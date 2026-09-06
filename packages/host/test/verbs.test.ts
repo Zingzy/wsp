@@ -17,7 +17,7 @@ import type { HostHandle } from "../src/server.js";
 import { dialHost } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -329,6 +329,59 @@ describe("wsp verbs over the host", () => {
     }
   });
 
+  it("snapshot takes a project golden of the workspace and says how to fork it; a workspace without a project, and one that was resumed, are refused in one line", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    const bare = await run("snapshot", "alpha");
+    expect(bare.code).toBe(1);
+    expect(bare.io.errors).toEqual(["wsp snapshot: alpha has no project loaded; import one before snapshotting it"]);
+
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
+    const { code, io } = await run("snapshot", "alpha");
+    expect(code).toBe(0);
+    const [golden] = await rt.golden.projects();
+    expect(golden).toMatchObject({ project: { name: "proj", dest: "/root/work/proj" }, golden: "snap_gold", version: 1, workspaceId: alpha!.id, workspaceName: "alpha" });
+    expect(io.lines).toEqual([`project golden ${golden!.snapshotId}: golden v1 plus proj as imported ${golden!.project.importedAt.slice(0, 10)}, taken from alpha\nfork it with: wsp new <name> --from proj`]);
+    expect(io.errors).toEqual([]);
+
+    const asJson = await run("snapshot", alpha!.id, "--json");
+    expect(asJson.code).toBe(0);
+    expect(json(asJson.io)).toEqual([{ projectGolden: expect.objectContaining({ project: golden!.project, golden: "snap_gold" }) }]);
+
+    await rt.workspaces.nap(alpha!.id);
+    await rt.workspaces.wake(alpha!.id);
+    const resumed = await run("snapshot", "alpha");
+    expect(resumed.code).toBe(1);
+    expect(resumed.io.errors).toHaveLength(1);
+    expect(resumed.io.errors[0]).toMatch(/^wsp snapshot: snapshot of alpha refused: machine m\d+ is not first-life/);
+    expect(await rt.golden.projects()).toHaveLength(2);
+  });
+
+  it("new --from forks a project golden by project name (the newest) or snapshot id, and names what it cannot find", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
+    const first = await rt.workspaces.snapshot(alpha!.id);
+    await new Promise(r => setTimeout(r, 2));
+    const second = await rt.workspaces.snapshot(alpha!.id);
+    expect(second.snapshotId).not.toBe(first.snapshotId);
+
+    const byName = await run("new", "task-a", "--from", "proj");
+    expect(byName.code).toBe(0);
+    const taskA = (await rt.workspaces.list()).find(w => w.name === "task-a")!;
+    expect(taskA).toMatchObject({ golden: second.snapshotId, project: first.project });
+    expect(byName.io.lines).toEqual([`created task-a ${taskA.id}`]);
+
+    const byId = await run("new", "task-b", "--from", first.snapshotId);
+    expect(byId.code).toBe(0);
+    expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: first.snapshotId, project: first.project });
+
+    const missing = await run("new", "task-c", "--from", "nope");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp new: no project golden named nope; wsp snapshot <workspace> takes one"]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
+  });
+
   it("import says in one plain line that it is not here yet", async () => {
     const imp = await run("import", "./proj", "--to", "alpha");
     expect(imp.code).toBe(1);
@@ -387,7 +440,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("every verb takes --json and --help; a bad flag prints the usage", async () => {
-    for (const verb of [["new"], ["fork"], ["pause"], ["threads"], ["thread", "new"], ["send"], ["exec"], ["import"], ["export"]]) {
+    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["threads"], ["thread", "new"], ["send"], ["exec"], ["import"], ["export"]]) {
       const help = await run(...verb, "--help");
       expect(help.code).toBe(0);
       expect(help.io.lines[0]).toMatch(new RegExp(`^usage: wsp ${verb.join(" ")}`));

@@ -20,6 +20,7 @@ import {
   type GoldenManifest,
   type ProjectExportEvent,
   type ProjectExportResult,
+  type ProjectGolden,
   type SessionEvent,
   type SessionOrigin,
   type SessionView,
@@ -262,6 +263,27 @@ export async function createFromHead(client: HostClient, out: Out, name: string)
   return create(client, out, head.snapshotId, name);
 }
 
+/** The project golden a person names: by snapshot id, else the newest whose project carries that name. */
+export async function projectGoldenOf(client: HostClient, ref: string): Promise<ProjectGolden> {
+  const { projectGoldens } = await client.request<{ projectGoldens: ProjectGolden[] }>("projectGoldens.list");
+  const byId = projectGoldens.find(g => g.snapshotId === ref);
+  if (byId !== undefined) return byId;
+  const byName = projectGoldens.filter(g => g.project.name === ref).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (byName[0] !== undefined) return byName[0];
+  throw new Error(`no project golden named ${ref}; wsp snapshot <workspace> takes one`);
+}
+
+/** Snapshots the workspace a person names as a project golden; the record, as every director shows it. */
+export async function snapshot(client: HostClient, ref: string): Promise<ProjectGolden> {
+  const source = await workspaceOf(client, ref);
+  return (await client.request<{ projectGolden: ProjectGolden }>("workspaces.snapshot", { workspaceId: source.id })).projectGolden;
+}
+
+export function projectGoldenLine(g: ProjectGolden): string {
+  const version = g.version !== undefined ? `golden v${g.version}` : `golden ${g.golden}`;
+  return `project golden ${g.snapshotId}: ${version} plus ${g.project.name} as imported ${g.project.importedAt.slice(0, 10)}, taken from ${g.workspaceName}\nfork it with: wsp new <name> --from ${g.project.name}`;
+}
+
 export async function create(client: HostClient, out: Out, golden: string, name: string): Promise<WorkspaceCreateResult> {
   const pushed = pushedFrames(client);
   await client.events();
@@ -445,13 +467,29 @@ const notYet = (verb: string, usage: string, options: Verb["options"], does: str
 export const VERBS: readonly Verb[] = [
   {
     name: "new",
-    usage: "wsp new <name>",
-    about: "a workspace forked from the golden's head",
-    options: {},
+    usage: "wsp new <name> [--from <project golden>]",
+    about: "a workspace forked from the golden's head, or with --from, from a project golden",
+    options: { from: { type: "string" } },
     run: async ctx => {
       const [name] = ctx.args;
       if (name === undefined || ctx.args.length !== 1) throw new Error("wsp new takes one name");
-      await createFromHead(await ctx.client(), ctx.out, name);
+      const client = await ctx.client();
+      const from = flag(ctx.flags, "from");
+      if (from === undefined) await createFromHead(client, ctx.out, name);
+      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name);
+      return 0;
+    },
+  },
+  {
+    name: "snapshot",
+    usage: "wsp snapshot <workspace>",
+    about: "a project golden of the workspace: its golden plus the project as it is now, ready to fork",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp snapshot takes one workspace");
+      const projectGolden = await snapshot(await ctx.client(), ref);
+      ctx.out.emit({ projectGolden }, projectGoldenLine(projectGolden));
       return 0;
     },
   },

@@ -4,7 +4,7 @@
 // machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import type { GoldenMissingTool, GoldenVersion, SnapshotLineage, SysSample, WorkspaceCostEvent, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { GoldenMissingTool, GoldenVersion, ProjectGolden, SnapshotLineage, SysSample, WorkspaceCostEvent, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { provideDaemonUpdate, useDaemonUpdate, useDaemonVersion } from "../../files/wire.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { daemonBehindLine } from "../../machine/daemon.js";
@@ -457,10 +457,13 @@ function Usage({ workspace, status, series }: { workspace: WorkspaceView; status
 
 function Lineage({ workspace }: { workspace: WorkspaceView }) {
   const api = useStore(s => s.api);
+  const createWorkspace = useStore(s => s.createWorkspace);
   const [lineage, setLineage] = useState<SnapshotLineage | null>(null);
+  const [projects, setProjects] = useState<ProjectGolden[]>([]);
   /** Version whose rollback awaits the confirm dialog. */
   const [armed, setArmed] = useState<GoldenVersion | null>(null);
-  const [busy, setBusy] = useState(false);
+  /** The action in flight, so the two buttons wait for each other and the note names it. */
+  const [busy, setBusy] = useState<"rollback" | "snapshot" | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -469,6 +472,12 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
     api.listSnapshots().then(
       l => {
         if (current) setLineage(l);
+      },
+      () => {},
+    );
+    api.listProjectGoldens?.().then(
+      p => {
+        if (current) setProjects(p);
       },
       () => {},
     );
@@ -491,7 +500,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
   const rollback = async (version: number): Promise<void> => {
     if (!api) return;
     setArmed(null);
-    setBusy(true);
+    setBusy("rollback");
     try {
       const result = await api.rollbackSnapshot(version);
       setLineage(result.lineage);
@@ -499,19 +508,49 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
     } catch (e) {
       setNote(errorText(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
+  const snapshot = async (): Promise<void> => {
+    const project = workspace.project;
+    if (!api?.snapshotWorkspace || project === undefined) return;
+    setBusy("snapshot");
+    try {
+      await api.snapshotWorkspace(workspace.id);
+      load();
+      setNote(`Project golden of ${project.name} taken. New forks of it start with the project.`);
+    } catch (e) {
+      setNote(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const fork = (g: ProjectGolden): void => {
+    void createWorkspace(`${g.project.name}-fork`, g.snapshotId);
+  };
+
+  const under = (snapshotId: string): ReactNode => <ProjectGoldens goldens={projects.filter(p => p.golden === snapshotId)} forkOf={workspace.golden} busy={busy !== null} onFork={fork} />;
   const versions = lineage ? [...lineage.versions].sort((a, b) => b.version - a.version) : [];
+  const project = workspace.project;
   return (
     <Section label="Lineage" aside={lineage?.head !== null && lineage?.head !== undefined ? `head v${lineage.head}` : undefined}>
       <ul className="mt-1 divide-y divide-border/40">
         <LineageRow
           dot={workspace.phase === "running" ? "bg-success" : "border border-muted-foreground/60"}
           title={<span className="font-medium">Live disk</span>}
-          detail={`forked ${workspace.createdAt.slice(0, 10)}`}
-          aside={<span className="text-muted-foreground">now</span>}
+          detail={`forked ${workspace.createdAt.slice(0, 10)}${project !== undefined ? ` · ${project.name} imported ${project.importedAt.slice(0, 10)}` : ""}`}
+          aside={
+            <span className="flex items-center gap-2">
+              <span className="text-muted-foreground">now</span>
+              {project !== undefined && api?.snapshotWorkspace !== undefined && (
+                <Button size="xs" variant="outline" disabled={busy !== null || workspace.phase !== "running"} aria-label={`snapshot ${workspace.name} as a project golden`} onClick={() => void snapshot()}>
+                  Snapshot
+                </Button>
+              )}
+            </span>
+          }
         />
         {versions.length === 0 ? (
           <LineageRow
@@ -522,6 +561,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
               </span>
             }
             detail="golden base"
+            below={under(workspace.golden)}
           />
         ) : (
           versions.map(v => {
@@ -547,10 +587,15 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                   </span>
                 }
                 detail={`built ${v.createdAt.slice(0, 10)}`}
-                below={fork && v.missingTools !== undefined && v.missingTools.length > 0 ? <MissingTools tools={v.missingTools} /> : undefined}
+                below={
+                  <>
+                    {fork && v.missingTools !== undefined && v.missingTools.length > 0 && <MissingTools tools={v.missingTools} />}
+                    {under(v.snapshotId)}
+                  </>
+                }
                 aside={
                   !head && (
-                    <Button size="xs" variant="outline" disabled={busy} aria-label={`roll back to v${v.version}`} onClick={() => setArmed(v)}>
+                    <Button size="xs" variant="outline" disabled={busy !== null} aria-label={`roll back to v${v.version}`} onClick={() => setArmed(v)}>
                       Roll back
                     </Button>
                   )
@@ -561,7 +606,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
         )}
       </ul>
       <p className="min-h-4 text-[11px] text-muted-foreground" data-k="lineage-note">
-        {busy ? "Rolling back…" : note}
+        {busy === "rollback" ? "Rolling back…" : busy === "snapshot" ? "Taking the snapshot…" : note}
       </p>
       <AlertDialog open={armed !== null} onOpenChange={open => !open && setArmed(null)}>
         <AlertDialogPopup>
@@ -582,19 +627,51 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
   );
 }
 
+/** Dot, title and aside share one row at a button's height, so a wrapping detail or an appearing button moves nothing. */
 function LineageRow({ dot, title, detail, aside, below }: { dot: string; title: ReactNode; detail: string; aside?: ReactNode; below?: ReactNode }) {
   return (
     <li className="py-1.5 text-xs">
-      <div className="grid grid-cols-[0.375rem_minmax(0,1fr)_auto] items-center gap-x-2">
+      <div className="grid grid-cols-[0.375rem_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5">
         <span aria-hidden className={cn("size-1.5 rounded-full", dot)} />
-        <span className="flex min-w-0 flex-col gap-0.5">
-          {title}
-          <span className="text-[11px] text-muted-foreground">{detail}</span>
-        </span>
-        <span className="flex items-center text-[11px]">{aside}</span>
+        <span className="flex min-w-0 items-center">{title}</span>
+        <span className="flex min-h-6 items-center text-[11px]">{aside}</span>
+        <span className="col-span-2 col-start-2 text-[11px] text-muted-foreground">{detail}</span>
       </div>
       {below}
     </li>
+  );
+}
+
+/** The project goldens taken on forks of one version, newest first: the version's disk plus a project as it stood, each a
+ * fork away from a task with no upload. */
+function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGolden[]; forkOf: string; busy: boolean; onFork: (g: ProjectGolden) => void }) {
+  if (goldens.length === 0) return null;
+  const rows = [...goldens].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return (
+    <ul className="mt-1 ml-3.5 divide-y divide-border/40" aria-label="project goldens">
+      {rows.map(g => (
+        <LineageRow
+          key={g.snapshotId}
+          dot="border border-muted-foreground/60"
+          title={
+            <span className="flex min-w-0 items-center gap-1.5" data-k={`pg-${g.snapshotId}`}>
+              <span className="truncate font-mono">{g.project.name}</span>
+              {g.snapshotId === forkOf && (
+                <Badge size="sm" variant="outline">
+                  this fork
+                </Badge>
+              )}
+            </span>
+          }
+          detail={`snapshot ${g.createdAt.slice(0, 10)} · imported ${g.project.importedAt.slice(0, 10)} · from ${g.workspaceName}`}
+          aside={
+            <Button size="xs" variant="outline" disabled={busy} aria-label={`fork ${g.project.name} from ${g.snapshotId}`} onClick={() => onFork(g)}>
+              Fork
+            </Button>
+          }
+        />
+      ))}
+    </ul>
   );
 }
 

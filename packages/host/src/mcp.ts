@@ -7,16 +7,18 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { ProjectExportResult, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { ProjectExportResult, ProjectGolden, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { VERSION } from "./version.js";
-import { create, createFromHead, dialHost, execOn, exportProject, follow, nap, openingOf, resumeOf, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { create, createFromHead, dialHost, execOn, exportProject, follow, nap, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 const INSTRUCTIONS = [
   "wsp runs cloud machines called workspaces, each with agents working inside it, and this server is the same host the",
   "person's app is open on: whatever you do here shows in their sidebar, and they can read and answer any thread.",
   "Start with workspaces. Open a thread with thread_new (a workspace, a task, and the agent to run, such as codex);",
   "it returns the reply when the turn ends. Continue a thread with send. Run a command on a machine with exec.",
-  "new forks the golden image into a fresh machine, fork makes a sibling of a workspace, pause naps one.",
+  "new forks the golden image into a fresh machine, or with from, a project golden; fork makes a sibling of a workspace, pause naps one.",
+  "snapshot takes a project golden of a workspace with a project loaded: the golden plus that project as it stands, so every",
+  "new machine forked from it starts a task with the project in place and no upload.",
   "export brings a project folder and the agent sessions keyed to it home from a workspace's machine to this computer.",
 ].join(" ");
 
@@ -97,8 +99,25 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
   );
   server.registerTool(
     "new",
-    { description: "A new workspace forked from the golden image's head, booted and reachable when this returns.", inputSchema: { name: z.string() }, outputSchema: Created.shape },
-    async ({ name }) => asJson(await createFromHead(await dial(), QUIET, name)),
+    {
+      description: "A new workspace forked from the golden image's head, or with from, from a project golden (the project already in place), booted and reachable when this returns.",
+      inputSchema: { name: z.string(), from: z.string().optional().describe("a project golden: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them") },
+      outputSchema: Created.shape,
+    },
+    async ({ name, from }) => {
+      const client = await dial();
+      if (from === undefined) return asJson(await createFromHead(client, QUIET, name));
+      return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name));
+    },
+  );
+  server.registerTool(
+    "snapshot",
+    {
+      description: "A project golden of the workspace: its golden version plus the project loaded on it as it stands now, ready for new with from. Only a running first-life machine with a project imported can be snapshotted; anything else is refused in one line and nothing is taken.",
+      inputSchema: { workspace },
+      outputSchema: { projectGolden: ProjectGolden },
+    },
+    async ({ workspace: ref }) => asJson({ projectGolden: await snapshot(await dial(), ref) }),
   );
   server.registerTool(
     "fork",

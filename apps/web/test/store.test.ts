@@ -170,6 +170,30 @@ describe("store creations", () => {
     expect(useStore.getState().selectedId).toBe("ws_a");
   });
 
+  it("createWorkspace with a snapshot forks that image instead of the golden's head, and a retry keeps it", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    const calls: [string, string | undefined][] = [];
+    api.createFromGoldenHead = async () => {
+      throw new Error("the head is not what was asked for");
+    };
+    api.createWorkspace = async (golden, name) => {
+      calls.push([golden, name]);
+      if (calls.length === 1) {
+        emit(stage({ name: "proj-fork" }));
+        emit(stage({ name: "proj-fork", stage: "failed", message: "Sandbox limit reached (2)", elapsedMs: 900 }));
+        throw new RequestError("Sandbox limit reached (2)", "concurrency");
+      }
+      return view("ws_new");
+    };
+    useStore.getState().bind(api);
+    await flush();
+    expect(await useStore.getState().createWorkspace("proj-fork", "snap_project")).toBeNull();
+    const failed = useStore.getState().creations[0]!;
+    await useStore.getState().retryCreation(failed.key);
+    expect(calls).toEqual([["snap_project", "proj-fork"], ["snap_project", "proj-fork"]]);
+    expect(useStore.getState().selectedId).toBe("ws_new");
+  });
+
   it("a create another client started shows up from its stage events and leaves on created without moving the selection", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
     useStore.getState().bind(api);

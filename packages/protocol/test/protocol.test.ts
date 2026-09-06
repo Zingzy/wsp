@@ -26,6 +26,7 @@ import {
   PortReachView,
   ProjectExportEvent,
   ProjectExportResult,
+  ProjectGolden,
   ProjectImportResult,
   ProjectPlan,
   RuntimeErrorResponse,
@@ -704,5 +705,40 @@ describe("the project export", () => {
     expect(ProjectExportResult.parse(result)).toEqual(result);
     expect(ProjectExportResult.safeParse({ ...result, excluded: undefined }).success).toBe(false);
     expect(ProjectImportResult.parse({ dest: "/root/p", files: 1, bytes: 1, parts: 1, cut: [], rewritten: [], agents: [{ agent: "codex", files: 1, bytes: 1, outcome: "transcript-only", skipped: 2 }] }).agents[0]).toMatchObject({ skipped: 2 });
+  });
+});
+
+describe("project goldens", () => {
+  it("a workspace view may carry the project it holds: the folder's name, where it landed and when the bundle landed", () => {
+    const project = { name: "proj", dest: "/root/work/proj", importedAt: "2026-09-06T10:00:00.000Z" };
+    const view = { id: "ws_1", name: "task", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-06T09:00:00.000Z", project };
+    expect(WorkspaceView.parse(view)).toEqual(view);
+    const { project: _p, ...bare } = view;
+    expect(WorkspaceView.parse(bare)).toEqual(bare);
+    expect(WorkspaceView.safeParse({ ...view, project: { name: "proj" } }).success).toBe(false);
+  });
+
+  it("a project golden names its snapshot, the project, the golden version it stands on and the workspace it was taken from", () => {
+    const golden = {
+      snapshotId: "snap_project-proj",
+      project: { name: "proj", dest: "/root/work/proj", importedAt: "2026-09-06T10:00:00.000Z" },
+      golden: "snap_golden-v12",
+      version: 12,
+      workspaceId: "ws_1",
+      workspaceName: "task",
+      createdAt: "2026-09-06T10:05:00.000Z",
+    };
+    expect(ProjectGolden.parse(golden)).toEqual(golden);
+    const { version: _v, ...unversioned } = golden;
+    expect(ProjectGolden.parse(unversioned)).toEqual(unversioned);
+    expect(ProjectGolden.safeParse({ ...golden, project: undefined }).success).toBe(false);
+    expect(ProjectGolden.safeParse({ ...golden, version: "12" }).success).toBe(false);
+  });
+
+  it("workspaces.snapshot names the workspace and projectGoldens.list takes nothing", () => {
+    const snapshot = { id: 30, op: "workspaces.snapshot", workspaceId: "ws_1" };
+    const list = { id: 31, op: "projectGoldens.list" };
+    for (const r of [snapshot, list]) expect(RuntimeRequest.parse(r)).toEqual(r);
+    expect(RuntimeRequest.safeParse({ id: 32, op: "workspaces.snapshot" }).success).toBe(false);
   });
 });

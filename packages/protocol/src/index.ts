@@ -120,14 +120,20 @@ export type PortProbeView = z.infer<typeof PortProbeView>;
 export const WorkspaceSize = z.object({ cpu: z.number(), memMb: z.number() });
 export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
 
+/** The project a workspace holds: the folder the bundle landed at, named by its last segment, and when the bundle
+ * landed. Set by an import, inherited by every fork of a project golden. */
+export const WorkspaceProject = z.object({ name: z.string(), dest: z.string(), importedAt: z.string() });
+export type WorkspaceProject = z.infer<typeof WorkspaceProject>;
+
 export const WorkspaceView = z.object({
   id: z.string(),
   name: z.string(),
   machineId: z.string(),
   phase: WorkspacePhase,
-  /** Snapshot id of the golden image this workspace forks from. */
+  /** Snapshot id of the image this workspace forks from: a golden version's, or a project golden's. */
   golden: z.string(),
   createdAt: z.string(),
+  project: WorkspaceProject.optional(),
   /** Claude session id of the last session, so the next send can --resume it. */
   claudeSessionId: z.string().optional(),
   /** Present when the machine streams a display (desktop kind); sandbox machines are headless. */
@@ -1135,6 +1141,12 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
   }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
+  /** Snapshots the workspace's disk as a project golden and replies with { projectGolden }. Refused when the workspace
+   * is not running, holds no project, or its machine is not first-life (kind "notFirstLife"). The guest freezes for
+   * about three seconds and keeps its first life. */
+  z.object({ id: reqId, op: z.literal("workspaces.snapshot"), workspaceId: z.string() }),
+  /** Replies with { projectGoldens: ProjectGolden[] }, every project golden this runtime took, newest last. */
+  z.object({ id: reqId, op: z.literal("projectGoldens.list") }),
   /** A person acted in the workspace through a road the runtime cannot see (typed into
    * a terminal over the browser's daemon link); the idle countdown starts over. */
   z.object({ id: reqId, op: z.literal("workspaces.touch"), workspaceId: z.string() }),
@@ -1308,6 +1320,20 @@ export const SnapshotLineage = z.object({
   versions: z.array(GoldenVersion),
 });
 export type SnapshotLineage = z.infer<typeof SnapshotLineage>;
+
+/** A workspace's disk with its project loaded, snapshotted so forks start a task with the project in place and no
+ * upload. `golden` is the snapshot of the golden version at the root of its lineage, whatever it was forked from, so the
+ * Lineage section lists it under that version; `version` is that version's number when a manifest knows the snapshot. */
+export const ProjectGolden = z.object({
+  snapshotId: z.string(),
+  project: WorkspaceProject,
+  golden: z.string(),
+  version: z.number().int().optional(),
+  workspaceId: z.string(),
+  workspaceName: z.string(),
+  createdAt: z.string(),
+});
+export type ProjectGolden = z.infer<typeof ProjectGolden>;
 
 /** Every snapshot on the account as the provider bills it: a snapshot is a full disk image, the free GB are shared
  * by all of them, and the rest costs usdPerGbMonth from billedFrom. Sizes come from the provider's snapshot

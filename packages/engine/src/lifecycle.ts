@@ -186,8 +186,9 @@ export class Workspace {
     });
   }
 
-  async checkpoint(name: string): Promise<string> {
-    assertFirstLife(this.machine.id, this.firstLife, `checkpoint(${name})`);
+  /** A snapshot of the running disk under `name`; `action` is what the refusal names when the machine is not first-life. */
+  async checkpoint(name: string, action = `checkpoint(${name})`): Promise<string> {
+    assertFirstLife(this.machine.id, this.firstLife, action);
     return this.machine.snapshot(name);
   }
 

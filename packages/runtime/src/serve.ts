@@ -185,6 +185,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               await rt.workspaces.delete(msg.workspaceId);
               send({ id: msg.id, ok: true });
               return;
+            case "workspaces.snapshot":
+              send({ id: msg.id, ok: true, projectGolden: await rt.workspaces.snapshot(msg.workspaceId) });
+              return;
+            case "projectGoldens.list":
+              send({ id: msg.id, ok: true, projectGoldens: await rt.golden.projects() });
+              return;
             case "workspaces.touch":
               await rt.workspaces.touch(msg.workspaceId);
               send({ id: msg.id, ok: true });
