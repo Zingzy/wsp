@@ -368,6 +368,17 @@ describe("wsp verbs over the host", () => {
     expect(existsSync(join(dir, "user", ".claude"))).toBe(false);
   });
 
+  it("export refuses an --agents id the catalog does not know before anything reaches the machine, naming it and the ids it knows", async () => {
+    const guest = exportGuest(backend);
+    await run("new", "alpha");
+    const typo = await run("export", "alpha", join(dir, "out", "proj"), "--agents", "claude,codx");
+    expect(typo.code).toBe(1);
+    expect(typo.io.lines).toEqual([]);
+    expect(typo.io.errors).toEqual(["wsp export: no agent called codx; the catalog knows claude, codex, gemini, opencode, pi, hermes"]);
+    expect(guest.sources).toEqual([]);
+    expect(existsSync(join(dir, "out"))).toBe(false);
+  });
+
   it("every verb takes --json and --help; a bad flag prints the usage", async () => {
     for (const verb of [["new"], ["fork"], ["pause"], ["threads"], ["thread", "new"], ["send"], ["exec"], ["import"], ["export"]]) {
       const help = await run(...verb, "--help");

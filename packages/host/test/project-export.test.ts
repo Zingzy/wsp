@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The bundle's trip home against fake homes on this computer and archives shaped like the ones a machine packs:
 // the folder lands beside its destination and moves in one rename, the agents' state is keyed to it here.
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -179,6 +180,68 @@ describe("projectLander", () => {
     const dest = join(root, "proj");
     await expect(projectLander({}).land({ source: SOURCE, dest, replace: false, tar: Buffer.from("not an archive") })).rejects.toThrow(/extracting the archive/);
     expect(readdirSync(root)).toEqual([]);
+  });
+
+  it("a state archive that cannot be opened leaves nothing at the destination, no scratch home, and the homes as they were, so the same run lands on retry", async () => {
+    const root = scratch();
+    const dest = join(root, "proj");
+    const homes = macHomes(`${realpathSync(root)}/proj`);
+    const before = snapshot(homes["claude"]!);
+    const lander = projectLander(homes);
+    await expect(lander.land({ source: SOURCE, dest, replace: false, tar: folderTar(), state: { tar: Buffer.from("not an archive"), homes: guestAgentHomes() } })).rejects.toThrow(/extracting the archive/);
+    expect(readdirSync(root)).toEqual([]);
+    expect(snapshot(homes["claude"]!)).toEqual(before);
+    expect(readdirSync(tmpdir()).filter(n => n.startsWith("wsp-home-"))).toEqual([]);
+    const landed = await lander.land({ source: SOURCE, dest, replace: false, tar: folderTar(), state: { tar: stateTar(), homes: guestAgentHomes() } });
+    expect(landed.files).toBe(3);
+    expect(landed.agents.map(a => [a.agent, a.outcome])).toEqual([["claude", "moved"], ["codex", "transcript-only"], ["hermes", "nothing"]]);
+  });
+
+  describe("an archive that reaches out of the folder", () => {
+    it("a .. entry is refused, nothing lands beside the destination and the staging directory is gone", async () => {
+      const root = scratch();
+      const dest = join(root, "proj");
+      const tar = tarOf([{ path: "./ok.txt", mode: 0o644, content: "ok\n" }, { path: "../evil.txt", mode: 0o644, content: "evil\n" }]);
+      await expect(projectLander({}).land({ source: SOURCE, dest, replace: false, tar })).rejects.toThrow(/extracting the archive/);
+      expect(readdirSync(root)).toEqual([]);
+    });
+
+    it("an absolute entry loses its leading slash and lands inside the folder, nothing at the absolute path", async () => {
+      const root = scratch();
+      const dest = join(root, "proj");
+      const outside = join(scratch(), "abs");
+      put(outside, "evil.txt", "evil\n");
+      const archive = join(scratch(), "abs.tgz");
+      const made = spawnSync("tar", ["-P", "-czf", archive, join(outside, "evil.txt")]);
+      expect(made.status).toBe(0);
+      rmSync(outside, { recursive: true, force: true });
+      const landed = await projectLander({}).land({ source: SOURCE, dest, replace: false, tar: readFileSync(archive) });
+      expect(landed.files).toBe(1);
+      expect(existsSync(join(outside, "evil.txt"))).toBe(false);
+      expect(readFileSync(join(dest, outside, "evil.txt"), "utf8")).toBe("evil\n");
+      expect(readdirSync(root)).toEqual(["proj"]);
+    });
+
+    it("a file through a link that points out of the folder is refused, the link's target untouched, nothing at or beside the destination", async () => {
+      const root = scratch();
+      const dest = join(root, "proj");
+      const outside = scratch();
+      const tar = tarOf([
+        { path: "./ok.txt", mode: 0o644, content: "ok\n" },
+        { path: "./out", target: outside },
+        { path: "./out/evil.txt", mode: 0o644, content: "evil\n" },
+      ]);
+      await expect(projectLander({}).land({ source: SOURCE, dest, replace: false, tar })).rejects.toThrow(/extracting the archive/);
+      expect(readdirSync(outside)).toEqual([]);
+      expect(readdirSync(root)).toEqual([]);
+    });
+  });
+
+  it("a destination that is not an absolute path is refused before anything is read", async () => {
+    const lander = projectLander({});
+    await expect(lander.probe("code/proj")).rejects.toThrow(/absolute path, got code\/proj/);
+    await expect(lander.land({ source: SOURCE, dest: "code/proj", replace: false, tar: folderTar() })).rejects.toThrow(/absolute path, got code\/proj/);
+    expect(existsSync("code")).toBe(false);
   });
 
   it("agents named narrow whose state comes home; an agent whose store cannot be read is failed with the reason and the others still land", async () => {

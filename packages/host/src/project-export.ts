@@ -3,16 +3,19 @@
 // and moves into place in one rename, and the agents' state that came with it is keyed to that destination in a
 // scratch copy of their homes, then laid over the real homes here. The homes here only gain files.
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { PROJECT_STATE_RESOLVERS, countProjectState, moveProjectState, plural, resolveProjectPath } from "@wsp/engine";
+import { PROJECT_STATE_RESOLVERS, countProjectState, destExists, moveProjectState } from "@wsp/engine";
 import type { ProjectAgentResult } from "@wsp/protocol";
 import type { LandRequest, LandedAgent, LandedProject, ProjectLander } from "@wsp/runtime";
 import { CACHE_RULE, outcomeOf } from "./project-bundle.js";
 
-const destExists = (dest: string, files: number): Error => Object.assign(new Error(`${dest} already exists on this computer with ${plural(files, "file")}; export with replace to overwrite it`), { kind: "exists" });
+/** A destination is spelled out in full; the wire and the MCP tool carry it as the caller wrote it. */
+function absolute(dest: string): void {
+  if (!isAbsolute(dest)) throw new Error(`the destination must be an absolute path, got ${dest}`);
+}
 
 /** Every regular file under a path, or the path itself when it is one. */
 function filesAt(path: string): { files: number; bytes: number } | undefined {
@@ -46,32 +49,12 @@ function extract(tar: Buffer, dir: string): Promise<void> {
   });
 }
 
-/** Lands the folder's archive at dest: extracted beside it into a staging directory, then moved into place in one
- * rename, so a failed extraction leaves nothing at the destination. An existing destination is refused at the move
- * unless `replace` removes it. */
-async function landFolder(req: LandRequest): Promise<{ files: number; bytes: number }> {
-  const staging = `${req.dest}.wsp-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  mkdirSync(staging, { recursive: true });
-  try {
-    await extract(req.tar, staging);
-    const at = filesAt(req.dest);
-    if (at !== undefined) {
-      if (!req.replace) throw destExists(req.dest, at.files);
-      rmSync(req.dest, { recursive: true, force: true });
-    }
-    renameSync(staging, req.dest);
-  } catch (e) {
-    rmSync(staging, { recursive: true, force: true });
-    throw e;
-  }
-  return filesAt(req.dest) ?? { files: 0, bytes: 0 };
-}
-
-/** The agents' state, keyed on the machine to `source`, brought into the homes here keyed to `dest`: the archive is
- * opened in a scratch directory, each agent's home there is a skeleton holding its state roots alone, the move runs
- * in the skeleton, and the files its module then names for dest are copied over the home here, one by one. A row
- * that lives in a shared store here (an index, a registry) is not written, so that agent is transcript-only. */
-async function landState(state: NonNullable<LandRequest["state"]>, source: string, dest: string, homes: Readonly<Record<string, string>>): Promise<LandedAgent[]> {
+/** The agents' state, keyed on the machine to `source`, brought into the homes here keyed to `target`, the real path
+ * the folder will have: the archive is opened in a scratch directory, each agent's home there is a skeleton holding
+ * its state roots alone, the move runs in the skeleton, and the files its module then names for the target are copied
+ * over the home here, one by one. A row that lives in a shared store here (an index, a registry) is not written, so
+ * that agent is transcript-only. */
+async function landState(state: NonNullable<LandRequest["state"]>, source: string, target: string, homes: Readonly<Record<string, string>>): Promise<LandedAgent[]> {
   const scratch = mkdtempSync(join(tmpdir(), "wsp-home-"));
   try {
     await extract(state.tar, scratch);
@@ -79,8 +62,7 @@ async function landState(state: NonNullable<LandRequest["state"]>, source: strin
     const wanted = CATALOG_AGENTS.filter(a => state.agents === undefined || state.agents.includes(a.id));
     const rows = await countProjectState(source, skeletons, wanted);
     const readable = rows.filter(r => r.error === undefined);
-    const reports = new Map((await moveProjectState({ from: source, to: dest, homes: skeletons }, readable.map(r => ({ id: r.agent })))).map(r => [r.agent, r]));
-    const target = resolveProjectPath(dest);
+    const reports = new Map((await moveProjectState({ from: source, to: target, homes: skeletons }, readable.map(r => ({ id: r.agent })))).map(r => [r.agent, r]));
     const landed: LandedAgent[] = [];
     for (const row of rows) {
       const report = reports.get(row.agent);
@@ -113,19 +95,44 @@ async function landState(state: NonNullable<LandRequest["state"]>, source: strin
   }
 }
 
+/** Lands the folder's archive at dest and the agents' state that came with it. The folder is extracted into a
+ * staging directory beside dest, the state is opened in a scratch home, keyed to the path dest will have and laid
+ * over the homes here, and only then is the staging directory renamed onto dest, so a failure anywhere before that
+ * rename leaves nothing at or beside the destination. An existing destination is refused first and again at the
+ * rename, unless `replace` removes it. */
+async function land(req: LandRequest, homes: Readonly<Record<string, string>>): Promise<LandedProject> {
+  absolute(req.dest);
+  const at = filesAt(req.dest);
+  if (at !== undefined && !req.replace) throw destExists(req.dest, at.files);
+  const staging = `${req.dest}.wsp-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  mkdirSync(staging, { recursive: true });
+  try {
+    await extract(req.tar, staging);
+    const target = join(dirname(realpathSync(staging)), basename(req.dest));
+    const agents = req.state === undefined ? [] : await landState(req.state, req.source, target, homes);
+    const now = filesAt(req.dest);
+    if (now !== undefined) {
+      if (!req.replace) throw destExists(req.dest, now.files);
+      rmSync(req.dest, { recursive: true, force: true });
+    }
+    renameSync(staging, req.dest);
+    return { ...(filesAt(req.dest) ?? { files: 0, bytes: 0 }), agents };
+  } catch (e) {
+    rmSync(staging, { recursive: true, force: true });
+    throw e;
+  }
+}
+
 /** This computer's side of project.export; `homes` is each agent's home here by catalog id, the production caller's
  * under the real home directory, so a test never writes the homes on this computer. */
 export function projectLander(homes: Readonly<Record<string, string>>): ProjectLander {
   return {
     caches: CACHE_RULE,
     probe: async dest => {
+      absolute(dest);
       const at = filesAt(dest);
       return at === undefined ? undefined : { files: at.files };
     },
-    land: async (req): Promise<LandedProject> => {
-      const folder = await landFolder(req);
-      const agents = req.state === undefined ? [] : await landState(req.state, req.source, req.dest, homes);
-      return { ...folder, agents };
-    },
+    land: req => land(req, homes),
   };
 }

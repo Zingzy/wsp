@@ -81,8 +81,11 @@ export function guestAgentHomes(): Record<string, string> {
 }
 
 /** The paths a trip pulls from the homes: each registered module's roots under its agent's home, in catalog order,
- * for the agents named (every one with a home when none is). */
+ * for the agents named (every one with a home when none is). An id the catalog does not know is refused, so a typo
+ * is a sentence rather than a trip that brings nothing. */
 export function stateRoots(homes: Readonly<Record<string, string>>, ids?: readonly string[]): string[] {
+  const unknown = ids?.find(id => !CATALOG_AGENTS.some(a => a.id === id));
+  if (unknown !== undefined) throw new Error(`no agent called ${unknown}; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
   return CATALOG_AGENTS.flatMap(({ id }) => {
     const home = homes[id];
     const resolver = PROJECT_STATE_RESOLVERS.get(id);

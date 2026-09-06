@@ -9,6 +9,7 @@ import {
   OWNER_LABEL,
   Workspace,
   buildGolden,
+  destExists,
   exportFolder,
   exportPaths,
   goldenHead,
@@ -431,8 +432,6 @@ function homeOutcome(a: LandedAgent): string {
   const skipped = a.skipped === undefined || a.skipped === 0 ? "" : `, ${plural(a.skipped, "indexed rollout")} not under sessions/ skipped`;
   return `${a.name}${counted} ${a.outcome === "failed" ? `failed: ${a.error ?? "no reason given"}` : HOME_WORDS[a.outcome]}${skipped}`;
 }
-
-const destExists = (dest: string, files: number): Error => Object.assign(new Error(`${dest} already exists on this computer with ${plural(files, "file")}; export with replace to overwrite it`), { kind: "exists" });
 
 /** Vite's and Next's refusals fit in a few hundred bytes; a page that loaded fine is not carried back whole. */
 export const PORT_PROBE_BODY_CAP = 2048;
@@ -2601,12 +2600,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
       const downloading = (what: string) => (p: { bytes: number; total: number }): void => report("downloading", `${what}: ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, p);
       try {
+        const homes = guestAgentHomes();
+        const roots = stateRoots(homes, o.agents);
         const at = await o.lander.probe(o.dest);
         if (at !== undefined && o.replace !== true) throw destExists(o.dest, at.files);
         report("packing", `Packing ${o.source} on the machine.`);
         const folder = await exportFolder(entry.machine, o.source, o.lander.caches, { timeoutMs: 600_000, onProgress: downloading("The folder") });
-        const homes = guestAgentHomes();
-        const roots = stateRoots(homes, o.agents);
         const found = roots.length === 0 ? { exitCode: 0, stdout: "", stderr: "" } : await entry.machine.exec(`for p in ${roots.map(shellQuote).join(" ")}; do test -e "$p" && echo "$p"; done; true`, { timeoutMs: INLINE_EXEC_MS });
         if (found.exitCode !== 0) throw new Error(`could not look for agent state on the machine: ${found.stderr.slice(-200)}`);
         const present = found.stdout.split("\n").filter(l => l !== "");

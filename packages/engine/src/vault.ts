@@ -3,6 +3,7 @@ import { gzipSync } from "node:zlib";
 import { shellQuote } from "@wsp/protocol";
 import { backoffMs, classify, shouldRetry } from "./errors.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { plural } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -100,6 +101,10 @@ export function folderExportScript(dir: string, rule: CacheRule, out: string): s
     `rm -f ${shellQuote(list)}`,
   ].join("\n");
 }
+
+/** The refusal an export gives for a destination on this computer that already holds something; kind "exists" is
+ * what a caller reads to offer replace. */
+export const destExists = (dest: string, files: number): Error => Object.assign(new Error(`${dest} already exists on this computer with ${plural(files, "file")}; export with replace to overwrite it`), { kind: "exists" });
 
 /** A folder on the guest as an archive rooted at the folder, its caches left behind under the rule and named; the
  * folder is checked first so a wrong path costs one command, and the guest keeps nothing afterwards. */
