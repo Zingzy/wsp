@@ -9,6 +9,8 @@ import { fakeHost } from "./fake-host.js";
 const line = (o: unknown): string => JSON.stringify(o);
 const claudeLine = (sessionId: string, tools: { name: string; input: unknown }[]): string =>
   line({ type: "assistant", cwd: "/Users/dev/proj", sessionId, message: { role: "assistant", content: tools.map(t => ({ type: "tool_use", id: "toolu_1", name: t.name, input: t.input })) } });
+const claudeLineNoCwd = (sessionId: string, command: string): string =>
+  line({ type: "assistant", sessionId, message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command } }] } });
 const userLine = (text: string): string => line({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: text }] } });
 
 describe("command names", () => {
@@ -136,23 +138,70 @@ describe("Codex reader", () => {
 describe("Hermes reader", () => {
   const db = "/Users/dev/.hermes/state.db";
   const query = "select session_id, tool_calls from messages where tool_calls is not null";
+  const joined = "select m.session_id, m.tool_calls, s.cwd from messages m left join sessions s on s.id = m.session_id where m.tool_calls is not null";
+  const call = (session: string, command: string) => ({ session_id: session, tool_calls: JSON.stringify([{ type: "function", function: { name: "terminal", arguments: JSON.stringify({ command }) } }]) });
   const rows = JSON.stringify([
     { session_id: "h1", tool_calls: JSON.stringify([{ type: "function", function: { name: "terminal", arguments: JSON.stringify({ command: "docker ps", timeout: 30 }) } }]) },
     { session_id: "h1", tool_calls: JSON.stringify([{ type: "function", function: { name: "skill_view", arguments: { name: "github" } } }, { type: "function", function: { name: "browser_exec", arguments: "{}" } }]) },
     { session_id: "h2", tool_calls: JSON.stringify([{ type: "function", function: { name: "terminal", arguments: JSON.stringify({ command: "docker compose up" }) } }]) },
   ]);
 
-  it("asks sqlite3 read-only for the two columns and reads the terminal calls out of the JSON", async () => {
-    const host = fakeHost({ files: { "~/.hermes/state.db": 4096 }, exec: { [`sqlite3 -readonly -json ${db} ${query}`]: rows } });
+  it("asks sqlite3 read-only for its columns and the folder each session ran in, and reads the terminal calls out of the JSON", async () => {
+    const host = fakeHost({ files: { "~/.hermes/state.db": 4096 }, exec: { [`sqlite3 -readonly -json ${db} ${joined}`]: rows } });
     const usage = await tally(hermesReader.read(host, db));
     expect(usage).toMatchObject({ sessions: 2, calls: 4 });
     expect([...usage.commands]).toEqual([["docker", { sessions: 2, calls: 2 }]]);
-    expect(host.calls).toEqual([`run sqlite3 -readonly -json ${db} ${query}`]);
+    expect(host.calls).toEqual([`run sqlite3 -readonly -json ${db} ${joined}`]);
+  });
+
+  it("falls back to the columns alone on a database with no sessions table, and counts nothing for a project then", async () => {
+    const host = fakeHost({ files: { "~/.hermes/state.db": 4096 }, exec: { [`sqlite3 -readonly -json ${db} ${query}`]: rows } });
+    expect(await tally(hermesReader.read(host, db))).toMatchObject({ sessions: 2, calls: 4 });
+    expect(host.calls).toEqual([`run sqlite3 -readonly -json ${db} ${joined}`, `run sqlite3 -readonly -json ${db} ${query}`]);
+    const known = fakeHost({ files: { "~/.hermes/state.db": 4096 }, exec: { [`sqlite3 -readonly -json ${db} ${joined}`]: JSON.stringify([{ ...call("h1", "docker ps"), cwd: "/Users/dev/proj" }, { ...call("h2", "go build"), cwd: "/Users/dev/other" }]) } });
+    expect([...(await tally(hermesReader.read(known, db), ["/Users/dev/proj"])).commands]).toEqual([["docker", { sessions: 1, calls: 1 }]]);
   });
 
   it("reads nothing when there is no database, and throws when the database is there but sqlite3 does not answer", async () => {
     expect(await tally(hermesReader.read(fakeHost(), db))).toMatchObject({ sessions: 0, calls: 0 });
     await expect(tally(hermesReader.read(fakeHost({ files: { "~/.hermes/state.db": 4096 } }), db))).rejects.toThrow("could not be read");
+  });
+});
+
+describe("weighing by project", () => {
+  it("counts only the sessions that ran at a named folder or under it, whatever the store", async () => {
+    const host = fakeHost({
+      files: {
+        "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", [{ name: "Bash", input: { command: "pnpm test" } }]),
+        "~/.claude/projects/-Users-dev-proj-web/s2.jsonl": line({ type: "assistant", cwd: "/Users/dev/proj/web", sessionId: "s2", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "gh pr view" } }] } }),
+        "~/.claude/projects/-Users-dev-other/s3.jsonl": line({ type: "assistant", cwd: "/Users/dev/other", sessionId: "s3", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "go build" } }] } }),
+      },
+    });
+    const all = await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"));
+    expect([...all.commands].map(([name]) => name).sort()).toEqual(["gh", "go", "pnpm"]);
+    const one = await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"), ["/Users/dev/proj"]);
+    expect([...one.commands].map(([name]) => name).sort()).toEqual(["gh", "pnpm"]);
+    expect(one.sessions).toBe(2);
+    // A sibling folder that shares the prefix is not inside it.
+    expect((await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"), ["/Users/dev/pro"])).sessions).toBe(0);
+  });
+
+  it("takes a codex session's folder from the session_meta the rollout opens with", async () => {
+    const rollout = (id: string, cwd: string, cmd: string) =>
+      [line({ type: "session_meta", payload: { id, cwd } }), line({ type: "response_item", payload: { type: "function_call", name: "exec_command", arguments: JSON.stringify({ cmd }) } })].join("\n");
+    const host = fakeHost({
+      files: {
+        "~/.codex/sessions/2026/06/01/rollout-a-t1.jsonl": rollout("t1", "/Users/dev/proj", "cargo build"),
+        "~/.codex/sessions/2026/06/01/rollout-b-t2.jsonl": rollout("t2", "/Users/dev/other", "go build"),
+      },
+    });
+    expect([...(await tally(codexReader.read(host, "/Users/dev/.codex/sessions"), ["/Users/dev/proj"])).commands]).toEqual([["cargo", { sessions: 1, calls: 1 }]]);
+  });
+
+  it("counts nothing from a session whose store never recorded a folder", async () => {
+    const host = fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLineNoCwd("s1", "pnpm test") } });
+    expect((await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"), ["/Users/dev/proj"])).sessions).toBe(0);
+    expect((await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"))).sessions).toBe(1);
   });
 });
 

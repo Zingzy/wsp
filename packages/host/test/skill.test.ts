@@ -35,6 +35,20 @@ describe("the wsp skill", () => {
     for (const outcome of SessionStartOutcome.options) expect(WSP_SKILL, outcome).toContain(`(outcome \`${outcome}\`)`);
   });
 
+  it("tells an agent how to add a tool the catalog does not carry, and what not to add", () => {
+    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("## Tools the catalog does not carry"), WSP_SKILL.indexOf("## Rules learned the hard way"));
+    expect(section).toContain("--add <id>=<install command>");
+    expect(section).toContain("--add-check <id>=<command>");
+    // The example is the line an agent copies: both flags in the form the verb takes.
+    expect(section).toContain('wsp recipe --add just="brew install just" --add-check just="just --version"');
+    expect(section).toContain("command -v <id>");
+    // The guardrails: evidence before a row, a manager's own form, and no sign-in for these.
+    expect(section).toContain("Add only what the person's own history or their repository files show in use");
+    expect(section).toMatch(/brew install x.*npm install -g x.*uv tool install x.*apt-get install -y x/s);
+    expect(section).toContain("pipes a download into a shell is refused");
+    expect(section).toContain("There is no sign-in for these rows");
+  });
+
   it("carries no em dash", () => {
     expect(WSP_SKILL).not.toContain("\u2014");
   });

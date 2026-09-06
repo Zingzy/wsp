@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, plural, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -67,6 +67,12 @@ describe("notifyLine", () => {
 });
 
 describe("fmtThreads, forgetNotice and deleteNotice", () => {
+  it("counts anything with its noun, plural by an s", () => {
+    expect(plural(1, "file")).toBe("1 file");
+    expect(plural(0, "file")).toBe("0 files");
+    expect(plural(2, "secret-shaped file")).toBe("2 secret-shaped files");
+  });
+
   it("counts threads with the noun, and names what a forget and a delete each take off this computer", () => {
     expect([0, 1, 2].map(fmtThreads)).toEqual(["0 threads", "1 thread", "2 threads"]);
     expect(forgetNotice(1)).toBe("Its record and 1 thread leave this computer; the machine is already gone.");
@@ -100,6 +106,14 @@ describe("the machine row's line about its helper", () => {
       expect(line).not.toContain("daemon");
       expect(line.length).toBeLessThanOrEqual(30);
     }
+  });
+});
+
+describe("plural", () => {
+  it("is the one rule for a count and its noun, and fmtThreads reads it", () => {
+    expect([0, 1, 2].map(n => plural(n, "row"))).toEqual(["0 rows", "1 row", "2 rows"]);
+    expect(plural(1, "tool call")).toBe("1 tool call");
+    expect([1, 2].map(fmtThreads)).toEqual([plural(1, "thread"), plural(2, "thread")]);
   });
 });
 

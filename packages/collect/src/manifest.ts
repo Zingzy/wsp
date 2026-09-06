@@ -4,15 +4,13 @@
 // the same shape with bring and choice filled in is saved as the recipe file,
 // so one schema covers both a fresh collection and a saved recipe.
 import { z } from "zod";
+import { LoginChoice } from "@wsp/protocol";
 
 export const RUNGS = ["identity", "shell", "toolchains", "tools", "agents", "logins"] as const;
 export const Rung = z.enum(RUNGS);
 export type Rung = z.infer<typeof Rung>;
 
-/** What happens to a login: copied from this computer, signed in on the machine, or left out. */
-export const LOGIN_CHOICES = ["copy", "machine", "skip"] as const;
-export const LoginChoice = z.enum(LOGIN_CHOICES);
-export type LoginChoice = z.infer<typeof LoginChoice>;
+export { LOGIN_CHOICES, LoginChoice } from "@wsp/protocol";
 
 export const Default = z.enum(["bring", "skip"]);
 export type Default = z.infer<typeof Default>;

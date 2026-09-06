@@ -16,9 +16,6 @@ export function fmtBytes(n: number): string {
   return `${(n / GIB).toFixed(1)} GB`;
 }
 
-/** A count with its word, pluralised by an s: "1 file", "12 files". */
-export const fmtCount = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
-
 /** A machine size's memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
 export function fmtMemGb(memMb: number): string {
   return `${Number((memMb / 1024).toFixed(1))} GB`;
@@ -68,9 +65,16 @@ export function notifyLine(threadId: string, result: TurnResult): string {
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
+/** A count with its noun, the noun pluralised by an s: the one rule every line that counts rows, sessions, calls,
+ * threads or a plan's files reads, so none of them says "1 sessions". A noun that does not take an s is spelled by
+ * its caller. */
+export function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 /** A thread count with its noun, as the sidebar's counts and the verbs' lines say it. */
 export function fmtThreads(n: number): string {
-  return `${n} ${n === 1 ? "thread" : "threads"}`;
+  return plural(n, "thread");
 }
 
 /** What forgetting a workspace takes off this computer, the one sentence every client's confirmation shows. */

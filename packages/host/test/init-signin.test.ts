@@ -8,7 +8,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { describe, expect, it } from "vitest";
-import { flowHooks, signInStage, type SignInFlow, type SignInStageOptions } from "../src/init-signin.js";
+import { flowHooks, keyAsks, signInStage, stageLogins, type SignInFlow, type SignInStageOptions } from "../src/init-signin.js";
 import { fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
 
 const CLAUDE: ManifestEntry = { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
@@ -178,5 +178,23 @@ describe("o and the page the machine asks to open", () => {
     expect(t.opened).toEqual([PRINTED]);
     t.link.exit(pty, 0);
     await t.run;
+  });
+});
+
+describe("what an answer means at build time", () => {
+  const login = (id: string, label: string): ManifestEntry => ({ rung: "logins", id, label, paths: [], bytes: 0, default: "skip" });
+  const manifest = { entries: [login("logins/claude", "Claude Code login"), login("logins/codex", "Codex login"), login("logins/gh", "GitHub CLI login")] };
+
+  it("a row answered API key is asked for in the secrets step, under the variable its tool reads, and never staged as a sign-in", () => {
+    const choices = new Map([["logins/claude", "key"], ["logins/codex", "machine"], ["logins/gh", "key"]]);
+    // Claude Code reads a key the catalog knows; the GitHub CLI has no key variable, so nothing is asked for it.
+    expect(keyAsks(manifest, choices)).toEqual([{ name: "ANTHROPIC_API_KEY", from: "the key Claude Code reads on the machine" }]);
+    expect(keyAsks(manifest, new Map())).toEqual([]);
+    // The key answer is not a sign-in to run there: only the machine row is staged.
+    expect(stageLogins(manifest, choices, new Set()).map(e => e.id)).toEqual(["logins/codex"]);
+  });
+
+  it("Codex takes a key too, under its own variable", () => {
+    expect(keyAsks(manifest, new Map([["logins/codex", "key"]]))).toEqual([{ name: "OPENAI_API_KEY", from: "the key Codex reads on the machine" }]);
   });
 });

@@ -10,7 +10,7 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { isCancel, log } from "@clack/prompts";
-import { canTravel, defaultImportConsent, fmtBytes, fmtCount, workspaceHash, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
+import { canTravel, defaultAgents, defaultConsent, fmtBytes, importRequest, plural, workspaceHash, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import type { CreatedWorkspace } from "@wsp/runtime";
 import { confirmPrompt, textPrompt } from "./init-layout.js";
 import type { HostHandle } from "./server.js";
@@ -110,19 +110,19 @@ export interface FirstRun {
 
 /** What the plan says before anything is packed, in the wizard's one line. */
 export function planLine(plan: ProjectPlan): string {
-  const parts = [`${fmtCount(plan.files, "file")}, ${fmtBytes(plan.bytes)}`];
+  const parts = [`${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}`];
   if (plan.repo) parts.push("the repository whole");
   const travelling = plan.agents.filter(canTravel);
-  if (travelling.length > 0) parts.push(`${fmtCount(travelling.reduce((n, a) => n + a.sessions, 0), "session")} from ${travelling.map(a => a.name).join(", ")}`);
-  if (plan.secrets.length > 0) parts.push(`${fmtCount(plan.secrets.length, "secret-shaped file")} read for what may travel`);
+  if (travelling.length > 0) parts.push(`${plural(travelling.reduce((n, a) => n + a.sessions, 0), "session")} from ${travelling.map(a => a.name).join(", ")}`);
+  if (plan.secrets.length > 0) parts.push(`${plural(plan.secrets.length, "secret-shaped file")} read for what may travel`);
   return `${parts.join("; ")}.`;
 }
 
 /** Where the folder landed and what was left out of it. */
 export function importedLine(result: ProjectImportResult, workspaceName: string): string {
-  const cut = result.cut.length > 0 ? `; ${fmtCount(result.cut.length, "secret-shaped file")} cut` : "";
-  const rewritten = result.rewritten.length > 0 ? `; ${fmtCount(result.rewritten.length, "file")} rewritten without their credentials` : "";
-  return `${result.dest} on ${workspaceName}: ${fmtCount(result.files, "file")}, ${fmtBytes(result.bytes)}${rewritten}${cut}.`;
+  const cut = result.cut.length > 0 ? `; ${plural(result.cut.length, "secret-shaped file")} cut` : "";
+  const rewritten = result.rewritten.length > 0 ? `; ${plural(result.rewritten.length, "file")} rewritten without their credentials` : "";
+  return `${result.dest} on ${workspaceName}: ${plural(result.files, "file")}, ${fmtBytes(result.bytes)}${rewritten}${cut}.`;
 }
 
 /** Forks the workspace and, when a folder was named, lands its project on it under the app's own consent defaults.
@@ -148,7 +148,8 @@ export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
     spinner.stop();
     log.step(planLine(plan), out);
     spinner = o.spin(`Importing ${o.first.folder}`);
-    const imported = await o.handle.importProject({ workspaceId: workspace.id, source: o.first.folder, dest: plan.source, ...defaultImportConsent(plan) });
+    // The app's dialog seeds its ticks from these two and sends this request; nothing is changed on the way here.
+    const imported = await o.handle.importProject({ workspaceId: workspace.id, ...importRequest(plan, o.first.folder, defaultConsent(plan.secrets), defaultAgents(plan.agents)) });
     spinner.stop();
     log.step(importedLine(imported, workspace.name), out);
     return { workspace, imported };

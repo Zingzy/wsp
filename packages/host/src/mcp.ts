@@ -7,10 +7,14 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, deleteNotice } from "@wsp/protocol";
+import { nodeHost } from "@wsp/collect";
+import { AFTER_CUT_LINE, LOGIN_CHOICES, ProjectExportResult, ProjectGolden, ProjectImportResult, ProjectPlan, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, actionRefusal, deleteNotice, importConsented, importRequest, workspaceState } from "@wsp/protocol";
+import { smallRecipePath } from "./recipe-file.js";
+import { runRecipe, runScan, type ScanInput } from "./recipe-command.js";
+import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, absolutePath, agentsChosen, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, resumeOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -81,7 +85,10 @@ function turnOut(turn: Turn): z.infer<typeof TurnOut> {
 
 const QUIET_TURN = { event: () => {} };
 
-export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpServer {
+/** The line under a plan the tool returned without importing: the call that says yes, and the two per-row answers. */
+const PLAN_ONLY_TOOL = "nothing imported; call import again with yes true to take these defaults, or keep and cut per secret-shaped row";
+
+export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: ScanInput["alsoHere"] } = {}): McpServer {
   const dial = opts.dial ?? dialer(statePath);
   const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: INSTRUCTIONS });
   const workspace = z.string().describe("the workspace's name, or its id when two share a name");
@@ -96,6 +103,60 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means the agent's default"),
   };
 
+  const PROJECT_FOLDERS = z.array(z.string()).optional().describe("folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count");
+  /** The same folders on the write verb, where naming them is also naming a rule input, so it re-decides the ticks. */
+  const WEIGH_BY_FOLDERS = z.array(z.string()).optional().describe("folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count. Naming one re-decides every tick from the rule, as tick does, so any flip an earlier call made goes");
+  /** Absolute, since this server's own folder is wherever the agent launched it and a prefix test on a relative
+   * path silently matches nothing. */
+  const projectFolders = (folders: readonly string[]): string[] => folders.map(f => absolutePath("project is a folder on this computer", f));
+
+  server.registerTool(
+    "recipe_scan",
+    {
+      description:
+        "Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, what else a package manager on this computer has that the image could take (alsoHere, by manager, with the line that installs each on the machine, which is the line to hand recipe's add), whose scanned says whether anything looked, the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.",
+      inputSchema: { project: PROJECT_FOLDERS },
+      outputSchema: RecipeScan.shape,
+    },
+    async ({ project }) => {
+      const scan = await runScan(nodeHost(), {
+        ...(project !== undefined ? { projects: projectFolders(project) } : {}),
+        ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}),
+      });
+      return asText(scanPrintout(scan).join("\n"), scan);
+    },
+  );
+  server.registerTool(
+    "recipe",
+    {
+      description:
+        `The recipe for a machine, read off this computer and written to a file: every catalog agent and tool with its tick, why it has that tick, and what it adds to the machine, plus the commands the person's agents ran that no catalog row carries. tick names the rule: used ticks what their agents actually ran here, installed ticks what is on this computer, default ticks what the catalog ships on; an agent wsp cannot open a thread on is off unless installed. The file is the state, so a second call is not a fresh start: naming tick or project lets the rule decide every tick again and throws away the flips a call before it made, and a call that names neither keeps what the file says and puts its own flips on top. Sign-in answers stand through every call whatever the rule, since nothing but the person decides one. Put the heavy rows to the person with their sizes before anything is built, then flip rows with set and hand them \`wsp init --recipe <out>\` to run themselves, since the sign-ins need their machine. Only names and counts are read; nothing a session held is returned.`,
+      inputSchema: {
+        tick: RecipeTick.optional().describe(`which rule decides every tick: ${RECIPE_TICKS.join(", ")}. Naming it re-decides every row from the rule, so any flip an earlier call made goes; absent, the file's own rule and its ticks stand, and used decides a first call and any row the file does not carry`),
+        set: z.array(z.string()).optional().describe('rows to flip by catalog id, "<id>=on" or "<id>=off", applied over whatever decided the row. On a call that names tick or project they sit over the rule\'s fresh answer; on any other call they sit over the ticks already in the file'),
+        signin: z.array(z.string()).optional().describe(`what happens to a row's sign-in, "<id>=${LOGIN_CHOICES.join("|")}"; key brings the key files beside its login and the login still runs on the machine. An answer already in the file stands until a later call names that row again, whatever tick or project do to the ticks`),
+        add: z.array(z.string()).optional().describe('tools the catalog does not carry, "<id>=<install command>"; the line runs on the machine as given after every catalog install, and such a row is never offered a sign-in. Rows an earlier call added stand, whatever tick or project do to the ticks'),
+        add_check: z.array(z.string()).optional().describe('what proves an added tool landed, "<id>=<command that exits 0>"; without one the id on PATH is the check'),
+        why: z.string().optional().describe("what the rows this call adds are for, in your own words; absent, they say an agent added them"),
+        project: WEIGH_BY_FOLDERS,
+        out: z.string().optional().describe("where the recipe file goes, absolute; absent means the host's own recipe.json beside its state"),
+      },
+      outputSchema: RecipeAnswer.shape,
+    },
+    async ({ tick, set, signin, add, add_check: addCheck, why, project, out }) => {
+      const table = await runRecipe(nodeHost(), {
+        out: out === undefined ? smallRecipePath(statePath) : absolutePath("out is a path on this computer", out),
+        ...(tick !== undefined ? { tick } : {}),
+        ...(set !== undefined ? { set } : {}),
+        ...(signin !== undefined ? { signin } : {}),
+        ...(add !== undefined ? { add } : {}),
+        ...(addCheck !== undefined ? { addCheck } : {}),
+        ...(why !== undefined ? { why } : {}),
+        ...(project !== undefined ? { projects: projectFolders(project) } : {}),
+      });
+      return asText(recipePrintout(table).join("\n"), table);
+    },
+  );
   server.registerTool(
     "workspaces",
     { description: "Every workspace this host runs, as the app lists them: id, name, phase (running or napping) and the golden it forked from.", outputSchema: { workspaces: z.array(WorkspaceView) } },
@@ -268,6 +329,39 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     },
   );
   server.registerTool(
+    "import",
+    {
+      description:
+        "Lands a project folder from this computer on the workspace's machine at the same path, as the app's import dialog does, with the sessions of the agents named keyed to it there. Called without yes, keep or cut it uploads nothing and answers with the plan: the repository, files and size, the caches left behind, each secret-shaped file with its default (cut, unless a rewrite that removes the credential is offered) and each agent with sessions for the folder; put those rows to the person, then call again with yes true for the defaults or keep and cut per row. Refused in one line while the workspace is not running.",
+      inputSchema: {
+        workspace,
+        folder: z.string().describe("the folder on this computer, absolute; it lands at this path on the machine"),
+        yes: z.boolean().optional().describe("true imports with the plan's defaults; absent or false answers with the plan and imports nothing unless keep or cut is given"),
+        keep: z.array(z.string()).optional().describe("secret-shaped paths from the plan, relative to the folder, that travel (as they are, or rewritten when the plan offers it)"),
+        cut: z.array(z.string()).optional().describe("secret-shaped paths from the plan that stay behind, for rows the plan would carry rewritten"),
+        agents: z.array(z.string()).optional().describe("catalog ids of the agents whose sessions travel, each with sessions in the plan; absent means every agent the plan lists with readable sessions"),
+        replace: z.boolean().optional().describe("remove what is at the path on the machine first; without it an existing folder there is refused"),
+      },
+      outputSchema: { plan: ProjectPlan, imported: ProjectImportResult.optional() },
+    },
+    async ({ workspace: ref, folder, yes, keep = [], cut = [], agents, replace }) => {
+      const client = await dial();
+      const target = await workspaceOf(client, ref);
+      const refusal = actionRefusal(workspaceState({ phase: target.phase }), "import", target.gone);
+      if (refusal !== null) throw new Error(refusal);
+      const plan = await planProject(client, folder);
+      const ticked = secretsChosen(plan, keep, cut);
+      const chosen = agentsChosen(plan, agents);
+      const lines = planLines(plan, ticked, chosen).join("\n");
+      if (!importConsented({ yes, keep, cut })) return asText(`${lines}\n${PLAN_ONLY_TOOL}`, { plan });
+      let done = "";
+      const imported = await importProject(client, target.id, importRequest(plan, folder, ticked, chosen, replace), e => {
+        if (e.stage === "done") done = e.message;
+      });
+      return asText(done, { plan, imported });
+    },
+  );
+  server.registerTool(
     "export",
     {
       description:
@@ -296,9 +390,9 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
 }
 
 /** The server on stdio until the agent is done with it: its stdin ending closes the transport, and the host socket with it. */
-export async function serveMcp(statePath: string, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
+export async function serveMcp(statePath: string, opts: { alsoHere?: ScanInput["alsoHere"] } = {}, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
   const dial = dialer(statePath);
-  const server = mcpServer(statePath, { dial });
+  const server = mcpServer(statePath, { dial, ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}) });
   const transport = new StdioServerTransport(streams.input, streams.output);
   const closed = new Promise<void>(done => {
     server.server.onclose = () => done();

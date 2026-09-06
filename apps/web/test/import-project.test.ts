@@ -5,8 +5,8 @@
 // offer wording as the tick changes it, the agent row's words, and the landed
 // line with what was cut.
 import { describe, expect, it } from "vitest";
-import { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, type ProjectAgent, type ProjectImportEvent, type ProjectSecret } from "@wsp/protocol";
-import { IMPORT_STEPS, agentState, importStepRows, isImportOf, landedLine, secretOffer } from "../src/sidebar/importProject.js";
+import type { ProjectAgent, ProjectImportEvent, ProjectSecret } from "@wsp/protocol";
+import { IMPORT_STEPS, agentState, agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "../src/sidebar/importProject.js";
 
 const ev = (over: Partial<ProjectImportEvent>): ProjectImportEvent => ({
   type: "project.import",

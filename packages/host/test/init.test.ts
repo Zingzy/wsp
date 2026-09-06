@@ -17,7 +17,8 @@ import { ALREADY_APPLIED, Recipe, type GoldenManifest, type ProjectImportResult,
 import { DAEMON_TOKEN_SET, createRuntime, goldenHead, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP, catalogEntry } from "@wsp/catalog";
-import { recipePath } from "../src/init-recipe.js";
+import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
+import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
 import { reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import { FIRST_QUESTION, FOLDER_QUESTION } from "../src/init-first.js";
@@ -32,7 +33,7 @@ import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
-const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
+const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
 const SEAL_Q = (v: number) => `Seal this machine as golden v${v}?`;
 const BOOT = /Boot a \d+ vCPU/;
@@ -326,29 +327,159 @@ function withGhCopy(f: Fake): void {
   f.opts.recipe = async () => answeredCopy("gh");
 }
 
-/** Enter through the three screens, as they stand. */
-async function throughScreens(f: Fake): Promise<void> {
-  for (const screen of ["Agents", "What they need", "Sign-ins and keys"]) {
+/** The five screens a run asks before the build, in order. */
+const SCREENS = ["Agents", "Tools", "Also on this Mac", "Sign-ins", "wsp for your agents"];
+
+/** Enter through every screen, taking the defaults each one opens on. */
+async function throughScreens(f: Fake, screens: readonly string[] = SCREENS): Promise<void> {
+  for (const screen of screens) {
     await f.until(screen);
     await f.press(KEY.enter);
   }
 }
 
 describe("wsp init, interactive", () => {
-  it("enter at the confirm takes No: the marker sits on No, nothing boots, and the recipe is kept", async () => {
+  it("offers what this Mac's package managers have as its own screen, every row off, and a tick writes that row into the recipe", async () => {
+    const f = fake();
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, JSON.stringify({ version: 1, at: "2026-09-06T03:00:00.000Z", histories: [], rows: [], custom: [{ kind: "custom", id: "cuda", name: "cuda", install: ["apt-get install -y cuda"], check: "command -v cuda", why: "added by the agent" }] }));
+    // The scan is asked with what the recipe already installs, so it can leave those tools off the screen.
+    let asked: readonly { id: string }[] = [];
+    f.opts.scan = async recipe => {
+      asked = recipe;
+      return [
+        { id: "brew/llvm", name: "llvm", manager: "brew", group: "Homebrew formulae", install: "brew install llvm", check: "command -v llvm", size: 2 * 1024 * 1024 * 1024 },
+        { id: "npm/turbo", name: "turbo", manager: "npm", group: "npm globals", install: "npm install -g turbo", check: "command -v turbo" },
+      ];
+    };
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f, ["Agents", "Tools"]);
+    await f.until("Also on this Mac");
+    const screen = f.text().slice(f.text().lastIndexOf("◆  Also on this Mac"));
+    // The third of the six screens, its own sentence over it, and every row starts off with its manager's count and weight.
+    expect(screen).toMatch(/Also on this Mac\s+3\/6/);
+    expect(screen).toContain("We found these installed on this Mac. Tick the ones you or your agents need");
+    expect(screen).toMatch(/▾ Homebrew formulae\s+0 of 1\s+0 B\n┃\s+○ llvm\s+2\.0 GB\n/);
+    expect(screen).toMatch(/▾ npm globals\s+0 of 1\s+0 B\n┃\s+○ turbo\s+size unknown\n/);
+    // The screen that spends disk shows the Disk line, as Tools does, and it follows the ticks.
+    const disk = (text: string): string => text.slice(text.lastIndexOf("Disk: ")).split("\n")[0]!;
+    const before = disk(screen);
+    expect(before).toContain("on the 20 GB builder");
+    // Down to llvm, tick it, on to the sign-ins.
+    await f.press(KEY.down);
+    await f.press(" ");
+    await f.until(/● llvm/);
+    expect(disk(f.text().slice(f.text().lastIndexOf("◆  Also on this Mac")))).not.toBe(before);
+    await f.press(KEY.enter);
+    await throughScreens(f, ["Sign-ins", "wsp for your agents"]);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+    expect(asked.map(r => r.id)).toEqual(["cuda"]);
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")).custom).toEqual([
+      { kind: "custom", id: "cuda", name: "cuda", install: ["apt-get install -y cuda"], check: "command -v cuda", why: "added by the agent" },
+      { kind: "custom", id: "brew/llvm", name: "llvm", install: ["brew install llvm"], check: "command -v llvm", manager: "brew", size: 2 * 1024 * 1024 * 1024, why: "installed on this Mac by brew" },
+    ]);
+  });
+
+  it("keeps the rows wsp recipe --add wrote into the recipe beside the state, which a plain run rewrites", async () => {
+    const f = fake({ yes: true });
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [],
+      custom: [{ kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" }],
+    }));
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.backends[0]!.machines[0]!.execLog.some(c => c.includes("brew install just"))).toBe(true);
+    expect(JSON.parse(readFileSync(saved, "utf8")).custom).toEqual([
+      { kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" },
+    ]);
+  });
+
+  it("says so and carries on when the recipe beside the state cannot be read, rather than refusing to run", async () => {
+    const f = fake({ yes: true });
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, "{ not json");
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.text()).toContain("added rows go with it");
+  });
+
+  it("names Also on this Mac beside What they need when the recipe that overfills the disk has a row from it", async () => {
+    const f = fake({ yes: true });
+    const saved = join(dirname(f.opts.statePath), "recipe.json");
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [],
+      custom: [{ kind: "custom", id: "brew/llvm", name: "llvm", install: ["brew install llvm"], check: "command -v llvm", size: 30 * 1024 * 1024 * 1024, why: "installed on this Mac by brew" }],
+    }));
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const out = f.text();
+    expect(out).toContain("This recipe needs about");
+    expect(out).toContain("under Tools or Also on this Mac");
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
+  });
+
+  it("with no manager row to offer, the third screen keeps its place and says so", async () => {
+    const f = fake();
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f, ["Agents", "Tools"]);
+    await f.until("Also on this Mac  3/6");
+    const screen = f.text().slice(f.text().lastIndexOf("◆  Also on this Mac"));
+    expect(screen).toContain("What this Mac has installed that a package manager could put on the image");
+    expect(screen).toContain("nothing found here yet");
+    await f.press(KEY.enter);
+    await throughScreens(f, ["Sign-ins", "wsp for your agents"]);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("once this computer has measured a build, the build screen says how long that one took", async () => {
+    const f = fake();
+    // What the last seal wrote beside the recipe: 19 minutes of stages.
+    writeFileSync(importResultPath(f.opts.statePath), JSON.stringify({ build: { at: "2026-09-05T19:44:00.000Z", stages: { creating: 61_000, "installing-tools": 1_059_000, snapshotting: 40_000 } } }));
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f);
+    await f.until(BOOT);
+    const ready = f.text().slice(f.text().lastIndexOf("Ready to build")).replace(/\n┃\s+/g, " ");
+    expect(ready).toContain("The build takes about 19 minutes, going by the last one; a workspace naps when it is idle and stops billing.");
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("the build screen says what it will build, what it costs and that a workspace naps; the marker opens on Yes and n keeps everything", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
     await throughScreens(f);
     await f.until(BOOT);
+    const frame = f.text().slice(f.text().lastIndexOf("Ready to build")).replace(/\n┃\s+/g, " ");
+    const ready = frame.slice(0, frame.indexOf("Boot a"));
+    expect(ready).toMatch(/^Ready to build\. 1 agent, 2 tools, [\d.]+ GB on the image\. 2 sign-ins on the machine after the build\. The build takes about ten minutes, not measured on this computer yet; a workspace naps when it is idle and stops billing\./);
+    // The rate is the boot question's, said once on the screen.
+    expect(ready).not.toContain("/hr");
+    expect(frame.match(/\$0\.11\/hr/g)).toHaveLength(1);
     const ask = f.text().slice(f.text().lastIndexOf("Boot a"));
     expect(ask).toMatch(/2 vCPU, 4 GB\s+builder/);
     expect(ask).toMatch(/\$0\.11\/hr/);
     expect(ask).toMatch(/No\s+costs\s+nothing/);
-    // The confirm is the screen being answered: thick bar, the marker on No, the help line on the heavy end.
-    expect(ask).toContain(`\n┃  ${S_RADIO_INACTIVE} Yes / ${S_RADIO_ACTIVE} No\n┗  ← → change • y n answer • enter choose • esc cancel`);
-    await f.press(KEY.enter);
+    // Enter takes the defaults everywhere, so the marker opens on Yes; the help line is the screen being answered.
+    expect(ask).toContain(`\n┃  ${S_RADIO_ACTIVE} Yes / ${S_RADIO_INACTIVE} No\n┗  ← → change • y n answer • enter choose • esc cancel`);
+    await f.press("n");
     expect((await run).code).toBe(1);
-    expect(f.text().slice(f.text().lastIndexOf("◇  Boot a"))).toMatch(/^◇  Boot a[^\n]*\n(│    [^\n]*\n)?│  No costs nothing[^\n]*\n│  No\n└  Nothing was booted\. The recipe is kept\./);
+    // The finished block opens on the summary line, the boot question under it, and ends on the answer.
+    const done = f.text().slice(f.text().lastIndexOf("◇  Ready to build"));
+    expect(done).toContain("│  No\n└  Nothing was booted. The recipe is kept.");
+    expect(done).toMatch(/^◇  Ready to build\./);
+    expect(done).toContain("Boot a");
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
     expect(f.hosts).toBe(0);
     const saved = loadManifest(join(dirs[0]!, "golden-recipe.json"));
@@ -411,7 +542,7 @@ describe("wsp init, interactive", () => {
       },
     });
     const run = runInit(f.opts, f.io);
-    await f.until("1/3");
+    await f.until("1/6");
     const t = f.text();
     expect(t).toContain("Reading this computer  Identity 3");
     expect(t).toContain("Reading this computer  Identity 3, Shell 2, Toolchains 1, Tools 4, Agents 2, Sign-ins 3");
@@ -419,10 +550,7 @@ describe("wsp init, interactive", () => {
     // Then the recipe is read, its own spinner naming each agent's history as it lands.
     expect(t.indexOf("Reading what your agents used")).toBeGreaterThan(t.indexOf("Sign-ins 3"));
     expect(t).toContain("Reading what your agents used  Claude Code: no history here");
-    for (const screen of ["Agents", "What they need", "Sign-ins and keys"]) {
-      await f.until(screen);
-      await f.press(KEY.enter);
-    }
+    await throughScreens(f);
     await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);
@@ -437,16 +565,13 @@ describe("wsp init, interactive", () => {
       },
     });
     const run = runInit(f.opts, f.io);
-    await f.until("1/3");
+    await f.until("1/6");
     const spins = f.text().split("\r").filter(l => l.includes("Reading this computer"));
     expect(spins.length).toBeGreaterThan(1);
     expect(spins.map(l => l.length).filter(n => n > 48)).toEqual([]);
     expect(spins.filter(l => /Identity 3$/.test(l)).length).toBeGreaterThan(0);
     expect(spins.at(-1)).toMatch(/Identity 3, Shell 2.*…$/);
-    for (const screen of ["Agents", "What they need", "Sign-ins and keys"]) {
-      await f.until(screen);
-      await f.press(KEY.enter);
-    }
+    await throughScreens(f);
     await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);
@@ -460,14 +585,21 @@ describe("wsp init, interactive", () => {
     await f.until("Agents");
     expect(f.text()).toContain("Nothing found to bring");
     // The catalog's six, none ticked: a fresh Mac still gets to try them on a machine.
-    expect(f.text()).toMatch(/all\s+0 of 6/);
-    for (const name of ["Claude Code", "Codex", "Gemini CLI", "OpenCode", "Pi", "Hermes Agent"]) expect(f.text()).toMatch(new RegExp(`○ ${name}\\s+[\\d.]+ MB`));
+    expect(f.text()).toContain("On: 0 agents, 0 B");
+    for (const name of ["Claude Code", "Codex", "Gemini CLI", "OpenCode", "Pi", "Hermes Agent"]) expect(f.text()).toMatch(new RegExp(`○ ${name}\\s+catalog\\s+not installed here\\s+[\\d.]+ MB`));
     await f.press(KEY.enter);
-    await f.until("What they need");
-    expect(f.text()).toContain("9 tools: 9 in the base");
+    await f.until("Tools  2/6");
+    // Nothing here and nothing ticked: the base rows still come, and every other row is on the screen at its size.
+    expect(f.text()).toMatch(/• ripgrep\s+base\s+always on the image\s+size unknown\n/);
+    expect(f.text()).toContain("On: 9 tools, 250.0 MB, 8 of unknown size");
     await f.press(KEY.enter);
-    await f.until("Sign-ins and keys");
+    await f.until("Also on this Mac");
+    expect(f.text()).toContain("nothing found here yet");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins  4/6");
     expect(f.text()).toContain("nothing found");
+    await f.press(KEY.enter);
+    await f.until("wsp for your agents");
     await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press("n");
@@ -494,7 +626,7 @@ describe("wsp init, the summary-first screens", () => {
     ],
   };
 
-  it("three screens: the six agents with this Mac's ticked, one line of counts over the loud Disk line with the rows behind a, the sign-ins listed and the keys ticked; then the build installs the agent ticked here and signs it in on the machine", async () => {
+  it("five screens: the agents with what this computer did with each, the tools table, the scan slot, a choice per sign-in and the wsp tools; then the build installs the agent ticked here and signs it in on the machine", async () => {
     const f = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED, columns: 100 });
     // A tall terminal, so the whole tools list is on screen at once.
     Object.assign(f.io.output, { rows: 50 });
@@ -510,58 +642,61 @@ describe("wsp init, the summary-first screens", () => {
     expect(one).toContain("21 found on this computer. Nothing has left this computer.");
     expect(one).not.toContain("not in this build");
     // The catalog's six in its order, a size beside each, the three on this Mac ticked.
-    expect(one).toMatch(/◆  Agents  1\/3\n┃ {2}search/);
-    expect(one).toMatch(/all\s+3 of 6\n/);
-    expect(one).toMatch(/● Claude Code\s+208\.0 MB\n┃\s+● Codex\s+455\.0 MB\n┃\s+○ Gemini CLI\s+189\.0 MB\n┃\s+○ OpenCode\s+673\.0 MB\n┃\s+○ Pi\s+165\.0 MB\n┃\s+● Hermes Agent\s+484\.0 MB\n/);
-    expect(one).toMatch(/Selected: Claude Code, Codex, Hermes Agent\n/);
-    // Down onto Gemini CLI: the detail says it is not here and what installs; space ticks it for the machine.
-    await f.press(KEY.down, KEY.down, KEY.down);
-    await f.until("not on this Mac; try it on the machine, nothing here changes");
-    expect(f.text()).toContain("installs about 189.0 MB on the machine (measured 2026-09-05)");
+    expect(one).toMatch(/◆  Agents  1\/6\n┃ {2}Which coding agents go on your machine image\.\n┃ {2}You can change this later\.\n┃ {2}search/);
+    expect(one).toContain("On: 3 agents, 1.1 GB");
+    expect(one).toMatch(/● Hermes Agent\s+installed\s+installed here, never used\s+484\.0 MB\n┃\s+● Claude Code\s+installed\s+installed here, never used\s+208\.0 MB\n┃\s+● Codex\s+catalog\s+not installed here\s+455\.0 MB\n/);
+    // Down onto Gemini CLI: the detail says wsp cannot drive it yet and what installs; space ticks it for the machine.
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
+    await f.until("installs about 189.0 MB on the machine (measured 2026-09-05)");
+    expect(f.text()).toContain("installs, but wsp cannot run its threads yet");
+    expect(f.text()).toContain("not on this Mac; try it on the machine, nothing here changes");
     await f.press(KEY.space);
     await f.until(/● Gemini CLI/);
     await f.press(KEY.enter);
 
-    await f.until("What they need");
-    const two = f.text().slice(f.text().lastIndexOf("◆  What they need"));
-    expect(two).toMatch(/^◆  What they need  2\/3\n┃  12 tools: 9 in the base, 2 installed here, 1 used by your agents\n┃  Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder \(files [\d.]+ KB, Homebrew's toolchain 1\.0 GB, agents\n┃ {8}1\.3 GB; 3 unmeasured, ~300\.0 MB\)\n┗  a adjust • enter next • esc back/);
-    // No search, no rows, no weight tiers: the counts, the Disk line and three keys.
-    expect(two).not.toMatch(/search|● |○ /);
-    // a opens the rows: the floor as bullets under the title, the rest grouped by the source of their tick.
-    await f.press("a");
-    await f.until(/▾ What they need\s+in the base/);
-    const list = f.text().slice(f.text().lastIndexOf("◆  What they need"));
-    expect(list).toMatch(/• Node 22 with npm\s+250\.0 MB\n/);
-    expect(list).toMatch(/▾ Installed here\s+2 of 2\n┃\s+● GitHub CLI\n┃\s+● yq\n┃\s+▾ Used by your agents\s+1 of 2\n/);
-    // Typing narrows the rows to a match; space unticks yq; enter keeps the ticks and returns to the counts.
+    await f.until("Tools  2/6");
+    const two = f.text().slice(f.text().lastIndexOf("◆  Tools"));
+    // Screen two is the list itself: the base as bullets under the title, then a group per why, every row with its
+    // count and its size, the totals and the Disk line under them. Nothing is hidden behind a key.
+    expect(two).toMatch(/^◆  Tools  2\/6\n┃ {2}What installs on the image, from what you use\.\n┃ {2}You can change this later\.\n┃ {2}search/);
+    expect(two).toMatch(/▾ Always on the image\s+9\s+250\.0 MB\n┃\s+• Node 22 with npm\s+base\s+always on the image\s+250\.0 MB\n/);
+    expect(two).toMatch(/▾ You use these\s+1 of 2\s+0 B\n┃\s+○ Go\s+used\s+2 commands in 1 session\s+251\.0 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+size unknown\n/);
+    expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+0 B\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+size unknown\n┃\s+● yq\s+installed\s+installed here, never used\s+size unknown\n/);
+    expect(two).toMatch(/On: 12 tools, [\d.]+ MB, 11 of unknown size\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
+    expect(two).not.toContain("adjust");
+    expect(two).not.toContain("every row on this screen that can be ticked");
+    // Typing narrows the rows to a match; space unticks yq and the totals follow it.
     await f.press("y", "q");
     await f.until(/search {2}yq/);
     await f.press(KEY.space);
     await f.until(/○ yq/);
-    expect(f.text().slice(f.text().lastIndexOf("◆  What they need"))).toMatch(/Disk: /);
-    await f.press(KEY.enter);
-    await f.until("a adjust");
-    expect(f.text().slice(f.text().lastIndexOf("◆  What they need"))).toContain("11 tools: 9 in the base, 1 installed here, 1 used by your agents");
+    expect(f.text().slice(f.text().lastIndexOf("◆  Tools"))).toContain("On: 11 tools");
     await f.press(KEY.enter);
 
-    await f.until("Sign-ins and keys");
-    const three = f.text().slice(f.text().lastIndexOf("◆  Sign-ins and keys"));
-    // The logins with a browser or device flow are listed with their command and no action here; Gemini's, ticked though not on this Mac, among them.
-    expect(three).toMatch(/▾ Sign-ins and keys\s+sign in on the machine after the build\n┃\s+• GitHub CLI login\s+gh auth login\n┃\s+• Claude Code login\s+claude auth login\n┃\s+• Codex login\s+codex login\n┃\s+• Hermes Agent login\s+hermes auth\n┃\s+• Gemini CLI login\s+gemini\n/);
-    // The keys: Hermes's .env beside its login, ticked to copy; the kubeconfig, whose command is not coming, locked with the reason;
-    // the MCP server with a token, its agent beside it, unticked until the person says copy. The server without one is not here: it follows its agent.
-    expect(three).toMatch(/● Hermes Agent API keys\s+24\.4 KB\n┃\s+○ kubectl config\s+stays here\n┃\s+○ github\s+Claude Code\n/);
-    expect(three).not.toContain("notes");
-    expect(three).not.toMatch(/sign in, copy, skip|\bcopy\b.*\bskip\b/);
-    await f.press(KEY.down);
-    await f.until("ticked, it is copied to the machine; unticked, it stays here");
-    expect(f.text()).toContain("the keys in ~/.hermes/.env travel only by copy; no sign-in produces them");
-    await f.press(KEY.space);
-    await f.until(/○ Hermes Agent API keys/);
-    await f.press(KEY.down, KEY.down);
-    await f.until("ticked, it is copied to the machine; unticked, not copied; the server stays off the machine");
-    expect(f.text()).toContain("defined in the agent's config");
-    expect(f.text()).toContain("stdio: npx @modelcontextprotocol/server-github; runs via npx; carries a secret");
+    await f.until("Also on this Mac  3/6");
+    await f.press(KEY.enter);
+
+    await f.until("Sign-ins  4/6");
+    const four = f.text().slice(f.text().lastIndexOf("◆  Sign-ins"));
+    // Every row carries the word it will act on, the agents first, then the CLIs, then the servers with auth.
+    expect(four).toMatch(/▾ Agents\s+1 copy\s+4 sign in\s+0 API key\s+0 skip\n/);
+    expect(four).toMatch(/Claude Code login\s+[^\n]*sign in on the machine\n/);
+    expect(four).toMatch(/Hermes Agent API keys\s+[^\n]*copy from this Mac\n/);
+    expect(four).toMatch(/▾ Developer CLIs\s+0 copy\s+1 sign in\s+1 skip\n┃\s+GitHub CLI login\s+[^\n]*sign in on the machine\n┃\s+kubectl config\s+kubectl is not coming\s+skip\n/);
+    expect(four).toMatch(/▾ MCP servers from your agents' configs\s+0 copy\s+1 skip\n┃\s+github\s+in Claude Code's config\s+skip\n/);
+    expect(four).not.toContain("notes");
+    expect(four).not.toContain("wsp tools");
+    // Right on the Hermes keys row walks it to the next word it takes.
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
+    await f.until("the keys in ~/.hermes/.env travel only by copy; no sign-in produces them");
+    // The keys travel only by copy: no sign-in produces them, so the row walks between copy and skip alone.
+    await f.press(KEY.right);
+    await f.until(/Hermes Agent API keys\s+[^\n]*skip/);
+    await f.press(KEY.left);
+    await f.until(/Hermes Agent API keys\s+[^\n]*copy from this Mac/);
+    await f.press(KEY.enter);
+
+    await f.until("wsp for your agents  5/6");
     await f.press(KEY.enter);
 
     await f.until(BOOT);
@@ -569,8 +704,8 @@ describe("wsp init, the summary-first screens", () => {
     // The four agents and the one MCP server without a secret; the one with a token, unticked, is out and unlisted.
     // Gemini's row is the catalog's, added after what the collector found, so it installs last.
     expect(summary).toMatch(/Agents\s+5 of 8/);
-    expect(summary).toMatch(/Sign-ins\s+5 sign in\n/);
-    expect(summary).toMatch(/Hermes Agent API keys\s+skip\n/);
+    expect(summary).toMatch(/Sign-ins\s+1 copy, 5 sign in\s+24\.4 KB\n/);
+    expect(summary).toMatch(/Hermes Agent API keys\s+copy\n/);
     expect(summary).toMatch(/kubectl config\s+skip\n/);
     expect(summary).not.toContain("github");
     expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, Gemini CLI, 2 tools plus Homebrew's toolchain, 1 MCP server/);
@@ -598,7 +733,8 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("tools/brew/yq")).toMatchObject({ bring: false });
     expect(saved.get("tools/brew/gh")).toMatchObject({ bring: true });
     expect(saved.get("tools/npm/tsx")).toMatchObject({ bring: false });
-    expect(saved.get("logins/hermes-keys")).toMatchObject({ bring: false, choice: "skip" });
+    // The keys row was left on copy, so it travels; the login beside it still signs in on the machine.
+    expect(saved.get("logins/hermes-keys")).toMatchObject({ bring: true, choice: "copy" });
     expect(saved.get("logins/hermes")).toMatchObject({ bring: false, choice: "machine" });
     expect(saved.get("logins/gemini")).toMatchObject({ bring: false, choice: "machine" });
     expect(saved.get("logins/kube")).toMatchObject({ bring: false, choice: "skip" });
@@ -625,20 +761,27 @@ describe("wsp init, the summary-first screens", () => {
     await f.until("Agents");
     await f.press(KEY.esc);
     await new Promise(r => setTimeout(r, 100));
-    expect(f.text()).not.toContain("What they need");
-    await f.press(KEY.down, KEY.down, KEY.down, KEY.space, KEY.enter);
-    await f.until("What they need");
+    expect(f.text()).not.toContain("Tools  2/6");
+    // Down onto Gemini CLI and space: the tick stands when the screen is left and come back to.
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.space, KEY.enter);
+    await f.until("Tools  2/6");
     await f.press(KEY.esc);
-    await f.until(/Agents  1\/3[\s\S]*Agents  1\/3/);
+    await f.until(/Agents  1\/6[\s\S]*Agents  1\/6/);
     expect(f.text().slice(f.text().lastIndexOf("◆  Agents"))).toMatch(/● Gemini CLI/);
     await f.press(KEY.enter);
-    await f.until(/What they need  2\/3[\s\S]*What they need  2\/3/);
+    await f.until(/Tools  2\/6[\s\S]*Tools  2\/6/);
     await f.press(KEY.enter);
-    await f.until("Sign-ins and keys");
+    await f.until("Also on this Mac");
     await f.press(KEY.esc);
-    await f.until(/What they need  2\/3[\s\S]*What they need  2\/3[\s\S]*What they need  2\/3/);
+    await f.until(/Tools  2\/6[\s\S]*Tools  2\/6[\s\S]*Tools  2\/6/);
     await f.press(KEY.enter);
-    await f.until(/Sign-ins and keys  3\/3[\s\S]*Sign-ins and keys  3\/3/);
+    await f.press(KEY.enter);
+    await f.until("Sign-ins  4/6");
+    await f.press(KEY.esc);
+    await f.until(/Also on this Mac  3\/6[\s\S]*Also on this Mac  3\/6/);
+    await f.press(KEY.enter);
+    await f.press(KEY.enter);
+    await f.until("wsp for your agents  5/6");
     await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press("n");
@@ -648,31 +791,20 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("tools/catalog/wrangler")).toMatchObject({ label: "Cloudflare Wrangler", bring: true });
   });
 
-  it("the third screen offers the wsp tools to each agent on this Mac whose config the catalog knows, unticked; ticked, the server is in that config here when the screens end", async () => {
+  it("the fifth screen offers the wsp tools to each agent on this Mac whose config the catalog knows; ticked, the server is in that config here when the screens end", async () => {
     const f = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED });
     const run = runInit(f.opts, f.io);
-    for (const screen of ["Agents", "What they need"]) {
-      await f.until(screen);
-      await f.press(KEY.enter);
-    }
-    await f.until("Sign-ins and keys");
-    const three = f.text().slice(f.text().lastIndexOf("◆  Sign-ins and keys"));
+    await throughScreens(f, ["Agents", "Tools", "Also on this Mac", "Sign-ins"]);
+    await f.until("wsp for your agents  5/6");
+    const five = f.text().slice(f.text().lastIndexOf("◆  wsp for your agents"));
     // Claude Code is the one agent here whose config the catalog can place a server in: Hermes is here without one, Codex is not here.
-    expect(three).toMatch(/○ github\s+Claude Code\n┃\s+▾ On this Mac\s+0 of 1\n┃\s+○ wsp tools for Claude Code\s+~\/\.claude\.json\n/);
-    expect(three).not.toMatch(/wsp tools for (Codex|Hermes Agent|Pi|Gemini CLI|OpenCode)/);
-    // The all row brings everything to the machine and leaves the write on this Mac alone: it stays unticked, out of the count.
-    expect(three).toMatch(/○ all\s+5 of 6\n/);
+    expect(five).toContain("Add wsp's MCP server and skill to the agents installed here, so they can");
+    expect(five).toMatch(/○ Claude Code\n/);
+    expect(five).not.toMatch(/(Codex|Hermes Agent|Pi|Gemini CLI|OpenCode)\n/);
+    // This computer has run no session with it, so the row starts off; the file it would write reads under it.
+    expect(five).toContain("writes ~/.claude.json");
     await f.press(KEY.space);
-    await f.until(/● all\s+6 of 6\n/);
-    expect(f.text().slice(f.text().lastIndexOf("◆  Sign-ins and keys"))).toMatch(/▾ On this Mac\s+0 of 1\n┃\s+○ wsp tools for Claude Code/);
-    await f.press(KEY.space);
-    await f.until(/○ all\s+4 of 6\n/);
-    // Down past the keys rows and the group heading onto the row: the detail says what the tick does.
-    await f.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.down);
-    await f.until("ticked, it is written when the screens end; unticked, nothing here changes");
-    expect(f.text()).toContain("wsp joins its MCP servers, so it can drive workspaces, threads and commands");
-    await f.press(KEY.space);
-    await f.until(/● wsp tools for Claude Code/);
+    await f.until(/● Claude Code/);
     await f.press(KEY.enter);
     await f.until(BOOT);
     // The helper's own line, after the recipe is saved and before anything boots.
@@ -699,21 +831,25 @@ describe("wsp init, the summary-first screens", () => {
     const broken = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED });
     writeFileSync(join(broken.opts.home, ".claude.json"), "[]\n");
     const second = runInit(broken.opts, broken.io);
-    for (const screen of ["Agents", "What they need"]) {
-      await broken.until(screen);
-      await broken.press(KEY.enter);
-    }
-    await broken.until("Sign-ins and keys");
-    await broken.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.down);
-    await broken.until("ticked, it is written when the screens end");
+    await throughScreens(broken, ["Agents", "Tools", "Also on this Mac", "Sign-ins"]);
+    await broken.until("wsp for your agents  5/6");
     await broken.press(KEY.space);
-    await broken.until(/● wsp tools for Claude Code/);
+    await broken.until(/● Claude Code/);
     await broken.press(KEY.enter);
     await broken.until(BOOT);
     expect(broken.text()).toMatch(/Claude Code did not get the wsp tools: ~\/\.claude\.json: [^\n]+\. Fix the file and run wsp mcp install --agent claude\./);
     expect(readFileSync(join(broken.opts.home, ".claude.json"), "utf8")).toBe("[]\n");
     await broken.press("n");
     expect((await second).code).toBe(1);
+  });
+
+  it("--yes never writes an agent's config on this computer, however this Mac's own sessions would have ticked it, and says how to do it by hand", async () => {
+    // Claude Code has run here, so screen five would have opened with its row on; nobody answered it.
+    const used: Recipe = { ...MEASURED, histories: [{ agent: "claude", state: "read", sessions: 151, calls: 4102 }] };
+    const f = fake({ yes: true, collect: async () => LAPTOP, recipe: async () => used });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(existsSync(join(f.opts.home, ".claude.json"))).toBe(false);
+    expect(f.text()).toContain("The wsp tools were not added to Claude Code here: --yes writes nothing on this computer. Run wsp mcp install --agent claude to add them.");
   });
 
   it("under --yes the recipe decides the ticks, the keys copy, the logins wait for the machine, and both recipe files are written; no agent's config here is touched", async () => {
@@ -724,8 +860,7 @@ describe("wsp init, the summary-first screens", () => {
     }
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
-    expect(out).not.toMatch(/Agents  1\/3|What they need|Sign-ins and keys/);
-    expect(out).not.toContain("wsp tools");
+    expect(out).not.toMatch(/Agents  1\/6|Tools  2\/6|Sign-ins  4\/6/);
     expect(existsSync(join(f.opts.home, ".claude.json"))).toBe(false);
     expect(out).not.toContain("not in this build");
     expect(out.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, 3 tools plus Homebrew's toolchain, 1 MCP server/);
@@ -749,6 +884,13 @@ describe("wsp init, the summary-first screens", () => {
     expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "gh", "yq", "hermes", "wrangler"]);
     expect(small.rows.find(r => r.id === "gh")).toMatchObject({ signIn: "machine" });
     expect(small.rows.find(r => r.id === "go")).not.toHaveProperty("signIn");
+    // --yes answers every row with the word its screen would have opened on: the same map signInItems hands the screen.
+    const screens = signInItems(applyRecipe(withCatalogAgents(LAPTOP), MEASURED));
+    for (const [id, choice] of screens.initial) {
+      // The one exception is a Keychain login, which nobody is here to consent to; the run says so on the screen above.
+      if (choice === "copy" && saved.get(id)?.paths.some(p => p.startsWith("Keychain:")) === true) continue;
+      expect([id, saved.get(id)?.choice]).toEqual([id, choice]);
+    }
   });
 });
 
@@ -759,10 +901,10 @@ describe("wsp init, the secrets step", () => {
     writeFileSync(join(f.opts.home, ".zshrc"), "export A=1\nexport A_KEY=fake\n");
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
-    expect(out).toContain("Secrets skipped: A_KEY (~/.zshrc). --yes asks nothing; set them from the app's terminal.");
+    expect(out).toContain("Secrets skipped: A_KEY (cut from ~/.zshrc). --yes asks nothing; set them from the app's terminal.");
     expect(out).toMatch(/Secrets\n│\s+A_KEY\s+skipped \(--yes asks nothing; set them from the app's terminal\)\n/);
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
-      secrets: [{ name: "A_KEY", path: "~/.zshrc", state: "skipped", note: "--yes asks nothing; set them from the app's terminal" }],
+      secrets: [{ name: "A_KEY", from: "cut from ~/.zshrc", state: "skipped", note: "--yes asks nothing; set them from the app's terminal" }],
     });
     // The value never went anywhere: no pty was opened for it.
     expect(f.link.ptys.filter(p => p.created["env"] !== undefined && "WSP_SECRET_LINE" in (p.created["env"] as object))).toEqual([]);
@@ -775,7 +917,7 @@ describe("wsp init, the secrets step", () => {
     await throughScreens(f);
     await f.until(BOOT);
     await f.press("y");
-    await f.until("Secrets were cut from your files. Paste each to set it on the machine, or leave it empty to skip.");
+    await f.until("Paste each value to set it on the machine, or leave it empty to skip.");
     expect(f.text()).not.toContain("Signing in on the machine");
     await f.until("cut from ~/.zshrc; the value is set on the machine and never shown here");
     await f.press(..."s3cret-value".split(""), KEY.enter);
@@ -785,10 +927,10 @@ describe("wsp init, the secrets step", () => {
     await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
-    expect(result.secrets).toEqual([{ name: "ANTHROPIC_API_KEY", path: "~/.zshrc", state: "set" }]);
+    expect(result.secrets).toEqual([{ name: "ANTHROPIC_API_KEY", from: "cut from ~/.zshrc", state: "set" }]);
     const out = f.text();
-    expect(out.indexOf("Secrets were cut")).toBeGreaterThan(out.indexOf("Ready"));
-    expect(out.indexOf("Secrets were cut")).toBeLessThan(out.indexOf("Signing in on the machine"));
+    expect(out.indexOf("Paste each value")).toBeGreaterThan(out.indexOf("Ready"));
+    expect(out.indexOf("Paste each value")).toBeLessThan(out.indexOf("Signing in on the machine"));
     expect(out.indexOf("Signing in on the machine")).toBeLessThan(out.indexOf("Ready to seal golden v1"));
     expect(out).toMatch(/Secrets\n│\s+ANTHROPIC_API_KEY\s+set on the machine\n/);
     expect(out).not.toContain("s3cret");
@@ -806,7 +948,7 @@ describe("wsp init, the secrets step", () => {
     expect(f.link.dials).toBe(4);
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
       logins: [{ id: "logins/gh", state: "signed-in" }, { id: "logins/claude", state: "signed-in", note: "claude auth login exited 0" }],
-      secrets: [{ name: "ANTHROPIC_API_KEY", path: "~/.zshrc", state: "set" }],
+      secrets: [{ name: "ANTHROPIC_API_KEY", from: "cut from ~/.zshrc", state: "set" }],
     });
     expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).not.toContain("s3cret");
   });
@@ -829,7 +971,7 @@ describe("wsp init, the sign-in stage", () => {
     const f = fake({ signedIn: false, hold: true, collect: async () => CODEX_MANIFEST, recipe: async () => CODEX });
     const run = runInit(f.opts, f.io);
     await throughScreens(f);
-    expect(f.text()).toMatch(/• Codex login\s+codex login/);
+    expect(f.text()).toMatch(/Codex login\s+[^\n]*sign in on the machine/);
     await f.until(BOOT);
     await f.press("y");
 
@@ -2259,6 +2401,21 @@ describe("summaryNote", () => {
     }
   });
 
+  it("names every row outside the catalog with the command it runs, since the card is the last thing read before the boot", () => {
+    const custom = [
+      { kind: "custom" as const, id: "brew/just", name: "just", install: ["brew install just"], check: "command -v just", size: 4 * 1024 * 1024, why: "installed on this Mac by brew" },
+      { kind: "custom" as const, id: "ruff", name: "ruff", install: ["uv tool install ruff"], check: "ruff --version", why: "used in wsp" },
+    ];
+    const lines = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0, new Map(), custom);
+    expect(lines).toContain("Added     just runs brew install just");
+    expect(lines).toContain("          ruff runs uv tool install ruff");
+    // They are the person's tools too: the Installs line counts them, the Disk line carries the measured one's
+    // 4 MB and counts the other beside the gh formula the Mac's Homebrew never sized.
+    expect(lines.find(l => l.startsWith("Installs"))).toContain("3 tools");
+    expect(lines.find(l => l.startsWith("Disk"))).toContain("tools 4.0 MB; 2 unmeasured");
+    expect(summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0).some(l => l.startsWith("Added"))).toBe(false);
+  });
+
   it("a tap formula that takes the road counts as a tool in the Installs line, with the checksum note the ruling asks for", () => {
     const tap = { rung: "tools" as const, id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "bring" as const, linux: "unknown" as const };
     const brew = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
@@ -2883,16 +3040,18 @@ describe("wsp init --recipe", () => {
     // The machine was still read; the card says what ticked it and counts the collector's rows, not the catalog's bare one.
     expect(out).toContain("15 found on this computer, ticked by the recipe.");
     expect(out).not.toContain("not in this build");
-    // No Agents or What they need screen: the sign-ins are the first and only screen.
-    expect(out).not.toContain("1/3");
-    expect(out).toMatch(/Sign-ins and keys\s+1\/1/);
+    // No Agents or Tools screen: the run opens on the sign-ins.
+    expect(out).not.toContain("1/6");
+    expect(out).toMatch(/Sign-ins\s+4\/6/);
     // Codex is on and Claude Code off, so only Codex's login is listed, to sign in on the machine; the saved copy answer for gh is a ticked keys row.
-    expect(out).toMatch(/• Codex login\s+codex login/);
+    expect(out).toMatch(/Codex login\s+[^\n]*sign in on the machine/);
     expect(out).not.toContain("Claude Code login");
-    expect(out).toMatch(/● GitHub CLI login\s+200 B/);
+    expect(out).toMatch(/GitHub CLI login\s+[^\n]*copy from this Mac/);
+    await f.press(KEY.enter);
+    await f.until("wsp for your agents  5/6");
     await f.press(KEY.enter);
     await f.until(BOOT);
-    await f.press(KEY.enter);
+    await f.press("n");
     expect((await run).code).toBe(1);
     const saved = new Map(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.map(e => [e.id, e]));
     expect(saved.get("agents/codex")).toMatchObject({ bring: true });
@@ -2929,6 +3088,47 @@ describe("wsp init --recipe", () => {
     expect(f.text()).toMatch(/Installing tools\s+\d+ installed \(agent-browser by an un/);
   });
 
+  it("a row the catalog does not carry installs after the catalog's own, is recorded by name, and is offered no sign-in", async () => {
+    const f = fake({ yes: true });
+    const path = join(dirname(f.opts.statePath), "recipe.json");
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [{ id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 100, calls: 7919 } }],
+      custom: [{ kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "used in wsp" }],
+    }));
+    f.opts.recipeFile = path;
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const log = f.backends[0]!.machines[0]!.execLog;
+    expect(log.some(c => c.includes("brew install just"))).toBe(true);
+    // After every catalog road: the gh formula went first.
+    expect(log.findIndex(c => c.includes("brew install just"))).toBeGreaterThan(log.findIndex(c => c.includes("brew install gh")));
+    const tools = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).tools as { id: string; label: string; outcome: string }[];
+    expect(tools.at(-1)).toMatchObject({ id: "tools/custom/just", label: "just", outcome: "installed" });
+    // The row travels in the small recipe, so a second run carries it; no sign-in was ever offered for it.
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")).custom).toEqual([{ kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "used in wsp" }]);
+    expect(f.text()).not.toContain("just login");
+  });
+
+  it("names the recipe file, not screens it never drew, when the recipe it was given overfills the disk", async () => {
+    const f = fake({ yes: true });
+    const path = join(dirname(f.opts.statePath), "given.json");
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [],
+      custom: [{ kind: "custom", id: "brew/llvm", name: "llvm", install: ["brew install llvm"], check: "brew list llvm", manager: "brew", size: 30 * 1024 * 1024 * 1024, why: "installed on this Mac by brew" }],
+    }));
+    f.opts.recipeFile = path;
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const out = f.text();
+    expect(out).toContain(`Untick about 14.8 GB of tools or agents in ${path}`);
+    expect(out).not.toContain("What they need");
+    expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
+  });
+
   it("the wsp tools rows follow the agents on this Mac, not the recipe's recorded source; a ticked row writes here, and a file with comments says they are gone", async () => {
     const f = fake();
     // The file says Codex is installed where it was written; this Mac has Claude Code and Gemini CLI.
@@ -2937,14 +3137,17 @@ describe("wsp init --recipe", () => {
     mkdirSync(join(f.opts.home, ".gemini"), { recursive: true });
     writeFileSync(join(f.opts.home, ".gemini", "settings.json"), '{\n  // the theme\n  "theme": "dark"\n}\n');
     const run = runInit(f.opts, f.io);
-    await f.until("Sign-ins and keys");
-    const screen = f.text().slice(f.text().lastIndexOf("◆  Sign-ins and keys"));
-    expect(screen).toMatch(/▾ On this Mac\s+0 of 2\n┃\s+○ wsp tools for Claude Code\s+~\/\.claude\.json\n┃\s+○ wsp tools for Gemini CLI\s+~\/\.gemini\/settings\.json\n/);
-    expect(screen).not.toContain("wsp tools for Codex");
+    // A recipe file decides the agents and the tools, so the run opens on the sign-ins and the wsp tools follow.
+    await f.until("Sign-ins  4/6");
+    await f.press(KEY.enter);
+    await f.until("wsp for your agents  5/6");
+    const screen = f.text().slice(f.text().lastIndexOf("◆  wsp for your agents"));
+    expect(screen).toMatch(/○ Claude Code\n┃\s+○ Gemini CLI\n/);
+    expect(screen).not.toContain("Codex");
     await f.press(..."gemini");
     await f.until(/search {2}gemini/);
-    await f.press(KEY.down, KEY.space);
-    await f.until(/● wsp tools for Gemini CLI/);
+    await f.press(KEY.space);
+    await f.until(/● Gemini CLI/);
     await f.press(KEY.enter);
     await f.until(BOOT);
     const out = f.text();

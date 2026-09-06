@@ -17,10 +17,11 @@ export function claudeSession(rel: string): string | undefined {
   return second.endsWith(".jsonl") ? stem(second) : second;
 }
 
-export function claudeCall(session: string, name: string, input: unknown): Call {
+export function claudeCall(session: string, name: string, input: unknown, folder?: string): Call {
   const arg = isRecord(input) ? input : {};
-  if (name === "Bash" && typeof arg["command"] === "string") return { session, kind: "shell", line: arg["command"] };
-  return { session, kind: "other", name };
+  const where = folder !== undefined ? { folder } : {};
+  if (name === "Bash" && typeof arg["command"] === "string") return { session, ...where, kind: "shell", line: arg["command"] };
+  return { session, ...where, kind: "other", name };
 }
 
 export const claudeReader: HistoryReader = {
@@ -36,9 +37,11 @@ export const claudeReader: HistoryReader = {
         if (!isRecord(row) || row["type"] !== "assistant" || !isRecord(row["message"])) continue;
         const content = row["message"]["content"];
         if (!Array.isArray(content)) continue;
+        // Every line of a transcript carries the folder the session ran in, this one included.
+        const folder = typeof row["cwd"] === "string" ? row["cwd"] : undefined;
         for (const block of content) {
           if (!isRecord(block) || block["type"] !== "tool_use" || typeof block["name"] !== "string") continue;
-          yield claudeCall(session, block["name"], block["input"]);
+          yield claudeCall(session, block["name"], block["input"], folder);
         }
       }
     }
