@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// wsp recipe: the small recipe from this computer, written to a file, with a
-// summary on the terminal of what decided each tick. Names and counts only;
-// the histories are read here and nothing of them leaves.
-import { mkdirSync, writeFileSync } from "node:fs";
+// wsp recipe: the small recipe from this computer, written to a file, with the
+// same tables wsp init's first two screens draw printed under it, and the rows
+// the catalog does not carry under those, so what would move and what each row
+// costs is read before anything is built. Names and counts only; the histories
+// are read here and nothing of them leaves.
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { agentName } from "@wsp/catalog";
+import { CATALOG_AGENTS, CATALOG_TOOLS, agentName } from "@wsp/catalog";
 import { type Host, type ProjectScan, computeRecipe } from "@wsp/collect";
-import type { Recipe, RecipeHistory, RecipeRow, RecipeSource } from "@wsp/protocol";
-
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+import { plural } from "@wsp/engine";
+import type { Recipe, RecipeCustomRow, RecipeHistory } from "@wsp/protocol";
+import { loadRecipe } from "./init-recipe.js";
+import { recipeTable, tableLines, totalsLine } from "./init-table.js";
+import { customTableLines, withCustom } from "./recipe-custom.js";
 
 /** One line per agent: what its history here said. */
 export function historyLine(h: RecipeHistory): string {
@@ -29,20 +33,6 @@ export function historyLine(h: RecipeHistory): string {
   }
 }
 
-/** The ticked tools under the source that ticked them, the project's own needs first. */
-export function toolLines(rows: readonly RecipeRow[]): string[] {
-  const tools = rows.filter(r => r.kind === "tool");
-  const on = tools.filter(r => r.on);
-  const by = (kind: RecipeSource["kind"]): string => on.filter(r => r.source.kind === kind).map(r => agentName(r.id)).join(", ") || "none";
-  return [
-    `Tools on: ${on.length} of ${tools.length}`,
-    `  your project needs: ${by("project")}`,
-    `  installed here: ${by("installed")}`,
-    `  used by your agents: ${by("used")}`,
-    `  popular in the catalog: ${by("popular")}`,
-  ];
-}
-
 /** What the project folder asked for: the file that asked beside each row, then the names the catalog carries no row for. */
 export function projectLines(scan: ProjectScan): string[] {
   return [
@@ -52,23 +42,49 @@ export function projectLines(scan: ProjectScan): string[] {
   ];
 }
 
-export interface WriteRecipeOptions {
-  now?: () => Date;
-  /** A project folder read for what its own manifests say it needs; those rows are ticked first. */
-  project?: string;
+/** The rows outside the catalog a recipe already at this path carries; a file nobody can read is about to be
+ * rewritten anyway, so its rows are named as lost rather than stopping the run. Both writers of that file, the
+ * recipe verb and the wizard, read it through here, so neither writes over what the other added. */
+export function carriedOver(out: string, log: (line: string) => void): { custom?: RecipeCustomRow[] } {
+  if (!existsSync(out)) return {};
+  try {
+    const custom = loadRecipe(out).custom;
+    return custom === undefined ? {} : { custom };
+  } catch (e) {
+    log(`${out} could not be read (${e instanceof Error ? e.message : String(e)}); it is rewritten, and any rows it added are gone.`);
+    return {};
+  }
 }
 
-export async function writeRecipe(host: Host, out: string, log: (line: string) => void, opts: WriteRecipeOptions = {}): Promise<Recipe> {
+export interface RecipeCommandOptions {
+  now?: () => Date;
+  /** A project folder read for what its own manifests say it needs; those rows are ticked before anything this computer says. */
+  project?: string;
+  /** The rows the run adds outside the catalog (wsp recipe --add); they join whatever a recipe at `out` already carries. */
+  add?: readonly RecipeCustomRow[];
+  /** The colour depth the tables are drawn at; 1, no colour, off a terminal. */
+  depth?: number;
+}
+
+export async function writeRecipe(host: Host, out: string, log: (line: string) => void, opts: RecipeCommandOptions = {}): Promise<Recipe> {
   log("Reading this computer against the catalog and your agents' session histories. Nothing leaves this computer.");
-  const recipe = await computeRecipe(host, {
+  const here = await computeRecipe(host, {
     ...(opts.now !== undefined ? { now: opts.now } : {}),
     ...(opts.project !== undefined ? { project: opts.project } : {}),
     onHistory: h => log(historyLine(h)),
     onProject: scan => projectLines(scan).forEach(log),
   });
-  const agents = recipe.rows.filter(r => r.kind === "agent" && r.on).map(r => agentName(r.id));
-  log(`Agents here: ${agents.join(", ") || "none"}`);
-  toolLines(recipe.rows).forEach(log);
+  // The rows outside the catalog are the file's, not this computer's: an earlier run's stand, so --add adds up across calls.
+  const recipe = withCustom({ ...here, ...carriedOver(out, log) }, opts.add ?? []);
+  const depth = opts.depth ?? 1;
+  for (const [title, catalog, noun] of [["Agents", CATALOG_AGENTS, "agents"], ["Tools", CATALOG_TOOLS, "tools"]] as const) {
+    const rows = recipeTable(recipe, catalog);
+    log(title);
+    tableLines(rows, depth).forEach(log);
+    log(totalsLine(rows, noun));
+  }
+  // The rows the catalog does not carry sit under the two tables, in their own, since no group of the catalog's holds them.
+  customTableLines(recipe).forEach(log);
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, `${JSON.stringify(recipe, null, 2)}\n`);
   log(`Recipe written to ${out}. Review it, then run wsp init --recipe ${out}.`);

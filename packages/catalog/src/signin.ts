@@ -220,7 +220,7 @@ export const SIGN_IN_ROWS = {
     login: "claude auth login",
     status: { command: "claude auth status", typed: CLAUDE_STATUS, signedIn: claudeSignedIn, detail: claudeSource, why: claudeWhy },
   },
-  codex: { kind: "oauth", sources: ["file"], login: "codex login", fallback: "codex login --device-auth", status: { command: "codex login status", signedIn: ok(/Logged in using/) } },
+  codex: { kind: "oauth", sources: ["file"], keyEnv: "OPENAI_API_KEY", login: "codex login", fallback: "codex login --device-auth", status: { command: "codex login status", signedIn: ok(/Logged in using/) } },
   gemini: { kind: "oauth", sources: ["file"], login: "gemini", status: { command: GEMINI_STATUS, signedIn: ok(), detail: geminiSource }, toolTimeoutMs: 5 * MIN },
   // Both counts print on exit 0; a provider key exported on the machine is listed under Environment and counts as a login.
   opencode: {

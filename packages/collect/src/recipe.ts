@@ -71,9 +71,11 @@ export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promi
   const rows = catalog.map((e): RecipeRow => {
     const size = e.size !== undefined ? { size: e.size } : {};
     const installed = present.get(e.id);
-    if (installed !== undefined) return { id: e.id, kind: e.kind, on: true, source: installed, ...size };
+    // What the agents ran is the source even for a tool this computer has, so a row can say it is installed and
+    // never used; being here still ticks it.
     const u = e.kind === "tool" ? used.get(e.id) : undefined;
-    if (u !== undefined) return { id: e.id, kind: e.kind, on: u.sessions >= USED_TICK_SESSIONS, source: { kind: "used", ...u }, ...size };
+    if (u !== undefined) return { id: e.id, kind: e.kind, on: installed !== undefined || u.sessions >= USED_TICK_SESSIONS, source: { kind: "used", ...u }, ...size };
+    if (installed !== undefined) return { id: e.id, kind: e.kind, on: true, source: installed, ...size };
     return { id: e.id, kind: e.kind, on: e.kind === "tool" && e.defaultOn, source: { kind: "popular", sessions: e.source.sessions, images: e.source.images }, ...size };
   });
   const recipe: Recipe = {

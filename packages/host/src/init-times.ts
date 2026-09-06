@@ -12,8 +12,8 @@ export interface BuildTimes {
   stages: Record<string, number>;
 }
 
-/** The one estimate the offer has before this computer has measured a build. */
-const ASSUMED = "about ten minutes, not measured on this computer yet";
+/** How long a build is said to take before this computer has measured one. */
+const ASSUMED = "about ten minutes";
 
 /** The stages the streams clocked, or nothing when a stage before a closing one has no clock: the builder already
  * held it, so the run was not a rebuild and measures none. */
@@ -50,11 +50,23 @@ export function readBuildTimes(path: string): BuildTimes | undefined {
   return { at, stages: Object.fromEntries(entries) as Record<string, number> };
 }
 
-/** What a rebuild from scratch is said to take: the last build's stages summed, or the assumption when none was measured. */
-export function rebuildEstimate(last: BuildTimes | undefined): string {
-  if (last === undefined) return ASSUMED;
+/** How long the last build ran, to the minute, and whether it was measured here at all. */
+function length(last: BuildTimes | undefined): { words: string; measured: boolean } {
+  if (last === undefined) return { words: ASSUMED, measured: false };
   const total = Object.values(last.stages).reduce((a, b) => a + b, 0);
-  if (total < 60_000) return "under a minute last time";
+  if (total < 60_000) return { words: "under a minute", measured: true };
   const minutes = Math.round(total / 60_000);
-  return minutes === 1 ? "about a minute last time" : `about ${minutes} minutes last time`;
+  return { words: minutes === 1 ? "about a minute" : `about ${minutes} minutes`, measured: true };
+}
+
+/** What a rebuild from scratch is said to take, in the offer's frame ("a rebuild is the safer road, ..."). */
+export function rebuildEstimate(last: BuildTimes | undefined): string {
+  const { words, measured } = length(last);
+  return measured ? `${words} last time` : `${words}, not measured on this computer yet`;
+}
+
+/** The same length in the build screen's frame ("The build takes ..., at about $x/hr"). */
+export function buildTakes(last: BuildTimes | undefined): string {
+  const { words, measured } = length(last);
+  return measured ? `${words}, going by the last one` : `${words}, not measured on this computer yet`;
 }

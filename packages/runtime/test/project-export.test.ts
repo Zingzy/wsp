@@ -165,7 +165,7 @@ describe("project.export on a workspace", () => {
     const lander = fakeLander();
     await expect(rt.projects.export({ workspaceId: ws.id, source: SOURCE, dest: DEST, lander })).rejects.toThrow(`${SOURCE} is not a folder on the machine`);
     await rt.workspaces.nap(ws.id);
-    await expect(rt.projects.export({ workspaceId: ws.id, source: SOURCE, dest: DEST, lander })).rejects.toThrow(/is napping; wake it before exporting/);
+    await expect(rt.projects.export({ workspaceId: ws.id, source: SOURCE, dest: DEST, lander })).rejects.toThrow(/^Workspace is paused; wake it to export$/);
     await expect(rt.projects.export({ workspaceId: "ws_nope", source: SOURCE, dest: DEST, lander })).rejects.toThrow(/no such workspace/);
     expect(lander.landings).toEqual([]);
     expect(lander.probes).toEqual([DEST]);
