@@ -373,8 +373,8 @@ describe("the MCP server over the host", () => {
     expect(new Set(requestIds).size).toBe(4);
     const { threads } = (await call("threads")).structured as { threads: ThreadView[] };
     expect(threads.map(t => [t.harness, t.startedBy, t.title, t.turns])).toEqual([
-      ["codex", "agent", "second", 1],
-      ["claude", "person", "and this", 1],
+      ["codex", "agent", "first", 1],
+      ["claude", "person", "from the app", 1],
     ]);
     const missing = await call("send", { thread: "nope", message: "x" });
     expect(missing).toEqual({ text: "no thread nope", structured: undefined, isError: true });

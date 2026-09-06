@@ -423,8 +423,8 @@ describe("wsp verbs over the host", () => {
     const listed = await run("threads", "--json");
     const [{ threads }] = json(listed.io) as [{ threads: ThreadView[] }];
     expect(threads.map(t => [t.id, t.harness, t.startedBy, t.title, t.turns])).toEqual([
-      [byCli!.threadId, "codex", "cli", "second", 1],
-      [byPerson!.threadId, "claude", "person", "and this", 1],
+      [byCli!.threadId, "codex", "cli", "first", 1],
+      [byPerson!.threadId, "claude", "person", "from the app", 1],
     ]);
 
     const prefixed = await run("send", byCli!.threadId!.slice(0, 8), "third");

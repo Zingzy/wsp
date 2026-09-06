@@ -2163,8 +2163,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       );
       const handleId = started.localId;
       sessionView.id = handleId;
-      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread.
-      if (o.resume !== undefined) sessionView.startedBy = sessions.get(handleId)?.view.startedBy ?? sessionView.startedBy;
+      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread and
+      // with what, since every client titles the thread by the row's prompt. Later turns live in the transcript.
+      const resumed = o.resume !== undefined ? sessions.get(handleId)?.view : undefined;
+      if (resumed !== undefined) {
+        sessionView.startedBy = resumed.startedBy ?? sessionView.startedBy;
+        if (resumed.prompt !== undefined) sessionView.prompt = resumed.prompt;
+      }
 
       const handle: SessionHandle = {
         id: handleId,
