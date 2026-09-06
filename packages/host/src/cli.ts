@@ -35,7 +35,7 @@ import { recipePath } from "./init-recipe.js";
 import { writeRecipe } from "./recipe-command.js";
 import { customFromFlags } from "./recipe-custom.js";
 import { scanTools } from "./scan.js";
-import { confirmPrompt, passwordPrompt, type PromptOptions } from "./init-layout.js";
+import { colourDepth, confirmPrompt, isTTY, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
@@ -53,10 +53,11 @@ usage:
   wsp init           set up your first golden image: the agents, what they
                      need and the sign-ins, three screens, then the build and
                      the browser
-  wsp recipe         write the recipe: every catalog agent and tool with a tick
-                     from what is installed here, what your agents used (their
-                     session histories, read here, names and counts only) or the
-                     catalog's own default; review it, then wsp init --recipe
+  wsp recipe         write the recipe and print it as a table: every catalog
+                     agent and tool with a tick from what is installed here,
+                     what your agents used (their session histories, read here,
+                     names and counts only) or the catalog's own default, its
+                     download size beside it; then wsp init --recipe
   wsp doctor         run the reach loop end to end against one live machine
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
@@ -569,7 +570,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         io.error(e instanceof Error ? e.message : String(e));
         return 1;
       }
-      await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line), { add });
+      await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line), { add, depth: colourDepth(isTTY(process.stdout)) });
       return 0;
     }
     case "doctor": {

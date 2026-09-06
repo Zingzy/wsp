@@ -5,13 +5,14 @@
 // golden recipe the ticked rows add up to.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { LoginChoice, Manifest, ManifestEntry, Rung } from "@wsp/collect";
+import { LOGIN_CHOICES, type LoginChoice, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { CATALOG_AGENTS, catalogEntry, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, isMcpRow, neverCopied, packageOf, parseMcpId, rowRoad, type RecipeDigest } from "@wsp/engine";
 import { Recipe } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
+import { SIGN_IN_WORDS } from "./signin-words.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
@@ -21,13 +22,6 @@ export const RUNG_TITLE: Record<Rung, string> = {
   agents: "Agents",
   logins: "Sign-ins",
 };
-
-/** The prompt's words for each login choice; the choices themselves are the collector's. */
-export const LOGIN_CHOICES: readonly { value: LoginChoice; label: string }[] = [
-  { value: "copy", label: "copy" },
-  { value: "machine", label: "sign in" },
-  { value: "skip", label: "skip" },
-];
 
 /** The plan's note when every path of a row is refused by name, asked of the same rule the pack asks with the
  * same answer about what is on disk (`isDir`: true, false, or undefined when the path is not there). */
@@ -72,10 +66,10 @@ function rowBin(t: ManifestEntry): string | undefined {
   return catalogToolFor(pkg)?.bin ?? planned.bin ?? pkg.slice(pkg.lastIndexOf("/") + 1);
 }
 
-/** What brings a command no tools row lists: its catalog entry, ticked under What they need. */
+/** What brings a command no tools row lists: its catalog entry, ticked under Tools. */
 function brings(bin: string): string {
   const entry = catalogToolFor(bin);
-  return entry !== undefined ? `tick ${entry.name} under What they need to bring it` : `installing ${bin} brings it`;
+  return entry !== undefined ? `tick ${entry.name} under Tools to bring it` : `installing ${bin} brings it`;
 }
 
 export interface LoginTool {
@@ -189,7 +183,7 @@ export function withCatalogAgents(manifest: Manifest): Manifest {
 }
 
 export function isLoginChoice(v: unknown): v is LoginChoice {
-  return LOGIN_CHOICES.some(c => c.value === v);
+  return LOGIN_CHOICES.includes(v as LoginChoice);
 }
 
 /** The small recipe wsp recipe wrote (or a person or an agent did), checked against the protocol's shape. */
@@ -317,7 +311,7 @@ export function agentName(e: ManifestEntry): string {
  * files that came or went with it are not listed again. */
 export function recipeChanges(from: RecipeDigest, to: RecipeDigest, manifest: Manifest): string[] {
   const label = (id: string): string => manifest.entries.find(e => e.id === id)?.label ?? id;
-  const word = (choice: string | undefined): string => LOGIN_CHOICES.find(c => c.value === choice)?.label ?? choice ?? "ticked";
+  const word = (choice: string | undefined): string => (isLoginChoice(choice) ? SIGN_IN_WORDS[choice].short : (choice ?? "ticked"));
   const out: string[] = [];
   const noted = new Set<string>();
   const was = new Map(from.ticks.map(t => [t.id, t]));

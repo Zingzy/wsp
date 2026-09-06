@@ -6,7 +6,7 @@ import { stripVTControlCharacters } from "node:util";
 import { MIB } from "@wsp/catalog";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { ALSO_TITLE, alsoItems, scannedTicks, withScanned } from "../src/init-also.js";
+import { ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, scannedTicks, withScanned } from "../src/init-also.js";
 import { rungSelect } from "../src/init-select.js";
 import type { ScanRow } from "../src/scan.js";
 
@@ -23,22 +23,39 @@ describe("the Also on this Mac screen", () => {
   it("draws one row per tool under its manager, with the install line and the size measured here", () => {
     const items = alsoItems(scan);
     expect(items.map(i => i.group)).toEqual(["Homebrew formulae", "Homebrew formulae", "Homebrew formulae", "npm globals"]);
-    expect(items[0]).toMatchObject({ id: "brew/just", label: "just", hint: "4.0 MB" });
+    expect(items[0]).toMatchObject({ id: "brew/just", label: "just", hint: { text: "4.0 MB" } });
     expect(items[0]!.detail[0]).toBe("brew install just");
     expect(items[3]!.detail[0]).toBe("npm install -g turbo");
     expect(items[3]!.detail[1]).toContain("2.5.0 here");
   });
 
   it("says so when nothing here measured a size", () => {
-    expect(alsoItems(scan)[3]).toMatchObject({ hint: "size unknown" });
-    expect(alsoItems(scan)[3]).not.toHaveProperty("tone");
+    expect(alsoItems(scan)[3]!.hint).toEqual({ text: "size unknown" });
   });
 
   it("colours a heavy row's size by weight and leaves a small one plain", () => {
+    // styleText reads FORCE_COLOR at each call, so colour is on for this test alone.
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "1";
+    onTestFinished(() => {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    });
     const items = alsoItems(scan);
-    expect(items[0]).not.toHaveProperty("tone");
-    expect(items[1]).toMatchObject({ tone: "red" });
-    expect(items[2]).toMatchObject({ tone: "yellowBright" });
+    const paint = (i: number): ((padded: string) => string) | undefined => (typeof items[i]!.hint === "object" ? items[i]!.hint.paint : undefined);
+    // The paint runs on the padded cell, so a colour never changes the column's width.
+    expect(paint(0)).toBeUndefined();
+    expect(paint(1)!("2.0 GB")).toBe("\x1b[31m2.0 GB\x1b[39m");
+    expect(paint(2)!("600.0 MB")).toBe("\x1b[93m600.0 MB\x1b[39m");
+    expect(paint(3)).toBeUndefined();
+  });
+
+  it("a manager's header counts its ticked rows and what they weigh here", () => {
+    const items = alsoItems(scan);
+    const brew = items.filter(i => i.group === "Homebrew formulae");
+    const line = alsoGroupLine(scan);
+    expect(line(brew, { ticks: new Set(), answers: new Map() })).toBe("0 of 3  0 B");
+    expect(line(brew, { ticks: new Set(["brew/just", "brew/llvm"]), answers: new Map() })).toBe("2 of 3  2.0 GB");
   });
 
   it("starts every row off: nothing here goes on the image unasked", () => {
@@ -92,17 +109,17 @@ describe("the screen as a terminal draws it", () => {
       else process.env["FORCE_COLOR"] = was;
     });
     const o = streams();
-    const done = rungSelect({ title: ALSO_TITLE, counter: "3/4", items: alsoItems(scan), initial: new Set(), input: o.input, output: o.output });
+    const done = rungSelect({ title: ALSO_TITLE, top: ALSO_TOP, counter: "3/6", items: alsoItems(scan), initial: new Set(), groupLine: alsoGroupLine(scan), input: o.input, output: o.output });
     await settle();
     // Down to the first row under the first manager, so the detail pane is that row's.
     o.input.write("\x1b[B\x1b[B");
     await settle();
     const t = o.text();
-    expect(t).toContain("Also on this Mac  3/4");
+    expect(t).toContain("Also on this Mac  3/6");
     expect(t).toContain("Homebrew formulae");
     expect(t).toContain("npm globals");
-    expect(t).toContain("0 of 3");
-    expect(t).toContain("Selected: none");
+    expect(t).toContain("0 of 3  0 B");
+    expect(t).toContain("You can change this later.");
     expect(t).toContain("brew install just");
     // Red for the row past a gigabyte, orange for the one in the middle tier; the small row and the unmeasured one carry no hue.
     expect(o.raw()).toContain("\x1b[31m");
