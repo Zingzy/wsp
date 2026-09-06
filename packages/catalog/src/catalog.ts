@@ -4,10 +4,11 @@
 // status check, the global config that carries over, how it keys project
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
+import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE_CONTEXT, PI_CONTEXT, type AgentContext } from "./context.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
-import { roadModule } from "./road-modules.js";
-import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
+import { APT_INDEX, roadModule } from "./road-modules.js";
+import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
@@ -72,6 +73,8 @@ export interface AgentEntry extends EntryBase {
   stateHome: string;
   /** Where that directory is on the guest when it is not stateHome under the guest's home, absolute. */
   guestStateHome?: string;
+  /** The variable that points the agent at guestStateHome; a golden with the agent carries it in its envs. */
+  stateHomeEnv?: string;
   /** Every store that holds the project's path. */
   projectState: readonly ProjectState[];
   /** Absent while the agent's session format has no reader: its history reads as none. */
@@ -79,6 +82,8 @@ export interface AgentEntry extends EntryBase {
   /** Where the agent on this computer keeps its user-wide MCP servers and how one is named there, per its own docs;
    * absent when the catalog knows no such file for it, and wsp's server is then added by hand. */
   mcp?: McpConfig;
+  /** How the agent loads the machine context on the guest; absent, it gets no hook and no skill there. */
+  context?: AgentContext;
 }
 
 export interface ToolEntry extends EntryBase {
@@ -86,7 +91,7 @@ export interface ToolEntry extends EntryBase {
   defaultOn: boolean;
   /** On every golden from the base stage, whatever the Mac has; the floor runs these in catalog order. */
   floor: boolean;
-  /** The floor row a script road runs on top of, by id; the npm and apt roads say it themselves. */
+  /** What a script road runs on top of: a floor row by id, or the apt index; the npm and apt roads say it themselves. */
   after?: string;
   /** Commands that come along with this row and have a version of their own. */
   brings?: readonly { bin: string; version: string }[];
@@ -152,11 +157,13 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("claude"),
     stateHome: ".claude",
     guestStateHome: CLAUDE_CONFIG_DIR,
+    stateHomeEnv: "CLAUDE_CONFIG_DIR",
     name: "Claude Code",
+    context: CLAUDE_CONTEXT,
     installRoad: { road: "script", script: GOLDEN_SETUP },
     signIn: SIGN_IN_ROWS.claude,
     // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
-    mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], scope: "user scope and your home folder" },
+    mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login" },
     configPaths: [
       "~/.claude/settings.json", "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
       "~/.claude/plugins/installed_plugins.json", "~/.claude/plugins/known_marketplaces.json", "~/.claude.json",
@@ -176,6 +183,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("codex"),
     stateHome: ".codex",
     name: "Codex",
+    context: CODEX_CONTEXT,
     installRoad: npm("@openai/codex", "0.153.0"),
     node: 16,
     signIn: SIGN_IN_ROWS.codex,
@@ -195,6 +203,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("gemini"),
     stateHome: ".gemini",
     name: "Gemini CLI",
+    context: GEMINI_CONTEXT,
     installRoad: npm("@google/gemini-cli", "0.58.0"),
     node: 20,
     signIn: SIGN_IN_ROWS.gemini,
@@ -214,6 +223,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("opencode"),
     stateHome: ".local/share/opencode",
     name: "OpenCode",
+    context: OPENCODE_CONTEXT,
     installRoad: npm("opencode-ai", "1.18.27"),
     signIn: SIGN_IN_ROWS.opencode,
     // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
@@ -233,6 +243,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("pi"),
     stateHome: ".pi/agent",
     name: "Pi",
+    context: PI_CONTEXT,
     installRoad: { road: "npm", package: "@earendil-works/pi-coding-agent", version: "0.84.4", ignoreScripts: true },
     node: 22,
     signIn: SIGN_IN_ROWS.pi,
@@ -251,6 +262,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("hermes"),
     stateHome: ".hermes",
     name: "Hermes Agent",
+    context: HERMES_CONTEXT,
     installRoad: { road: "script", script: HERMES_INSTALL },
     signIn: SIGN_IN_ROWS.hermes,
     configPaths: ["~/.hermes/config.yaml", "~/.hermes/SOUL.md", "~/.hermes/memories", "~/.hermes/skills", "~/.hermes/cron", "~/.hermes/hooks"],
@@ -272,7 +284,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "jq", name: "jq", bin: "jq", installRoad: apt("jq"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 17, images: 5, road: "unmeasured" } },
   { ...tool, id: "ripgrep", name: "ripgrep", bin: "rg", installRoad: apt("ripgrep"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 10, images: 4, road: "unmeasured" } },
   { ...tool, id: "curl", name: "curl", bin: "curl", installRoad: apt("curl"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 87, images: 4, road: "unmeasured" } },
-  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: apt("docker.io", "docker-compose-v2"), floor: true, covers: ["docker-compose"], brings: [{ bin: "docker compose", version: "docker compose version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" } },
+  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: { road: "script", script: DOCKER_INSTALL }, floor: true, after: APT_INDEX, covers: ["docker-compose"], brings: [{ bin: "docker compose", version: "docker compose version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" } },
   // gh has no pinned release yet and agent-browser waits on a second data point: default-on through the tools stage.
   { ...tool, id: "gh", name: "GitHub CLI", bin: "gh", installRoad: github("cli/cli", "github.com/cli/cli/v2/cmd/gh"), signIn: SIGN_IN_ROWS.gh, defaultOn: true, source: { sessions: 100, images: 3, road: "unmeasured" } },
   { ...tool, id: "agent-browser", name: "agent-browser", bin: "agent-browser", installRoad: npm("agent-browser", "0.31.1"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 45, images: 0, road: "unmeasured", note: "sessions counted on one Mac only; on by default for this user until a second data point" } },
@@ -303,7 +315,17 @@ export const CATALOG: readonly CatalogEntry[] = [
 ];
 
 export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is AgentEntry => e.kind === "agent");
+
+const firstAgent = CATALOG_AGENTS[0];
+if (firstAgent === undefined) throw new Error("the catalog has no agent");
+/** The agent a thread runs when none is named and the composer's first pick: the catalog's first agent. */
+export const DEFAULT_AGENT: AgentEntry = firstAgent;
 export const CATALOG_TOOLS: readonly ToolEntry[] = CATALOG.filter((e): e is ToolEntry => e.kind === "tool");
+
+/** The envs a golden carries for an agent on it: the variable that points it at its state home on the guest. */
+export function guestEnv(a: AgentEntry): Record<string, string> {
+  return a.stateHomeEnv !== undefined && a.guestStateHome !== undefined ? { [a.stateHomeEnv]: a.guestStateHome } : {};
+}
 
 /** An agent entry whose MCP config the catalog knows. */
 export type McpAgent = AgentEntry & { mcp: McpConfig };
@@ -347,6 +369,11 @@ export function baseNote(e: ToolEntry, macVersion: string | undefined): string {
 /** The entry by its id, or nothing. */
 export function catalogEntry(id: string): CatalogEntry | undefined {
   return BY_ID.get(id);
+}
+
+/** An entry as the catalog names it; an id the catalog does not know reads as itself. */
+export function agentName(id: string): string {
+  return catalogEntry(id)?.name ?? id;
 }
 
 /** One row the Sign-ins screen can show, under the login id the collector files it: an entry's own sign-in (a

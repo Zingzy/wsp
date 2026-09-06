@@ -673,7 +673,7 @@ describe("serveRuntime workspaces.exec", () => {
     // The command travels base64-encoded inside the launch script, each word quoted for the machine's shell, after
     // the same exports a harness turn gets.
     const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
-    const script = Buffer.from(/printf '%s' '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8");
+    const script = Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8");
     expect(script).toContain("export CLAUDE_CONFIG_DIR='/root/.claude'\nexport PATH='/usr/bin'\n");
     expect(script).toContain("'sh' '-c' 'printf '\\''one\\ntwo\\n'\\''; exit 3'\n");
 

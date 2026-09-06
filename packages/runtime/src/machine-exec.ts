@@ -4,19 +4,21 @@
 // pause/resume while control-channel children get reaped (PoC P10/P4b). The
 // stream then polls the log, so a mid-turn nap only stalls polling: polls fail
 // while the machine is paused, recover after wake, and the turn's own output
-// picks up where it left off. The engine's execDetached runs the same launch
-// and poll contract for a command that ends on its own; this one streams and
-// can be signalled while it runs, which is what a harness turn needs. A stream
-// started with an input channel gets a file the launch seeds and every write()
-// appends to with one exec; a tail feeds it to the command's stdin through a
-// fifo, so a message reaches a running process the runtime holds no pipe to.
-// The tail's pid is recorded: closeInput() kills it so the command reads EOF,
-// and the script kills it once the command ended, so nothing outlives the turn.
+// picks up where it left off. The script goes up through the engine's
+// putFiles, so it lands under the exec body cap however long it is; the
+// engine's execDetached polls the same way for a command that ends on its
+// own, while this one streams and can be signalled while it runs, which is
+// what a harness turn needs. A stream started with an input channel gets a
+// file the launch seeds and every write() appends to through putFiles; a tail
+// feeds it to the command's stdin through a fifo, so a message reaches a
+// running process the runtime holds no pipe to. The tail's pid is recorded:
+// closeInput() kills it so the command reads EOF, and the script kills it once
+// the command ended, so nothing outlives the turn.
 
 import { randomBytes } from "node:crypto";
-import { INLINE_EXEC_MS, type ExecResult, type Machine } from "@wsp/engine";
+import { INLINE_EXEC_MS, putFiles, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
 import type { ExecStream, ExecStreamFactory } from "@wsp/adapter-claude";
-import { shellQuote } from "@wsp/protocol";
+import { EXEC_CHUNK_BYTES, shellQuote } from "@wsp/protocol";
 
 export interface MachineExecOptions {
   /** Delay between log polls. */
@@ -31,7 +33,6 @@ export interface MachineExecOptions {
   now?: () => number;
 }
 
-const CHUNK_BYTES = 262_144;
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function sleep(ms: number): Promise<void> {
@@ -49,7 +50,6 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     const id = randomBytes(6).toString("hex");
     const base = `${runDir}/${id}`;
     const sentinel = `__WSP_EOF_${id}__`;
-    const b64 = (text: string): string => Buffer.from(text, "utf8").toString("base64");
 
     const exports = Object.entries(env)
       .filter(([k]) => ENV_KEY.test(k))
@@ -61,12 +61,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       input === undefined
         ? `${command}\necho $? > ${base}.exit\n`
         : `( tail -n +1 -f ${base}.in > ${base}.fifo & echo $! > ${base}.tail )\n{ ${command}\n} < ${base}.fifo\necho $? > ${base}.exit\nkill $(cat ${base}.tail) 2>/dev/null\n`;
-    const channel = input === undefined ? "" : `printf '%s' '${b64(input.map(line => `${line}\n`).join(""))}' | base64 -d > ${base}.in; mkfifo ${base}.fifo; `;
-    // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
-    const launchCmd =
-      `mkdir -p ${runDir}; mkdir ${base}.d 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }; ` +
-      `printf '%s' '${b64(`${exports}\n${run}`)}' | base64 -d > ${base}.sh; ${channel}` +
-      `setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`;
+    const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${exports}\n${run}` }];
+    if (input !== undefined) files.push({ path: `${base}.in`, text: input.map(line => `${line}\n`).join("") });
 
     let killed = false;
     let inputClosed = false;
@@ -84,7 +80,12 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     };
 
     // Spawn eagerly, like a local child process would.
-    const launched: Promise<ExecResult> = machine.exec(launchCmd, { timeoutMs: execTimeoutMs });
+    const launched: Promise<ExecResult> = putFiles(machine, files, {
+      // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
+      before: [`mkdir ${base}.d 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
+      after: [...(input === undefined ? [] : [`mkfifo ${base}.fifo`]), `setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`],
+      timeoutMs: execTimeoutMs,
+    });
 
     const signal = (sig: "TERM" | "KILL"): void => {
       void launched
@@ -100,7 +101,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
     const pollCmd = (offset: number): string =>
       `E=$(cat ${base}.exit 2>/dev/null); ` +
-      `tail -c +${offset + 1} ${base}.log 2>/dev/null | head -c ${CHUNK_BYTES} | base64 -w0; ` +
+      `tail -c +${offset + 1} ${base}.log 2>/dev/null | head -c ${EXEC_CHUNK_BYTES} | base64 -w0; ` +
       `P=$(cat ${base}.pid 2>/dev/null); ` +
       `printf '\\n${sentinel} %s %s\\n' "$E" ` +
       `"$([ -n "$P" ] && kill -0 "$P" 2>/dev/null && echo up || echo down)"`;
@@ -188,10 +189,11 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         if (finishCode !== undefined) throw new Error("the stream has ended");
         await launched;
         // The guest knows the command ended the moment its exit file exists, up to a poll before this side does.
-        const res = await machine.exec(
-          `[ -e ${base}.exit ] && { echo WSP_GONE; exit 0; }; printf '%s' '${b64(`${line}\n`)}' | base64 -d >> ${base}.in; echo WSP_OK`,
-          { timeoutMs: execTimeoutMs },
-        );
+        const res = await putFiles(machine, [{ path: `${base}.in`, text: `${line}\n`, append: true }], {
+          before: [`[ -e ${base}.exit ] && { echo WSP_GONE; exit 0; }`],
+          after: ["echo WSP_OK"],
+          timeoutMs: execTimeoutMs,
+        });
         if (res.stdout.includes("WSP_GONE")) return "gone";
         if (res.exitCode !== 0 || !res.stdout.includes("WSP_OK")) throw new Error(`remote write failed on ${machine.id}: exit ${res.exitCode}: ${res.stderr}`);
         // The person just acted, so the turn gets its deadline over.

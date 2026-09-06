@@ -24,6 +24,7 @@ import {
   withoutAgentTools,
   withCatalogAgents,
   recipeWithAnswers,
+  withTicksOf,
 } from "../src/init-recipe.js";
 import { FIXTURE, byId } from "./init-fixture.js";
 
@@ -92,6 +93,9 @@ describe("the command a login needs", () => {
     // gh's row is ticked in the fixture's defaults; an agent's login follows its agent, not a tools row.
     expect(loginTool(byId("logins/gh"), manifest, new Set(["tools/brew/gh"]))).toEqual({ bin: "gh", row: byId("tools/brew/gh"), coming: true });
     expect(loginTool(byId("logins/claude"), manifest, none)).toBeUndefined();
+    // Any catalog tool's login names its command; a keys row beside an agent's login follows the agent.
+    expect(loginTool(login("fly", "Fly login"), { entries: [] }, none)?.why).toBe("fly is not coming: no row lists it; tick flyctl under What they need to bring it");
+    expect(loginTool(login("hermes-keys", "Hermes keys"), { entries: [] }, none)).toBeUndefined();
     expect(loginTool(byId("tools/brew/gh"), manifest, none)).toBeUndefined();
   });
 
@@ -243,6 +247,13 @@ describe("goldenRecipeFor", () => {
     expect(noKey.envs).toHaveProperty("CLAUDE_CONFIG_DIR");
   });
 
+  it("a ticked agent whose entry names no state home variable and no key variable adds nothing, even with a key loaded", () => {
+    const codex = goldenRecipeFor(bring("agents/codex", "shell/zshrc"), { anthropic: ANTHROPIC });
+    expect(codex.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
+    expect(codex.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(codex.envs).toEqual(goldenRecipeFor(bring("shell/zshrc"), {}).envs);
+  });
+
   it("threads the daemon deploy hook through", () => {
     const hook = async () => "node v22";
     expect(goldenRecipeFor([], {}, { deployDaemon: hook }).deployDaemon).toBe(hook);
@@ -388,5 +399,30 @@ describe("the small recipe", () => {
     expect(Recipe.parse(out)).toEqual(out);
     // A saved answer the screens did not repeat is gone rather than stale.
     expect(recipeWithAnswers(RECIPE, new Map()).rows.find(r => r.id === "kubectl")).not.toHaveProperty("signIn");
+  });
+
+  it("withTicksOf writes a saved recipe's ticks and answers onto this computer's rows: a row the saved one lacks is off and unanswered, a saved row this computer has no row for comes after them as saved", () => {
+    const here: Recipe = {
+      ...RECIPE,
+      at: "2026-09-06T09:00:00.000Z",
+      histories: [],
+      rows: [
+        { id: "claude", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.claude/settings.json"], bin: true }, signIn: "machine" },
+        { id: "codex", kind: "agent", on: false, source: { kind: "popular", sessions: 5, images: 1 }, size: 2 },
+        { id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } },
+        { id: "gemini", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.gemini/settings.json"], bin: true } },
+      ],
+    };
+    const out = withTicksOf(here, RECIPE);
+    expect(out.rows).toEqual([
+      { id: "claude", kind: "agent", on: false, source: { kind: "installed", paths: ["~/.claude/settings.json"], bin: true } },
+      { id: "codex", kind: "agent", on: true, source: { kind: "popular", sessions: 5, images: 1 }, size: 2 },
+      { id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true }, signIn: "copy" },
+      { id: "gemini", kind: "agent", on: false, source: { kind: "installed", paths: ["~/.gemini/settings.json"], bin: true } },
+      ...RECIPE.rows.filter(r => !["claude", "codex", "gh"].includes(r.id)),
+    ]);
+    expect(out.at).toBe(here.at);
+    expect(out.histories).toEqual([]);
+    expect(Recipe.parse(out)).toEqual(out);
   });
 });

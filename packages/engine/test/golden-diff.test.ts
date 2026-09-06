@@ -155,7 +155,7 @@ describe("recipe diff", () => {
 describe("removals", () => {
   const removed = (entries: RecipeEntry[], files: DigestFile[] = []) => {
     const from = snap(entries, files);
-    return removalsFor(diffRecipes(from, snap([])), from, { claude: { name: "Claude Code", install: "curl -fsSL https://claude.ai/install.sh | bash", smoke: "claude --version" } });
+    return removalsFor(diffRecipes(from, snap([])), from);
   };
 
   it("a removed file is deleted at its guest path, quoted; a dest that could leave home is refused", () => {

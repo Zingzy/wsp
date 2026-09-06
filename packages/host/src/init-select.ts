@@ -27,6 +27,8 @@ export interface SelectItem {
   detail: string[];
   /** on: always ticked, shown as a bullet the cursor skips. off: never ticked. */
   lock?: "on" | "off";
+  /** Out of the all row's reach: a tick here is its own act, so all leaves the row as it is and counts without it. */
+  apart?: true;
 }
 
 export type Entry =
@@ -93,7 +95,7 @@ export function buildEntries(items: readonly SelectItem[], query: string, folded
     for (const item of bullets) out.push({ type: "bullet", item });
     if (bullets.length < locked.length) out.push({ type: "more", count: locked.length - bullets.length });
   }
-  if (query.trim() === "" && rest.some(tickable)) out.push({ type: "all" });
+  if (query.trim() === "" && rest.some(inAll)) out.push({ type: "all" });
   let i = 0;
   while (i < rest.length) {
     const item = rest[i]!;
@@ -121,6 +123,8 @@ export function settle(entries: readonly Entry[], at: number, dir: 1 | -1 = 1): 
 }
 
 const tickable = (i: SelectItem): boolean => i.lock === undefined;
+/** A row the all row flips: tickable and not kept apart. */
+const inAll = (i: SelectItem): boolean => tickable(i) && i.apart !== true;
 /** A row that comes along or can: always included or open to a tick. Only a row locked out is out, so a screen's one
  * denominator is what the found table called able to come. */
 const unlocked = (i: SelectItem): boolean => i.lock !== "off";
@@ -137,7 +141,7 @@ function flipAll(ticks: Set<string>, items: readonly SelectItem[]): void {
 export function toggleEntry(ticks: Set<string>, entry: Entry, items: readonly SelectItem[]): void {
   switch (entry.type) {
     case "all":
-      flipAll(ticks, items);
+      flipAll(ticks, items.filter(inAll));
       return;
     case "group":
       flipAll(ticks, entry.items);
@@ -331,9 +335,10 @@ class RungPrompt extends Prompt<Set<string>> {
     const label = (i: SelectItem): string => cuts.get(i) ?? i.label;
     switch (entry.type) {
       case "all": {
-        // The box says what space does next (the rows it flips are all on); the count runs over every row that can come.
-        const flips = this.o.items.filter(tickable);
-        const free = this.o.items.filter(unlocked);
+        // The box says what space does next (the rows it flips are all on); the count runs over every row that can come
+        // to the machine, so a row kept apart is in neither.
+        const flips = this.o.items.filter(inAll);
+        const free = this.o.items.filter(i => unlocked(i) && i.apart !== true);
         return this.line(box(flips.length > 0 && flips.every(i => ticks.has(i.id))), "all", fmtCount(free.filter(i => ticks.has(i.id)).length, free.length), 0, cols, current, false);
       }
       case "locked":
@@ -361,13 +366,19 @@ class RungPrompt extends Prompt<Set<string>> {
       at === undefined
         ? []
         : at.type === "all"
-          ? ["every row on this screen that can be ticked"]
+          ? this.allDetail()
           : at.type === "group"
             ? [`${at.items.length} in ${at.group}`, "space ticks or clears the group"]
             : at.type === "item"
               ? at.item.detail
               : [];
     return Array.from({ length: rows }, (_, i) => lines[i] ?? "");
+  }
+
+  /** What all does, then the groups it leaves alone when the screen has rows kept apart. */
+  private allDetail(): string[] {
+    const apart = [...new Set(this.o.items.filter(i => i.apart === true).map(i => i.group ?? i.label))];
+    return ["every row on this screen that can be ticked", ...(apart.length === 0 ? [] : [`${apart.join(", ")} is left as it is; tick those rows one by one`])];
   }
 
   /** The ticked labels in list order: the rows that always come along first, then the rest. */

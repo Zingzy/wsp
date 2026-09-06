@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The roads a catalog entry or a recipe's tools row can take onto a Linux
 // machine (the modules that walk them are in road-modules.ts), and the pinned
-// installers the script road carries: uv and Node by their checksummed
-// releases, Hermes by a git checkout at a commit, Claude Code by its vendor's
-// installer. Every pin here is checked on the machine before anything runs.
+// installers the script road carries: uv, Node and Docker's compose plugin by
+// their checksummed releases, Hermes by a git checkout at a commit, Claude Code
+// by its vendor's installer. Every pin here is checked on the machine before
+// anything runs.
 import type { LinuxCask } from "./linux-casks.js";
 
 export const MIB = 1024 * 1024;
@@ -58,6 +59,8 @@ export const GOLDEN_SMOKE = "claude --version";
 
 /** The guest's home directory: every machine runs as root. */
 export const GUEST_HOME = "/root";
+/** The one line every apt run exports, so no prompt can wait on a machine nobody types at. */
+export const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
 /** Claude Code's config dir on the guest, always CLAUDE_CONFIG_DIR and never HOME. */
 export const CLAUDE_CONFIG_DIR = `${GUEST_HOME}/.claude-cfg`;
 /** The file under Claude Code's config dir that the apiKeyHelper's key is placed in and the copied settings read. */
@@ -144,6 +147,36 @@ export function nodeInstallScript(floor: number, release: NodeRelease): string {
     `echo "NODE_INSTALLED v${v}"`,
   ].join("\n");
 }
+
+/** Docker Compose by its release binary, checksummed against the sums Docker
+ * publishes next to it (https://github.com/docker/compose/releases). */
+export const COMPOSE = {
+  version: "v5.5.1",
+  sha256: {
+    x86_64: "db1889184726840f75c4f9c001048430d4f25b3be3cb084d3ddd762bc0aed576",
+    aarch64: "732e3a84c1a0f67256ce80bc2598a24546b10ca05f9faa97efceb1171ece2ef7",
+  },
+} as const;
+
+/** Where the docker cli looks for its plugins system-wide, so `docker compose` finds the binary. */
+export const COMPOSE_PLUGIN = "/usr/libexec/docker/cli-plugins/docker-compose";
+
+/** The engine from the distro, compose from its release: Debian bookworm, the machines' base, packages
+ * docker.io but no compose v2, so the plugin is fetched pinned and put where the cli reads it. */
+export const DOCKER_INSTALL = [
+  APT_ENV,
+  "apt-get install -y -qq docker.io",
+  'arch="$(uname -m)"',
+  'case "$arch" in',
+  `  x86_64) sha=${COMPOSE.sha256.x86_64} ;;`,
+  `  aarch64) sha=${COMPOSE.sha256.aarch64} ;;`,
+  '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+  "esac",
+  `curl -fSsL -o /tmp/docker-compose "https://github.com/docker/compose/releases/download/${COMPOSE.version}/docker-compose-linux-$arch"`,
+  'echo "$sha  /tmp/docker-compose" | sha256sum -c - >/dev/null',
+  `install -D -m 0755 /tmp/docker-compose ${COMPOSE_PLUGIN}`,
+  "rm -f /tmp/docker-compose",
+].join("\n");
 
 /** Python 3.12 as uv's managed interpreter: uv pins the python-build-standalone release and checks its sha256,
  * so the pin is uv's own; python3 on PATH is a link to that interpreter, ahead of whatever the image ships. */

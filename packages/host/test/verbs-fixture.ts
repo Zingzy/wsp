@@ -131,5 +131,5 @@ export function exportGuest(backend: StubBackend): { sources: string[] } {
 /** The script the launch carried to the machine, decoded. */
 export function launchedScript(backend: StubBackend): string {
   const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
-  return Buffer.from(/printf '%s' '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8");
+  return Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8");
 }

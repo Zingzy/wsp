@@ -48,6 +48,8 @@ export type SignIn =
       sources: readonly LoginSource[];
       /** The device-code, paste-code or no-browser variant, offered on a retry. */
       fallback?: string;
+      /** The variable the tool reads an API key from; a key loaded on this computer is set under it on the machine. */
+      keyEnv?: string;
       /** Absent when the tool has no status command: the login is then "not verified". */
       status?: StatusCheck;
       /** What the tool itself waits for the person, measured or read from its source; absent when it never gives up. */
@@ -214,6 +216,7 @@ export const SIGN_IN_ROWS = {
   claude: {
     kind: "oauth",
     sources: ["keychain", "rc-key", "file", "helper"],
+    keyEnv: "ANTHROPIC_API_KEY",
     login: "claude auth login",
     status: { command: "claude auth status", typed: CLAUDE_STATUS, signedIn: claudeSignedIn, detail: claudeSource, why: claudeWhy },
   },

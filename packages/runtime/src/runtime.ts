@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import type { AdapterEvent, ExecStream, TurnResult } from "@wsp/adapter-claude";
+import { DEFAULT_AGENT } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -1810,7 +1811,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. */
   const adapterFor = (entry: LiveWorkspace, named?: string): { harness: string; adapter: HarnessAdapter } => {
-    const harness = named ?? "claude";
+    const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
     if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
     return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id }) };

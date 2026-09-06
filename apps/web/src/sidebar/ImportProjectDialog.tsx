@@ -8,34 +8,19 @@
 // destination and the events are matched on that. A consent is for the plan
 // the person read: editing the path drops the plan and its ticks until the
 // folder is read again.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtBytes, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
-import { durationLabel } from "../components/machine/format.js";
 import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
-import { Input } from "../components/ui/input.js";
-import { Label } from "../components/ui/label.js";
-import { cn, errorText } from "../lib/utils.js";
-import { RequestError, type ProtocolEvent } from "../protocol/client.js";
+import { errorText } from "../lib/utils.js";
+import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
-import {
-  consentRequest,
-  defaultConsent,
-  isImportOf,
-  landedLine,
-  secretOffer,
-  stepRows,
-  type StepRow,
-} from "./importProject.js";
+import { consentRequest, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "./importProject.js";
+import { count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
+import { FactRow, FolderField, StatusLine, StepRows } from "./ProjectTripRows.js";
 
 type Phase = "idle" | "importing" | "done";
-
-interface Refusal {
-  readonly message: string;
-  /** The destination already exists on the machine; the one follow-up is to replace it. */
-  readonly exists: boolean;
-}
 
 /** What the import was asked with, so its events are recognised whatever the path spelling. */
 interface Sent {
@@ -120,7 +105,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
       setResult(landed);
       setPhase("done");
     } catch (e) {
-      setRefusal({ message: errorText(e), exists: e instanceof RequestError && e.kind === "exists" });
+      setRefusal(refusalOf(e));
       setPhase("idle");
     }
   };
@@ -156,42 +141,21 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
             <DialogDescription>Into {workspace.name}. The folder lands on the machine at the path it has here; caches stay behind.</DialogDescription>
           </DialogHeader>
           <DialogPanel className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="import-source" className="text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">
-                Folder on this Mac
-              </Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="import-source"
-                  nativeInput
-                  autoFocus={initialSource === undefined}
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="font-mono text-xs"
-                  placeholder="/Users/you/code/project"
-                  value={source}
-                  disabled={busy}
-                  onChange={e => edit(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      void read(source);
-                    }
-                  }}
-                />
-                {bridge === undefined ? null : (
-                  <Button type="button" variant="outline" size="sm" className="w-28 shrink-0" disabled={busy} onClick={() => void pick()}>
-                    Choose folder
-                  </Button>
-                )}
-              </div>
-            </div>
+            <FolderField
+              id="import-source"
+              label="Folder on this Mac"
+              placeholder="/Users/you/code/project"
+              value={source}
+              disabled={busy}
+              autoFocus={initialSource === undefined}
+              onChange={edit}
+              onEnter={() => void read(source)}
+              {...(bridge === undefined ? {} : { onPick: () => void pick() })}
+            />
             <Summary plan={plan} />
             {plan !== null && plan.secrets.length > 0 ? <Secrets secrets={plan.secrets} ticked={ticked} disabled={phase !== "idle"} onToggle={toggle} /> : null}
-            <Steps rows={stepRows(events)} />
-            <p role="status" className={cn("h-4 truncate text-[11px] leading-4", refusal !== null ? "text-destructive-foreground" : "text-muted-foreground")} title={status}>
-              {status}
-            </p>
+            <StepRows label="Import steps" transfer="Upload" rows={importStepRows(events)} />
+            <StatusLine tone={refusalTone(refusal)}>{status}</StatusLine>
           </DialogPanel>
           <DialogFooter>
             {phase === "done" ? null : (
@@ -213,39 +177,25 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
   );
 }
 
-/** A fact with its value flush right in mono; the value is cut with an ellipsis and rides its title whole. */
-function Row({ label, k, title, children }: { label: string; k: string; title?: string; children: ReactNode }) {
-  return (
-    <div className="flex h-7 min-w-0 items-center justify-between gap-3 text-xs">
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate text-right font-mono tabular-nums text-foreground" title={title ?? (typeof children === "string" ? children : undefined)} data-k={k}>
-        {children}
-      </span>
-    </div>
-  );
-}
-
-const count = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
-
 function Summary({ plan }: { plan: ProjectPlan | null }) {
   const skippedTitle = plan?.skipped.map(s => `${s.path}: ${s.note}`).join("\n");
   return (
     <div data-k="summary" className="divide-y divide-border/40 rounded-md border border-border/60 px-2.5">
-      <Row label="Repository" k="repository">
+      <FactRow label="Repository" k="repository">
         {plan === null ? "" : plan.repo ? "git, .git travels whole" : "none"}
-      </Row>
-      <Row label="Files" k="files">
+      </FactRow>
+      <FactRow label="Files" k="files">
         {plan === null ? "" : `${count(plan.files, "file")} · ${fmtBytes(plan.bytes)}`}
-      </Row>
-      <Row label="Caches left behind" k="caches">
+      </FactRow>
+      <FactRow label="Caches left behind" k="caches">
         {plan === null ? "" : plan.excluded.length === 0 ? "none" : plan.excluded.join(", ")}
-      </Row>
-      <Row label="Not carried" k="skipped" {...(skippedTitle !== undefined && skippedTitle !== "" ? { title: skippedTitle } : {})}>
+      </FactRow>
+      <FactRow label="Not carried" k="skipped" {...(skippedTitle !== undefined && skippedTitle !== "" ? { title: skippedTitle } : {})}>
         {plan === null ? "" : plan.skipped.length === 0 ? "none" : count(plan.skipped.length, "path")}
-      </Row>
-      <Row label="Lands at" k="dest">
+      </FactRow>
+      <FactRow label="Lands at" k="dest">
         {plan === null ? "" : plan.source}
-      </Row>
+      </FactRow>
     </div>
   );
 }
@@ -274,28 +224,5 @@ function Secrets({ secrets, ticked, disabled, onToggle }: { secrets: readonly Pr
       </ul>
       <p className="text-[11px] text-muted-foreground">Ticked files travel; a ticked rewrite lands without its credentials; the rest is cut and named.</p>
     </section>
-  );
-}
-
-function Steps({ rows }: { rows: readonly StepRow[] }) {
-  return (
-    <ol aria-label="Import steps" className="divide-y divide-border/40 rounded-md border border-border/60 px-2.5">
-      {rows.map(r => (
-        <li key={r.stage} data-step={r.stage} className="flex h-7 items-center gap-3 text-xs">
-          <span data-k="step-label" className={cn("w-[4.5rem] shrink-0 font-mono text-[11px] uppercase tracking-wider", r.message === null ? "text-muted-foreground" : "text-foreground")}>{r.stage}</span>
-          <span className="min-w-0 flex-1 truncate text-foreground" title={r.message ?? undefined}>
-            {r.message ?? ""}
-          </span>
-          <span className="w-16 shrink-0">
-            {r.fraction !== null ? (
-              <span role="progressbar" aria-label="Upload" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(r.fraction * 100)} className="block h-1 w-full overflow-hidden rounded-full bg-border">
-                <span className="block h-full bg-foreground/70" style={{ width: `${Math.round(r.fraction * 100)}%` }} />
-              </span>
-            ) : null}
-          </span>
-          <span className="w-10 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">{r.elapsedMs === null ? "" : durationLabel(r.elapsedMs)}</span>
-        </li>
-      ))}
-    </ol>
   );
 }

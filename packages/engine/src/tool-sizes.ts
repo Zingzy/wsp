@@ -171,11 +171,7 @@ export function toolSize(e: RecipeEntry, brew: BrewTable): ToolSize | undefined 
   return { bytes, road: LINUX_FORMULA_MIB[formula] !== undefined ? "measured" : "mac", deps: members.size - 1 };
 }
 
-/** The host owns Claude Code's installer; every other agent installs from the engine's table. */
-const installable = (e: RecipeEntry): boolean => {
-  const name = e.id.slice(e.id.indexOf("/") + 1);
-  return name === "claude" || name in AGENT_INSTALLERS;
-};
+const installable = (e: RecipeEntry): boolean => e.id.slice(e.id.indexOf("/") + 1) in AGENT_INSTALLERS;
 
 /** An agent's measured install size, by the row's name. */
 export function agentSize(e: RecipeEntry): number | undefined {

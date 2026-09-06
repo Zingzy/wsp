@@ -5,7 +5,7 @@
 // and host are the real ones over fakes; only the terminal is faked.
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -399,7 +399,9 @@ describe("wsp init, interactive", () => {
   });
 
   it("nothing found on this machine still offers the six agents, unticked, and reaches the confirm", async () => {
-    const f = fake({ collect: async () => ({ entries: [] }), recipe: async () => ({ ...RECIPE, rows: RECIPE.rows.map(r => ({ ...r, on: r.kind === "tool" && r.source.kind === "popular" })) }) });
+    // A Mac with none of the agents: the recipe found nothing installed either, so no row offers the wsp tools.
+    const none = { kind: "popular", sessions: 0, images: 0 } as const;
+    const f = fake({ collect: async () => ({ entries: [] }), recipe: async () => ({ ...RECIPE, rows: RECIPE.rows.map(r => ({ ...r, on: r.kind === "tool" && r.source.kind === "popular", ...(r.source.kind === "installed" ? { source: none } : {}) })) }) });
     const run = runInit(f.opts, f.io);
     await f.until("Agents");
     expect(f.text()).toContain("Nothing found to bring");
@@ -591,7 +593,75 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("tools/catalog/wrangler")).toMatchObject({ label: "Cloudflare Wrangler", bring: true });
   });
 
-  it("under --yes the recipe decides the ticks, the keys copy, the logins wait for the machine, and both recipe files are written", async () => {
+  it("the third screen offers the wsp tools to each agent on this Mac whose config the catalog knows, unticked; ticked, the server is in that config here when the screens end", async () => {
+    const f = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED });
+    const run = runInit(f.opts, f.io);
+    for (const screen of ["Agents", "What they need"]) {
+      await f.until(screen);
+      await f.press(KEY.enter);
+    }
+    await f.until("Sign-ins and keys");
+    const three = f.text().slice(f.text().lastIndexOf("◆  Sign-ins and keys"));
+    // Claude Code is the one agent here whose config the catalog can place a server in: Hermes is here without one, Codex is not here.
+    expect(three).toMatch(/○ github\s+Claude Code\n┃\s+▾ On this Mac\s+0 of 1\n┃\s+○ wsp tools for Claude Code\s+~\/\.claude\.json\n/);
+    expect(three).not.toMatch(/wsp tools for (Codex|Hermes Agent|Pi|Gemini CLI|OpenCode)/);
+    // The all row brings everything to the machine and leaves the write on this Mac alone: it stays unticked, out of the count.
+    expect(three).toMatch(/○ all\s+5 of 6\n/);
+    await f.press(KEY.space);
+    await f.until(/● all\s+6 of 6\n/);
+    expect(f.text().slice(f.text().lastIndexOf("◆  Sign-ins and keys"))).toMatch(/▾ On this Mac\s+0 of 1\n┃\s+○ wsp tools for Claude Code/);
+    await f.press(KEY.space);
+    await f.until(/○ all\s+4 of 6\n/);
+    // Down past the keys rows and the group heading onto the row: the detail says what the tick does.
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.down);
+    await f.until("ticked, it is written when the screens end; unticked, nothing here changes");
+    expect(f.text()).toContain("wsp joins its MCP servers, so it can drive workspaces, threads and commands");
+    await f.press(KEY.space);
+    await f.until(/● wsp tools for Claude Code/);
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    // The helper's own line, after the recipe is saved and before anything boots.
+    const out = f.text();
+    expect(out).toContain("Claude Code now has the wsp tools: ~/.claude.json");
+    expect(out.indexOf("Recipe saved to")).toBeLessThan(out.indexOf("Claude Code now has the wsp tools"));
+    const written = JSON.parse(readFileSync(join(f.opts.home, ".claude.json"), "utf8")) as { mcpServers: { wsp: { command: string; args: string[] } } };
+    expect(written.mcpServers.wsp.command).toBe(process.execPath);
+    expect(written.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", f.opts.statePath]);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("unticked, the offer writes nothing on this Mac; a config that is not its format is refused in one line, left as it was, and the run goes on", async () => {
+    const f = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED });
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f);
+    await f.until(BOOT);
+    expect(f.text()).not.toContain("now has the wsp tools");
+    expect(existsSync(join(f.opts.home, ".claude.json"))).toBe(false);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+
+    const broken = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED });
+    writeFileSync(join(broken.opts.home, ".claude.json"), "[]\n");
+    const second = runInit(broken.opts, broken.io);
+    for (const screen of ["Agents", "What they need"]) {
+      await broken.until(screen);
+      await broken.press(KEY.enter);
+    }
+    await broken.until("Sign-ins and keys");
+    await broken.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.down);
+    await broken.until("ticked, it is written when the screens end");
+    await broken.press(KEY.space);
+    await broken.until(/● wsp tools for Claude Code/);
+    await broken.press(KEY.enter);
+    await broken.until(BOOT);
+    expect(broken.text()).toMatch(/Claude Code did not get the wsp tools: ~\/\.claude\.json: [^\n]+\. Fix the file and run wsp mcp install --agent claude\./);
+    expect(readFileSync(join(broken.opts.home, ".claude.json"), "utf8")).toBe("[]\n");
+    await broken.press("n");
+    expect((await second).code).toBe(1);
+  });
+
+  it("under --yes the recipe decides the ticks, the keys copy, the logins wait for the machine, and both recipe files are written; no agent's config here is touched", async () => {
     const f = fake({ yes: true, collect: async () => LAPTOP, recipe: async () => MEASURED });
     for (const rel of [".hermes/.env", ".hermes/auth.json", ".hermes/config.yaml", ".kube/config"]) {
       mkdirSync(dirname(join(f.opts.home, rel)), { recursive: true });
@@ -600,6 +670,8 @@ describe("wsp init, the summary-first screens", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
     expect(out).not.toMatch(/Agents  1\/3|What they need|Sign-ins and keys/);
+    expect(out).not.toContain("wsp tools");
+    expect(existsSync(join(f.opts.home, ".claude.json"))).toBe(false);
     expect(out).not.toContain("not in this build");
     expect(out.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, 3 tools plus Homebrew's toolchain, 1 MCP server/);
     expect(out).toMatch(/Hermes Agent API keys\s+copy\n/);
@@ -2793,6 +2865,40 @@ describe("wsp init --recipe", () => {
     const tools = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).tools as { id: string; outcome: string; note?: string }[];
     expect(tools.find(t => t.id === "tools/catalog/agent-browser")).toMatchObject({ outcome: "installed", note: "by an unmeasured road" });
     expect(f.text()).toMatch(/Installing tools\s+\d+ installed \(agent-browser by an un/);
+  });
+
+  it("the wsp tools rows follow the agents on this Mac, not the recipe's recorded source; a ticked row writes here, and a file with comments says they are gone", async () => {
+    const f = fake();
+    // The file says Codex is installed where it was written; this Mac has Claude Code and Gemini CLI.
+    f.opts.recipeFile = recipeFile(f);
+    f.opts.recipe = async () => ({ ...RECIPE, rows: [...RECIPE.rows, { id: "gemini", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.gemini/settings.json"], bin: true } }] });
+    mkdirSync(join(f.opts.home, ".gemini"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".gemini", "settings.json"), '{\n  // the theme\n  "theme": "dark"\n}\n');
+    const run = runInit(f.opts, f.io);
+    await f.until("Sign-ins and keys");
+    const screen = f.text().slice(f.text().lastIndexOf("◆  Sign-ins and keys"));
+    expect(screen).toMatch(/▾ On this Mac\s+0 of 2\n┃\s+○ wsp tools for Claude Code\s+~\/\.claude\.json\n┃\s+○ wsp tools for Gemini CLI\s+~\/\.gemini\/settings\.json\n/);
+    expect(screen).not.toContain("wsp tools for Codex");
+    await f.press(..."gemini");
+    await f.until(/search {2}gemini/);
+    await f.press(KEY.down, KEY.space);
+    await f.until(/● wsp tools for Gemini CLI/);
+    await f.press(KEY.enter);
+    await f.until(BOOT);
+    const out = f.text();
+    expect(out).toMatch(/Gemini CLI now has the wsp tools: ~\/\.gemini\/settings\.json\n│\s+The file held comments; the rewrite is plain JSON, so they are gone\.\n/);
+    expect(out).not.toContain("Claude Code now has the wsp tools");
+    expect(existsSync(join(f.opts.home, ".claude.json"))).toBe(false);
+    const settings = JSON.parse(readFileSync(join(f.opts.home, ".gemini", "settings.json"), "utf8")) as { theme: string; mcpServers: { wsp: { args: string[] } } };
+    expect(settings.theme).toBe("dark");
+    expect(settings.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", f.opts.statePath]);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+    // The saved recipe is this Mac's rows with the file's ticks on them: what is here as each row's source, a row the file lacked off.
+    const saved = Recipe.parse(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "recipe.json"), "utf8")));
+    expect(saved.rows.find(r => r.id === "codex")).toMatchObject({ on: true, source: { kind: "popular" } });
+    expect(saved.rows.find(r => r.id === "claude")).toMatchObject({ on: false, source: { kind: "installed" } });
+    expect(saved.rows.find(r => r.id === "gemini")).toMatchObject({ on: false, source: { kind: "installed" } });
   });
 
   it("a recipe that does not parse ends the run before anything is read or booted", async () => {

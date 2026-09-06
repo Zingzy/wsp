@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { detectAgents } from "../src/index.js";
+import { CATALOG_AGENTS } from "@wsp/catalog";
+import { AGENTS, detectAgents } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 describe("agents", () => {
@@ -64,6 +65,10 @@ describe("agents", () => {
   ])("%s on PATH with no config is still an installed agent", async (bin, label) => {
     const rows = await detectAgents(fakeHost({ which: [bin] }));
     expect(rows).toEqual([{ rung: "agents", id: `agents/${bin}`, label, paths: [], bytes: 0, default: "bring" }]);
+  });
+
+  it("lists the catalog's agents in its order, then Aider, which the catalog does not ship", () => {
+    expect(AGENTS.map(a => a.id)).toEqual([...CATALOG_AGENTS.map(a => a.id), "aider"]);
   });
 
   it("agents the laptop does not have are not listed", async () => {

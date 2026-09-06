@@ -275,7 +275,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "status": undefined,
   },
   {
-    "argument": "docker.io docker-compose-v2",
+    "argument": "12 lines",
     "configPaths": 0,
     "covers": [
       "docker-compose",
@@ -284,7 +284,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "floor": true,
     "id": "docker",
     "kind": "tool",
-    "road": "apt",
+    "road": "script",
     "signIn": "none",
     "size": undefined,
     "source": {

@@ -105,7 +105,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const queue = useComposerQueue(threadKey);
   const held = useComposerQueueHeld(threadKey);
   const cwd = useThreadFolder(workspaceId);
-  const { startOptions, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
+  const { harness: harnessId, startOptions, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const enqueue = useComposerDraftStore(s => s.enqueue);
   const editQueued = useComposerDraftStore(s => s.editQueued);
@@ -164,7 +164,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
   const menuOpen = trigger !== null && trigger.rangeStart === 0 && dismissedSearchKey !== searchKey && unavailable === null;
   const { harness } = thread.view;
-  const catalog = useMemo(() => catalogFromHarness({ harness }), [harness]);
+  const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness }), [harnessId, harness]);
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!menuOpen || trigger === null) return [];
     const all = catalog.slashCommands.map(command => ({

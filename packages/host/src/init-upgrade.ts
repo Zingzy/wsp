@@ -9,7 +9,6 @@ import { describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, removalsFor, rows
 import type { GoldenLogin, RecipeDigest } from "@wsp/protocol";
 import { GRACE_MS, goldenHead, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
 import { cancel, isCancel, log, note, outro, select } from "@clack/prompts";
-import { CLAUDE_INSTALLER } from "./init-import.js";
 import { rebuildEstimate, type BuildTimes } from "./init-times.js";
 import type { StageWords } from "./init.js";
 
@@ -94,7 +93,7 @@ export function deltaFor(diff: RecipeDiff, from: RecipeDigest, full: GoldenImpor
   const part = importOf(bring.filter(e => rows.has(e.id)));
   return {
     import: { ...part, recipeHash: full.recipeHash, ...(full.recipe !== undefined ? { recipe: full.recipe } : {}) },
-    removals: removalsFor(diff, from, { claude: CLAUDE_INSTALLER }),
+    removals: removalsFor(diff, from),
   };
 }
 

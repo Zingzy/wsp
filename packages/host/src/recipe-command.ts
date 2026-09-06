@@ -4,16 +4,15 @@
 // the histories are read here and nothing of them leaves.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { catalogEntry } from "@wsp/catalog";
+import { agentName } from "@wsp/catalog";
 import { type Host, computeRecipe } from "@wsp/collect";
 import type { Recipe, RecipeHistory, RecipeRow, RecipeSource } from "@wsp/protocol";
 
-const nameOf = (id: string): string => catalogEntry(id)?.name ?? id;
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** One line per agent: what its history here said. */
 export function historyLine(h: RecipeHistory): string {
-  const name = nameOf(h.agent);
+  const name = agentName(h.agent);
   switch (h.state) {
     case "read":
       return `${name}: ${plural(h.sessions, "session")}, ${plural(h.calls, "tool call")}`;
@@ -34,14 +33,14 @@ export function historyLine(h: RecipeHistory): string {
 export function toolLines(rows: readonly RecipeRow[]): string[] {
   const tools = rows.filter(r => r.kind === "tool");
   const on = tools.filter(r => r.on);
-  const by = (kind: RecipeSource["kind"]): string => on.filter(r => r.source.kind === kind).map(r => nameOf(r.id)).join(", ") || "none";
+  const by = (kind: RecipeSource["kind"]): string => on.filter(r => r.source.kind === kind).map(r => agentName(r.id)).join(", ") || "none";
   return [`Tools on: ${on.length} of ${tools.length}`, `  installed here: ${by("installed")}`, `  used by your agents: ${by("used")}`, `  popular in the catalog: ${by("popular")}`];
 }
 
 export async function writeRecipe(host: Host, out: string, log: (line: string) => void, now?: () => Date): Promise<Recipe> {
   log("Reading this computer against the catalog and your agents' session histories. Nothing leaves this computer.");
   const recipe = await computeRecipe(host, { ...(now !== undefined ? { now } : {}), onHistory: h => log(historyLine(h)) });
-  const agents = recipe.rows.filter(r => r.kind === "agent" && r.on).map(r => nameOf(r.id));
+  const agents = recipe.rows.filter(r => r.kind === "agent" && r.on).map(r => agentName(r.id));
   log(`Agents here: ${agents.join(", ") || "none"}`);
   toolLines(recipe.rows).forEach(log);
   mkdirSync(dirname(out), { recursive: true });

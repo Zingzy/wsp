@@ -3,7 +3,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ExecResult, Machine } from "@wsp/engine";
+import { EXEC_ENV, INLINE_EXEC_MS, type ExecResult, type Machine } from "@wsp/engine";
+import { EXEC_BODY_MAX, shellQuote } from "@wsp/protocol";
 import { machineExecStream } from "../src/machine-exec.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
@@ -21,18 +22,33 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
   let log = Buffer.alloc(0);
   let exitFile = "";
   let alive = true;
-  let script = "";
   let launch = "";
-  let input = "";
   let step = 0;
   const kills: string[] = [];
   const writes: string[] = [];
-  const decoded = (cmd: string): string[] => [...cmd.matchAll(/printf '%s' '([A-Za-z0-9+/=]*)' \| base64 -d/g)].map(m => Buffer.from(m[1]!, "base64").toString("utf8"));
+  const calls: string[] = [];
+  const pieces = new Map<string, string>();
+  const disk = new Map<string, string>();
+  const at = (suffix: string): string => [...disk].find(([path]) => path.endsWith(suffix))?.[1] ?? "";
+  /** Lands every file the exec writes, inline or joined from pieces, replaced or appended. */
+  const land = (cmd: string): void => {
+    for (const m of cmd.matchAll(/(?:printf %s '([A-Za-z0-9+/=]*)'|cat '([^']*)'\.\{0\.\.(\d+)\}) \| base64 -d (>>?) '([^']*)'/g)) {
+      const b64 = m[1] ?? Array.from({ length: Number(m[3]) + 1 }, (_, i) => pieces.get(`${m[2]}.${i}`) ?? "").join("");
+      disk.set(m[5]!, (m[4] === ">>" ? at(m[5]!) : "") + Buffer.from(b64, "base64").toString("utf8"));
+    }
+  };
 
   backend.execImpl = async (_m, cmd): Promise<ExecResult> => {
+    calls.push(cmd);
+    if (cmd.endsWith("echo WSP_PIECE")) {
+      const m = /printf %s '([A-Za-z0-9+/=]*)' > '([^']*)'\.(\d+) \|\| exit 1\n/.exec(cmd);
+      if (m === null) throw new Error(`piece exec without a numbered file: ${cmd}`);
+      pieces.set(`${m[2]}.${m[3]}`, m[1]!);
+      return { exitCode: 0, stdout: "WSP_PIECE\n", stderr: "" };
+    }
     if (cmd.includes("WSP_LAUNCHED")) {
       launch = cmd;
-      [script = "", input = ""] = decoded(cmd);
+      land(cmd);
       return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
     }
     if (cmd.includes("kill -KILL") || cmd.includes("kill -TERM")) {
@@ -40,10 +56,10 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
       if (!cmd.includes(".tail")) alive = false;
       return { exitCode: 0, stdout: "", stderr: "" };
     }
-    if (cmd.includes(".in")) {
+    if (cmd.includes("echo WSP_OK")) {
       writes.push(cmd);
       if (exitFile !== "") return { exitCode: 0, stdout: "WSP_GONE\n", stderr: "" };
-      input += decoded(cmd)[0] ?? "";
+      land(cmd);
       return { exitCode: 0, stdout: "WSP_OK\n", stderr: "" };
     }
     const sentinel = cmd.match(/(__WSP_EOF_[a-z0-9]+__)/)?.[1];
@@ -65,8 +81,15 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
     }
     throw new Error(`guest got unexpected command: ${cmd}`);
   };
-  return { kills, writes, getScript: () => script, getLaunch: () => launch, getInput: () => input, exit: (code: number) => (exitFile = String(code)) };
+  return { kills, writes, calls, getScript: () => at(".sh"), getLaunch: () => launch, getInput: () => at(".in"), exit: (code: number) => (exitFile = String(code)) };
 }
+
+/** The bytes the provider counts: its request with the backend's wrapper around the command. */
+const solariBody = (cmd: string): number => Buffer.byteLength(JSON.stringify({ cmd: "bash", args: ["-c", `${EXEC_ENV}\n${cmd}`], timeoutMs: INLINE_EXEC_MS }));
+/** Every exec before the first poll: the launch, with the pieces ahead of it when the script needs them. */
+const launchCalls = (calls: readonly string[]): string[] => calls.slice(0, calls.findIndex(c => c.includes("__WSP_EOF_")));
+/** Forty kilobytes of command, as a turn whose prompt rides the command line would be. */
+const BIG_COMMAND = `claude -p ${shellQuote(Array.from({ length: 520 }, (_, i) => `line ${i} it's ünïcödé ${"y".repeat(50)}`).join("\n"))} </dev/null`;
 
 async function makeMachine(): Promise<{ backend: StubBackend; machine: StubMachine }> {
   const backend = stubBackend();
@@ -91,6 +114,34 @@ describe("machineExecStream", () => {
     expect(await stream.exited).toBe(0);
     expect(guest.getScript()).toContain("export CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
     expect(guest.getScript()).toContain("claude -p 'hi' </dev/null");
+  });
+
+  it("a command that fits one exec body launches in one exec, under the cap", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: "hi\n", exit: 0 }, {}]);
+    const stream = machineExecStream(machine, { pollMs: 5 })("claude -p 'hi' </dev/null", { env: { CLAUDE_CONFIG_DIR: "/root/.claude-cfg" } });
+    for await (const _ of stream.lines) void _;
+    expect(await stream.exited).toBe(0);
+    const launch = launchCalls(guest.calls);
+    expect(launch).toHaveLength(1);
+    expect(launch[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\nmkdir \/tmp\/wsp-run\/[0-9a-f]{12}\.d 2>\/dev\/null \|\| \{ echo WSP_LAUNCHED; exit 0; \}\nset -o pipefail\nprintf %s '[A-Za-z0-9+/=]+' \| base64 -d > '\/tmp\/wsp-run\/[0-9a-f]{12}\.sh' \|\| exit 1\nsetsid bash /);
+    expect(solariBody(launch[0]!)).toBeLessThanOrEqual(EXEC_BODY_MAX);
+  });
+
+  it("a 40 KB command goes up in pieces, every exec body under the cap, and the script decodes byte for byte", async () => {
+    expect(Buffer.byteLength(BIG_COMMAND)).toBeGreaterThan(40_000);
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: "hi\n", exit: 0 }, {}]);
+    const stream = machineExecStream(machine, { pollMs: 5 })(BIG_COMMAND, { env: { CLAUDE_CONFIG_DIR: "/root/.claude-cfg" } });
+    const lines: string[] = [];
+    for await (const l of stream.lines) lines.push(l);
+    expect(lines).toEqual(["hi"]);
+    expect(await stream.exited).toBe(0);
+    for (const c of guest.calls) expect(solariBody(c), c.slice(0, 80)).toBeLessThanOrEqual(EXEC_BODY_MAX);
+    const launch = launchCalls(guest.calls);
+    expect(launch.filter(c => c.endsWith("echo WSP_PIECE"))).toHaveLength(4);
+    expect(launch).toHaveLength(5);
+    expect(guest.getScript()).toBe(`export CLAUDE_CONFIG_DIR='/root/.claude-cfg'\n${BIG_COMMAND}\necho $? > ${launch.at(-1)!.match(/> '([^']*)\.sh'/)![1]}.exit\n`);
   });
 
   it("reassembles multi-byte characters split across poll boundaries", async () => {
@@ -176,7 +227,7 @@ describe("machineExecStream", () => {
     const stream = machineExecStream(machine, { pollMs: 5 })("claude", { env: {}, input: ["first"] });
     expect(await stream.write('{"type":"user","text":"don\'t stop"}')).toBe("written");
     expect(guest.writes).toHaveLength(1);
-    expect(guest.writes[0]).toMatch(/>> \/tmp\/wsp-run\/[a-f0-9]+\.in/);
+    expect(guest.writes[0]).toMatch(/\| base64 -d >> '\/tmp\/wsp-run\/[a-f0-9]+\.in'/);
     expect(guest.getInput()).toBe('first\n{"type":"user","text":"don\'t stop"}\n');
     for await (const _ of stream.lines) void _;
     await expect(stream.write("late")).rejects.toThrow(/ended/);
@@ -194,7 +245,7 @@ describe("machineExecStream", () => {
     now = 900;
     expect(await stream.write("late")).toBe("gone");
     expect(guest.writes).toHaveLength(1);
-    expect(guest.writes[0]).toMatch(/^\[ -e \/tmp\/wsp-run\/[a-f0-9]+\.exit \] && \{ echo WSP_GONE; exit 0; \}; printf/);
+    expect(guest.writes[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\n\[ -e \/tmp\/wsp-run\/[a-f0-9]+\.exit \] && \{ echo WSP_GONE; exit 0; \}\nset -o pipefail\n\[ -e '\/tmp\/wsp-run\/[a-f0-9]+\.in\.a[0-9a-f]{12}' \] \|\| \{ printf %s '[A-Za-z0-9+/=]+' \| base64 -d >> '\/tmp\/wsp-run\/[a-f0-9]+\.in' && : > '[^']+'; \} \|\| exit 1\necho WSP_OK$/);
     expect(guest.getInput()).toBe("first\n");
     now = 1100;
     await expect(first).rejects.toThrow(/deadline/);

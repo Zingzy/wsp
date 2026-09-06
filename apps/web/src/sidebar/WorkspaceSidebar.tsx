@@ -5,7 +5,7 @@
 // live here; rows and logic come from the copied t3code files beside this one.
 // The surface itself is the shell's sidebar-glass: nothing here paints a
 // background.
-import { ChevronDownIcon, FolderInputIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
@@ -32,6 +32,7 @@ import { shortcutLabelForCommand } from "../keybindings.js";
 import { cn } from "../lib/utils.js";
 import { useSelectedId, useSelectedThreadId, useStore, type Creation } from "../protocol/store.js";
 import { onNewWorkspaceRequest, requestNewThread } from "../shell/shellRequests.js";
+import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
@@ -92,11 +93,19 @@ interface DialogState {
   readonly name: string;
 }
 
-/** An import dialog open for one workspace; keyed per opening so its folder and plan reset. */
-interface ImportState {
+/** A project dialog open for one workspace; keyed per opening so its folder and plan reset. */
+interface ProjectDialogState {
   readonly key: number;
   readonly workspaceId: string;
 }
+
+/** Hover actions sit left of the new-thread plus, one slot each; the row's end padding makes room for as many as it has. */
+const ACTION_SLOTS = ["right-6", "right-11", "right-16"] as const;
+const ACTION_PADDING: Record<number, string> = {
+  1: "group-has-data-[sidebar=menu-action]/menu-item:pe-14",
+  2: "group-has-data-[sidebar=menu-action]/menu-item:pe-19",
+  3: "group-has-data-[sidebar=menu-action]/menu-item:pe-24",
+};
 
 export function WorkspaceSidebar() {
   const api = useStore(s => s.api);
@@ -119,8 +128,10 @@ export function WorkspaceSidebar() {
   const [settledExpanded, setSettledExpanded] = useLocalStorage(SETTLED_EXPANDED_KEY, true, booleanCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [dialog, setDialog] = useState<DialogState | null>(null);
-  const [importing, setImporting] = useState<ImportState | null>(null);
+  const [importing, setImporting] = useState<ProjectDialogState | null>(null);
+  const [exporting, setExporting] = useState<ProjectDialogState | null>(null);
   const canImport = api?.planProject !== undefined && api.importProject !== undefined;
+  const canExport = api?.exportProject !== undefined;
   /** Workspace id to the machine id a rebuild was asked for; the action stays disabled while that machine is still the one reported. */
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
   const rootRef = useRef<HTMLDivElement>(null);
@@ -129,6 +140,7 @@ export function WorkspaceSidebar() {
   const searching = query.trim().length > 0;
   const visible = useMemo(() => visibleProjects(projects, query), [projects, query]);
   const importTarget = importing === null ? undefined : workspaces.find(w => w.id === importing.workspaceId);
+  const exportTarget = exporting === null ? undefined : workspaces.find(w => w.id === exporting.workspaceId);
 
   const openDialog = (): void => {
     setDialog({ key: Date.now(), name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]) });
@@ -245,7 +257,12 @@ export function WorkspaceSidebar() {
                     .join(" · ");
                   const showThreads = !isCollapsed && active.length + settled.length > 0;
                   const collapsible = project.threads.length > 0 && !searching;
-                  const actions = Number(collapsible) + Number(canImport);
+                  const actions = Number(collapsible) + Number(canImport) + Number(canExport);
+                  const slots = [...ACTION_SLOTS].slice(0, actions);
+                  const slotOf = (): string => slots.shift() ?? "";
+                  const collapseSlot = collapsible ? slotOf() : "";
+                  const importSlot = canImport ? slotOf() : "";
+                  const exportSlot = canExport ? slotOf() : "";
                   return (
                     <SidebarMenuItem key={project.id}>
                       <SidebarMenuButton
@@ -253,10 +270,7 @@ export function WorkspaceSidebar() {
                         isActive={selectedId === project.id && selectedThreadId === null}
                         data-sidebar-row
                         data-row-id={`ws:${project.id}`}
-                        className={cn(
-                          !zombie && actions === 1 && "group-has-data-[sidebar=menu-action]/menu-item:pe-14",
-                          !zombie && actions === 2 && "group-has-data-[sidebar=menu-action]/menu-item:pe-19",
-                        )}
+                        className={cn(!zombie && ACTION_PADDING[actions])}
                         onClick={() => select(project.id)}
                       >
                         <span
@@ -284,13 +298,30 @@ export function WorkspaceSidebar() {
                         </SidebarMenuAction>
                       ) : (
                         <>
+                          {canExport ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <SidebarMenuAction
+                                    showOnHover
+                                    className={exportSlot}
+                                    aria-label={`Export a project from ${project.displayName}`}
+                                    onClick={() => setExporting({ key: Date.now(), workspaceId: project.id })}
+                                  />
+                                }
+                              >
+                                <FolderOutputIcon />
+                              </TooltipTrigger>
+                              <TooltipPopup side="bottom">Export a project to this Mac</TooltipPopup>
+                            </Tooltip>
+                          ) : null}
                           {canImport ? (
                             <Tooltip>
                               <TooltipTrigger
                                 render={
                                   <SidebarMenuAction
                                     showOnHover
-                                    className={collapsible ? "right-11" : "right-6"}
+                                    className={importSlot}
                                     aria-label={`Import a project into ${project.displayName}`}
                                     onClick={() => setImporting({ key: Date.now(), workspaceId: project.id })}
                                   />
@@ -304,7 +335,7 @@ export function WorkspaceSidebar() {
                           {collapsible ? (
                             <SidebarMenuAction
                               showOnHover
-                              className="right-6"
+                              className={collapseSlot}
                               aria-label={isCollapsed ? `Expand ${project.displayName}` : `Collapse ${project.displayName}`}
                               onClick={() => toggleCollapsed(project.id)}
                             >
@@ -423,6 +454,9 @@ export function WorkspaceSidebar() {
       ) : null}
       {importing !== null && importTarget !== undefined ? (
         <ImportProjectDialog key={importing.key} workspace={importTarget} onClose={() => setImporting(null)} />
+      ) : null}
+      {exporting !== null && exportTarget !== undefined ? (
+        <ExportProjectDialog key={exporting.key} workspace={exportTarget} onClose={() => setExporting(null)} />
       ) : null}
     </>
   );

@@ -226,6 +226,8 @@ describe("import project dialog", () => {
     api.importProject.mockRejectedValueOnce(new RequestError("/private/var/proj exists on the machine", "exists"));
     fireEvent.click(within(root).getByRole("button", { name: "Import" }));
     await waitFor(() => expect(within(root).getByRole("status").textContent).toBe("/private/var/proj exists on the machine"));
+    // A replace is a caution to confirm, not a failure: the confirm colour, as the export dialog's.
+    expect(within(root).getByRole("status").className).toContain("text-warning-foreground");
     const replace = within(root).getByRole("button", { name: "Replace and import" }) as HTMLButtonElement;
     expect(replace.disabled).toBe(false);
     fireEvent.click(replace);
@@ -243,6 +245,7 @@ describe("import project dialog", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(within(root).getByRole("status").textContent).toBe("Reading the folder.");
     await waitFor(() => expect(within(root).getByRole("status").textContent).toBe("git ls-files failed in /var/proj: not a git repository"));
+    expect(within(root).getByRole("status").className).toContain("text-destructive-foreground");
     expect(value(root, "files")).toBe("");
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
   });

@@ -9,8 +9,8 @@ const pkg = (path: string) => fileURLToPath(new URL(`../../packages/${path}`, im
 
 export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss()],
-  // The browser cannot follow protocol's package.json main into a dist a fresh worktree may not have.
-  resolve: command === "serve" ? { alias: { "@wsp/protocol": pkg("protocol/src/index.ts") } } : {},
+  // The browser cannot follow a package.json main into a dist a fresh worktree may not have.
+  resolve: command === "serve" ? { alias: { "@wsp/protocol": pkg("protocol/src/index.ts"), "@wsp/catalog": pkg("catalog/src/index.ts") } } : {},
   // noVNC's H.264 decoder module uses top-level await, which vite's default
   // es2020 target rejects. build.target covers only the production bundle;
   // the dev dependency prescan has its own esbuild target and needs the same.
@@ -23,6 +23,9 @@ export default defineConfig(({ command }) => ({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./test/setup.ts"],
+    // A budget, not a retry: the slowest case here runs half a second idle, and a gate at load average 135
+    // stretched cases of 0.05 to 0.2 s to 5 to 8 s. 20 s is 40 times the slowest idle case, 2.5 times that stretch.
+    testTimeout: 20_000,
     // Test-only: terminal tests drive the real in-process daemon through the
     // reach client, source-aliased like the root workspace's node project.
     alias: {

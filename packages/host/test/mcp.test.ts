@@ -285,7 +285,7 @@ describe("the MCP server over the host", () => {
     expect(ran.text).toBe("one\ntwo");
     expect(ran.structured).toEqual({ exitCode: 3, output: ["one", "two"] });
     const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
-    expect(Buffer.from(/printf '%s' '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8")).toContain("'sh' '-c' 'printf '\\''one\\ntwo\\n'\\''; exit 3'\n");
+    expect(Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8")).toContain("'sh' '-c' 'printf '\\''one\\ntwo\\n'\\''; exit 3'\n");
   });
 
   it("the workspace going away under a running exec ends the tool with the reason as an error", async () => {

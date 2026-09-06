@@ -78,6 +78,8 @@ export interface McpConfig {
   /** The scopes the file covers, shown on the wizard's group heading; every agent's docs also give a project scope
    * this file does not hold. */
   scope: string;
+  /** Where an http server's sign-in lives when the agent keeps it beside its own login, for the row; absent, nothing is said. */
+  httpAuth?: string;
 }
 
 type GuestFn = (...args: never[]) => unknown;

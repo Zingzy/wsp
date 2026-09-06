@@ -2,6 +2,7 @@
 // The process table's order: a tree by ppid at rest, siblings sorted by the
 // chosen column; a filter flattens it to the matches, since a match whose
 // parent is hidden has no tree to sit in.
+import { CATALOG_AGENTS } from "@wsp/catalog";
 import type { ProcEntry } from "@wsp/protocol";
 
 export type ProcSort = "cpu" | "mem";
@@ -47,13 +48,13 @@ export function procRows(procs: readonly ProcEntry[], sort: ProcSort, filter: st
   return out;
 }
 
-/** The harness pieces the daemon can name: itself, the shells behind its ptys (by the tab's title) and the agent by its comm. */
+/** The harness pieces the daemon can name: itself, the shells behind its ptys (by the tab's title) and an agent by the command its catalog entry puts on PATH. */
 export function procLabel(p: ProcEntry, daemonPid: number, terminalTitles: ReadonlyMap<string, string>): string | null {
   if (p.pid === daemonPid) return "daemon";
   if (p.pty !== undefined) {
     const title = terminalTitles.get(p.pty);
     return title !== undefined ? `terminal ${title}` : "terminal";
   }
-  if (p.comm === "claude") return "agent";
+  if (CATALOG_AGENTS.some(a => a.bin === p.comm)) return "agent";
   return null;
 }

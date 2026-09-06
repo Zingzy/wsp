@@ -7,6 +7,7 @@
 // and no question is ever asked on the remote machine.
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
+import { catalogEntry } from "@wsp/catalog";
 import { MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { Recipe, RecipeHistory } from "@wsp/protocol";
@@ -17,7 +18,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED, fmtBytes, fmtMemGb } from "@wsp/protocol";
-import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
+import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   LOGIN_CHOICES,
   RUNG_TITLE,
@@ -38,9 +39,11 @@ import {
   smallRecipePath,
   tickLoginTools,
   withCatalogAgents,
+  withTicksOf,
   withoutAgentTools,
 } from "./init-recipe.js";
 import { pickScreens } from "./init-pick.js";
+import { installLines, installMcp, mcpServerSpec } from "./mcp-install.js";
 import { historyLine } from "./recipe-command.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
@@ -536,7 +539,7 @@ export function summaryNote(
   const answered = new Map(table(listed.map(e => [`  ${ellipsize(e.label, labelRoom)}`, answer(e)])).map((line, i) => [listed[i]!.id, line]));
   const lines = perRung.flatMap((entries, i) => [rows[i]!, ...entries.flatMap(e => answered.get(e.id) ?? [])]);
   const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
-  const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER }).installs.map(a => a.name);
+  const agents = agentInstallsFor(bring).installs.map(a => a.name);
   // Only what the person ticked counts as their tools; Homebrew and its toolchain are named apart.
   const steps = toolInstallsFor(bring, brew).installs;
   const tools = steps.filter(t => ticks.has(t.id)).length;
@@ -622,19 +625,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   spinner.stop();
   const source = given === undefined ? "found on this computer" : "found on this computer, ticked by the recipe";
+  // This computer's own recipe is read even under a recipe file: the file's ticks and answers stand, the rows and
+  // their sources are what is here, so a row about this Mac (an agent's config to write) never follows another's.
   let catalogRecipe: Recipe;
-  if (given !== undefined) catalogRecipe = given;
-  else {
-    const histories = spin(io.output, "Reading what your agents used", io.isTTY);
-    try {
-      catalogRecipe = await opts.recipe(h => histories.detail(historyLine(h)));
-    } catch (e) {
-      histories.stop();
-      log.error(e instanceof Error ? e.message : String(e), out);
-      return { code: 1 };
-    }
+  const histories = spin(io.output, "Reading what your agents used", io.isTTY);
+  try {
+    const here = await opts.recipe(h => histories.detail(historyLine(h)));
+    catalogRecipe = given === undefined ? here : withTicksOf(here, given);
+  } catch (e) {
     histories.stop();
+    log.error(e instanceof Error ? e.message : String(e), out);
+    return { code: 1 };
   }
+  histories.stop();
   // A row the pack would refuse whole is locked here with the pack's own sentence, judged on the same disk the pack reads.
   manifest = lockRefused(manifest, rel => {
     const st = statOf(join(opts.home, rel));
@@ -659,13 +662,16 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   card("Found on this computer", detectionNote(found, source), io.output);
 
   let answers: Answers;
+  // The agents here whose config gets the wsp MCP server: only a tick on the screens, never a default.
+  let wspTools = new Set<string>();
   if (interactive) {
-    const picked = await pickScreens({ manifest, recipe: catalogRecipe, brew, from: opts.recipeFile === undefined ? "agents" : "logins", input: io.input, output: io.output });
+    const picked = await pickScreens({ manifest, recipe: catalogRecipe, brew, from: opts.recipeFile === undefined ? "agents" : "logins", home: opts.home, input: io.input, output: io.output });
     if (picked === "cancel") {
       cancel("Nothing was changed.", out);
       return { code: 1 };
     }
     catalogRecipe = picked.recipe;
+    wspTools = picked.wspTools;
     manifest = applyRecipe(manifest, catalogRecipe);
     answers = defaultAnswers(manifest);
     // The screens' own answers on the login rows: a ticked keys row is the copy, the listed sign-ins run on the machine.
@@ -733,6 +739,13 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const small = { path: smallRecipePath(opts.statePath), recipe: catalogRecipe };
   saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
   log.step(`Recipe saved to ${path} and ${small.path}`, out);
+  for (const agent of wspTools) {
+    try {
+      log.step(installLines(installMcp(agent, mcpServerSpec(opts.statePath), opts.home)).join("\n"), out);
+    } catch (e) {
+      log.warn(`${catalogEntry(agent)?.name ?? agent} did not get the wsp tools: ${e instanceof Error ? e.message : String(e)}. Fix the file and run wsp mcp install --agent ${agent}.`, out);
+    }
+  }
   // The whole recipe against the disk, before the account is read or anything boots: the tools stage would
   // otherwise fill the disk after the machine billed.
   const disk = estimateDisk(asBring(bring), uploadBytes, brew);
