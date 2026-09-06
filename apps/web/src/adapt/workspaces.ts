@@ -13,15 +13,17 @@ export interface SidebarInput {
   readonly sessions?: Readonly<Record<string, ReadonlyArray<SessionView>>>;
 }
 
+/** Machines that are up (and billing) lead, then the paused, then the gone; inside a group the latest turn or creation is on top. */
+const LIST_RANK: Record<WorkspaceState, number> = { running: 0, waking: 0, unreachable: 0, pausing: 1, paused: 1, gone: 2 };
+
 export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapshot[] {
-  return [...input.workspaces]
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+  return input.workspaces
     .map(workspace => {
       const status = input.statuses?.[workspace.id] ?? null;
       const phase = status?.phase ?? workspace.phase;
-      const threads = deriveThreads(input.sessions?.[workspace.id] ?? []);
       const state = workspaceStateOf({ phase }, status);
-      return {
+      const threads = foldThreads(input.sessions?.[workspace.id] ?? []);
+      const project: SidebarProjectSnapshot = {
         id: workspace.id,
         projectKey: workspace.id,
         displayName: workspace.name,
@@ -35,10 +37,18 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
         machineState: status?.machineState ?? null,
         reach: status?.reach.state ?? null,
         state,
-        indicator: indicatorOf(state),
-        threads,
+        indicator: indicatorFor(state),
+        threads: threads.map(deriveThread),
       };
-    });
+      return { rank: LIST_RANK[state], activityMs: lastActivityMs(workspace, threads), project };
+    })
+    .sort((a, b) => a.rank - b.rank || b.activityMs - a.activityMs || a.project.id.localeCompare(b.project.id))
+    .map(row => row.project);
+}
+
+/** The latest turn start or end in the workspace, or its creation while it has none. */
+function lastActivityMs(workspace: Pick<WorkspaceView, "createdAt">, threads: ReadonlyArray<ThreadView>): number {
+  return Math.max(Date.parse(workspace.createdAt), ...threads.flatMap(t => [t.startedAt ?? 0, t.endedAt ?? 0]));
 }
 
 /** The one state word's key for a workspace as the app knows it: its phase, and the machine state and reach of its status when one has arrived. */
@@ -47,10 +57,10 @@ export function workspaceStateOf(workspace: Pick<WorkspaceView, "phase">, status
 }
 
 export function workspaceIndicator(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null): StatusIndicator {
-  return indicatorOf(workspaceStateOf(workspace, status));
+  return indicatorFor(workspaceStateOf(workspace, status));
 }
 
-function indicatorOf(state: WorkspaceState): StatusIndicator {
+function indicatorFor(state: WorkspaceState): StatusIndicator {
   return { label: workspaceWord(state), tone: indicatorTone(state), pulse: state === "pausing" || state === "waking" };
 }
 
@@ -91,11 +101,6 @@ export function turnWait(state: WorkspaceState): { readonly label: string; reado
       return null;
     }
   }
-}
-
-/** One row per turn from the wire, one thread per row here: the protocol's fold, in the order the first turn of each started. */
-export function deriveThreads(sessions: ReadonlyArray<SessionView>): SidebarThreadSnapshot[] {
-  return foldThreads(sessions).map(deriveThread);
 }
 
 function deriveThread(thread: ThreadView): SidebarThreadSnapshot {

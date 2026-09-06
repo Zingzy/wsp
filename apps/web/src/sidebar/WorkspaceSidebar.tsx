@@ -246,6 +246,9 @@ export function WorkspaceSidebar() {
             <SidebarGroupLabel>Workspaces</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
+                {creations.map(creation => (
+                  <CreationRow key={creation.key} creation={creation} active={selectedId === creation.key} onSelect={() => select(creation.key)} />
+                ))}
                 {visible.map(({ project, active, settled }) => {
                   const isCollapsed = collapsed.has(project.id);
                   const zombie = project.reach === "zombie";
@@ -430,9 +433,6 @@ export function WorkspaceSidebar() {
                     </SidebarMenuItem>
                   );
                 })}
-                {creations.map(creation => (
-                  <CreationRow key={creation.key} creation={creation} active={selectedId === creation.key} onSelect={() => select(creation.key)} />
-                ))}
               </SidebarMenu>
               {visible.length === 0 && creations.length === 0 ? (
                 <Empty className="py-8">

@@ -153,6 +153,19 @@ describe("rows from the fixture wire", () => {
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
+  it("three workspaces in mixed states: the running one leads, then the paused, then the gone, whatever order they were created in; a creating row sits above them all", async () => {
+    const gone = { ...view("ws_gone", "scratch"), createdAt: new Date(NOW - 3 * 24 * 60 * 60_000).toISOString() };
+    const paused = { ...view("ws_nap", "spike", "napping"), createdAt: new Date(NOW - 2 * 60 * 60_000).toISOString() };
+    const running = { ...view("ws_run", "dev"), createdAt: new Date(NOW - 60_000).toISOString() };
+    await mount(fakeApi([gone, paused, running], [status(gone, { machineState: "gone", reach: { state: "gone" } }), status(paused), status(running)]), "dev");
+    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_run", "ws:ws_nap", "ws:ws_gone"]));
+    expect(rowOf("dev").textContent).toContain("Running");
+    expect(rowOf("spike").textContent).toContain("Paused");
+    expect(rowOf("scratch").textContent).toContain("Gone");
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", workspaceId: null, lines: [], failed: null }] }));
+    expect(rowIds()).toEqual(["creating:1", "ws:ws_run", "ws:ws_nap", "ws:ws_gone"]);
+  });
+
   it("every thread row carries the agent's mark and who opened it, in muted mono, with the agent named on hover", async () => {
     await mount(
       fakeApi(
