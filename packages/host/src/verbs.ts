@@ -25,7 +25,7 @@ import {
   type SessionEvent,
   type SessionOrigin,
   type SessionStartOutcome,
-  type SessionStartResult,
+  SessionStartResult,
   type SessionView,
   type ThreadView,
   type TurnResult,
@@ -367,6 +367,9 @@ export function resumeOf(thread: ThreadView, prompt: string): Record<string, unk
   return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, resume: thread.claudeSessionId };
 }
 
+/** A start reply the protocol schema refuses: the host process predates or postdates this command's build. */
+const OTHER_VERSION = "the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up";
+
 /** Starts a turn as `startedBy` and follows it to its reply: `on.queued` when the runtime says the start waits behind
  * the thread's running turn, `on.started` the thread as soon as the runtime names it, `on.event` every event of the
  * turn with the turn so far. Fails when the host goes away first. The send carries its own request id so an app view
@@ -387,13 +390,15 @@ export async function follow(
   const offQueued = client.onFrame(f => {
     if (f.type === "session.queued" && f["requestId"] === requestId) on.queued?.();
   });
-  let reply: SessionStartResult;
+  let answer: Record<string, unknown>;
   try {
-    reply = await client.request<SessionStartResult>("sessions.start", { ...start, startedBy, requestId });
+    answer = await client.request("sessions.start", { ...start, startedBy, requestId });
   } finally {
     offQueued();
   }
-  const { session, outcome, turnId } = reply;
+  const reply = SessionStartResult.safeParse(answer);
+  if (!reply.success) throw new Error(OTHER_VERSION);
+  const { session, outcome, turnId } = reply.data;
   const threadId = session.threadId;
   if (threadId === undefined) throw new Error("the runtime stamped no thread on the session");
   const turn: Turn = { session, threadId, outcome };

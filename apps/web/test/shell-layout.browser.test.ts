@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The shell's chrome in a real Chromium: the sidebar's brand lockup starts
-// where the search box does, collapsing the sidebar leaves the page header's
-// left padding alone, and a status toast holds a long token inside its box.
-// Vite serves test/shell to Playwright's browser, so like the glyph test it
-// runs only when asked for (WSP_RENDER=1) and skips without Playwright's
-// Chromium on the machine.
+// where the search box does, a thread row's title keeps its room at the
+// default width, a status toast holds a long token inside its box, and
+// collapsing the sidebar leaves the page header's left padding alone. Vite
+// serves test/shell to Playwright's browser, so like the glyph test it runs
+// only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
+// on the machine.
 import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -70,6 +71,39 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       const path = join(SHOTS_DIR, `sidebar-header-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar header screenshot: ${path}`);
+    }
+  }, 30_000);
+
+  it("a thread row keeps twelve characters of a long title at the default width, the agent and opener whole under it, rows one height", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      const rows = await page!.locator("[data-row-id^='thread:']").evaluateAll(els =>
+        els.map(el => {
+          const title = el.querySelector<HTMLElement>("[data-thread-title]");
+          const meta = el.querySelector<HTMLElement>("[data-thread-meta]");
+          if (!title || !meta) return null;
+          const font = getComputedStyle(title);
+          const ctx = document.createElement("canvas").getContext("2d")!;
+          ctx.font = `${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
+          return {
+            height: el.getBoundingClientRect().height,
+            titleWidth: title.clientWidth,
+            twelveChars: ctx.measureText((title.textContent ?? "").slice(0, 12)).width,
+            metaClipped: [meta, ...meta.querySelectorAll("*")].some(e => e.scrollWidth > e.clientWidth),
+            meta: `${meta.textContent ?? ""} (${meta.querySelector("[data-thread-provenance]")?.getAttribute("aria-label")})`,
+          };
+        }),
+      );
+      console.info(`thread rows at ${theme}: ${JSON.stringify(rows)}`);
+      expect(rows.map(r => r?.meta)).toEqual(["Working·you (Claude Code · you)", "cli (Claude Code · cli)"]);
+      for (const row of rows) {
+        expect(row!.titleWidth).toBeGreaterThanOrEqual(row!.twelveChars);
+        expect(row!.metaClipped).toBe(false);
+      }
+      expect(new Set(rows.map(r => r!.height)).size).toBe(1);
+      const path = join(SHOTS_DIR, `sidebar-threads-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar thread rows screenshot: ${path}`);
     }
   }, 30_000);
 

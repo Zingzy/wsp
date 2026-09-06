@@ -37,9 +37,14 @@ const PLAIN = { colorClass: "text-muted-foreground/70", dotClass: "bg-muted-fore
 
 const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli", agent: "agent" };
 
-/** The agent inside the thread and who opened it: you, the command line on this computer, or a local agent. */
+/** Who opened the thread: you, the command line on this computer, or a local agent. */
+export function openerWord(startedBy: SessionOrigin): string {
+  return OPENER_WORD[startedBy];
+}
+
+/** The agent inside the thread and who opened it, as the row's hover text reads it. */
 export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness" | "startedBy">): string {
-  return `${agentName(thread.harness)} · ${OPENER_WORD[thread.startedBy]}`;
+  return `${agentName(thread.harness)} · ${openerWord(thread.startedBy)}`;
 }
 
 /** The pill keys on the session's status and wears the adapter's word: a running thread and one that did not settle carry one, the resting states none. */

@@ -151,7 +151,20 @@ describe("rows from the fixture wire", () => {
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
-  it("every thread row says which agent runs in it and who opened it, in muted mono", async () => {
+  it("three workspaces in mixed states: the running one leads, then the paused, then the gone, whatever order they were created in; a creating row sits above them all", async () => {
+    const gone = { ...view("ws_gone", "scratch"), createdAt: new Date(NOW - 3 * 24 * 60 * 60_000).toISOString() };
+    const paused = { ...view("ws_nap", "spike", "napping"), createdAt: new Date(NOW - 2 * 60 * 60_000).toISOString() };
+    const running = { ...view("ws_run", "dev"), createdAt: new Date(NOW - 60_000).toISOString() };
+    await mount(fakeApi([gone, paused, running], [status(gone, { machineState: "gone", reach: { state: "gone" } }), status(paused), status(running)]), "dev");
+    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_run", "ws:ws_nap", "ws:ws_gone"]));
+    expect(rowOf("dev").textContent).toContain("Running");
+    expect(rowOf("spike").textContent).toContain("Paused");
+    expect(rowOf("scratch").textContent).toContain("Gone");
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", workspaceId: null, lines: [], failed: null }] }));
+    expect(rowIds()).toEqual(["creating:1", "ws:ws_run", "ws:ws_nap", "ws:ws_gone"]);
+  });
+
+  it("every thread row carries the agent's mark and who opened it, in muted mono, with the agent named on hover", async () => {
     await mount(
       fakeApi(
         [API],
@@ -166,13 +179,42 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
-    const provenance = (title: string): HTMLElement => within(rowOf(title)).getByText(/·/);
-    expect(provenance("fix the port list").textContent).toBe("Claude Code · cli");
-    expect(provenance("upgrade node").textContent).toBe("Codex · you");
-    expect(provenance("before provenance").textContent).toBe("Claude Code · you");
-    expect(provenance("from the director").textContent).toBe("Claude Code · agent");
-    expect(provenance("fix the port list").className).toContain("font-mono");
-    expect(provenance("fix the port list").className).toContain("text-muted-foreground");
+    const provenance = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-provenance]")!;
+    const reads = (title: string) => ({ label: provenance(title).getAttribute("aria-label"), text: provenance(title).textContent, mark: provenance(title).querySelector("[data-harness-mark]")?.getAttribute("data-harness-mark") });
+    expect(reads("fix the port list")).toEqual({ label: "Claude Code · cli", text: "cli", mark: "claude" });
+    expect(reads("upgrade node")).toEqual({ label: "Codex · you", text: "COyou", mark: "codex" });
+    expect(reads("before provenance")).toEqual({ label: "Claude Code · you", text: "you", mark: "claude" });
+    expect(reads("from the director")).toEqual({ label: "Claude Code · agent", text: "agent", mark: "claude" });
+    const line = provenance("fix the port list").closest<HTMLElement>("[data-thread-meta]")!;
+    expect(line.className).toContain("font-mono");
+    expect(line.className).toContain("text-muted-foreground");
+  });
+
+  it("a long title shares its line with the age only; state, agent and opener sit under it, and every row is one height", async () => {
+    const LONG = "Now reply with exactly the word pong.";
+    const SHORT = "Reply with exactly the word hi.";
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [
+          session("s1", "ws_a", { prompt: LONG, startedBy: "person", startedAt: iso(-48 * 60_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: SHORT, startedBy: "cli", startedAt: iso(-30 * 60_000), endedAt: iso(-24 * 60_000) }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByText(LONG)).toBeDefined());
+    const title = screen.getByText(LONG);
+    expect(title.className).toContain("truncate");
+    expect(title.parentElement!.children).toHaveLength(2);
+    expect(title.nextElementSibling!.textContent).toBe("48m");
+    const meta = rowOf(LONG).querySelector<HTMLElement>("[data-thread-meta]")!;
+    expect(meta.contains(title)).toBe(false);
+    expect(meta.textContent).toBe("Working·you");
+    expect(meta.className).toContain("font-mono");
+    expect(rowOf(SHORT).querySelector("[data-thread-meta]")!.textContent).toBe("cli");
+    expect(rowOf(SHORT).className).toBe(rowOf(LONG).className);
   });
 
   it("the idle shelf collapses per workspace and remembers it", async () => {
