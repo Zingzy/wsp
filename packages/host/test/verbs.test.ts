@@ -523,6 +523,35 @@ describe("wsp verbs over the host", () => {
     expect(c.io.errors).toEqual(["machine deleted while the agent was working"]);
   });
 
+  it("a host whose sessions.start reply has no turn id or outcome is refused in one line before the follow, never printed as undefined", async () => {
+    await handle!.close();
+    handle = undefined;
+    const old = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+    await new Promise<void>(r => old.once("listening", r));
+    const wsPort = (old.address() as AddressInfo).port;
+    writeFileSync(hostTokenPath(statePath), "tok\n");
+    writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: wsPort, wsPort, startedAt: new Date().toISOString() }));
+    const workspace = { id: "ws_1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_gold", createdAt: "2026-09-06T00:00:00.000Z" };
+    const session = { id: "s_1", workspaceId: "ws_1", harness: "claude", status: "running", threadId: "t_1" };
+    old.on("connection", socket => {
+      socket.on("message", raw => {
+        const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
+        const reply = op === "workspaces.list" ? { workspaces: [workspace] } : op === "sessions.start" ? { session } : {};
+        socket.send(JSON.stringify({ id, ok: true, ...reply }));
+      });
+    });
+    try {
+      const { code, io } = await run("thread", "new", "--in", "alpha", "first");
+      expect(code).toBe(1);
+      expect(io.lines).toEqual([]);
+      expect(io.streamed).toBe("");
+      expect(io.errors).toEqual(["wsp thread new: the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up"]);
+    } finally {
+      for (const client of old.clients) client.terminate();
+      await new Promise(r => old.close(r));
+    }
+  });
+
   it("a port that accepts but never answers fails the dial within its deadline, before and after the handshake", async () => {
     await handle!.close();
     handle = undefined;
