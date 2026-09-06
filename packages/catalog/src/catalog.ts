@@ -84,6 +84,9 @@ export interface AgentEntry extends EntryBase {
   mcp?: McpConfig;
   /** How the agent loads the machine context on the guest; absent, it gets no hook and no skill there. */
   context?: AgentContext;
+  /** The directory on this computer the agent loads its global skills from, `~/`-relative, one folder per skill with
+   * a SKILL.md inside; the wsp skill goes there with the MCP server. */
+  skills: string;
 }
 
 export interface ToolEntry extends EntryBase {
@@ -160,6 +163,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHomeEnv: "CLAUDE_CONFIG_DIR",
     name: "Claude Code",
     context: CLAUDE_CONTEXT,
+    skills: "~/.claude/skills",
     installRoad: { road: "script", script: GOLDEN_SETUP },
     signIn: SIGN_IN_ROWS.claude,
     // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
@@ -184,6 +188,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".codex",
     name: "Codex",
     context: CODEX_CONTEXT,
+    skills: "~/.codex/skills",
     installRoad: npm("@openai/codex", "0.153.0"),
     node: 16,
     signIn: SIGN_IN_ROWS.codex,
@@ -204,6 +209,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".gemini",
     name: "Gemini CLI",
     context: GEMINI_CONTEXT,
+    skills: "~/.gemini/skills",
     installRoad: npm("@google/gemini-cli", "0.58.0"),
     node: 20,
     signIn: SIGN_IN_ROWS.gemini,
@@ -224,6 +230,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".local/share/opencode",
     name: "OpenCode",
     context: OPENCODE_CONTEXT,
+    skills: "~/.config/opencode/skills",
     installRoad: npm("opencode-ai", "1.18.27"),
     signIn: SIGN_IN_ROWS.opencode,
     // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
@@ -244,6 +251,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".pi/agent",
     name: "Pi",
     context: PI_CONTEXT,
+    skills: "~/.pi/agent/skills",
     installRoad: { road: "npm", package: "@earendil-works/pi-coding-agent", version: "0.84.4", ignoreScripts: true },
     node: 22,
     signIn: SIGN_IN_ROWS.pi,
@@ -263,6 +271,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".hermes",
     name: "Hermes Agent",
     context: HERMES_CONTEXT,
+    skills: "~/.hermes/skills",
     installRoad: { road: "script", script: HERMES_INSTALL },
     signIn: SIGN_IN_ROWS.hermes,
     configPaths: ["~/.hermes/config.yaml", "~/.hermes/SOUL.md", "~/.hermes/memories", "~/.hermes/skills", "~/.hermes/cron", "~/.hermes/hooks"],

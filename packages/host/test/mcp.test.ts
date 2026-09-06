@@ -16,6 +16,7 @@ import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runti
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
+import { WSP_SKILL, instructionsOf } from "../src/skill.js";
 import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -134,8 +135,10 @@ describe("the MCP server over the host", () => {
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "cwd", "notify", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "cwd", "name", "notify", "task", "workspace"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
+    expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL));
     expect(c.getInstructions()).toContain("thread_new");
     expect(c.getInstructions()).toContain("snapshot");
+    for (const t of tools) expect(WSP_SKILL, t.name).toContain(`\`${t.name}\``);
   });
 
   it("snapshot takes a project golden of the workspace as wsp snapshot does, and new with from forks it by project name or snapshot id; a workspace without a project, and a name no golden carries, are tool errors in one line", async () => {
@@ -479,6 +482,6 @@ describe("the MCP server never talks to the provider", () => {
     const imports = [...source.matchAll(/ from "([^"]+)";$/gm)].map(m => m[1]!);
     const workspacePackages = imports.filter(i => i.startsWith("@wsp/"));
     expect(workspacePackages).toEqual(["@wsp/protocol"]);
-    expect(imports.filter(i => i.startsWith("./"))).toEqual(["./version.js", "./verbs.js"]);
+    expect(imports.filter(i => i.startsWith("./"))).toEqual(["./skill.js", "./version.js", "./verbs.js"]);
   });
 });

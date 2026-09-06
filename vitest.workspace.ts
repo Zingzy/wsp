@@ -1,6 +1,7 @@
 // Vitest 2.x workspace: each entry runs under its own config/environment.
 // Node packages + wspx use the root node config; apps/web carries its own
 // vite config (react plugin + jsdom) so React component tests get a DOM.
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +9,12 @@ import { fileURLToPath } from "node:url";
 // Paths are pinned to this file, not the cwd, so a run started inside one package sees the same tree as a root run.
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 const pkg = (name: string) => here(`./packages/${name}/src/index.ts`);
+/** A markdown import is its text, as tsup's text loader makes it in the host's build. */
+const markdownText = () => ({
+  name: "md-text",
+  load: (id: string) => (id.endsWith(".md") ? `export default ${JSON.stringify(readFileSync(id, "utf8"))};` : undefined),
+});
+
 const alias = {
   "@wsp/engine": pkg("engine"),
   "@wsp/adapter-claude": pkg("adapter-claude"),
@@ -22,6 +29,7 @@ const alias = {
 export default [
   {
     root: here("./"),
+    plugins: [markdownText()],
     resolve: { alias },
     test: {
       name: "node",

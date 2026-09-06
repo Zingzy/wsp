@@ -58,6 +58,7 @@ usage:
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (${MCP_AGENTS.map(a => a.id).join(", ")})
+                     and the wsp skill in its skills folder
   wsp --version      print the version
 
 verbs, against the host wsp up started; every one takes --json for the raw
