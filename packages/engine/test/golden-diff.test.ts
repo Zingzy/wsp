@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import type { RecipeDigest } from "@wsp/protocol";
-import { SMALL_BYTES, SMALL_TOOLS, describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, removalsFor, rowsToApply, type RecipeDiff } from "../src/golden-diff.js";
+import { SMALL_BYTES, SMALL_TOOLS, changeCounts, describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, retiredBy, rowsToApply, type RecipeDiff } from "../src/golden-diff.js";
 import type { RecipeEntry } from "../src/golden-import.js";
 
 const row = (rung: string, id: string, over: Partial<RecipeEntry> = {}): RecipeEntry => ({ rung, id, label: id.slice(id.lastIndexOf("/") + 1), paths: [], bytes: 0, default: "bring", bring: true, ...over });
@@ -132,7 +132,10 @@ describe("recipe diff", () => {
     expect(got).toEqual(diff);
     expect([...rowsToApply(got)].sort()).toEqual(apply.sort());
     expect(isEmptyDiff(got)).toBe(diff === EMPTY);
-    expect(removalsFor(got, from).map(r => r.id)).toEqual(diff.files.filter(f => f.change === "removed").map(f => f.id).concat(diff.tools.filter(t => t.change === "removed").map(t => t.id), diff.agents.filter(a => a.change === "removed").map(a => a.id)));
+    const dropped = diff.files.filter(f => f.change === "removed").map(f => f.id).concat(diff.tools.filter(t => t.change === "removed").map(t => t.id), diff.agents.filter(a => a.change === "removed").map(a => a.id));
+    // A row this delta ships again is not retired, whatever else the diff says about it: a dest that moved is a
+    // removal and an addition of one id, and the id stays in the recipe.
+    expect(retiredBy(got).map(r => r.id)).toEqual(dropped.filter(id => !rowsToApply(got).has(id)));
   });
 
   it("a missing file is described as kept, and a login flipped to sign in says it will not be in the golden", () => {
@@ -152,72 +155,31 @@ describe("recipe diff", () => {
   });
 });
 
-describe("removals", () => {
-  const removed = (entries: RecipeEntry[], files: DigestFile[] = []) => {
-    const from = snap(entries, files);
-    return removalsFor(diffRecipes(from, snap([])), from);
-  };
+describe("rows the recipe stopped asking for", () => {
+  const retired = (entries: RecipeEntry[], files: DigestFile[] = [], previous: { id: string; name: string }[] = []) => retiredBy(diffRecipes(snap(entries, files), snap([])), previous);
 
-  it("a removed file is deleted at its guest path, quoted; a dest that could leave home is refused", () => {
-    expect(removed([row("shell", "shell/zshrc")], [file("shell/zshrc", ".zshrc")])).toEqual([{ what: "file", id: "shell/zshrc", label: "~/.zshrc", cmd: "rm -rf -- '/root/.zshrc'" }]);
-    expect(removed([row("shell", "shell/x")], [file("shell/x", "it's here/a")])[0]!.cmd).toBe(`rm -rf -- '/root/it'\\''s here/a'`);
-    for (const dest of ["", "..", "a/../b", "./a", "a//b"]) {
-      expect(removed([row("shell", "shell/x")], [file("shell/x", dest)])[0]).toEqual({ what: "file", id: "shell/x", label: `~/${dest}`, note: "path refused; left on the machine" });
-    }
-  });
-
-  it.each([
-    ["tools/brew/yq", /brew uninstall yq/],
-    ["tools/brew-tap/homebrew/cask-fonts", /brew untap homebrew\/cask-fonts/],
-    ["tools/npm/bun", /npm uninstall -g bun$/],
-    ["tools/pnpm/turbo", /pnpm remove -g turbo$/],
-    ["tools/bun/elysia", /bun remove -g elysia$/],
-    ["tools/uv/ruff", /uv tool uninstall ruff$/],
-    ["tools/pipx/httpie", /pipx uninstall httpie$/],
-    ["tools/cargo/bat", /cargo uninstall bat$/],
-    // A catalog row the recipe added comes off by its catalog road.
-    ["tools/catalog/gh", /rm -f \/usr\/local\/bin\/'gh'$/],
-    ["tools/catalog/ffmpeg", /apt-get purge -y -qq ffmpeg && apt-get autoremove -y -qq --purge$/],
-  ])("a removed %s is uninstalled through its manager, on the tools PATH", (id, cmd) => {
-    const [r] = removed([row("tools", id)]);
-    expect(r).toMatchObject({ what: "tool", id });
-    expect(r!.cmd).toMatch(/^export PATH=/);
-    expect(r!.cmd).toMatch(cmd);
-    expect(r!.note).toBeUndefined();
-  });
-
-  it.each([
-    ["tools/go/gopls", "go has no uninstall; the binary stays in /root/go/bin"],
-    ["tools/other/x", "no manager known for this row"],
-    // The base floor put it there for every golden; a tick coming off never takes it away.
-    ["tools/brew/jq", "jq is part of the base and stays"],
-    ["tools/npm/pnpm", "pnpm is part of the base and stays"],
-    ["tools/cargo/ripgrep", "ripgrep is part of the base and stays"],
-    ["tools/catalog/git", "git is part of the base and stays"],
-  ])("a removed %s has no command and is noted", (id, note) => {
-    expect(removed([row("tools", id)])).toEqual([{ what: "tool", id, label: expect.any(String), note }]);
-  });
-
-  it("a removed tap formula comes off through brew when brew put it there, else its road binary leaves /usr/local/bin", () => {
-    const [r] = removed([row("tools", "tools/brew/zingzy/tap/diskbloom")]);
-    expect(r).toMatchObject({ what: "tool", id: "tools/brew/zingzy/tap/diskbloom" });
-    expect(r!.cmd).toMatch(/^export PATH=/);
-    expect(r!.cmd).toMatch(/if \[ -x \/home\/linuxbrew\/.linuxbrew\/bin\/brew \] && su .*brew list --formula zingzy\/tap\/diskbloom.* >\/dev\/null 2>&1; then su .*brew uninstall zingzy\/tap\/diskbloom.*; else rm -f \/usr\/local\/bin\/'diskbloom'; fi$/);
-  });
-
-  it("a removed agent comes off through the inverse of its installer, with its smoke; one without an inverse is noted", () => {
-    const got = removed([row("agents", "agents/codex"), row("agents", "agents/aider"), row("agents", "agents/hermes"), row("agents", "agents/claude"), row("agents", "agents/zed")]);
-    expect(got).toEqual([
-      { what: "agent", id: "agents/codex", label: "codex", cmd: 'export PATH="/usr/local/bin:$PATH"\nnpm uninstall -g @openai/codex', smoke: "codex --version" },
-      { what: "agent", id: "agents/aider", label: "aider", cmd: "uv tool uninstall aider-chat", smoke: "aider --version" },
-      { what: "agent", id: "agents/hermes", label: "hermes", cmd: "rm -rf /root/.hermes/venvs/hermes /root/.hermes/hermes-agent /usr/local/bin/hermes", smoke: "hermes --version" },
-      { what: "agent", id: "agents/claude", label: "claude", note: "Claude Code has no uninstaller; left on the machine", smoke: "claude --version" },
-      { what: "agent", id: "agents/zed", label: "zed", note: "no installer known, so nothing to uninstall" },
+  it("a file, a tool and an agent are recorded by id with the person's name for them, and nothing is uninstalled", () => {
+    expect(retired([row("shell", "shell/zshrc"), row("tools", "tools/brew/yq"), row("agents", "agents/codex")], [file("shell/zshrc", ".zshrc")])).toEqual([
+      { id: "shell/zshrc", name: "~/.zshrc" },
+      { id: "tools/brew/yq", name: "yq" },
+      { id: "agents/codex", name: "codex" },
     ]);
   });
 
-  it("pi's installer runs with --ignore-scripts and still uninstalls by package", () => {
-    expect(removed([row("agents", "agents/pi")])[0]!.cmd).toBe('export PATH="/usr/local/bin:$PATH"\nnpm uninstall -g @earendil-works/pi-coding-agent');
+  it("what the version being updated retired rides along, and a row ticked again leaves the list", () => {
+    const was = [{ id: "tools/brew/yq", name: "yq" }, { id: "tools/npm/bun", name: "bun" }];
+    const from = snap([row("tools", "tools/brew/jq")]);
+    const to = snap([row("tools", "tools/brew/jq"), row("tools", "tools/npm/bun")]);
+    expect(retiredBy(diffRecipes(from, to), was)).toEqual([{ id: "tools/brew/yq", name: "yq" }]);
+  });
+
+  it("a row retired twice is recorded once", () => {
+    expect(retired([row("tools", "tools/brew/yq")], [], [{ id: "tools/brew/yq", name: "yq" }])).toEqual([{ id: "tools/brew/yq", name: "yq" }]);
+  });
+
+  it("nothing changed retires nothing", () => {
+    const same = snap([row("tools", "tools/brew/jq")]);
+    expect(retiredBy(diffRecipes(same, same))).toEqual([]);
   });
 });
 
@@ -237,9 +199,9 @@ describe("describing and sizing the delta", () => {
       "add 1 agent: aider",
       "update 1 file: ~/.zshrc",
       "update 1 tool: bun (1.4.0 to 1.5.0)",
-      "remove 1 file: ~/.config/gh/hosts.yml",
-      "remove 1 tool: yq",
-      "remove 1 agent: codex",
+      "retire 1 file: ~/.config/gh/hosts.yml, left on the image",
+      "retire 1 tool: yq, left on the image",
+      "retire 1 agent: codex, left on the image",
       "gh: sign in on the machine is not done by an update, so it would not be in the golden; pick the rebuild for it",
       "copy the codex",
     ]);
@@ -262,5 +224,48 @@ describe("describing and sizing the delta", () => {
     const same = snap([row("shell", "shell/nvim", { bytes: SMALL_BYTES + 1 }), row("shell", "shell/zshrc", { bytes: 5 })], [file("shell/nvim", ".config/nvim"), file("shell/zshrc", ".zshrc")]);
     const before = snap([row("shell", "shell/nvim", { bytes: SMALL_BYTES + 1 })], [file("shell/nvim", ".config/nvim")]);
     expect(isSmallDelta(diffRecipes(before, same), bytesIn(same))).toBe(true);
+  });
+});
+
+describe("what the build line counts", () => {
+  it("added and updated rows by their noun, everything the update retires as one, and no login taking the rebuild road", () => {
+    const from = snap([row("tools", "tools/brew/yq"), row("logins", "logins/gh", { choice: "copy" })], [file("logins/gh", ".config/gh/hosts.yml")]);
+    const to = snap([row("tools", "tools/brew/jq"), row("tools", "tools/npm/bun"), row("logins", "logins/gh", { choice: "machine" })]);
+    expect(changeCounts(diffRecipes(from, to)).filter(c => c.count > 0)).toEqual([
+      { count: 2, noun: "tool", word: "added" },
+      { count: 2, noun: "row", word: "retired" },
+    ]);
+  });
+
+  it("a recipe that only adds two tools counts exactly those", () => {
+    const from = snap([]);
+    const to = snap([row("tools", "tools/brew/jq"), row("tools", "tools/npm/bun")]);
+    expect(changeCounts(diffRecipes(from, to)).filter(c => c.count > 0)).toEqual([{ count: 2, noun: "tool", word: "added" }]);
+  });
+});
+
+describe("a login answered with an API key", () => {
+  const keyed = (from: string, to: string) => diffRecipes(snap([row("logins", "logins/claude", { choice: from })]), snap([row("logins", "logins/claude", { choice: to })]));
+
+  it("is named for what it is, never as a login taken off the machine", () => {
+    expect(describeDiff(keyed("copy", "key"))).toEqual(["claude: the API key is set when the machine is created, so it would not be on an updated one; pick the rebuild for it"]);
+  });
+
+  it("takes the rebuild road: a key reaches a machine at create time, so an update would not carry it", () => {
+    expect(isSmallDelta(keyed("copy", "key"), () => 0)).toBe(false);
+    expect(isSmallDelta(keyed("copy", "machine"), () => 0)).toBe(false);
+    // The answers an update can carry stay small.
+    expect(isSmallDelta(keyed("machine", "copy"), () => 0)).toBe(true);
+    expect(isSmallDelta(keyed("copy", "skip"), () => 0)).toBe(true);
+  });
+
+  it("brings nothing and retires nothing of its own: the key is not a row with bytes", () => {
+    expect([...rowsToApply(keyed("machine", "key"))]).toEqual([]);
+    expect(retiredBy(keyed("machine", "key"))).toEqual([]);
+  });
+
+  it("an answer no screen gives yet reads as a row the recipe dropped, never as something taken off the machine", () => {
+    const later = diffRecipes(snap([row("logins", "logins/claude", { choice: "copy" })]), snap([row("logins", "logins/claude", { choice: "device-code" })]));
+    expect(describeDiff(later)).toEqual(["retire the claude, left signed in on the image"]);
   });
 });

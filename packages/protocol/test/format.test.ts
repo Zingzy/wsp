@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
+import { behindGoldenLine, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -100,6 +100,30 @@ describe("the machine row's line about its helper", () => {
       expect(line).not.toContain("daemon");
       expect(line.length).toBeLessThanOrEqual(30);
     }
+  });
+});
+
+describe("the line a re-run of the wizard shows before it builds", () => {
+  it("names the version it builds and the one it builds on top of, then what it changes", () => {
+    expect(goldenBuildLine(2, 3, [{ count: 2, noun: "tool", word: "added" }])).toBe("Builds version 3 on top of version 2: 2 tools added");
+  });
+
+  it("pluralises each noun on its own count and drops what did not change", () => {
+    expect(goldenBuildLine(1, 2, [{ count: 1, noun: "tool", word: "added" }, { count: 0, noun: "agent", word: "added" }, { count: 3, noun: "row", word: "retired" }])).toBe(
+      "Builds version 2 on top of version 1: 1 tool added, 3 rows retired",
+    );
+  });
+
+  it("a build with no version under it names no version to build on, and a build that changes nothing says only what it makes", () => {
+    expect(goldenBuildLine(0, 1, [{ count: 4, noun: "tool", word: "added" }])).toBe("Builds version 1: 4 tools added");
+    expect(goldenBuildLine(2, 3, [{ count: 0, noun: "tool", word: "added" }])).toBe("Builds version 3 on top of version 2");
+  });
+});
+
+describe("the line a workspace behind the golden's head shows", () => {
+  it("names the version it is on and the one available, in words short enough for the row", () => {
+    expect(behindGoldenLine(11, 12)).toBe("on image v11, v12 available");
+    expect(behindGoldenLine(11, 12).length).toBeLessThanOrEqual(30);
   });
 });
 

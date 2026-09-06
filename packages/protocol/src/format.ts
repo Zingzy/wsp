@@ -113,3 +113,26 @@ export const AFTER_CUT_LINE = "previous turn was cut; resuming";
  * and it names the daemon in its own words. The runtime logs it for whoever runs the host. */
 export const DAEMON_UPDATING = "updating the helper";
 export const DAEMON_UPDATE_FAILED = "could not update the helper";
+
+/** One noun's change in a golden build line: "2 tools added". */
+export interface GoldenChange {
+  count: number;
+  /** Singular; the line pluralises it. */
+  noun: string;
+  word: string;
+}
+
+/** The wizard's build line and the app's word for what a re-run does: which version it makes, the version it is
+ * built on top of, and what it changes. `from` is 0 before any golden was sealed, and the line says so instead of
+ * naming a version nothing was built on. */
+export function goldenBuildLine(from: number, to: number, changes: readonly GoldenChange[]): string {
+  const what = changes.filter(c => c.count > 0).map(c => `${c.count} ${c.noun}${c.count === 1 ? "" : "s"} ${c.word}`);
+  const head = from === 0 ? `Builds version ${to}` : `Builds version ${to} on top of version ${from}`;
+  return what.length === 0 ? head : `${head}: ${what.join(", ")}`;
+}
+
+/** The app's line for a workspace still forked from an older golden version, offered the way the helper update is:
+ * a state in words, never a badge. The move is the person's; nothing replaces a machine they are working on. */
+export function behindGoldenLine(on: number, head: number): string {
+  return `on image v${on}, v${head} available`;
+}

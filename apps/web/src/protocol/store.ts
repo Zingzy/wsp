@@ -99,6 +99,9 @@ interface State {
   toggle(id: string): Promise<void>;
   /** The wake alone: what every Wake button calls, whatever the row says. A running workspace is left as it is. */
   wake(id: string): Promise<void>;
+  /** A workspace view the runtime handed back to a caller, over the one in the rail: no event carries the image a
+   * workspace forks from, so a move to a newer golden version would read stale until the next full refresh. */
+  applyWorkspace(workspace: WorkspaceView): void;
   /** The row leaves on the host's forward.close; a refusal is a toast. */
   stopForward(workspaceId: string, port: number): Promise<void>;
   clearToast(): void;
@@ -292,6 +295,12 @@ export const useStore = create<State>((set, get) => {
       }
     },
     clearToast() { set({ toast: null }); },
+    applyWorkspace(workspace) {
+      set(s => ({
+        workspaces: s.workspaces.map(w => (w.id === workspace.id ? { ...w, ...workspace } : w)),
+        statuses: s.statuses[workspace.id] ? { ...s.statuses, [workspace.id]: { ...s.statuses[workspace.id]!, ...workspace } } : s.statuses,
+      }));
+    },
     applyEvent(e) {
       switch (e.type) {
         case "workspace.deleted":

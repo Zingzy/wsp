@@ -47,7 +47,7 @@ describe("the delta of a binary row", () => {
     for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true });
   });
 
-  it("ticked later, a binary row plans its install and nothing else; unticked, its uninstall and nothing else", () => {
+  it("ticked later, a binary row plans its install and retires nothing; unticked, it is retired and nothing is planned", () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), "wsp-upgrade-home-")));
     homes.push(home);
     const gh: ManifestEntry = { rung: "tools", id: "tools/brew/gh", label: "gh", group: "Homebrew", paths: [], bytes: 0, default: "bring", bring: true, linux: "yes" };
@@ -55,16 +55,37 @@ describe("the delta of a binary row", () => {
     const before = importOf([]);
     const after = importOf([gh]);
 
-    const up = deltaFor(diffRecipes(before.recipe!, after.recipe!), before.recipe!, after, [gh], importOf);
+    const up = deltaFor(diffRecipes(before.recipe!, after.recipe!), after, [gh], importOf);
     expect(up.import.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/gh"]);
     expect(up.import.tools.at(-1)!.cmd).toContain("brew install gh");
     expect(up.import.files).toBeUndefined();
     expect(up.import.agents).toEqual([]);
     expect(up.import.recipeHash).toBe(after.recipeHash);
-    expect(up.removals).toEqual([]);
+    expect(up.retired).toEqual([]);
+    expect(up.retiredOnImage).toEqual([]);
 
-    const down = deltaFor(diffRecipes(after.recipe!, before.recipe!), after.recipe!, before, [], importOf);
+    const down = deltaFor(diffRecipes(after.recipe!, before.recipe!), before, [], importOf);
     expect(down.import.tools).toEqual([]);
-    expect(down.removals).toEqual([{ what: "tool", id: "tools/brew/gh", label: "gh", cmd: expect.stringContaining("brew uninstall gh") }]);
+    expect(down.retired).toEqual([{ id: "tools/brew/gh", name: "gh" }]);
+    expect(down.retiredOnImage).toEqual([{ id: "tools/brew/gh", name: "gh" }]);
+  });
+
+  it("what the version being updated retired rides on the version's list, never on the words for this run", () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "wsp-upgrade-home-")));
+    homes.push(home);
+    const gh: ManifestEntry = { rung: "tools", id: "tools/brew/gh", label: "gh", group: "Homebrew", paths: [], bytes: 0, default: "bring", bring: true, linux: "yes" };
+    const importOf = (rows: readonly ManifestEntry[]) => importFor(rows, { home, secrets: new Map(), platform: "darwin" });
+    const before = importOf([]);
+    const after = importOf([gh]);
+    const was = [{ id: "tools/npm/bun", name: "bun" }];
+
+    // gh comes back, bun stays retired: the version records bun alone, and this run retired nothing.
+    const back = deltaFor(diffRecipes(before.recipe!, after.recipe!), after, [gh], importOf, [...was, { id: "tools/brew/gh", name: "gh" }]);
+    expect(back.retiredOnImage).toEqual(was);
+    expect(back.retired).toEqual([]);
+    // gh goes out beside it: this run retired gh, the version carries both.
+    const out = deltaFor(diffRecipes(after.recipe!, before.recipe!), before, [], importOf, was);
+    expect(out.retired).toEqual([{ id: "tools/brew/gh", name: "gh" }]);
+    expect(out.retiredOnImage).toEqual([...was, { id: "tools/brew/gh", name: "gh" }]);
   });
 });

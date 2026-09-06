@@ -248,6 +248,9 @@ export interface Api {
   touch?(id: string): Promise<void>;
   /** Replaces the machine with a fresh golden fork at the new size; gate on capabilities().resize. */
   upgrade(id: string, size: WorkspaceSizeSpec): Promise<WorkspaceView>;
+  /** Moves the workspace onto the golden's head version, carrying its files across. Optional so fixtures that never
+   * show the lineage need not fake it. */
+  updateImage?(id: string): Promise<WorkspaceView>;
   /** Replaces a zombie's machine with a fresh golden fork carrying the vault; id and name stay. Optional so fixtures without a zombie need not fake it. */
   rebuild?(id: string): Promise<WorkspaceView>;
   /** Drops a workspace whose machine is gone from the host's store; the row leaves on workspace.deleted. The host refuses
@@ -382,6 +385,7 @@ export function makeApi(c: ProtocolClient): Api {
     touch: async id => void (await c.request("workspaces.touch", { workspaceId: id })),
     upgrade: async (id, size) =>
       (await c.request<{ workspace: WorkspaceView }>("workspaces.upgrade", { workspaceId: id, ...size })).workspace,
+    updateImage: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.updateImage", { workspaceId: id })).workspace,
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
     forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),
     // Parsed, not trusted: a reply without the list must not become the list.

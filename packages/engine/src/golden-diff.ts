@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The recipe diff: what a golden was built from (the digest its seal wrote)
-// against the recipe now, as rows to apply on top and rows to take off. Pure;
-// golden.ts runs the result on a fork or on the kept builder.
-import { MCP_ID_PREFIX, shellQuote, type RecipeDigest } from "@wsp/protocol";
-import { AGENT_INSTALLERS, agentUninstall, toolUninstall, type RecipeEntry } from "./golden-import.js";
+// against the recipe now, as rows to apply on top and rows the recipe stopped
+// asking for. Pure; golden.ts runs the result on a fork or on the kept builder.
+import { MCP_ID_PREFIX, type GoldenChange, type GoldenRetired, type RecipeDigest } from "@wsp/protocol";
 
 type Tick = RecipeDigest["ticks"][number];
 type DigestFile = RecipeDigest["files"][number];
@@ -48,20 +47,8 @@ export interface RecipeDiff {
   logins: LoginChange[];
 }
 
-/** One thing taken off the machine, or noted when nothing can take it off. */
-export interface Removal {
-  what: "file" | "tool" | "agent";
-  id: string;
-  label: string;
-  /** Runs on the guest; absent when the manager has no uninstall, and `note` says so. */
-  cmd?: string;
-  note?: string;
-  /** A removed agent's version check, so the next version's smoke stops asking for it. */
-  smoke?: string;
-}
-
 /** A row's rung is the first segment of its id, its default label the last. */
-const rungOf = (id: string): string => id.slice(0, id.indexOf("/"));
+export const rungOf = (id: string): string => id.slice(0, id.indexOf("/"));
 export const nameOf = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
 const byRung = (ticks: readonly Tick[], rung: string): Map<string, Tick> => new Map(ticks.filter(t => rungOf(t.id) === rung).map(t => [t.id, t]));
 const fileKey = (f: DigestFile): string => `${f.id}\0${f.dest}`;
@@ -129,49 +116,43 @@ export function rowsToApply(d: RecipeDiff): Set<string> {
   return ids;
 }
 
-const GUEST_HOME = "/root";
-
-/** A removed file is deleted at its guest path; a dest that could climb out of home is refused with a note. */
-function fileRemoval(f: FileChange): Removal {
-  const parts = f.dest.split("/");
-  if (f.dest === "" || parts.some(p => p === "" || p === "." || p === "..")) {
-    return { what: "file", id: f.id, label: `~/${f.dest}`, note: "path refused; left on the machine" };
-  }
-  return { what: "file", id: f.id, label: `~/${f.dest}`, cmd: `rm -rf -- ${shellQuote(`${GUEST_HOME}/${f.dest}`)}` };
+/** What the next version's image carries that its recipe no longer asks for. An update leaves every dropped row on
+ * the image: uninstalling asks each manager for an inverse it may not have, on a disk the next full build throws
+ * away anyway, so the row is recorded against the version instead and the lineage says what a fork still carries.
+ * `previous` is the version being updated; a row ticked again leaves the list at the version that installs it. */
+export function retiredBy(d: RecipeDiff, previous: readonly GoldenRetired[] = []): GoldenRetired[] {
+  const back = rowsToApply(d);
+  const dropped: GoldenRetired[] = [
+    ...d.files.filter(f => f.change === "removed").map(f => ({ id: f.id, name: `~/${f.dest}` })),
+    ...d.tools.filter(t => t.change === "removed").map(t => ({ id: t.id, name: t.label })),
+    ...d.agents.filter(a => a.change === "removed").map(a => ({ id: a.id, name: a.label })),
+  ];
+  const rows = [...previous.filter(p => !back.has(p.id)), ...dropped.filter(r => !back.has(r.id))];
+  return [...new Map(rows.map(r => [r.id, r])).values()];
 }
 
-/** Everything the diff takes off the machine: removed files, removed tools
- * through their manager, removed agents through their installer's inverse. */
-export function removalsFor(d: RecipeDiff, from: RecipeDigest): Removal[] {
-  const out: Removal[] = [];
-  for (const f of d.files) if (f.change === "removed") out.push(fileRemoval(f));
-  for (const t of d.tools) {
-    if (t.change !== "removed") continue;
-    const tick = from.ticks.find(x => x.id === t.id);
-    const row: RecipeEntry | undefined = tick === undefined ? undefined : { rung: "tools", id: tick.id, label: t.label, paths: [], bytes: 0, default: "bring", bring: true, ...(tick.version !== undefined ? { version: tick.version } : {}) };
-    const r = row === undefined ? { note: "row not in the recipe the golden was built from" } : toolUninstall(row);
-    out.push({ what: "tool", id: t.id, label: t.label, ...r });
-  }
-  for (const a of d.agents) {
-    if (a.change !== "removed") continue;
-    if (a.id.startsWith(MCP_ID_PREFIX)) {
-      out.push({ what: "agent", id: a.id, label: a.label, note: "an MCP server; the MCP stage takes it out of the agent's config" });
-      continue;
-    }
-    const installer = AGENT_INSTALLERS[nameOf(a.id)];
-    const r = installer === undefined ? { note: "no installer known, so nothing to uninstall" } : agentUninstall(installer);
-    out.push({ what: "agent", id: a.id, label: a.label, ...r, ...(installer !== undefined ? { smoke: installer.smoke } : {}) });
-  }
-  return out;
-}
+/** A login row the new recipe carries no answer for: the row left it, so the update stops asking for that login. */
+const DROPPED = "\0dropped";
+
+/** What an update does with each login answer, in the person's words. One entry per answer the sign-ins screen can
+ * give, so a new answer is a line here and nowhere else; an answer with no entry reads as one the recipe dropped,
+ * which is what an unticked row is. */
+const LOGIN_LINES: Record<string, (label: string) => string> = {
+  copy: label => `copy the ${label}`,
+  machine: label => `${label}: sign in on the machine is not done by an update, so it would not be in the golden; pick the rebuild for it`,
+  key: label => `${label}: the API key is set when the machine is created, so it would not be on an updated one; pick the rebuild for it`,
+  skip: label => `retire the ${label}, left signed in on the image`,
+  [DROPPED]: label => `retire the ${label}, left signed in on the image`,
+};
 
 /** One line per change, for the person. */
 export function describeDiff(d: RecipeDiff): string[] {
   const lines: string[] = [];
   const group = (change: Change, items: string[], noun: string): void => {
     if (items.length === 0) return;
-    const verb = change === "added" ? "add" : change === "changed" ? "update" : "remove";
-    lines.push(`${verb} ${items.length} ${noun}${items.length === 1 ? "" : "s"}: ${items.join(", ")}`);
+    const verb = change === "added" ? "add" : change === "changed" ? "update" : "retire";
+    const tail = change === "removed" ? ", left on the image" : "";
+    lines.push(`${verb} ${items.length} ${noun}${items.length === 1 ? "" : "s"}: ${items.join(", ")}${tail}`);
   };
   for (const change of ["added", "changed", "removed"] as const) {
     group(change, d.files.filter(f => f.change === change).map(f => `~/${f.dest}`), "file");
@@ -183,23 +164,39 @@ export function describeDiff(d: RecipeDiff): string[] {
       group(change, agents.filter(a => a.id.startsWith(MCP_ID_PREFIX)).map(a => a.label), "MCP server");
     }
   }
-  for (const l of d.logins) {
-    if (l.to === "copy") lines.push(`copy the ${l.label}`);
-    else if (l.to === "machine") lines.push(`${l.label}: sign in on the machine is not done by an update, so it would not be in the golden; pick the rebuild for it`);
-    else lines.push(`take the ${l.label} off the machine`);
-  }
+  for (const l of d.logins) lines.push((LOGIN_LINES[l.to ?? DROPPED] ?? LOGIN_LINES[DROPPED]!)(l.label));
   return lines;
 }
 
+/** What the build line counts: added and changed rows by noun, then everything the update retires as one. Logins
+ * are counted by what the update does with them, so a row moved to sign in on the machine is not counted here at
+ * all: that change takes the rebuild road. */
+export function changeCounts(d: RecipeDiff): GoldenChange[] {
+  const added = (n: number, noun: string): GoldenChange => ({ count: n, noun, word: "added" });
+  return [
+    added(d.files.filter(f => f.change === "added").length, "file"),
+    { count: d.files.filter(f => f.change === "changed").length, noun: "file", word: "updated" },
+    added(d.tools.filter(t => t.change === "added").length, "tool"),
+    { count: d.tools.filter(t => t.change === "changed").length, noun: "tool", word: "updated" },
+    added(d.agents.filter(a => a.change === "added").length, "agent"),
+    added(d.logins.filter(l => l.to === "copy").length, "login"),
+    { count: retiredBy(d).length, noun: "row", word: "retired" },
+  ];
+}
+
+/** Login answers an update cannot land: a sign-in on the machine needs a pty on a builder before the seal, and an
+ * API key is set in the environment at create time, so neither reaches a machine that is already running. */
+const NEEDS_FRESH_MACHINE = new Set(["machine", "key"]);
+
 /** A change small enough that applying it on a fork beats a rebuild: no
- * agent to install, no sign-in to do on the machine, at most this many tool
- * installs, and this much to upload. `bytesOf` is a row's size on this computer. */
+ * agent to install, no login answer needing a machine built for it, at most
+ * this many tool installs, and this much to upload. `bytesOf` is a row's size on this computer. */
 export const SMALL_TOOLS = 5;
 export const SMALL_BYTES = 50 * 1024 * 1024;
 
 export function isSmallDelta(d: RecipeDiff, bytesOf: (id: string) => number): boolean {
   if (d.agents.some(a => a.change === "added")) return false;
-  if (d.logins.some(l => l.to === "machine")) return false;
+  if (d.logins.some(l => NEEDS_FRESH_MACHINE.has(l.to ?? ""))) return false;
   if (d.tools.filter(t => t.change !== "removed").length > SMALL_TOOLS) return false;
   const bytes = [...rowsToApply(d)].filter(id => rungOf(id) !== "tools").reduce((n, id) => n + bytesOf(id), 0);
   return bytes <= SMALL_BYTES;

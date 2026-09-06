@@ -739,6 +739,11 @@ export type GoldenMissingTool = z.infer<typeof GoldenMissingTool>;
 /** One base tool's command with the version read on the builder after the base stage. */
 export const GoldenBaseTool = z.object({ name: z.string(), version: z.string() });
 export type GoldenBaseTool = z.infer<typeof GoldenBaseTool>;
+/** A row an update took out of the recipe. An update never takes anything off the image: the bytes stay where the
+ * version before it put them and the row is recorded here, so the lineage says what a fork still carries but the
+ * recipe no longer asks for. A row ticked again later leaves this list at the version that re-installs it. */
+export const GoldenRetired = z.object({ id: z.string(), name: z.string() });
+export type GoldenRetired = z.infer<typeof GoldenRetired>;
 
 /** One sealed image. `kind` is the machine kind the snapshot was taken from and
  * therefore restores as; entries sealed before kind was recorded were all
@@ -766,6 +771,9 @@ export const GoldenVersion = z.object({
   /** Every base tool's command with the version read after the base stage on the builder this version descends from.
    * Absent on a version sealed before the base tools existed; its forks never ran them, so an update is refused. */
   base: z.array(GoldenBaseTool).optional(),
+  /** Every row on this version's image that its recipe no longer asks for, carried from the version before it.
+   * Absent when the recipe asks for everything the image carries. */
+  retired: z.array(GoldenRetired).optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 
@@ -1286,6 +1294,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     cpu: z.number().optional(),
     memMb: z.number().optional(),
   }),
+  /** Moves a workspace onto the golden's head version: a fresh fork of the newer image carrying this workspace's
+   * files across, the way a resize does. The person asks for it; nothing moves a machine they are working on.
+   * Refused (kind "conflict") for a workspace forked from a project golden, whose disk the move would throw away. */
+  z.object({ id: reqId, op: z.literal("workspaces.updateImage"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Drops a workspace whose machine the provider no longer has: the record, its transcripts and its sessions leave the
    * store, workspace.deleted follows, and nothing is asked of the provider. Refused with the reason (kind "conflict")
@@ -1541,7 +1553,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
+export { goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, behindGoldenLine, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, notifyLine, titleLine, turnCutLine, type DurationStyle, type GoldenChange, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";

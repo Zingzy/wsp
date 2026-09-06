@@ -2484,39 +2484,24 @@ describe("wsp init with a golden already built from a recipe", () => {
   /** The recipe with yq off: the formula this Mac has comes off the golden on the next update. */
   const withoutYq = (): Recipe => ({ ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "yq" ? { ...r, on: false } : r)) });
 
-  it("a binary row unticked after the seal comes off on the update, and the tally names what was removed", async () => {
+  it("a binary row unticked after the seal is retired on the update, left on the image, and the tally names it", async () => {
     const { store, shared, next } = await sealed();
     const f = next({ tty: false, recipe: async () => withoutYq() });
     const builder = shared.machines[0]!;
     const before = builder.execLog.length;
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
-    expect(out).toContain("remove 1 tool: yq");
+    expect(out).toContain("Builds version 2 on top of version 1: 1 row retired");
+    expect(out).toContain("retire 1 tool: yq, left on the image");
     expect(out).toContain("Small change: update on the builder kept since the save");
     const ran = builder.execLog.slice(before);
-    expect(ran.filter(c => c.includes("brew uninstall yq"))).toHaveLength(1);
+    expect(ran.filter(c => c.includes("brew uninstall yq"))).toEqual([]);
     expect(ran.some(c => c.includes("brew install"))).toBe(false);
     expect(out).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
-    expect(out).toMatch(/Tools, agents and machine context: 0 installed, 1 removed, 0 failed, 0 skipped; the list is in .*golden-import\.json/);
-    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ tools: [], removed: [{ what: "tool", id: "tools/brew/yq", label: "yq", outcome: "removed" }] });
-    expect(await store.get("goldens", "default")).toMatchObject({ head: 2 });
-  });
-
-  it("the tally counts tools and agents removed and says how many were not", async () => {
-    const { shared, next } = await sealed();
-    shared.execImpl = (_m, cmd) => (cmd.includes("brew uninstall yq") ? { exitCode: 1, stdout: "", stderr: "Error: Refusing to uninstall yq because it is required by gh" } : guestAnswer(cmd));
-    const f = next({ tty: false, recipe: async () => withoutYq() });
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
-    const out = f.text();
-    expect(out).toContain("remove 1 tool: yq");
-    const tally = out.slice(out.indexOf("Tools, agents and machine context:"));
-    expect(tally.split("\n").slice(0, 2).map(l => l.replace(/^[│◇●]\s+/, ""))).toEqual([
-      expect.stringMatching(/^Tools, agents and machine context: 0 installed, 0 removed, 0 failed, 1 not removed, 0 skipped; the list is in .*golden-import\.json$/),
-      "yq not removed: Error: Refusing to uninstall yq because it is required by gh",
-    ]);
-    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
-      removed: [{ what: "tool", id: "tools/brew/yq", outcome: "failed", note: "Error: Refusing to uninstall yq because it is required by gh" }],
-    });
+    expect(out).toMatch(/Tools, agents and machine context: 0 installed, 1 retired, 0 failed, 0 skipped; the list is in .*golden-import\.json/);
+    expect(out).toContain("yq retired: out of the recipe, left on the image");
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ tools: [], retired: [{ id: "tools/brew/yq", name: "yq" }] });
+    expect(await store.get("goldens", "default")).toMatchObject({ head: 2, versions: [{ version: 1 }, { version: 2, retired: [{ id: "tools/brew/yq", name: "yq" }] }] });
   });
 
   it("when the cap refuses the smoke fork the update falls back and the line about the builder staying up is not printed", async () => {
@@ -2655,6 +2640,74 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(await store.get("goldens", "default")).toMatchObject({ head: 3, versions: [{ version: 2 }, { version: 3 }] });
     expect(await store.get("golden-recipes", "default@v1")).toBeUndefined();
     expect(await store.get("golden-recipes", "default@v3")).toBeDefined();
+  });
+
+  it("a recipe with one row added builds the next version on top of the golden's head: one road only, v2 with v1 as its parent, and the wizard says what it builds", async () => {
+    const { store, shared, first, next } = await sealed();
+    const f = next({ tty: false, recipe: async () => ticking("tmux") });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Builds version 2 on top of version 1: 1 tool added");
+    expect(out).toContain("Updating the golden. Taken as the default (--yes).");
+    // One road: the delta landed on the builder kept from v1, and nothing was built from scratch beside it.
+    expect(out).not.toContain("Rebuilding from scratch");
+    expect(out).not.toMatch(BOOT);
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v2", true]]);
+    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
+    expect(manifest.head).toBe(2);
+    expect(manifest.versions.map(v => v.version)).toEqual([1, 2]);
+    expect(manifest.versions[1]).toMatchObject({ version: 2, parentSnapshotId: manifest.versions[0]!.snapshotId });
+    expect(manifest.versions[1]).not.toHaveProperty("retired");
+    expect(first.text()).toContain("Golden v1 sealed.");
+  });
+
+  it("a row unticked after the seal is retired on the next version and left on the image: nothing is uninstalled, and the lineage carries it", async () => {
+    const { store, shared, next } = await sealed();
+    const added = next({ tty: false, recipe: async () => ticking("tmux") });
+    expect((await runInit(added.opts, added.io)).code).toBe(0);
+    const before = shared.machines.length;
+
+    const dropped = next({ tty: false });
+    expect((await runInit(dropped.opts, dropped.io)).code).toBe(0);
+    const out = dropped.text();
+    expect(out).toContain("Builds version 3 on top of version 2: 1 row retired");
+    expect(out).toContain("retire 1 tool: tmux, left on the image");
+    expect(out).toContain("tmux retired: out of the recipe, left on the image");
+    const ran = shared.machines.slice(before - 1).flatMap(m => m.execLog);
+    expect(ran.filter(c => /uninstall|apt-get purge/.test(c))).toEqual([]);
+    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
+    expect(manifest.head).toBe(3);
+    expect(manifest.versions.find(v => v.version === 3)!.retired).toEqual([{ id: "tools/catalog/tmux", name: "tmux" }]);
+  });
+
+  it("a third version names only the row it retires, while its record carries every row the image still holds", async () => {
+    const { store, shared, next } = await sealed();
+    // v2 drops yq and picks up tmux.
+    const two = next({ tty: false, recipe: async () => without(ticking("tmux"), "yq") });
+    expect((await runInit(two.opts, two.io)).code).toBe(0);
+    expect(two.text()).toContain("Builds version 2 on top of version 1: 1 tool added, 1 row retired");
+    const before = shared.machines.length;
+
+    // v3 drops tmux. yq was retired a version ago and is nothing this run did.
+    const three = next({ tty: false, recipe: async () => without(RECIPE, "yq") });
+    expect((await runInit(three.opts, three.io)).code).toBe(0);
+    const out = three.text();
+    expect(out).toContain("Builds version 3 on top of version 2: 1 row retired");
+    expect(out).toContain("retire 1 tool: tmux, left on the image");
+    expect(out).toMatch(/Tools, agents and machine context: 0 installed, 1 retired, /);
+    expect(out).toContain("tmux retired: out of the recipe, left on the image");
+    // The run never claims to have retired yq: that happened at v2.
+    expect(out).not.toContain("yq retired");
+    expect(out).not.toContain("retired: yq");
+    expect(shared.machines.slice(before - 1).flatMap(m => m.execLog).filter(c => /uninstall|apt-get purge/.test(c))).toEqual([]);
+
+    // The version's record is the whole truth about its image, so it carries both.
+    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
+    expect(manifest.versions.find(v => v.version === 2)!.retired).toEqual([{ id: "tools/brew/yq", name: "yq" }]);
+    expect(manifest.versions.find(v => v.version === 3)!.retired).toEqual([
+      { id: "tools/brew/yq", name: "yq" },
+      { id: "tools/catalog/tmux", name: "tmux" },
+    ]);
   });
 
   it("--yes with a big change (an agent added) takes the rebuild: the boot question follows, the kept builder is no blocker, a fresh builder boots beside it, and its seal forks nothing beside the existing workspace", async () => {
