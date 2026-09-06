@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The one way a byte count reads anywhere wsp prints one: the wizard, the
-// engine's stage lines, the runtime's import events and the app.
+// Binary units with one decimal for the wizard, the engine's stage lines, the
+// runtime's import events and the app; snapshot storage keeps the provider's
+// decimal GB (host storage.ts) by ruling.
 const KIB = 1024;
 const MIB = KIB * 1024;
 const GIB = MIB * 1024;
