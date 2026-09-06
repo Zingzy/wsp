@@ -46,20 +46,33 @@ export interface ProbeOptions {
   timeoutMs: number;
 }
 
+/** The daemon's ws server answers a plain HTTP GET with Upgrade Required and nothing else it serves does: it is the
+ * one status that came from inside the guest. */
+const DAEMON_ANSWER = 426;
+
+/** What one round trip found: the state to show, and whether the guest itself answered. */
+export interface Probed {
+  state: ReachState;
+  /** The daemon answered. Any other answer is the edge speaking for the machine (an edge auth refusal, a route to a
+   * paused machine), which says nothing about the guest either way, so it decides nothing on its own and only sends
+   * the caller to the provider for the machine's real state. */
+  fromDaemon: boolean;
+}
+
 /** One HTTP round trip against the minted URL. A prompt 502 means the edge
- * dialed the guest and nothing listens on the daemon port; any other prompt
- * response came from inside the guest (the daemon's ws server answers plain
- * HTTP with 426). A late answer, 502 included, is a provider slow spell: the
- * machine is there, the edge is not keeping up. Silence is unreachable. */
-export async function probeReach(url: string, o: ProbeOptions, now: () => number = Date.now): Promise<ReachState> {
+ * dialed the guest and nothing listens on the daemon port. A late answer, 502
+ * included, is a provider slow spell: the machine is there, the edge is not
+ * keeping up. Silence is unreachable. */
+export async function probeReach(url: string, o: ProbeOptions, now: () => number = Date.now): Promise<Probed> {
   const started = now();
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(o.timeoutMs) });
     await res.text().catch(() => "");
-    if (now() - started > o.promptMs) return "slow";
-    return res.status === 502 ? "no-daemon" : "reachable";
+    const fromDaemon = res.status === DAEMON_ANSWER;
+    if (now() - started > o.promptMs) return { state: "slow", fromDaemon };
+    return { state: res.status === 502 ? "no-daemon" : "reachable", fromDaemon };
   } catch {
-    return "unreachable";
+    return { state: "unreachable", fromDaemon: false };
   }
 }
 
@@ -121,6 +134,9 @@ interface Meter {
   awakeMs: number;
   /** Set while running: when the current awake stretch began. */
   mark?: number;
+  /** The newest instant anything proved the machine awake. A pause or a death the provider made ended the stretch
+   * here at the latest: nothing proves a machine awake while the host is down or unwatched, so the gap is not billed. */
+  awakeUntil?: number;
 }
 
 const COST_HISTORIES = "cost-histories";
@@ -187,18 +203,31 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     }
     return m;
   };
+  /** Something proved the machine awake just now: a create or a wake here, the guest answering the probe, or the
+   * provider saying running. The record's own phase is a belief, and a belief never moves this. */
+  const sawAwake = (id: string): void => {
+    meter(id).awakeUntil = clock.now();
+  };
+  const beganAwake = (id: string): void => {
+    meter(id).mark = clock.now();
+    sawAwake(id);
+  };
   o.on("workspace.created", e => {
-    if (e.type === "workspace.created") meter(e.workspace.id).mark = clock.now();
+    if (e.type === "workspace.created") beganAwake(e.workspace.id);
   });
   o.on("workspace.woken", e => {
-    if (e.type === "workspace.woken") meter(e.workspaceId).mark = clock.now();
+    if (e.type === "workspace.woken") beganAwake(e.workspaceId);
   });
-  // Awake time ends where the machine did: at the pause, or at the moment the provider was found not to know it.
+  // Awake time ends where the machine did: a pause this host made ends it now; a pause the provider made and this
+  // host only found, and the moment the provider was found not to know the machine at all, end it at the last
+  // instant anything proved the machine awake, so the hours before we noticed bill nothing.
   for (const type of ["workspace.napped", "workspace.gone"] as const) {
     o.on(type, e => {
       if (e.type !== type) return;
       const m = meter(e.workspaceId);
-      if (m.mark !== undefined) m.awakeMs += clock.now() - m.mark;
+      const found = e.type === "workspace.gone" || e.found === true;
+      const ended = found ? (m.awakeUntil ?? clock.now()) : clock.now();
+      if (m.mark !== undefined) m.awakeMs += Math.max(0, ended - m.mark);
       m.mark = undefined;
     });
   }
@@ -223,7 +252,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       histories.set(doc.workspaceId, doc.points);
       const m = meter(doc.workspaceId);
       m.awakeMs = last.awakeMs;
-      if (last.phase === "running") m.mark = Date.parse(last.at);
+      if (last.phase === "running") m.mark = m.awakeUntil = Date.parse(last.at);
     }
   })().catch((e: unknown) => console.warn("cost histories not loaded; the series begins at the first tick", e));
 
@@ -251,6 +280,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       words = e instanceof Error ? e.message : String(e);
     }
     reconciled.set(r.id, { state, at: clock.now() });
+    if (state === "running") sawAwake(r.id);
     if (state === "gone") goneReasons.set(r.id, goneWords(r.machineId, words));
     return state;
   };
@@ -356,16 +386,24 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         } catch {
           return done(await machineState(r, reconcile, true), { state: "unreachable" });
         }
-        const state = await probeReach(reach.url, probe, clock.now);
-        const status: ReachStatus = { state, url: reach.url, expiresAt: reach.expiresAt };
-        if (state !== "slow" && state !== "unreachable") {
+        const probed = await probeReach(reach.url, probe, clock.now);
+        if (probed.fromDaemon) sawAwake(r.id);
+        const status: ReachStatus = { state: probed.state, url: reach.url, expiresAt: reach.expiresAt };
+        if (probed.state !== "slow" && probed.state !== "unreachable") {
           suspects.delete(r.id);
-          return done(await machineState(r, reconcile, state === "no-daemon"), status);
+          // An answer the guest did not send is a reason to ask the provider, never a verdict on the guest: the
+          // state on show stays as it was, and a machine the provider has paused is caught by its own word.
+          return done(await machineState(r, reconcile, !probed.fromDaemon), status);
         }
         const judged = await judge(r, status, reconcile);
         return { ...done(judged.state, judged.reach), ...(judged.reason !== undefined ? { reason: judged.reason } : {}) };
       }),
     );
+  };
+
+  /** A tick that throws is a tick that failed, never an unhandled rejection: one of those takes the host down with it. */
+  const guarded = (what: string, run: () => Promise<void>) => (): void => {
+    void run().catch((e: unknown) => console.warn(`${what} tick failed`, e));
   };
 
   let watchers = 0;
@@ -416,10 +454,13 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const watch: StatusApi["watch"] = opts => {
     watchers++;
     if (watchers === 1) {
-      costTimer = setInterval(() => void costTick(), opts?.costIntervalMs ?? costIntervalMs);
-      pollTimer = setInterval(() => void pollTick(), opts?.pollIntervalMs ?? pollIntervalMs);
+      costTimer = setInterval(guarded("cost", costTick), opts?.costIntervalMs ?? costIntervalMs);
+      pollTimer = setInterval(guarded("status poll", pollTick), opts?.pollIntervalMs ?? pollIntervalMs);
       costTimer.unref?.();
       pollTimer.unref?.();
+      // Every machine's state before the first cost tick: nothing polls while no client watches, so a client
+      // attaching after a gap would otherwise meter a stretch the provider ended hours ago.
+      guarded("status poll", pollTick)();
     }
     let released = false;
     return () => {

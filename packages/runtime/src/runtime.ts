@@ -1447,7 +1447,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     entry.record.phase = "napping";
     await persist(entry.record);
     endSessions(entry.record.id, PAUSED_REASON);
-    bus.emit({ type: "workspace.napped", workspaceId: entry.record.id });
+    bus.emit({ type: "workspace.napped", workspaceId: entry.record.id, found: true });
     await emitStatus(entry, "napping", "paused outside wsp");
   };
   /** The provider stopped knowing the machine (deleted behind wsp, or expired): the record follows the fact and stays
@@ -1576,16 +1576,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       for (const raw of await store.list(WORKSPACES)) {
         const stored = raw as Omit<WorkspaceRecord, "size"> & { size?: WorkspaceSize };
-        // The store is the fleet's truth and get(id) the provider's: a record whose machine 404s is gone, whatever
-        // phase it was left at, and says so before anything lists it.
+        // The store is the fleet's truth and get(id) the provider's: a record whose machine the provider lost is
+        // gone and one whose machine it holds paused is napping, whatever phase either was left at, and both say
+        // so before anything lists it or meters it.
         let missing: string | undefined;
         const machine = await backend.get(stored.machineId).catch((e: unknown) => {
           if ((e as { kind?: string }).kind !== "missing") throw e;
           missing = goneWords(stored.machineId, e instanceof Error ? e.message : String(e));
           return deadMachine(stored.machineId);
         });
-        // A record left at pausing died mid-pause: whether or not the provider got the call, a wake resumes it either way.
-        const phase: WorkspacePhase = missing !== undefined || stored.phase === "gone" ? "gone" : stored.phase === "pausing" ? "napping" : stored.phase;
+        // The state rides on the view get() just fetched; a second read would reset the provider's idle timer.
+        const atProvider = missing !== undefined ? "gone" : (machine.seen?.state ?? (await machine.state()));
+        // A record left at pausing died mid-pause: whether or not the provider got the call, a wake resumes it either
+        // way. A record left at waking follows the provider both ways, since waking refuses sends, bills nothing and
+        // schedules no nap: paused means the resume never landed, running means it did with nobody left to write it.
+        const phase: WorkspacePhase =
+          missing !== undefined || atProvider === "gone" || stored.phase === "gone"
+            ? "gone"
+            : atProvider === "paused" || stored.phase === "pausing"
+              ? "napping"
+              : atProvider === "running" && stored.phase === "waking"
+                ? "running"
+                : stored.phase;
         const record: WorkspaceRecord = {
           ...stored,
           phase,
@@ -1594,8 +1606,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         };
         if (phase === "gone") record.gone = stored.gone ?? missing ?? goneWords(stored.machineId);
         attach(record, machine);
-        if (phase === "gone" && stored.phase !== "gone") {
-          console.warn(`workspace ${stored.id} is gone: ${record.gone}`);
+        if (phase !== stored.phase) {
+          if (phase === "gone") console.warn(`workspace ${stored.id} is gone: ${record.gone}`);
+          else console.warn(`workspace ${stored.id} was left ${stored.phase} and its machine is ${atProvider} at the provider; the record hydrates ${phase}`);
           await persist(record);
         }
         if (phase === "running") idle.touch(stored.id);

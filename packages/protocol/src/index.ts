@@ -506,7 +506,9 @@ export const WorkspaceCreatingEvent = z.object({
   notice: z.string().optional(),
 });
 export type WorkspaceCreatingEvent = z.infer<typeof WorkspaceCreatingEvent>;
-export const WorkspaceNappedEvent = z.object({ type: z.literal("workspace.napped"), workspaceId: z.string() });
+/** found is set when the provider had already paused the machine and this host only followed it: the awake
+ * stretch ended at the last instant the meter saw the machine awake, not at this event. */
+export const WorkspaceNappedEvent = z.object({ type: z.literal("workspace.napped"), workspaceId: z.string(), found: z.boolean().optional() });
 export const WorkspaceWokenEvent = z.object({
   type: z.literal("workspace.woken"),
   workspaceId: z.string(),
@@ -1541,6 +1543,6 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
+export { AFTER_CUT_LINE, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";
