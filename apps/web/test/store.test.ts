@@ -102,12 +102,12 @@ describe("store creations", () => {
     expect(useStore.getState().selectedId).toBe(creation!.key);
 
     emit(stage());
-    emit(stage({ stage: "machine-booting", message: "Machine m1 is booting.", elapsedMs: 1_500, notice: "Stopped the builder kept from golden v1 (m0) to make room at the machine cap." }));
+    emit(stage({ stage: "machine-booting", message: "Machine m1 is booting.", elapsedMs: 1_500, notice: "Stopped the builder kept from golden v1 to make room at the machine cap." }));
     const logged = useStore.getState().creations[0]!;
     expect(logged.workspaceId).toBe("ws_new");
     expect(logged.lines.map(l => [l.stage, l.message, l.elapsedMs, l.notice])).toEqual([
       ["fork-requested", "Fork of the golden image requested.", 0, undefined],
-      ["machine-booting", "Machine m1 is booting.", 1_500, "Stopped the builder kept from golden v1 (m0) to make room at the machine cap."],
+      ["machine-booting", "Machine m1 is booting.", 1_500, "Stopped the builder kept from golden v1 to make room at the machine cap."],
     ]);
     expect(logged.lines.every(l => !Number.isNaN(Date.parse(l.at)))).toBe(true);
 
@@ -122,14 +122,14 @@ describe("store creations", () => {
 
   it("a reply that lands before the created event finishes the row from the reply, and carries its notice as the toast", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
-    api.createFromGoldenHead = async () => ({ ...view("ws_new"), notice: "Stopped the builder kept from golden v1 (m0) to make room at the machine cap." });
+    api.createFromGoldenHead = async () => ({ ...view("ws_new"), notice: "Stopped the builder kept from golden v1 to make room at the machine cap." });
     useStore.getState().bind(api);
     await flush();
     expect(await useStore.getState().createWorkspace("beta")).toBe("ws_new");
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBe("ws_new");
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
-    expect(useStore.getState().toast).toBe("Stopped the builder kept from golden v1 (m0) to make room at the machine cap.");
+    expect(useStore.getState().toast).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
     emit({ type: "workspace.created", workspace: view("ws_new") });
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
   });

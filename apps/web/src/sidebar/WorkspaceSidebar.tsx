@@ -438,7 +438,7 @@ export function WorkspaceSidebar() {
             role="status"
             aria-label={toast}
             onClick={clearToast}
-            className="mb-1 cursor-pointer rounded-lg border border-sidebar-border bg-sidebar-control-surface px-3 py-2 text-xs text-sidebar-foreground"
+            className="mb-1 cursor-pointer rounded-lg border border-sidebar-border bg-sidebar-control-surface px-3 py-2 text-xs break-words text-sidebar-foreground"
           >
             {toast}
           </div>

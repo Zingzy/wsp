@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The shell's chrome in a real Chromium: the sidebar's brand lockup starts
-// where the search box does, and collapsing the sidebar leaves the page
-// header's left padding alone. Vite serves test/shell to Playwright's
-// browser, so like the glyph test it runs only when asked for (WSP_RENDER=1)
-// and skips without Playwright's Chromium on the machine.
+// where the search box does, collapsing the sidebar leaves the page header's
+// left padding alone, and a status toast holds a long token inside its box.
+// Vite serves test/shell to Playwright's browser, so like the glyph test it
+// runs only when asked for (WSP_RENDER=1) and skips without Playwright's
+// Chromium on the machine.
 import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -69,6 +70,24 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       const path = join(SHOTS_DIR, `sidebar-header-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar header screenshot: ${path}`);
+    }
+  }, 30_000);
+
+  it("a status toast with a 200-character token stays inside the sidebar's width, in both themes", async () => {
+    const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);
+    const toast = encodeURIComponent(`Stopped the builder ${token} to make room at the machine cap.`);
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&toast=${toast}`);
+      const status = page!.locator("[data-slot=sidebar-footer] [role=status]").first();
+      await status.waitFor();
+      const sidebar = await box("[data-slot=sidebar]");
+      const b = await box("[data-slot=sidebar-footer] [role=status]");
+      expect(b.x).toBeGreaterThanOrEqual(sidebar.x);
+      expect(b.x + b.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
+      expect(await status.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
+      const path = join(SHOTS_DIR, `sidebar-toast-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar toast screenshot: ${path}`);
     }
   }, 30_000);
 
