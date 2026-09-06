@@ -3711,8 +3711,8 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(await store.list("builders")).toEqual([]);
     expect(ws.machineId).toBe(backend.machines[2]!.id);
     // The person who asked for the workspace reads why a builder of theirs went, on the create's own result.
-    expect(ws.notice).toBe(`Stopped the builder kept from golden v1 (${b.id}) to make room at the machine cap.`);
-    expect(said).toEqual([`workspace ${ws.id}: stopped the builder kept from golden v1 (${b.id}) to make room at the machine cap`]);
+    expect(ws.notice).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
+    expect(said).toEqual([`workspace ${ws.id}: stopped the builder kept from golden v1 to make room at the machine cap (${b.id})`]);
 
     // Nothing left to stop: the refusal reaches the caller with its kind, and nothing of ours is killed.
     await expect(rt.workspaces.create({ golden: version.snapshotId, name: "two" })).rejects.toMatchObject({ kind: "concurrency" });
@@ -3738,7 +3738,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(stages[1]).toMatchObject({
       workspaceId: ws.id,
       message: "Fork of the golden image requested again.",
-      notice: `Stopped the builder kept from golden v1 (${b.id}) to make room at the machine cap.`,
+      notice: "Stopped the builder kept from golden v1 to make room at the machine cap.",
     });
     expect(stages.map(e => (e.type === "workspace.creating" ? e.name : ""))).toEqual(Array<string>(5).fill("one"));
   });
@@ -3764,7 +3764,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const made = await wsRequest(srv.port, "t", { op: "workspaces.create", golden: version.snapshotId, name: "room" });
     warn.mockRestore();
     expect(made["ok"]).toBe(true);
-    expect(made["notice"]).toBe(`Stopped the builder kept from golden v1 (${second.id}) to make room at the machine cap.`);
+    expect(made["notice"]).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
     expect(made["workspace"]).not.toHaveProperty("notice");
     await srv.close();
   });
@@ -3786,7 +3786,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const stopped = [a.id, b.id].filter(id => backend.machines.find(m => m.id === id)!.killed);
     expect(stopped).toHaveLength(1);
     expect((await store.list("builders")).map(r => (r as { id: string }).id)).toEqual([a.id, b.id].filter(id => !stopped.includes(id)));
-    expect(ws.notice).toBe(`Stopped the builder kept from golden v1 (${stopped[0]}) to make room at the machine cap.`);
+    expect(ws.notice).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
 
     // The cap at one: the next create needs a second slot, so the remaining kept builder goes on the second refusal.
     backend.create = async spec => {
@@ -3797,7 +3797,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const two = await rt.workspaces.create({ golden: sealedA.version.snapshotId, name: "two" });
     quiet.mockRestore();
     expect(await store.list("builders")).toEqual([]);
-    expect(two.notice).toMatch(/^Stopped the builder kept from golden v1 \(m[0-9]+\) to make room at the machine cap\.$/);
+    expect(two.notice).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
   });
 
   it("a kept builder another live process holds is not stopped to make room; the refusal stands", async () => {

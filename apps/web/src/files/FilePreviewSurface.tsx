@@ -23,7 +23,8 @@ import { fsRead } from "../terminal/daemon-fs.js";
 import { isMarkdownFile } from "./entries.js";
 import { NotRunning } from "./FilesSurface.js";
 import { useWorkspaceListing } from "./listing.js";
-import { useDaemonRoot, useDaemonWire } from "./wire.js";
+import { rootOf, useRoots } from "./root.js";
+import { useDaemonWire } from "./wire.js";
 
 type FileSurface = Extract<RightPanelSurface, { kind: "file" }>;
 
@@ -44,7 +45,7 @@ export function FilePreviewSurface({ workspaceId, surface, theme }: { workspaceI
   const path = surface.relativePath;
   const workspace = useWorkspace(workspaceId);
   const wire = useDaemonWire(workspaceId);
-  const daemonRoot = useDaemonRoot(workspaceId);
+  const roots = useRoots(workspaceId);
   const listing = useWorkspaceListing(workspaceId);
   const openFile = useRightPanelStore(s => s.openFile);
   const [read, setRead] = useState<ReadState>({ kind: "pending", last: null });
@@ -86,7 +87,7 @@ export function FilePreviewSurface({ workspaceId, surface, theme }: { workspaceI
           <div className="flex h-full w-max min-w-full items-center text-xs">
             <FileBreadcrumbs
               projectName={workspace?.name ?? "workspace"}
-              root={daemonRoot ?? "/"}
+              root={rootOf(roots, path) ?? "/"}
               path={path}
               levels={listing.levels}
               onBrowseDirectory={listing.ensure}

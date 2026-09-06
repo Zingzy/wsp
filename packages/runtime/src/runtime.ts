@@ -96,6 +96,7 @@ import type {
 import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, goneRefusal, notifyLine, sendRefusal, shellQuote, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
+import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
@@ -1642,13 +1643,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let made = false;
       await refreshBuilders();
       for (const x of [...builders.values()].filter(x => (x.life === "own" || x.life === "reusable") && x.record.sealed !== undefined)) {
-        const stopped = `Stopped the builder kept from golden v${x.record.sealed!.version} (${x.record.id}) to make room at the machine cap.`;
+        const stopped = `Stopped the builder kept from golden v${x.record.sealed!.version} to make room at the machine cap.`;
         graceTimers.get(x.record.id)?.();
         graceTimers.delete(x.record.id);
         await killUntilGone(backend, x.builder.machine, opts.killConfirm);
         await forgetBuilder(x.record.id);
         notices.push(stopped);
-        console.warn(`workspace ${record.id}: ${stopped.charAt(0).toLowerCase()}${stopped.slice(1, -1)}`);
+        console.warn(`workspace ${record.id}: ${stopped.charAt(0).toLowerCase()}${stopped.slice(1, -1)} (${x.record.id})`);
         report("fork-requested", "Fork of the golden image requested again.", stopped);
         try {
           await fork(record, bind, undefined, report);
@@ -2882,6 +2883,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           report("landing", `Landing sessions: ${outcomes()}.`);
         }
+        const browsable = await entry.machine.exec(writeDaemonRootsScript([o.dest]), { timeoutMs: INLINE_EXEC_MS });
+        if (browsable.exitCode !== 0) throw new Error(`could not make ${o.dest} browsable on the machine: ${browsable.stderr.slice(-200)}`);
         entry.record.project = { name: posix.basename(o.dest), dest: o.dest, importedAt: new Date(clock.now()).toISOString() };
         await persist(entry.record);
         report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${agents.length > 0 ? `; sessions: ${outcomes()}` : ""}.`);
@@ -2930,6 +2933,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const status = createStatusTracker({
     rateUsdPerHour: size => backend.pricing.rateUsdPerHour(size),
+    store,
     records: async () => {
       await ready();
       return [...live.values()].filter(e => !e.creating).map(e => ({

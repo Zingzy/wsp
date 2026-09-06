@@ -14,7 +14,7 @@ function seeded(history: WorkspaceCostEvent[], live: readonly WorkspaceCostEvent
   return after.reduce(appendCostPoint, history);
 }
 
-/** The workspace's accrued cost since the runtime began metering it: its history once fetched, every live tick after.
+/** The workspace's accrued cost since metering began: its history once fetched, every live tick after.
  * Rate-constant runs fold to their ends, so a day of ticks stays a handful of points. */
 export function useCostSeries(id: string | null): WorkspaceCostEvent[] {
   const api = useStore(s => s.api);

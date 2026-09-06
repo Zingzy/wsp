@@ -1,10 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { DAEMON_VERSION, DaemonAuthRequest, type DaemonEvent } from "@wsp/protocol";
+import { DAEMON_ROOTS_PATH, DAEMON_VERSION, DaemonAuthRequest, type DaemonEvent } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
 import { listDir, readFileBounded, type FsReadEncoding } from "./fs-ops.js";
 import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
@@ -48,8 +49,10 @@ export interface DaemonOptions {
   procRoot?: string;
   procPasswdPath?: string;
   procIntervalMs?: number;
-  /** Every fs.* and git.* path must resolve inside this directory; HOME by default. */
+  /** Every fs.* and git.* path must resolve inside this directory or a folder the roots file names; HOME by default. */
   root?: string;
+  /** The file naming the imported project folders, one absolute path per line, read on every fs.* and git.* op. */
+  rootsPath?: string;
   /** Unix socket the browser shim posts URLs to; absent means no shim socket (local and test daemons). */
   openSocketPath?: string;
   spotter?: CallbackSpotter;
@@ -158,6 +161,18 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   };
 
   const root = resolve(opts.root ?? process.env["HOME"] ?? homedir());
+  const rootsPath = opts.rootsPath ?? DAEMON_ROOTS_PATH;
+  // Read per op, not once: the host writes the file when a project lands and the daemon keeps running.
+  const roots = async (): Promise<string[]> => {
+    let named = "";
+    try {
+      named = await readFile(rootsPath, "utf8");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    }
+    const extra = named.split("\n").map(line => line.trim()).filter(line => line.startsWith("/"));
+    return [...new Set([root, ...extra])];
+  };
   const getSysSampler = () => {
     sysSampler ??= new SysSampler(opts.sysSource ?? procSysSource(root), {
       ...(opts.sysIntervalMs !== undefined ? { intervalMs: opts.sysIntervalMs } : {}),
@@ -206,7 +221,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       else if (port === undefined) spotter.spot(p => broadcast({ type: "callback.port", port: p }));
     },
   };
-  const ctx: Ctx = { ptys, manifest, modes, root, getPortWatcher, getInboxWatcher, getSysSampler, getProcSampler, spotter, broadcast };
+  const ctx: Ctx = { ptys, manifest, modes, root, roots, getPortWatcher, getInboxWatcher, getSysSampler, getProcSampler, spotter, broadcast };
   let openSocket: OpenSocket | undefined;
   if (opts.openSocketPath !== undefined) {
     try {
@@ -319,6 +334,7 @@ interface Ctx {
   manifest: ProcessManifest;
   modes: ModeWatcher;
   root: string;
+  roots(): Promise<string[]>;
   getPortWatcher(): PortWatcher;
   getInboxWatcher(): InboxWatcher;
   getSysSampler(): SysSampler;
@@ -538,18 +554,18 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       return;
     }
     case "fs.list": {
-      const dir = await resolveInside(ctx.root, requireString(msg, "path"));
+      const dir = await resolveInside(await ctx.roots(), requireString(msg, "path"));
       reply(ws, msg.id, await listDir(dir, { gitignore: msg["gitignore"] === true }));
       return;
     }
     case "fs.read": {
       const encoding = optionalEnum<FsReadEncoding>(msg, "encoding", ["utf8", "base64"]);
-      const file = await resolveInside(ctx.root, requireString(msg, "path"));
+      const file = await resolveInside(await ctx.roots(), requireString(msg, "path"));
       reply(ws, msg.id, await readFileBounded(file, encoding));
       return;
     }
     case "git.status": {
-      const cwd = await resolveInside(ctx.root, requireString(msg, "cwd"));
+      const cwd = await resolveInside(await ctx.roots(), requireString(msg, "cwd"));
       reply(ws, msg.id, await gitStatus(cwd));
       return;
     }
@@ -558,7 +574,7 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       if (scope === undefined) throw new OpError("bad-request", "scope is required");
       const path = msg["path"];
       if (path !== undefined && typeof path !== "string") throw new OpError("bad-request", "path must be a string");
-      const cwd = await resolveInside(ctx.root, requireString(msg, "cwd"));
+      const cwd = await resolveInside(await ctx.roots(), requireString(msg, "cwd"));
       reply(ws, msg.id, await gitDiff(cwd, scope, path));
       return;
     }
