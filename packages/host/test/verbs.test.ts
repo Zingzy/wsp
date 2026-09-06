@@ -289,6 +289,75 @@ describe("wsp verbs over the host", () => {
     expect(held.steered).toEqual([]);
   });
 
+  it("thread new --notify me prints the thread's end once on stderr, after the reply, and records it in the thread", async () => {
+    await run("new", "alpha");
+    const { code, io } = await run("thread", "new", "--in", "alpha", "--notify", "me", "build it");
+    expect(code).toBe(0);
+    const [row] = await rt.sessions.list();
+    const line = `thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it`;
+    expect(io.lines).toEqual([`thread ${row!.threadId}`, "re: build it"]);
+    expect(io.errors).toEqual([line]);
+    const [alpha] = await rt.workspaces.list();
+    const history = await rt.sessions.history(alpha!.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.delta", "session.delta", "session.delta", "session.notify", "session.done", "session.end"]);
+    expect(history[4]).toMatchObject({ type: "session.notify", notify: "me", text: line, threadId: row!.threadId });
+
+    const later = await run("send", row!.threadId!, "and the docs");
+    expect(later.io.errors).toEqual([`thread ${row!.threadId!.slice(0, 8)} finished (completed): re: and the docs`]);
+    expect(later.io.lines).toEqual(["re: and the docs"]);
+  });
+
+  it("thread new --notify <thread> tells that thread, by a prefix of its id, when the child ends: the running parent takes the line as a steer and the child's command prints no notice", async () => {
+    const held = heldAgent(true);
+    await handle?.close();
+    rt = createRuntime({ backend, store, adapters: { claude: held.adapter } });
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
+    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    vi.stubEnv("SOLARI_API_KEY", "");
+    await run("new", "alpha");
+    const parent = run("thread", "new", "--in", "alpha", "orchestrate the builders");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [parentRow] = await rt.sessions.list();
+    const kid = run("thread", "new", "--in", "alpha", "--notify", parentRow!.threadId!.slice(0, 8), "build it");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(2));
+    const kidRow = (await rt.sessions.list()).find(r => r.threadId !== parentRow!.threadId)!;
+    held.release(1, "all green");
+    const line = `thread ${kidRow.threadId!.slice(0, 8)} finished (completed): all green`;
+    await vi.waitFor(() => expect(held.steered).toEqual([line]));
+    const built = await kid;
+    expect(built.code).toBe(0);
+    expect(built.io.lines).toEqual([`thread ${kidRow.threadId}`, "all green"]);
+    expect(built.io.errors).toEqual([]);
+    held.release(0, "read the report");
+    expect((await parent).io.lines).toEqual([`thread ${parentRow!.threadId}`, "read the report"]);
+    expect(held.starts).toHaveLength(2);
+    const [alpha] = await rt.workspaces.list();
+    const history = await rt.sessions.history(alpha!.id);
+    expect(history.filter(e => e.threadId === parentRow!.threadId).map(e => e.type)).toEqual(["session.start", "session.steer", "session.delta", "session.done", "session.end"]);
+    expect(history.find(e => e.type === "session.steer")).toMatchObject({ prompt: line });
+    expect(history.find(e => e.type === "session.notify")).toMatchObject({ threadId: kidRow.threadId, notify: parentRow!.threadId, text: line });
+
+    const missing = await run("thread", "new", "--in", "alpha", "--notify", "nope", "x");
+    expect(missing.io.errors).toEqual(["wsp thread new: no thread nope"]);
+    expect(held.starts).toHaveLength(2);
+  });
+
+  it("fork --send --notify me prints the first turn's end on stderr as thread new does; a bad --notify fails before any machine is minted", async () => {
+    await run("new", "alpha");
+    const { code, io } = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--notify", "me");
+    expect(code).toBe(0);
+    const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
+    const [row] = await rt.sessions.list(worker.id);
+    expect(io.lines).toEqual([`created worker ${worker.id}`, `thread ${row!.threadId}`, "re: build it"]);
+    expect(io.errors).toEqual([`thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it`]);
+
+    const bad = await run("fork", "alpha", "--name", "never", "--send", "build it", "--notify", "nope");
+    expect(bad.code).toBe(1);
+    expect(bad.io.lines).toEqual([]);
+    expect(bad.io.errors).toEqual(["wsp fork: no thread nope"]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "worker"]);
+  });
+
   it("send --json prints the turn's raw events and nothing else", async () => {
     await run("new", "alpha");
     await run("thread", "new", "--in", "alpha", "first");
@@ -508,7 +577,7 @@ describe("wsp verbs over the host", () => {
     expect(bad.io.errors[0]).toContain("usage: wsp threads");
     const half = await run("thread");
     expect(half.code).toBe(1);
-    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent <name>] "<task>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent <name>] [--notify <thread | me>] "<task>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {

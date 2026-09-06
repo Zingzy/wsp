@@ -131,6 +131,8 @@ describe("the MCP server over the host", () => {
     expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "snapshot", "thread_new", "threads", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
+    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "notify", "task", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "name", "notify", "task", "workspace"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toContain("thread_new");
     expect(c.getInstructions()).toContain("snapshot");
@@ -302,6 +304,40 @@ describe("the MCP server over the host", () => {
     expect(joined.structured).toEqual({ threadId: row!.threadId, workspaceId: row!.workspaceId, harness: "claude", text: "done STEERED", outcome: "steered" });
     expect(held.starts).toHaveLength(1);
     expect((await rt.sessions.history(row!.workspaceId)).map(e => e.type)).toEqual(["session.start", "session.steer", "session.delta", "session.done", "session.end"]);
+  });
+
+  it("thread_new with notify tells that thread when the new one ends, through the same start the CLI makes: the running parent is steered the line and the child's transcript names the parent", async () => {
+    const held = heldAgent(true);
+    await restartHost({ claude: held.adapter });
+    await call("new", { name: "alpha" });
+    const parent = call("thread_new", { workspace: "alpha", task: "orchestrate" });
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [parentRow] = await rt.sessions.list();
+    const kid = call("thread_new", { workspace: "alpha", task: "build it", notify: parentRow!.threadId!.slice(0, 8) });
+    await vi.waitFor(() => expect(held.starts).toHaveLength(2));
+    const kidRow = (await rt.sessions.list()).find(r => r.threadId !== parentRow!.threadId)!;
+    held.release(1, "all green");
+    const line = `thread ${kidRow.threadId!.slice(0, 8)} finished (completed): all green`;
+    await vi.waitFor(() => expect(held.steered).toEqual([line]));
+    expect((await kid).structured).toEqual({ threadId: kidRow.threadId, workspaceId: kidRow.workspaceId, harness: "claude", text: "all green", outcome: "started" });
+    held.release(0, "read it");
+    expect((await parent).text).toBe("read it");
+    const history = await rt.sessions.history(kidRow.workspaceId);
+    expect(history.find(e => e.type === "session.notify")).toMatchObject({ threadId: kidRow.threadId, notify: parentRow!.threadId, text: line });
+    expect(history.find(e => e.type === "session.steer")).toMatchObject({ threadId: parentRow!.threadId, prompt: line });
+    expect(held.starts).toHaveLength(2);
+
+    const missing = await call("thread_new", { workspace: "alpha", task: "x", notify: "nope" });
+    expect(missing).toEqual({ text: "no thread nope", structured: undefined, isError: true });
+  });
+
+  it("fork with a task and notify me records the first turn's end in the new thread for the person", async () => {
+    await call("new", { name: "alpha" });
+    const sent = await call("fork", { workspace: "alpha", name: "worker", task: "build it", notify: "me" });
+    expect(sent.isError).toBe(false);
+    const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
+    const [row] = await rt.sessions.list(worker.id);
+    expect((await rt.sessions.history(worker.id)).find(e => e.type === "session.notify")).toMatchObject({ threadId: row!.threadId, notify: "me", text: `thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it` });
   });
 
   it("a failed turn is a tool error carrying the harness's reason", async () => {

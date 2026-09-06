@@ -12,6 +12,7 @@ import { resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import WebSocket from "ws";
 import {
+  NOTIFY_ME,
   foldThreads,
   goldenHead,
   workspaceState,
@@ -319,9 +320,17 @@ export interface Turn {
   reason?: string;
 }
 
-/** The start that opens a new thread in a workspace, under the named agent or the runtime's default. */
-export function openingOf(workspaceId: string, prompt: string, harness?: string): Record<string, unknown> {
-  return { workspaceId, prompt, ...(harness !== undefined ? { harness } : {}) };
+/** The start that opens a new thread in a workspace, under the named agent or the runtime's default; notify is the
+ * thread its every turn's end is told to, or NOTIFY_ME. */
+export function openingOf(workspaceId: string, prompt: string, harness?: string, notify?: string): Record<string, unknown> {
+  return { workspaceId, prompt, ...(harness !== undefined ? { harness } : {}), ...(notify !== undefined ? { notify } : {}) };
+}
+
+/** What a --notify names for the runtime: NOTIFY_ME as given, else the thread the reference picks, by its full id. */
+export async function notifyOf(client: HostClient, ref: string | undefined): Promise<string | undefined> {
+  if (ref === undefined || ref === NOTIFY_ME) return ref;
+  const thread = await threadOf(client, ref);
+  return thread.threadId ?? thread.id;
 }
 
 /** The start a message to an existing thread makes: its latest turn resumed under the thread's own agent. */
@@ -404,6 +413,7 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
     event: (e, t) => {
       ctx.out.emit(e, e.type === "session.end" ? t.result?.text : undefined);
       if (e.type === "session.delta" && e.kind === "text") ctx.out.stream(e.text);
+      if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
     },
   });
   const failure = turnFailure(turn);
@@ -522,18 +532,20 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "fork",
-    usage: 'wsp fork <workspace> [--name <name>] [--send "<task>" [--agent <name>]]',
+    usage: 'wsp fork <workspace> [--name <name>] [--send "<task>" [--agent <name>] [--notify <thread | me>]]',
     about: "a new machine from the source's golden version, not a copy of its live disk",
-    options: { name: { type: "string" }, send: { type: "string" }, agent: { type: "string" } },
+    options: { name: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, notify: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp fork takes one workspace");
       const client = await ctx.client();
       const source = await workspaceOf(client, ref);
+      // Resolved before the machine is minted, so a bad reference costs nothing.
+      const notify = await notifyOf(client, flag(ctx.flags, "notify"));
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`);
       const task = flag(ctx.flags, "send");
       if (task === undefined) return 0;
-      return followVerb(ctx, client, openingOf(created.workspace.id, task, flag(ctx.flags, "agent")), true);
+      return followVerb(ctx, client, openingOf(created.workspace.id, task, flag(ctx.flags, "agent"), notify), true);
     },
   },
   {
@@ -563,9 +575,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "thread new",
-    usage: 'wsp thread new --in <workspace> [--agent <name>] "<task>"',
-    about: "opens a thread in the workspace and follows its first turn",
-    options: { in: { type: "string" }, agent: { type: "string" } },
+    usage: 'wsp thread new --in <workspace> [--agent <name>] [--notify <thread | me>] "<task>"',
+    about: "opens a thread in the workspace and follows its first turn; --notify reports its ends",
+    options: { in: { type: "string" }, agent: { type: "string" }, notify: { type: "string" } },
     run: async ctx => {
       const [task] = ctx.args;
       const within = flag(ctx.flags, "in");
@@ -573,7 +585,7 @@ export const VERBS: readonly Verb[] = [
       if (task === undefined || ctx.args.length !== 1) throw new Error("wsp thread new takes one task");
       const client = await ctx.client();
       const workspace = await workspaceOf(client, within);
-      return followVerb(ctx, client, openingOf(workspace.id, task, flag(ctx.flags, "agent")), true);
+      return followVerb(ctx, client, openingOf(workspace.id, task, flag(ctx.flags, "agent"), await notifyOf(client, flag(ctx.flags, "notify"))), true);
     },
   },
   {

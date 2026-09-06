@@ -9,7 +9,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { VERSION } from "./version.js";
-import { create, createFromHead, dialHost, execOn, exportProject, follow, nap, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { create, createFromHead, dialHost, execOn, exportProject, follow, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 const INSTRUCTIONS = [
   "wsp runs cloud machines called workspaces, each with agents working inside it, and this server is the same host the",
@@ -83,6 +83,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
   const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: INSTRUCTIONS });
   const workspace = z.string().describe("the workspace's name, or its id when two share a name");
   const agent = z.string().optional().describe("the agent to run in the thread, such as claude or codex; absent means the host's default");
+  const notify = z.string().optional().describe("a thread (by id, or a prefix of it) told in one line each time a turn of the new thread ends, as a message into it; or me, for the person's app");
 
   server.registerTool(
     "workspaces",
@@ -124,17 +125,17 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     "fork",
     {
       description: "A sibling workspace from the source's golden version (a new machine, not a copy of its live disk); with a task, its first thread is opened and the reply returned. When that first turn fails, the error still names the workspace, which exists: continue with thread_new on it rather than forking again.",
-      inputSchema: { workspace, name: z.string().optional().describe("defaults to <source>-fork"), task: z.string().optional(), agent },
+      inputSchema: { workspace, name: z.string().optional().describe("defaults to <source>-fork"), task: z.string().optional(), agent, notify },
       outputSchema: Created.extend({ turn: TurnOut.optional(), failure: z.string().optional() }).shape,
     },
-    async ({ workspace: ref, name, task, agent: harness }) => {
+    async ({ workspace: ref, name, task, agent: harness, notify: tell }) => {
       const client = await dial();
       const source = await workspaceOf(client, ref);
       const created = await create(client, QUIET, source.golden, name ?? `${source.name}-fork`);
       if (task === undefined) return asJson(created);
       let failure: string;
       try {
-        const turn = await follow(client, openingOf(created.workspace.id, task, harness), "agent", QUIET_TURN);
+        const turn = await follow(client, openingOf(created.workspace.id, task, harness, await notifyOf(client, tell)), "agent", QUIET_TURN);
         const ended = turnFailure(turn);
         if (ended === undefined) return asJson({ ...created, turn: turnView(turn) });
         failure = ended;
@@ -153,14 +154,14 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
   server.registerTool(
     "thread_new",
     {
-      description: "Opens a thread in the workspace under the named agent and follows its first turn; returns the reply text when the turn ends, with the thread id for send.",
-      inputSchema: { workspace, task: z.string(), agent },
+      description: "Opens a thread in the workspace under the named agent and follows its first turn; returns the reply text when the turn ends, with the thread id for send. With notify, every turn of the thread that ends later sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll.",
+      inputSchema: { workspace, task: z.string(), agent, notify },
       outputSchema: TurnOut.shape,
     },
-    async ({ workspace: ref, task, agent: harness }) => {
+    async ({ workspace: ref, task, agent: harness, notify: tell }) => {
       const client = await dial();
       const target = await workspaceOf(client, ref);
-      const out = turnOut(await follow(client, openingOf(target.id, task, harness), "agent", QUIET_TURN));
+      const out = turnOut(await follow(client, openingOf(target.id, task, harness, await notifyOf(client, tell)), "agent", QUIET_TURN));
       return asText(out.text, out);
     },
   );

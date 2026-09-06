@@ -390,8 +390,24 @@ export const SessionQueuedEvent = z.object({
 });
 export type SessionQueuedEvent = z.infer<typeof SessionQueuedEvent>;
 
+/** The word a start's notify carries to mean the person who ran it, not a thread. */
+export const NOTIFY_ME = "me";
+
+/** The turn ended and its one line (notifyLine) went where the thread's start said: into the named thread as a send
+ * would go, steered or queued, or, for me, to the person, whom the CLI and the app tell from this event. Recorded in
+ * the ending thread's transcript, before its session.done, so the line's source is visible and a follower that ends
+ * on the done still sees it. */
+export const SessionNotifyEvent = z.object({
+  type: z.literal("session.notify"),
+  ...sessionScope,
+  /** The thread the line went to, or NOTIFY_ME. */
+  notify: z.string(),
+  text: z.string(),
+});
+export type SessionNotifyEvent = z.infer<typeof SessionNotifyEvent>;
+
 /** The events sessions.history replays: what a chat transcript folds. */
-export const SessionEvent = z.discriminatedUnion("type", [SessionStartEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionSteerEvent]);
+export const SessionEvent = z.discriminatedUnion("type", [SessionStartEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionSteerEvent, SessionNotifyEvent]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
 // --- workspace / port / inbox events ----------------------------------------
@@ -812,6 +828,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionDoneEvent.extend(sequenced),
   SessionEndEvent.extend(sequenced),
   SessionSteerEvent.extend(sequenced),
+  SessionNotifyEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
   PortCloseEvent.extend(sequenced),
@@ -1205,6 +1222,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     startedBy: SessionOrigin.optional(),
     /** Minted by the client per send and echoed on the turn's session.start, so the client knows which start is its own. */
     requestId: z.string().optional(),
+    /** A thread id, or NOTIFY_ME: registered on the thread this start opens, so every turn's end on it sends one line
+     * there (a session.notify event in this thread's transcript). Refused when no thread has that id. */
+    notify: z.string().optional(),
   }),
   /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
    * from the binaries on its machine where they answer; without one, from the runtime's table. */
@@ -1424,6 +1444,6 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { fmtBytes, fmtMemGb } from "./format.js";
+export { fmtBytes, fmtCost, fmtDuration, fmtMemGb, notifyLine } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";

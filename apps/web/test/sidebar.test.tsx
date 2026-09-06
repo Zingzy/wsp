@@ -251,6 +251,16 @@ describe("rows from the fixture wire", () => {
     expect(rowOf("before threads").getAttribute("data-active")).toBe("false");
   });
 
+  it("a thread's end addressed to me shows as the store toast; one addressed to a thread shows nothing here", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
+    const line = "thread c452d1e8 finished (completed, 8m 12s, $1.94): all green";
+    useStore.getState().applyEvent({ type: "session.notify", workspaceId: "ws_a", sessionId: "s1", turnId: "t1", threadId: "thr_child", notify: "thr_parent", text: line });
+    expect(useStore.getState().toast).toBeNull();
+    useStore.getState().applyEvent({ type: "session.notify", workspaceId: "ws_a", sessionId: "s1", turnId: "t1", threadId: "thr_child", notify: "me", text: line });
+    expect(useStore.getState().toast).toBe(line);
+    expect(await screen.findByRole("status", { name: line })).toBeDefined();
+  });
+
   it("an empty fleet says so; a store toast shows and can be dismissed", async () => {
     const api = fakeApi([], []);
     api.watchStatuses = vi.fn(async () => { throw new Error("runtime unreachable"); });
