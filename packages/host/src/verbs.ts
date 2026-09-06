@@ -137,7 +137,8 @@ function untilSettled<T>(client: HostClient, work: Promise<T>): Promise<T> {
 }
 
 /** Frames pushed to the socket, held from before the request that names what to wait for: the id to match is
- * only known once the reply lands, and the host may push the first frame right behind it. */
+ * only known once the reply lands, and the host may push the first frame right behind it. A stop from inside `on`
+ * drops the held frames not yet replayed too: a whole turn may sit in them when the harness answered at once. */
 function pushedFrames(client: HostClient): { follow(pick: (f: Frame) => boolean, on: (f: Frame) => void): void; stop(): void } {
   const held: Frame[] = [];
   let sink: ((f: Frame) => void) | undefined;
@@ -149,7 +150,10 @@ function pushedFrames(client: HostClient): { follow(pick: (f: Frame) => boolean,
       };
       for (const f of held.splice(0)) sink(f);
     },
-    stop: off,
+    stop: () => {
+      off();
+      sink = () => {};
+    },
   };
 }
 
@@ -330,12 +334,14 @@ export function resumeOf(thread: ThreadView, prompt: string): Record<string, unk
   return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, resume: thread.claudeSessionId };
 }
 
-/** Starts a turn as `startedBy` and follows it to its end: `on.queued` when the runtime says the start waits behind
+/** Starts a turn as `startedBy` and follows it to its reply: `on.queued` when the runtime says the start waits behind
  * the thread's running turn, `on.started` the thread as soon as the runtime names it, `on.event` every event of the
  * turn with the turn so far. Fails when the host goes away first. The send carries its own request id so an app view
  * with the same text in flight cannot take this turn's start for its own, and so the queued notice is known to be
  * this start's. Events are picked by the turn's id: a start that waited behind the thread's running turn must not
- * read that turn's end as its own. */
+ * read that turn's end as its own. The follow ends at session.done, which carries the whole reply: session.end
+ * follows the runtime's exit read and reap, minutes later when the machine is slow to answer. A turn the runtime
+ * ended itself has no done, so its end is the last event instead. */
 export async function follow(
   client: HostClient,
   start: Record<string, unknown>,
@@ -367,7 +373,9 @@ export async function follow(
         if (e.type === "session.done") turn.result = e.result;
         if (e.type === "session.end" && e.reason !== undefined) turn.reason = e.reason;
         on.event(e, turn);
-        if (e.type === "session.end") done(turn);
+        if (e.type !== "session.done" && e.type !== "session.end") return;
+        pushed.stop();
+        done(turn);
       },
     );
   });
@@ -393,7 +401,8 @@ const JOINED: Record<Exclude<SessionStartOutcome, "started">, string> = {
 };
 
 /** The verbs' way through a turn: text streams to stderr as it arrives, the last message is printed on stdout when
- * the turn ends, with --json every event of the turn is printed instead; the failure is one line on stderr, exit 1. */
+ * the reply is complete, with --json every event of the turn up to its done is printed instead; the failure is one
+ * line on stderr, exit 1. */
 async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean): Promise<number> {
   const turn = await follow(client, start, "cli", {
     queued: () => ctx.io.error(WAITING),
@@ -401,8 +410,8 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
       if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, `thread ${t.threadId}`);
       if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome]);
     },
-    event: (e, t) => {
-      ctx.out.emit(e, e.type === "session.end" ? t.result?.text : undefined);
+    event: e => {
+      ctx.out.emit(e, e.type === "session.done" ? e.result.text : undefined);
       if (e.type === "session.delta" && e.kind === "text") ctx.out.stream(e.text);
     },
   });
