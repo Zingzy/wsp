@@ -18,9 +18,8 @@ import { daemonBehindLine } from "../machine/daemon.js";
 import { useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { requestNewThread } from "../shell/shellRequests.js";
-import { parentPath } from "./entries.js";
 import { useWorkspaceListing } from "./listing.js";
-import { rootOf, usePinned, useRoot, useRoots, useRootStore } from "./root.js";
+import { parentWithin, rootOf, usePinned, useRoot, useRoots, useRootStore } from "./root.js";
 import { useDaemonRoot, useDaemonVersion, useDaemonWire } from "./wire.js";
 
 export function FilesSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
@@ -36,9 +35,7 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   const follow = useRootStore(s => s.follow);
   const { levels, ensure, refresh } = useWorkspaceListing(workspaceId);
   const openFile = useRightPanelStore(s => s.openFile);
-  // The daemon refuses anything outside every root, so up stops at a root's edge.
-  const above = root === null ? null : parentPath(root);
-  const parent = above !== null && rootOf(roots, above) !== null ? above : null;
+  const parent = root === null ? null : parentWithin(roots, root);
   const current = root === null ? null : rootOf(roots, root);
   // A daemon that predates the roots file browses its home and nothing else, so a folder outside it comes back
   // refused, naming a path nobody asked about; that one refusal reads as what the daemon predates. Every other
