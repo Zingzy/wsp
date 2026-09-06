@@ -6,7 +6,8 @@
 // controls. A workspace with only the daemon running shows the daemon.
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ProcEntry, ProcInspectReply, ProcSignal } from "@wsp/protocol";
-import { cn } from "../../lib/utils.js";
+import { cn, errorText } from "../../lib/utils.js";
+import { daemonBehindLine, useDaemonVersion } from "../../machine/daemon.js";
 import { getProcs, useWorkspaceProcs } from "../../machine/procs.js";
 import { useWorkspace } from "../../protocol/store.js";
 import { getTerminals, onTerminals } from "../../terminal/link.js";
@@ -23,8 +24,6 @@ const NO_TABS: readonly never[] = [];
 
 type Stale = "napping" | "unreachable" | null;
 
-const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
 function useTerminalTitles(workspaceId: string): ReadonlyMap<string, string> {
   const terms = useSyncExternalStore(onTerminals, () => getTerminals(workspaceId));
   const subscribe = useCallback((fn: () => void) => (terms ? terms.onTabs(fn) : () => {}), [terms]);
@@ -35,6 +34,7 @@ function useTerminalTitles(workspaceId: string): ReadonlyMap<string, string> {
 export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
   const workspace = useWorkspace(workspaceId);
   const procs = useWorkspaceProcs(workspaceId);
+  const version = useDaemonVersion(workspaceId);
   const titles = useTerminalTitles(workspaceId);
   const [sort, setSort] = useState<ProcSort>("cpu");
   const [filter, setFilter] = useState("");
@@ -52,6 +52,9 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
   }, [snapshot, selected]);
 
   const count = snapshot === null ? "pending" : snapshot.procs.length < snapshot.total ? `${snapshot.procs.length} of ${snapshot.total}` : `${snapshot.total} processes`;
+  const unavailable = stale === null && snapshot === null ? procs.unavailable : null;
+  const behind = daemonBehindLine(version);
+  const unavailableLine = unavailable === null ? null : behind !== null ? `${behind}; update it from the machine tab` : unavailable;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col font-mono text-[11px]" data-procs>
@@ -64,7 +67,7 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
           className="h-6 min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-placeholder"
         />
         <span className={cn("shrink-0 tabular-nums", stale !== null ? "text-muted-foreground/60" : "text-muted-foreground")} data-procs-count>
-          {stale ?? count}
+          {stale ?? (unavailable !== null ? "unavailable" : count)}
         </span>
       </div>
       <div className={cn(COLUMNS, "h-6 shrink-0 border-b border-border/50 text-[.65rem] uppercase tracking-wider text-muted-foreground")} role="row">
@@ -79,6 +82,11 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div role="table" aria-label="Processes" className={cn(stale !== null && "text-muted-foreground/60")} {...(stale !== null ? { "data-stale": stale } : {})}>
+          {unavailableLine !== null && (
+            <p className="truncate px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={unavailable ?? undefined} data-procs-unavailable>
+              {unavailableLine}
+            </p>
+          )}
           {rows.map(({ proc, depth }) => {
             const lit = proc.pid === selected;
             const label = snapshot ? procLabel(proc, snapshot.daemon, titles) : null;

@@ -5,7 +5,8 @@
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { GoldenMissingTool, GoldenVersion, SnapshotLineage, SysSample, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
-import { cn } from "../../lib/utils.js";
+import { cn, errorText } from "../../lib/utils.js";
+import { daemonBehindLine, useDaemonVersion } from "../../machine/daemon.js";
 import { LIVE_WINDOW, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type CostPoint, type Upgrade } from "../../protocol/machine.js";
 import { useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
@@ -22,6 +23,7 @@ import { Badge } from "../ui/badge.js";
 import { Button } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ScrollArea } from "../ui/scroll-area.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
 import {
   bytesOfLabel,
   clockLabel,
@@ -37,8 +39,6 @@ import {
   type DiskTier,
 } from "./format.js";
 import { SnapshotStorageLine } from "./SnapshotStorageLine.js";
-
-const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export function MachineSurface({ workspaceId }: { workspaceId: string }) {
   const workspace = useWorkspace(workspaceId);
@@ -275,20 +275,73 @@ function Rebuild({ workspace }: { workspace: WorkspaceView }) {
 type Stale = "napping" | "unreachable" | null;
 
 /** cpu, memory and disk from the guest, one sparkline each. A napping workspace, or a running one whose link is
- * down, keeps the last values dim under the word for it; the daemon says nothing about a machine it is not on. */
+ * down, keeps the last values dim under the word for it; the daemon says nothing about a machine it is not on. A
+ * daemon that refused the stream puts the word unavailable in the slots, and one older than this app gets a line
+ * under the rows naming what it predates, with the update. */
 function Live({ workspace }: { workspace: WorkspaceView }) {
   const live = useWorkspaceLive(workspace.id);
+  const version = useDaemonVersion(workspace.id);
   const last = live.samples[live.samples.length - 1];
   const stale: Stale = workspace.phase === "napping" || workspace.phase === "pausing" ? "napping" : live.reach === "live" ? null : "unreachable";
   const share = (m: { used: number; total: number }): number => (m.total > 0 ? (m.used / m.total) * 100 : 0);
+  const behind = workspace.phase === "running" ? daemonBehindLine(version) : null;
   return (
     <Section label="Live" aside={last !== undefined && stale === null ? `load ${last.load1.toFixed(2)}` : undefined}>
       <div className="mt-1 divide-y divide-border/40">
-        <LiveRow label="cpu" k="cpu" samples={live.samples} y={s => s.cpu} text={s => percentLabel(s.cpu)} stale={stale} />
-        <LiveRow label="memory" k="mem" samples={live.samples} y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} stale={stale} />
-        <LiveRow label="disk" k="disk" samples={live.samples} y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} stale={stale} />
+        <LiveRow label="cpu" k="cpu" samples={live.samples} y={s => s.cpu} text={s => percentLabel(s.cpu)} stale={stale} unavailable={live.unavailable} />
+        <LiveRow label="memory" k="mem" samples={live.samples} y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} stale={stale} unavailable={live.unavailable} />
+        <LiveRow label="disk" k="disk" samples={live.samples} y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} stale={stale} unavailable={live.unavailable} />
       </div>
+      {behind !== null && <DaemonUpdate workspace={workspace} line={behind} />}
     </Section>
+  );
+}
+
+/** One fixed-height line: what the machine's daemon predates, and the update as a keycap. The runtime redeploys the
+ * daemon and the link redials on its own; the line leaves when the new hello names a current version. */
+function DaemonUpdate({ workspace, line }: { workspace: WorkspaceView; line: string }) {
+  const api = useStore(s => s.api);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  const update = async (): Promise<void> => {
+    if (!api?.updateDaemon) {
+      setNote("This client cannot update daemons.");
+      return;
+    }
+    setBusy(true);
+    setNote(null);
+    try {
+      await api.updateDaemon(workspace.id);
+    } catch (e) {
+      setNote(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-1 flex h-6 items-center justify-between gap-2 font-mono text-[11px] text-muted-foreground" data-k="daemon-update">
+      <span className="min-w-0 truncate" title={note ?? line}>
+        {note ?? line}
+      </span>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              disabled={busy}
+              aria-label={`update the daemon on ${workspace.name}`}
+              onClick={() => void update()}
+              className="h-5 shrink-0 cursor-pointer rounded-sm border border-border bg-muted/40 px-1.5 text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-50"
+            >
+              {busy ? "updating" : "update"}
+            </button>
+          }
+        />
+        <TooltipPopup side="top">Restarts the daemon on the machine. Open terminals end, chat threads keep running.</TooltipPopup>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -321,15 +374,17 @@ interface LiveRowProps {
   text: (s: SysSample) => string;
   tier?: (s: SysSample) => DiskTier;
   stale: Stale;
+  /** The daemon's refusal of the stream; the slot reads unavailable and carries it as the title. */
+  unavailable: string | null;
 }
 
 /** One fixed-height row: label, sparkline, value. The value slot has a fixed width so a word in place of a number
  * moves nothing; a single sample draws as a dot through the round cap. Hovering reads that sample into the slot. */
-function LiveRow({ label, k, samples, y, text, tier, stale }: LiveRowProps) {
+function LiveRow({ label, k, samples, y, text, tier, stale, unavailable }: LiveRowProps) {
   const [hover, setHover] = useState<number | null>(null);
   const points = sparkPoints(samples, y);
   const shown = hover !== null ? samples[hover] : samples[samples.length - 1];
-  const word = stale ?? (shown === undefined ? "pending" : null);
+  const word = stale ?? (unavailable !== null ? "unavailable" : shown === undefined ? "pending" : null);
   const tone = word === null && shown !== undefined && tier ? TIER_CLASS[tier(shown)] : undefined;
 
   const track = (e: ReactMouseEvent<SVGSVGElement>): void => {
@@ -341,7 +396,12 @@ function LiveRow({ label, k, samples, y, text, tier, stale }: LiveRowProps) {
   };
 
   return (
-    <div className="grid h-7 grid-cols-[3.25rem_minmax(0,1fr)_8rem] items-center gap-2 text-xs" data-live-row={k} {...(stale !== null ? { "data-stale": stale } : {})}>
+    <div
+      className="grid h-7 grid-cols-[3.25rem_minmax(0,1fr)_8rem] items-center gap-2 text-xs"
+      data-live-row={k}
+      {...(stale !== null ? { "data-stale": stale } : {})}
+      {...(unavailable !== null ? { "data-unavailable": unavailable } : {})}
+    >
       <span className="text-muted-foreground">{label}</span>
       <svg className="block h-4 w-full" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none" role="img" aria-label={`${label} over the last two minutes, one line`} onMouseMove={track} onMouseLeave={() => setHover(null)}>
         {points.length > 0 && (
@@ -360,7 +420,11 @@ function LiveRow({ label, k, samples, y, text, tier, stale }: LiveRowProps) {
           <line x1={points[hover].x} x2={points[hover].x} y1={0} y2={SPARK_H} className="stroke-muted-foreground/50" strokeWidth={1} vectorEffect="non-scaling-stroke" data-live-hover />
         )}
       </svg>
-      <span className={cn("truncate text-right font-mono tabular-nums", word !== null ? "text-muted-foreground/60" : (tone ?? "text-foreground"))} data-k={k}>
+      <span
+        className={cn("truncate text-right font-mono tabular-nums", word !== null ? "text-muted-foreground/60" : (tone ?? "text-foreground"))}
+        data-k={k}
+        {...(word === "unavailable" && unavailable !== null ? { title: unavailable } : {})}
+      >
         {word ?? (shown !== undefined ? text(shown) : "")}
       </span>
     </div>

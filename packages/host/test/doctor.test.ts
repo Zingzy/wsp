@@ -15,6 +15,7 @@ import {
   connectDaemonSocket,
   deployDaemon,
   deployScript,
+  stopDaemonScript,
   previewHostSuffix,
   VITE_ALLOWED_HOSTS_ENV,
   GUEST_ENVS,
@@ -181,6 +182,18 @@ describe("deployScript", () => {
     const cleanup = script.indexOf("rm -rf /root/.npm /root/.cache/node-gyp /root/wsp-daemon/node_modules/node-pty/prebuilds");
     expect(cleanup).toBeGreaterThan(script.indexOf("npm install"));
     expect(cleanup).toBeLessThan(script.indexOf("setsid"));
+  });
+
+  it("stops the daemon holding the port before starting the new one, so an update replaces a running daemon instead of reading it as up", () => {
+    const script = deployScript("aabbcc");
+    const stop = script.indexOf(stopDaemonScript());
+    expect(stop).toBeGreaterThan(script.indexOf("npm install"));
+    expect(stop).toBeGreaterThan(script.indexOf("umask 077"));
+    expect(stop).toBeLessThan(script.indexOf("setsid nohup node"));
+    // The pid is read off the socket table for the daemon's port, never matched by name.
+    expect(stopDaemonScript()).toContain("ss -ltnpH 'sport = :7070'");
+    expect(stopDaemonScript()).not.toMatch(/pkill|killall|pgrep/);
+    expect(stopDaemonScript()).toContain('kill "$old"');
   });
 
   it("names the node version on stdout before installing, so the deploy log can carry it", () => {

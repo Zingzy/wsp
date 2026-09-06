@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Capabilities,
@@ -13,9 +14,17 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { MachineSurface } from "../src/components/machine/MachineSurface.js";
+import { provideDaemonVersion, resetDaemonVersions } from "../src/machine/daemon.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+
+// Base UI's tooltip opens on pointer hover, which jsdom cannot stage; the popup renders inline instead.
+vi.mock("../src/components/ui/tooltip.js", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render: element, children }: { render: ReactElement<{ children?: ReactNode }>; children?: ReactNode }) => cloneElement(element, {}, children ?? element.props.children),
+  TooltipPopup: ({ children }: { children: ReactNode }) => <div role="tooltip">{children}</div>,
+}));
 
 const view = (id: string, name: string, phase: WorkspacePhase = "running"): WorkspaceView => ({
   id,
@@ -94,6 +103,8 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
 
 beforeEach(() => {
   resetLive();
+  resetDaemonVersions();
+  document.documentElement.classList.add("dark");
   useStore.setState({
     api: null,
     capabilities: null,
@@ -662,6 +673,34 @@ describe("live", () => {
     expect(heights()).toEqual(["h-7", "h-7", "h-7"]);
   });
 
+  it("a daemon that refused the stream puts unavailable in every slot with its reason as the title, never pending, at the same height", async () => {
+    await mount([view("ws_a", "api")]);
+    act(() => {
+      getLive("ws_a").feedStatus("live");
+      getLive("ws_a").feedUnavailable("unknown op: sys.watch");
+    });
+    await waitFor(() => expect(fact("cpu")).toBe("unavailable"));
+    for (const k of ["cpu", "mem", "disk"]) {
+      expect(fact(k)).toBe("unavailable");
+      expect(valueSlot(k).getAttribute("title")).toBe("unknown op: sys.watch");
+      expect(liveRow(k).getAttribute("data-unavailable")).toBe("unknown op: sys.watch");
+      expect(liveRow(k).className).toMatch(/\bh-7\b/);
+      expect(valueSlot(k).className).toMatch(/muted-foreground/);
+      expect(valueSlot(k).className).not.toMatch(/warning|caution|destructive|success/);
+    }
+    expect(["cpu", "mem", "disk"].map(fact)).not.toContain("pending");
+    // The link dropping outranks it; a daemon that then answers the watch clears it and the rows fill.
+    feed("ws_a", [], "connecting");
+    await waitFor(() => expect(fact("cpu")).toBe("unreachable"));
+    act(() => {
+      getLive("ws_a").feedStatus("live");
+      getLive("ws_a").feedUnavailable(null);
+      getLive("ws_a").feedSample(sysSample(0));
+    });
+    await waitFor(() => expect(fact("cpu")).toBe("33%"));
+    expect(valueSlot("cpu").hasAttribute("title")).toBe(false);
+  });
+
   it("hovering a sparkline reads that sample into the value slot; leaving restores the current one", async () => {
     await mount([view("ws_a", "api")]);
     feed("ws_a", [sysSample(0, { cpu: 10 }), sysSample(1, { cpu: 50 }), sysSample(2, { cpu: 90 })]);
@@ -677,5 +716,68 @@ describe("live", () => {
     fireEvent.mouseLeave(svg);
     expect(fact("cpu")).toBe("90%");
     expect(svg.querySelector("[data-live-hover]")).toBeNull();
+  });
+});
+
+const updateLine = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-k="daemon-update"]');
+const updateButton = (): HTMLButtonElement => screen.getByRole("button", { name: "update the daemon on api" }) as HTMLButtonElement;
+
+describe("daemon version", () => {
+  it.each(["dark", "light"] as const)("in the %s theme a daemon older than the app gets one mono muted line naming what it predates and a keycap that updates it; a current one gets no line", async theme => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    const api = await mount([view("ws_a", "api")]);
+    const updateDaemon = vi.fn(async (_id: string) => {});
+    (api as Api).updateDaemon = updateDaemon;
+    expect(updateLine()).toBeNull();
+    act(() => provideDaemonVersion("ws_a", 2));
+    expect(updateLine()).toBeNull();
+    act(() => provideDaemonVersion("ws_a", 1));
+    const line = updateLine()!;
+    expect(line.querySelector("span")!.textContent).toBe("daemon v1 predates Live and Processes");
+    expect(line.className).toMatch(/font-mono/);
+    expect(line.className).toMatch(/text-muted-foreground/);
+    expect(line.className).toMatch(/\bh-6\b/);
+    expect(line.className).not.toMatch(/warning|caution|destructive|success|info/);
+    expect(line.querySelectorAll("[class*=badge], [data-slot=badge]")).toHaveLength(0);
+    const button = updateButton();
+    expect(button.textContent).toBe("update");
+    expect(line.querySelector("[role=tooltip]")!.textContent).toBe("Restarts the daemon on the machine. Open terminals end, chat threads keep running.");
+    expect(button.className).toMatch(/border/);
+    expect(button.className).toMatch(/\bh-5\b/);
+    expect(button.className).not.toMatch(/warning|caution|destructive|success|info/);
+    fireEvent.click(button);
+    expect(updateDaemon).toHaveBeenCalledWith("ws_a");
+    await waitFor(() => expect(updateButton().textContent).toBe("update"));
+    expect(updateLine()!.className).toMatch(/\bh-6\b/);
+    // The new daemon's hello names a current version: the line leaves.
+    act(() => provideDaemonVersion("ws_a", 2));
+    expect(updateLine()).toBeNull();
+  });
+
+  it("the keycap reads updating while the runtime redeploys, and a refusal takes the line's place", async () => {
+    const api = await mount([view("ws_a", "api")]);
+    let settle!: (e?: Error) => void;
+    (api as Api).updateDaemon = vi.fn((_id: string) => new Promise<void>((resolve, reject) => (settle = e => (e ? reject(e) : resolve()))));
+    act(() => provideDaemonVersion("ws_a", 1));
+    fireEvent.click(updateButton());
+    await waitFor(() => expect(updateButton().textContent).toBe("updating"));
+    expect(updateButton().disabled).toBe(true);
+    act(() => settle(new Error("daemon deploy failed: NPM_FAIL")));
+    await waitFor(() => expect(updateLine()!.querySelector("span")!.textContent).toBe("daemon deploy failed: NPM_FAIL"));
+    expect(updateButton().disabled).toBe(false);
+    expect(updateButton().textContent).toBe("update");
+  });
+
+  it("a client without the update op says so instead of offering nothing", async () => {
+    await mount([view("ws_a", "api")]);
+    act(() => provideDaemonVersion("ws_a", 1));
+    fireEvent.click(updateButton());
+    await waitFor(() => expect(updateLine()!.querySelector("span")!.textContent).toBe("This client cannot update daemons."));
+  });
+
+  it("a napping workspace shows no update line: its daemon is not running to replace", async () => {
+    await mount([view("ws_a", "api", "napping")]);
+    act(() => provideDaemonVersion("ws_a", 1));
+    expect(updateLine()).toBeNull();
   });
 });

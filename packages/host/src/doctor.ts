@@ -92,6 +92,25 @@ function nodeBootstrap(): string {
  * dev server answers 403 through the preview edge. Next.js and webpack-dev-server have no env equivalent. */
 export const VITE_ALLOWED_HOSTS_ENV = "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS";
 
+/** Stops whatever holds the daemon's port before the new daemon starts: an update lands on a machine whose daemon
+ * is running, and a second bind would fail while the port check still read the old one as up. The pid comes from
+ * the socket table, the one place the guest names it (nothing else may bind the port; the machine context says so).
+ * A fresh machine has no holder and skips through. */
+export function stopDaemonScript(): string {
+  return [
+    `old="$(ss -ltnpH 'sport = :${DAEMON_PORT}' | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | head -n 1)"`,
+    'if [ -n "$old" ]; then',
+    '  kill "$old" 2>/dev/null || true',
+    "  for _ in $(seq 20); do",
+    `    ss -ltnH 'sport = :${DAEMON_PORT}' | grep -q . || break`,
+    "    sleep 0.25",
+    "  done",
+    `  ss -ltnH 'sport = :${DAEMON_PORT}' | grep -q . && kill -9 "$old" 2>/dev/null && sleep 0.5`,
+    '  echo "DAEMON_STOPPED $old"',
+    "fi",
+  ].join("\n");
+}
+
 /** The in-guest install+start sequence. The setsid line ends in a bare `&`
  * with the sleep on the same statement: `&` already terminates a command, so
  * joining it with `;` would be a bash syntax error (a live run died on it).
@@ -125,6 +144,7 @@ export function deployScript(token: string, previewHostSuffix?: string): string 
         ]
       : []),
     writeDaemonTokenScript(token),
+    stopDaemonScript(),
     "setsid nohup node /root/wsp-daemon/start.mjs > /root/daemon.log 2>&1 < /dev/null & sleep 1.5",
     "ss -ltn | grep -q 7070 && echo DAEMON_UP || { cat /root/daemon.log; echo DAEMON_DOWN; }",
   ].join("\n");
@@ -161,9 +181,8 @@ export async function packBundle(stage: string, tgz: string): Promise<void> {
   await execFileAsync(file, args, { env });
 }
 
-/** Upload and start the daemon on a machine; returns the token it starts with
- * (the runtime replaces it the first time a client reaches the daemon) and the
- * Node version the daemon runs on. */
+/** Upload and start the daemon on a machine, replacing one already running there; returns the token it starts
+ * with (the runtime replaces it the first time a client reaches the daemon) and the Node version the daemon runs on. */
 export async function deployDaemon(
   machine: Machine,
   opts: { token?: string; daemonDir?: string } = {},

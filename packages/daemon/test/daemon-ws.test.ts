@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { connect, createServer, type Server } from "node:net";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DAEMON_VERSION } from "@wsp/protocol";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
@@ -292,14 +293,20 @@ describe("daemon WS server", () => {
     }
   });
 
-  it("answers the auth frame, then greets with its root before anything else", async () => {
+  it("answers the auth frame, then greets with its root and version before anything else", async () => {
     const c = await Client.connect(daemon.port, TOKEN);
     const pong = await c.request("ping");
     expect(pong.ok).toBe(true);
     expect(c.frames.slice(0, 2)).toEqual([
       { id: 1, ok: true },
-      { type: "daemon.hello", root: resolve(process.env["HOME"] ?? homedir()) },
+      { type: "daemon.hello", root: resolve(process.env["HOME"] ?? homedir()), version: DAEMON_VERSION },
     ]);
+    c.close();
+  });
+
+  it("answers an op it does not know with an error naming it, never with silence", async () => {
+    const c = await Client.connect(daemon.port, TOKEN);
+    expect(await c.request("sys.explode")).toMatchObject({ ok: false, error: "unknown op: sys.explode" });
     c.close();
   });
 
