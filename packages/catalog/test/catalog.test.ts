@@ -4,7 +4,7 @@
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
 import { describe, expect, it } from "vitest";
-import { APT_INDEX, APT_UPDATE, BASE_FLOOR, CATALOG, CATALOG_AGENTS, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, ROADS, ROAD_MODULES, SIGN_IN_ROWS, baseEntryFor, baseNote, catalogEntry, catalogToolFor, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, smokeOf, vendorRoad, type InstallRoad } from "../src/index.js";
+import { APT_INDEX, APT_UPDATE, BASE_FLOOR, CATALOG, CATALOG_AGENTS, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, ROADS, ROAD_MODULES, SIGN_IN_ROWS, baseEntryFor, baseNote, catalogEntry, catalogToolFor, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, smokeOf, type InstallRoad } from "../src/index.js";
 
 describe("catalog", () => {
   it("names a session history for the agents with a reader, in a known format under a home path", () => {
@@ -198,7 +198,7 @@ describe("catalog", () => {
     expect(ROAD_MODULES.cargo.at!({ road: "cargo", package: "bat", version: "0.23.0" }, "0.24.0")).toEqual({ road: "cargo", package: "bat", version: "0.24.0" });
     expect(ROAD_MODULES.release.at!({ road: "release", repo: "cli/cli" }, "v2.86.0")).toEqual({ road: "release", repo: "cli/cli", version: "v2.86.0" });
     // A bare row's version is the tool's own, not a Mac cask's, so the vendor road takes it whether or not the cask's Mac version names the Linux build.
-    expect(ROAD_MODULES.vendor.at!({ road: "vendor", cask: GCLOUD }, "575.0.0")).toEqual(vendorRoad(GCLOUD, { version: "575.0.0" }));
+    expect(ROAD_MODULES.vendor.at!({ road: "vendor", cask: GCLOUD }, "575.0.0")).toEqual({ road: "vendor", cask: GCLOUD, version: "575.0.0" });
     expect(ROAD_MODULES.vendor.at!({ road: "vendor", cask: KUBECTL }, "v1.37.0")).toEqual({ road: "vendor", cask: KUBECTL, version: "v1.37.0" });
     for (const road of ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go", "release", "vendor"] as const) expect(ROAD_MODULES[road].at, road).toBeDefined();
     for (const road of ["brew", "apt", "script"] as const) expect(ROAD_MODULES[road].at, road).toBeUndefined();
@@ -209,10 +209,11 @@ describe("catalog", () => {
     expect(line({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }, "gh")).toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
     expect(line({ road: "release" }, "spoo")).toEqual({ note: "no GitHub release to install from" });
     expect(off({ road: "release" }, "spoo")).toEqual({ cmd: "rm -f /usr/local/bin/'spoo'" });
-    // A vendor's download is the cask's own script, at the Mac's version when the cask names the Linux build.
-    const gcloud = vendorRoad(GCLOUD, { version: "575.0.0" });
+    // A vendor's download is the cask's own script, at the road's version when it names one, else the pinned or current one.
+    const gcloud: InstallRoad = { road: "vendor", cask: GCLOUD, version: "575.0.0" };
     expect([line(gcloud), off(gcloud), ROAD_MODULES.vendor.bin!(gcloud)]).toEqual([GCLOUD.install("575.0.0", undefined), { cmd: GCLOUD.uninstall }, "gcloud"]);
-    expect(vendorRoad(KUBECTL, { version: "4.80.0,232116", pin: { tag: "v1.37.0", sha256: "c".repeat(64) } })).toEqual({ road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "c".repeat(64) } });
+    const kubectl: InstallRoad = { road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "c".repeat(64) } };
+    expect(line(kubectl)).toBe(KUBECTL.install(undefined, { tag: "v1.37.0", sha256: "c".repeat(64) }));
     // apt rows wait on the one index read; purge takes what the package alone pulled in.
     const apt: InstallRoad = { road: "apt", packages: ["neovim"] };
     expect([line(apt), off(apt), ROAD_MODULES.apt.after]).toEqual(["export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq neovim", { cmd: "export DEBIAN_FRONTEND=noninteractive\napt-get purge -y -qq neovim && apt-get autoremove -y -qq --purge" }, APT_INDEX]);

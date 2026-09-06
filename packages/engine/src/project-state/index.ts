@@ -18,6 +18,7 @@ import { opencodeResolver } from "./opencode.js";
 import { piResolver } from "./pi.js";
 import { resolveProjectPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
+export { parseMergeOutput, type MergeOutput } from "./merge.js";
 export { filesUnder, resolveProjectPath, underProject, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
 export const PROJECT_STATE_RESOLVERS: ReadonlyMap<string, ProjectStateResolver> = new Map(

@@ -316,6 +316,9 @@ export const SessionStartEvent = z.object({
   ...sessionScope,
   /** The user's turn; set by the runtime (the adapter never sees it) so a replayed transcript shows it. */
   prompt: z.string().optional(),
+  /** The id the client minted for the sessions.start that opened this turn, stamped by the runtime; absent when the
+   * client sent none. Two clients sending the same text at the same moment are told apart by this, not the prompt. */
+  requestId: z.string().optional(),
   model: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).optional(),
@@ -405,6 +408,7 @@ export const WorkspaceCostEvent = z.object({
   accruedUsd: z.number(),
   at: z.string(),
 });
+export type WorkspaceCostEvent = z.infer<typeof WorkspaceCostEvent>;
 
 export const PortOpenEvent = z.object({
   type: z.literal("port.open"),
@@ -493,14 +497,17 @@ export const ProjectImportEvent = z.object({
 });
 export type ProjectImportEvent = z.infer<typeof ProjectImportEvent>;
 /** What became of one agent the import named: `moved` when the agent is on the machine and its module re-keyed every
- * file to dest, `transcript-only` when it is on the machine but only its files landed and the rows in its shared store
- * that list them stayed behind, `carried` when it is not there so the files landed as they were, `nothing` when no
- * file of its travelled, `failed` when the move raised and nothing of that agent landed; files and bytes are what landed. */
+ * file to dest, or merged its rows into its store there; `transcript-only` when it is on the machine but only its
+ * files landed and the rows in its shared store that list them are still to come; `carried` when it is not there so
+ * the files landed as they were, `nothing` when no file of its travelled, `failed` when the move raised and nothing of
+ * that agent landed, or the merge on the machine failed after its files did; files and bytes are what landed. */
 export const ProjectAgentOutcome = z.enum(["moved", "transcript-only", "carried", "nothing", "failed"]);
 export type ProjectAgentOutcome = z.infer<typeof ProjectAgentOutcome>;
 /** `sessions` is how many the files hold when the trip counted them; `skipped` is how many sessions the agent's own
  * index named whose transcript was not under its home (Codex keeps archived ones elsewhere), so their rows moved
- * and nothing else did. */
+ * and nothing else did. `rows` is what the merge on the machine inserted or updated in the agent's store, once it
+ * ran; `note` says why the rows still wait when they could not be merged yet (the agent has not made its store
+ * there), or what the merge kept as the machine had it rather than as carried. */
 export const ProjectAgentResult = z.object({
   agent: z.string(),
   files: z.number(),
@@ -509,6 +516,8 @@ export const ProjectAgentResult = z.object({
   sessions: z.number().optional(),
   skipped: z.number().optional(),
   error: z.string().optional(),
+  rows: z.number().optional(),
+  note: z.string().optional(),
 });
 export type ProjectAgentResult = z.infer<typeof ProjectAgentResult>;
 /** What landed: the path on the machine, the files and bytes extracted there, the upload parts, the secret-shaped
@@ -1146,6 +1155,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     contextWindow: z.string().optional(),
     /** Absent reads as person: the app never sends it, the command line sends cli, the MCP server sends agent. */
     startedBy: SessionOrigin.optional(),
+    /** Minted by the client per send and echoed on the turn's session.start, so the client knows which start is its own. */
+    requestId: z.string().optional(),
   }),
   /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
    * from the binaries on its machine where they answer; without one, from the runtime's table. */
@@ -1169,6 +1180,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   /** Replies with { storage: SnapshotStorage | null }: every snapshot on the account by count, size and monthly
    * cost; null on a backend whose capabilities lack snapshotListing. */
   z.object({ id: reqId, op: z.literal("snapshots.storage") }),
+  /** Replies with { points: WorkspaceCostEvent[] }: the workspace's cost ticks since this runtime began metering it,
+   * folded to the ticks where the rate changed plus the newest (appendCostPoint); empty before the first tick. */
+  z.object({ id: reqId, op: z.literal("cost.history"), workspaceId: z.string() }),
   /** Moves the golden's head to a version already in its manifest; replies with a
    * SnapshotRollbackResult. A version outside the manifest fails with kind "missing". */
   z.object({ id: reqId, op: z.literal("snapshots.rollback"), version: z.number(), name: z.string().optional() }),
@@ -1323,4 +1337,5 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
 export { fmtBytes, fmtMemGb } from "./format.js";
+export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";

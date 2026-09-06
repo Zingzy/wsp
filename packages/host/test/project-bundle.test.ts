@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { INSTALL_NAMES, OUTPUT_NAMES } from "@wsp/collect";
-import { agentHomes, folderExportScript } from "@wsp/engine";
+import { PROJECT_STATE_RESOLVERS, agentHomes, folderExportScript } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { CACHE_RULE, isCacheName, packProject, planProject, projectBundler } from "../src/project-bundle.js";
 
@@ -426,6 +426,7 @@ describe("packState", () => {
       { agent: "claude", files: 3, bytes: Buffer.byteLength(moved) + 4 + 6, outcome: "moved" },
       { agent: "pi", files: 1, bytes: Buffer.byteLength(piSession(real)), outcome: "carried" },
     ]);
+    expect(packed.merges).toEqual([]);
     expect(listed(packed.tar)).toEqual([
       "root/.claude-cfg/projects/-root-work-proj/S1.jsonl",
       "root/.claude-cfg/projects/-root-work-proj/S1/tool-results/t1.txt",
@@ -463,6 +464,49 @@ describe("packState", () => {
     expect(existsSync(join(h.claude, "projects", h.key, "S1.jsonl"))).toBe(true);
   });
 
+  it("an agent on the machine whose rows sit in a shared store gets its module's merge script in the archive under the guest's /tmp; rows alone are transcript-only with a script and no file; an absent agent's rows wait with no script; a store that cannot be read fails that agent alone", async () => {
+    const root = fixture();
+    const real = realpathSync(root);
+    const h = homes(real);
+    const hermes = join(h.dir, "hermes");
+    mkdirSync(hermes);
+    const db = new DatabaseSync(join(hermes, "state.db"));
+    db.exec("create table sessions (id text primary key, cwd text, git_repo_root text); create table messages (id integer primary key, session_id text, content text)");
+    db.prepare("insert into sessions values ('s1', ?, ?)").run(real, real);
+    db.prepare("insert into sessions values ('s2', '/Users/me/other', null)").run();
+    db.prepare("insert into messages values (1, 's1', 'hi')").run();
+    db.close();
+    const opencode = join(h.dir, "opencode");
+    put(opencode, "opencode.db", "not a database\n");
+    const b = projectBundler(root, { claude: h.claude, hermes, opencode });
+    const packed = await b.packState({
+      dest: "/root/work/proj",
+      agents: [{ agent: "claude", home: "/root/.claude-cfg", present: true }, { agent: "hermes", home: "/root/.hermes", present: true }, { agent: "opencode", home: "/root/.local/share/opencode", present: true }],
+    });
+    expect(packed.agents).toEqual([
+      { agent: "claude", files: 3, bytes: expect.any(Number), outcome: "moved" },
+      { agent: "hermes", files: 0, bytes: 0, outcome: "transcript-only" },
+      { agent: "opencode", files: 0, bytes: 0, outcome: "failed", error: expect.stringMatching(/not a database/) },
+    ]);
+    const dir = /^\/tmp\/wsp-merge-[0-9a-f]{8}$/;
+    expect(packed.merges).toEqual([{ agent: "hermes", script: expect.stringMatching(/^\/tmp\/wsp-merge-[0-9a-f]{8}\/hermes\.py$/) }]);
+    const script = packed.merges[0]!.script;
+    expect(script.slice(0, script.lastIndexOf("/"))).toMatch(dir);
+    expect(listed(packed.tar)).toEqual([
+      "root/.claude-cfg/projects/-root-work-proj/S1.jsonl",
+      "root/.claude-cfg/projects/-root-work-proj/S1/tool-results/t1.txt",
+      "root/.claude-cfg/projects/-root-work-proj/memory/MEMORY.md",
+      script.slice(1),
+    ]);
+    const out = extract(packed.tar);
+    expect(readFileSync(join(out, script), "utf8")).toBe(await PROJECT_STATE_RESOLVERS.get("hermes")!.merge!(hermes, real, "/root/work/proj", "/root/.hermes"));
+    expect(statSync(join(out, script)).mode & 0o777).toBe(0o600);
+    const away = await b.packState({ dest: "/root/work/proj", agents: [{ agent: "hermes", home: "/root/.hermes", present: false }] });
+    expect(away.agents).toEqual([{ agent: "hermes", files: 0, bytes: 0, outcome: "nothing" }]);
+    expect(away.merges).toEqual([]);
+    expect(listed(away.tar)).toEqual([]);
+  });
+
   it("an agent whose rows stay behind lands its transcripts as they were and says transcript-only even when it is on the machine; an absent agent with no file for the folder says nothing", async () => {
     const root = fixture();
     const real = realpathSync(root);
@@ -483,7 +527,11 @@ describe("packState", () => {
       { agent: "codex", files: 1, bytes: Buffer.byteLength(meta), outcome: "transcript-only" },
       { agent: "gemini", files: 0, bytes: 0, outcome: "nothing" },
     ]);
-    expect(listed(packed.tar)).toEqual(["root/.codex/sessions/2026/09/05/rollout-2026-09-05T21-58-00-t1.jsonl"]);
-    expect(readFileSync(join(extract(packed.tar), "root/.codex/sessions/2026/09/05/rollout-2026-09-05T21-58-00-t1.jsonl"), "utf8")).toBe(meta);
+    expect(packed.merges).toEqual([{ agent: "codex", script: expect.stringMatching(/^\/tmp\/wsp-merge-[0-9a-f]{8}\/codex\.py$/) }]);
+    const script = packed.merges[0]!.script;
+    expect(listed(packed.tar)).toEqual(["root/.codex/sessions/2026/09/05/rollout-2026-09-05T21-58-00-t1.jsonl", script.slice(1)]);
+    const out = extract(packed.tar);
+    expect(readFileSync(join(out, "root/.codex/sessions/2026/09/05/rollout-2026-09-05T21-58-00-t1.jsonl"), "utf8")).toBe(meta);
+    expect(readFileSync(join(out, script), "utf8")).toBe(await PROJECT_STATE_RESOLVERS.get("codex")!.merge!(codex, real, "/root/work/proj", "/root/.codex"));
   });
 });

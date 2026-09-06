@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, type McpAgent, type McpFormat, type McpServer } from "@wsp/catalog";
-import { type ManifestEntry, detectMcp, linuxFit, mcpGroups, mcpRemoteHash } from "../src/index.js";
+import { detectMcp, linuxFit, mcpRemoteHash } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const HOME = "/Users/dev";
@@ -64,7 +64,7 @@ describe("mcp servers", () => {
       rung: "agents", id: "agents/mcp/claude/home/zomato", label: "zomato", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring",
       detail: "local to ~; stdio: npx mcp-remote (mcp.zomato.com/mcp); runs via npx; its saved sign-in (1.4 KB) travels on the mcp-remote sign-ins row",
     });
-    // The whole store is claimed so the Everything screen stops listing it; only what the current bridge reads travels.
+    // The whole store is claimed; only what the current bridge reads travels.
     expect(rows[5]).toEqual({
       rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote sign-ins", group: "MCP sign-ins", paths: ["~/.mcp-auth"],
       excludes: ["~/.mcp-auth/mcp-remote-0.1.37", `~/.mcp-auth/mcp-remote-v1/${hash("https://mcp.zomato.com/mcp")}_lock.json`],
@@ -138,27 +138,6 @@ describe("mcp servers", () => {
     ]);
   });
 
-  it("a command in ~/.local/bin that is installed by hand: a macOS binary locks the row off, a script travels with its Installed by hand row, and a script whose interpreter nothing brings is locked like its row", async () => {
-    const gemini = JSON.stringify({ mcpServers: { memory: { command: "~/.local/bin/codebase-memory-mcp" }, notes: { command: "/Users/dev/.local/bin/notes-mcp", args: ["--v"] }, lint: { command: "~/.local/bin/lint-mcp" }, tsx: { command: "~/.local/bin/tsx-mcp" }, rb: { command: "~/.local/bin/rb-mcp" }, gone: { command: "~/.local/bin/gone-mcp" } } });
-    const bins = {
-      "~/.local/bin/codebase-memory-mcp": { head: "mach-o", bytes: 30_000_000 },
-      "~/.local/bin/notes-mcp": { head: "#!/usr/bin/env node\n" },
-      "~/.local/bin/lint-mcp": { head: "#!/opt/homebrew/bin/python3\n" },
-      "~/.local/bin/tsx-mcp": { head: "#!/opt/homebrew/bin/tsx\n" },
-      "~/.local/bin/rb-mcp": { head: "#!/opt/homebrew/bin/ruby\n" },
-    };
-    const tsx: ManifestEntry = { rung: "tools", id: "tools/npm/tsx", label: "tsx", paths: [], bytes: 0, default: "bring", linux: "yes" };
-    const rows = await detectMcp(fakeHost({ files: { "~/.gemini/settings.json": gemini }, bins }), [tsx]);
-    expect(rows.map(r => [r.id, r.default, r.reason, r.detail])).toEqual([
-      ["agents/mcp/gemini/memory", "skip", "command codebase-memory-mcp is a macOS binary installed by hand, will not run", "stdio: ~/.local/bin/codebase-memory-mcp; carries no secret"],
-      ["agents/mcp/gemini/notes", "bring", undefined, "stdio: ~/.local/bin/notes-mcp --v; needs notes-mcp on the machine; it travels as a copy when its row under Installed by hand is ticked; carries no secret"],
-      ["agents/mcp/gemini/lint", "bring", undefined, "stdio: ~/.local/bin/lint-mcp; needs lint-mcp on the machine; it travels as a copy when its row under Installed by hand is ticked; carries no secret"],
-      ["agents/mcp/gemini/tsx", "bring", undefined, "stdio: ~/.local/bin/tsx-mcp; needs tsx-mcp on the machine; it travels as a copy when its row under Installed by hand is ticked, and runs with tsx, so the tsx row has to be ticked too; carries no secret"],
-      ["agents/mcp/gemini/rb", "skip", "command rb-mcp is a ruby script installed by hand, and neither the machine nor a tools row brings ruby; its row under Installed by hand is locked, will not run", "stdio: ~/.local/bin/rb-mcp; carries no secret"],
-      ["agents/mcp/gemini/gone", "bring", undefined, "stdio: ~/.local/bin/gone-mcp; needs gone-mcp on the machine; carries no secret"],
-    ]);
-  });
-
   it("a value after a secret-named flag, or inside a secret-named assignment, is a secret: hidden on the row and counted by size", async () => {
     const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": JSON.stringify({ mcpServers: { s: { command: "npx", args: ["-y", "some-server", "--api-key", "sk-123", "--token=abcdef", "API_KEY=zzz"] } } }) } }));
     expect(rows.map(r => r.detail)).toEqual(["stdio: npx some-server --api-key … --token=… API_KEY=…; runs via npx; carries secrets: flag --api-key (6 B), flag --token (6 B), arg API_KEY (3 B)"]);
@@ -204,7 +183,7 @@ describe("mcp servers", () => {
     expect(await detectMcp(fakeHost())).toEqual([]);
   });
 
-  it("an agent the catalog gains with a format of its own is read through its module: one row per server it names, under the agent's group, with the entry's scope on the heading", async () => {
+  it("an agent the catalog gains with a format of its own is read through its module: one row per server it names, under the agent's group,", async () => {
     const lines: McpFormat = {
       read: text => text.split("\n").filter(l => l !== "").map((l): McpServer => {
         const [name, command, ...args] = l.split(" ");
@@ -215,12 +194,11 @@ describe("mcp servers", () => {
     };
     const entry: McpAgent = { ...CATALOG_AGENTS.find(a => a.id === "pi")!, id: "lines", name: "Lines", mcp: { format: lines, files: ["~/.lines/servers.txt"], scope: "one file" } };
     const host = fakeHost({ files: { "~/.lines/servers.txt": "alpha npx -y pkg\nbeta /Applications/B.app/b\n", "~/.claude.json": claudeJson() } });
-    const rows = await detectMcp(host, [], [entry]);
+    const rows = await detectMcp(host, [entry]);
     expect(rows.map(r => [r.id, r.group, r.default, r.detail])).toEqual([
       ["agents/mcp/lines/alpha", "Lines MCP servers", "bring", "stdio: npx pkg; runs via npx; carries no secret"],
       ["agents/mcp/lines/beta", "Lines MCP servers", "skip", "stdio: /Applications/B.app/b; carries no secret"],
     ]);
-    expect(await mcpGroups(host, rows, [entry])).toEqual([{ rung: "agents", group: "Lines MCP servers", hint: "one file" }]);
   });
 
   it("linuxFit: home paths and Homebrew's prefix have a Linux equivalent, Library and Applications do not", () => {
@@ -243,63 +221,3 @@ describe("mcp servers", () => {
   });
 });
 
-const CLAUDE_GROUP = "Claude Code MCP servers";
-const CLAUDE_SCOPE = "user scope and your home folder";
-const mcpJson = (...names: string[]): string => JSON.stringify({ mcpServers: Object.fromEntries(names.map(n => [n, { type: "http", url: `https://${n}.example/mcp` }])) });
-
-describe("mcp groups", () => {
-  it("user scope only: the group says what it covers and leaves nothing out", async () => {
-    const host = fakeHost({ files: { "~/.claude.json": claudeJson({ projects: {} }) } });
-    expect(await mcpGroups(host, await detectMcp(host))).toEqual([{ rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE }]);
-  });
-
-  it("home scope only: the same words, since the home folder's project entry is what the list reads", async () => {
-    const home = { [HOME]: { mcpServers: { zomato: { command: "npx", args: ["mcp-remote", "https://mcp.zomato.com/mcp"] } } } };
-    const host = fakeHost({ files: { "~/.claude.json": claudeJson({ mcpServers: {}, projects: home }) } });
-    const rows = await detectMcp(host);
-    expect(rows.map(r => r.id)).toEqual(["agents/mcp/claude/home/zomato"]);
-    expect(await mcpGroups(host, rows)).toEqual([{ rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE }]);
-  });
-
-  it("another project entry's servers are counted as left out, with the folder", async () => {
-    const host = fakeHost({ files: { "~/.claude.json": claudeJson() } });
-    expect(await mcpGroups(host, await detectMcp(host))).toEqual([
-      { rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE, note: "1 more in 1 project folder stay on this computer (a repo's .mcp.json travels with it)" },
-    ]);
-  });
-
-  it("a repo .mcp.json is looked for only in the folders the project entries name, its names joined with the entry's", async () => {
-    const host = fakeHost({
-      files: {
-        "~/.claude.json": claudeJson({ projects: { ...JSON.parse(claudeJson()).projects, [`${HOME}/spoo`]: { allowedTools: [] }, [`${HOME}/gone`]: { mcpServers: { d: {} } } } }),
-        "~/code/mono/.mcp.json": mcpJson("linear", "sentry"),
-        "~/spoo/.mcp.json": mcpJson("axiom", "clarity", "gmail"),
-        "~/.mcp.json": mcpJson("athome"),
-        "~/elsewhere/.mcp.json": mcpJson("never", "read"),
-      },
-    });
-    const rows = await detectMcp(host);
-    expect(await mcpGroups(host, rows)).toEqual([
-      { rung: "agents", group: CLAUDE_GROUP, hint: CLAUDE_SCOPE, note: "6 more in 3 project folders stay on this computer (a repo's .mcp.json travels with it)" },
-    ]);
-    // Nothing outside the named folders is opened, and no whole-disk walk happens.
-    expect(host.calls.filter(c => c.startsWith("read ")).slice(1)).toEqual([`read ${HOME}/.claude.json`, `read ${HOME}/.mcp.json`, `read ${HOME}/code/mono/.mcp.json`, `read ${HOME}/spoo/.mcp.json`]);
-  });
-
-  it("the left-out line fits the screen's 100-column cap with two-digit counts", async () => {
-    const projects = Object.fromEntries(Array.from({ length: 99 }, (_, i) => [`${HOME}/p${i}`, { mcpServers: { s: { url: `https://s${i}.example` } } }]));
-    const host = fakeHost({ files: { "~/.claude.json": claudeJson({ projects }) } });
-    const [claude] = await mcpGroups(host, await detectMcp(host));
-    expect(claude?.note).toBe("99 more in 99 project folders stay on this computer (a repo's .mcp.json travels with it)");
-    // The line sits eight columns in: the bar, a space and the row's six-column indent.
-    expect(claude!.note!.length).toBeLessThanOrEqual(100 - 8);
-  });
-
-  it("no group, no note: nothing configured, only project-scoped servers, or a user-wide agent's config alone", async () => {
-    expect(await mcpGroups(fakeHost(), [])).toEqual([]);
-    const projectsOnly = fakeHost({ files: { "~/.claude.json": claudeJson({ mcpServers: {}, projects: { [`${HOME}/code/mono`]: { mcpServers: { linear: { url: "https://l" } } } } }) } });
-    expect(await mcpGroups(projectsOnly, await detectMcp(projectsOnly))).toEqual([]);
-    const codex = fakeHost({ files: { "~/.codex/config.toml": '[mcp_servers.linear]\nurl = "https://mcp.linear.app/sse"\n' } });
-    expect(await mcpGroups(codex, await detectMcp(codex))).toEqual([{ rung: "agents", group: "Codex MCP servers", hint: "user scope" }]);
-  });
-});

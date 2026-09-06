@@ -10,7 +10,7 @@
 // awake and billing forever.
 
 import type { ExecResult, MachineState, PreviewReach } from "@wsp/engine";
-import type { EventUnion, ReachState, ReachStatus, WorkspacePhase, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { appendCostPoint, type EventUnion, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 
 /** The provider word the runtime's own phase implies: a wake in flight is a machine starting, a pause in flight still runs. */
@@ -81,6 +81,8 @@ export interface StatusApi {
   /** Refcounted: while at least one watcher holds this, the poller and cost
    * ticker run and their events ride the runtime bus. Returns the release. */
   watch(opts?: StatusWatchOptions): () => void;
+  /** The workspace's cost ticks since this runtime began metering it, folded to the rate changes and the newest tick. */
+  history(workspaceId: string): WorkspaceCostEvent[];
 }
 
 /** A workspace as the tracker needs it: the view, the size the provider built
@@ -150,6 +152,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const pollIntervalMs = o.defaults?.pollIntervalMs ?? 15_000;
   const clock = o.clock ?? realClock;
   const meters = new Map<string, Meter>();
+  const histories = new Map<string, WorkspaceCostEvent[]>();
   const reconciled = new Map<string, { state: MachineState; at: number }>();
   const suspects = new Map<string, Suspect>();
 
@@ -178,6 +181,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   o.on("workspace.deleted", e => {
     if (e.type !== "workspace.deleted") return;
     meters.delete(e.workspaceId);
+    histories.delete(e.workspaceId);
     lastEmitted.delete(e.workspaceId);
     reconciled.delete(e.workspaceId);
     suspects.delete(e.workspaceId);
@@ -317,7 +321,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       const running = view.phase === "running" && m.mark !== undefined;
       const rate = o.rateUsdPerHour(size);
       const awakeMs = m.awakeMs + (running ? now - m.mark! : 0);
-      o.emit({
+      const tick: WorkspaceCostEvent = {
         type: "workspace.cost",
         workspaceId: view.id,
         phase: view.phase,
@@ -325,7 +329,9 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         awakeMs,
         accruedUsd: (rate * awakeMs) / 3_600_000,
         at: new Date(now).toISOString(),
-      });
+      };
+      histories.set(view.id, appendCostPoint(histories.get(view.id) ?? [], tick));
+      o.emit(tick);
     }
   };
 
@@ -360,5 +366,5 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     };
   };
 
-  return { list, watch };
+  return { list, watch, history: id => histories.get(id) ?? [] };
 }

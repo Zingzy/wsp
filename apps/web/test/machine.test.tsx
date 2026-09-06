@@ -58,7 +58,7 @@ const EMPTY_LINEAGE: SnapshotLineage = { name: "default", head: null, versions: 
 
 // The surface's cost series listens through api.subscribe like the store does,
 // so tests push events through the same channel.
-function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS, lineage: SnapshotLineage = EMPTY_LINEAGE) {
+function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS, lineage: SnapshotLineage = EMPTY_LINEAGE, history?: EventUnion[]) {
   const listeners = new Set<(e: EventUnion) => void>();
   let current = lineage;
   const api: Api & {
@@ -77,6 +77,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     sessionHistory: vi.fn(async () => []),
     listSnapshots: vi.fn<() => Promise<SnapshotLineage>>(async () => current),
     snapshotStorage: async () => null,
+    ...(history !== undefined ? { costHistory: async () => history.filter((e): e is EventUnion & { type: "workspace.cost" } => e.type === "workspace.cost") } : {}),
     rollbackSnapshot: vi.fn(async (version: number) => {
       current = { ...current, head: version };
       return { lineage: current, existingWorkspaces: "untouched" as const };
@@ -124,8 +125,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function mount(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS, lineage: SnapshotLineage = EMPTY_LINEAGE) {
-  const api = fakeApi(workspaces, capabilities, lineage);
+async function mount(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS, lineage: SnapshotLineage = EMPTY_LINEAGE, history?: EventUnion[]) {
+  const api = fakeApi(workspaces, capabilities, lineage, history);
   useStore.getState().bind(api);
   render(<MachineSurface workspaceId={workspaces[0]!.id} />);
   await waitFor(() => expect(useStore.getState().ready).toBe(true));
@@ -259,6 +260,24 @@ describe("idle window", () => {
 });
 
 describe("usage", () => {
+  const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const clockToSecond = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const T0 = Date.UTC(2026, 8, 5, 6, 0);
+  const at = (minutes: number) => T0 + minutes * 60_000;
+  const point = (minutes: number, rate: number, accruedUsd: number): EventUnion => ({
+    type: "workspace.cost",
+    workspaceId: "ws_a",
+    phase: rate > 0 ? "running" : "napping",
+    rateUsdPerHour: rate,
+    awakeMs: Math.round((accruedUsd / 0.11) * 3_600_000),
+    accruedUsd,
+    at: new Date(at(minutes)).toISOString(),
+  });
+  // Three hours the runtime metered before the tab opened: two running at $0.11/hr, then one napping.
+  const HISTORY = [point(0, 0.11, 0), point(120, 0.11, 0.22), point(121, 0, 0.22), point(180, 0, 0.22)];
+  const axis = (which: "x" | "y") => [...document.querySelectorAll(`[data-usage-axis=${which}] span`)].map(el => el.textContent);
+  const toggle = (name: string) => screen.getByRole("button", { name });
+
   it("shows the live rate and accrued total", async () => {
     const api = await mount([view("ws_a", "api")]);
     act(() => api.emit(costEvent("ws_a", 0.11, 60_000, "2026-09-01T00:01:00Z")));
@@ -266,58 +285,70 @@ describe("usage", () => {
     expect(fact("accrued")).toBe("$0.0018");
   });
 
-  it("draws one line through the cost ticks, never bars, and drops the empty state on the first tick", async () => {
+  it("starts with a quiet empty state and draws the accrued total as one line from the first tick, never bars", async () => {
     const api = await mount([view("ws_a", "api")]);
-    expect(screen.getByText("No cost ticks yet.")).toBeDefined();
+    expect(screen.getByText("No cost yet")).toBeDefined();
+    expect(document.querySelector("[data-usage-chart] svg")).toBeNull();
     act(() => api.emit(costEvent("ws_a", 0.11, 60_000, "2026-09-01T00:01:00Z")));
     await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
-    expect(screen.queryByText("No cost ticks yet.")).toBeNull();
-    act(() => api.emit(costEvent("ws_a", 0.22, 120_000, "2026-09-01T00:02:00Z")));
-    act(() => api.emit(costEvent("ws_a", 0.11, 180_000, "2026-09-01T00:03:00Z")));
-    await waitFor(() => expect(screen.getByText("peak $0.22")).toBeDefined());
+    expect(screen.queryByText("No cost yet")).toBeNull();
     const chart = document.querySelector("[data-usage-chart]")!;
     expect(chart.querySelectorAll("rect")).toHaveLength(0);
     expect(chart.querySelectorAll("[data-usage-bar]")).toHaveLength(0);
-    const line = chart.querySelector("[data-usage-line]")!;
-    expect(line.tagName.toLowerCase()).toBe("path");
-    // One move then one segment per tick after the first: the path is the series, nothing else.
-    expect(line.getAttribute("d")).toMatch(/^M[^ML]+(L[^ML]+){2}$/);
-    // The peak is marked on its point with its value beside it.
-    expect(chart.querySelector("[data-usage-peak]")).not.toBeNull();
-    expect(fact("usage-peak")).toBe("$0.220/hr");
+    expect(chart.querySelector("[data-usage-line]")!.tagName.toLowerCase()).toBe("path");
+    expect(chart.querySelector("[data-usage-area]")).not.toBeNull();
+    expect(chart.querySelector("[data-k=usage-end]")).not.toBeNull();
+    // One tick still reads as a minute of axis, not a window collapsed to a point, and ticks under a minute apart carry
+    // seconds so no two labels read alike.
+    const t1 = Date.parse("2026-09-01T00:01:00Z");
+    expect(axis("x")).toEqual([clockToSecond(t1 - 60_000), clockToSecond(t1 - 40_000), clockToSecond(t1 - 20_000), clockToSecond(t1)]);
+    expect(new Set(axis("x")).size).toBe(4);
+    expect(fact("usage-readout")).toBe(`tracked since ${clockToSecond(t1)}`);
   });
 
-  it("hovering the chart reads out the tick under the pointer; leaving returns to the window", async () => {
-    const api = await mount([view("ws_a", "api")]);
-    act(() => {
-      api.emit(costEvent("ws_a", 0.11, 60_000, "2026-09-01T00:01:00Z"));
-      api.emit(costEvent("ws_a", 0.22, 120_000, "2026-09-01T00:02:00Z"));
-      api.emit(costEvent("ws_a", 0.11, 180_000, "2026-09-01T00:03:00Z"));
-    });
-    await waitFor(() => expect(screen.getByText("peak $0.22")).toBeDefined());
-    const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    expect(fact("usage-readout")).toBe(`${clock("2026-09-01T00:01:00Z")} to ${clock("2026-09-01T00:03:00Z")}`);
+  it("reads the workspace's history from the runtime and spans all of it by default, with hour and day toggles", async () => {
+    await mount([view("ws_a", "api")], CAPS, EMPTY_LINEAGE, HISTORY);
+    await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
+    expect(toggle("all").getAttribute("aria-pressed")).toBe("true");
+    expect(axis("x")).toEqual([clock(at(0)), clock(at(60)), clock(at(120)), clock(at(180))]);
+    // A round ceiling just above the total, labelled to the step.
+    expect(axis("y")).toEqual(["$0.30", "$0.20", "$0.10", "$0.00"]);
+    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))}`);
+    expect(screen.queryByText(/peak/)).toBeNull();
+
+    fireEvent.click(toggle("hour"));
+    expect(toggle("hour").getAttribute("aria-pressed")).toBe("true");
+    expect(toggle("all").getAttribute("aria-pressed")).toBe("false");
+    expect(axis("x")).toEqual([clock(at(120)), clock(at(140)), clock(at(160)), clock(at(180))]);
+
+    fireEvent.click(toggle("day"));
+    expect(axis("x")).toEqual([clock(at(180 - 1440)), clock(at(180 - 960)), clock(at(180 - 480)), clock(at(180))]);
+    // The series began inside the day: the line starts where the data does, the axis stays the whole day.
+    const d = document.querySelector("[data-usage-line]")!.getAttribute("d")!;
+    expect(Number(d.slice(1).split(" ")[0])).toBeCloseTo(100 * (1 - 180 / 1440), 0);
+  });
+
+  it("a live tick extends the line and the axis to the newest moment", async () => {
+    const api = await mount([view("ws_a", "api")], CAPS, EMPTY_LINEAGE, HISTORY);
+    await waitFor(() => expect(axis("x").at(-1)).toBe(clock(at(180))));
+    act(() => api.emit(point(190, 0.11, 0.23)));
+    expect(axis("x").at(-1)).toBe(clock(at(190)));
+    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))}`);
+  });
+
+  it("hovering reads the total, the rate and the moment under the pointer; leaving returns to the span", async () => {
+    await mount([view("ws_a", "api")], CAPS, EMPTY_LINEAGE, HISTORY);
+    await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
     const svg = document.querySelector<SVGSVGElement>("[data-usage-chart] svg")!;
-    svg.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 300, bottom: 64, width: 300, height: 64, toJSON: () => ({}) });
-    fireEvent.mouseMove(svg, { clientX: 150, clientY: 30 });
-    expect(fact("usage-readout")).toBe(`$0.220/hr at ${clock("2026-09-01T00:02:00Z")}`);
+    svg.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 300, bottom: 96, width: 300, height: 96, toJSON: () => ({}) });
+    fireEvent.mouseMove(svg, { clientX: 100, clientY: 30 });
+    expect(fact("usage-readout")).toBe(`$0.1100 · $0.110/hr · ${clock(at(60))}`);
     expect(svg.querySelector("[data-usage-hover]")).not.toBeNull();
-    fireEvent.mouseMove(svg, { clientX: 299, clientY: 30 });
-    expect(fact("usage-readout")).toBe(`$0.110/hr at ${clock("2026-09-01T00:03:00Z")}`);
+    fireEvent.mouseMove(svg, { clientX: 250, clientY: 30 });
+    expect(fact("usage-readout")).toBe(`$0.2200 · $0.000/hr · ${clock(at(150))}`);
     fireEvent.mouseLeave(svg);
-    expect(fact("usage-readout")).toBe(`${clock("2026-09-01T00:01:00Z")} to ${clock("2026-09-01T00:03:00Z")}`);
+    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))}`);
     expect(svg.querySelector("[data-usage-hover]")).toBeNull();
-  });
-
-  it("never says no spend while the counters show spend the chart missed", async () => {
-    const api = fakeApi([view("ws_a", "api")]);
-    useStore.getState().bind(api);
-    // A tick that landed before the surface mounted: the store has it, the chart does not.
-    act(() => useStore.getState().applyEvent(costEvent("ws_a", 0.11, 60_000, "2026-09-01T00:01:00Z")));
-    render(<MachineSurface workspaceId="ws_a" />);
-    await waitFor(() => expect(fact("accrued")).toBe("$0.0018"));
-    expect(screen.queryByText("No cost ticks yet.")).toBeNull();
-    expect(screen.getByText("Chart starts with the next cost tick.")).toBeDefined();
   });
 
   it("keeps each workspace's series separate", async () => {
@@ -327,7 +358,7 @@ describe("usage", () => {
       api.emit(costEvent("ws_b", 0.44, 120_000, "2026-09-01T00:02:00Z"));
     });
     expect(document.querySelector("[data-usage-line]")).toBeNull();
-    expect(screen.getByText("No cost ticks yet.")).toBeDefined();
+    expect(screen.getByText("No cost yet")).toBeDefined();
   });
 });
 

@@ -6,12 +6,11 @@
 // it needs on Linux and which secret it carries. Token files are only stat'ed,
 // never read.
 import { createHash } from "node:crypto";
-import { MCP_AGENTS, parseJsonc, type McpAgent, type McpConfig, type McpServer, type McpTransport } from "@wsp/catalog";
+import { MCP_AGENTS, type McpAgent, type McpConfig, type McpServer, type McpTransport } from "@wsp/catalog";
 import { MCP_ID_PREFIX, fmtBytes } from "@wsp/protocol";
-import { type Host, expand } from "../host.js";
-import type { GroupNote, ManifestEntry } from "../manifest.js";
-import { isSecretName } from "../everything/shell-rc.js";
-import { BASE_INTERPRETERS, HAND_DIRS, HAND_GROUP, type HandBin, brought, carries, handBins } from "./hand-bins.js";
+import { type Host, expand, tilde } from "../host.js";
+import type { ManifestEntry } from "../manifest.js";
+import { isSecretName } from "./shell-rc.js";
 
 /** The row that carries mcp-remote's saved browser sign-ins for every agent. */
 export const MCP_REMOTE_ID = `${MCP_ID_PREFIX}mcp-remote`;
@@ -23,29 +22,12 @@ const MCP_AUTH = "~/.mcp-auth";
 /** mcp-remote's store since its versioned folders went away: MCP_REMOTE_CONFIG_DIR or ~/.mcp-auth, then mcp-remote-v1. */
 const MCP_REMOTE_STORE = `${MCP_AUTH}/mcp-remote-v1`;
 
-// --- parsing -----------------------------------------------------------------
-
-function parseJson(text: string): Record<string, unknown> | undefined {
-  try {
-    const v: unknown = parseJsonc(text);
-    return isObject(v) ? v : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-
 // --- what runs on Linux --------------------------------------------------------
 
 /** Absolute prefixes with no Linux equivalent. */
 const MAC_ONLY = ["/Applications/", "/System/", "/Library/", "/Volumes/", "/private/", "/opt/homebrew/Caskroom/"];
 /** Directories whose binaries the machine finds on its own PATH under the same name; the import's plan strips them too. */
 export const MCP_BIN_DIRS: readonly string[] = ["/opt/homebrew/bin/", "/opt/homebrew/sbin/", "/usr/local/bin/", "/usr/bin/", "/bin/"];
-
-function tilde(home: string, p: string): string {
-  return p === home ? "~" : p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p;
-}
 
 function isMacOnly(p: string, home: string): boolean {
   const abs = p.startsWith("~/") ? `${home}${p.slice(1)}` : p;
@@ -63,36 +45,14 @@ function binaryOf(command: string, home: string): string {
   return tilde(home, abs);
 }
 
-/** The hand-installed binary a command names, when the command sits in one of the hand bin directories. */
-function handOf(command: string, home: string, hands: ReadonlyMap<string, HandBin>): HandBin | undefined {
-  const abs = command.startsWith("~/") ? `${home}${command.slice(1)}` : command;
-  const slash = abs.lastIndexOf("/");
-  if (slash === -1) return undefined;
-  return HAND_DIRS.some(d => `${home}${d.slice(1)}` === abs.slice(0, slash)) ? hands.get(abs.slice(slash + 1)) : undefined;
-}
-
 /** Whether a definition can run on the machine and what it needs there. A path under ~/Library or a macOS
- * install location has no Linux equivalent; home paths and Homebrew's prefix are rewritten on the machine.
- * A command installed by hand travels only as a copy of a script or a Linux binary, with its own row; brings
- * is what the machine has for its interpreter (see brought). */
-export function linuxFit(server: McpServer, home: string, hands: ReadonlyMap<string, HandBin> = new Map(), brings: ReadonlySet<string> = BASE_INTERPRETERS): LinuxFit {
+ * install location has no Linux equivalent; home paths and Homebrew's prefix are rewritten on the machine. */
+export function linuxFit(server: McpServer, home: string): LinuxFit {
   const t = server.transport;
   if (t.kind === "http") return { ok: true, needs: "nothing to install" };
   if (isMacOnly(t.command, home)) return { ok: false, reason: `command ${tilde(home, t.command)} is macOS-only, will not run` };
   for (const s of [...t.args.map(pathOf), ...(t.cwd !== undefined ? [t.cwd] : []), ...Object.values(t.env)]) {
     if (isMacOnly(s, home)) return { ok: false, reason: `path ${tilde(home, s)} is macOS-only, will not run` };
-  }
-  const hand = handOf(t.command, home, hands);
-  if (hand !== undefined && !carries(hand.format)) {
-    return { ok: false, reason: hand.format.kind === "mach-o" ? `command ${hand.name} is a macOS binary installed by hand, will not run` : `command ${hand.name} is installed by hand and has no build the machine can run, will not run` };
-  }
-  if (hand !== undefined) {
-    const need = hand.format.kind === "script" && hand.format.at !== undefined && !BASE_INTERPRETERS.has(hand.format.interpreter) ? hand.format.interpreter : undefined;
-    if (need !== undefined && !brings.has(need)) {
-      return { ok: false, reason: `command ${hand.name} is a ${need} script installed by hand, and neither the machine nor a tools row brings ${need}; its row under ${HAND_GROUP} is locked, will not run` };
-    }
-    const via = need !== undefined ? `, and runs with ${need}, so the ${need} row has to be ticked too` : "";
-    return { ok: true, needs: `needs ${hand.name} on the machine; it travels as a copy when its row under ${HAND_GROUP} is ticked${via}` };
   }
   const bin = binaryOf(t.command, home);
   if (bin === "npx") return { ok: true, needs: "runs via npx" };
@@ -370,22 +330,18 @@ async function configText(host: Host, config: McpConfig): Promise<string | undef
   return undefined;
 }
 
-/** One row per MCP server under its agent, then the mcp-remote sign-in store when there is one; prior is the
- * rows detected before this rung, whose tools rows say which interpreters reach the machine. Each agent's config is
- * read by its entry's format module, so an agent the catalog gains needs nothing here. */
-export async function detectMcp(host: Host, prior: readonly ManifestEntry[] = [], agents: readonly McpAgent[] = MCP_AGENTS): Promise<ManifestEntry[]> {
-  const brings = brought(prior);
+/** One row per MCP server under its agent, then the mcp-remote sign-in store when there is one. Each agent's
+ * config is read by its entry's format module, so an agent the catalog gains needs nothing here. */
+export async function detectMcp(host: Host, agents: readonly McpAgent[] = MCP_AGENTS): Promise<ManifestEntry[]> {
   const store = await remoteStore(host);
   const tokens = store?.tokens ?? new Map<string, number>();
   const rows: ManifestEntry[] = [];
   const matched: string[] = [];
-  let hands: Map<string, HandBin> | undefined;
   for (const agent of agents) {
     const text = await configText(host, agent.mcp);
     if (text === undefined) continue;
-    hands ??= new Map((await handBins(host)).map(b => [b.name, b]));
     for (const server of agent.mcp.format.read(text, host.home)) {
-      const fit = linuxFit(server, host.home, hands, brings);
+      const fit = linuxFit(server, host.home);
       const c = await carried(host, server, agent, tokens);
       const deps = await homeDeps(host, server, c.paths);
       const hash = server.transport.kind === "stdio" ? mcpRemoteHash(server.transport.args) : undefined;
@@ -397,52 +353,3 @@ export async function detectMcp(host: Host, prior: readonly ManifestEntry[] = []
   return rows;
 }
 
-// --- what the list leaves out ------------------------------------------------------
-
-interface LeftOut {
-  servers: number;
-  folders: number;
-}
-
-/** Servers Claude Code reads only inside a project folder: a project entry's own list (the home folder's is on
- * the rows) and the .mcp.json in that folder, both in the file's own shape. Only the folders ~/.claude.json names
- * are looked at. */
-async function claudeLeftOut(host: Host, agent: McpAgent, root: Record<string, unknown>): Promise<LeftOut> {
-  const out: LeftOut = { servers: 0, folders: 0 };
-  if (!isObject(root.projects)) return out;
-  const names = (text: string): string[] => agent.mcp.format.read(text, host.home).filter(s => s.scope === "user").map(s => s.name);
-  for (const [folder, project] of Object.entries(root.projects)) {
-    if (!folder.startsWith("/")) continue;
-    const found = new Set(folder === host.home ? [] : names(JSON.stringify(project)));
-    const file = `${folder}/.mcp.json`;
-    if ((await host.fs.stat(file))?.kind === "file") {
-      const text = await host.fs.readText(file);
-      if (text !== undefined) for (const name of names(text)) found.add(name);
-    }
-    if (found.size === 0) continue;
-    out.servers += found.size;
-    out.folders += 1;
-  }
-  return out;
-}
-
-/** What each agent's group covers, for the groups that have rows; Claude Code's also counts the project-scoped
- * servers it leaves out. */
-export async function mcpGroups(host: Host, rows: readonly ManifestEntry[], agents: readonly McpAgent[] = MCP_AGENTS): Promise<GroupNote[]> {
-  const out: GroupNote[] = [];
-  for (const agent of agents) {
-    const group = mcpGroup(agent);
-    if (!rows.some(r => r.group === group)) continue;
-    const note: GroupNote = { rung: "agents", group, hint: agent.mcp.scope };
-    if (agent.id === "claude") {
-      const text = await configText(host, agent.mcp);
-      const root = text === undefined ? undefined : parseJson(text);
-      const left = root === undefined ? undefined : await claudeLeftOut(host, agent, root);
-      if (left !== undefined && left.servers > 0) {
-        note.note = `${left.servers} more in ${left.folders} project folder${left.folders === 1 ? "" : "s"} stay on this computer (a repo's .mcp.json travels with it)`;
-      }
-    }
-    out.push(note);
-  }
-  return out;
-}

@@ -150,12 +150,17 @@ describe("runtime session history", () => {
     const rt = createRuntime({ backend, store, adapters: { claude: scripted("hello") } });
     const a = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const b = await rt.workspaces.create({ golden: "snap_g", name: "b" });
-    await (await rt.sessions.start(a.id, { prompt: "say hello" })).finished;
+    await (await rt.sessions.start(a.id, { prompt: "say hello", requestId: "req_a1" })).finished;
 
     const history = await rt.sessions.history(a.id);
     expect(history.map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
-    expect(history[0]).toMatchObject({ type: "session.start", workspaceId: a.id, prompt: "say hello" });
+    expect(history[0]).toMatchObject({ type: "session.start", workspaceId: a.id, prompt: "say hello", requestId: "req_a1" });
+    expect(history.slice(1).some(e => "requestId" in e)).toBe(false);
     expect(await rt.sessions.history(b.id)).toEqual([]);
+    // A client that sent no id leaves the start without one; the id is the client's, never minted here.
+    await (await rt.sessions.start(b.id, { prompt: "say hello" })).finished;
+    expect((await rt.sessions.history(b.id))[0]).not.toHaveProperty("requestId");
+    await rt.workspaces.delete(b.id);
 
     // a fresh runtime over the same store still has it; deleting the workspace drops it
     const rt2 = createRuntime({ backend, store, adapters: {} });

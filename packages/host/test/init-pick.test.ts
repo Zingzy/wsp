@@ -58,7 +58,7 @@ describe("the agents", () => {
     expect(items.map(i => [i.label, i.hint])).toEqual([["Claude Code", "208.0 MB"], ["Codex", "455.0 MB"], ["Gemini CLI", "189.0 MB"], ["OpenCode", "673.0 MB"], ["Pi", "165.0 MB"], ["Hermes Agent", "484.0 MB"]]);
     expect(items[0]!.detail).toEqual(["on this Mac; its config (39.1 KB) comes along", "installs about 208.0 MB on the machine (measured 2026-09-05)"]);
     expect(items[1]!.detail[0]).toBe("not on this Mac; try it on the machine, nothing here changes");
-    expect(items.every(i => i.lock === undefined && i.choices === undefined)).toBe(true);
+    expect(items.every(i => i.lock === undefined)).toBe(true);
   });
 });
 

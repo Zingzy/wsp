@@ -203,6 +203,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
                 ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
                 ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
+                ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
               });
               send({ id: msg.id, ok: true, session: handle.view() });
               return;
@@ -243,6 +244,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "snapshots.storage":
               send({ id: msg.id, ok: true, storage: (await rt.golden.storage()) ?? null });
+              return;
+            case "cost.history":
+              send({ id: msg.id, ok: true, points: rt.status.history(msg.workspaceId) });
               return;
             case "snapshots.rollback": {
               const name = msg.name ?? "default";

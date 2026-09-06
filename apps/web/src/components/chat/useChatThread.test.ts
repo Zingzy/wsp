@@ -2,9 +2,10 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
-import { deriveChatThread, dropEvent, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type StaleTurn, type ThreadState } from "./useChatThread";
+import { deriveChatThread, dropEvent, leaveView, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type StaleTurn, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
+const REQ = "req_own";
 const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> = {}): ThreadState => ({
   events,
   arrivals: events.map(() => T0),
@@ -63,7 +64,7 @@ describe("deriveChatThread", () => {
   });
 
   it("appends the optimistic prompt and local errors after the wire's entries", () => {
-    const view = deriveChatThread(state(CHAT_STREAM, { pendingPrompt: { text: "next", at: T0 }, localErrors: [{ message: "socket closed", at: T0 }] }));
+    const view = deriveChatThread(state(CHAT_STREAM, { pendingPrompt: { text: "next", at: T0, requestId: REQ }, localErrors: [{ message: "socket closed", at: T0 }] }));
     const tail = view.entries.slice(-2);
     expect(tail[0]?.kind === "message" && tail[0].message.text).toBe("next");
     expect(tail[1]?.kind === "work" && tail[1].entry.label).toBe("socket closed");
@@ -147,7 +148,7 @@ describe("reloadTranscript", () => {
   });
 
   it("while fresh, a left thread that ended in the dark leaves nothing stale and keeps the fresh state", () => {
-    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], stale: A_TURN, pendingPrompt: { text: "start over", at: T0 } });
+    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], stale: A_TURN, pendingPrompt: { text: "start over", at: T0, requestId: REQ } });
     const next = reloadTranscript(fresh, A, T0);
     expect(next).toEqual({ ...fresh, stale: null });
   });
@@ -158,7 +159,7 @@ describe("reloadTranscript", () => {
   });
 
   it("while fresh with a send in flight, a thread with an id the left one did not have, its start carrying the sent prompt, is the person's own and loads as such", () => {
-    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0 } });
+    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0, requestId: REQ } });
     const next = reloadTranscript(fresh, [...A, ...B_RUNNING], T0);
     expect(next.events).toEqual(B_RUNNING);
     expect(next.fresh).toBe(false);
@@ -168,7 +169,7 @@ describe("reloadTranscript", () => {
   });
 
   it("while fresh, the left thread alone decides the stale record when the person's thread is present", () => {
-    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], stale: A_TURN, sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0 } });
+    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], stale: A_TURN, sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0, requestId: REQ } });
     const next = reloadTranscript(fresh, [...A_RUNNING, ...B_RUNNING], T0);
     expect(next.events).toEqual(B_RUNNING);
     expect(next.stale).toEqual(A_TURN);
@@ -176,7 +177,7 @@ describe("reloadTranscript", () => {
 
   it("while fresh from an empty thread, a new id whose start carries the sent prompt is the person's own; a legacy thread is the left one", () => {
     const fresh = state([], { fresh: true, left: undefined });
-    const sending = { ...fresh, sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0 } };
+    const sending = { ...fresh, sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0, requestId: REQ } };
     expect(reloadTranscript(sending, B_RUNNING, T0).events).toEqual(B_RUNNING);
     expect(reloadTranscript(fresh, B_RUNNING, T0).events).toEqual([]);
     const legacy = reloadTranscript(fresh, unstamped.slice(0, 3), T0);
@@ -203,7 +204,7 @@ describe("reloadTranscript", () => {
     expect(next.events).toEqual([]);
     expect(next.fresh).toBe(true);
     expect(next.left).toBe("thr_b");
-    const own = reloadTranscript(state([], { fresh: true, left: "thr_a", known: ["thr_a"], sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0 } }), [...A, ...B_RUNNING], T0);
+    const own = reloadTranscript(state([], { fresh: true, left: "thr_a", known: ["thr_a"], sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0, requestId: REQ } }), [...A, ...B_RUNNING], T0);
     expect(own.events).toEqual(B_RUNNING);
     expect(own.fresh).toBe(false);
   });
@@ -226,7 +227,7 @@ describe("reloadTranscript", () => {
   });
 
   it("while fresh with a send in flight, a reply that holds the person's thread settles the send and names the workspace key its rows waited under; a quiet reply keeps the send and its prompt", () => {
-    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0 } });
+    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0, requestId: REQ } });
     const own = reloadTranscript(fresh, [...A, ...B_RUNNING], T0);
     expect(own.events).toEqual(B_RUNNING);
     expect(own.sending).toBeNull();
@@ -234,7 +235,7 @@ describe("reloadTranscript", () => {
     expect(own.named).toEqual({ key: CHAT_WS, thread: "thr_b" });
     const waiting = reloadTranscript(fresh, A, T0);
     expect(waiting.sending).toEqual({ after: undefined });
-    expect(waiting.pendingPrompt).toEqual({ text: "start over", at: T0 });
+    expect(waiting.pendingPrompt).toEqual({ text: "start over", at: T0, requestId: REQ });
     expect(waiting.named).toBeNull();
   });
 
@@ -249,7 +250,7 @@ describe("reloadTranscript", () => {
       { type: "session.start", ...z, prompt: "retry" },
       { type: "session.delta", ...z, kind: "text", text: "Second time lucky." },
     ];
-    const send = { sending: { after: "turn_x1" }, pendingPrompt: { text: "retry", at: T0 } };
+    const send = { sending: { after: "turn_x1" }, pendingPrompt: { text: "retry", at: T0, requestId: REQ } };
 
     const latest = state(DEAD, { known: ["thr_a", "thr_x"], ...send });
     const elsewhere = reloadTranscript(latest, [...A, ...DEAD, ...B_DONE], T0);
@@ -279,6 +280,54 @@ describe("reloadTranscript", () => {
     const died = reloadTranscript(fresh, [...A, ...B_DONE, ...DEAD], T0);
     expect(died.events).toEqual(DEAD);
     expect(died.sending).toBeNull();
+  });
+
+  it("two clients sending the same text: a reply folds a start-less view to the thread whose start carries the send's request id, past another client's start with the same text under another id; a start with no id folds by the prompt", () => {
+    const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    const DEAD: SessionEvent[] = [
+      { type: "session.done", ...x, result: { status: "failed", error: "claude exited before init" } },
+      { type: "session.end", ...x, exitCode: 1, sawResult: true },
+    ];
+    const c = { workspaceId: CHAT_WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
+    const OTHER_RUNNING: SessionEvent[] = [
+      { type: "session.start", ...c, prompt: "retry", requestId: "req_other" },
+      { type: "session.delta", ...c, kind: "text", text: "Elsewhere." },
+    ];
+    const z = { workspaceId: CHAT_WS, sessionId: "sess_z", turnId: "turn_z1", threadId: "thr_z" };
+    const Z_RUNNING: SessionEvent[] = [
+      { type: "session.start", ...z, prompt: "retry", requestId: REQ },
+      { type: "session.delta", ...z, kind: "text", text: "Second time lucky." },
+    ];
+    const BARE_RUNNING: SessionEvent[] = [{ type: "session.start", ...z, prompt: "retry" }, Z_RUNNING[1]!];
+    const send = { sending: { after: "turn_x1" }, pendingPrompt: { text: "retry", at: T0, requestId: REQ } };
+
+    const latest = state(DEAD, { known: ["thr_a", "thr_x"], ...send });
+    const elsewhere = reloadTranscript(latest, [...A, ...DEAD, ...OTHER_RUNNING], T0);
+    expect(elsewhere.events).toEqual(DEAD);
+    expect(elsewhere.sending).toEqual(send.sending);
+    expect(elsewhere.named).toBeNull();
+    expect(elsewhere.known).toEqual(["thr_a", "thr_x", "thr_c"]);
+    const own = reloadTranscript(latest, [...A, ...DEAD, ...OTHER_RUNNING, ...Z_RUNNING], T0);
+    expect(own.events).toEqual(Z_RUNNING);
+    expect(own.sending).toBeNull();
+    expect(own.named).toEqual({ key: CHAT_WS, thread: "thr_z" });
+    expect(reloadTranscript(latest, [...A, ...DEAD, ...OTHER_RUNNING, ...BARE_RUNNING], T0).events).toEqual(BARE_RUNNING);
+
+    expect(reloadTranscript(latest, [...DEAD, ...A, ...OTHER_RUNNING], T0, "thr_x").events).toEqual(DEAD);
+    const pinned = reloadTranscript(latest, [...DEAD, ...A, ...OTHER_RUNNING, ...Z_RUNNING], T0, "thr_x");
+    expect(pinned.events).toEqual(Z_RUNNING);
+    expect(pinned.named).toEqual({ key: "thr_x", thread: "thr_z" });
+
+    const empty = state([], send);
+    expect(reloadTranscript(empty, OTHER_RUNNING, T0)).toMatchObject({ events: [], ...send, known: ["thr_c"] });
+    expect(reloadTranscript(empty, [...OTHER_RUNNING, ...Z_RUNNING], T0).events).toEqual(Z_RUNNING);
+
+    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], ...send, sending: { after: undefined } });
+    expect(reloadTranscript(fresh, [...A, ...OTHER_RUNNING], T0)).toEqual({ ...fresh, known: ["thr_a", "thr_c"] });
+    const opened = reloadTranscript(fresh, [...A, ...OTHER_RUNNING, ...Z_RUNNING], T0);
+    expect(opened.events).toEqual(Z_RUNNING);
+    expect(opened.fresh).toBe(false);
+    expect(opened.named).toEqual({ key: CHAT_WS, thread: "thr_z" });
   });
 
   it("while a send is pending on a view with a start, a reply that ends in another thread folds to the held one and keeps the send for its own start", () => {
@@ -324,7 +373,7 @@ describe("reloadTranscript", () => {
     ];
     const idle = reloadTranscript(state([], { known: ["thr_a"] }), [...DEAD, ...A], T0, "thr_x");
     expect(idle.events).toEqual(DEAD);
-    const sending = { ...idle, sending: { after: "turn_x1" }, pendingPrompt: { text: "start over", at: T0 } };
+    const sending = { ...idle, sending: { after: "turn_x1" }, pendingPrompt: { text: "start over", at: T0, requestId: REQ } };
     const next = reloadTranscript(sending, [...DEAD, ...A, ...B_DONE], T0, "thr_x");
     expect(next.events).toEqual(B_DONE);
     expect(next.sending).toBeNull();
@@ -332,11 +381,11 @@ describe("reloadTranscript", () => {
     const quiet = reloadTranscript(sending, [...DEAD, ...A], T0, "thr_x");
     expect(quiet.events).toEqual(DEAD);
     expect(quiet.sending).toEqual({ after: "turn_x1" });
-    expect(quiet.pendingPrompt).toEqual({ text: "start over", at: T0 });
+    expect(quiet.pendingPrompt).toEqual({ text: "start over", at: T0, requestId: REQ });
     const elsewhere = reloadTranscript({ ...sending, known: ["thr_a", "thr_b", "thr_x"] }, [...DEAD, ...A, ...B_DONE], T0, "thr_x");
     expect(elsewhere.events).toEqual(DEAD);
     expect(elsewhere.sending).toEqual({ after: "turn_x1" });
-    const otherTab = reloadTranscript({ ...sending, pendingPrompt: { text: "retry", at: T0 } }, [...DEAD, ...A, ...B_DONE], T0, "thr_x");
+    const otherTab = reloadTranscript({ ...sending, pendingPrompt: { text: "retry", at: T0, requestId: REQ } }, [...DEAD, ...A, ...B_DONE], T0, "thr_x");
     expect(otherTab.events).toEqual(DEAD);
     expect(otherTab.sending).toEqual({ after: "turn_x1" });
     expect(otherTab.named).toBeNull();
@@ -364,7 +413,7 @@ describe("reduceEvent", () => {
   });
 
   it("while fresh, a delta from any thread is dropped: only the session.start carrying the sent prompt opens the person's own thread", () => {
-    const fresh = state([], { fresh: true, left: "thr_a", sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0 } });
+    const fresh = state([], { fresh: true, left: "thr_a", sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0, requestId: REQ } });
     expect(reduceEvent(fresh, B_DELTA, T0).events).toEqual([]);
     expect(reduceEvent(fresh, CHAT_STREAM[1]!, T0)).toBe(fresh);
     expect(reduceEvent(fresh, B_START, T0).events).toEqual([B_START]);
@@ -381,7 +430,7 @@ describe("reduceEvent", () => {
   });
 
   it("while fresh, the next session.start opens the thread and the left turn's end still clears the stale record", () => {
-    const fresh = state([], { fresh: true, left: "thr_a", stale: A_TURN, sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0 } });
+    const fresh = state([], { fresh: true, left: "thr_a", stale: A_TURN, sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0, requestId: REQ } });
     const opened = reduceEvent(fresh, B_START, T0);
     expect(opened.events).toEqual([B_START]);
     expect(opened.fresh).toBe(false);
@@ -403,7 +452,7 @@ describe("reduceEvent", () => {
   });
 
   it("named is the key a send's rows waited under when its start lands: the thread id the view held, or the workspace id before it had one", () => {
-    const sending = state([], { sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0 } });
+    const sending = state([], { sending: { after: undefined }, pendingPrompt: { text: "start over", at: T0, requestId: REQ } });
     expect(reduceEvent(sending, B_START, T0).named).toEqual({ key: CHAT_WS, thread: "thr_b" });
     expect(reduceEvent(sending, CHAT_STREAM[0]!, T0).named).toEqual({ key: CHAT_WS, thread: CHAT_WS });
     expect(reduceEvent(state([]), B_START, T0).named).toBeNull();
@@ -418,7 +467,7 @@ describe("reduceEvent", () => {
     const died = reduceEvent(state([], { sending: { after: undefined } }), { type: "session.end", ...x, exitCode: 127, sawResult: true }, T0);
     expect(died.events).toHaveLength(1);
     expect(died.sending).toBeNull();
-    const started = reduceEvent({ ...died, sending: { after: "turn_x1" }, pendingPrompt: { text: "start over", at: T0 } }, B_START, T0);
+    const started = reduceEvent({ ...died, sending: { after: "turn_x1" }, pendingPrompt: { text: "start over", at: T0, requestId: REQ } }, B_START, T0);
     expect(started.events).toHaveLength(2);
     expect(started.named).toEqual({ key: CHAT_WS, thread: "thr_b" });
     expect(reduceEvent(started, A[1]!, T0).events).toEqual(started.events);
@@ -479,7 +528,7 @@ describe("reduceEvent", () => {
     expect(reduceEvent(dead, A.at(-1)!, T0)).toBe(dead);
     expect(reduceEvent(dead, B_START, T0)).toBe(dead);
     expect(reduceEvent(dead, { type: "session.delta", ...x, kind: "text", text: "late" }, T0).events).toHaveLength(3);
-    const sending = { ...dead, sending: { after: "turn_x1" }, pendingPrompt: { text: "retry", at: T0 } };
+    const sending = { ...dead, sending: { after: "turn_x1" }, pendingPrompt: { text: "retry", at: T0, requestId: REQ } };
     expect(reduceEvent(sending, { type: "session.start", ...b, threadId: "thr_a" }, T0)).toBe(sending);
     const c = { workspaceId: CHAT_WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
     const otherTab = reduceEvent(sending, { type: "session.start", ...c, prompt: "from another tab" }, T0);
@@ -507,7 +556,7 @@ describe("reduceEvent", () => {
     ];
     const dead = state(deadEvents, { known: ["thr_a", "thr_x"] });
     expect(reduceEvent(dead, A[1]!, T0, "thr_x")).toBe(dead);
-    const sending = { ...dead, sending: { after: "turn_x1" }, pendingPrompt: { text: "retry", at: T0 } };
+    const sending = { ...dead, sending: { after: "turn_x1" }, pendingPrompt: { text: "retry", at: T0, requestId: REQ } };
     expect(reduceEvent(sending, A[1]!, T0, "thr_x")).toBe(sending);
     const c = { workspaceId: CHAT_WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
     const otherTab = reduceEvent(sending, { type: "session.start", ...c, prompt: "from another tab" }, T0, "thr_x");
@@ -525,6 +574,42 @@ describe("reduceEvent", () => {
     const empty = state([], { known: ["thr_a"] });
     expect(reduceEvent(empty, A[0]!, T0, "thr_x")).toBe(empty);
     expect(reduceEvent(empty, deadEvents[0]!, T0, "thr_x").events).toHaveLength(1);
+  });
+
+  it("two clients sending the same text: on every start-less view a start stamped with another request id is another client's whatever its prompt, the start stamped with the send's own id is the send's whatever its prompt, and a start with no id is told by the prompt", () => {
+    const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    const deadEvents: SessionEvent[] = [
+      { type: "session.done", ...x, result: { status: "failed", error: "claude exited before init" } },
+      { type: "session.end", ...x, exitCode: 1, sawResult: true },
+    ];
+    const c = { workspaceId: CHAT_WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
+    const z = { workspaceId: CHAT_WS, sessionId: "sess_z", turnId: "turn_z1", threadId: "thr_z" };
+    const otherStart: SessionEvent = { type: "session.start", ...c, prompt: "retry", requestId: "req_other" };
+    const ownStart: SessionEvent = { type: "session.start", ...z, prompt: "retry", requestId: REQ };
+    const send = { sending: { after: "turn_x1" }, pendingPrompt: { text: "retry", at: T0, requestId: REQ } };
+    const views: ReadonlyArray<[ThreadState, string | null]> = [
+      [state(deadEvents, { known: ["thr_a", "thr_x"], ...send }), null],
+      [state(deadEvents, { known: ["thr_a", "thr_x"], ...send }), "thr_x"],
+      [state([], { known: ["thr_a"], ...send }), null],
+      [state([], { fresh: true, left: "thr_a", known: ["thr_a"], ...send, sending: { after: undefined } }), null],
+    ];
+    for (const [view, pin] of views) {
+      const other = reduceEvent(view, otherStart, T0, pin);
+      expect(other.events).toEqual(view.events);
+      expect(other.sending).toEqual(view.sending);
+      expect(other.named).toBeNull();
+      expect(other.known).toContain("thr_c");
+      expect(reduceEvent(other, { type: "session.delta", ...c, kind: "text", text: "Elsewhere." }, T0, pin)).toBe(other);
+      const own = reduceEvent(other, ownStart, T0, pin);
+      expect(own.events.at(-1)).toEqual(ownStart);
+      expect(own.sending).toBeNull();
+      expect(own.named).toEqual({ key: pin ?? CHAT_WS, thread: "thr_z" });
+      expect(reduceEvent(other, { ...ownStart, prompt: "edited on the way" }, T0, pin).sending).toBeNull();
+      expect(reduceEvent(other, { type: "session.start", ...z, prompt: "retry" }, T0, pin).sending).toBeNull();
+      const otherText = reduceEvent(other, { type: "session.start", ...z, prompt: "something else" }, T0, pin);
+      expect(otherText.sending).toEqual(view.sending);
+      expect(otherText.known).toContain("thr_z");
+    }
   });
 
   it("the thread of a dropped event becomes known, once, so it cannot pass for the person's own send later", () => {
@@ -561,12 +646,57 @@ describe("reduceEvent", () => {
 
 describe("a send a view change left in flight", () => {
   const A = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
-  const stray = { prompt: "first" };
+  const stray = { text: "first", requestId: REQ, key: CHAT_WS };
   const pinned = state(A, { known: ["thr_a"], stray });
+
   const n = { workspaceId: CHAT_WS, sessionId: "sess_n", turnId: "turn_n1", threadId: "thr_n" };
   const c = { workspaceId: CHAT_WS, sessionId: "sess_c", turnId: "turn_c1", threadId: "thr_c" };
   const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
   const N_START: SessionEvent = { type: "session.start", ...n, prompt: "first" };
+  const here = { workspaceId: CHAT_WS, threadId: null };
+  const deadEvents: SessionEvent[] = [
+    { type: "session.done", ...x, result: { status: "failed", error: "claude exited before init" } },
+    { type: "session.end", ...x, exitCode: 1, sawResult: true },
+  ];
+
+  it("leaving a start-less view mid-send carries the send with the key its rows waited under: the workspace id from the latest view, the pin from a pinned one; a started view or an idle one carries nothing", () => {
+    const inFlight = { sending: { after: "turn_x1" }, pendingPrompt: { text: "first", at: T0, requestId: REQ } };
+    const fromLatest = leaveView(state([], { known: ["thr_a"], ...inFlight }), here, { ...here, threadId: "thr_a" });
+    expect(fromLatest).toEqual(state([], { known: ["thr_a"], stray }));
+    const fromPin = leaveView(state(deadEvents, { known: ["thr_a", "thr_x"], ...inFlight }), { ...here, threadId: "thr_x" }, { ...here, threadId: "thr_a" });
+    expect(fromPin).toEqual(state([], { known: ["thr_a", "thr_x"], stray: { text: "first", requestId: REQ, key: "thr_x" } }));
+    expect(leaveView(state(A, { known: ["thr_a"], ...inFlight }), { ...here, threadId: "thr_a" }, here).stray).toBeNull();
+    expect(leaveView(state(deadEvents, { known: ["thr_x"] }), { ...here, threadId: "thr_x" }, here).stray).toBeNull();
+    expect(leaveView(state([], { known: ["thr_a"], stray }), here, { ...here, threadId: "thr_a" }).stray).toEqual(stray);
+    expect(leaveView(state([], { known: ["thr_a"], stray, ...inFlight }), { ...here, threadId: "thr_a" }, { workspaceId: "ws_other", threadId: null })).toEqual(state([]));
+  });
+
+  it("the start of a send left from a pinned dead view names the rows under the pin, on whichever view drops it or holds it", () => {
+    const fromPin = { text: "first", requestId: REQ, key: "thr_x" };
+    const dropped = dropEvent(state(A, { known: ["thr_a", "thr_x"], stray: fromPin }), N_START);
+    expect(dropped.stray).toBeNull();
+    expect(dropped.named).toEqual({ key: "thr_x", thread: "thr_n" });
+    const held = reduceEvent(state([], { fresh: true, left: "thr_a", known: ["thr_a", "thr_x"], stray: fromPin }), N_START, T0);
+    expect(held.named).toEqual({ key: "thr_x", thread: "thr_n" });
+    const replayed = reloadTranscript(state([], { known: ["thr_a", "thr_x"], stray: fromPin }), [...deadEvents, ...A, N_START], T0, "thr_a");
+    expect(replayed.events).toEqual(A);
+    expect(replayed.named).toEqual({ key: "thr_x", thread: "thr_n" });
+  });
+
+  it("a send left from a pinned thread that resumed its row starts under that same thread: its start settles it without moving the rows, and another thread's start with the prompt under a known id does not", () => {
+    const fromPin = { text: "first", requestId: REQ, key: "thr_x" };
+    const resumed = dropEvent(state(A, { known: ["thr_a", "thr_x"], stray: fromPin }), { type: "session.start", ...x, prompt: "first" });
+    expect(resumed.stray).toBeNull();
+    expect(resumed.named).toEqual({ key: "thr_x", thread: "thr_x" });
+    const other = dropEvent(state(A, { known: ["thr_a", "thr_x", "thr_c"], stray: fromPin }), { type: "session.start", ...c, prompt: "first" });
+    expect(other.stray).toEqual(fromPin);
+    expect(other.named).toBeNull();
+    const fresh = reduceEvent(state([], { fresh: true, left: "thr_a", known: ["thr_a", "thr_x"], stray: fromPin }), { type: "session.start", ...x, prompt: "first" }, T0);
+    expect(fresh.events).toEqual([]);
+    expect(fresh.fresh).toBe(true);
+    expect(fresh.stray).toBeNull();
+    expect(fresh.named).toEqual({ key: "thr_x", thread: "thr_x" });
+  });
 
   it("its start, told by the prompt it carries, names the rows under the workspace id on whichever view drops it", () => {
     const landed = dropEvent(pinned, N_START);
@@ -583,6 +713,27 @@ describe("a send a view change left in flight", () => {
     expect(other.known).toEqual(["thr_a", "thr_c"]);
     expect(dropEvent(other, { type: "session.end", ...c, exitCode: 0, sawResult: true })).toBe(other);
     expect(dropEvent(pinned, { type: "session.start", ...c, prompt: "first" }).stray).toBeNull();
+  });
+
+  it("two clients sending the same text: a stray is settled only by the start stamped with its request id; another client's same-text start under another id is remembered, not taken, on whichever view sees it", () => {
+    const otherStart: SessionEvent = { type: "session.start", ...c, prompt: "first", requestId: "req_other" };
+    const ownStart: SessionEvent = { type: "session.start", ...n, prompt: "first", requestId: REQ };
+    const other = dropEvent(pinned, otherStart);
+    expect(other.stray).toEqual(stray);
+    expect(other.named).toBeNull();
+    expect(other.known).toEqual(["thr_a", "thr_c"]);
+    const landed = dropEvent(other, ownStart);
+    expect(landed.stray).toBeNull();
+    expect(landed.named).toEqual({ key: CHAT_WS, thread: "thr_n" });
+    const fresh = state([], { fresh: true, left: "thr_a", known: ["thr_a"], stray });
+    expect(reduceEvent(fresh, otherStart, T0)).toMatchObject({ events: [], stray, named: null });
+    expect(reduceEvent(fresh, ownStart, T0)).toMatchObject({ events: [ownStart], stray: null, named: { key: CHAT_WS, thread: "thr_n" } });
+    const replayed = reloadTranscript(state([], { known: ["thr_a"], stray }), [...A, otherStart, ownStart], T0, "thr_a");
+    expect(replayed.stray).toBeNull();
+    expect(replayed.named).toEqual({ key: CHAT_WS, thread: "thr_n" });
+    const fromPin = { text: "first", requestId: REQ, key: "thr_x" };
+    expect(dropEvent(state(A, { known: ["thr_a", "thr_x"], stray: fromPin }), { type: "session.start", ...x, prompt: "first", requestId: "req_other" }).stray).toEqual(fromPin);
+    expect(dropEvent(state(A, { known: ["thr_a", "thr_x"], stray: fromPin }), { type: "session.start", ...x, prompt: "first", requestId: REQ }).named).toEqual({ key: "thr_x", thread: "thr_x" });
   });
 
   it("a harness that dies before its start settles it without a name; its done alone keeps waiting for the end", () => {

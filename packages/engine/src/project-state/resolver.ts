@@ -38,6 +38,11 @@ export interface ProjectStateResolver {
   /** The files under home holding state for `path` and the folders under it alone, absolute; a store shared with
    * other projects (an index, a registry) is never one. */
   entries(home: string, path: string): Promise<string[]>;
+  /** The merge the machine runs once the files have landed, for an agent whose rows for the project sit in a store
+   * shared with other projects: a python3 script that puts this home's rows for `from`, keyed to `to`, into the store
+   * under the agent's home on the machine and prints a MergeOutput as its last line. Nothing when this home holds no
+   * such row; absent on an agent whose files carry every key. */
+  merge?(home: string, from: string, to: string, guestHome: string): Promise<string | undefined>;
 }
 
 /** The path as the agents store it: absolute, no trailing slash, symlinks resolved when it exists. */
@@ -60,6 +65,9 @@ export function underProject(path: string, root: string): boolean {
 export function movedPath(path: string, from: string, to: string): string | undefined {
   return underProject(path, from) ? to + path.slice(from.length) : undefined;
 }
+
+/** A stored value moved when it is a path at or under `from`, else itself. */
+export const movedOr = <T>(value: T, from: string, to: string): T | string => (typeof value === "string" ? (movedPath(value, from, to) ?? value) : value);
 
 /** The `cwd` recorded in the first transcript line under dir that carries one, or nothing. */
 export async function recordedCwd(dir: string): Promise<string | undefined> {

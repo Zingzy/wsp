@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { rewriteCwd, type MovedState, type ProjectStateResolver } from "./resolver.js";
-import { countRows, inTransaction, movedColumn, pathParams, readOnly, runUpdate, underPath } from "./sqlite.js";
+import { jsonlCwdStep, mergeScript } from "./merge.js";
+import { movedOr, rewriteCwd, type MovedState, type ProjectStateResolver } from "./resolver.js";
+import { countRows, inTransaction, movedColumn, pathParams, readOnly, runUpdate, selectRows, sqliteMergeStep, underPath } from "./sqlite.js";
 
 const SESSIONS_DIR = "sessions";
 const SESSIONS = `/${SESSIONS_DIR}/`;
@@ -59,4 +60,15 @@ export const codexResolver: ProjectStateResolver = {
   },
   sessions: async (home, path) => countRows(join(home, INDEX), `select count(*) as n from threads where ${underPath("cwd")}`, { $from: path }),
   entries: async (home, path) => rolloutsUnder(home, readOnly(join(home, INDEX), d => d.prepare(INDEXED_ROLLOUTS).all({ $from: path }).map(r => String(r.rollout_path))) ?? []).files,
+  async merge(home, from, to, guestHome) {
+    // Only a thread whose rollout travelled (the ones entries names) is listed on the machine; a row without its file would open nothing there.
+    const threads = (selectRows(join(home, INDEX), `select * from threads where ${underPath("cwd")} order by id`, { $from: from }) ?? []).filter(r => rolloutsUnder(home, [String(r["rollout_path"])]).files.length > 0);
+    if (threads.length === 0) return undefined;
+    const rows = threads.map(r => ({ ...r, cwd: movedOr(r["cwd"] ?? null, from, to), rollout_path: rolloutUnder(guestHome, String(r["rollout_path"])) ?? null }));
+    // The landed rollouts still carry this computer's cwd: the skeleton they moved through had no index to name them.
+    return mergeScript(from, to, [
+      jsonlCwdStep(rows.map(r => String(r.rollout_path)), "payload"),
+      sqliteMergeStep(join(guestHome, INDEX), [{ table: "threads", key: ["id"], set: ["cwd", "rollout_path"], rows }]),
+    ]);
+  },
 };

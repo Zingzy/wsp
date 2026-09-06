@@ -241,6 +241,10 @@ describe("the MCP server over the host", () => {
     expect(codex.starts.map(s => [s.prompt, s.resume])).toEqual([["first", undefined], ["second", byAgent!.claudeSessionId]]);
     const followUp = await call("send", { thread: byPerson!.threadId!.slice(0, 8), message: "and this" });
     expect(followUp.text).toBe("re: and this");
+    // The server's starts carry their own request ids, like the command line's; the app's start through the runtime sent none.
+    const requestIds = (await rt.sessions.history(alpha!.id)).filter(e => e.type === "session.start").map(e => e.requestId);
+    expect(requestIds.map(id => typeof id)).toEqual(["string", "undefined", "string", "string"]);
+    expect(new Set(requestIds).size).toBe(4);
     const { threads } = (await call("threads")).structured as { threads: ThreadView[] };
     expect(threads.map(t => [t.harness, t.startedBy, t.title, t.turns])).toEqual([
       ["codex", "agent", "second", 1],

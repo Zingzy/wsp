@@ -3,22 +3,21 @@ import { linuxSupport } from "../brew-bottles.js";
 import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { exists, firstLine, found, entry, item, present } from "./common.js";
-import { brought, handRows } from "./hand-bins.js";
 
 export interface BrewLine {
-  kind: "tap" | "brew" | "cask" | "mas";
+  kind: "tap" | "brew";
   name: string;
 }
 
-/** The Brewfile lines that name something installable; vscode lines are the editors rung's job. */
+/** The Brewfile lines that name a tap or a formula; a cask or a Mac App Store app has no Linux build to bring. */
 export function parseBrewfile(text: string): BrewLine[] {
   const out: BrewLine[] = [];
   for (const line of text.split("\n")) {
-    const m = /^(tap|brew|cask|mas)\s+"([^"]+)"/.exec(line.trim());
+    const m = /^(tap|brew)\s+"([^"]+)"/.exec(line.trim());
     if (m === null) continue;
     const kind = m[1];
     const name = m[2];
-    if ((kind === "tap" || kind === "brew" || kind === "cask" || kind === "mas") && name !== undefined) out.push({ kind, name });
+    if ((kind === "tap" || kind === "brew") && name !== undefined) out.push({ kind, name });
   }
   return out;
 }
@@ -175,111 +174,10 @@ function formulaRow(host: Host, name: string): ManifestEntry {
   return linux === "unknown" ? item({ ...base, default: "skip" }) : item(base);
 }
 
-/** The heading of the casks that are commands, not apps; each row is named for the command it puts on PATH. */
-export const CLI_GROUP = "Command-line tools";
-
-export interface CaskInfo {
-  token: string;
-  fullToken: string;
-  tap: string;
-  version: string;
-  url: string;
-  /** The commands the binary artifacts put on PATH, in stanza order: the target when the stanza names one, else the file's basename. */
-  binaries: string[];
-  /** Whether an .app artifact is among them: an app that also ships a CLI is an app. */
-  app: boolean;
-}
-
-const basename = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
-
-/** `brew info --json=v2 --cask`: each cask under its token and its full token, with the artifacts that decide what it is. */
-export function parseCaskInfo(json: unknown): Map<string, CaskInfo> {
-  const out = new Map<string, CaskInfo>();
-  if (!isRecord(json) || !Array.isArray(json["casks"])) return out;
-  for (const c of json["casks"]) {
-    if (!isRecord(c) || typeof c["token"] !== "string") continue;
-    const artifacts = Array.isArray(c["artifacts"]) ? c["artifacts"].filter(isRecord) : [];
-    const binaries = artifacts.flatMap(a => {
-      if (!Array.isArray(a["binary"]) || typeof a["binary"][0] !== "string") return [];
-      const opts = a["binary"][1];
-      return [isRecord(opts) && typeof opts["target"] === "string" ? basename(opts["target"]) : basename(a["binary"][0])];
-    });
-    const fullToken = typeof c["full_token"] === "string" ? c["full_token"] : c["token"];
-    const info: CaskInfo = {
-      token: c["token"],
-      fullToken,
-      tap: typeof c["tap"] === "string" ? c["tap"] : "",
-      version: typeof c["version"] === "string" ? c["version"] : "",
-      url: typeof c["url"] === "string" ? c["url"] : "",
-      binaries,
-      app: artifacts.some(a => "app" in a),
-    };
-    out.set(c["token"], info);
-    out.set(fullToken, info);
-  }
-  return out;
-}
-
-const GITHUB_RELEASE = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/releases\/download\/([^/]+)\//;
-
-const appRow = (name: string): ManifestEntry => item({ rung: "tools", id: `tools/brew-cask/${name}`, label: name, group: "Homebrew casks", default: "skip", reason: "macOS app, no Linux build", linux: "no" });
-
-/** A cask that is a command: its row is the command, installed from the GitHub release the cask itself downloads,
- * the tag riding in the first path as a Go row's module does. A release stanza with an on_linux block is a
- * Linux yes; without one the release may still carry a Linux asset, so the row stays open to a tick. */
-async function caskRow(host: Host, name: string, info: CaskInfo | undefined): Promise<ManifestEntry> {
-  if (info === undefined || info.app || info.binaries.length === 0) return appRow(name);
-  const bin = info.binaries.find(b => b === info.token) ?? info.binaries.find(b => info.token.includes(b)) ?? info.binaries[0]!;
-  const label = bin === info.token ? bin : `${bin} (${info.token})`;
-  const base = { rung: "tools" as const, id: `tools/cli/${bin}`, label, group: CLI_GROUP, ...(info.version === "" ? {} : { version: info.version }) };
-  const m = GITHUB_RELEASE.exec(info.url);
-  if (m === null) return item({ ...base, default: "skip", reason: "command-line tool, but not from a GitHub release; no Linux install path", linux: "no" });
-  const stanza = (await host.exec.run("brew", ["cat", info.fullToken])) ?? "";
-  const linux = /^\s*on_linux\b/m.test(stanza) ? "yes" : "unknown";
-  return entry({ ...base, paths: [`github.com/${m[1]}@${m[2]}`], bytes: 0, linux, ...(linux === "yes" ? {} : { default: "skip" }) });
-}
-
-/** One brew info for every cask; a token brew cannot resolve fails the whole call with no JSON, so then each token is asked alone. */
-async function caskInfos(host: Host, casks: string[]): Promise<Map<string, CaskInfo>> {
-  if (casks.length === 0) return new Map();
-  const ask = async (tokens: string[]): Promise<unknown> => tryJson((await host.exec.run("brew", ["info", "--json=v2", "--cask", ...tokens])) ?? "");
-  const batch = await ask(casks);
-  if (batch !== undefined) return parseCaskInfo(batch);
-  const out = new Map<string, CaskInfo>();
-  for (const c of casks) for (const [k, v] of parseCaskInfo(await ask([c]))) out.set(k, v);
-  return out;
-}
-
 async function brewRows(host: Host): Promise<ManifestEntry[]> {
   if (!(await host.exec.which("brew"))) return [];
   const lines = parseBrewfile((await host.exec.run("brew", ["bundle", "dump", "--file=-"])) ?? "");
-  const casks = lines.filter(l => l.kind === "cask").map(l => l.name);
-  const info = await caskInfos(host, casks);
-  const rows: ManifestEntry[] = [];
-  for (const l of lines) {
-    switch (l.kind) {
-      case "tap":
-        rows.push(item({ rung: "tools", id: `tools/brew-tap/${l.name}`, label: l.name, group: "Homebrew taps", linux: "yes" }));
-        break;
-      case "brew":
-        rows.push(formulaRow(host, l.name));
-        break;
-      case "cask":
-        rows.push(await caskRow(host, l.name, info.get(l.name)));
-        break;
-      case "mas":
-        rows.push(item({ rung: "tools", id: `tools/mas/${l.name}`, label: l.name, group: "Mac App Store", default: "skip", reason: "Mac App Store, macOS only", linux: "no" }));
-        break;
-      default: {
-        const _exhaustive: never = l.kind;
-        return _exhaustive;
-      }
-    }
-  }
-  // The tap a command's cask came from serves nothing on Linux once no formula line names it: the release is the road.
-  const used = new Set(lines.filter(l => l.kind === "brew" && l.name.includes("/")).map(l => l.name.slice(0, l.name.lastIndexOf("/"))));
-  const folded = new Set(casks.map(c => info.get(c)).filter((c): c is CaskInfo => c !== undefined && !c.app && c.binaries.length > 0 && !used.has(c.tap)).map(c => c.tap));
-  return rows.filter(r => !(r.id.startsWith("tools/brew-tap/") && folded.has(r.id.slice("tools/brew-tap/".length))));
+  return lines.map(l => (l.kind === "tap" ? item({ rung: "tools", id: `tools/brew-tap/${l.name}`, label: l.name, group: "Homebrew taps", linux: "yes" }) : formulaRow(host, l.name)));
 }
 
 async function goRows(host: Host): Promise<ManifestEntry[]> {
@@ -294,20 +192,6 @@ async function goRows(host: Host): Promise<ManifestEntry[]> {
       : entry({ rung: "tools", id: `tools/go/${name}`, label: name, group: "Go binaries", paths: [`${mod.path}@${mod.version}`], bytes: 0, linux: "yes", version: mod.version }));
   }
   return rows;
-}
-
-/** A Go binary named for a command's cask is the same tool: its module joins the command's row as the
- * fallback road, after the release, and its own row goes. A locked-off row takes nothing: the Go row stays installable. */
-function groupCli(rows: ManifestEntry[]): ManifestEntry[] {
-  const cli = new Map(rows.filter(r => r.id.startsWith("tools/cli/") && r.reason === undefined).map(r => [r.id.slice("tools/cli/".length), r]));
-  return rows.flatMap(r => {
-    if (!r.id.startsWith("tools/go/")) return [r];
-    const tool = cli.get(r.id.slice("tools/go/".length));
-    if (tool === undefined) return [r];
-    const spec = r.paths[0];
-    if (spec !== undefined && !tool.paths.includes(spec)) tool.paths.push(spec);
-    return [];
-  });
 }
 
 export async function detectTools(host: Host): Promise<ManifestEntry[]> {
@@ -326,6 +210,5 @@ export async function detectTools(host: Host): Promise<ManifestEntry[]> {
     }
   }
   rows.push(...(await goRows(host)));
-  rows.push(...(await handRows(host, brought(present(rows)))));
-  return groupCli(present(rows));
+  return present(rows);
 }

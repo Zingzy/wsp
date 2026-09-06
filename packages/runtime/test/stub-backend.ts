@@ -12,6 +12,8 @@ export interface StubMachine extends Machine {
   execLog: string[];
   /** The scripts that went through run(), the road for anything that may outlive one exec. */
   runLog: string[];
+  /** The options each run() carried, in runLog order. */
+  runOptions: RunOptions[];
   resumes: number;
   /** What describe() reports; tests mutate it to play a resume that rebuilt the VM. */
   shape: MachineShape;
@@ -86,6 +88,7 @@ export function stubBackend(): StubBackend {
         killed: false,
         execLog: [],
         runLog: [],
+        runOptions: [],
         resumes: 0,
         shape: { cpu: spec.cpu ?? 2, memMb: spec.memMb ?? 4096, createdAt: new Date().toISOString() },
         async exec(cmd: string): Promise<ExecResult> {
@@ -93,10 +96,11 @@ export function stubBackend(): StubBackend {
           m.execLog.push(cmd);
           return backend.execImpl(m, cmd);
         },
-        async run(script: string, _opts: RunOptions): Promise<ExecResult> {
+        async run(script: string, opts: RunOptions): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
           m.execLog.push(script);
           m.runLog.push(script);
+          m.runOptions.push(opts);
           return backend.execImpl(m, script);
         },
         async snapshot(name: string): Promise<string> {

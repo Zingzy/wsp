@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { shellQuote } from "@wsp/protocol";
+import { APT_ENV } from "@wsp/catalog";
 import { CHEZMOI, DOTFILES_PRESETS, PRELUDE, pinnedBinaryInstall } from "./dotfiles-presets.js";
 import type { Machine } from "./machine.js";
 
@@ -122,7 +123,7 @@ fi
 `;
     case "stow":
       return `${PRELUDE}
-export DEBIAN_FRONTEND=noninteractive
+${APT_ENV}
 command -v stow >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq stow; }
 cd ${CLONE_DIR}
 stow --verbose --target "$HOME" ${stowPackages(listing).map(shellQuote).join(" ")}

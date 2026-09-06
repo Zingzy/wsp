@@ -576,6 +576,17 @@ describe("thread provenance", () => {
     expect(() => RuntimeRequest.parse({ id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "go", startedBy: "app" })).toThrow();
   });
 
+  it("sessions.start may carry the client's request id, and session.start carries it back, so a client tells its own start from another's with the same prompt", () => {
+    const req = { id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "go", requestId: "req_1" };
+    expect(RuntimeRequest.parse(req)).toEqual(req);
+    expect(() => RuntimeRequest.parse({ ...req, requestId: 7 })).toThrow();
+    const started = { type: "session.start", workspaceId: "ws_1", sessionId: "s1", prompt: "go", requestId: "req_1" };
+    expect(SessionEvent.parse(started)).toEqual(started);
+    expect(EventUnion.parse(JSON.parse(JSON.stringify(started)))).toEqual(started);
+    const { requestId: _requestId, ...none } = started;
+    expect(SessionEvent.parse(none)).toEqual(none);
+  });
+
   it("foldThreads groups turns by threadId, titles by the opening turn, reads state and resume id from the latest, and keeps the opener's provenance", () => {
     const threads = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", startedBy: "cli", prompt: "make a server", claudeSessionId: "c1", startedAt: 1_000, endedAt: 2_000 },
@@ -650,14 +661,16 @@ describe("the project plan", () => {
       rewritten: [],
       agents: [
         { agent: "claude", files: 3, bytes: 40, outcome: "moved" },
-        { agent: "codex", files: 1, bytes: 40, outcome: "transcript-only" },
+        { agent: "codex", files: 1, bytes: 40, outcome: "moved", rows: 2 },
         { agent: "gemini", files: 1, bytes: 40, outcome: "carried" },
-        { agent: "hermes", files: 0, bytes: 0, outcome: "nothing" },
+        { agent: "hermes", files: 0, bytes: 0, outcome: "transcript-only", note: "no /root/.hermes/state.db on the machine" },
+        { agent: "opencode", files: 0, bytes: 0, outcome: "nothing" },
         { agent: "pi", files: 0, bytes: 0, outcome: "failed", error: "x already exists" },
       ],
     };
     expect(ProjectImportResult.parse(result)).toEqual(result);
     expect(ProjectImportResult.safeParse({ ...result, agents: [{ agent: "pi", files: 0, bytes: 0, outcome: "lost" }] }).success).toBe(false);
+    expect(ProjectImportResult.safeParse({ ...result, agents: [{ agent: "codex", files: 1, bytes: 40, outcome: "moved", rows: "two" }] }).success).toBe(false);
   });
 });
 
