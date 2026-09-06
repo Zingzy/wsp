@@ -45,6 +45,7 @@ import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtBytes, fmtDurati
 import { aliasLines } from "./init-aliases.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
+import { buildTimes, readBuildTimes } from "./init-times.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
 import { rungSelect, type FooterLine, type RungSelectOptions, type SelectItem, type Tone } from "./init-select.js";
@@ -1062,6 +1063,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // Filled by the Keychain reads below, after the earlier-builder check; the pack reads it only at build time.
   const secrets = new Map<string, string>();
   const resultsPath = importResultPath(opts.statePath);
+  // Read before the first write of the file; every result written this run carries it until a seal measures anew.
+  const lastBuild = readBuildTimes(resultsPath);
   const path = recipePath(opts.statePath);
   let landed: ImportResult | undefined;
   const importOf = (rows: readonly ManifestEntry[]) =>
@@ -1072,7 +1075,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       rows: manifest.entries.map(e => ({ ...e, bring: ticks.has(e.id) })),
       brew,
       onResult: r => {
-        writeFileSync(resultsPath, `${JSON.stringify(r, null, 2)}\n`);
+        writeFileSync(resultsPath, `${JSON.stringify({ ...r, ...(lastBuild !== undefined ? { build: lastBuild } : {}) }, null, 2)}\n`);
         landed = r;
         // The first install of a release tag pins its asset: the tag and the checksum the guest read go into the recipe for later installs of that tag.
         const pins = new Map(r.tools.filter(t => t.outcome === "installed" && t.road?.sha256 !== undefined && t.road.tag !== undefined).map(t => [t.id, { tag: t.road!.tag!, sha256: t.road!.sha256! }]));
@@ -1207,7 +1210,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // builder already carrying this recipe is attached to instead, since the update would bill beside it.
   const current = attach === undefined ? await rt.golden.recipe(GOLDEN_NAME) : undefined;
   if (current !== undefined) {
-    const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run, runLog.note) });
+    const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, lastBuild, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run, runLog.note) });
     if (road !== "rebuild") {
       if (road === 0 && landed !== undefined) log.info(installsTally(landed, resultsPath).join("\n"), out);
       if (road === 0) await retentionOffer({ rt, interactive, yes: opts.yes, input: io.input, output: io.output });
@@ -1344,7 +1347,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     io.signals.off("SIGINT", onInt);
     io.signals.off("SIGTERM", onTerm);
   }
-  stream.stop();
+  const prepared = stream.stop();
   off();
   if (landed !== undefined) log.info(installsTally(landed, resultsPath).join("\n"), out);
 
@@ -1410,6 +1413,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     outro("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.", out);
     return leave(1);
   }
+  const measured = buildTimes([prepared, view], new Date());
+  if (measured !== undefined) noteOutcomes(resultsPath, { build: measured });
   const version = sealed.version.version;
   const kept = keptBuilder(await rt.golden.builders(), version);
   log.success(
