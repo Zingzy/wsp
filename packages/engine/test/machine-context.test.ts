@@ -187,6 +187,9 @@ describe("the facts", () => {
     const next = mergeFacts(FACTS, result({ retired: [{ id: "tools/brew-cask/raycast", name: "raycast" }] }));
     expect(next.tools).toEqual([]);
     expect(next.agents).toEqual(FACTS.agents);
+    const noZed = mergeFacts(FACTS, result({ retired: [{ id: "agents/zed", name: "Zed" }] }));
+    expect(noZed.agents).toEqual([]);
+    expect(noZed.tools).toEqual(FACTS.tools);
     expect(mergeFacts(FACTS, undefined)).toEqual(FACTS);
     expect(mergeFacts(undefined, undefined)).toEqual({ tools: [], agents: [], files: [] });
   });

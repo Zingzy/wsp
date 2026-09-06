@@ -589,8 +589,9 @@ export interface Runtime {
     nap(id: string): Promise<WorkspaceView>;
     wake(id: string): Promise<WorkspaceView>;
     upgrade(id: string, spec?: WorkspaceSpec): Promise<WorkspaceView>;
-    /** Moves the workspace onto its golden's head version, carrying its files across; a workspace already on the
-     * head is returned untouched. */
+    /** Moves the workspace onto its golden's head version, carrying its files across. Refused in one sentence when
+     * the machine is not running, the image is a project golden, or no golden knows the image; a workspace past
+     * those and already on the head is returned untouched. */
     updateImage(id: string): Promise<WorkspaceView>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
     rebuild(id: string): Promise<WorkspaceView>;
@@ -1980,7 +1981,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (refusal !== null) throw Object.assign(new Error(refusal), { kind: "conflict" });
       // The refusal covers an image no manifest knows, so both are there by the time the move runs.
       const to = head!;
-      const from = manifest!.versions.find(v => v.snapshotId === entry.record.golden)?.version;
+      const from = manifest!.versions.find(v => v.snapshotId === entry.record.golden)!.version;
       if (to.snapshotId === entry.record.golden) return view(entry.record);
       // The fork reads the record, so the new image is named before the machine is replaced; the vault carries the
       // work across the way a resize does. A move that throws puts the record back, so a retry forks what the

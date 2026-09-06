@@ -133,7 +133,7 @@ export interface GoldenChange {
  * built on top of, and what it changes. `from` is 0 before any golden was sealed, and the line says so instead of
  * naming a version nothing was built on. */
 export function goldenBuildLine(from: number, to: number, changes: readonly GoldenChange[]): string {
-  const what = changes.filter(c => c.count > 0).map(c => `${c.count} ${c.noun}${c.count === 1 ? "" : "s"} ${c.word}`);
+  const what = changes.filter(c => c.count > 0).map(c => `${plural(c.count, c.noun)} ${c.word}`);
   const head = from === 0 ? `Builds version ${to}` : `Builds version ${to} on top of version ${from}`;
   return what.length === 0 ? head : `${head}: ${what.join(", ")}`;
 }

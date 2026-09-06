@@ -551,10 +551,15 @@ describe("a workspace behind the golden's head", () => {
   });
 
   it("a client that cannot move a workspace shows the state and no button", async () => {
-    const api = await mount([onV11()], CAPS, twoVersions);
+    // The op is gone before the first render, so no render ever offers a button whose call would throw.
+    const api = fakeApi([onV11()], CAPS, twoVersions);
     delete (api as { updateImage?: unknown }).updateImage;
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_a" />);
     await waitFor(() => expect(fact("v11")).toBe("v11this fork"));
     expect(document.querySelector("[data-k='v11']")!.closest("li")!.textContent).toContain("on image v11, v12 available");
+    expect(screen.queryByRole("button", { name: /^update api to/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "roll back to v11" })).toBeDefined();
   });
 
   it("a failed move leaves the note with the reason and the workspace where it was", async () => {

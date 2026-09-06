@@ -149,10 +149,9 @@ const LOGIN_ANSWERS: Record<LoginChoice, LoginAnswer> = {
   skip: { line: label => `retire the ${label}, left signed in on the image`, needsFreshMachine: false },
 };
 
-/** A login row the new recipe carries no answer for: the row left it, so the update stops asking for that login. */
-const dropped: LoginAnswer = { line: label => `retire the ${label}, left signed in on the image`, needsFreshMachine: false };
-
-const answerFor = (choice: LoginChoice | undefined): LoginAnswer => (choice === undefined ? dropped : LOGIN_ANSWERS[choice]);
+/** A login row the new recipe carries no answer for reads as a skip: the row left the recipe, so the update stops
+ * asking for that login and the sign-in stays on the image, which is what skipping it does too. */
+const answerFor = (choice: LoginChoice | undefined): LoginAnswer => LOGIN_ANSWERS[choice ?? "skip"];
 
 /** One line per change, for the person. */
 export function describeDiff(d: RecipeDiff): string[] {

@@ -653,7 +653,6 @@ function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGol
   );
 }
 
-/** One row per tool the import left off the image, with its cause and reason: a count would not say why a tool is missing. */
 /** A list under one lineage row, behind a micro-label: what the version is missing, what it retired. One wrapper so
  * the two read as one thing and only their rows differ. */
 function UnderVersion({ label, k, children }: { label: string; k: string; children: ReactNode }) {
@@ -665,6 +664,7 @@ function UnderVersion({ label, k, children }: { label: string; k: string; childr
   );
 }
 
+/** One row per tool the import left off the image, with its cause and reason: a count would not say why a tool is missing. */
 function MissingTools({ tools }: { tools: GoldenMissingTool[] }) {
   return (
     <UnderVersion label="not on this image" k="missing-tools">
