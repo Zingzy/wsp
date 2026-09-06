@@ -261,13 +261,21 @@ export async function nap(client: HostClient, ref: string): Promise<WorkspaceVie
 /** The most characters a folder cell holds before its front is cut: the end of a path is what a person recognises. */
 const FOLDER_WIDTH = 40;
 
+/** The most characters a title cell holds before its end is cut: the opening words are what a person recognises. */
+const TITLE_WIDTH = 60;
+
 /** The path within `width` cells, cut at the front behind an ellipsis when it is longer. */
 export function shortenedFront(path: string, width: number): string {
   return path.length <= width ? path : `…${path.slice(path.length - width + 1)}`;
 }
 
+/** The text within `width` cells, cut at the end before an ellipsis when it is longer. */
+export function shortenedEnd(text: string, width: number): string {
+  return text.length <= width ? text : `${text.slice(0, width - 1)}…`;
+}
+
 function threadLine(t: ThreadRow): string[] {
-  return [t.id, t.workspaceName, t.harness, t.status, t.startedBy, t.cwd !== undefined ? shortenedFront(t.cwd, FOLDER_WIDTH) : "", t.title];
+  return [t.id, t.workspaceName, t.harness, t.status, t.startedBy, t.cwd !== undefined ? shortenedFront(t.cwd, FOLDER_WIDTH) : "", shortenedEnd(t.title, TITLE_WIDTH)];
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */

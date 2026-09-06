@@ -52,6 +52,13 @@ export function notifyLine(threadId: string, result: TurnResult): string {
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
+/** A thread's title as every list shows it: the prompt's first non-empty line with its whitespace collapsed, so a
+ * multi-paragraph brief is one row in the CLI's table and one line in the sidebar. */
+export function titleLine(text: string): string {
+  const first = text.split(/\r?\n/).find(l => l.trim().length > 0) ?? "";
+  return first.replace(/\s+/g, " ").trim();
+}
+
 /** Minutes and two-digit seconds, with whole hours ahead when there are any: how long a turn ran. */
 export function fmtElapsed(ms: number): string {
   const s = Math.round(ms / 1000);
