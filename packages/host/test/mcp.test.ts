@@ -2,7 +2,7 @@
 // The MCP server over the host: an MCP client calls each tool against a host
 // over the fake runtime, through the same socket client and verb logic the
 // command line uses; a thread it opens is the local agent's.
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -11,11 +11,13 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { ProjectGolden, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { CATALOG } from "@wsp/catalog";
+import { ProjectGolden, Recipe, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
+import { RecipeScan, RecipeTable, recipePrintout, scanPrintout } from "../src/recipe-table.js";
 import { WSP_SKILL, instructionsOf } from "../src/skill.js";
 import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
@@ -129,16 +131,21 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described, and none for import until it exists", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "forget", "fork", "new", "pause", "send", "snapshot", "stop", "thread_new", "threads", "wake", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "forget", "fork", "new", "pause", "recipe", "recipe_scan", "send", "snapshot", "stop", "thread_new", "threads", "wake", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "effort", "message", "model", "thread"]);
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "out", "project", "set", "signin", "tick"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL));
     expect(c.getInstructions()).toContain("thread_new");
+    // The setup sequence an agent follows the first time, so it never has to guess at the order.
+    expect(c.getInstructions()).toContain("run `recipe_scan`");
+    expect(c.getInstructions()).toContain("write the answers with `recipe`");
+    expect(c.getInstructions()).toContain("wsp init --recipe <out>");
     expect(c.getInstructions()).toContain("snapshot");
     for (const t of tools) expect(WSP_SKILL, t.name).toContain(`\`${t.name}\``);
   });
@@ -621,15 +628,76 @@ describe("the MCP server over the host", () => {
     await stdio.close();
     await expect(served).resolves.toBeUndefined();
   });
+
+  it("recipe reads this computer, writes the file and answers with the same table the command line prints, set and all", async () => {
+    const out = join(dir, "recipe.json");
+    const first = await call("recipe", { out });
+    const table = RecipeTable.parse(first.structured);
+    expect(table.tick).toBe("used");
+    expect(table.out).toBe(out);
+    expect(table.rows.map(r => r.id)).toEqual(CATALOG.map(e => e.id));
+    expect(first.text).toBe(recipePrintout(table).join("\n"));
+    expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).tick).toBe("used");
+
+    const flipped = RecipeTable.parse((await call("recipe", { out, set: ["java=on"] })).structured);
+    expect(flipped.rows.find(r => r.id === "java")).toMatchObject({ on: true, size: 343 * 1024 * 1024 });
+    expect(flipped.heavy.map(r => r.id)).toContain("java");
+    // A word the catalog does not know is a tool error in one line, not a rewritten file.
+    expect(await call("recipe", { out, set: ["jaava=on"] })).toMatchObject({ isError: true, text: '--set jaava=on: the catalog has no row called "jaava"' });
+    expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows.find(r => r.id === "java")?.on).toBe(true);
+  });
+
+  it("recipe refuses a relative out or project by name: this server's own folder is wherever the agent launched it", async () => {
+    expect(await call("recipe", { out: "recipe.json" })).toMatchObject({ isError: true, text: 'out is a path on this computer, absolute: got "recipe.json"' });
+    expect(await call("recipe", { out: join(dir, "r.json"), project: ["../elsewhere"] })).toMatchObject({ isError: true, text: 'project is a folder on this computer, absolute: got "../elsewhere"' });
+    expect(await call("recipe_scan", { project: ["packages/host"] })).toMatchObject({ isError: true, text: 'project is a folder on this computer, absolute: got "packages/host"' });
+  });
+
+  it("recipe_scan answers with every option and a recommendation per row, and writes nothing", async () => {
+    const out = join(dir, "untouched.json");
+    const result = await call("recipe_scan", {});
+    const scan = RecipeScan.parse(result.structured);
+    expect(existsSync(out)).toBe(false);
+    expect(scan.tick).toBe("used");
+    expect(scan.agents.map(r => r.id)).toEqual(CATALOG.filter(e => e.kind === "agent").map(e => e.id));
+    expect(scan.tools.map(r => r.id)).toEqual(CATALOG.filter(e => e.kind === "tool").map(e => e.id));
+    expect(scan.alsoHere).toEqual({ scanned: false, managers: [] });
+    for (const row of [...scan.agents, ...scan.tools]) expect(row.recommended.value, row.id).toBe(row.on ? "on" : "off");
+    expect(result.text).toBe(scanPrintout(scan).join("\n"));
+    expect(result.text).toContain("no scanner yet");
+  });
 });
 
 describe("the MCP server never talks to the provider", () => {
-  it("imports the protocol, the verbs' client and the SDK only: no runtime, engine, backend or key loading", async () => {
-    const { readFileSync } = await import("node:fs");
-    const source = readFileSync(new URL("../src/mcp.ts", import.meta.url), "utf8");
-    const imports = [...source.matchAll(/ from "([^"]+)";$/gm)].map(m => m[1]!);
-    const workspacePackages = imports.filter(i => i.startsWith("@wsp/"));
-    expect(workspacePackages).toEqual(["@wsp/protocol"]);
-    expect(imports.filter(i => i.startsWith("./"))).toEqual(["./skill.js", "./version.js", "./verbs.js"]);
+  it("imports the protocol, the collector, the verbs' client and the SDK only: no runtime, engine, backend or key loading", async () => {
+    const { existsSync, readFileSync } = await import("node:fs");
+    const src = (file: string): URL => new URL(`../src/${file}`, import.meta.url);
+    // What a module really pulls in at run time: a type-only import is erased by the build and carries nothing.
+    const read = (file: string): string[] =>
+      [...readFileSync(src(file), "utf8").matchAll(/(?:^|\n)(?:import|export)([^;]*?) from "([^"]*)";/gs)].flatMap(m => (m[1]!.trimStart().startsWith("type ") ? [] : [m[2]!]));
+    // Every local module the server pulls in, however deep: a new import three files down is caught here too.
+    const closure = (entry: string): Map<string, string[]> => {
+      const seen = new Map<string, string[]>();
+      const walk = (file: string): void => {
+        if (seen.has(file)) return;
+        const imports = read(file);
+        seen.set(file, imports);
+        for (const i of imports) {
+          if (!i.startsWith("./")) continue;
+          const local = `${i.slice(2, -3)}.ts`;
+          if (existsSync(src(local))) walk(local);
+        }
+      };
+      walk(entry);
+      return seen;
+    };
+    const walked = closure("mcp.ts");
+    // The collector reads this computer for the recipe tool; it depends on the catalog and the protocol and nothing else.
+    expect(walked.get("mcp.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/collect", "@wsp/protocol"]);
+    expect([...walked.keys()].sort()).toContain("recipe-table.ts");
+    expect([...walked.keys()].sort()).toContain("init-layout.ts");
+    for (const [file, imports] of walked) {
+      for (const i of imports) expect(`${i} in ${file}`).not.toMatch(/@wsp\/(runtime|engine|adapter-claude|daemon|web)/);
+    }
   });
 });

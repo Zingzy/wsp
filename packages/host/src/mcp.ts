@@ -7,10 +7,14 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, deleteNotice } from "@wsp/protocol";
+import { nodeHost } from "@wsp/collect";
+import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, RECIPE_SIGN_INS, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, deleteNotice } from "@wsp/protocol";
+import { smallRecipePath } from "./recipe-file.js";
+import { runRecipe, runScan } from "./recipe-command.js";
+import { RecipeScan, RecipeTable, recipePrintout, scanPrintout } from "./recipe-table.js";
 import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, absolutePath, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -96,6 +100,51 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means the agent's default"),
   };
 
+  const PROJECT_FOLDERS = z.array(z.string()).optional().describe("folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count");
+  /** Absolute, since this server's own folder is wherever the agent launched it and a prefix test on a relative
+   * path silently matches nothing. */
+  const projectFolders = (folders: readonly string[]): string[] => folders.map(f => absolutePath("project is a folder on this computer", f));
+
+  server.registerTool(
+    "recipe_scan",
+    {
+      description:
+        "Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, the tools here no catalog row carries, the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.",
+      inputSchema: { project: PROJECT_FOLDERS },
+      outputSchema: RecipeScan.shape,
+    },
+    async ({ project }) => {
+      const scan = await runScan(nodeHost(), project !== undefined ? { projects: projectFolders(project) } : {});
+      return asText(scanPrintout(scan).join("\n"), scan);
+    },
+  );
+  server.registerTool(
+    "recipe",
+    {
+      description:
+        `The recipe for a machine, read off this computer and written to a file: every catalog agent and tool with its tick, why it has that tick, and what it adds to the machine, plus the commands the person's agents ran that no catalog row carries. tick names the rule: used (the default) ticks what their agents actually ran here, installed ticks what is on this computer, default ticks what the catalog ships on; an agent wsp cannot open a thread on is off unless installed. Put the heavy rows to the person with their sizes before anything is built, then flip rows with set and hand them \`wsp init --recipe <out>\` to run themselves, since the sign-ins need their machine. Only names and counts are read; nothing a session held is returned.`,
+      inputSchema: {
+        tick: RecipeTick.optional().describe(`which rule decides every tick: ${RECIPE_TICKS.join(", ")}; absent means the file's own rule, else used`),
+        set: z.array(z.string()).optional().describe('rows to flip by catalog id, "<id>=on" or "<id>=off"; applied over the rule and on top of the ticks already in the file'),
+        signin: z.array(z.string()).optional().describe(`what happens to a row's sign-in, "<id>=${RECIPE_SIGN_INS.join("|")}"; key brings the key files beside its login and nothing else of it`),
+        add: z.array(z.string()).optional().describe("catalog ids to add from a scan row's install line; nothing here scans for tools outside the catalog yet, so each one is refused by name"),
+        project: PROJECT_FOLDERS,
+        out: z.string().optional().describe("where the recipe file goes, absolute; absent means the host's own recipe.json beside its state"),
+      },
+      outputSchema: RecipeTable.shape,
+    },
+    async ({ tick, set, signin, add, project, out }) => {
+      const table = await runRecipe(nodeHost(), {
+        out: out === undefined ? smallRecipePath(statePath) : absolutePath("out is a path on this computer", out),
+        ...(tick !== undefined ? { tick } : {}),
+        ...(set !== undefined ? { set } : {}),
+        ...(signin !== undefined ? { signin } : {}),
+        ...(add !== undefined ? { add } : {}),
+        ...(project !== undefined ? { projects: projectFolders(project) } : {}),
+      });
+      return asText(recipePrintout(table).join("\n"), table);
+    },
+  );
   server.registerTool(
     "workspaces",
     { description: "Every workspace this host runs, as the app lists them: id, name, phase (running or napping) and the golden it forked from.", outputSchema: { workspaces: z.array(WorkspaceView) } },

@@ -8,7 +8,7 @@ import { chmod, rename, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { once } from "node:events";
 import { finished } from "node:stream/promises";
-import type { ProjectCarry } from "@wsp/protocol";
+import { underProject, type ProjectCarry } from "@wsp/protocol";
 
 /** One catalog projectState row the module moved: the files it touched and how many directories, keys, lines or rows
  * changed; `skipped` counts sessions the row named whose transcript was not under the home, so the row moved alone. */
@@ -53,11 +53,6 @@ export function resolveProjectPath(path: string): string {
   } catch {
     return abs;
   }
-}
-
-/** Whether path is the project root or sits inside it; a sibling that shares the prefix is not. */
-export function underProject(path: string, root: string): boolean {
-  return path === root || path.startsWith(`${root}/`);
 }
 
 /** Where a path lands when the project moves: `to` for the project root, the same tail under `to` for a folder

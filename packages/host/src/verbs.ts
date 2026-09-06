@@ -429,11 +429,17 @@ export interface Turn {
   afterCut?: true;
 }
 
+/** A path a caller named, refused unless absolute: whoever reads it has a working folder of its own that the caller
+ * cannot see, so a relative path resolves somewhere neither of them meant. `named` opens the line. */
+export function absolutePath(named: string, path: string): string {
+  if (!path.startsWith("/")) throw new Error(`${named}, absolute: got ${JSON.stringify(path)}`);
+  return path;
+}
+
 /** A folder named for a thread, refused unless absolute: the harness would run a relative one against its own home
  * and fail inside the guest, where the person reads it as a harness failure. */
 export function absoluteFolder(cwd: string | undefined): string | undefined {
-  if (cwd !== undefined && !cwd.startsWith("/")) throw new Error(`--cwd is a path on the machine, absolute: got "${cwd}"`);
-  return cwd;
+  return cwd === undefined ? undefined : absolutePath("--cwd is a path on the machine", cwd);
 }
 
 /** The folder a new thread works in: the one named, else the workspace's imported project folder, else none, and the

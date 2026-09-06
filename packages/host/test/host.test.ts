@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -85,6 +85,61 @@ describe("wsp cli", () => {
 
   it("is wired as the wsp bin", () => {
     expect(pkg.bin["wsp"]).toBe("./dist/bin.js");
+  });
+
+  it("recipe writes the file, prints the table on stdout and the reading on stderr, and refuses a --tick word it does not know", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-cli-recipe-"));
+    const out = join(dir, "recipe.json");
+    const logs: string[] = [];
+    const errs: string[] = [];
+    const io: CliIO = { log: l => logs.push(l), error: l => errs.push(l), ask: noPrompt, askSecret: noPrompt };
+    expect(await cli(["recipe", "--out", out, "--tick", "default", "--json"], io)).toBe(0);
+    const table = JSON.parse(logs.at(-1)!) as { tick: string; out: string; rows: { id: string }[] };
+    expect(table).toMatchObject({ tick: "default", out });
+    expect(logs).toHaveLength(1);
+    expect(errs[0]).toContain("Nothing leaves this computer");
+    expect(JSON.parse(readFileSync(out, "utf8")).tick).toBe("default");
+
+    logs.length = 0;
+    errs.length = 0;
+    expect(await cli(["recipe", "--out", out, "--set", "java=on"], io)).toBe(0);
+    expect(logs[0]).toMatch(/^id +on +why +size$/);
+    expect(logs.at(-1)).toContain(`wsp init --recipe ${out}`);
+    expect(JSON.parse(readFileSync(out, "utf8")).rows.find((r: { id: string }) => r.id === "java").on).toBe(true);
+
+    errs.length = 0;
+    expect(await cli(["recipe", "--out", out, "--tick", "everything"], io)).toBe(1);
+    expect(errs.at(-1)).toBe('--tick takes one of used, installed, default, not "everything"');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("recipe scan prints every section and writes nothing; an unknown subverb is one usage line", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-cli-scan-"));
+    const out = join(dir, "recipe.json");
+    const logs: string[] = [];
+    const errs: string[] = [];
+    const io: CliIO = { log: l => logs.push(l), error: l => errs.push(l), ask: noPrompt, askSecret: noPrompt };
+    expect(await cli(["recipe", "scan", "--out", out], io)).toBe(0);
+    expect(existsSync(out)).toBe(false);
+    expect(logs[0]).toBe("Agents");
+    expect(logs).toContain("Tools");
+    expect(logs).toContain("Also on this Mac");
+    expect(logs).toContain("  no scanner yet");
+    expect(logs.at(-1)).toContain("Nothing was written.");
+    expect(errs[0]).toContain("Nothing leaves this computer");
+
+    logs.length = 0;
+    expect(await cli(["recipe", "scan", "--out", out, "--json"], io)).toBe(0);
+    expect(logs).toHaveLength(1);
+    const scan = JSON.parse(logs[0]!) as { tick: string; tools: { id: string; recommended: { value: string; why: string } }[] };
+    expect(scan.tick).toBe("used");
+    for (const row of scan.tools) expect(row.recommended.why.length, row.id).toBeGreaterThan(0);
+    expect(existsSync(out)).toBe(false);
+
+    errs.length = 0;
+    expect(await cli(["recipe", "sniff"], io)).toBe(1);
+    expect(errs.at(-1)).toContain("unknown command: wsp recipe sniff");
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

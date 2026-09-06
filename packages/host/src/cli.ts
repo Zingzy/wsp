@@ -9,7 +9,6 @@ import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import { isCancel } from "@clack/prompts";
-import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { collect, computeRecipe, nodeHost, type Manifest, type Rung } from "@wsp/collect";
 import {
   SolariBackend,
@@ -17,21 +16,24 @@ import {
   goldenHead,
   hostIdentity,
   jsonFileStore,
-  machineExecStream,
   type GoldenBuilderView,
   type GoldenRecipe,
   type GoldenVersion,
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
-import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENTS } from "@wsp/catalog";
+import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENTS } from "@wsp/catalog";
+import { RECIPE_TICKS } from "@wsp/protocol";
 import { assetDir } from "./assets.js";
+import { HARNESS_ADAPTERS } from "./adapters.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
 import { recipePath } from "./init-recipe.js";
-import { writeRecipe } from "./recipe-command.js";
+import { smallRecipePath } from "./recipe-file.js";
+import { isRecipeTick, runRecipe, runScan } from "./recipe-command.js";
+import { recipePrintout, scanPrintout } from "./recipe-table.js";
 import { confirmPrompt, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { systemOpener, type UrlOpener } from "./relay.js";
@@ -50,10 +52,15 @@ usage:
   wsp init           set up your first golden image: the agents, what they
                      need and the sign-ins, three screens, then the build and
                      the browser
-  wsp recipe         write the recipe: every catalog agent and tool with a tick
-                     from what is installed here, what your agents used (their
-                     session histories, read here, names and counts only) or the
-                     catalog's own default; review it, then wsp init --recipe
+  wsp recipe scan    read this computer and print every option, writing
+                     nothing: the agents, the tools with why and size, the
+                     tools no catalog row carries, the commands your agents
+                     ran, and the sign-ins, each with what to do about it
+  wsp recipe         write the recipe and print it as a table: every catalog
+                     agent and tool with its tick, why it has it and what it
+                     costs on the machine, then the commands your agents ran
+                     that no catalog row carries; review it, flip rows with
+                     --set and --signin, then wsp init --recipe
   wsp doctor         run the reach loop end to end against one live machine
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
@@ -85,6 +92,28 @@ options:
                      straight to the sign-ins; this machine is still read for
                      what travels
   --out PATH         recipe: where to write it (default <state dir>/recipe.json)
+  --tick WORD        recipe: which rule decides every tick (used, installed,
+                     default). used, the default, ticks what your agents
+                     actually ran here, read from their session histories
+                     (names and counts only); installed ticks what is on this
+                     computer; default ticks what the catalog ships on. An
+                     agent wsp cannot open a thread on is off unless installed
+  --set ID=on|off    recipe: flip one row by its catalog id, repeatable; the
+                     file is rewritten and the table printed again
+  --signin ID=WORD   recipe: what happens to that row's sign-in (copy,
+                     machine, key, skip), repeatable; key brings the key files
+                     beside its login and nothing else of it
+  --add ID           recipe: take a tool from a scan row of that id;
+                     repeatable, and refused by name until something here
+                     scans for tools outside the catalog
+  --project PATH     recipe: weigh the histories by this folder, repeatable;
+                     only sessions that ran in it or under it count, so the
+                     recipe reflects one project's tools. Naming it, or
+                     --tick, lets the rule decide every row again; without
+                     either, what the file already says stands and the flags
+                     flip rows on top of it
+  --json             recipe: print the table, or the scan, as one object and
+                     nothing else
   --agent ID         mcp install: the agent whose MCP config gets the server
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
@@ -256,13 +285,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
   return createRuntime({
     backend: new SolariBackend({ apiKey: keys.solari }),
     store: jsonFileStore(statePath),
-    adapters: {
-      claude: ctx =>
-        createClaudeAdapter({
-          exec: machineExecStream(ctx.machine),
-          configDir: CLAUDE_CONFIG_DIR,
-        }),
-    },
+    adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
     hostId: hostIdentity(),
   });
@@ -429,6 +452,66 @@ async function hostFor(
   }
 }
 
+interface RecipeFlags {
+  out?: string;
+  tick?: string;
+  set?: string[];
+  signin?: string[];
+  add?: string[];
+  project?: string[];
+  json?: boolean;
+}
+
+/** `wsp recipe` and `wsp recipe scan`: read this computer, write the recipe file (scan writes nothing) and print
+ * the table, or the same object as JSON. Progress goes to stderr so what is on stdout is the whole answer. */
+async function recipe(io: CliIO, statePath: string, words: string[], values: RecipeFlags): Promise<number> {
+  if (words.length > 0 && (words[0] !== "scan" || words.length !== 1)) {
+    io.error(`unknown command: wsp recipe ${words.join(" ")}\n\nusage: wsp recipe [--tick, --set, --signin, --add, --project, --out, --json]\n       wsp recipe scan [--project, --json]`);
+    return 1;
+  }
+  const scanning = words[0] === "scan";
+  if (values.tick !== undefined && !isRecipeTick(values.tick)) {
+    io.error(`--tick takes one of ${RECIPE_TICKS.join(", ")}, not ${JSON.stringify(values.tick)}`);
+    return 1;
+  }
+  // The reading is progress, not the answer: stdout carries the table alone, so --json is one object and nothing else.
+  const streams = { log: (line: string) => io.log(line), note: (line: string) => io.error(line) };
+  const projects = values.project !== undefined ? { projects: values.project.map(p => resolve(p)) } : {};
+  const out = resolve(values.out ?? smallRecipePath(statePath));
+  try {
+    if (scanning) {
+      const scan = await runScan(nodeHost(), projects, streams);
+      if (values.json === true) io.log(JSON.stringify(scan));
+      else {
+        for (const line of scanPrintout(scan)) io.log(line);
+        io.log(`Nothing was written. Take the do column with wsp recipe --set <id>=on and --signin <id>=machine, then run wsp init --recipe ${out}.`);
+      }
+      return 0;
+    }
+    const table = await runRecipe(
+      nodeHost(),
+      {
+        out,
+        ...(values.tick !== undefined ? { tick: values.tick } : {}),
+        ...(values.set !== undefined ? { set: values.set } : {}),
+        ...(values.signin !== undefined ? { signin: values.signin } : {}),
+        ...(values.add !== undefined ? { add: values.add } : {}),
+        ...projects,
+      },
+      streams,
+    );
+    if (values.json === true) io.log(JSON.stringify(table));
+    else {
+      for (const line of recipePrintout(table)) io.log(line);
+      io.log(`Recipe written to ${out}. Review it, flip a row with wsp recipe --set <id>=on, then run wsp init --recipe ${out}.`);
+    }
+    return 0;
+  } catch (e) {
+    io.error(`wsp recipe: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+}
+
 /** `wsp mcp` serves until the agent closes its stdin; `wsp mcp install --agent <id>` writes the agent's config. */
 async function mcp(io: CliIO, statePath: string, words: string[], agent: string | undefined): Promise<number> {
   const ids = MCP_AGENTS.map(a => a.id).join(", ");
@@ -456,7 +539,23 @@ async function mcp(io: CliIO, statePath: string, words: string[], agent: string 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
   if (verb !== undefined) return runVerb(verb, argv, io, defaultStatePath);
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; recipe?: string; out?: string; agent?: string };
+  let values: {
+    version?: boolean;
+    help?: boolean;
+    port?: string;
+    "ws-port"?: string;
+    state?: string;
+    yes?: boolean;
+    recipe?: string;
+    out?: string;
+    agent?: string;
+    tick?: string;
+    set?: string[];
+    signin?: string[];
+    add?: string[];
+    project?: string[];
+    json?: boolean;
+  };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -471,6 +570,12 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         recipe: { type: "string" },
         out: { type: "string" },
         agent: { type: "string" },
+        tick: { type: "string" },
+        set: { type: "string", multiple: true },
+        signin: { type: "string", multiple: true },
+        add: { type: "string", multiple: true },
+        project: { type: "string", multiple: true },
+        json: { type: "boolean" },
       },
       allowPositionals: true,
     }));
@@ -503,8 +608,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
     case "init":
       return init(io, opts, { yes: values.yes === true, ...(values.recipe !== undefined ? { recipe: values.recipe } : {}) });
     case "recipe":
-      await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line));
-      return 0;
+      return recipe(io, opts.statePath, positionals.slice(1), values);
     case "mcp":
       return mcp(io, opts.statePath, positionals.slice(1), values.agent);
     case "doctor": {

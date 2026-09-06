@@ -3,15 +3,16 @@
 // what a login defaults to, the recipe file (the same list with the person's
 // ticks, saved next to the state so golden v2 is a re-run of it), and the
 // golden recipe the ticked rows add up to.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LoginChoice, Manifest, ManifestEntry, Rung } from "@wsp/collect";
-import { CATALOG_AGENTS, catalogEntry, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow } from "@wsp/catalog";
+import { CATALOG_AGENTS, NO_SIGN_IN, catalogEntry, catalogToolFor, guestEnv, hasLogin, keysIdOf, loginIdOf, loginRow } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, isMcpRow, neverCopied, packageOf, parseMcpId, rowRoad, type RecipeDigest } from "@wsp/engine";
 import { Recipe } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
+export { loadRecipe, saveSmallRecipe, smallRecipePath, withTicksOf } from "./recipe-file.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
@@ -192,25 +193,29 @@ export function isLoginChoice(v: unknown): v is LoginChoice {
   return LOGIN_CHOICES.some(c => c.value === v);
 }
 
-/** The small recipe wsp recipe wrote (or a person or an agent did), checked against the protocol's shape. */
-export function loadRecipe(path: string): Recipe {
-  if (!existsSync(path)) throw new Error(`no recipe at ${path}`);
-  let data: unknown;
-  try {
-    data = JSON.parse(readFileSync(path, "utf8"));
-  } catch (e) {
-    throw new Error(`${path}: ${e instanceof Error ? e.message : String(e)}`);
-  }
-  const r = Recipe.safeParse(data);
-  if (r.success) return r.data;
-  throw new Error(`${path}: invalid recipe: ${r.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-}
-
 /** The catalog id a collector row stands for: an agents row its agent, a tools row the tool its package names. */
 export function catalogIdOf(e: ManifestEntry): string | undefined {
   if (e.rung === "agents" && !isMcpRow(e)) return agentName(e);
   if (e.rung === "tools") return catalogToolFor(packageOf(e))?.id;
   return undefined;
+}
+
+/** A recipe row's sign-in answer as the login rows the collector files. copy, machine and skip land on the entry's
+ * own login row. key lands on the keys row beside it, so the key files travel and nothing else of the login does;
+ * the login itself is then run on the machine when it has one to run. */
+export function loginAnswers(recipe: Recipe): Map<string, LoginChoice> {
+  const out = new Map<string, LoginChoice>();
+  for (const r of recipe.rows) {
+    if (r.signIn === undefined) continue;
+    const login = loginIdOf(r.id);
+    if (r.signIn !== "key") {
+      out.set(`logins/${login}`, r.signIn);
+      continue;
+    }
+    out.set(`logins/${keysIdOf(r.id)}`, "copy");
+    out.set(`logins/${login}`, hasLogin(loginRow(login)?.signIn ?? NO_SIGN_IN) ? "machine" : "skip");
+  }
+  return out;
 }
 
 /** The collector's rows with the recipe's ticks written on: an agents or tools row is on when its catalog row is,
@@ -220,7 +225,7 @@ export function catalogIdOf(e: ManifestEntry): string | undefined {
  * earlier pass are made anew, so an untick takes its row away. */
 export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
   const on = new Set(recipe.rows.filter(r => r.on).map(r => r.id));
-  const answers = new Map<string, LoginChoice>(recipe.rows.flatMap(r => (r.signIn === undefined ? [] : [[`logins/${loginIdOf(r.id)}`, r.signIn]])));
+  const answers = loginAnswers(recipe);
   const own = manifest.entries.filter(e => !e.id.startsWith(CATALOG_PREFIX));
   const here = new Set(own.map(catalogIdOf));
   const bare = recipe.rows.flatMap((r): ManifestEntry[] => {
@@ -255,11 +260,6 @@ export function recipePath(statePath: string): string {
   return join(dirname(statePath), "golden-recipe.json");
 }
 
-/** Where the small recipe lives, beside the saved manifest: what wsp recipe writes and wsp init --recipe reads. */
-export function smallRecipePath(statePath: string): string {
-  return join(dirname(statePath), "recipe.json");
-}
-
 /** The small recipe with the login answers written on: a row whose login row was answered carries the answer, a row
  * whose login nobody answered carries none. The ticks are the recipe's own, as the screens left them. */
 export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, string>): Recipe {
@@ -271,29 +271,6 @@ export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, s
       return { ...rest, ...(isLoginChoice(answer) ? { signIn: answer } : {}) };
     }),
   };
-}
-
-/** This computer's recipe with a saved one's ticks and answers written on, by id: a row the saved one lacks is off
- * and unanswered, and a saved row this computer's recipe does not carry follows them as it was saved. */
-export function withTicksOf(here: Recipe, saved: Recipe): Recipe {
-  const rows = new Map(saved.rows.map(r => [r.id, r]));
-  const ids = new Set(here.rows.map(r => r.id));
-  return {
-    ...here,
-    rows: [
-      ...here.rows.map(r => {
-        const { signIn: _signIn, ...rest } = r;
-        const s = rows.get(r.id);
-        return { ...rest, on: s?.on === true, ...(s?.signIn === undefined ? {} : { signIn: s.signIn }) };
-      }),
-      ...saved.rows.filter(r => !ids.has(r.id)),
-    ],
-  };
-}
-
-export function saveSmallRecipe(path: string, recipe: Recipe): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`);
 }
 
 export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string> = new Map()): void {

@@ -801,6 +801,14 @@ export const RecipeSource = z.discriminatedUnion("kind", [
 ]);
 export type RecipeSource = z.infer<typeof RecipeSource>;
 
+/** What happens to an entry's sign-in: its files are copied from this computer, it is signed into on the machine
+ * after the build, only the key files beside its login travel (the row the catalog files under the login's id plus
+ * "-keys"), or nothing of it goes. One word per row; nothing here explains a key against a login. */
+export const RecipeSignIn = z.enum(["copy", "machine", "key", "skip"]);
+export type RecipeSignIn = z.infer<typeof RecipeSignIn>;
+/** The words `--signin` takes, in the order the help lists them. */
+export const RECIPE_SIGN_INS: readonly RecipeSignIn[] = RecipeSignIn.options;
+
 /** One catalog entry in a recipe: ticked or not, why, its size on the machine when the catalog measured one, and
  * the sign-in answer the person or the agent that wrote the recipe gave; absent, the wizard's default stands. */
 export const RecipeRow = z.object({
@@ -809,7 +817,7 @@ export const RecipeRow = z.object({
   on: z.boolean(),
   source: RecipeSource,
   size: z.number().int().nonnegative().optional(),
-  signIn: z.enum(["copy", "machine", "skip"]).optional(),
+  signIn: RecipeSignIn.optional(),
 });
 export type RecipeRow = z.infer<typeof RecipeRow>;
 
@@ -823,6 +831,14 @@ export const RecipeHistory = z.object({
 });
 export type RecipeHistory = z.infer<typeof RecipeHistory>;
 
+/** Which rule decided every tick in a recipe: what the person's agents used on this computer, what is installed on
+ * it, or the catalog's own default. `wsp recipe --tick` names one; a recipe written without one (the wizard's
+ * screens) carries none and its rows say for themselves where each tick came from. */
+export const RecipeTick = z.enum(["used", "installed", "default"]);
+export type RecipeTick = z.infer<typeof RecipeTick>;
+/** The words `--tick` takes, in the order the help lists them. */
+export const RECIPE_TICKS: readonly RecipeTick[] = RecipeTick.options;
+
 /** The small recipe: catalog ids with a tick each and the source of that tick, written by wsp recipe from this
  * computer (or by hand, or by a local agent), read by wsp init --recipe, the app's pick screen and the import
  * of a project. It names catalog entries only and never carries a path's content or a key. */
@@ -830,6 +846,8 @@ export const Recipe = z.object({
   version: z.literal(1),
   /** When it was written, ISO 8601. */
   at: z.string().min(1),
+  /** The rule that decided the ticks, when one was named; a later --set keeps it, so the table reads the same. */
+  tick: RecipeTick.optional(),
   histories: z.array(RecipeHistory),
   rows: z.array(RecipeRow),
 });
@@ -1545,3 +1563,4 @@ export { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, 
 export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";
+export { underProject } from "./project-path.js";
