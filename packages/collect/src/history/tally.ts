@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { catalogToolFor } from "@wsp/catalog";
+import { MIB, catalogToolFor } from "@wsp/catalog";
 import { underProject } from "@wsp/protocol";
 import { commandNames, installNames } from "./commands.js";
 import type { Call } from "./reader.js";
@@ -7,6 +7,21 @@ import type { Call } from "./reader.js";
 export interface Count {
   sessions: number;
   calls: number;
+}
+
+/** Over this a row is heavy: it is weighed against the heavy floor and put to the person before a build. */
+export const HEAVY_BYTES = 300 * MIB;
+/** The least use that ticks a tool on its own: one session is a look, and a handful of commands is a try. */
+export const USED_FLOOR: Count = { sessions: 2, calls: 5 };
+/** A heavy row costs more to be wrong about, so it takes more use to earn its place. */
+export const HEAVY_USED_FLOOR: Count = { sessions: 3, calls: 20 };
+
+export const isHeavy = (size: number | undefined): boolean => size !== undefined && size > HEAVY_BYTES;
+
+/** Whether this much use ticks a tool of this size: at or over the floor its weight sets. */
+export function meetsUsedFloor(c: Count, size: number | undefined): boolean {
+  const floor = isHeavy(size) ? HEAVY_USED_FLOOR : USED_FLOOR;
+  return c.sessions >= floor.sessions && c.calls >= floor.calls;
 }
 
 /** What one agent's histories ran, as names with how many sessions and how many calls each; nothing else is kept. */

@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 import { isCancel } from "@clack/core";
 import { unicode } from "@clack/prompts";
-import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, passwordPrompt, plainLine, rowsOf, summarize, table, textPrompt, viewport, widthOf, wrap } from "../src/init-layout.js";
+import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, helpLine, passwordPrompt, plainLine, rowsOf, summarize, table, textPrompt, viewport, widthOf, wrap } from "../src/init-layout.js";
 
 describe("init layout", () => {
   it("plainLine leaves what a terminal would: later carriage-return segments overprint earlier ones, escapes and controls go, a tab is a space", () => {
@@ -47,13 +47,6 @@ describe("init layout", () => {
       "Tools     161           92 can come",
       "Shell       9   1.1 MB",
     ]);
-  });
-
-  it("fmtDuration shows tenths under a minute and minutes past it", () => {
-    expect(fmtDuration(340)).toBe("0.3s");
-    expect(fmtDuration(59_949)).toBe("59.9s");
-    expect(fmtDuration(61_000)).toBe("1m 01s");
-    expect(fmtDuration(600_000)).toBe("10m 00s");
   });
 
   it("widthOf reads the stream's columns, falls back to 80, and caps at 100", () => {

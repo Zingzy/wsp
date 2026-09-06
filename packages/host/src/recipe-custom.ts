@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The rows a recipe carries that the catalog does not: how `wsp recipe --add`
-// and the MCP recipe tool read them, how they join a recipe, and the lines
-// they take in the recipe's table. The install line runs as given, so nothing
+// and the MCP recipe tool read them and how they join a recipe; the table
+// draws them under their own group. The install line runs as given, so nothing
 // here rewrites one; a row outside the catalog is never offered a sign-in.
-import { ADDED_BY_AGENT, commandCheck, customRows, fmtBytes, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
-import { table } from "./init-layout.js";
+import { ADDED_BY_AGENT, commandCheck, customRows, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
 
 /** `<id>=<value>`, split at the first equals; both sides have to be there. */
 export function parsePair(flag: string, spec: string): { id: string; value: string } {
@@ -46,17 +45,4 @@ export function withCustom(recipe: Recipe, rows: readonly RecipeCustomRow[]): Re
   const kept = customRows(recipe).map(r => added.get(r.id) ?? r);
   const known = new Set(kept.map(r => r.id));
   return { ...recipe, custom: [...kept, ...rows.filter(r => !known.has(r.id))] };
-}
-
-/** A custom row's cells in the recipe's table: the same columns a catalog row takes, and its install line beside
- * them, since the command is the row. */
-export function customCells(row: RecipeCustomRow): string[] {
-  return [row.id, "on", row.why, row.size === undefined ? "size unknown" : fmtBytes(row.size), row.install.join("; ")];
-}
-
-/** The custom rows as printed lines, headed like the table above them; nothing when the recipe has none. */
-export function customTableLines(recipe: Pick<Recipe, "custom">): string[] {
-  const rows = customRows(recipe);
-  if (rows.length === 0) return [];
-  return ["Rows the catalog does not carry:", ...table([["id", "on", "why", "size", "install"], ...rows.map(customCells)]).map(l => `  ${l}`)];
 }

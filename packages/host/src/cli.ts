@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { parseArgs } from "node:util";
+import { parseArgs, type ParseArgsConfig } from "node:util";
 import { isCancel } from "@clack/prompts";
 import { collect, computeRecipe, expand, nodeHost, scanProject, type Manifest, type Rung } from "@wsp/collect";
 import {
@@ -42,7 +42,7 @@ import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from
 import { startHost, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
-import { findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
+import { COMMON, VERBS, findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 export const HELP = `wsp - ${TAGLINE}
@@ -50,9 +50,9 @@ export const HELP = `wsp - ${TAGLINE}
 usage:
   wsp up             start the app and the runtime over the golden you sealed
                      (plain wsp does the same)
-  wsp init           set up your first golden image: the agents, what they
-                     need and the sign-ins, three screens, then the build and
-                     the browser
+  wsp init           set up your first golden image in six screens: Agents,
+                     Tools, Also on this Mac, Sign-ins, wsp for your agents
+                     on this Mac, and Build, then the browser
   wsp recipe scan    read this computer and print every option, writing
                      nothing: the agents, the tools with why and size, what
                      else a package manager here has that the image could
@@ -118,6 +118,15 @@ options:
                      workflows) say what it needs, and those rows are ticked
                      first, each saying which file asked. Without it, init asks
                      for one before the first screen
+  --non-interactive  init: ask nothing, but still run the sign-ins on the
+                     machine: each one prints the page to open on this computer,
+                     the code when the flow shows one, and the command that
+                     opens it, then waits for you (this is what a run off a
+                     terminal does anyway)
+  --json             init: print each sign-in hand-off and its outcome as one
+                     JSON object on stdout, everything else on stderr; implies
+                     --non-interactive, and is refused beside --yes, which skips
+                     the sign-ins
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
@@ -193,6 +202,16 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: q => (screen ? answered(passwordPrompt(split(q))) : nobody(q)),
   };
+}
+
+/** What an init under --json speaks through: stdout carries the objects alone, so every line the run says goes to
+ * stderr beside them, and a key that is not in the environment or a .env file is an error rather than a prompt on a
+ * stream nobody is reading. */
+export function jsonCliIO(err: Writable = process.stderr): CliIO {
+  const say = (line: string): void => void err.write(`${line}\n`);
+  const nobody = (q: string): Promise<never> =>
+    Promise.reject(new Error(`${q.split("\n")[0]}: --json asks nothing; set it in the environment, ./.env, or ~/.wsp/.env.`));
+  return { log: say, error: say, stream: text => void err.write(text), ask: nobody, askSecret: nobody };
 }
 
 function parseEnvFile(path: string): Record<string, string> {
@@ -303,17 +322,19 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
   });
 }
 
-export function terminalInitIO(): InitIO {
+/** With --json stdout carries the objects alone, so every line the run says moves to stderr beside it. */
+export function terminalInitIO(json = false): InitIO {
   const os = platform();
   return {
     input: process.stdin,
-    output: process.stdout,
+    output: json ? process.stderr : process.stdout,
     stderr: process.stderr,
     isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true,
     env: process.env,
     open: systemOpener(os),
     signals: process,
     exit: code => process.exit(code),
+    ...(json ? { json: (record: Record<string, unknown>) => void process.stdout.write(`${JSON.stringify(record)}\n`) } : {}),
   };
 }
 
@@ -361,7 +382,11 @@ function initRefusal(lock: HostLock, statePath: string): string {
   return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
 }
 
-async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; recipe?: string; project?: string }): Promise<number> {
+async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string; project?: string }): Promise<number> {
+  if (flags.json && flags.yes) {
+    io.error("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
+    return 1;
+  }
   const held = servingHost(opts.statePath);
   if (held !== undefined) {
     io.error(initRefusal(held, opts.statePath));
@@ -373,12 +398,15 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
     return 1;
   }
   const project = flag.path;
-  const screen = terminalInitIO();
+  // Under --json every line this run says, the host's own included, goes to stderr so stdout is the objects' alone.
+  const say = flags.json ? jsonCliIO() : io;
+  const screen = terminalInitIO(flags.json);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes });
-  const keys = await loadKeys(io, undefined, { anthropic: false });
+  const keys = await loadKeys(say, undefined, { anthropic: false });
   const result = await runInit(
     {
       yes: flags.yes,
+      nonInteractive: flags.nonInteractive,
       ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
       ...(project !== undefined ? { project } : {}),
       collect: collectThisComputer,
@@ -396,11 +424,11 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
       brew: () => readBrewTable(nodeHost()),
       scan: recipe => scanTools(nodeHost(), recipe),
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
-      host: (rt, builder, hooks) => hostFor(rt, keys, { ...opts, builder, ...hooks }, io),
+      host: (rt, builder, hooks) => hostFor(rt, keys, { ...opts, builder, ...hooks }, say),
     },
     screen,
   );
-  if (result.handle !== undefined) stopOnSignals(result.handle, io);
+  if (result.handle !== undefined) stopOnSignals(result.handle, say);
   return result.code;
 }
 
@@ -493,6 +521,63 @@ async function hostFor(
   }
 }
 
+/** The flags the shared parse reads; a command that answers on its own word (mcp, recipe) parses its own. */
+interface SharedFlags {
+  version?: boolean;
+  help?: boolean;
+  port?: string;
+  "ws-port"?: string;
+  state?: string;
+  yes?: boolean;
+  "non-interactive"?: boolean;
+  json?: boolean;
+  recipe?: string;
+  project?: string;
+}
+
+interface Command {
+  /** Whether stdout is objects under --json; a command without it refuses the flag rather than hand prose to whoever reads them. */
+  json: boolean;
+  run(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, values: SharedFlags): Promise<number>;
+}
+
+/** The commands the shared parse serves, by word; a line with no word is `up`. */
+const COMMANDS: Readonly<Record<string, Command>> = {
+  up: {
+    json: false,
+    run: async (io, opts) => {
+      const handle = await up(io, opts);
+      if (handle === undefined) return 1;
+      stopOnSignals(handle, io);
+      return 0;
+    },
+  },
+  init: {
+    json: true,
+    run: (io, opts, values) =>
+      init(io, opts, {
+        yes: values.yes === true,
+        // --json has nobody to answer the screens: its objects are for whoever is driving the run.
+        nonInteractive: values["non-interactive"] === true || values.json === true,
+        json: values.json === true,
+        ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
+        ...(values.project !== undefined ? { project: values.project } : {}),
+      }),
+  },
+  doctor: {
+    json: false,
+    run: async (io, opts) => {
+      const keys = await loadKeys(io);
+      const rt = makeRuntime(keys, opts.statePath);
+      return doctor(rt, io, keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {});
+    },
+  },
+};
+
+/** The words that take --json on the shared parse and those that refuse it, the one fact the refusal and its test read. */
+export const JSON_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => COMMANDS[w]!.json);
+export const PROSE_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => !COMMANDS[w]!.json);
+
 /** The word `recipe` opens the command, as `mcp` does: its flags are its own, so `--json` and the rest never reach
  * the shared parse, where a command with no table to print would take them and answer in prose. */
 const RECIPE_COMMAND = "recipe";
@@ -500,6 +585,22 @@ const RECIPE_COMMAND = "recipe";
 /** The words only the write verb reads. `scan` writes nothing, so one of these on its line is a person asking for
  * something that will not happen, and it is refused rather than dropped. */
 const WRITE_ONLY_FLAGS = ["tick", "set", "signin", "add", "add-check", "out"] as const;
+
+type Options = NonNullable<ParseArgsConfig["options"]>;
+
+/** The flags `wsp recipe` parses; scan refuses the write-only ones. */
+export const RECIPE_OPTIONS: Options = {
+  out: { type: "string" },
+  tick: { type: "string" },
+  set: { type: "string", multiple: true },
+  signin: { type: "string", multiple: true },
+  add: { type: "string", multiple: true },
+  "add-check": { type: "string", multiple: true },
+  project: { type: "string", multiple: true },
+  json: { type: "boolean" },
+  state: { type: "string" },
+  help: { type: "boolean", short: "h" },
+};
 
 const recipeUsage = (): string =>
   `usage: wsp ${RECIPE_COMMAND} [--tick used|installed|default] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>] [--json]\n       wsp ${RECIPE_COMMAND} scan [--project <folder>] [--json]`;
@@ -511,22 +612,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
   let values: { out?: string; tick?: string; set?: string[]; signin?: string[]; add?: string[]; "add-check"?: string[]; project?: string[]; json?: boolean; state?: string; help?: boolean };
   let words: string[];
   try {
-    ({ values, positionals: words } = parseArgs({
-      args: argv,
-      options: {
-        out: { type: "string" },
-        tick: { type: "string" },
-        set: { type: "string", multiple: true },
-        signin: { type: "string", multiple: true },
-        add: { type: "string", multiple: true },
-        "add-check": { type: "string", multiple: true },
-        project: { type: "string", multiple: true },
-        json: { type: "boolean" },
-        state: { type: "string" },
-        help: { type: "boolean", short: "h" },
-      },
-      allowPositionals: true,
-    }));
+    ({ values, positionals: words } = parseArgs({ args: argv, options: RECIPE_OPTIONS, allowPositionals: true }));
   } catch (e) {
     io.error(`${e instanceof Error ? e.message : String(e)}\n\n${usage}`);
     return 1;
@@ -597,6 +683,14 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
  * that word before the shared parse ever sees them. */
 const MCP_COMMAND = "mcp";
 
+/** The flags `wsp mcp` and `wsp mcp install` parse. */
+export const MCP_OPTIONS: Options = {
+  agent: { type: "string", multiple: true },
+  json: { type: "boolean" },
+  state: { type: "string" },
+  help: { type: "boolean", short: "h" },
+};
+
 const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--json]   (${MCP_AGENT_IDS})`;
 const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND}\n       ${mcpInstallUsage()}`;
 
@@ -618,16 +712,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   let values: { agent?: string[]; json?: boolean; state?: string; help?: boolean };
   let words: string[];
   try {
-    ({ values, positionals: words } = parseArgs({
-      args: argv,
-      options: {
-        agent: { type: "string", multiple: true },
-        json: { type: "boolean" },
-        state: { type: "string" },
-        help: { type: "boolean", short: "h" },
-      },
-      allowPositionals: true,
-    }));
+    ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
   } catch (e) {
     io.error(`${e instanceof Error ? e.message : String(e)}\n\n${usage}`);
     return 1;
@@ -660,41 +745,48 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   return report.failures.length > 0 ? 1 : 0;
 }
 
+/** The flags the shared parse reads for up, init and doctor. */
+export const SHARED_OPTIONS: Options = {
+  version: { type: "boolean", short: "v" },
+  help: { type: "boolean", short: "h" },
+  port: { type: "string" },
+  "ws-port": { type: "string" },
+  state: { type: "string" },
+  yes: { type: "boolean", short: "y" },
+  "non-interactive": { type: "boolean" },
+  json: { type: "boolean" },
+  recipe: { type: "string" },
+  project: { type: "string" },
+};
+
+const without = (options: Options, names: readonly string[]): Options => Object.fromEntries(Object.entries(options).filter(([name]) => !names.includes(name)));
+
+export interface CommandLine {
+  /** The words after `wsp` that select it. */
+  words: string;
+  /** Every flag that line parses; anything else is a usage error. */
+  options: Options;
+}
+
+/** Every line `wsp` answers, with the flags it takes: what the skill's examples and the MCP tools are held to. */
+export const COMMAND_LINES: readonly CommandLine[] = [
+  ...VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options } })),
+  { words: RECIPE_COMMAND, options: RECIPE_OPTIONS },
+  { words: `${RECIPE_COMMAND} scan`, options: without(RECIPE_OPTIONS, WRITE_ONLY_FLAGS) },
+  { words: MCP_COMMAND, options: MCP_OPTIONS },
+  { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS },
+  ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: command.json ? SHARED_OPTIONS : without(SHARED_OPTIONS, ["json"]) })),
+];
+
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
   if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom);
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom);
   if (argv[0] === RECIPE_COMMAND) return recipe(io, argv.slice(1), statePathFrom);
-  let values: {
-    version?: boolean;
-    help?: boolean;
-    port?: string;
-    "ws-port"?: string;
-    state?: string;
-    yes?: boolean;
-    recipe?: string;
-    out?: string;
-    project?: string;
-  };
+  let values: SharedFlags;
   let positionals: string[];
   try {
-    ({ values, positionals } = parseArgs({
-      args: argv,
-      options: {
-        version: { type: "boolean", short: "v" },
-        help: { type: "boolean", short: "h" },
-        port: { type: "string" },
-        "ws-port": { type: "string" },
-        state: { type: "string" },
-        yes: { type: "boolean", short: "y" },
-        recipe: { type: "string" },
-        out: { type: "string" },
-        add: { type: "string", multiple: true },
-        "add-check": { type: "string", multiple: true },
-        project: { type: "string" },
-      },
-      allowPositionals: true,
-    }));
+    ({ values, positionals } = parseArgs({ args: argv, options: SHARED_OPTIONS, allowPositionals: true }));
   } catch (e) {
     io.error(e instanceof Error ? e.message : String(e));
     return 1;
@@ -712,24 +804,15 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
     wsPort: values["ws-port"] !== undefined ? Number(values["ws-port"]) : 4410,
     statePath: statePathFrom(values.state),
   };
-  const [cmd] = positionals;
-  switch (cmd) {
-    case undefined:
-    case "up": {
-      const handle = await up(io, opts);
-      if (handle === undefined) return 1;
-      stopOnSignals(handle, io);
-      return 0;
-    }
-    case "init":
-      return init(io, opts, { yes: values.yes === true, ...(values.recipe !== undefined ? { recipe: values.recipe } : {}), ...(values.project !== undefined ? { project: values.project } : {}) });
-    case "doctor": {
-      const keys = await loadKeys(io);
-      const rt = makeRuntime(keys, opts.statePath);
-      return doctor(rt, io, keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {});
-    }
-    default:
-      io.error(commandUsage(cmd) ?? `unknown command: ${cmd}\n\n${HELP}`);
-      return 1;
+  const word = positionals[0] ?? "up";
+  const command = COMMANDS[word];
+  if (command === undefined) {
+    io.error(commandUsage(word) ?? `unknown command: ${word}\n\n${HELP}`);
+    return 1;
   }
+  if (values.json === true && !command.json) {
+    io.error(`Unknown option '--json' for wsp ${word}: only ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")} prints JSON.`);
+    return 1;
+  }
+  return command.run(io, opts, values);
 }

@@ -96,7 +96,7 @@ function stageRecorder() {
 }
 
 /** The base floor's own lines under its stage: the df warning, one per step, the loop's summary. The stage's closing line stays. */
-const BASE_STEP = /^deploying-daemon:(free disk unknown|.* \(\d+\/10\)$|\d+ installed)/;
+const BASE_STEP = /^deploying-daemon:(free disk unknown|.* \(\d+\/\d+\)$|\d+ installed)/;
 const sansBase = (stages: readonly string[]): string[] => stages.filter(s => !BASE_STEP.test(s));
 
 describe("golden pipeline", () => {
@@ -917,7 +917,7 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend: plain.backend, setup: "true", fetch: plain.fetch, onStage: stageRecorder().onStage, import: importOf() });
     const checks = plain.inline.filter(c => c.cmd.includes('echo "missing'));
     expect(checks).toHaveLength(1);
-    expect(checks[0]!.cmd).toContain(`for b in 'node' 'pnpm' 'uv' 'python3' 'git' 'jq' 'rg' 'curl' 'docker'; do`);
+    expect(checks[0]!.cmd).toContain(`for b in 'node' 'pnpm' 'uv' 'python3' 'git' 'jq' 'rg' 'curl' 'docker' 'cc' 'fd' 'sqlite3' 'wget' 'zip' 'xz' 'rsync'; do`);
   });
 
   it("two tap roads whose go module is named otherwise land under the row's command and pass the check: the road is kept, on the fake guest end to end", async () => {
@@ -1199,7 +1199,7 @@ describe("golden import stages", () => {
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(sweepsAt[2]!);
     expect(sweepsAt[2]).toBeLessThan(cmds.indexOf("echo ok"));
     // Each closing line carries what the sweep gave back and the df reading the stage left.
-    expect(stages).toContain("deploying-daemon:10 installed; caches swept, 700.0 MB back; 3.6 GB free");
+    expect(stages).toContain("deploying-daemon:17 installed; caches swept, 700.0 MB back; 3.6 GB free");
     expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700.0 MB back; 4.3 GB free");
     expect(stages).toContain("installing-tools:3 installed; caches swept, 700.0 MB back; 5.0 GB free");
     // A sweep that fails is named, and the build goes on to the next stage.

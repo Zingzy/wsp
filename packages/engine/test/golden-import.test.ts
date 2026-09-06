@@ -706,6 +706,16 @@ describe("toolInstallsFor", () => {
     expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/manager/cargo", "tools/cargo/bat"]);
   });
 
+  it("a manager the catalog carries installs by the catalog's road: bun's rows wait on an npm install of bun, and no Homebrew comes along", () => {
+    const t = toolInstallsFor([row({ rung: "tools", id: "tools/bun/eslint", label: "eslint 9.0.0", version: "9.0.0" })]);
+    expect(t.installs.map(i => [i.id, i.manager, i.after])).toEqual([
+      ["tools/manager/bun", "npm", undefined],
+      ["tools/bun/eslint", "bun", "tools/manager/bun"],
+    ]);
+    expect(t.installs[0]!.cmd).toMatch(/\nnpm install -g bun$/);
+    expect(t.brewfile).toBe("");
+  });
+
   it("no Homebrew step when no formula, tap or manager needs it; unticked rows install nothing", () => {
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/npm/bun", label: "bun@1.4.0", version: "1.4.0" }), row({ rung: "tools", id: "tools/brew/gh", linux: "yes", bring: false })]);
     expect(t.installs.map(i => i.id)).toEqual(["tools/npm/bun"]);

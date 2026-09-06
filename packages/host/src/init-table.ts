@@ -3,27 +3,28 @@
 // with its tick, why it is here in the words the person's own machine gives,
 // and the size its install downloads. wsp recipe prints it as text; wsp init's
 // agents and tools screens are the same rows as a list.
-import { CATALOG, MIB, type CatalogEntry } from "@wsp/catalog";
-import type { ProjectScan } from "@wsp/collect";
-import { fmtBytes, plural, type Recipe, type RecipeRow } from "@wsp/protocol";
+import { CATALOG, type CatalogEntry, sizeBytes } from "@wsp/catalog";
+import { HEAVY_USED_FLOOR, USED_FLOOR, type ProjectScan, floorApplies, isHeavy, meetsUsedFloor } from "@wsp/collect";
+import { customRows, fmtBytes, plural, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { GREY, GUTTER, accent, grey } from "./init-layout.js";
 import type { Cell } from "./init-select.js";
 
 /** The groups a row falls in, in reading order: what always comes, what this computer's agents ran, what is here
- * and unused, and the rest of the catalog. */
+ * and unused, what an agent added outside the catalog, and the rest of the catalog. */
 export const BASE_GROUP = "Always on the image";
 export const PROJECT_GROUP = "Your project needs";
 export const USED_GROUP = "You use these";
 export const HERE_GROUP = "Installed here, never used";
+export const ADDED_GROUP = "Added by your agent";
 export const CATALOG_GROUP = "Also in the catalog";
-export type Group = typeof BASE_GROUP | typeof PROJECT_GROUP | typeof USED_GROUP | typeof HERE_GROUP | typeof CATALOG_GROUP;
+export type Group = typeof BASE_GROUP | typeof PROJECT_GROUP | typeof USED_GROUP | typeof HERE_GROUP | typeof ADDED_GROUP | typeof CATALOG_GROUP;
 /** The project's own needs come first after the base: a repo that will not build without a tool outranks anything
  * this computer happens to have. */
-export const GROUP_ORDER = [BASE_GROUP, PROJECT_GROUP, USED_GROUP, HERE_GROUP, CATALOG_GROUP] as const;
+export const GROUP_ORDER = [BASE_GROUP, PROJECT_GROUP, USED_GROUP, HERE_GROUP, ADDED_GROUP, CATALOG_GROUP] as const;
 /** The one word that stands for a group where colour cannot say it. */
-export const GROUP_LABEL: Record<Group, string> = { [BASE_GROUP]: "base", [PROJECT_GROUP]: "project", [USED_GROUP]: "used", [HERE_GROUP]: "installed", [CATALOG_GROUP]: "catalog" };
-/** Over this a row is heavy: it comes first inside its group and its size is drawn brighter. */
-export const HEAVY_BYTES = 300 * MIB;
+export const GROUP_LABEL: Record<Group, string> = { [BASE_GROUP]: "base", [PROJECT_GROUP]: "project", [USED_GROUP]: "used", [HERE_GROUP]: "installed", [ADDED_GROUP]: "added", [CATALOG_GROUP]: "catalog" };
+/** The one line under the table that says when use ticks a row, so a row reading "below the floor" can be placed. */
+export const FLOOR_LINE = `on when used in ${plural(USED_FLOOR.sessions, "session")} and ${plural(USED_FLOOR.calls, "command")}; heavy rows ${HEAVY_USED_FLOOR.sessions} and ${HEAVY_USED_FLOOR.calls}`;
 /** What a row reads where the catalog has measured no size. */
 export const UNKNOWN_SIZE = "size unknown";
 
@@ -31,10 +32,10 @@ const TICK_ON = "●";
 const TICK_OFF = "○";
 const LABEL_WIDTH = Math.max(...Object.values(GROUP_LABEL).map(l => l.length));
 
-/** One row of the table: a catalog entry with what the recipe made of it. */
+/** One row of the table: a catalog entry with what the recipe made of it, or a row an agent added outside the catalog. */
 export interface TableRow {
   id: string;
-  kind: CatalogEntry["kind"];
+  kind: CatalogEntry["kind"] | RecipeCustomRow["kind"];
   name: string;
   on: boolean;
   /** Always on the image: on the machine whatever is ticked, so nothing can turn it off. */
@@ -67,24 +68,36 @@ export function groupOf(e: CatalogEntry, r: RecipeRow | undefined, sessions: num
   }
 }
 
-/** The why column: the counts this computer gave, in the plainest words each group has. */
-function whyLine(e: CatalogEntry, r: RecipeRow | undefined, sessions: number): string {
+/** The why column: the counts this computer gave, in the plainest words each group has, and where the rule weighs
+ * use and the use is under the floor its size sets, that too, so a row that is off can be read and flipped knowingly. */
+function whyLine(e: CatalogEntry, r: RecipeRow | undefined, sessions: number, size: number | undefined, tick: Recipe["tick"]): string {
   const group = groupOf(e, r, sessions);
   if (group === BASE_GROUP) return "always on the image";
   if (r?.source.kind === "project") return r.source.why;
   if (e.kind === "agent") return group === USED_GROUP ? `used here, ${plural(sessions, "session")}` : group === HERE_GROUP ? "installed here, never used" : "not installed here";
-  if (r?.source.kind === "used") return `${plural(r.source.calls, "command")} in ${plural(r.source.sessions, "session")}`;
+  if (r?.source.kind === "used") {
+    const counts = `${plural(r.source.calls, "command")} in ${plural(r.source.sessions, "session")}`;
+    if (!floorApplies(tick) || meetsUsedFloor(r.source, size)) return counts;
+    return `${isHeavy(size) ? "heavy, below the floor" : "below the floor"}, ${counts}`;
+  }
   if (group === HERE_GROUP) return "installed here, never used";
   return e.defaultOn ? "in the catalog, on by default" : "in the catalog, on request";
 }
 
+/** A row an agent added: on, since it is on the recipe at all, with the lines that install it as its why. */
+function customTableRow(c: RecipeCustomRow): TableRow {
+  return { id: c.id, kind: c.kind, name: c.name, on: true, base: false, group: ADDED_GROUP, why: c.install.join("; "), ...(c.size !== undefined ? { size: c.size } : {}), heavy: isHeavy(c.size) };
+}
+
 /** Every catalog entry as a row: the recipe's tick and source where it named one, the catalog's own evidence where
- * it did not; grouped by why it is here, the heavy rows first inside their group. */
+ * it did not; grouped by why it is here, the heavy rows first inside their group. The rows an agent added are
+ * tools, so they join a table that draws tools and never the agents table. */
 export function recipeTable(recipe: Recipe, catalog: readonly CatalogEntry[] = CATALOG): TableRow[] {
+  const added = catalog.some(e => e.kind === "tool") ? customRows(recipe).map(customTableRow) : [];
   const rows = catalog.map((e): TableRow => {
     const r = recipe.rows.find(x => x.id === e.id);
     const base = e.kind === "tool" && e.floor;
-    const size = r?.size ?? e.size;
+    const size = r?.size ?? sizeBytes(e.size);
     const sessions = e.kind === "agent" ? sessionsOf(recipe, e.id) : 0;
     return {
       id: e.id,
@@ -93,14 +106,14 @@ export function recipeTable(recipe: Recipe, catalog: readonly CatalogEntry[] = C
       on: base || r?.on === true,
       base,
       group: groupOf(e, r, sessions),
-      why: whyLine(e, r, sessions),
+      why: whyLine(e, r, sessions, size, recipe.tick),
       ...(size !== undefined ? { size } : {}),
-      heavy: size !== undefined && size > HEAVY_BYTES,
+      heavy: isHeavy(size),
       ...(e.kind === "agent" && e.threads !== true ? { note: "installs, but wsp cannot run its threads yet" } : {}),
     };
   });
   return GROUP_ORDER.flatMap(g => {
-    const group = rows.filter(r => r.group === g);
+    const group = [...rows, ...added].filter(r => r.group === g);
     return [...group.filter(r => r.heavy), ...group.filter(r => !r.heavy)];
   });
 }
@@ -121,6 +134,7 @@ const PAINT: Record<Group, (s: string) => string> = {
   [PROJECT_GROUP]: accent,
   [USED_GROUP]: accent,
   [HERE_GROUP]: s => grey(GREY.bright, s),
+  [ADDED_GROUP]: accent,
   [CATALOG_GROUP]: s => grey(GREY.mid, s),
 };
 

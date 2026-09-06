@@ -6,12 +6,11 @@
 // never say different things about the same recipe; nothing here draws a
 // second table of catalog rows.
 import { CATALOG_AGENTS, CATALOG_TOOLS, keysIdOf, loginIdOf, loginRow, signsInByDefault, hasLogin } from "@wsp/catalog";
-import type { CommandCount } from "@wsp/collect";
+import { type CommandCount, floorApplies } from "@wsp/collect";
 import { RecipeCustomRow, RecipeTick, customRows, fmtBytes, type Recipe } from "@wsp/protocol";
 import { z } from "zod";
 import { table } from "./init-layout.js";
-import { BASE_GROUP, CATALOG_GROUP, GROUP_ORDER, HEAVY_BYTES, HERE_GROUP, USED_GROUP, recipeTable, tableLines, totalsLine, type TableRow } from "./init-table.js";
-import { customTableLines } from "./recipe-custom.js";
+import { FLOOR_LINE, GROUP_ORDER, recipeTable, tableLines, totalsLine, type TableRow } from "./init-table.js";
 import type { ScanRow } from "./scan.js";
 import { signInFor, signInWords } from "./signin-table.js";
 
@@ -21,9 +20,9 @@ export const COMMANDS_SHOWN = 12;
 /** One catalog row as an answer carries it: the shared renderer's row, named field by field so a client reading
  * this over MCP has a shape and not a table of text. */
 export const RecipeAnswerRow = z.object({
-  /** The catalog id, the same word `--set` takes. */
+  /** The catalog id, the same word `--set` takes; for an added row, the id `--add` gave it. */
   id: z.string(),
-  kind: z.enum(["agent", "tool"]),
+  kind: z.enum(["agent", "tool", "custom"]),
   name: z.string(),
   on: z.boolean(),
   /** On the image whatever is ticked, so nothing can turn it off. */
@@ -123,11 +122,14 @@ export const drawn = (r: RecipeAnswerRow): TableRow => ({
   ...(r.note !== undefined ? { note: r.note } : {}),
 });
 
-/** The two tables the shared renderer draws, each under its title with its own totals line. */
-export function answerTables(a: Pick<RecipeAnswer, "agents" | "tools">, depth: number): string[] {
+/** What sits under the Tools table's totals: the floor, once, when the rule the recipe went on weighs use. */
+export const floorLines = (tick: RecipeTick | undefined): string[] => (floorApplies(tick) ? [FLOOR_LINE] : []);
+
+/** The two tables the shared renderer draws, each under its title with its own totals line, the floor under the tools. */
+export function answerTables(a: Pick<RecipeAnswer, "tick" | "agents" | "tools">, depth: number): string[] {
   return ([["Agents", a.agents, "agents"] as const, ["Tools", a.tools, "tools"] as const]).flatMap(([title, rows, noun], i) => {
     const table = rows.map(drawn);
-    return [...(i > 0 ? [""] : []), title, ...tableLines(table, depth), totalsLine(table, noun)];
+    return [...(i > 0 ? [""] : []), title, ...tableLines(table, depth), totalsLine(table, noun), ...(noun === "tools" ? floorLines(a.tick) : [])];
   });
 }
 
@@ -144,11 +146,10 @@ export function commandTableLines(commands: readonly RecipeCommand[], shown = CO
   ];
 }
 
-/** Everything the recipe verb and the MCP tool print: the two tables, the rows the catalog does not carry that
- * this recipe installs anyway, then the commands. */
+/** Everything the recipe verb and the MCP tool print: the two tables, the rows an agent added among the tools, then
+ * the commands. */
 export function recipePrintout(answer: RecipeAnswer, depth = 1): string[] {
-  const custom = customTableLines(answer);
-  return [...answerTables(answer, depth), ...(custom.length > 0 ? ["", ...custom] : []), "", ...commandTableLines(answer.commands)];
+  return [...answerTables(answer, depth), "", ...commandTableLines(answer.commands)];
 }
 
 // --- the scan: every option, with what an agent should do about each ------------------------------------------
@@ -285,14 +286,12 @@ export function scanPrintout(s: RecipeScan, depth = 1): string[] {
   ];
 }
 
-/** The shared renderer's lines with the do column beside them. */
+/** The shared renderer's lines with the do column beside them, the floor under the tools. */
 export function adviceTables(s: RecipeScan, depth: number): string[] {
   return ([["Agents", s.agents, "agents"] as const, ["Tools", s.tools, "tools"] as const]).flatMap(([title, rows, noun], i) => {
     const table = rows.map(drawn);
     const lines = tableLines(table, depth);
     const width = Math.max(0, ...lines.map(l => l.length));
-    return [...(i > 0 ? [""] : []), title, ...lines.map((l, n) => `${l.padEnd(width)}  ${rows[n]!.recommended.value}`), totalsLine(table, noun)];
+    return [...(i > 0 ? [""] : []), title, ...lines.map((l, n) => `${l.padEnd(width)}  ${rows[n]!.recommended.value}`), totalsLine(table, noun), ...(noun === "tools" ? floorLines(s.tick) : [])];
   });
 }
-
-export { HEAVY_BYTES };

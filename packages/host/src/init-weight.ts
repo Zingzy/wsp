@@ -3,6 +3,7 @@
 // colour a single row's size takes: one set of thresholds each, in one place.
 // Hue here means weight and nothing else.
 import { MIB } from "@wsp/catalog";
+import { isHeavy } from "@wsp/collect";
 import { BUILDER_DISK_GB, type DiskEstimate } from "@wsp/engine";
 import { fmtBytes } from "@wsp/protocol";
 import type { Tone } from "./init-select.js";
@@ -16,16 +17,13 @@ export function diskTone(total: number, room: number): Tone | undefined {
   return share >= 0.5 ? "yellow" : undefined;
 }
 
-/** A row this size is worth a word with the person before it goes on the image. */
-export const HEAVY_BYTES = 300 * MIB;
-
 /** The colour a row's own size takes on a list: the same three tiers as the Disk line, read in bytes. Nothing
  * under the heavy line, then yellow, orange from 500 MB, red past a gigabyte. */
 export function sizeTone(bytes: number | undefined): Tone | undefined {
   if (bytes === undefined) return undefined;
   if (bytes >= 1024 * MIB) return "red";
   if (bytes >= 500 * MIB) return "yellowBright";
-  return bytes >= HEAVY_BYTES ? "yellow" : undefined;
+  return isHeavy(bytes) ? "yellow" : undefined;
 }
 
 /** The estimate's parts that are not zero, and how many rows have no size. */
