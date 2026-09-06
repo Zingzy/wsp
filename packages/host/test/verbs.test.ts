@@ -173,21 +173,22 @@ describe("wsp verbs over the host", () => {
     expect(io.errors).toEqual(["the harness died"]);
   });
 
-  it("threads is the sidebar's data: one row per thread with agent, state and who opened it, filtered by --in", async () => {
+  it("threads is the sidebar's data: one row per thread with agent, state, who opened it and its folder, filtered by --in", async () => {
     await run("new", "alpha");
     await run("new", "beta");
     const [alpha, beta] = await rt.workspaces.list();
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
     await run("thread", "new", "--in", "alpha", "first task");
     await (await rt.sessions.start(beta!.id, { prompt: "from the app", harness: "codex" })).finished;
     const { code, io } = await run("threads");
     expect(code).toBe(0);
     const rows = io.lines[0]!.split("\n");
-    expect(rows[0]).toMatch(/^THREAD\s+WORKSPACE\s+AGENT\s+STATE\s+BY\s+TITLE$/);
+    expect(rows[0]).toMatch(/^THREAD\s+WORKSPACE\s+AGENT\s+STATE\s+BY\s+FOLDER\s+TITLE$/);
     const [a] = await rt.sessions.list(alpha!.id);
     const [b] = await rt.sessions.list(beta!.id);
     expect(rows.slice(1)).toEqual([
-      `${a!.threadId}  alpha      claude  completed  cli     first task`,
-      `${b!.threadId}  beta       codex   completed  person  from the app`,
+      `${a!.threadId}  alpha      claude  completed  cli     /root/work/proj  first task`,
+      `${b!.threadId}  beta       codex   completed  person                   from the app`,
     ]);
 
     const scoped = await run("threads", "--in", "beta", "--json");
@@ -195,6 +196,73 @@ describe("wsp verbs over the host", () => {
     const [{ threads }] = json(scoped.io) as [{ threads: ThreadView[] }];
     expect(threads.map(t => ThreadView.parse(t))).toEqual(threads);
     expect(threads).toEqual([expect.objectContaining({ id: b!.threadId, workspaceId: beta!.id, harness: "codex", startedBy: "person", turns: 1 })]);
+  });
+
+  it("thread new --cwd is the folder the turn starts in, the same field the app's composer sends; without it the workspace's project folder, else none and the harness starts in its own home", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    const picked = await run("thread", "new", "--in", "alpha", "--agent", "codex", "--cwd", "/root/work/elsewhere", "write tests");
+    expect(picked.code).toBe(0);
+    expect(codex.starts.map(s => s.cwd)).toEqual(["/root/work/elsewhere"]);
+
+    const bare = await run("thread", "new", "--in", "alpha", "hello");
+    expect(bare.code).toBe(0);
+    expect(claude.starts.map(s => s.cwd)).toEqual([undefined]);
+
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
+    const inProject = await run("thread", "new", "--in", "alpha", "hello again");
+    expect(inProject.code).toBe(0);
+    expect(claude.starts.map(s => s.cwd)).toEqual([undefined, "/root/work/proj"]);
+    const rows = await rt.sessions.list(alpha!.id);
+    expect(rows.map(r => r.cwd)).toEqual(["/root/work/elsewhere", undefined, "/root/work/proj"]);
+  });
+
+  it("fork --send --cwd starts the first thread in that folder; without it, in the project folder the fork inherited, else none", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    const picked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--cwd", "/root/work/site");
+    expect(picked.code).toBe(0);
+    expect(claude.starts.map(s => s.cwd)).toEqual(["/root/work/site"]);
+
+    const plain = await run("fork", "alpha", "--name", "other", "--send", "build it");
+    expect(plain.code).toBe(0);
+    expect(claude.starts.map(s => s.cwd)).toEqual(["/root/work/site", undefined]);
+
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
+    const golden = await rt.workspaces.snapshot(alpha!.id);
+    await run("new", "task", "--from", golden.snapshotId);
+    const inherited = await run("fork", "task", "--name", "task-fork", "--send", "build it");
+    expect(inherited.code).toBe(0);
+    expect(claude.starts.at(-1)?.cwd).toBe("/root/work/proj");
+  });
+
+  it("a --cwd that is not absolute is refused with the usage line before anything is created, started or dialled; fork's --cwd needs --send", async () => {
+    await run("new", "alpha");
+    const relative = await run("thread", "new", "--in", "alpha", "--cwd", "packages/host", "look here");
+    expect(relative.code).toBe(1);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent <name>] [--cwd <path on the machine>] "<task>"']);
+    const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
+    expect(forked.code).toBe(1);
+    expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute: got "packages\/host"\n\nusage: wsp fork /);
+    const dangling = await run("fork", "alpha", "--cwd", "/root/work");
+    expect(dangling.code).toBe(1);
+    expect(dangling.io.errors).toEqual(["wsp fork: --cwd needs --send"]);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
+    expect(await rt.sessions.list()).toEqual([]);
+    expect(claude.starts).toEqual([]);
+  });
+
+  it("threads shortens a folder that would not fit its column with an ellipsis at the front, keeping the end a person recognises", async () => {
+    await run("new", "alpha");
+    const deep = "/root/work/a-project-with-a-long-name/packages/host/src";
+    await run("thread", "new", "--in", "alpha", "--cwd", deep, "look here");
+    const { io } = await run("threads");
+    const [, line] = io.lines[0]!.split("\n");
+    expect(line).toContain("  …ject-with-a-long-name/packages/host/src  look here");
+    expect(line).not.toContain(deep);
+    const asJson = await run("threads", "--json");
+    const [{ threads }] = json(asJson.io) as [{ threads: ThreadView[] }];
+    expect(threads[0]!.cwd).toBe(deep);
   });
 
   it("send resumes the thread's latest session under its own agent; the thread keeps its id and who opened it", async () => {
@@ -531,7 +599,7 @@ describe("wsp verbs over the host", () => {
     expect(bad.io.errors[0]).toContain("usage: wsp threads");
     const half = await run("thread");
     expect(half.code).toBe(1);
-    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent <name>] "<task>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent <name>] [--cwd <path on the machine>] "<task>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {
