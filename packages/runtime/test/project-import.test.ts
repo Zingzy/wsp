@@ -35,7 +35,9 @@ const AGENTS: ProjectAgent[] = [
 /** An agent whose state for the folder is rows alone: nothing to land as a file, a merge to run. */
 const HERMES: ProjectAgent = { agent: "hermes", name: "Hermes Agent", sessions: 1, bytes: 0, carry: "transcript-only" };
 const MERGE_DIR = "/tmp/wsp-merge-0000";
-const mergeCommand = (agent: string): string => `python3 '${MERGE_DIR}/${agent}.py'; s=$?; rm -f '${MERGE_DIR}/${agent}.py'; rmdir '${MERGE_DIR}' 2>/dev/null; exit $s`;
+const mergeCommand = (agent: string): string => `python3 '${MERGE_DIR}/${agent}.py'`;
+/** The exec that takes the script away once its run ended, however it ended. */
+const removeCommand = (agent: string): string => `rm -f '${MERGE_DIR}/${agent}.py'; rmdir '${MERGE_DIR}' 2>/dev/null`;
 
 /** What the host would hand the runtime for a small folder: three secret-shaped files, one binary with an exec bit,
  * and, when asked, agents with sessions for it; the state pack lands one file per agent with bytes under its machine
@@ -224,10 +226,36 @@ describe("project.import on a workspace", () => {
     expect(untars[0]).toMatch(/tar xzf - -C '\/root\/work\/proj\.wsp-in-[^']+' --no-same-owner/);
     expect(untars[1]).toMatch(/tar xzf - -C '\/' --no-same-owner/);
     expect(machine.runLog.findIndex(s => s.includes("mv "))).toBeLessThan(machine.runLog.indexOf(untars[1]!));
-    // The merge runs after the overlay has landed, as a run with a deadline, and takes its script away.
+    // The merge runs after the overlay has landed, as a run with a deadline, and the script is taken away by the next exec.
     const merge = machine.runLog.indexOf(mergeCommand("codex"));
     expect(merge).toBeGreaterThan(machine.runLog.indexOf(untars[1]!));
+    expect(machine.runOptions[merge]!.deadlineMs).toBe(120_000);
     expect(machine.runLog.filter(s => s.startsWith("python3 "))).toEqual([mergeCommand("codex")]);
+    expect(machine.execLog[machine.execLog.indexOf(mergeCommand("codex")) + 1]).toBe(removeCommand("codex"));
+  });
+
+  it("a merge the deadline killed still has its script removed and fails by its exit; a merge that kept the machine's own row carries the note into the done line", async () => {
+    const backend = stubBackend();
+    const base = backend.execImpl;
+    backend.execImpl = (m, cmd) =>
+      cmd.startsWith(`python3 '${MERGE_DIR}/codex.py'`)
+        ? { exitCode: 124, stdout: "", stderr: "" }
+        : cmd.startsWith(`python3 '${MERGE_DIR}/hermes.py'`)
+          ? { exitCode: 0, stdout: '{"merged": 1, "kept": 1, "note": "the machine already lists /root/work/proj as proj"}\n', stderr: "" }
+          : base(m, cmd);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", agents: ["codex", "hermes"], bundler: fakeBundler([], [...AGENTS, HERMES]) });
+    expect(result.agents).toEqual([
+      { agent: "codex", files: 1, bytes: Buffer.byteLength("codex at /root/work/proj\n"), outcome: "failed", error: "the merge on the machine failed (exit 124): no output" },
+      { agent: "hermes", files: 0, bytes: 0, outcome: "moved", rows: 1, note: "the machine already lists /root/work/proj as proj" },
+    ]);
+    const log = backend.machines[0]!.execLog;
+    for (const agent of ["codex", "hermes"]) expect(log[log.indexOf(mergeCommand(agent)) + 1], agent).toBe(removeCommand(agent));
+    const said = "Codex failed: the merge on the machine failed (exit 124): no output, Hermes Agent moved, 1 row merged (the machine already lists /root/work/proj as proj)";
+    expect(imports(events).at(-1)!.message).toBe(`3 files, 3.9 KB, landed at /root/work/proj; sessions: ${said}.`);
   });
 
   it("a merge the machine cannot take yet leaves the rows waiting with the reason, one that fails says why, and rows alone still travel", async () => {

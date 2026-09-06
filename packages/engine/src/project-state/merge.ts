@@ -5,8 +5,9 @@
 // can run the engine, and python3 with its sqlite3 module is on the images.
 
 /** What the script prints as its last line: the rows it inserted or updated and the ones already as they should be,
- * or why it could not merge yet (the agent has not made its store on the machine). */
-export type MergeOutput = { merged: number; kept: number } | { waiting: string };
+ * with a note when a row was kept as the machine had it rather than as carried, or why it could not merge yet (the
+ * agent has not made its store on the machine). */
+export type MergeOutput = { merged: number; kept: number; note?: string } | { waiting: string };
 
 /** The script's result off its stdout; anything else is an error naming what came back. */
 export function parseMergeOutput(stdout: string): MergeOutput {
@@ -20,7 +21,9 @@ export function parseMergeOutput(stdout: string): MergeOutput {
   }
   const o = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   if (typeof o["waiting"] === "string") return { waiting: o["waiting"] };
-  if (typeof o["merged"] === "number" && typeof o["kept"] === "number") return { merged: o["merged"], kept: o["kept"] };
+  if (typeof o["merged"] === "number" && typeof o["kept"] === "number") {
+    return { merged: o["merged"], kept: o["kept"], ...(typeof o["note"] === "string" ? { note: o["note"] } : {}) };
+  }
   throw new Error(`the merge script ended with: ${last}`);
 }
 
@@ -30,7 +33,8 @@ export const pyData = (value: unknown): string => `data(${JSON.stringify(Buffer.
 /**
  * A merge script from its steps: the preamble defines FROM and TO, the path rule as moved(), data() for the values
  * the steps carry, out() and fail() for the result, and write() for a file replaced in place; each step adds to
- * merged and kept, and the last line prints both.
+ * merged and kept, and to notes when it kept something as the machine had it, and the last line prints them.
+ * Text files are read and written with surrogateescape so a line that is not UTF-8 passes through byte for byte.
  */
 export function mergeScript(from: string, to: string, steps: readonly string[]): string {
   return [
@@ -47,7 +51,7 @@ export function mergeScript(from: string, to: string, steps: readonly string[]):
     "    sys.exit(1)",
     "def write(path, text):",
     '    tmp = path + ".wsp-merge"',
-    '    with open(tmp, "w", encoding="utf-8", newline="") as f:',
+    '    with open(tmp, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:',
     "        f.write(text)",
     "    if os.path.exists(path):",
     "        shutil.copymode(path, tmp)",
@@ -56,8 +60,9 @@ export function mergeScript(from: string, to: string, steps: readonly string[]):
     `TO = ${pyData(to)}`,
     "merged = 0",
     "kept = 0",
+    "notes = []",
     ...steps,
-    'out({"merged": merged, "kept": kept})',
+    'out({"merged": merged, "kept": kept, **({"note": "; ".join(notes)} if notes else {})})',
   ].join("\n");
 }
 
@@ -69,7 +74,7 @@ export function jsonlCwdStep(files: readonly string[], holder?: string): string 
     `for f in ${pyData(files)}:`,
     "    if not os.path.exists(f):",
     "        continue",
-    '    with open(f, encoding="utf-8", newline="") as h:',
+    '    with open(f, encoding="utf-8", errors="surrogateescape", newline="") as h:',
     '        parts = h.read().split("\\n")',
     "    changed = False",
     "    for i, line in enumerate(parts):",

@@ -59,6 +59,9 @@ export const geminiResolver: ProjectStateResolver = {
     if (keys.length === 0) return undefined;
     // The registry is a plain file Gemini makes on first run in the measured shape, so a machine without one gets it;
     // a slug another path there owns already holds the landed files, and the merge says so rather than share it.
+    // Every key is checked before anything is written, so a conflict leaves the machine's files as they were.
+    // A path the machine already registers under its own slug keeps that slug: rebinding it would drop the
+    // machine's own chats from Gemini's list.
     return mergeScript(from, to, [
       `HOME = ${pyData(guestHome)}`,
       `REG = ${pyData(join(guestHome, REGISTRY))}`,
@@ -71,13 +74,18 @@ export const geminiResolver: ProjectStateResolver = {
       "else:",
       '    reg = {"projects": {}}',
       'projects = reg.setdefault("projects", {})',
-      "changed = False",
       "for old, key, slug in KEYS:",
       "    for other, s in projects.items():",
       "        if s == slug and other != key:",
       '            fail("slug " + slug + " already belongs to " + other + " in " + REG)',
-      "    if projects.get(key) == slug:",
+      "changed = False",
+      "for old, key, slug in KEYS:",
+      "    held = projects.get(key)",
+      "    if held == slug:",
       "        kept += 1",
+      "    elif held is not None:",
+      "        kept += 1",
+      '        notes.append("the machine already lists " + key + " as " + str(held) + ", so that slug stays and the carried chats under tmp/" + slug + " are not listed there")',
       "    else:",
       "        projects[key] = slug",
       "        merged += 1",

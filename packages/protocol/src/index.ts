@@ -500,7 +500,8 @@ export type ProjectImportEvent = z.infer<typeof ProjectImportEvent>;
 export const ProjectAgentOutcome = z.enum(["moved", "transcript-only", "carried", "nothing", "failed"]);
 export type ProjectAgentOutcome = z.infer<typeof ProjectAgentOutcome>;
 /** `rows` is what the merge on the machine inserted or updated in the agent's store, once it ran; `note` says why the
- * rows still wait when they could not be merged yet (the agent has not made its store there). */
+ * rows still wait when they could not be merged yet (the agent has not made its store there), or what the merge kept
+ * as the machine had it rather than as carried. */
 export const ProjectAgentResult = z.object({ agent: z.string(), files: z.number(), bytes: z.number(), outcome: ProjectAgentOutcome, error: z.string().optional(), rows: z.number().optional(), note: z.string().optional() });
 export type ProjectAgentResult = z.infer<typeof ProjectAgentResult>;
 /** What landed: the path on the machine, the files and bytes extracted there, the upload parts, the secret-shaped

@@ -368,8 +368,9 @@ const OUTCOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {
 function outcomeWords(a: ProjectAgentResult): string {
   if (a.outcome === "failed") return `failed: ${a.error ?? "no reason given"}`;
   const word = OUTCOME_WORDS[a.outcome];
-  if (a.outcome === "moved" && a.rows !== undefined) return a.rows > 0 ? `${word}, ${plural(a.rows, "row")} merged` : `${word}, its rows already there`;
-  if (a.outcome === "transcript-only" && a.note !== undefined) return `${word} (${a.note})`;
+  const note = a.note !== undefined ? ` (${a.note})` : "";
+  if (a.outcome === "moved" && a.rows !== undefined) return `${word}, ${a.rows > 0 ? `${plural(a.rows, "row")} merged` : "its rows already there"}${note}`;
+  if (a.outcome === "transcript-only") return `${word}${note}`;
   return word;
 }
 /** Bounds a merge that hangs; one project's rows take python3 well under it. */
@@ -377,17 +378,23 @@ const MERGE_DEADLINE_MS = 120_000;
 
 /** Runs one agent's merge script on the machine and folds what it printed into the agent's result: rows merged is
  * moved, a store not there yet leaves the rows waiting with the reason, a failure carries the last line of stderr.
- * The script is removed either way, and its directory once it is empty. */
+ * The script is removed by its own exec once the run ended, so a run the deadline killed leaves nothing behind. */
 async function mergeOnMachine(machine: Machine, script: string, agent: ProjectAgentResult): Promise<ProjectAgentResult> {
   const dir = script.slice(0, script.lastIndexOf("/"));
-  const run = await machine.run(`python3 ${shellQuote(script)}; s=$?; rm -f ${shellQuote(script)}; rmdir ${shellQuote(dir)} 2>/dev/null; exit $s`, { deadlineMs: MERGE_DEADLINE_MS });
+  let run: ExecResult;
+  try {
+    run = await machine.run(`python3 ${shellQuote(script)}`, { deadlineMs: MERGE_DEADLINE_MS });
+  } finally {
+    await machine.exec(`rm -f ${shellQuote(script)}; rmdir ${shellQuote(dir)} 2>/dev/null`).catch(() => undefined);
+  }
   if (run.exitCode !== 0) {
     const why = run.stderr.trimEnd().split("\n").at(-1) || "no output";
     return { ...agent, outcome: "failed", error: `the merge on the machine failed (exit ${run.exitCode}): ${why}` };
   }
   try {
     const out = parseMergeOutput(run.stdout);
-    return "waiting" in out ? { ...agent, note: out.waiting } : { ...agent, outcome: "moved", rows: out.merged };
+    if ("waiting" in out) return { ...agent, note: out.waiting };
+    return { ...agent, outcome: "moved", rows: out.merged, ...(out.note !== undefined ? { note: out.note } : {}) };
   } catch (e) {
     return { ...agent, outcome: "failed", error: e instanceof Error ? e.message : String(e) };
   }

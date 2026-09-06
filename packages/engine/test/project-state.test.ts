@@ -3,7 +3,7 @@
 // measured on 2026-09-05; the move runs against it and the tree is compared
 // byte for byte with what the agent needs at the new path.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -743,6 +743,18 @@ describe("merge on the machine", () => {
     expect(tree(mac)).toEqual(before);
   });
 
+  it("Codex: a rollout line that is not UTF-8 passes through byte for byte while the cwd lines around it are rewritten", async () => {
+    const root = scratch();
+    const mac = codexHome(root);
+    const guest = codexGuest(root);
+    const t1 = join(guest, "sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl");
+    const raw = Buffer.concat([Buffer.from('{"type":"raw","data":"'), Buffer.from([0xff, 0xfe]), Buffer.from('"}\n')]);
+    appendFileSync(t1, raw);
+    const script = await mergeFor("codex")(mac, FROM, TO, guest);
+    expect(runMerge(script!)).toEqual({ exit: 0, out: { merged: 2, kept: 0 }, err: "" });
+    expect(readFileSync(t1)).toEqual(Buffer.concat([Buffer.from(lines(codexMeta(TO), codexItem, codexTurn(TO), codexEvent)), raw]));
+  });
+
   it("Codex: a thread the machine already lists keeps its own columns and gets only cwd and rollout_path", async () => {
     const root = scratch();
     const mac = codexHome(root);
@@ -902,6 +914,44 @@ describe("merge on the machine", () => {
     expect(tree(guest)).toEqual({ "projects.json": registry });
   });
 
+  it("Gemini: a destination the machine already maps to its own slug keeps that slug and counts kept with a note; its own chats stay listed", async () => {
+    const root = scratch();
+    const mac = geminiHome(root);
+    const guest = join(root, "guest-gemini");
+    write(join(guest, "projects.json"), JSON.stringify({ projects: { [TO]: "proj" } }, null, 2) + "\n");
+    write(join(guest, "tmp", "proj", ".project_root"), TO);
+    write(join(guest, "tmp", "proj", "chats", "session-2026-09-06T01-00-ffffffff.jsonl"), geminiChat);
+    write(join(guest, "tmp", "b_2.x", ".project_root"), FROM);
+    write(join(guest, "tmp", "b_2.x", "chats", "session-2026-09-05T21-59-a1b2c3d4.jsonl"), geminiChat);
+    write(join(guest, "tmp", "sub", ".project_root"), FROM_SUB);
+    const script = await mergeFor("gemini")(mac, FROM, TO, guest);
+    const note = `the machine already lists ${TO} as proj, so that slug stays and the carried chats under tmp/b_2.x are not listed there`;
+    expect(runMerge(script!)).toEqual({ exit: 0, out: { merged: 1, kept: 1, note }, err: "" });
+    const after = {
+      "projects.json": JSON.stringify({ projects: { [TO]: "proj", [TO_SUB]: "sub" } }, null, 2) + "\n",
+      "tmp/proj/.project_root": TO,
+      "tmp/proj/chats/session-2026-09-06T01-00-ffffffff.jsonl": geminiChat,
+      "tmp/b_2.x/.project_root": TO,
+      "tmp/b_2.x/chats/session-2026-09-05T21-59-a1b2c3d4.jsonl": geminiChat,
+      "tmp/sub/.project_root": TO_SUB,
+    };
+    expect(tree(guest)).toEqual(after);
+    expect(runMerge(script!).out).toEqual({ merged: 0, kept: 2, note });
+    expect(tree(guest)).toEqual(after);
+  });
+
+  it("Gemini: a later key's slug conflict fails before any marker of an earlier key is rewritten", async () => {
+    const root = scratch();
+    const mac = geminiHome(root);
+    const guest = join(root, "guest-gemini");
+    const registry = JSON.stringify({ projects: { "/root/other/sub": "sub" } }) + "\n";
+    write(join(guest, "projects.json"), registry);
+    write(join(guest, "tmp", "b_2.x", ".project_root"), FROM);
+    const run = runMerge((await mergeFor("gemini")(mac, FROM, TO, guest))!);
+    expect(run).toEqual({ exit: 1, out: undefined, err: `slug sub already belongs to /root/other/sub in ${join(guest, "projects.json")}\n` });
+    expect(tree(guest)).toEqual({ "projects.json": registry, "tmp/b_2.x/.project_root": FROM });
+  });
+
   it("a home with no row for the path emits no script; the agents whose files carry every key have no merge", async () => {
     const root = scratch();
     for (const [agent, home] of [["codex", codexHome(root)], ["hermes", hermesHome(root)], ["opencode", opencodeHome(root)], ["gemini", geminiHome(root)]] as const) {
@@ -917,6 +967,7 @@ describe("merge on the machine", () => {
   it("the script's result is its last line; anything else is an error naming what came back", () => {
     expect(parseMergeOutput('noise\n{"merged": 2, "kept": 1}\n')).toEqual({ merged: 2, kept: 1 });
     expect(parseMergeOutput('{"waiting": "no store"}')).toEqual({ waiting: "no store" });
+    expect(parseMergeOutput('{"merged": 0, "kept": 1, "note": "kept as it was"}')).toEqual({ merged: 0, kept: 1, note: "kept as it was" });
     expect(() => parseMergeOutput("Traceback\n")).toThrow(/Traceback/);
     expect(() => parseMergeOutput("")).toThrow(/nothing/);
     expect(() => parseMergeOutput('{"merged": "x"}')).toThrow(/merged/);
