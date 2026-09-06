@@ -85,7 +85,7 @@ describe("runtime", () => {
           for (const e of feed) onEvent(e);
           return result;
         })();
-        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+        return { localId: sessionId, finished, interrupt: async () => {} };
       },
     });
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: scripted } });
@@ -140,7 +140,7 @@ describe("runtime session history", () => {
         for (const e of feed) onEvent(e);
         return result;
       })();
-      return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+      return { localId: sessionId, finished, interrupt: async () => {} };
     },
   });
 
@@ -177,7 +177,7 @@ describe("runtime session history", () => {
       start: o => {
         onEvent = o.onEvent;
         lastStart = o;
-        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+        return { localId: sessionId, finished, interrupt: async () => {} };
       },
     });
     return {
@@ -207,7 +207,7 @@ describe("runtime session history", () => {
           o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
           return result;
         });
-        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+        return { localId: sessionId, finished, interrupt: async () => {} };
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted } });
@@ -246,7 +246,7 @@ describe("runtime session history", () => {
         o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
         return result;
       });
-      return { localId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+      return { localId, finished, interrupt: async () => {} };
     },
   });
   /** Counts runs of one threadId in wire order. Enough here, where turns never overlap; a consumer folding a
@@ -741,7 +741,7 @@ describe("runtime session index", () => {
           o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
           return result;
         });
-        return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+        return { localId: sessionId, finished, interrupt: async () => {} };
       },
     });
     return { adapter, starts };
@@ -751,7 +751,7 @@ describe("runtime session index", () => {
   const hung: HarnessAdapterFactory = () => ({
     start: o => {
       o.onEvent({ type: "session.start", sessionId: HUNG_ID, model: "claude-sonnet-4-5", cwd: "/root/work" });
-      return { localId: HUNG_ID, claudeSessionId: HUNG_ID, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
+      return { localId: HUNG_ID, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
     },
   });
 
@@ -785,6 +785,54 @@ describe("runtime session index", () => {
     const rt3 = createRuntime({ backend, store, adapters: {} });
     expect((await rt3.sessions.history(ws.id)).filter(e => e.type === "session.end")).toHaveLength(2);
     await rt3.close();
+  });
+
+  /** A harness that dies before init: only a done and an end, under the resume id or a fresh local one. */
+  const dying: HarnessAdapterFactory = () => ({
+    start: o => {
+      const localId = o.resume ?? randomUUID();
+      const result: TurnResult = { status: "failed", error: "claude exited before init (exit code 1)" };
+      const finished = Promise.resolve().then(() => {
+        o.onEvent({ type: "turn.done", sessionId: localId, result });
+        o.onEvent({ type: "session.end", sessionId: localId, exitCode: 1, sawResult: true });
+        return result;
+      });
+      // The real adapter hands back its local id as claudeSessionId until init re-keys it; the row must not take it.
+      return { localId, claudeSessionId: localId, finished, interrupt: async () => {} };
+    },
+  });
+
+  it("a harness that dies before init leaves its row and the workspace without a session id: no harness announced one", async () => {
+    const store = memoryStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: dying } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "first" });
+    await handle.finished;
+    const [row] = await rt.sessions.list(ws.id);
+    expect(row).toMatchObject({ id: handle.id, status: "failed", prompt: "first", threadId: expect.any(String) });
+    expect(row!.claudeSessionId).toBeUndefined();
+    expect((await rt.workspaces.get(ws.id)).claudeSessionId).toBeUndefined();
+    // the dead turn's events still carry the adapter's local id, so the row is found by its id, not by a session
+    expect((await rt.sessions.history(ws.id)).map(e => e.sessionId)).toEqual([handle.id, handle.id]);
+    await rt.close();
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { claudeSessionId?: string }[] };
+    expect(stored.sessions).toHaveLength(1);
+    expect(stored.sessions[0]!.claudeSessionId).toBeUndefined();
+  });
+
+  it("a resumed turn that dies before init keeps the resume id on its row: the harness answered that id in an earlier turn", async () => {
+    const store = memoryStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: turns().adapter, dying } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
+    const [first] = await rt.sessions.list(ws.id);
+    const resume = first!.claudeSessionId!;
+    await (await rt.sessions.start(ws.id, { prompt: "again", resume, harness: "dying" })).finished;
+    const rows = await rt.sessions.list(ws.id);
+    expect(rows.map(r => [r.prompt, r.status, r.threadId, r.claudeSessionId])).toEqual([["again", "failed", first!.threadId, resume]]);
+    await rt.close();
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { claudeSessionId?: string }[] };
+    expect(stored.sessions.map(r => r.claudeSessionId)).toEqual([resume]);
   });
 
   it("a resume after a restart joins the persisted thread and hands the harness the session id and folder", async () => {
@@ -838,7 +886,7 @@ describe("runtime session index", () => {
     const pending: HarnessAdapterFactory = () => ({
       start: o => {
         o.onEvent({ type: "session.start", sessionId: HUNG_ID, model: "claude-sonnet-4-5", cwd: "/root/work" });
-        return { localId: HUNG_ID, claudeSessionId: HUNG_ID, finished: new Promise<TurnResult>(r => (settle = r)), interrupt: async () => {} };
+        return { localId: HUNG_ID, finished: new Promise<TurnResult>(r => (settle = r)), interrupt: async () => {} };
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: pending } });

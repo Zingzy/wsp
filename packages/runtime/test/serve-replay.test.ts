@@ -29,7 +29,7 @@ function drivenHarness() {
     start: o => {
       onEvent = o.onEvent;
       onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
-      return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };
+      return { localId: sessionId, finished, interrupt: async () => {} };
     },
   });
   return {
