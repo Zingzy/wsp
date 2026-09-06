@@ -135,7 +135,15 @@ describe("catalog", () => {
     expect(gh).toContain(`release="$(curl -fsSL 'https://api.github.com/repos/cli/cli/releases/latest' || true)"`);
     expect(gh).toContain(`tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"`);
     expect(gh).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
-    expect(gh).toContain("go install 'github.com/cli/cli@latest'");
+    // The fall-through installs the entry's main package, not the repository root, which for gh is no package.
+    expect(gh).toContain("go install 'github.com/cli/cli/v2/cmd/gh@latest'");
+    expect(installLine(catalogEntry("cloudflared")!)).toContain("go install 'github.com/cloudflare/cloudflared/cmd/cloudflared@latest'");
+    expect(installLine(catalogEntry("yq")!)).toContain("go install 'github.com/mikefarah/yq/v4@latest'");
+    // An entry that names no Go module has no fall-through and says only what is true.
+    const supabase = installLine(catalogEntry("supabase")!) as string;
+    expect(supabase).not.toContain("go install");
+    expect(supabase).not.toContain("command -v go");
+    expect(supabase).toContain(`echo "Error: the current release of "'supabase/cli'" has no Linux build" >&2`);
     expect(gh).not.toContain('[ "$sum" =');
     expect(installLine(catalogEntry("gcloud")!)).toBe(GCLOUD.install(undefined, undefined));
     expect(installLine(catalogEntry("kubectl")!)).toBe(KUBECTL.install(undefined, undefined));
@@ -176,11 +184,24 @@ describe("catalog", () => {
     expect(off(gh)).toEqual({ cmd: expect.stringMatching(/brew uninstall gh'$/) });
     expect(off({ road: "brew", formula: "zingzy/tap/diskbloom" })).toEqual({ cmd: expect.stringMatching(/^if \[ -x \/home\/linuxbrew\/.linuxbrew\/bin\/brew \] && su .*brew list --formula zingzy\/tap\/diskbloom.* >\/dev\/null 2>&1; then su .*brew uninstall zingzy\/tap\/diskbloom.*; else rm -f \/usr\/local\/bin\/'diskbloom'; fi$/) });
     // A release at a tag fetches that tag and prints it; with a pin for the same tag the sum is checked; a row that names no repository only comes off.
-    const tagged = line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1" }, "spoo");
+    const tagged = line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", go: "github.com/spoo-me/spoo-cli" }, "spoo");
     expect(tagged).toContain(`release="$(curl -fsSL 'https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1' || true)"`);
     expect(tagged).not.toContain("tag=\"$(");
     expect(tagged).toContain(`echo "WSP_ROAD release \${asset:-$url} $sum "'v0.4.1'`);
+    // A bare module goes in at the tag; one that carries its own version keeps it; a road with none has no go branch.
     expect(tagged).toContain("go install 'github.com/spoo-me/spoo-cli@v0.4.1'");
+    expect(tagged).toContain(`echo "Error: release "'v0.4.1'" of "'spoo-me/spoo-cli'" has no Linux build, and go is not on the machine" >&2`);
+    expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", go: "github.com/spoo-me/spoo-cli@v0.4.0" }, "spoo")).toContain("go install 'github.com/spoo-me/spoo-cli@v0.4.0'");
+    expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1" }, "spoo")).not.toContain("command -v go");
+    // A road that pins a version takes a row's through at(); Homebrew, apt and a script install what their source serves and have none.
+    expect(ROAD_MODULES.npm.at!({ road: "npm", package: "wrangler" }, "4.1.0")).toEqual({ road: "npm", package: "wrangler", version: "4.1.0" });
+    expect(ROAD_MODULES.cargo.at!({ road: "cargo", package: "bat", version: "0.23.0" }, "0.24.0")).toEqual({ road: "cargo", package: "bat", version: "0.24.0" });
+    expect(ROAD_MODULES.release.at!({ road: "release", repo: "cli/cli" }, "v2.86.0")).toEqual({ road: "release", repo: "cli/cli", version: "v2.86.0" });
+    // A bare row's version is the tool's own, not a Mac cask's, so the vendor road takes it whether or not the cask's Mac version names the Linux build.
+    expect(ROAD_MODULES.vendor.at!({ road: "vendor", cask: GCLOUD }, "575.0.0")).toEqual(vendorRoad(GCLOUD, { version: "575.0.0" }));
+    expect(ROAD_MODULES.vendor.at!({ road: "vendor", cask: KUBECTL }, "v1.37.0")).toEqual({ road: "vendor", cask: KUBECTL, version: "v1.37.0" });
+    for (const road of ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go", "release", "vendor"] as const) expect(ROAD_MODULES[road].at, road).toBeDefined();
+    for (const road of ["brew", "apt", "script"] as const) expect(ROAD_MODULES[road].at, road).toBeUndefined();
     expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.1", sha256: "c".repeat(64) } }, "spoo")).toContain(`[ "$sum" = '${"c".repeat(64)}' ]`);
     expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.0", sha256: "c".repeat(64) } }, "spoo")).not.toContain('[ "$sum" =');
     // No version: a pin fixes the tag and is checked, as a vendor install does; none at all takes the current release.

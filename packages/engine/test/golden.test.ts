@@ -853,13 +853,49 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, onResult: r => void results.push(r) }) });
     const road = cmds.find(c => c.includes("repos/cli/cli/releases/latest"))!;
     expect(road).toContain(`install -m 0755 "$bin" "/usr/local/bin/$name"`);
-    expect(road).toContain("go install '\\''github.com/cli/cli@latest'\\''");
+    expect(road).toContain("go install '\\''github.com/cli/cli/v2/cmd/gh@latest'\\''");
     expect(inline.filter(c => c.cmd.includes('echo "missing')).at(-1)!.cmd).toContain(`for b in 'gh'; do`);
     expect(results[0]!.tools).toEqual([
       { id: "tools/npm/wrangler", label: "wrangler", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.86.0" }, ms: expect.any(Number), bytes: 0 },
     ]);
     expect(stages).toContain(`installing-tools:2 installed (GitHub CLI from its release, ${UNMEASURED_ROAD}); caches swept; 2.9 GB free`);
+  });
+
+  it("a catalog go row beside a go row on the guest: Homebrew installs go once, the go row runs after it, and the tally counts each install once", async () => {
+    const { backend, cmds, fetch } = backendFor();
+    const plan = toolInstallsFor([
+      { rung: "tools", id: "tools/catalog/go", label: "Go", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" },
+      { rung: "tools", id: "tools/go/gopls", label: "gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"], bytes: 0, default: "bring", bring: true },
+    ]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, onResult: r => void results.push(r) }) });
+    expect(cmds.filter(c => c.includes("brew install go'"))).toHaveLength(1);
+    expect(cmds.indexOf(cmds.find(c => c.includes("brew install go'"))!)).toBeLessThan(cmds.indexOf(cmds.find(c => c.includes("go install golang.org/x/tools/gopls@v0.16.2"))!));
+    expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([
+      ["tools/homebrew", "installed"], ["tools/brew-toolchain/glibc", "installed"], ["tools/brew-toolchain/gcc", "installed"], ["tools/catalog/go", "installed"], ["tools/go/gopls", "installed"],
+    ]);
+    expect(stages).toContain("installing-tools:5 installed; caches swept; 2.9 GB free");
+  });
+
+  it("a catalog row with a version on the guest: the road that pins installs at it; the road that cannot says in the result and the tally what it installed instead", async () => {
+    const { backend, cmds, fetch } = backendFor();
+    const plan = toolInstallsFor([
+      { rung: "tools", id: "tools/catalog/wrangler", label: "Cloudflare Wrangler", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes", version: "4.1.0" },
+      { rung: "tools", id: "tools/catalog/tmux", label: "tmux", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes", version: "3.5a" },
+    ]);
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, onResult: r => void results.push(r) }) });
+    expect(cmds.some(c => c.includes("npm install -g wrangler@4.1.0"))).toBe(true);
+    const tmuxNote = `${UNMEASURED_ROAD}; 3.5a asked, installed by apt at its current version`;
+    expect(results[0]!.tools).toEqual([
+      { id: "tools/catalog/wrangler", label: "Cloudflare Wrangler", outcome: "installed", note: UNMEASURED_ROAD, ms: expect.any(Number), bytes: 0 },
+      { id: "tools/apt-index", label: "apt index", outcome: "installed", ms: expect.any(Number), bytes: 0 },
+      { id: "tools/catalog/tmux", label: "tmux", outcome: "installed", note: tmuxNote, ms: expect.any(Number), bytes: 0 },
+    ]);
+    expect(stages).toContain(`installing-tools:3 installed (Cloudflare Wrangler ${UNMEASURED_ROAD}, tmux ${tmuxNote}); caches swept; 2.9 GB free`);
   });
 
   it("after the loop every install that names its command is checked with command -v on the tools PATH: one not there is failed with the reason, in the result and the summary", async () => {
