@@ -4,12 +4,12 @@
 // machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import type { GoldenMissingTool, GoldenVersion, SnapshotLineage, SysSample, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { GoldenMissingTool, GoldenVersion, SnapshotLineage, SysSample, WorkspaceCostEvent, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { provideDaemonUpdate, useDaemonUpdate, useDaemonVersion } from "../../files/wire.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { daemonBehindLine } from "../../machine/daemon.js";
 import { LIVE_WINDOW, useWorkspaceLive } from "../../machine/live.js";
-import { upgradeOptions, useCostSeries, useUpgrade, type CostPoint, type Upgrade } from "../../protocol/machine.js";
+import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
 import { useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
 import {
   AlertDialog,
@@ -27,7 +27,6 @@ import { ScrollArea } from "../ui/scroll-area.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
 import {
   bytesOfLabel,
-  clockLabel,
   diskTier,
   divergentMachineState,
   durationLabel,
@@ -40,6 +39,8 @@ import {
   type DiskTier,
 } from "./format.js";
 import { SnapshotStorageLine } from "./SnapshotStorageLine.js";
+import { UsageChart, UsageRangeToggle } from "./UsageChart.js";
+import type { UsageRange } from "./usage.js";
 
 export function MachineSurface({ workspaceId }: { workspaceId: string }) {
   const workspace = useWorkspace(workspaceId);
@@ -57,7 +58,7 @@ export function MachineSurface({ workspaceId }: { workspaceId: string }) {
   return <Surface key={workspace.id} workspace={workspace} series={series} />;
 }
 
-function Surface({ workspace, series }: { workspace: WorkspaceView; series: CostPoint[] }) {
+function Surface({ workspace, series }: { workspace: WorkspaceView; series: WorkspaceCostEvent[] }) {
   const status = useStatus(workspace.id);
   const upgrade = useUpgrade(workspace.id);
   const last = series[series.length - 1];
@@ -434,13 +435,13 @@ function LiveRow({ label, k, samples, y, text, tier, stale, unavailable }: LiveR
   );
 }
 
-function Usage({ workspace, status, series }: { workspace: WorkspaceView; status: WorkspaceStatus | null; series: CostPoint[] }) {
+function Usage({ workspace, status, series }: { workspace: WorkspaceView; status: WorkspaceStatus | null; series: WorkspaceCostEvent[] }) {
   const cost = useCost(workspace.id);
+  const [range, setRange] = useState<UsageRange>("all");
   const rate = cost?.rateUsdPerHour ?? (workspace.phase === "running" ? status?.rateUsdPerHour ?? 0 : 0);
-  const peak = series.length > 0 ? Math.max(...series.map(p => p.rateUsdPerHour)) : null;
   return (
-    <Section label="Usage" aside={peak !== null ? `peak ${money(peak, 2)}` : undefined}>
-      <UsageChart series={series} sawSpend={cost !== null} />
+    <Section label="Usage" aside={<UsageRangeToggle range={range} onChange={setRange} />}>
+      <UsageChart series={series} range={range} />
       <div className="divide-y divide-border/40">
         <Row label="Rate now" k="rate">
           {`${money(rate, 3)}/hr`}
@@ -451,101 +452,6 @@ function Usage({ workspace, status, series }: { workspace: WorkspaceView; status
       </div>
       <SnapshotStorageLine />
     </Section>
-  );
-}
-
-/** The drawing box the line is laid out in; the svg stretches it to the panel, and the stroke keeps its width. */
-const CHART_W = 100;
-const CHART_H = 40;
-/** Room around the line so a dot on the peak, on zero or on the newest tick sits inside the box. */
-const CHART_PAD = 4;
-const CHART_PAD_X = 1.5;
-
-/** Where each tick lands in the box: newest at the right edge, the peak at the top. */
-function chartPoints(series: CostPoint[]): { x: number; y: number }[] {
-  const max = Math.max(...series.map(p => p.rateUsdPerHour), 0.001);
-  const span = CHART_H - 2 * CHART_PAD;
-  const width = CHART_W - 2 * CHART_PAD_X;
-  return series.map((p, i) => ({
-    x: CHART_PAD_X + (series.length === 1 ? width : (i / (series.length - 1)) * width),
-    y: CHART_PAD + (1 - p.rateUsdPerHour / max) * span,
-  }));
-}
-
-/** One line through the cost ticks, the peak marked, the tick under the pointer read out under the box. The series lives
- * in this surface, so a tick that landed before it mounted shows in the counters but not here; the empty text has to
- * say that rather than claim there was no spend. */
-function UsageChart({ series, sawSpend }: { series: CostPoint[]; sawSpend: boolean }) {
-  const [hover, setHover] = useState<number | null>(null);
-  const points = chartPoints(series);
-  const peakAt = series.reduce((best, p, i) => (p.rateUsdPerHour > series[best]!.rateUsdPerHour ? i : best), 0);
-  const over = hover !== null ? series[hover] : undefined;
-  const first = series[0];
-  const last = series[series.length - 1];
-  const readout = over !== undefined ? `${money(over.rateUsdPerHour, 3)}/hr at ${clockLabel(over.at)}` : first === undefined || last === undefined ? "" : first === last ? clockLabel(first.at) : `${clockLabel(first.at)} to ${clockLabel(last.at)}`;
-
-  const track = (e: ReactMouseEvent<SVGSVGElement>): void => {
-    const box = e.currentTarget.getBoundingClientRect();
-    if (box.width <= 0 || series.length === 0) return;
-    // The inverse of chartPoints, so the hairline lands on the mark under the pointer and not a pad's width beside it.
-    const x = ((e.clientX - box.left) / box.width) * CHART_W;
-    const at = Math.round(((x - CHART_PAD_X) / (CHART_W - 2 * CHART_PAD_X)) * (series.length - 1));
-    setHover(Math.min(series.length - 1, Math.max(0, at)));
-  };
-
-  return (
-    <div className="mt-2 mb-1" data-usage-chart>
-      <div className="relative h-16 overflow-hidden rounded-md border border-border/40 bg-muted/8">
-        {series.length === 0 ? (
-          <span className="absolute inset-0 flex items-center justify-center text-[11px] text-muted-foreground/60">
-            {sawSpend ? "Chart starts with the next cost tick." : "No cost ticks yet."}
-          </span>
-        ) : (
-          <>
-            <svg
-              className="block size-full"
-              viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-              preserveAspectRatio="none"
-              role="img"
-              aria-label="spend per hour over the ticks recorded, one line"
-              onMouseMove={track}
-              onMouseLeave={() => setHover(null)}
-            >
-              <path d={points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join("")} fill="none" className="stroke-foreground/80" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" data-usage-line />
-              {hover !== null && points[hover] !== undefined && (
-                <line x1={points[hover].x} x2={points[hover].x} y1={0} y2={CHART_H} className="stroke-muted-foreground/50" strokeWidth={1} vectorEffect="non-scaling-stroke" data-usage-hover />
-              )}
-            </svg>
-            <ChartDot point={points[hover ?? peakAt]!} label={hover === null ? `${money(series[peakAt]!.rateUsdPerHour, 3)}/hr` : undefined} />
-          </>
-        )}
-      </div>
-      <p className="mt-1 min-h-4 text-right font-mono text-[11px] tabular-nums text-muted-foreground" data-k="usage-readout">
-        {readout}
-      </p>
-    </div>
-  );
-}
-
-/** A dot on one point of the box, drawn outside the svg so the stretch does not squash it. The label hangs under the
- * dot, where nothing of the line is higher than the peak, and leans away from the nearer edge. */
-function ChartDot({ point, label }: { point: { x: number; y: number }; label: string | undefined }) {
-  const left = (point.x / CHART_W) * 100;
-  const top = (point.y / CHART_H) * 100;
-  const flip = left > 60;
-  return (
-    <>
-      <span aria-hidden className="pointer-events-none absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground" style={{ left: `${left}%`, top: `${top}%` }} data-usage-peak />
-      {label !== undefined && (
-        <span
-          className={cn("pointer-events-none absolute mt-1.5 font-mono text-[10px] leading-none tabular-nums text-muted-foreground", flip ? "-translate-x-full pr-1.5" : "pl-1.5")}
-          style={{ left: `${left}%`, top: `${top}%` }}
-          data-k="usage-peak"
-        >
-          {label}
-        </span>
-      )}
-    </>
   );
 }
 

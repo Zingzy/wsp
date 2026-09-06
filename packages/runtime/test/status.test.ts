@@ -250,6 +250,54 @@ describe("status.watch cost events", () => {
   });
 });
 
+describe("status.history", () => {
+  it("holds the folded ticks since metering began and hands them out over the wire", async () => {
+    const { rt } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    expect(rt.status.history(ws.id)).toEqual([]);
+    const costs: (EventUnion & { type: "workspace.cost" })[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as EventUnion & { type: "workspace.cost" }));
+    const stop = rt.status.watch();
+    await until(() => costs.length >= 4);
+    // One rate the whole way: the first tick and the newest, nothing between.
+    let history = rt.status.history(ws.id);
+    expect(history).toHaveLength(2);
+    // The bus stamps a seq on what it emits; the history holds the ticks as the tracker built them.
+    expect(costs[0]).toMatchObject(history[0]!);
+    expect(costs.at(-1)).toMatchObject(history[1]!);
+
+    await rt.workspaces.nap(ws.id);
+    const before = costs.length;
+    await until(() => costs.length >= before + 3);
+    history = rt.status.history(ws.id);
+    const rates = history.map(p => p.rateUsdPerHour);
+    // The last running tick and the first napping one bracket the change; the napping run folds to its newest.
+    expect(rates.slice(0, 2).every(r => r > 0)).toBe(true);
+    expect(rates.slice(2).every(r => r === 0)).toBe(true);
+    expect(history).toHaveLength(4);
+    expect(costs.at(-1)).toMatchObject(history.at(-1)!);
+
+    srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const res = await c.request("cost.history", { workspaceId: ws.id });
+    stop();
+    c.close();
+    expect(res.ok).toBe(true);
+    expect(res["points"]).toEqual(rt.status.history(ws.id));
+    expect(rt.status.history("ws_nobody")).toEqual([]);
+  });
+
+  it("forgets a deleted workspace's history", async () => {
+    const { rt } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const stop = rt.status.watch();
+    await until(() => rt.status.history(ws.id).length >= 1);
+    await rt.workspaces.delete(ws.id);
+    stop();
+    expect(rt.status.history(ws.id)).toEqual([]);
+  });
+});
+
 describe("serveRuntime status.subscribe", () => {
   it("returns a snapshot and pushes cost events to a subscribed socket", async () => {
     const { rt } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
