@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The messages entered while a turn ran, stacked above the composer oldest
 // first: each is a textarea edited in place, a remove button, and a send-now
-// button that stops the running turn first, since the harness takes no
-// message mid-turn. The head row goes when the turn ends; the row a send-now
-// promoted says so while the stop is in flight. Every row keeps the same
-// three controls in every state, so nothing shifts as the turn starts or ends.
+// button. With a harness that steers, send-now puts the row into the running
+// turn; with one that does not, it stops the turn first and says so in one
+// line. The head row goes when the turn ends; the row a send-now promoted
+// reads next while its request is in flight. Every row keeps the same three
+// controls in every state, so nothing shifts as the turn starts or ends.
 import { ArrowUpIcon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import type { QueuedMessage } from "./composerDraftStore";
@@ -20,9 +21,9 @@ export function ComposerQueue({
   onSteer,
 }: {
   rows: ReadonlyArray<QueuedMessage>;
-  /** The row a send-now put at the head while the turn stops; null when none. */
+  /** The row a send-now put at the head while its request is in flight; null when none. */
   steering: string | null;
-  /** What send-now does: starts the row at once, stops the turn first, or nothing can go yet. */
+  /** What send-now does: sends the row now (into the turn, or as the next start), stops the turn first, or nothing can go yet. */
   steer: "now" | "stop" | null;
   onEdit: (id: string, prompt: string) => void;
   onRemove: (id: string) => void;
@@ -64,7 +65,7 @@ export function ComposerQueue({
           );
         })}
       </ul>
-      {steering !== null && rows.some(row => row.id === steering) ? (
+      {steer === "stop" && steering !== null && rows.some(row => row.id === steering) ? (
         <p role="status" className="px-3 font-mono text-[11px] text-muted-foreground">{STEER_NOTICE}</p>
       ) : null}
     </div>

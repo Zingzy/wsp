@@ -6,7 +6,7 @@
 // rows wait for the person's next send. Same fixture api shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -40,14 +40,24 @@ const workspace: WorkspaceView = {
 /** The runtime's row for the running turn: its own id, which sessions.interrupt takes, beside the harness id the events carry. */
 const runningRow: SessionView = { id: "sess_local_1", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: "sess_0001", prompt: "go", startedAt: 0 };
 
-function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionView[] = []) {
+/** The runtime's catalog for the running harness, with or without steer. */
+const catalog = (steers: boolean): HarnessCatalog => ({ harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [], efforts: [], contextWindows: [], permissionModes: [], steers });
+
+function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionView[] = [], harnesses?: HarnessCatalog[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: Array<{ workspaceId: string; prompt: string; resume?: string }> = [];
   const interrupted: string[] = [];
+  const steered: Array<{ sessionId: string; prompt: string; requestId: string }> = [];
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
-  const hooks: { onInterrupt: () => void } = { onInterrupt: () => {} };
+  const hooks: { onInterrupt: () => void; onSteer: (prompt: string, requestId: string) => "accepted" | "not-running" | "unsupported" | "not-found" } = { onInterrupt: () => {}, onSteer: () => "accepted" };
   const api: Api = {
     interruptSession: async id => { interrupted.push(id); hooks.onInterrupt(); return "accepted"; },
+    ...(harnesses !== undefined
+      ? {
+          listHarnesses: async () => harnesses,
+          steerSession: async (sessionId, prompt, requestId) => { steered.push({ sessionId, prompt, requestId }); return hooks.onSteer(prompt, requestId); },
+        }
+      : {}),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     sessionHistory: async id => history[id] ?? [],
@@ -71,7 +81,7 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionV
       return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running", prompt: opts.prompt, startedAt: 0 };
     },
   };
-  return { api, started, interrupted, emit, hooks };
+  return { api, started, interrupted, steered, emit, hooks };
 }
 
 async function setup(api: Api) {
@@ -210,6 +220,102 @@ describe("composer queue", () => {
     emit(done("completed"));
     emit(end());
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["two"]));
+  });
+
+  it("with a harness that steers, send-now sends the row into the running turn: one steer under the runtime's session id, no interrupt, no notice, the row leaves on accepted and shows in the thread once the runtime records it", async () => {
+    const { api, started, interrupted, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "go" });
+    emit({ type: "session.delta", ...scope, kind: "text", text: "on it" });
+    await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
+    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
+    await enter("one");
+    await enter("two");
+    const li = rowFor("two");
+    const shape = li.children.length;
+    expect(within(li, "Send now")).not.toBeNull();
+    expect(within(li, "Stop the turn and send now")).toBeNull();
+    fireEvent.click(within(li, "Send now")!);
+    await waitFor(() => expect(steered).toHaveLength(1));
+    expect(steered[0]).toMatchObject({ sessionId: runningRow.id, prompt: "two" });
+    expect(steered[0]!.requestId).toMatch(/\S/);
+    expect(interrupted).toEqual([]);
+    await waitFor(() => expect(queued()).toEqual(["one"]));
+    expect(screen.queryByText(STEER_NOTICE)).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(rowFor("one").children.length).toBe(shape);
+    expect(started).toHaveLength(0);
+    emit({ type: "session.steer", ...scope, prompt: "two", requestId: steered[0]!.requestId });
+    expect(screen.getByText("two")).toBeDefined();
+    expect(screen.getByText("steered")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
+    emit({ type: "session.delta", ...scope, kind: "text", text: " done both" });
+    emit(done("completed"));
+    emit(end());
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
+  });
+
+  it("with a harness that steers, a steer the turn beat (not-running) leaves the row at the head, and the turn's end sends it as a start", async () => {
+    const { api, started, interrupted, steered, emit, hooks } = fixtureApi({}, [runningRow], [catalog(true)]);
+    hooks.onSteer = () => "not-running";
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "go" });
+    await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
+    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
+    await enter("one");
+    await enter("two");
+    fireEvent.click(within(rowFor("two"), "Send now")!);
+    await waitFor(() => expect(steered).toHaveLength(1));
+    await waitFor(() => expect(within(rowFor("two"), "Send now")!.disabled).toBe(false));
+    expect(queued()).toEqual(["two", "one"]);
+    expect(screen.queryByText("next")).toBeNull();
+    expect(interrupted).toEqual([]);
+    expect(started).toHaveLength(0);
+    emit(done("completed"));
+    emit(end());
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["two"]));
+    expect(queued()).toEqual(["one"]);
+  });
+
+  it("with a harness that steers, a steer the runtime refuses shows why and keeps the row; a held row is released by the steer", async () => {
+    const { api, started, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
+    api.steerSession = async (sessionId, prompt, requestId) => { steered.push({ sessionId, prompt, requestId }); throw new Error("Workspace is pausing; wake it to send"); };
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "go" });
+    await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
+    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
+    await enter("one");
+    useComposerDraftStore.getState().hold(WS);
+    expect(useComposerDraftStore.getState().held[WS]).toBe(true);
+    fireEvent.click(within(rowFor("one"), "Send now")!);
+    expect(useComposerDraftStore.getState().held[WS]).toBeFalsy();
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Could not send now: Workspace is pausing; wake it to send"));
+    expect(queued()).toEqual(["one"]);
+    expect(screen.queryByText("next")).toBeNull();
+    expect(started).toHaveLength(0);
+    emit(done("completed"));
+    emit(end());
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
+  });
+
+  it("with a harness that does not steer, send-now keeps the stop road and its notice", async () => {
+    const { api, started, interrupted, steered, emit, hooks } = fixtureApi({}, [runningRow], [catalog(false)]);
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "go" });
+    await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
+    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
+    await enter("one");
+    expect(within(rowFor("one"), "Send now")).toBeNull();
+    let release: () => void = () => {};
+    const held = new Promise<void>(resolve => { release = resolve; });
+    api.interruptSession = async id => { interrupted.push(id); await held; hooks.onInterrupt(); return "accepted"; };
+    fireEvent.click(within(rowFor("one"), "Stop the turn and send now")!);
+    expect(screen.getByRole("status").textContent).toBe(STEER_NOTICE);
+    expect(steered).toEqual([]);
+    hooks.onInterrupt = () => { emit(done("interrupted")); emit(end()); };
+    await act(async () => { release(); await held; });
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
+    expect(interrupted).toEqual([runningRow.id]);
   });
 
   it("send-now is disabled before the turn's start arrives, since nothing can be stopped yet, and the row does not shift when it can", async () => {

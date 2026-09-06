@@ -78,6 +78,7 @@ import type {
   ReachState,
   SessionEvent,
   SessionInterruptResult,
+  SessionSteerResult,
   SessionOrigin,
   SessionView,
   SnapshotStorage,
@@ -119,10 +120,15 @@ export interface HarnessSession {
   readonly finished: Promise<TurnResult>;
   /** Stops the process this session owns; finished settles after it, once session.end has been emitted. */
   interrupt(): Promise<void>;
+  /** Present on a harness that takes a message mid-turn; absent means it cannot. not-running when the turn had not
+   * started or had ended when the message was offered. */
+  steer?(prompt: string): Promise<"accepted" | "not-running">;
 }
 
 export interface HarnessAdapter {
   start(options: HarnessStartOptions): HarnessSession;
+  /** Whether this adapter's sessions carry steer; the catalog tells the composer before a turn runs. */
+  readonly steers: boolean;
   /** Asks the binary on the workspace's machine what it takes, null when it does not answer; absent, the table alone answers and nothing runs. */
   probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
   /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
@@ -345,6 +351,7 @@ export interface SessionHandle {
   readonly finished: Promise<TurnResult>;
   view(): SessionView;
   interrupt(): Promise<void>;
+  steer?(prompt: string): Promise<"accepted" | "not-running">;
 }
 
 /** What every golden built by this runtime gets; the host wires it (the daemon
@@ -616,6 +623,10 @@ export interface Runtime {
     history(workspaceId: string): Promise<SessionEvent[]>;
     /** Stops the session's running turn through its harness; a turn already over or an unknown id answers, never throws. */
     interrupt(sessionId: string): Promise<SessionInterruptResult>;
+    /** Sends a message into the session's running turn through its harness and records it as session.steer once the
+     * harness took it; a turn already over, a harness without steer or an unknown id answers. Refuses like start
+     * while the workspace is pausing or paused. */
+    steer(sessionId: string, opts: { prompt: string; requestId?: string }): Promise<SessionSteerResult>;
   };
   readonly harnesses: {
     /** What each harness with an adapter takes at launch; the composer's pickers render from this. With a running
@@ -1354,7 +1365,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
   // Every road into a workspace the runtime can see starts its window over;
   // typing over the browser's daemon link arrives as workspaces.touch.
-  for (const type of ["session.start", "session.delta", "session.done", "session.end", "inbox.file", "workspace.woken", "workspace.upgraded", "project.import", "project.export"] as const) {
+  for (const type of ["session.start", "session.delta", "session.done", "session.end", "session.steer", "inbox.file", "workspace.woken", "workspace.upgraded", "project.import", "project.export"] as const) {
     bus.on(type, e => idle.touch((e as { workspaceId: string }).workspaceId));
   }
   bus.on("workspace.created", e => e.type === "workspace.created" && idle.touch(e.workspace.id));
@@ -1784,14 +1795,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * not answer costs one exec, not one per composer mount. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
   const catalogOn = (table: HarnessCatalog, machine: Machine, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
-    if (adapter.probeCatalog === undefined) return Promise.resolve({ ...table });
+    const known: HarnessCatalog = { ...table, steers: adapter.steers };
+    if (adapter.probeCatalog === undefined) return Promise.resolve(known);
     const key = `${machine.id}:${table.harness}`;
     const hit = catalogs.get(key);
     const now = clock.now();
     if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog;
     const catalog = adapter
       .probeCatalog(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout))
-      .then(parsed => (parsed === null ? { ...table } : catalogFromProbe(table, parsed)), () => ({ ...table }));
+      .then(parsed => (parsed === null ? known : catalogFromProbe(known, parsed)), () => known);
     catalogs.set(key, { at: now, catalog });
     return catalog;
   };
@@ -1931,6 +1943,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         finished: started.finished,
         view: () => ({ ...sessionView }),
         interrupt: () => started.interrupt(),
+        ...(started.steer !== undefined ? { steer: (prompt: string) => started.steer!(prompt) } : {}),
       };
       const end = (reason: string): void => {
         if (ended || sessionView.status !== "running") return;
@@ -1976,6 +1989,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await s.handle.interrupt();
       // The harness resolves finished only after session.end, so accepted means the turn is over on the transcript too.
       await s.handle.finished.catch(() => {});
+      return { outcome: "accepted" };
+    },
+
+    async steer(sessionId, o) {
+      await ready();
+      const s = sessions.get(sessionId);
+      if (!s) return { outcome: "not-found" };
+      const entry = await entryOf(s.view.workspaceId);
+      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }));
+      if (refusal !== null) throw new Error(refusal);
+      if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
+      if (s.handle.steer === undefined) return { outcome: "unsupported" };
+      const outcome = await s.handle.steer(o.prompt);
+      if (outcome !== "accepted") return { outcome };
+      // Recorded once the harness took the line, so the row sits where the turn could first see it.
+      record({
+        type: "session.steer",
+        workspaceId: s.view.workspaceId,
+        sessionId: s.view.claudeSessionId ?? sessionId,
+        turnId: s.turnId,
+        ...(s.view.threadId !== undefined ? { threadId: s.view.threadId } : {}),
+        prompt: o.prompt,
+        ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
+      });
       return { outcome: "accepted" };
     },
   };

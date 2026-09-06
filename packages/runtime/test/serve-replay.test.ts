@@ -26,6 +26,7 @@ function drivenHarness() {
   let finish!: (r: TurnResult) => void;
   const finished = new Promise<TurnResult>(r => (finish = r));
   const adapter: HarnessAdapterFactory = () => ({
+    steers: false,
     start: o => {
       onEvent = o.onEvent;
       onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });

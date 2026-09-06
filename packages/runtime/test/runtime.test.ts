@@ -5,12 +5,13 @@ import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
-import { catalogProbeCommand, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
+import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
 import { SessionEvent, type EventUnion, type RecipeDigest } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { TABLE_PIN } from "../src/harness-catalog.js";
 import { CATALOG_TTL_MS, GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
+import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { wsRequest } from "./ws-client.js";
@@ -72,6 +73,7 @@ describe("runtime", () => {
   it("runs a harness session and fans adapter events out as session.* protocol events", async () => {
     const backend = stubBackend();
     const scripted: HarnessAdapterFactory = () => ({
+      steers: false,
       start: ({ onEvent }) => {
         const sessionId = "11111111-1111-4111-8111-111111111111";
         const result: TurnResult = { status: "completed", text: "done" };
@@ -127,6 +129,7 @@ describe("runtime", () => {
 
 describe("runtime session history", () => {
   const scripted = (text: string): HarnessAdapterFactory => () => ({
+    steers: false,
     start: ({ onEvent }) => {
       const sessionId = "22222222-2222-4222-8222-222222222222";
       const result: TurnResult = { status: "completed", text };
@@ -178,6 +181,7 @@ describe("runtime session history", () => {
     let finish!: (r: TurnResult) => void;
     const finished = new Promise<TurnResult>(r => (finish = r));
     const adapter: HarnessAdapterFactory = () => ({
+      steers: false,
       probeCatalog: exec => exec(catalogProbeCommand({ configDir: "/root/.claude-cfg" })).then(parseCatalogProbe),
       start: o => {
         onEvent = o.onEvent;
@@ -203,6 +207,7 @@ describe("runtime session history", () => {
     const sessionId = "44444444-4444-4444-8444-444444444444";
     const harness = { slashCommands: ["compact"], permissionMode: "bypassPermissions", agents: ["general-purpose"] };
     const scripted: HarnessAdapterFactory = () => ({
+      steers: false,
       start: o => {
         const result: TurnResult = { status: "completed", text: "ok" };
         const finished = Promise.resolve().then(() => {
@@ -240,6 +245,7 @@ describe("runtime session history", () => {
   /** Emits one full turn per start, under the resume id when given, else a fresh id; `rekey` makes a resumed
    * start announce a different id in system/init, as the CLI is allowed to. */
   const threaded = (rekey?: (resume: string) => string): HarnessAdapterFactory => () => ({
+    steers: false,
     start: o => {
       const localId = o.resume ?? randomUUID();
       const sessionId = o.resume !== undefined && rekey !== undefined ? rekey(o.resume) : localId;
@@ -806,6 +812,7 @@ describe("runtime session index", () => {
   const turns = () => {
     const starts: HarnessStartOptions[] = [];
     const adapter: HarnessAdapterFactory = () => ({
+      steers: false,
       start: o => {
         starts.push(o);
         const sessionId = o.resume ?? randomUUID();
@@ -824,6 +831,7 @@ describe("runtime session index", () => {
   /** A turn that announces itself and never settles: the host goes down under it. */
   const HUNG_ID = "55555555-5555-4555-8555-555555555555";
   const hung: HarnessAdapterFactory = () => ({
+    steers: false,
     start: o => {
       o.onEvent({ type: "session.start", sessionId: HUNG_ID, model: "claude-sonnet-4-5", cwd: "/root/work" });
       return { localId: HUNG_ID, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
@@ -864,6 +872,7 @@ describe("runtime session index", () => {
 
   /** A harness that dies before init: only a done and an end, under the resume id or a fresh local one. */
   const dying: HarnessAdapterFactory = () => ({
+    steers: false,
     start: o => {
       const localId = o.resume ?? randomUUID();
       const result: TurnResult = { status: "failed", error: "claude exited before init (exit code 1)" };
@@ -985,6 +994,7 @@ describe("runtime session index", () => {
     const store = memoryStore();
     let settle!: (result: TurnResult) => void;
     const pending: HarnessAdapterFactory = () => ({
+      steers: false,
       start: o => {
         o.onEvent({ type: "session.start", sessionId: HUNG_ID, model: "claude-sonnet-4-5", cwd: "/root/work" });
         return { localId: HUNG_ID, finished: new Promise<TurnResult>(r => (settle = r)), interrupt: async () => {} };
@@ -4009,5 +4019,201 @@ describe("create idempotency keys", () => {
       expect.stringMatching(/^golden\/default:[0-9a-f]{16}$/),
     ]);
     expect(backend.machines[0]!.spec.idempotencyKey).not.toBe(backend.machines[1]!.spec.idempotencyKey);
+  });
+});
+
+describe("runtime session steer", () => {
+  const SID = "66666666-6666-4666-8666-666666666666";
+  /** A harness whose turn runs until the test ends it; steer records the prompt and answers as told, or is absent. */
+  const steerable = (opts: { steers?: boolean; answer?: "accepted" | "not-running" } = {}) => {
+    const steered: string[] = [];
+    let onEvent: ((e: AdapterEvent) => void) | undefined;
+    let finish!: (r: TurnResult) => void;
+    const finished = new Promise<TurnResult>(r => (finish = r));
+    const steers = opts.steers ?? true;
+    const adapter: HarnessAdapterFactory = () => ({
+      steers,
+      start: o => {
+        onEvent = o.onEvent;
+        return {
+          localId: SID,
+          finished,
+          interrupt: async () => {},
+          ...(steers
+            ? {
+                steer: async (prompt: string) => {
+                  steered.push(prompt);
+                  return opts.answer ?? "accepted";
+                },
+              }
+            : {}),
+        };
+      },
+    });
+    return {
+      adapter,
+      steered,
+      init: () => onEvent!({ type: "session.start", sessionId: SID, model: "claude-sonnet-4-5" }),
+      end: () => {
+        onEvent!({ type: "turn.done", sessionId: SID, result: { status: "completed", text: "ok" } });
+        onEvent!({ type: "session.end", sessionId: SID, exitCode: 0, sawResult: true });
+        finish({ status: "completed", text: "ok" });
+      },
+    };
+  };
+
+  it("accepted: the adapter takes the line and the runtime records session.steer under the turn's scope with the prompt and the request id; no session.start comes with it", async () => {
+    const h = steerable();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go", requestId: "req_1" });
+    h.init();
+    expect(await rt.sessions.steer(handle.id, { prompt: "and say pineapple", requestId: "req_2" })).toEqual({ outcome: "accepted" });
+    expect(h.steered).toEqual(["and say pineapple"]);
+    const start = events.find(e => e.type === "session.start") as Extract<SessionEvent, { type: "session.start" }>;
+    const steers = events.filter(e => e.type === "session.steer");
+    expect(steers).toMatchObject([
+      { type: "session.steer", workspaceId: ws.id, sessionId: SID, turnId: start.turnId, threadId: start.threadId, prompt: "and say pineapple", requestId: "req_2", at: expect.any(Number) },
+    ]);
+    expect(start.turnId).toBeDefined();
+    expect(start.threadId).toBeDefined();
+    expect(events.filter(e => e.type === "session.start")).toHaveLength(1);
+    expect((await rt.sessions.list(ws.id))[0]!.status).toBe("running");
+    h.end();
+    await handle.finished;
+    const history = await rt.sessions.history(ws.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.steer", "session.done", "session.end"]);
+    expect(history[1]).toMatchObject({ type: "session.steer", prompt: "and say pineapple" });
+    await rt.close();
+  });
+
+  it("not-found for a session this runtime does not hold", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: steerable().adapter } });
+    expect(await rt.sessions.steer("nope", { prompt: "x" })).toEqual({ outcome: "not-found" });
+  });
+
+  it("not-running once the turn ended, and when the adapter says the line missed the turn; nothing is recorded either way", async () => {
+    const late = steerable({ answer: "not-running" });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: late.adapter } });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+    late.init();
+    expect(await rt.sessions.steer(handle.id, { prompt: "racing" })).toEqual({ outcome: "not-running" });
+    expect(late.steered).toEqual(["racing"]);
+    late.end();
+    await handle.finished;
+    expect(await rt.sessions.steer(handle.id, { prompt: "too late" })).toEqual({ outcome: "not-running" });
+    expect(late.steered).toEqual(["racing"]);
+    expect(events.some(e => e.type === "session.steer")).toBe(false);
+    await rt.close();
+  });
+
+  it("over the claude adapter on a fake machine: a steer after the CLI exited, before the poll saw it, answers not-running, appends nothing and records nothing", async () => {
+    const backend = stubBackend();
+    const plain = backend.execImpl;
+    const log = Buffer.from(`{"type":"system","subtype":"init","session_id":"${SID}"}\n`);
+    let exitFile = "";
+    const appends: string[] = [];
+    backend.execImpl = (m, cmd) => {
+      if (cmd.includes("WSP_LAUNCHED")) return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
+      const sentinel = cmd.match(/(__WSP_EOF_[a-z0-9]+__)/)?.[1];
+      if (sentinel !== undefined) {
+        const from = Number(cmd.match(/tail -c \+(\d+)/)?.[1] ?? "1") - 1;
+        return { exitCode: 0, stdout: `${log.subarray(from).toString("base64")}\n${sentinel} ${exitFile} ${exitFile === "" ? "up" : "down"}\n`, stderr: "" };
+      }
+      if (cmd.includes("base64 -d >> ")) {
+        appends.push(cmd);
+        return { exitCode: 0, stdout: exitFile === "" ? "WSP_OK\n" : "WSP_GONE\n", stderr: "" };
+      }
+      return plain(m, cmd);
+    };
+    const rt = createRuntime({
+      backend,
+      store: memoryStore(),
+      adapters: { claude: ctx => createClaudeAdapter({ exec: machineExecStream(ctx.machine, { pollMs: 200 }), configDir: "/root/.claude-cfg" }) },
+    });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+    await vi.waitFor(() => expect(events.some(e => e.type === "session.start")).toBe(true));
+    exitFile = "1";
+    expect(await rt.sessions.steer(handle.id, { prompt: "after exit" })).toEqual({ outcome: "not-running" });
+    expect(appends).toHaveLength(1);
+    expect(events.some(e => e.type === "session.steer")).toBe(false);
+    expect((await handle.finished).status).toBe("failed");
+    expect((await rt.sessions.history(ws.id)).some(e => e.type === "session.steer")).toBe(false);
+    await rt.close();
+  });
+
+  it("unsupported when the session's harness takes no message mid-turn; the catalog says so before the turn runs", async () => {
+    const plain = steerable({ steers: false });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: plain.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!.steers).toBe(false);
+    const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+    plain.init();
+    expect(await rt.sessions.steer(handle.id, { prompt: "x" })).toEqual({ outcome: "unsupported" });
+    expect((await rt.sessions.history(ws.id)).some(e => e.type === "session.steer")).toBe(false);
+    plain.end();
+    await handle.finished;
+    await rt.close();
+  });
+
+  it("harnesses.list carries steers from the adapter on a workspace; the table alone, with no machine to ask, says false", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: steerable().adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!.steers).toBe(true);
+    expect((await rt.harnesses.list()).find(c => c.harness === "claude")!.steers).toBe(false);
+    await rt.close();
+  });
+
+  it("a steer inside a turn keeps the idle hold: the workspace stays awake through the window and naps after the turn ends", async () => {
+    const h = steerable();
+    const fc = fakeClock();
+    const WINDOW = 5 * 60_000;
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter }, clock: fc.clock, idle: { defaultWindowMs: WINDOW }, status: { costIntervalMs: 60_000, pollIntervalMs: 60_000 } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+    h.init();
+    fc.advance(WINDOW * 2);
+    expect(await rt.sessions.steer(handle.id, { prompt: "more" })).toEqual({ outcome: "accepted" });
+    fc.advance(WINDOW * 2);
+    expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+    h.end();
+    await handle.finished;
+    await new Promise(r => setTimeout(r, 20));
+    fc.advance(WINDOW);
+    await vi.waitFor(async () => expect((await rt.workspaces.get(ws.id)).phase).toBe("napping"));
+    await rt.close();
+  });
+
+  it("refuses while the workspace is pausing and once it is paused, with the composer's sentence, as start does", async () => {
+    const backend = stubBackend();
+    const h = steerable();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+    h.init();
+    const m = backend.machines[0]!;
+    let releasePause: () => void = () => {};
+    const gate = new Promise<void>(r => (releasePause = r));
+    const pause = m.pause.bind(m);
+    m.pause = async () => {
+      await gate;
+      await pause();
+    };
+    const napping = rt.workspaces.nap(ws.id);
+    await vi.waitFor(async () => expect((await rt.workspaces.get(ws.id)).phase).toBe("pausing"));
+    await expect(rt.sessions.steer(handle.id, { prompt: "x" })).rejects.toThrow("Workspace is pausing; wake it to send");
+    expect(h.steered).toEqual([]);
+    releasePause();
+    await napping;
+    await expect(rt.sessions.steer(handle.id, { prompt: "x" })).rejects.toThrow("Workspace is paused; wake it to send");
+    await rt.close();
   });
 });

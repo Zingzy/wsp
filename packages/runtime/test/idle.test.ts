@@ -148,6 +148,7 @@ const napping = (rt: ReturnType<typeof testRuntime>["rt"], id: string) => until(
 function heldSession(): { factory: HarnessAdapterFactory; end: () => void } {
   let end!: () => void;
   const factory: HarnessAdapterFactory = () => ({
+    steers: false,
     start(o) {
       const result: TurnResult = { status: "completed" };
       const finished = new Promise<TurnResult>(resolve => {

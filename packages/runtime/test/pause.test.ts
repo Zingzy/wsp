@@ -23,6 +23,7 @@ function hangingAdapter() {
   const interrupts: string[] = [];
   let n = 0;
   const factory: HarnessAdapterFactory = ({ workspaceId }) => ({
+    steers: false,
     start: ({ onEvent }) => {
       const sessionId = `sess-${++n}`;
       emitters.set(workspaceId, onEvent);

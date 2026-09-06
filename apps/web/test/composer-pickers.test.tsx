@@ -132,6 +132,7 @@ const CLAUDE: HarnessCatalog = {
   efforts: [{ value: "low", label: "Low" }, { value: "high", label: "High" }],
   contextWindows: CONTEXT,
   permissionModes: MODES,
+  steers: true,
 };
 
 /** The runtime's table, what stands before the machine answers. */
@@ -142,7 +143,7 @@ const TABLE: HarnessCatalog = {
   models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] }],
 };
 
-const CODEX: HarnessCatalog = { harness: "codex", label: "Codex", source: "table", version: null, models: [{ value: "gpt-6-astra", label: "GPT-6 Astra" }], efforts: [{ value: "high", label: "High" }], contextWindows: [], permissionModes: [] };
+const CODEX: HarnessCatalog = { harness: "codex", label: "Codex", source: "table", version: null, models: [{ value: "gpt-6-astra", label: "GPT-6 Astra" }], efforts: [{ value: "high", label: "High" }], contextWindows: [], permissionModes: [], steers: false };
 
 function fixtureApi(opts: { table: HarnessCatalog[]; machine?: HarnessCatalog[] | Error; history?: ReadonlyArray<SessionEvent>; sessions?: SessionView[] }) {
   const listeners = new Set<(e: ProtocolEvent) => void>();

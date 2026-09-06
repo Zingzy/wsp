@@ -80,6 +80,7 @@ describe("runtime socket reconnect", () => {
     let onEvent: ((e: { type: "turn.delta"; sessionId: string; kind: "text"; text: string }) => void) | undefined;
     const sessionId = "88888888-8888-4888-8888-888888888888";
     const claude: HarnessAdapterFactory = () => ({
+      steers: false,
       start: o => {
         onEvent = o.onEvent;
         o.onEvent({ type: "session.start", sessionId });

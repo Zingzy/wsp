@@ -4,7 +4,7 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { catalogProbeCommand, parseCatalogProbe, type ClaudeCatalogProbe } from "./catalog.js";
-import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId } from "./landmines.js";
+import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
 export type DeltaKind = "text" | "thinking" | "tool_use" | "tool_result";
@@ -51,16 +51,25 @@ export type AdapterEvent =
 
 export interface ExecStream {
   readonly lines: AsyncIterable<string>;
-  /** Graceful stop: close stdin / SIGTERM. */
+  /** Graceful stop: SIGTERM. */
   teardown(): void;
   /** SIGKILL. */
   kill(): void;
+  /** Appends one line to the process's stdin channel, or answers gone when the process already ended where it runs;
+   * rejects once the stream ended or when it was started without one. */
+  write(line: string): Promise<"written" | "gone">;
+  /** Ends the stdin channel: the process reads EOF. Nothing after the stream ended. */
+  closeInput(): void;
   readonly exited: Promise<number | null>;
 }
 
 export type ExecStreamFactory = (
   command: string,
-  options: { env: Record<string, string> },
+  options: {
+    env: Record<string, string>;
+    /** Present, the process's stdin is a line channel seeded with these lines; absent, the process gets no channel. */
+    input?: readonly string[];
+  },
 ) => ExecStream;
 
 export interface StartOptions {
@@ -76,6 +85,8 @@ export interface StartOptions {
   onEvent: (event: AdapterEvent) => void;
 }
 
+export type SteerOutcome = "accepted" | "not-running";
+
 export interface ClaudeSession {
   /** Registry key, fixed before spawn (self-generated UUID, or the resume id). */
   readonly localId: string;
@@ -84,6 +95,8 @@ export interface ClaudeSession {
   readonly command: string;
   readonly finished: Promise<TurnResult>;
   interrupt(): Promise<void>;
+  /** Writes a user message into the running turn; not-running before system/init and once result was seen or the process is gone. */
+  steer(prompt: string): Promise<SteerOutcome>;
 }
 
 export interface AdapterDeps {
@@ -97,6 +110,8 @@ export interface AdapterDeps {
 export interface ClaudeAdapter {
   start(options: StartOptions): ClaudeSession;
   readonly sessions: ReadonlyMap<string, ClaudeSession>;
+  /** Sessions take a message mid-turn over the stdin channel. */
+  readonly steers: true;
   /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. */
   probeCatalog(exec: (command: string) => Promise<string>): Promise<ClaudeCatalogProbe | null>;
   /** What every session's command is exported with; the one environment a turn on the machine gets. */
@@ -278,7 +293,6 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   const start = (options: StartOptions): ClaudeSession => {
     const localId = options.resume ?? newSessionId();
     const command = buildCommand({
-      prompt: options.prompt,
       ...(options.resume === undefined ? { sessionId: localId } : { resume: options.resume }),
       cwd: options.cwd,
       model: options.model,
@@ -286,10 +300,12 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       permissionMode: options.permissionMode,
       contextWindow: options.contextWindow,
     });
-    const stream = deps.exec(command, { env: { ...env } });
+    const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(options.prompt, localId)] });
 
     let claudeSessionId = localId;
+    let sawInit = false;
     let sawResult = false;
+    let exited = false;
     let interruptRequested = false;
     let turnResult: TurnResult | undefined;
     let harnessCwd: string | undefined;
@@ -304,6 +320,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           for (const normalized of normalizeEvent(event, claudeSessionId)) {
             if (normalized.type === "session.start") {
               claudeSessionId = normalized.sessionId;
+              sawInit = true;
               harnessCwd = normalized.cwd;
               shellCwd = normalized.cwd;
             }
@@ -317,6 +334,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             if (normalized.type === "turn.done") {
               sawResult = true;
               turnResult = normalized.result;
+              // The CLI waits for more input after its result; EOF is what lets it exit.
+              stream.closeInput();
             }
             options.onEvent(normalized);
           }
@@ -326,6 +345,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         streamError = cause instanceof Error ? cause.message : String(cause);
       }
       const exitCode = await stream.exited;
+      exited = true;
       if (turnResult === undefined) {
         turnResult = interruptRequested
           ? { status: "interrupted" }
@@ -348,6 +368,13 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       },
       command,
       finished,
+      steer: async (prompt) => {
+        const running = (): boolean => sawInit && !sawResult && !exited;
+        if (!running()) return "not-running";
+        const wrote = await stream.write(userMessageLine(prompt, claudeSessionId));
+        // The turn may have ended while the write travelled; the line then sits unread and the caller starts a turn.
+        return wrote === "written" && running() ? "accepted" : "not-running";
+      },
       interrupt: async () => {
         // t3code landmine: a graceful interrupt can be acknowledged while
         // background tasks keep the CLI alive. Teardown, then SIGKILL.
@@ -369,5 +396,5 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     return session;
   };
 
-  return { start, sessions, probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir })).then(parseCatalogProbe), env };
+  return { start, sessions, steers: true, probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir })).then(parseCatalogProbe), env };
 }

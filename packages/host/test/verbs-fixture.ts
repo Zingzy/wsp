@@ -42,6 +42,7 @@ export function captured(): Captured {
 export function scriptedAgent(reply: (prompt: string) => string) {
   const starts: HarnessStartOptions[] = [];
   const adapter: HarnessAdapterFactory = () => ({
+    steers: false,
     start: o => {
       starts.push(o);
       const sessionId = o.resume ?? randomUUID();
@@ -67,6 +68,7 @@ export function scriptedAgent(reply: (prompt: string) => string) {
 /** A harness whose turn never ends: the session starts and nothing more arrives. */
 export function stuckAgent(): HarnessAdapterFactory {
   return () => ({
+    steers: false,
     start: o => {
       const sessionId = randomUUID();
       queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }));

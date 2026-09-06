@@ -9,6 +9,7 @@ import {
   HarnessCatalog,
   PortForward,
   SessionInterruptOutcome,
+  SessionSteerOutcome,
   type Capabilities,
   type DaemonReachView,
   type EventUnion,
@@ -271,6 +272,10 @@ export interface Api {
    * accepted means the turn's done is already on the wire; not-running and not-found are answers, not errors. Optional so
    * fixtures that never stop a turn need not fake it; the composer offers no stop without it. */
   interruptSession?(sessionId: string): Promise<SessionInterruptOutcome>;
+  /** Sends a message into the session's running turn; takes the runtime's session id, as interruptSession does. accepted
+   * means a session.steer event is on the wire; not-running means the turn beat it and the caller starts a turn instead.
+   * Optional so fixtures without a steering harness need not fake it; the composer keeps the stop road without it. */
+  steerSession?(sessionId: string, prompt: string, requestId: string): Promise<SessionSteerOutcome>;
   /** What each harness's CLI takes at launch; the composer's pickers render from it. With a workspace the runtime
    * asks the binaries on its machine, else its table answers. Optional so fixtures without pickers need not fake it;
    * without it the composer shows none. */
@@ -369,6 +374,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: an outcome outside the enum must not read as accepted.
     interruptSession: async sessionId =>
       SessionInterruptOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.interrupt", { sessionId })).outcome),
+    steerSession: async (sessionId, prompt, requestId) =>
+      SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId })).outcome),
     // Parsed, not trusted: a picker renders only values the wire type vouches for.
     listHarnesses: async workspaceId =>
       HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list", workspaceId !== undefined ? { workspaceId } : {})).harnesses),

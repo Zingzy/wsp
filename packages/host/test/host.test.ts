@@ -369,6 +369,7 @@ describe("host close flushes transcripts", () => {
     let onEvent: ((e: AdapterEvent) => void) | undefined;
     const finished = new Promise<TurnResult>(() => {});
     const adapter: HarnessAdapterFactory = () => ({
+      steers: false,
       start: o => {
         onEvent = o.onEvent;
         return { localId: sessionId, claudeSessionId: sessionId, finished, interrupt: async () => {} };

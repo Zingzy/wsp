@@ -39,10 +39,12 @@ const levels = (values: readonly string[]): HarnessOption[] => values.map(value 
 
 const CLAUDE_CONTEXT_WINDOWS: HarnessOption[] = [option("200k", "200k"), { ...option("1m", "1M"), isDefault: true }];
 
-const fromTable = (catalog: Omit<HarnessCatalog, "source" | "version" | "contextWindows"> & { contextWindows?: HarnessOption[] }): HarnessCatalog => ({
+// The table alone cannot say whether a harness steers: only its adapter, on a machine, knows.
+const fromTable = (catalog: Omit<HarnessCatalog, "source" | "version" | "contextWindows" | "steers"> & { contextWindows?: HarnessOption[] }): HarnessCatalog => ({
   source: "table",
   version: TABLE_PIN,
   contextWindows: [],
+  steers: false,
   ...catalog,
 });
 
@@ -136,5 +138,6 @@ export function catalogFromProbe(table: HarnessCatalog, probe: HarnessCatalogPro
     efforts: probe.efforts.map(value => known(table.efforts, value) ?? option(value, capitalize(value))),
     contextWindows: table.contextWindows,
     permissionModes: probe.permissionModes.map(value => known(table.permissionModes, value) ?? option(value, value)),
+    steers: table.steers,
   };
 }

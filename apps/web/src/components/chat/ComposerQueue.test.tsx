@@ -74,4 +74,11 @@ describe("ComposerQueue", () => {
     mount({ steering: "gone" });
     expect(screen.queryByRole("status")).toBeNull();
   });
+
+  it("with a harness that steers, the promoted row reads next and its button waits, but no stop notice shows: nothing is being stopped", () => {
+    mount({ steering: "b", steer: "now" });
+    expect(screen.getByText("next")).toBeDefined();
+    expect((screen.getAllByRole("button", { name: "Send now" })[1] as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });

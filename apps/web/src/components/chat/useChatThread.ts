@@ -100,7 +100,7 @@ export interface ThreadState {
 }
 
 const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, stale: null, sending: null, left: undefined, known: [], named: null, stray: null };
-const SESSION_TYPES: ReadonlySet<string> = new Set(["session.start", "session.delta", "session.done", "session.end"]);
+const SESSION_TYPES: ReadonlySet<string> = new Set(["session.start", "session.delta", "session.done", "session.end", "session.steer"]);
 const now = () => new Date().toISOString();
 
 function isSessionEvent(e: ProtocolEvent): e is SessionEvent {
@@ -251,11 +251,11 @@ function startsSend(state: ThreadState, e: SessionEvent): boolean {
   return state.sending !== null && state.pendingPrompt !== null && unknownThread(state, e) && startOf(state.pendingPrompt, e);
 }
 
-/** An event of the send in flight on a view without a start: its own start, or the done and end of a thread the view never knew, its harness dying before it could start. A start with another prompt, or a delta, is another client's thread. */
+/** An event of the send in flight on a view without a start: its own start, or the done and end of a thread the view never knew, its harness dying before it could start. A start with another prompt, a delta or a steer is another client's thread. */
 function sentEvent(state: ThreadState, e: SessionEvent): boolean {
   if (state.sending === null) return false;
   if (e.type === "session.start") return startsSend(state, e);
-  return e.type !== "session.delta" && unknownThread(state, e);
+  return (e.type === "session.done" || e.type === "session.end") && unknownThread(state, e);
 }
 
 /**
@@ -304,7 +304,7 @@ export function reduceEvent(state: ThreadState, e: SessionEvent, at: string, pin
   const { stale } = state;
   if (stale !== null) {
     if (stale.kind === "pending-send") {
-      const known = e.type === "session.start" || e.type === "session.delta" ? knowing(state.known, [e]) : state.known;
+      const known = e.type === "session.start" || e.type === "session.delta" || e.type === "session.steer" ? knowing(state.known, [e]) : state.known;
       if (e.type === "session.start") return { ...state, known, stale: { kind: "turn", turnId: e.turnId, sessionId: e.sessionId } };
       if (e.type === "session.end" && leftOrOwn(state, e) && e.turnId !== stale.after) return { ...state, stale: null };
       return known === state.known ? state : { ...state, known };
