@@ -3,6 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
+import { fmtDuration } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe, type ClaudeCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
@@ -209,6 +210,21 @@ function normalizeResult(event: Record<string, unknown>): TurnResult {
   };
 }
 
+/** A success with no text and no token in its usage: the CLI refused the turn (a resume of a transcript a kill left
+ * half-written) and said why on stderr only. */
+function answeredNothing(result: TurnResult): boolean {
+  if (result.status !== "completed" || (result.text ?? "").trim().length > 0) return false;
+  return !Object.entries(result.usage ?? {}).some(([key, value]) => key.endsWith("_tokens") && (num(value) ?? 0) > 0);
+}
+
+/** The last lines the process printed that were not stream-json events: the CLI's stderr shares the log. */
+const STDERR_TAIL_LINES = 5;
+
+function noOutputError(result: TurnResult, stderrTail: readonly string[]): string {
+  const head = `claude answered with no output and no usage after ${fmtDuration(result.durationMs ?? 0)}`;
+  return stderrTail.length === 0 ? head : `${head}: ${stderrTail.join("\n")}`;
+}
+
 function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: string): AdapterEvent[] {
   const sessionId = str(event.session_id) ?? fallbackSessionId;
   switch (str(event.type)) {
@@ -308,6 +324,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let exited = false;
     let interruptRequested = false;
     let turnResult: TurnResult | undefined;
+    let emptyResult: TurnResult | undefined;
+    const stderrTail: string[] = [];
     let harnessCwd: string | undefined;
     let shellCwd: string | undefined;
 
@@ -316,7 +334,11 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       try {
         for await (const raw of stream.lines) {
           const event = parseLine(raw);
-          if (event === undefined) continue;
+          if (event === undefined) {
+            const text = raw.trim();
+            if (text.length > 0 && stderrTail.push(text) > STDERR_TAIL_LINES) stderrTail.shift();
+            continue;
+          }
           for (const normalized of normalizeEvent(event, claudeSessionId)) {
             if (normalized.type === "session.start") {
               claudeSessionId = normalized.sessionId;
@@ -333,9 +355,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             }
             if (normalized.type === "turn.done") {
               sawResult = true;
-              turnResult = normalized.result;
               // The CLI waits for more input after its result; EOF is what lets it exit.
               stream.closeInput();
+              // Held until the process exits, since the CLI writes its reason to stderr after the result.
+              if (answeredNothing(normalized.result)) {
+                emptyResult = normalized.result;
+                continue;
+              }
+              turnResult = normalized.result;
             }
             options.onEvent(normalized);
           }
@@ -347,12 +374,15 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       const exitCode = await stream.exited;
       exited = true;
       if (turnResult === undefined) {
-        turnResult = interruptRequested
-          ? { status: "interrupted" }
-          : {
-              status: "failed",
-              error: streamError ?? `claude exited with code ${String(exitCode)} before emitting a result`,
-            };
+        turnResult =
+          emptyResult !== undefined
+            ? { ...emptyResult, status: "failed", error: noOutputError(emptyResult, stderrTail) }
+            : interruptRequested
+              ? { status: "interrupted" }
+              : {
+                  status: "failed",
+                  error: streamError ?? `claude exited with code ${String(exitCode)} before emitting a result`,
+                };
         options.onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
       options.onEvent({ type: "session.end", sessionId: claudeSessionId, exitCode, sawResult });

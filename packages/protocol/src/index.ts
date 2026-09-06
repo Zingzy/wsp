@@ -191,7 +191,8 @@ export const SessionView = z.object({
   claudeSessionId: z.string().optional(),
   /** The thread this turn belongs to, as the runtime stamps its events; rows sharing one are one sidebar thread. */
   threadId: z.string().optional(),
-  /** The user's turn that started this session. */
+  /** The turn that opened this row's thread; a resumed turn keeps it, and its own prompt rides its session.start
+   * event, so the title every client derives from a row never follows the latest send. */
   prompt: z.string().optional(),
   /** Ms epoch, runtime clock; endedAt is unset while the session runs. */
   startedAt: z.number().optional(),
@@ -407,6 +408,9 @@ export const SessionStartEvent = z.object({
   /** The id the client minted for the sessions.start that opened this turn, stamped by the runtime; absent when the
    * client sent none. Two clients sending the same text at the same moment are told apart by this, not the prompt. */
   requestId: z.string().optional(),
+  /** Set when the thread's previous turn ended with no exit code and no result (a deadline, a host restart, a nap
+   * that ended it), so clients say the harness resumes a transcript that may be missing context; absent otherwise. */
+  afterCut: z.literal(true).optional(),
   model: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).optional(),
@@ -1537,6 +1541,6 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type TurnCutRule } from "./format.js";
+export { AFTER_CUT_LINE, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";

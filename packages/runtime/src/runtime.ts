@@ -93,7 +93,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, goneRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, fmtDuration, goneRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -726,6 +726,8 @@ const DELETED_REASON = "machine deleted while the agent was working";
 const UNANSWERING_REASON = "machine stopped answering while the agent was working";
 const RESTARTED_REASON = "host restarted while the agent was working";
 const GONE_REASON = "machine gone at the provider while the agent was working";
+/** What a cut turn's parent hears: the row's own span, since no harness result reports one. */
+const restartCutLine = (elapsedMs: number): string => `cut by a host restart after ${fmtDuration(elapsedMs, "clock")}`;
 /** A guest with no daemon is asked again after this long (one may be deployed later). */
 const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
@@ -1037,6 +1039,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     }
     return randomUUID();
+  };
+
+  /** Whether the thread's last turn ended with no exit code and no result: the runtime or its transport ended the
+   * process (a deadline, a host restart, a nap), so the harness resumes a transcript it never finished writing. */
+  const cutBefore = (workspaceId: string, threadId: string): boolean => {
+    const events = transcripts.get(workspaceId) ?? [];
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.type === "session.end" && e.threadId === threadId) return e.exitCode === null && !e.sawResult;
+    }
+    return false;
   };
 
   /** The folder a resumed session's harness ran in, from its row or, past the index cap, its start event. The CLI
@@ -1591,6 +1604,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
       }
+      const cut: { view: SessionView; turnId: string; notify?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
@@ -1598,19 +1612,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        let cut = false;
         for (const { turnId, notify, ...view } of index.sessions) {
-          // The harness process died with the runtime that started it, so a turn still running never settles.
-          if (view.status === "running") {
-            cut = true;
-            view.status = "failed";
-            view.endedAt = Date.now();
-            record({ type: "session.end", workspaceId: view.workspaceId, sessionId: view.claudeSessionId ?? view.id, turnId, threadId: view.threadId, exitCode: null, sawResult: false, reason: RESTARTED_REASON });
-          }
-          sessions.set(view.id, { view, turnId, ...(notify !== undefined ? { notify } : {}) });
+          const row = { view, turnId, ...(notify !== undefined ? { notify } : {}) };
+          if (view.status === "running") cut.push(row);
+          sessions.set(view.id, row);
         }
-        if (cut) void persistSessions(index.workspaceId);
       }
+      // The harness process died with the runtime that started it, so a turn still running never settles. Its end
+      // is told once every workspace's rows are in: the parent it tells may sit in a workspace read after its own.
+      for (const s of cut) {
+        s.view.status = "failed";
+        s.view.endedAt = Date.now();
+        if (s.notify !== undefined) notifyEnd(s, s.notify, { status: "failed", error: restartCutLine(s.view.endedAt - (s.view.startedAt ?? s.view.endedAt)) });
+        record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: false, reason: RESTARTED_REASON });
+      }
+      for (const workspaceId of new Set(cut.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
     })();
     return hydrated;
@@ -2061,6 +2077,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       const turnId = randomUUID();
       const cwd = (o.resume !== undefined ? folderOf(workspaceId, o.resume) : undefined) ?? o.cwd;
+      const afterCut = o.resume !== undefined && cutBefore(workspaceId, threadId);
       // Created before adapter.start so events that fire synchronously during
       // start() still land on the view. A resume id was announced by the harness
       // in an earlier turn, so the row carries it before this one answers.
@@ -2079,6 +2096,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
       };
       let ended = false;
+      let startRecorded = false;
 
       const forward = (event: AdapterEvent): void => {
         if (ended) return;
@@ -2091,6 +2109,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             entry.record.claudeSessionId = sessionId;
             void persist(entry.record);
             void persistSessions(workspaceId);
+            // One turn is one start row however often the harness announces itself.
+            if (startRecorded) return;
+            startRecorded = true;
             record({
               type: "session.start",
               workspaceId,
@@ -2099,6 +2120,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               threadId,
               prompt: o.prompt,
               ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
+              ...(afterCut ? { afterCut } : {}),
               ...(event.model !== undefined ? { model: event.model } : {}),
               ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
               ...(event.tools !== undefined ? { tools: event.tools } : {}),
@@ -2163,8 +2185,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       );
       const handleId = started.localId;
       sessionView.id = handleId;
-      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread.
-      if (o.resume !== undefined) sessionView.startedBy = sessions.get(handleId)?.view.startedBy ?? sessionView.startedBy;
+      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread and
+      // with what, since every client titles the thread by the row's prompt. Later turns live in the transcript.
+      const resumed = o.resume !== undefined ? sessions.get(handleId)?.view : undefined;
+      if (resumed !== undefined) {
+        sessionView.startedBy = resumed.startedBy ?? sessionView.startedBy;
+        if (resumed.prompt !== undefined) sessionView.prompt = resumed.prompt;
+      }
 
       const handle: SessionHandle = {
         id: handleId,

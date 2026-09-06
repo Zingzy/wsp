@@ -17,7 +17,7 @@ import type { HostHandle } from "../src/server.js";
 import { dialHost } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, doneOnlyAgent, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, doneOnlyAgent, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -243,6 +243,23 @@ describe("wsp verbs over the host", () => {
     expect(io.errors).toEqual(["the harness died"]);
   });
 
+  it("a send into a thread whose last turn was cut says so on stderr before the reply; the send after that says nothing", async () => {
+    await run("new", "alpha");
+    const cut = await run("thread", "new", "--in", "alpha", "cut");
+    expect(cut.code).toBe(1);
+    expect(cut.io.errors).toEqual([CUT_LINE]);
+    const [row] = await rt.sessions.list();
+    const resumed = await run("send", row!.threadId!, "again");
+    expect(resumed.code).toBe(0);
+    expect(resumed.io.errors).toEqual(["previous turn was cut; resuming"]);
+    expect(resumed.io.lines).toEqual(["re: again"]);
+    const next = await run("send", row!.threadId!, "once more");
+    expect(next.code).toBe(0);
+    expect(next.io.errors).toEqual([]);
+    const asJson = await run("send", row!.threadId!, "and json", "--json");
+    expect(json(asJson.io).filter(e => (e as { type: string }).type === "session.start")).toEqual([expect.not.objectContaining({ afterCut: true })]);
+  });
+
   it("threads is the sidebar's data: one row per thread with agent, state, who opened it and its folder, filtered by --in", async () => {
     await run("new", "alpha");
     await run("new", "beta");
@@ -427,8 +444,8 @@ describe("wsp verbs over the host", () => {
     const listed = await run("threads", "--json");
     const [{ threads }] = json(listed.io) as [{ threads: ThreadView[] }];
     expect(threads.map(t => [t.id, t.harness, t.startedBy, t.title, t.turns])).toEqual([
-      [byCli!.threadId, "codex", "cli", "second", 1],
-      [byPerson!.threadId, "claude", "person", "and this", 1],
+      [byCli!.threadId, "codex", "cli", "first", 1],
+      [byPerson!.threadId, "claude", "person", "from the app", 1],
     ]);
 
     const prefixed = await run("send", byCli!.threadId!.slice(0, 8), "third");
