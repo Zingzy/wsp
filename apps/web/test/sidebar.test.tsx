@@ -4,7 +4,7 @@
 // traversal; the new-workspace dialog; the zombie rebuild and the gone forget.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATING, daemonUpdateFailed, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -332,8 +332,10 @@ describe("rows from the fixture wire", () => {
     expect(rowOf("api").textContent).toContain("Running");
     expect(rowOf("web").textContent).not.toContain(DAEMON_UPDATING);
 
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(14.5 * 60_000) }), daemonNote: daemonUpdateFailed("daemon deploy failed: NPM_FAIL") } }));
-    await waitFor(() => expect(rowOf("api").textContent).toContain("could not update the machine's helper: daemon deploy failed: NPM_FAIL"));
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(14.5 * 60_000) }), daemonNote: DAEMON_UPDATE_FAILED } }));
+    await waitFor(() => expect(rowOf("api").textContent).toContain(DAEMON_UPDATE_FAILED));
+    // The reason a deploy gave is in the host's log, never on the row: it names the daemon and runs to hundreds of characters.
+    expect(rowOf("api").textContent).not.toContain("NPM_FAIL");
 
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { idleAt: iso(14.5 * 60_000) }) }));
     await waitFor(() => expect(rowOf("api").textContent).toContain("naps in 14m"));

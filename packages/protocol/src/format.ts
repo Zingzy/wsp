@@ -106,11 +106,10 @@ export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: numbe
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 
-/** The machine row's line while the runtime replaces a daemon older than this wsp, and the sentence it shows
- * instead when the replacement failed. A person is never told the helper is called a daemon: they did not install
- * it and cannot run it, so its name would only be one more thing to know. */
-export const DAEMON_UPDATING = "updating the machine's helper";
-
-export function daemonUpdateFailed(reason: string): string {
-  return `could not update the machine's helper: ${reason}`;
-}
+/** The machine row's line while the runtime replaces a daemon older than this wsp, and the line it shows instead
+ * when the replacement failed. A person is never told the helper is called a daemon: they did not install it and
+ * cannot run it, so its name would only be one more thing to know. Neither line carries the reason a deploy gave:
+ * that is an npm log a person can do nothing with, hundreds of characters wide in a row that fits about thirty,
+ * and it names the daemon in its own words. The runtime logs it for whoever runs the host. */
+export const DAEMON_UPDATING = "updating the helper";
+export const DAEMON_UPDATE_FAILED = "could not update the helper";

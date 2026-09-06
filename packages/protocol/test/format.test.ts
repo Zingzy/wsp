@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DAEMON_UPDATING, daemonUpdateFailed, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -91,10 +91,15 @@ describe("turnCutLine", () => {
 });
 
 describe("the machine row's line about its helper", () => {
-  it("says what is being done, and why it failed, without ever naming the daemon to a person", () => {
-    expect(DAEMON_UPDATING).toBe("updating the machine's helper");
-    expect(daemonUpdateFailed("daemon deploy failed: NPM_FAIL")).toBe("could not update the machine's helper: daemon deploy failed: NPM_FAIL");
-    for (const line of [DAEMON_UPDATING, daemonUpdateFailed("x")]) expect(line).not.toContain("daemon");
+  it("says what is being done and that it failed, in fixed words: no daemon named, no reason quoted, and short enough for the row", () => {
+    expect(DAEMON_UPDATING).toBe("updating the helper");
+    expect(DAEMON_UPDATE_FAILED).toBe("could not update the helper");
+    // The row's second line fits about thirty characters at the default sidebar width (measured in Chromium at
+    // 159px), and a deploy's own reason is an npm log hundreds wide that names the daemon in its own words.
+    for (const line of [DAEMON_UPDATING, DAEMON_UPDATE_FAILED]) {
+      expect(line).not.toContain("daemon");
+      expect(line.length).toBeLessThanOrEqual(30);
+    }
   });
 });
 

@@ -40,7 +40,7 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   // A daemon that predates the roots file browses its home and nothing else, so a folder outside it comes back
   // refused, naming a path nobody asked about; that one refusal reads as what the daemon predates. Every other
   // failure, on any daemon, is its own and says so.
-  const behind = root !== null && home !== null && rootOf([home], root) === null ? daemonBehindLine(version) : null;
+  const behind = root !== null && home !== null && rootOf([home], root) === null ? daemonBehindLine(version, "files") : null;
 
   useEffect(() => {
     if (root !== null) ensure(root);

@@ -94,7 +94,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, daemonUpdateFailed, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -1210,14 +1210,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
   };
 
-  /** The line the machine's row shows about its daemon, pushed at once so the row does not wait for the poll. A
-   * machine that stopped running under the update keeps the line for its next status: only the poller knows what
-   * its reach is by then. */
+  /** The machine's row now, rather than at the next poll. A machine that stopped running is left to the poller:
+   * only it knows what that machine's reach is by then. */
+  const pushStatus = async (entry: LiveWorkspace): Promise<void> => {
+    if (entry.record.phase !== "running") return;
+    await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported");
+  };
+
+  /** The line the machine's row carries while the runtime is doing something to its daemon; undefined clears it. */
   const noteDaemon = async (entry: LiveWorkspace, note: string | undefined): Promise<void> => {
     if (note === undefined) daemonNotes.delete(entry.record.id);
     else daemonNotes.set(entry.record.id, note);
-    if (entry.record.phase !== "running") return;
-    await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported");
+    await pushStatus(entry);
+  };
+
+  /** A line for the machine's row that rides one status and no more, so the next poll shows the row's own facts
+   * again. What the row is for is the machine's rate and its nap countdown; a failure nobody here can act on must
+   * not sit on top of them for the life of the host. */
+  const flashDaemon = async (entry: LiveWorkspace, note: string): Promise<void> => {
+    daemonNotes.set(entry.record.id, note);
+    await pushStatus(entry);
+    daemonNotes.delete(entry.record.id);
   };
 
   /** The folders the record says this machine's daemon may browse beside its home. Derived state: the record is the
@@ -1232,15 +1245,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** Settles once no turn is running on the workspace: at once when none is, else when the last one ends. Replacing
    * the daemon ends the ptys under it, so the work a person or an agent started finishes first. */
+  const turnRuns = (workspaceId: string): boolean => [...sessions.values()].some(s => s.view.workspaceId === workspaceId && s.view.status === "running");
+
   const whenNoTurnRuns = (workspaceId: string): Promise<void> => {
-    const busy = (): boolean => [...sessions.values()].some(s => s.view.workspaceId === workspaceId && s.view.status === "running");
-    if (!busy()) return Promise.resolve();
+    if (!turnRuns(workspaceId)) return Promise.resolve();
     return new Promise(done => {
       // A turn leaves running on its done or its end and on nothing else, so this wakes twice a turn rather than
       // once per output chunk of every workspace on the bus.
       const offs: (() => void)[] = [];
       const check = (): void => {
-        if (busy()) return;
+        if (turnRuns(workspaceId)) return;
         for (const off of offs) off();
         done();
       };
@@ -1251,7 +1265,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Everything the runtime settles with a machine's daemon the moment it can reach it, and the only place that
    * does: the folders the record says it may browse, then a daemon older than this wsp replaced with this one's,
    * waiting out any running turn first. Nobody asks for it, and nothing about it is a person's to know: the panes
-   * that need the new ops simply work once it lands. A failure leaves the old daemon and its sentence on the row.
+   * that need the new ops simply work once it lands. A failure leaves the old daemon serving, says so on the row
+   * once, and puts the reason in this host's log, where the person who runs the host can read it.
    * One run per machine at a time, so two connects at once do the work once. */
   const daemonSyncs = new Map<string, Promise<void>>();
   const syncDaemon = (entry: LiveWorkspace): Promise<void> => {
@@ -1266,12 +1281,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await whenNoTurnRuns(entry.record.id);
       if (entry.record.phase !== "running") return;
       await noteDaemon(entry, DAEMON_UPDATING);
+      // Marking the row awaits a push, which is several ticks wide; a turn that opened inside that window would
+      // lose its ptys to the deploy, so the wait runs again until nothing is running as the deploy starts.
+      while (turnRuns(entry.record.id)) await whenNoTurnRuns(entry.record.id);
       try {
         await workspaces.updateDaemon(entry.record.id);
         await writeDaemonRoots(entry);
         await noteDaemon(entry, undefined);
       } catch (e) {
-        await noteDaemon(entry, daemonUpdateFailed(e instanceof Error ? e.message : String(e)));
+        const reason = e instanceof Error ? e.message : String(e);
+        await noteDaemon(entry, undefined);
+        // A machine that napped or went under the update did not fail one: its row says what its phase says.
+        if (entry.record.phase !== "running") return;
+        console.warn(`daemon on ${entry.machine.id} (workspace ${entry.record.id}) not updated: ${reason}`);
+        await flashDaemon(entry, DAEMON_UPDATE_FAILED);
       }
     })();
     daemonSyncs.set(key, work);

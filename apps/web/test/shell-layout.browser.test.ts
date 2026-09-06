@@ -2,9 +2,9 @@
 // The shell's chrome in a real Chromium: the sidebar's brand lockup starts
 // where the search box does, a thread row's title keeps its room at the
 // default width, a status toast holds a long token inside its box, the line
-// the runtime puts on a machine's row takes that row's second line and its
-// title without growing the row, and collapsing the sidebar leaves the page
-// header's left padding alone. Vite
+// the runtime puts on a machine's row takes that row's second line whole,
+// uncut and without growing the row, and collapsing the sidebar leaves the
+// page header's left padding alone. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -188,12 +188,13 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 30_000);
 
-  it("the line the runtime puts on a machine's row is the whole second line, at the row's own height and whole in its title, in both themes", async () => {
-    const metaOf = (): Promise<{ text: string; title: string; height: number }[]> =>
+  it("the line the runtime puts on a machine's row is the whole second line, drawn whole and at the row's own height, in both themes", async () => {
+    const metaOf = (): Promise<{ text: string; clipped: boolean; height: number }[]> =>
       page!.locator("[data-row-id^='ws:']").evaluateAll(rows =>
         rows.map(row => {
           const meta = row.querySelector<HTMLElement>("[data-workspace-meta]");
-          return { text: meta?.textContent ?? "", title: meta?.getAttribute("title") ?? "", height: row.getBoundingClientRect().height };
+          // textContent is the whole string whatever CSS does to it, so what the person sees is scroll against client.
+          return { text: meta?.textContent ?? "", clipped: meta !== null && meta.scrollWidth > meta.clientWidth, height: row.getBoundingClientRect().height };
         }),
       );
     for (const theme of ["dark", "light"] as const) {
@@ -205,10 +206,10 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       await page!.goto(`${base}?theme=${theme}&helper=1`);
       await page!.waitForSelector("[data-sidebar-row]");
       const updating = await metaOf();
-      // The whole line, nothing beside it, and the row is the height it always was. The slot is exactly as wide as
-      // the rate and the countdown need (159px at the default width, measured), so a longer line rides its title.
-      expect(updating[0]!.text).toBe("updating the machine's helper");
-      expect(updating[0]!.title).toBe("updating the machine's helper");
+      // The whole line, nothing beside it, drawn whole rather than cut, and the row is the height it always was.
+      // The slot is about 159px at the default width, so a line that outgrows it goes red here.
+      expect(updating[0]!.text).toBe("updating the helper");
+      expect(updating[0]!.clipped).toBe(false);
       expect(updating[0]!.height).toBe(plain[0]!.height);
       expect(updating.slice(1).map(m => m.text)).toEqual(plain.slice(1).map(m => m.text));
       const path = join(SHOTS_DIR, `sidebar-helper-${theme}.png`);

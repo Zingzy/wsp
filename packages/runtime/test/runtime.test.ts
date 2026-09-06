@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
-import { DAEMON_UPDATING, DAEMON_VERSION, SessionEvent, daemonUpdateFailed, foldThreads, type EventUnion, type RecipeDigest, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, SessionEvent, foldThreads, type EventUnion, type RecipeDigest, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -1349,7 +1349,7 @@ describe("runtime daemon reach", () => {
     }
   });
 
-  it("a deploy that fails leaves the old daemon serving and the reason on the machine's row", async () => {
+  it("a deploy that fails leaves the old daemon serving, says so on the row once and no longer, and logs the reason", async () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const store = memoryStore();
@@ -1370,8 +1370,23 @@ describe("runtime daemon reach", () => {
         },
       };
       const rt = createRuntime({ backend, store, adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
-      await rt.workspaces.list();
-      await until(async () => (await rt.workspaces.get(ws.id)).daemonNote === daemonUpdateFailed("daemon deploy failed: NPM_FAIL"));
+      const pushed: WorkspaceStatus[] = [];
+      rt.events.on("workspace.status", e => pushed.push((e as { status: WorkspaceStatus }).status));
+      const warned: string[] = [];
+      const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+      try {
+        await rt.workspaces.list();
+        await until(() => pushed.some(st => st.daemonNote === DAEMON_UPDATE_FAILED));
+      } finally {
+        warn.mockRestore();
+      }
+      // The row said it once. It is not on the workspace any more, so the next poll shows the rate and the
+      // countdown again rather than a failure nobody here can act on.
+      expect((await rt.workspaces.get(ws.id)).daemonNote).toBeUndefined();
+      expect(pushed.filter(st => st.daemonNote === DAEMON_UPDATE_FAILED)).toHaveLength(1);
+      // The reason npm gave is in this host's log and nowhere a person reads.
+      expect(warned.some(l => l.includes("daemon deploy failed: NPM_FAIL") && l.includes("m1"))).toBe(true);
+      expect(pushed.every(st => st.daemonNote === undefined || !st.daemonNote.includes("NPM_FAIL"))).toBe(true);
       // Nothing reached the machine after the deploy threw, the token was not rotated away from the daemon that
       // holds it, and that daemon still answers with the version it always did.
       expect(m.execLog.slice(atDeploy)).toEqual([]);
