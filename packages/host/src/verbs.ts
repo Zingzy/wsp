@@ -6,6 +6,7 @@
 // code. The MCP server is a second door onto the same exported functions.
 // Nothing here reads a key or imports the runtime: the host is the only
 // process that talks to the provider.
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
@@ -304,7 +305,8 @@ export function resumeOf(thread: ThreadView, prompt: string): Record<string, unk
 }
 
 /** Starts a turn as `startedBy` and follows it to its end: `on.started` sees the thread as soon as the runtime names
- * it, `on.event` every event of the turn with the turn so far. Fails when the host goes away first. */
+ * it, `on.event` every event of the turn with the turn so far. Fails when the host goes away first. The send carries
+ * its own request id so an app view with the same text in flight cannot take this turn's start for its own. */
 export async function follow(
   client: HostClient,
   start: Record<string, unknown>,
@@ -313,7 +315,7 @@ export async function follow(
 ): Promise<Turn> {
   const pushed = pushedFrames(client);
   await client.events();
-  const { session } = await client.request<{ session: SessionView }>("sessions.start", { ...start, startedBy });
+  const { session } = await client.request<{ session: SessionView }>("sessions.start", { ...start, startedBy, requestId: randomUUID() });
   const threadId = session.threadId;
   if (threadId === undefined) throw new Error("the runtime stamped no thread on the session");
   const turn: Turn = { session, threadId };

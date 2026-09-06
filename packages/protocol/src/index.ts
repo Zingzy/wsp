@@ -316,6 +316,9 @@ export const SessionStartEvent = z.object({
   ...sessionScope,
   /** The user's turn; set by the runtime (the adapter never sees it) so a replayed transcript shows it. */
   prompt: z.string().optional(),
+  /** The id the client minted for the sessions.start that opened this turn, stamped by the runtime; absent when the
+   * client sent none. Two clients sending the same text at the same moment are told apart by this, not the prompt. */
+  requestId: z.string().optional(),
   model: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).optional(),
@@ -1146,6 +1149,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     contextWindow: z.string().optional(),
     /** Absent reads as person: the app never sends it, the command line sends cli, the MCP server sends agent. */
     startedBy: SessionOrigin.optional(),
+    /** Minted by the client per send and echoed on the turn's session.start, so the client knows which start is its own. */
+    requestId: z.string().optional(),
   }),
   /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
    * from the binaries on its machine where they answer; without one, from the runtime's table. */

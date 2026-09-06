@@ -54,8 +54,8 @@ export interface ChatThreadHandle {
   readonly threadKey: string;
   /** The last send's start, once it landed: the key its rows waited under (the thread id the view held or was pinned to, or the workspace id before the thread had one) and the thread that start carried. Null while a send is in flight, after one that settled without a start, and before any. */
   readonly named: NamedStart | null;
-  /** Optimistic user message for a send; the next session.start replaces it. */
-  readonly appendUserTurn: (prompt: string) => void;
+  /** Optimistic user message for a send, with the request id the send carries; the session.start stamped with it replaces it. */
+  readonly appendUserTurn: (prompt: string, requestId: string) => void;
   /** A send that failed before the runtime emitted anything. */
   readonly appendLocalError: (message: string) => void;
   readonly setSending: (sending: boolean) => void;
@@ -74,10 +74,16 @@ export interface NamedStart {
   readonly thread: string;
 }
 
+/** A send as this client made it: its text, and the request id it carried, which the runtime stamps on the start it opens. */
+export interface Sent {
+  readonly text: string;
+  readonly requestId: string;
+}
+
 export interface ThreadState {
   readonly events: ReadonlyArray<SessionEvent>;
   readonly arrivals: ReadonlyArray<string>;
-  readonly pendingPrompt: { text: string; at: string } | null;
+  readonly pendingPrompt: (Sent & { readonly at: string }) | null;
   readonly localErrors: ReadonlyArray<{ message: string; at: string }>;
   readonly fresh: boolean;
   readonly stale: StaleTurn | null;
@@ -89,8 +95,8 @@ export interface ThreadState {
   readonly known: ReadonlyArray<string>;
   /** The last send's start once it landed: the key its rows waited under (the thread id the view held or was pinned to, or the workspace id without one) and the thread the start carried. Null from the send until then, and after a send that settled without a start. */
   readonly named: NamedStart | null;
-  /** A send from a view without a start, left in flight by a view change: the key its rows wait under (the pin, or the workspace id from the latest view) and the prompt the runtime stamps on its start, which still names those rows from whichever view sees it. */
-  readonly stray: { readonly prompt: string; readonly key: string } | null;
+  /** A send from a view without a start, left in flight by a view change: the key its rows wait under (the pin, or the workspace id from the latest view) and the send itself, whose start still names those rows from whichever view sees it. */
+  readonly stray: (Sent & { readonly key: string }) | null;
 }
 
 const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, stale: null, sending: null, left: undefined, known: [], named: null, stray: null };
@@ -228,20 +234,21 @@ function leftOrOwn(state: ThreadState, e: SessionEvent): boolean {
   return unknownThread(state, e) || e.threadId === state.left;
 }
 
-/** A start of a thread the view never knew, carrying a prompt the person sent: the runtime stamps the request's prompt on the start, and by id alone two clients' starts look the same. */
-function startsPrompt(state: ThreadState, e: SessionEvent, prompt: string | undefined): boolean {
-  return prompt !== undefined && e.type === "session.start" && unknownThread(state, e) && e.prompt === prompt;
+/** The start a send opened: the one the runtime stamped with the send's request id, or, when the start carries none (a client that sent none), the one carrying the send's text. By thread id alone two clients' starts look the same, and by text so do two clients sending the same words at once. */
+function startOf(sent: Sent, e: SessionEvent): boolean {
+  if (e.type !== "session.start") return false;
+  return e.requestId !== undefined ? e.requestId === sent.requestId : e.prompt === sent.text;
 }
 
 /** The start of the send a view change left in flight: under a thread the view never knew, or, resumed from its row, under the thread its rows wait under. */
 function startsStray(state: ThreadState, e: SessionEvent): boolean {
   const { stray } = state;
-  return stray !== null && e.type === "session.start" && e.prompt === stray.prompt && (unknownThread(state, e) || e.threadId === stray.key);
+  return stray !== null && startOf(stray, e) && (unknownThread(state, e) || e.threadId === stray.key);
 }
 
-/** The start of the send in flight on this view. */
+/** The start of the send in flight on this view, under a thread the view never knew. */
 function startsSend(state: ThreadState, e: SessionEvent): boolean {
-  return state.sending !== null && startsPrompt(state, e, state.pendingPrompt?.text);
+  return state.sending !== null && state.pendingPrompt !== null && unknownThread(state, e) && startOf(state.pendingPrompt, e);
 }
 
 /** An event of the send in flight on a view without a start: its own start, or the done and end of a thread the view never knew, its harness dying before it could start. A start with another prompt, or a delta, is another client's thread. */
@@ -253,7 +260,7 @@ function sentEvent(state: ThreadState, e: SessionEvent): boolean {
 
 /**
  * An event the view does not hold. While a send a view change left in flight waits for its start, that
- * start names the rows under the workspace id; a thread the view never knew ending without one is that
+ * start names the rows under the stray's key; a thread the view never knew ending without one is that
  * send's harness dying before init, and its done alone keeps waiting for the end. Every other event
  * only makes its thread known, so a thread another client opened after this view's history cannot pass
  * for the person's own send later.
@@ -399,8 +406,8 @@ interface ViewKey {
  */
 export function leaveView(s: ThreadState, from: ViewKey, to: ViewKey): ThreadState {
   if (from.workspaceId !== to.workspaceId) return EMPTY;
-  const prompt = s.sending !== null && heldThreadId(s) === undefined ? s.pendingPrompt?.text : undefined;
-  return { ...EMPTY, known: knowing(s.known, s.events), stray: prompt === undefined ? s.stray : { prompt, key: from.threadId ?? from.workspaceId } };
+  const sent = s.sending !== null && heldThreadId(s) === undefined ? s.pendingPrompt : null;
+  return { ...EMPTY, known: knowing(s.known, s.events), stray: sent === null ? s.stray : { text: sent.text, requestId: sent.requestId, key: from.threadId ?? from.workspaceId } };
 }
 
 /** The row a view without a session.start resumes from: pinned, the thread's latest turn the harness answered; on the latest view, the turn the workspace remembers. */
@@ -486,7 +493,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
       }),
     [],
   );
-  const appendUserTurn = useCallback((text: string) => setState(s => ({ ...s, pendingPrompt: { text, at: now() } })), []);
+  const appendUserTurn = useCallback((text: string, requestId: string) => setState(s => ({ ...s, pendingPrompt: { text, requestId, at: now() } })), []);
   const appendLocalError = useCallback(
     (message: string) =>
       setState(s => ({

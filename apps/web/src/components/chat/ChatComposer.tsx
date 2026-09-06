@@ -41,7 +41,7 @@ import { ComposerBanner } from "./ComposerBanner";
 import { ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
-import { EMPTY_DRAFT, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
+import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
 import { ComposerOptionPickers, useComposerPicks } from "./ComposerOptionPickers";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -181,10 +181,11 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const start = useCallback(
     (prompt: string, onRefused: () => void) => {
       if (!api) return;
+      const requestId = newId();
       setSending(true);
       hold(threadKey);
-      appendUserTurn(prompt);
-      void api.startSession({ workspaceId, prompt, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions }).catch((err: unknown) => {
+      appendUserTurn(prompt, requestId);
+      void api.startSession({ workspaceId, prompt, requestId, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions }).catch((err: unknown) => {
         setSending(false);
         onRefused();
         appendLocalError(err instanceof Error ? err.message : String(err));

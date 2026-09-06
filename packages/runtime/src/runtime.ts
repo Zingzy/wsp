@@ -567,6 +567,8 @@ export interface Runtime {
         contextWindow?: string;
         /** Absent means a person asked. */
         startedBy?: SessionOrigin;
+        /** The client's id for this send, stamped on the turn's session.start as sent. */
+        requestId?: string;
       },
     ): Promise<SessionHandle>;
     /** Every turn this state file knows, the ones before a restart as they were last written; one that was still
@@ -1816,6 +1818,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               turnId,
               threadId,
               prompt: o.prompt,
+              ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
               ...(event.model !== undefined ? { model: event.model } : {}),
               ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
               ...(event.tools !== undefined ? { tools: event.tools } : {}),
