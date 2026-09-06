@@ -30,6 +30,7 @@ describe("wsp verbs over the host", () => {
   let codex: ReturnType<typeof scriptedAgent>;
 
   beforeEach(async () => {
+    asked.length = 0;
     dir = mkdtempSync(join(tmpdir(), "wsp-verbs-"));
     const webDir = join(dir, "web");
     mkdirSync(join(webDir, "assets"), { recursive: true });
@@ -66,6 +67,16 @@ describe("wsp verbs over the host", () => {
     return { code, io };
   }
   const json = (io: Captured): unknown[] => io.lines.map(l => JSON.parse(l) as unknown);
+  /** A verb run with a person at the keyboard: every question it asks is recorded and answered with reply. */
+  const asked: string[] = [];
+  async function answer(reply: string, ...argv: string[]): Promise<{ code: number; io: Captured }> {
+    const io = captured();
+    io.ask = async q => {
+      asked.push(q);
+      return reply;
+    };
+    return { code: await cli([...argv, "--state", statePath], io), io };
+  }
   const head = (m: typeof SEALED_GOLDEN) => m.versions.find(v => v.version === m.head)!;
 
   /** The host again on the same state file, over a runtime with these adapters; the verbs still see no key. */
@@ -247,15 +258,6 @@ describe("wsp verbs over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
 
     backend.machines[0]!.killed = true;
-    const asked: string[] = [];
-    const answer = async (reply: string, ...argv: string[]): Promise<{ code: number; io: Captured }> => {
-      const io = captured();
-      io.ask = async q => {
-        asked.push(q);
-        return reply;
-      };
-      return { code: await cli([...argv, "--state", statePath], io), io };
-    };
     const kept = await answer("no", "forget", "alpha");
     expect(kept.code).toBe(1);
     expect(kept.io.errors).toEqual(["alpha kept"]);
@@ -281,6 +283,42 @@ describe("wsp verbs over the host", () => {
     const missing = await run("forget", "nope", "--yes");
     expect(missing.code).toBe(1);
     expect(missing.io.errors).toEqual(["wsp forget: no workspace nope"]);
+  });
+
+  it("delete asks once in the words the app shows, kills the machine at the provider, and drops the record and its threads", async () => {
+    await run("new", "alpha");
+    await run("new", "beta");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const alpha = (await rt.workspaces.list()).find(w => w.name === "alpha")!;
+
+    const kept = await answer("no", "delete", "alpha");
+    expect(kept.code).toBe(1);
+    expect(kept.io.errors).toEqual(["alpha kept"]);
+    expect(asked).toEqual([`Delete alpha?\nIts machine is deleted at the provider; its record and 1 thread leave this computer.`]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
+    expect(backend.machines[0]!.killed).toBe(false);
+
+    const deleted = await answer("yes", "delete", alpha.id);
+    expect(deleted.code).toBe(0);
+    expect(deleted.io.errors).toEqual([]);
+    expect(deleted.io.lines).toEqual([
+      `deleted alpha ${alpha.id}: machine ${alpha.machineId} is gone at the provider, and its record and 1 thread are gone from this computer`,
+    ]);
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["beta"]);
+    expect(await rt.sessions.list(alpha.id)).toEqual([]);
+    expect(await store.get("workspaces", alpha.id)).toBeUndefined();
+
+    const beta = (await rt.workspaces.list())[0]!;
+    const asJson = await run("delete", "beta", "--yes", "--json");
+    expect(asJson.code).toBe(0);
+    expect(json(asJson.io)).toEqual([{ deleted: { workspaceId: beta.id, name: "beta", machineId: beta.machineId, threads: 0 } }]);
+    expect(backend.machines[1]!.killed).toBe(true);
+    expect(await rt.workspaces.list()).toEqual([]);
+
+    const missing = await run("delete", "nope", "--yes");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp delete: no workspace nope"]);
   });
 
   it("thread new opens a thread under the named agent, announces it, streams the reply and prints the last message", async () => {
@@ -922,7 +960,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("every verb takes --json and --help; a bad flag prints the usage", async () => {
-    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["wake"], ["forget"], ["threads"], ["thread", "new"], ["send"], ["stop"], ["exec"], ["import"], ["export"]]) {
+    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["wake"], ["forget"], ["delete"], ["threads"], ["thread", "new"], ["send"], ["stop"], ["exec"], ["import"], ["export"]]) {
       const help = await run(...verb, "--help");
       expect(help.code).toBe(0);
       expect(help.io.lines[0]).toMatch(new RegExp(`^usage: wsp ${verb.join(" ")}`));

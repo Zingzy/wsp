@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer, type Server } from "node:http";
-import { EventUnion, type WorkspaceStatus } from "@wsp/protocol";
+import { EventUnion, sendRefusal, workspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import type { StatusWatchOptions } from "../src/status.js";
+import { createStatusTracker, type StatusWatchOptions } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -133,7 +133,7 @@ describe("status.list", () => {
     expect((await rt.status.list())[0]).toMatchObject({ machineState: "gone", reach: { state: "gone" } });
   });
 
-  it("maps a prompt 426 to reachable, a prompt 502 to no-daemon, a late answer to slow, and silence to unreachable", async () => {
+  it("maps a prompt 502 to no-daemon, a late answer to slow, silence to unreachable, and leaves the row where it was for any other answer the edge gives", async () => {
     const backend = stubBackend();
     const fc = fakeClock();
     // The stub moves the clock as the request lands, so "late" is what the clock says and not how fast the box answered.
@@ -141,6 +141,12 @@ describe("status.list", () => {
     const cases: [number, number | "never", number, string][] = [
       [426, 0, 5_000, "reachable"],
       [502, 0, 5_000, "no-daemon"],
+      // Not the guest's answer, so it decides nothing on its own: an edge refusal must not take a live workspace
+      // out of service in the row, it only sends the poll to the provider for the machine's real state.
+      [200, 0, 5_000, "reachable"],
+      [401, 0, 5_000, "reachable"],
+      [404, 0, 5_000, "reachable"],
+      [503, 0, 5_000, "reachable"],
       [502, 150, 5_000, "slow"],
       [426, 150, 5_000, "slow"],
       [426, "never", 300, "unreachable"],
@@ -161,6 +167,9 @@ describe("status.list", () => {
       const status = (await fresh.status.list(opts)).find(s => s.machineId === last.id)!;
       expect(status.reach.state, `${code} after ${took}`).toBe(expected);
       expect(status.machineState).toBe("running");
+      // A running machine stays sendable through every answer but the guest's own silence or a dead daemon port.
+      const sendable = sendRefusal(workspaceState({ phase: status.phase, machineState: status.machineState, reach: status.reach.state })) === null;
+      expect(sendable, `${code} after ${took} sendable`).toBe(expected === "reachable" || expected === "slow");
     }
   });
 });
@@ -248,6 +257,183 @@ describe("status.watch cost events", () => {
     expect(phases).toEqual(["running", "pausing", "napping"]);
     expect(seen.at(-1)).toMatchObject({ id: ws.id, phase: "napping", machineState: "paused" });
   });
+});
+
+describe("the status ticks", () => {
+  it("an answer the guest did not send sends the poll to the provider once, and leaves the row running", async () => {
+    const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 });
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    // The edge refusing a token it minted itself: the request never reached the guest, so it says nothing about it.
+    const edge = await httpStub(401);
+    openServers.push(edge.server);
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    const calls = countProvider(backend);
+    const seen: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => seen.push((e as { status: WorkspaceStatus }).status));
+
+    const stop = rt.status.watch();
+    try {
+      await until(() => edge.hits() >= 8, 5_000);
+    } finally {
+      stop();
+    }
+    expect(calls()).toEqual({ get: 0, list: 0, state: 1 });
+    const last = seen.at(-1)!;
+    expect(last).toMatchObject({ phase: "running", machineState: "running", reach: { state: "reachable" } });
+    expect(sendRefusal(workspaceState({ phase: last.phase, machineState: last.machineState, reach: last.reach.state }))).toBeNull();
+  }, 10_000);
+
+  it("a tick that throws is logged and the next tick still runs; nothing reaches the process as an unhandled rejection", async () => {
+    const rejections: unknown[] = [];
+    const caught = (e: unknown): void => void rejections.push(e);
+    process.on("unhandledRejection", caught);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let asked = 0;
+    const tracker = createStatusTracker({
+      rateUsdPerHour: () => 0.11,
+      records: async () => {
+        asked++;
+        throw new Error("the store is gone");
+      },
+      store: memoryStore(),
+      emit: () => {},
+      on: () => () => {},
+      defaults: { costIntervalMs: 5, pollIntervalMs: 5 },
+    });
+    const stop = tracker.watch();
+    try {
+      await until(() => asked >= 4, 5_000);
+    } finally {
+      stop();
+      process.off("unhandledRejection", caught);
+      warn.mockRestore();
+    }
+    expect(rejections).toEqual([]);
+  }, 10_000);
+});
+
+describe("a pause the provider made", () => {
+  type Cost = EventUnion & { type: "workspace.cost" };
+
+  it("the poll asks the provider when the edge answers for the machine instead of the daemon, and the record follows", async () => {
+    const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 0 });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    // The edge answers for a machine it cannot hand the request to; only the daemon's own 426 proves a live guest.
+    const edge = await httpStub(404);
+    openServers.push(edge.server);
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    const statuses: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
+    const napped: EventUnion[] = [];
+    rt.events.on("workspace.napped", e => napped.push(EventUnion.parse(e)));
+    backend.machines[0]!.paused = true;
+
+    const stop = rt.status.watch();
+    try {
+      await until(() => statuses.some(s => s.phase === "napping"), 5_000);
+    } finally {
+      stop();
+    }
+    // The wire event says the pause was found, not made here: what the meter needs to end the stretch where it did.
+    expect(napped).toMatchObject([{ type: "workspace.napped", workspaceId: ws.id, found: true }]);
+    expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
+    // The status that moved it: the record still said running, the edge answered for the machine, the provider said
+    // paused. The edge's answer never reads as a dead daemon, so the row says Paused and not Unreachable.
+    const moved = statuses.find(s => s.phase === "running" && s.machineState === "paused")!;
+    expect(moved.reach.state).toBe("reachable");
+    expect(workspaceState({ phase: moved.phase, machineState: moved.machineState, reach: moved.reach.state })).toBe("paused");
+  }, 10_000);
+
+  it("a machine paused at the provider while the host was down hydrates napping, in the store too, and the gap is not billed", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const fc = fakeClock();
+    const status = { costIntervalMs: 15, pollIntervalMs: 60_000 };
+    // The clock jumps an hour: the idle window must not nap the workspace behind the test.
+    const idle = { defaultWindowMs: 24 * 3_600_000 };
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const costs: Cost[] = [];
+    first.events.on("workspace.cost", e => costs.push(e as Cost));
+    let stop = first.status.watch();
+    await until(() => costs.length >= 1);
+    fc.advance(60_000);
+    await until(() => costs.at(-1)!.awakeMs >= 60_000);
+    stop();
+    await first.close();
+    const metered = costs.at(-1)!.awakeMs;
+
+    // An hour down, and the provider paused the machine meanwhile: the next host reads the state off the view it fetches.
+    backend.machines[0]!.paused = true;
+    fc.advance(3_600_000);
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    expect((await second.workspaces.get(ws.id)).phase).toBe("napping");
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "napping" });
+    const after: Cost[] = [];
+    second.events.on("workspace.cost", e => after.push(e as Cost));
+    stop = second.status.watch();
+    await until(() => after.filter(t => t.phase === "napping").length >= 2);
+    const held = after.filter(t => t.phase === "napping");
+    expect(held[0]).toMatchObject({ rateUsdPerHour: 0 });
+    expect(held[1]!.awakeMs).toBe(held[0]!.awakeMs);
+    expect(held[0]!.awakeMs).toBeLessThanOrEqual(metered);
+
+    // The wake resumes the machine the provider paused, and the stretch starts there, not an hour ago.
+    await second.workspaces.wake(ws.id);
+    fc.advance(10_000);
+    await until(() => after.at(-1)!.phase === "running" && after.at(-1)!.awakeMs > held[0]!.awakeMs);
+    stop();
+    expect(after.at(-1)!.awakeMs).toBe(held[0]!.awakeMs + 10_000);
+    expect(backend.machines[0]!.resumes).toBe(1);
+    await second.close();
+  });
+
+  it("a pause found after a gap in watching ends the awake stretch at the last proof the machine was awake", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const status = { costIntervalMs: 15, pollIntervalMs: 15, promptMs: 10_000, probeTimeoutMs: 50, reconcileMinMs: 0 };
+    // The clock jumps an hour: the idle window must not nap the workspace behind the test.
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status, idle: { defaultWindowMs: 24 * 3_600_000 } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const live = await httpStub(426);
+    openServers.push(live.server);
+    // Under the refresh margin, so every poll mints the route again and the probe follows the machine's current one.
+    const minted = (port: number, at: number): { url: string; token: string; expiresAt: number } => ({ url: `http://127.0.0.1:${at}/?port=${port}`, token: "t", expiresAt: Date.now() + 60_000 });
+    backend.machines[0]!.previewUrl = async port => minted(port, live.port);
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    const napped: string[] = [];
+    rt.events.on("workspace.napped", () => napped.push("napped"));
+
+    let stop = rt.status.watch();
+    fc.advance(60_000);
+    const proofs = live.hits();
+    try {
+      await until(() => live.hits() > proofs && costs.at(-1)?.awakeMs === 60_000, 5_000);
+    } finally {
+      stop();
+    }
+
+    // An hour with nothing watching: no tick and no poll runs, and the provider pauses the machine within it.
+    fc.advance(3_600_000);
+    backend.machines[0]!.paused = true;
+    // The reach goes dark while a machine is paused (measured), whatever the record still says.
+    const dark = await httpStub(426, "never");
+    openServers.push(dark.server);
+    backend.machines[0]!.previewUrl = async port => minted(port, dark.port);
+
+    stop = rt.status.watch();
+    try {
+      await until(() => napped.length >= 1, 5_000);
+      const seen = costs.length;
+      await until(() => costs.length > seen, 2_000);
+    } finally {
+      stop();
+    }
+    expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
+    expect(costs.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: 60_000 });
+    expect((await rt.status.history(ws.id)).at(-1)).toMatchObject({ awakeMs: 60_000 });
+  }, 20_000);
 });
 
 describe("status.history", () => {

@@ -14,6 +14,7 @@ import WebSocket from "ws";
 import {
   AFTER_CUT_LINE,
   NOTIFY_ME,
+  deleteNotice,
   fmtThreads,
   foldThreads,
   forgetNotice,
@@ -305,29 +306,43 @@ export function stopLine(stopped: Stopped): string {
   return `thread ${stopped.threadId} ${STOP_WORDS[stopped.outcome]}`;
 }
 
-/** What a forget takes off this computer, counted before anyone is asked: the workspace's record and its threads. */
-export interface Forgetting {
+/** What dropping a workspace takes off this computer, counted before anyone is asked: its record and its threads. */
+export interface Dropping {
   workspace: WorkspaceView;
   threads: number;
 }
 
-export async function forgetting(client: HostClient, ref: string): Promise<Forgetting> {
+export async function dropping(client: HostClient, ref: string): Promise<Dropping> {
   const workspace = await workspaceOf(client, ref);
   return { workspace, threads: (await threads(client, workspace.id)).length };
 }
 
 /** The one confirmation a forget asks, naming what goes; the first line is the question, the second its hint. */
-export function forgetQuestion(f: Forgetting): string {
+export function forgetQuestion(f: Dropping): string {
   return `Forget ${f.workspace.name}?\n${forgetNotice(f.threads)}`;
 }
 
 /** Drops the workspace from the host's store; the runtime refuses while its machine still exists. */
-export async function forget(client: HostClient, f: Forgetting): Promise<void> {
+export async function forget(client: HostClient, f: Dropping): Promise<void> {
   await client.request("workspaces.forget", { workspaceId: f.workspace.id });
 }
 
-export function forgotLine(f: Forgetting): string {
+export function forgotLine(f: Dropping): string {
   return `forgot ${f.workspace.name} ${f.workspace.id}: its record and ${fmtThreads(f.threads)} are gone from this computer`;
+}
+
+/** The one confirmation a delete asks, in the words every client shows: what a forget takes, and the machine too. */
+export function deleteQuestion(d: Dropping): string {
+  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads)}`;
+}
+
+/** Kills the workspace's machine at the provider, then drops its record here; a machine already gone is no error. */
+export async function deleteWorkspace(client: HostClient, d: Dropping): Promise<void> {
+  await client.request("workspaces.delete", { workspaceId: d.workspace.id });
+}
+
+export function deletedLine(d: Dropping): string {
+  return `deleted ${d.workspace.name} ${d.workspace.id}: machine ${d.workspace.machineId} is gone at the provider, and its record and ${fmtThreads(d.threads)} are gone from this computer`;
 }
 
 /** The most characters a folder cell holds before its front is cut: the end of a path is what a person recognises. */
@@ -643,6 +658,13 @@ export function agentsFlag(value: string | undefined): string[] | undefined {
   return ids;
 }
 
+/** The one question a drop asks unless --yes, and the one line it prints when the answer is anything but yes. */
+async function confirmed(ctx: VerbContext, question: string, d: Dropping): Promise<boolean> {
+  if (ctx.flags["yes"] === true || (await ctx.io.ask(question)) === "yes") return true;
+  ctx.io.error(`${d.workspace.name} kept`);
+  return false;
+}
+
 const notYet = (verb: string, usage: string, options: Verb["options"], does: string): Verb => ({
   name: verb,
   usage,
@@ -744,13 +766,26 @@ export const VERBS: readonly Verb[] = [
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp forget takes one workspace");
       const client = await ctx.client();
-      const f = await forgetting(client, ref);
-      if (ctx.flags["yes"] !== true && (await ctx.io.ask(forgetQuestion(f))) !== "yes") {
-        ctx.io.error(`${f.workspace.name} kept`);
-        return 1;
-      }
+      const f = await dropping(client, ref);
+      if (!(await confirmed(ctx, forgetQuestion(f), f))) return 1;
       await forget(client, f);
       ctx.out.emit({ forgot: { workspaceId: f.workspace.id, name: f.workspace.name, threads: f.threads } }, forgotLine(f));
+      return 0;
+    },
+  },
+  {
+    name: "delete",
+    usage: "wsp delete <workspace> [--yes]",
+    about: "deletes the machine at the provider, then drops the record and threads from this computer",
+    options: { yes: { type: "boolean" } },
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp delete takes one workspace");
+      const client = await ctx.client();
+      const d = await dropping(client, ref);
+      if (!(await confirmed(ctx, deleteQuestion(d), d))) return 1;
+      await deleteWorkspace(client, d);
+      ctx.out.emit({ deleted: { workspaceId: d.workspace.id, name: d.workspace.name, machineId: d.workspace.machineId, threads: d.threads } }, deletedLine(d));
       return 0;
     },
   },

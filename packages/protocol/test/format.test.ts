@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DAEMON_UPDATING, daemonUpdateFailed, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
+import { DAEMON_UPDATING, daemonUpdateFailed, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -66,10 +66,11 @@ describe("notifyLine", () => {
   });
 });
 
-describe("fmtThreads and forgetNotice", () => {
-  it("counts threads with the noun, and names what a forget takes off this computer", () => {
+describe("fmtThreads, forgetNotice and deleteNotice", () => {
+  it("counts threads with the noun, and names what a forget and a delete each take off this computer", () => {
     expect([0, 1, 2].map(fmtThreads)).toEqual(["0 threads", "1 thread", "2 threads"]);
     expect(forgetNotice(1)).toBe("Its record and 1 thread leave this computer; the machine is already gone.");
+    expect(deleteNotice(2)).toBe("Its machine is deleted at the provider; its record and 2 threads leave this computer.");
   });
 });
 

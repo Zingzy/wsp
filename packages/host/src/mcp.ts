@@ -7,10 +7,10 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { AFTER_CUT_LINE, ProjectExportResult, ProjectGolden, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, deleteNotice } from "@wsp/protocol";
 import { INSTRUCTIONS } from "./skill.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, awake, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, forget, forgetting, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -88,6 +88,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
   const agent = z.string().optional().describe("the agent to run in the thread, such as claude or codex; absent means the host's default");
   const notify = z.string().optional().describe("a thread (by id, or a prefix of it) told in one line each time a turn of the new thread ends, as a message into it; or me, for the person's app");
   const cwd = z.string().optional().describe("the folder on the machine the thread works in, absolute; absent means the workspace's project folder, else the home folder");
+  const confirmDelete = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");
   /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
   const picks = {
     model: z.string().optional().describe("the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"),
@@ -181,9 +182,30 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
     },
     async ({ workspace: ref }) => {
       const client = await dial();
-      const f = await forgetting(client, ref);
+      const f = await dropping(client, ref);
       await forget(client, f);
       return asText(forgotLine(f), { workspaceId: f.workspace.id, name: f.workspace.name, threads: f.threads });
+    },
+  );
+  server.registerTool(
+    "delete",
+    {
+      description:
+        "Deletes the workspace's machine at the provider and drops its record and its threads from this computer and the person's sidebar. Everything on that machine's disk that was not exported or pushed goes with it and no wake brings it back; a workspace whose machine is already gone takes forget instead. Called without confirm it deletes nothing and answers with what would go, which is the line to put to the person.",
+      inputSchema: { workspace, confirm: confirmDelete },
+      outputSchema: { workspaceId: z.string(), name: z.string(), machineId: z.string(), threads: z.number().int() },
+    },
+    async ({ workspace: ref, confirm }) => {
+      const client = await dial();
+      const d = await dropping(client, ref);
+      const going = { workspaceId: d.workspace.id, name: d.workspace.name, machineId: d.workspace.machineId, threads: d.threads };
+      // The command line asks a person before this and the app will; over MCP the second call is that step, so a
+      // machine is never killed by one tool call the caller made on its own.
+      if (confirm !== true) {
+        return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads)} Ask the person, then call delete again with confirm true.`, going), isError: true };
+      }
+      await deleteWorkspace(client, d);
+      return asText(deletedLine(d), going);
     },
   );
   server.registerTool(

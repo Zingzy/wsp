@@ -7,7 +7,7 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AdapterEvent } from "@wsp/adapter-claude";
-import type { EventUnion, SessionEvent } from "@wsp/protocol";
+import { sendRefusal, workspaceState, workspaceWord, type EventUnion, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
@@ -340,6 +340,69 @@ describe("a pause the runtime did not start", () => {
     const woken = await rt.workspaces.wake(ws.id);
     expect(woken.phase).toBe("running");
     expect(m.resumes).toBe(1);
+    expect(m.paused).toBe(false);
+  });
+
+  it("a record left waking by a wake that never landed hydrates paused when the provider holds the machine paused, and the row offers Wake", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {} });
+    const ws = await first.workspaces.create({ golden: "snap_g", name: "x" });
+    const stored = (await store.get("workspaces", ws.id)) as { phase: string };
+    // The host died inside a wake the provider never finished, and the machine is paused at the provider.
+    await store.put("workspaces", ws.id, { ...stored, phase: "waking" });
+    backend.machines[0]!.paused = true;
+
+    const second = createRuntime({ backend, store, adapters: {} });
+    const hydrated = await second.workspaces.get(ws.id);
+    expect(hydrated.phase).toBe("napping");
+    expect(workspaceWord(workspaceState({ phase: hydrated.phase }))).toBe("Paused");
+    expect(sendRefusal(workspaceState({ phase: hydrated.phase }))).toBe("Workspace is paused; wake it to send");
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "napping" });
+
+    const woken = await second.workspaces.wake(ws.id);
+    expect(woken.phase).toBe("running");
+    expect(backend.machines[0]!.resumes).toBe(1);
+  });
+
+  it("a record left waking whose machine the provider is running hydrates running, so it bills, naps and takes sends again", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {} });
+    const ws = await first.workspaces.create({ golden: "snap_g", name: "x" });
+    const stored = (await store.get("workspaces", ws.id)) as { phase: string };
+    // The resume landed and the host died before it could write the record.
+    await store.put("workspaces", ws.id, { ...stored, phase: "waking" });
+
+    const second = createRuntime({ backend, store, adapters: {} });
+    const hydrated = await second.workspaces.get(ws.id);
+    expect(hydrated.phase).toBe("running");
+    expect(workspaceWord(workspaceState({ phase: hydrated.phase }))).toBe("Running");
+    expect(sendRefusal(workspaceState({ phase: hydrated.phase }))).toBeNull();
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "running" });
+    expect((await second.status.list())[0]).toMatchObject({ phase: "running", machineState: "running" });
+  });
+
+  it("a wake the provider refuses leaves the record paused, not waking, and the next wake tries again", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    await rt.workspaces.nap(ws.id);
+    const m = backend.machines[0]!;
+    const resume = m.resume.bind(m);
+    let refuse = true;
+    // What Solari's resume answers when it gives up: a transient status, out of retries.
+    m.resume = async () => {
+      if (refuse) throw Object.assign(new Error("upstream request timeout"), { kind: "transient", status: 504 });
+      return resume();
+    };
+    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("upstream request timeout");
+    expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "napping" });
+
+    refuse = false;
+    expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
     expect(m.paused).toBe(false);
   });
 
