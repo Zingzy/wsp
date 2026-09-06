@@ -7,15 +7,15 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { ProjectExportResult, ProjectGolden, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { ProjectExportResult, ProjectGolden, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { VERSION } from "./version.js";
-import { absoluteFolder, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, checkedPicks, create, createFromHead, dialHost, execOn, exportProject, follow, nap, notifyOf, openingOf, projectGoldenOf, resumeOf, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 const INSTRUCTIONS = [
   "wsp runs cloud machines called workspaces, each with agents working inside it, and this server is the same host the",
   "person's app is open on: whatever you do here shows in their sidebar, and they can read and answer any thread.",
   "Start with workspaces. Open a thread with thread_new (a workspace, a task, and the agent to run, such as codex);",
-  "it returns the reply when the turn ends. Continue a thread with send. Run a command on a machine with exec.",
+  "it returns the reply when the turn ends. Continue a thread with send; stop ends its running turn. Run a command on a machine with exec.",
   "new forks the golden image into a fresh machine, or with from, a project golden; fork makes a sibling of a workspace, pause naps one.",
   "snapshot takes a project golden of a workspace with a project loaded: the golden plus that project as it stands, so every",
   "new machine forked from it starts a task with the project in place and no upload.",
@@ -185,6 +185,18 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer } = {}): McpS
       const client = await dial();
       const out = turnOut(await follow(client, resumeOf(await threadOf(client, ref), message, input), "agent", QUIET_TURN));
       return asText(out.text, out);
+    },
+  );
+  server.registerTool(
+    "stop",
+    {
+      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error.",
+      inputSchema: { thread: z.string() },
+      outputSchema: { threadId: z.string(), outcome: SessionInterruptOutcome },
+    },
+    async ({ thread: ref }) => {
+      const stopped = await stop(await dial(), ref);
+      return asText(stopLine(stopped), { ...stopped });
     },
   );
   server.registerTool(

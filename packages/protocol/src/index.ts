@@ -207,8 +207,8 @@ export type SessionView = z.infer<typeof SessionView>;
 
 /** One sidebar thread as every client lists it: the turns sharing a threadId (a row stamped none is its own),
  * titled by the opening turn, in the state and times of the latest, with the opening turn's provenance, always
- * filled in. id is the fold key, the runtime's thread id or the lone row's id; claudeSessionId is the latest
- * turn's, what a send resumes. */
+ * filled in. id is the fold key, the runtime's thread id or the lone row's id; sessionId is the latest turn's row
+ * id, what a stop interrupts; claudeSessionId is the latest turn's harness id, what a send resumes. */
 export const ThreadView = z.object({
   id: z.string(),
   threadId: z.string().optional(),
@@ -217,6 +217,7 @@ export const ThreadView = z.object({
   startedBy: SessionOrigin,
   status: SessionStatus,
   title: z.string(),
+  sessionId: z.string(),
   claudeSessionId: z.string().optional(),
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
@@ -247,6 +248,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       startedBy: first.startedBy ?? "person",
       status: latest.status,
       title: first.prompt !== undefined ? titleLine(first.prompt) : first.claudeSessionId ?? first.id,
+      sessionId: latest.id,
       ...(latest.claudeSessionId !== undefined ? { claudeSessionId: latest.claudeSessionId } : {}),
       ...(latest.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),

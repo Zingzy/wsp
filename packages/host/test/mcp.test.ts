@@ -128,7 +128,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described, and none for import until it exists", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "snapshot", "thread_new", "threads", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["exec", "export", "fork", "new", "pause", "send", "snapshot", "stop", "thread_new", "threads", "workspaces"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
@@ -377,6 +377,25 @@ describe("the MCP server over the host", () => {
     expect(joined.structured).toEqual({ threadId: row!.threadId, workspaceId: row!.workspaceId, harness: "claude", text: "done STEERED", outcome: "steered" });
     expect(held.starts).toHaveLength(1);
     expect((await rt.sessions.history(row!.workspaceId)).map(e => e.type)).toEqual(["session.start", "session.steer", "session.delta", "session.done", "session.end"]);
+  });
+
+  it("stop ends the thread's running turn and returns the outcome; the waiting thread_new is a tool error saying interrupted; a second stop says not-running and is no error", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await call("new", { name: "alpha" });
+    const first = call("thread_new", { workspace: "alpha", task: "loop forever" });
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    const stopped = await call("stop", { thread: row!.threadId!.slice(0, 8) });
+    expect(stopped).toEqual({ text: `thread ${row!.threadId} stopped`, structured: { threadId: row!.threadId, outcome: "accepted" }, isError: false });
+    expect(held.interrupted).toEqual([row!.id]);
+    expect(await first).toEqual({ text: "turn interrupted", structured: undefined, isError: true });
+    expect((await rt.workspaces.list())[0]!.phase).toBe("running");
+    const idle = await call("stop", { thread: row!.threadId! });
+    expect(idle).toEqual({ text: `thread ${row!.threadId} not running`, structured: { threadId: row!.threadId, outcome: "not-running" }, isError: false });
+    expect(held.interrupted).toHaveLength(1);
+    const missing = await call("stop", { thread: "nope" });
+    expect(missing).toEqual({ text: "no thread nope", structured: undefined, isError: true });
   });
 
   it("thread_new with notify tells that thread when the new one ends, through the same start the CLI makes: the running parent is steered the line and the child's transcript names the parent", async () => {

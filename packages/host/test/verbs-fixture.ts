@@ -87,12 +87,18 @@ export function doneOnlyAgent(reply: (prompt: string) => string) {
   return { adapter, starts };
 }
 
-/** A harness whose every turn runs until the test releases it with the reply text; a resumed start keeps the session
- * id, and with steers the turn takes a message mid-way. */
+/** A harness whose every turn runs until the test releases it with the reply text, or ends interrupted when told to
+ * stop, as the real one does; a resumed start keeps the session id, and with steers the turn takes a message mid-way. */
 export function heldAgent(steers: boolean) {
   const starts: HarnessStartOptions[] = [];
   const steered: string[] = [];
+  const interrupted: string[] = [];
   const turns: { sessionId: string; onEvent: HarnessStartOptions["onEvent"]; finish: (r: TurnResult) => void }[] = [];
+  const end = (t: (typeof turns)[number], result: TurnResult): void => {
+    t.onEvent({ type: "turn.done", sessionId: t.sessionId, result });
+    t.onEvent({ type: "session.end", sessionId: t.sessionId, exitCode: 0, sawResult: true });
+    t.finish(result);
+  };
   const adapter: HarnessAdapterFactory = () => ({
     steers,
     start: o => {
@@ -100,12 +106,16 @@ export function heldAgent(steers: boolean) {
       const sessionId = o.resume ?? randomUUID();
       let finish!: (r: TurnResult) => void;
       const finished = new Promise<TurnResult>(r => (finish = r));
-      turns.push({ sessionId, onEvent: o.onEvent, finish });
+      const turn = { sessionId, onEvent: o.onEvent, finish };
+      turns.push(turn);
       queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }));
       return {
         localId: sessionId,
         finished,
-        interrupt: async () => {},
+        interrupt: async () => {
+          interrupted.push(sessionId);
+          setImmediate(() => end(turn, { status: "interrupted" }));
+        },
         ...(steers
           ? {
               steer: async (prompt: string) => {
@@ -120,11 +130,9 @@ export function heldAgent(steers: boolean) {
   const release = (turn: number, text: string): void => {
     const t = turns[turn]!;
     t.onEvent({ type: "turn.delta", sessionId: t.sessionId, kind: "text", text });
-    t.onEvent({ type: "turn.done", sessionId: t.sessionId, result: { status: "completed", text } });
-    t.onEvent({ type: "session.end", sessionId: t.sessionId, exitCode: 0, sawResult: true });
-    t.finish({ status: "completed", text });
+    end(t, { status: "completed", text });
   };
-  return { adapter, starts, steered, release };
+  return { adapter, starts, steered, interrupted, release };
 }
 
 /** A harness whose turn never ends: the session starts and nothing more arrives. */
