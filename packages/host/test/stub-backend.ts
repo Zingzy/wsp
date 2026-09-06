@@ -72,6 +72,7 @@ export function stubBackend(): StubBackend {
   let seq = 0;
   const machines: StubMachine[] = [];
   const snapshots: SnapshotRow[] = [];
+  const snapshotsNamed = new Map<string, number>();
   const vaultOrigin = vaultServer(() => backend.downloads);
 
   const backend: StubBackend = {
@@ -105,8 +106,11 @@ export function stubBackend(): StubBackend {
           return backend.execImpl(m, script);
         },
         async snapshot(name: string): Promise<string> {
-          const id = `snap_${name}`;
-          if (!snapshots.some(r => r.id === id)) snapshots.push({ id, sizeBytes: backend.snapshotBytes, createdAt: new Date().toISOString() });
+          // The provider mints an id per call; a repeated name (two in one millisecond) must not fold into one row.
+          const nth = (snapshotsNamed.get(name) ?? 0) + 1;
+          snapshotsNamed.set(name, nth);
+          const id = nth === 1 ? `snap_${name}` : `snap_${name}-${nth}`;
+          snapshots.push({ id, sizeBytes: backend.snapshotBytes, createdAt: new Date().toISOString() });
           return id;
         },
         async pause(): Promise<void> {
