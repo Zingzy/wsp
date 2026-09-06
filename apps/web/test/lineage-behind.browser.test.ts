@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Lineage section in a real Chromium for a workspace still on an older
-// version: its row carries the state in words and the button that moves it,
-// the version's retired rows sit under it, and neither pushes the tab wide, in
-// both themes. Like the missing-tools render test it runs only when asked for
+// version: its row carries the state in words, the button that moves it and
+// the rollback that moves the golden's head, the version's retired rows sit
+// under it, and none of it pushes the tab wide, in both themes. Like the missing-tools render test it runs only when asked for
 // (WSP_RENDER=1) and skips without Playwright's Chromium.
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -48,12 +48,16 @@ describe.skipIf(skipped !== undefined)("the offer to a workspace behind the head
     const v12 = await page!.locator("[data-k=v12]").boundingBox();
     const row = page!.locator("[data-k=v11]").locator("xpath=ancestor::li[1]");
     expect(await row.textContent()).toContain("on image v11, v12 available");
+    // Both actions sit on that row and neither evicts the other: Update moves this workspace, Roll back moves the
+    // golden's head for every fork after it.
     const button = page!.getByRole("button", { name: "update api to v12" });
-    // The offer is on the row it belongs to, below v12 and beside v11's own line.
+    const rollback = page!.getByRole("button", { name: "roll back to v11" });
     const box = (await button.boundingBox())!;
+    const backBox = (await rollback.boundingBox())!;
     expect(box.y).toBeGreaterThan(v12!.y);
-    expect(Math.abs(box.y + box.height / 2 - (v11!.y + v11!.height / 2))).toBeLessThan(box.height);
-    expect(await page!.getByRole("button", { name: "roll back to v11" }).count()).toBe(0);
+    for (const b of [box, backBox]) expect(Math.abs(b.y + b.height / 2 - (v11!.y + v11!.height / 2))).toBeLessThan(b.height);
+    // Side by side, in that order, and they do not overlap.
+    expect(box.x + box.width).toBeLessThanOrEqual(backBox.x);
 
     const label = await page!.locator("[data-k=retired-rows] p").boundingBox();
     expect(await page!.locator("[data-k=retired-rows] p").textContent()).toBe("retired, still on this image");
@@ -61,7 +65,7 @@ describe.skipIf(skipped !== undefined)("the offer to a workspace behind the head
     expect(await page!.locator("[data-k=retired-row]").allTextContents()).toEqual(["yq", "~/.zshrc", "diskbloom"]);
 
     const tab = (await page!.locator("[data-testid=machine-tab]").boundingBox())!;
-    for (const el of [box, label!, (await page!.locator("[data-k=retired-row]").last().boundingBox())!]) {
+    for (const el of [box, backBox, label!, (await page!.locator("[data-k=retired-row]").last().boundingBox())!]) {
       expect(el.x + el.width).toBeLessThanOrEqual(tab.x + tab.width);
     }
     await page!.locator("[data-testid=machine-tab]").screenshot({ path: join(SHOTS, `lineage-behind-${theme}.png`) });

@@ -127,8 +127,9 @@ describe("installing the MCP server for a local agent", () => {
     expect(HELP).toContain("--json");
   });
 
-  it("--agent and --json belong to mcp install alone: a command that has no JSON to print refuses the flag, and mcp --help says its own usage", async () => {
-    for (const cmd of ["recipe", "up", "init", "doctor"]) {
+  it("--agent belongs to mcp install alone, a command with no JSON to print refuses --json, and mcp --help says its own usage", async () => {
+    // recipe is not on this list: it prints a table, and --json is that table as one object.
+    for (const cmd of ["up", "init", "doctor"]) {
       const out = io();
       expect(await cli([cmd, "--json", "--state", statePath], out), cmd).toBe(1);
       expect(out.errors[0], cmd).toContain("Unknown option '--json'");
@@ -143,6 +144,14 @@ describe("installing the MCP server for a local agent", () => {
     const stray = io();
     expect(await cli(["mcp", "install", "--nope", "--state", statePath], stray)).toBe(1);
     expect(stray.errors[0]).toContain("Unknown option '--nope'");
+    // recipe parses its own flags for the same reason, so --json reaches it and --agent never does.
+    const recipeAgent = io();
+    expect(await cli(["recipe", "--agent", "claude", "--state", statePath], recipeAgent)).toBe(1);
+    expect(recipeAgent.errors[0]).toContain("Unknown option '--agent'");
+    expect(recipeAgent.errors[0]).toContain("usage: wsp recipe");
+    const recipeHelp = io();
+    expect(await cli(["recipe", "--help", "--state", statePath], recipeHelp)).toBe(0);
+    expect(recipeHelp.lines[0]).toMatch(/^usage: wsp recipe \[--tick used\|installed\|default\]/);
   });
 
   it("a line that puts a flag before the word gets mcp's own usage, the way a verb's line gets its verb's", async () => {

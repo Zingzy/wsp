@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The secrets step of wsp init: the pack cut every secret export out of the
-// rc files it carried, so each name is asked for here once the machine is up.
+// rc files it carried, and the sign-ins screen may have asked for an API key
+// instead of a login, so each name is asked for here once the machine is up.
 // The value is typed hidden, travels to the builder in the pty's environment
 // and lands in a profile.d file of its own (and in fish's conf.d when fish is
 // there), so a later update re-uploading the rc file cannot strip it; a name
@@ -16,17 +17,21 @@ import { runQuiet, type QuietRun } from "./signin-relay.js";
 
 export type SecretState = "set" | "skipped" | "failed";
 
-export interface SecretOutcome {
+/** One value to ask for: the variable set on the machine and where it comes from, in the words the question uses. */
+export interface SecretAsk {
   name: string;
-  /** The rc file the export was cut from, `~`-relative. */
-  path: string;
+  /** "cut from ~/.zshrc", "the key Claude Code reads there". */
+  from: string;
+}
+
+export interface SecretOutcome extends SecretAsk {
   state: SecretState;
   note?: string;
 }
 
 export interface SecretsStageOptions {
-  /** What the pack cut, per file. */
-  cut: readonly { path: string; names: readonly string[] }[];
+  /** Every value to ask for: what the pack cut, then the API keys the sign-ins screen chose. */
+  asks: readonly SecretAsk[];
   /** A fresh link to the builder's daemon, dialled before each command so a dropped one costs that command alone. */
   dial(): Promise<BuilderLink>;
   input: Readable;
@@ -110,17 +115,19 @@ async function quietly(o: SecretsStageOptions, command: string, env: Record<stri
 }
 
 export async function secretsStage(o: SecretsStageOptions): Promise<SecretOutcome[]> {
-  const outcomes: SecretOutcome[] = o.cut.flatMap(c => c.names.map((name): SecretOutcome => ({ name, path: c.path, state: "skipped" })));
+  // One variable is one ask however many rows want it: the machine's file is read once, before the loop, so a second
+  // ask for a name would not see the first one land and would append it twice.
+  const outcomes: SecretOutcome[] = [...o.asks.reduce((by, ask) => by.set(ask.name, [...(by.get(ask.name) ?? []), ask.from]), new Map<string, string[]>())].map(([name, from]): SecretOutcome => ({ name, from: from.join("; "), state: "skipped" }));
   if (outcomes.length === 0) return outcomes;
   const out = { output: o.output };
   if (o.skipWhy !== undefined) {
     for (const r of outcomes) r.note = o.skipWhy;
-    const files = [...new Set(outcomes.map(r => r.path))].join(", ");
-    log.step(`Secrets skipped: ${outcomes.map(r => r.name).join(", ")} (${files}). ${o.skipWhy[0]!.toUpperCase()}${o.skipWhy.slice(1)}.`, out);
+    const where = [...new Set(outcomes.map(r => r.from))].join(", ");
+    log.step(`Secrets skipped: ${outcomes.map(r => r.name).join(", ")} (${where}). ${o.skipWhy[0]!.toUpperCase()}${o.skipWhy.slice(1)}.`, out);
     return outcomes;
   }
   const timeoutMs = o.timeoutMs ?? COMMAND_MS;
-  log.step("Secrets were cut from your files. Paste each to set it on the machine, or leave it empty to skip.", out);
+  log.step("Paste each value to set it on the machine, or leave it empty to skip.", out);
   const machine = await quietly(o, readCommand(), {}, timeoutMs);
   if (typeof machine === "string") log.warn(`The machine's secrets file was not read (${machine}); every name is asked.`, out);
   const lines = typeof machine === "string" ? [] : machine.output.split("\n");
@@ -131,7 +138,7 @@ export async function secretsStage(o: SecretsStageOptions): Promise<SecretOutcom
       r.state = "set";
       r.note = "on the machine from an earlier run";
     } else {
-      const value = await passwordPrompt({ message: r.name, hint: `cut from ${r.path}; the value is set on the machine and never shown here`, input: o.input, output: o.output });
+      const value = await passwordPrompt({ message: r.name, hint: `${r.from}; the value is set on the machine and never shown here`, input: o.input, output: o.output });
       if (isCancel(value) || value === "") {
         r.note = "skipped by you";
       } else {

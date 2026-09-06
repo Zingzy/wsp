@@ -59,7 +59,8 @@ const CELLAR_LOCKED = /has already locked/;
 const BREW_LOCK_WAIT_S = 600;
 const BREW_LOCK_WAIT_CMD = `for l in /home/linuxbrew/.linuxbrew/var/homebrew/locks/*.lock; do [ -e "$l" ] && flock -w ${BREW_LOCK_WAIT_S} "$l" true; done; true`;
 
-export const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+/** Re-exported so the engine's callers keep one import; the rule itself lives beside fmtBytes in the protocol. */
+export { plural } from "@wsp/protocol";
 
 /** The line that names the failure, for a warning: the last `Error:` line on stderr (Homebrew
  * follows its error with advice), else the last stderr line, else stdout's; 124 is the guest-side timeout. */
@@ -222,6 +223,45 @@ async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], r
   }
 }
 
+/** What a batched check prints for a row that is not there: the marker, the row's id, then the last line its check
+ * printed. Like the command check above, one run answers for every row rather than one round trip each. */
+const CHECK_FAILED = "wsp-check";
+
+/** The installs that carry a check of their own, all read in one run on the tools PATH after the stage: a row whose
+ * install exited 0 without leaving its tool on the machine is a failure, not an install, and so is every row when
+ * the run itself could not be made, which is said in the stage detail rather than passing quietly. */
+async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], results: readonly ToolResult[], stage: (detail: string) => void): Promise<void> {
+  const checked = results.flatMap(r => {
+    const check = r.outcome === "installed" ? tools.find(t => t.id === r.id)?.check : undefined;
+    return check === undefined ? [] : [{ result: r, check }];
+  });
+  if (checked.length === 0) return;
+  const cmd = [
+    `export PATH=${TOOLS_PATH}`,
+    ...checked.map(c => `if ! out="$( ( ${c.check} ) 2>&1 )"; then printf '${CHECK_FAILED} %s %s\\n' ${shellQuote(c.result.id)} "$(printf '%s' "$out" | tail -1)"; fi`),
+  ].join("\n");
+  const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
+  if (res.exitCode !== 0) {
+    const why = reasonOf(res, INLINE_EXEC_MS / 1000);
+    stage(`the checks could not be run (${why}): ${checked.map(c => c.result.label).join(", ")} count as failed`);
+    for (const c of checked) {
+      c.result.outcome = "failed";
+      c.result.note = `the check could not be run (${c.check}): ${why}`;
+    }
+    return;
+  }
+  const failed = new Map(res.stdout.split("\n").flatMap(line => {
+    const words = line.trim().split(" ");
+    return words[0] === CHECK_FAILED && words[1] !== undefined ? [[words[1], words.slice(2).join(" ")] as const] : [];
+  }));
+  for (const c of checked) {
+    const why = failed.get(c.result.id);
+    if (why === undefined) continue;
+    c.result.outcome = "failed";
+    c.result.note = `the check did not pass (${c.check})${why === "" ? "" : `: ${why}`}`;
+  }
+}
+
 /** Runs the plan's installs one at a time. Each tool fails alone and is named in the stage detail;
  * one that waits on an install that failed is skipped with that install's name. At the first reading
  * under the floor the cleanup runs once and df is read again, since the bottle cache alone held 2.4 GB
@@ -276,6 +316,8 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       free = after;
     }
     stage(`${tool.label} (${i + 1}/${tools.length})`);
+    // Not the "label: line" shape a tool's own output takes, so the command being shown is not read as its first line.
+    if (tool.shown !== undefined) stage(`${tool.label} runs ${tool.shown}`);
     const t0 = Date.now();
     let res = await run(tool.cmd, tool.label);
     if (res.exitCode !== 0 && CELLAR_LOCKED.test(res.stderr)) {
@@ -297,6 +339,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     }
   }
   await verifyCommands(machine, tools, out.tools, stage);
+  await verifyChecks(machine, tools, out.tools, stage);
   const housekeeping = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run) : undefined;
   stage(closing(summarize(out.tools, housekeeping), await sweepCaches(machine), await freeNote(machine)));
   return out;

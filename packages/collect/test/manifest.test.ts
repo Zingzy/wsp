@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { LOGIN_CHOICES as PROTOCOL_LOGIN_CHOICES } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { LINUX, LOGIN_CHOICES, Manifest, ManifestEntry, RUNGS, parseManifest } from "../src/index.js";
 
@@ -19,9 +20,10 @@ describe("manifest schema", () => {
     expect(() => parseManifest({ entries: [{ ...token, consent: undefined }] })).toThrow(/entries\.0\.choice: only a logins row or a consent row carries a choice/);
   });
 
-  it("lists the six rungs in ladder order and the three login choices", () => {
+  it("lists the six rungs in ladder order and the four login choices, which the protocol owns", () => {
     expect(RUNGS).toEqual(["identity", "shell", "toolchains", "tools", "agents", "logins"]);
-    expect(LOGIN_CHOICES).toEqual(["copy", "machine", "skip"]);
+    expect(LOGIN_CHOICES).toEqual(["copy", "machine", "key", "skip"]);
+    expect(LOGIN_CHOICES).toBe(PROTOCOL_LOGIN_CHOICES);
   });
 
   it("accepts a fresh entry and every recipe field wsp init writes back", () => {

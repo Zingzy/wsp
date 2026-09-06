@@ -5,8 +5,9 @@
 // toolchain is one line; agents carry measured sizes in the catalog; a row
 // nothing measured counts at a stated default for its kind. Nothing here runs a
 // command: the host reads the Mac's Homebrew and hands the table in.
-import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
+import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MANAGER_FORMULA, MACOS_ONLY_FORMULAE, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
 import { LINUX_FORMULA_MIB, MIB, catalogEntry } from "@wsp/catalog";
+import type { RecipeCustomRow } from "@wsp/protocol";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
 
 export { NODE_BYTES } from "@wsp/catalog";
@@ -98,14 +99,16 @@ export function parseBrewInfo(json: unknown): BrewFormula[] {
   return out;
 }
 
-/** `du -sk` lines over the Cellar's entries: bytes by directory name. */
-export function parseDu(text: string): Map<string, number> {
+/** The name a du line is filed under: the last part of its path, unless the caller knows the paths it asked about. */
+const duName = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
+/** `du -sk` lines over a directory's entries: bytes by directory name, or by whatever `keyOf` calls each path. */
+export function parseDu(text: string, keyOf: (path: string) => string = duName): Map<string, number> {
   const out = new Map<string, number>();
   for (const line of text.split("\n")) {
     const m = /^(\d+)\s+(.+)$/.exec(line.trim());
     if (m === null) continue;
-    const path = m[2]!.replace(/\/+$/, "");
-    out.set(path.slice(path.lastIndexOf("/") + 1), Number(m[1]) * 1024);
+    out.set(keyOf(m[2]!.replace(/\/+$/, "")), Number(m[1]) * 1024);
   }
   return out;
 }
@@ -197,8 +200,10 @@ export interface DiskEstimate {
   over: number;
 }
 
-/** The recipe's cost on the disk from the ticked rows, the plan they make and the Mac's table. */
-export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew: BrewTable): DiskEstimate {
+/** The recipe's cost on the disk from the ticked rows, the plan they make and the Mac's table; a row outside the
+ * catalog counts at the size whoever added it measured, and as an install of unknown size without one. */
+export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew: BrewTable, custom: readonly RecipeCustomRow[] = []): DiskEstimate {
+  // The plan is asked only about the catalog's own steps; the rows outside it are counted by the loop below, each once.
   const plan = toolInstallsFor(ticked, brew);
   const installs = new Set(plan.installs.map(t => t.id));
   const toolchain = installs.has("tools/homebrew") ? BREW_TOOLCHAIN_BYTES : 0;
@@ -228,6 +233,10 @@ export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew
     if (formula !== undefined) for (const m of closureOf(formula, brew)) members.add(m);
   }
   for (const m of members) tools += formulaBytes(m, brew) ?? 0;
+  for (const c of custom) {
+    if (c.size !== undefined) tools += c.size;
+    else assume({ rung: "tools", id: `${CUSTOM_PREFIX}${c.id}`, label: c.name, paths: [], bytes: 0, default: "bring" });
+  }
   let agents = 0;
   for (const e of ticked) {
     if (e.rung !== "agents" || !installable(e)) continue;

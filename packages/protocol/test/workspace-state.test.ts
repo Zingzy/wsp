@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -45,6 +45,16 @@ describe("workspaceState", () => {
     expect(sendRefusal("waking")).toBe("Workspace is waking; sends open when it is running");
     expect(sendRefusal("unreachable")).toBe("Workspace is unreachable; sends open when the machine answers");
     expect(sendRefusal("gone")).toBe("Workspace machine is gone; rebuild it to send");
+  });
+
+  it("actionRefusal is the same sentence for any verb that needs the machine, and a send's is it with send", () => {
+    expect(actionRefusal("running", "import")).toBeNull();
+    expect(actionRefusal("paused", "import")).toBe("Workspace is paused; wake it to import");
+    expect(actionRefusal("pausing", "export")).toBe("Workspace is pausing; wake it to export");
+    expect(actionRefusal("waking", "import")).toBe("Workspace is waking; imports open when it is running");
+    expect(actionRefusal("unreachable", "export")).toBe("Workspace is unreachable; exports open when the machine answers");
+    expect(actionRefusal("gone", "import", "404")).toBe("Workspace machine is gone; rebuild it to import (404)");
+    for (const state of ["running", "pausing", "paused", "waking", "unreachable", "gone"] as const) expect(actionRefusal(state, "send", "x")).toBe(sendRefusal(state, "x"));
   });
 
   it("needsRebuild: the rebuild is the one action for a gone machine or a zombie, and for nothing else", () => {

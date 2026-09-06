@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { titleLine } from "./format.js";
+import { shellQuote } from "./shell-quote.js";
 
 /** The one rule for a URL a guest may hand to the laptop: http or https in any
  * case, no whitespace or control characters, at most HTTP_URL_MAX bytes, and
@@ -785,13 +786,20 @@ export function goldenHead(manifest: GoldenManifest | undefined): GoldenVersion 
   return manifest?.versions.find(v => v.version === manifest.head);
 }
 
+/** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an
+ * API key the tool reads, or left out. One list, read by the collector's rows, by a recipe's rows and by the words
+ * `wsp recipe --signin` takes. */
+export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
+export const LoginChoice = z.enum(LOGIN_CHOICES);
+export type LoginChoice = z.infer<typeof LoginChoice>;
+
 /** What a golden is built from, as its builder records it: every ticked row
  * with its login answer and tool pin, and every planned path with a digest of
  * the bytes that travel. Two recipes with equal digests build the same golden;
  * the hash a builder carries is this object's, so a later run can say what
  * changed instead of only that something did. */
 export const RecipeDigest = z.object({
-  ticks: z.array(z.object({ id: z.string(), choice: z.string().optional(), version: z.string().optional() })),
+  ticks: z.array(z.object({ id: z.string(), choice: LoginChoice.optional(), version: z.string().optional() })),
   /** The computer's login shell by name, when a shell row is ticked: it decides which shell the machine logs into. */
   login: z.string().optional(),
   /** A volatile entry (its tool rewrites it, or it is a Keychain value the machine gets rendered) is recorded but never hashed. */
@@ -817,7 +825,7 @@ export const RecipeRow = z.object({
   on: z.boolean(),
   source: RecipeSource,
   size: z.number().int().nonnegative().optional(),
-  signIn: z.enum(["copy", "machine", "skip"]).optional(),
+  signIn: LoginChoice.optional(),
 });
 export type RecipeRow = z.infer<typeof RecipeRow>;
 
@@ -831,17 +839,61 @@ export const RecipeHistory = z.object({
 });
 export type RecipeHistory = z.infer<typeof RecipeHistory>;
 
+/** Which rule decided every tick in a recipe: what the person's agents used on this computer, what is installed on
+ * it, or the catalog's own default. `wsp recipe --tick` names one; a recipe written without one (the wizard's
+ * screens) carries none and its rows say for themselves where each tick came from. */
+export const RecipeTick = z.enum(["used", "installed", "default"]);
+export type RecipeTick = z.infer<typeof RecipeTick>;
+/** The words `--tick` takes, in the order the help lists them. */
+export const RECIPE_TICKS: readonly RecipeTick[] = RecipeTick.options;
+
+/** A tool the recipe carries that the catalog does not, because an agent added it for the person's own projects:
+ * the lines that install it, run as given on the builder after every catalog road, and one command that exits 0
+ * once it is there. Nothing here is ever offered a sign-in: the install is the whole row. */
+export const RecipeCustomRow = z.object({
+  kind: z.literal("custom"),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  install: z.array(z.string().min(1)).min(1),
+  check: z.string().min(1),
+  /** The package manager the lines call, when the row came off a scan of one: the build brings that manager onto
+   * the machine before the row runs. A row nobody named a manager for runs on what the base and the ticks left. */
+  manager: z.string().min(1).optional(),
+  /** Bytes on the machine, when whoever added the row measured one. */
+  size: z.number().int().nonnegative().optional(),
+  why: z.string().min(1),
+});
+export type RecipeCustomRow = z.infer<typeof RecipeCustomRow>;
+
 /** The small recipe: catalog ids with a tick each and the source of that tick, written by wsp recipe from this
  * computer (or by hand, or by a local agent), read by wsp init --recipe, the app's pick screen and the import
- * of a project. It names catalog entries only and never carries a path's content or a key. */
+ * of a project. Beside them, the rows an agent added for tools the catalog has none for. Names, ticks and install
+ * lines only: never a path's content, never a key. */
 export const Recipe = z.object({
   version: z.literal(1),
   /** When it was written, ISO 8601. */
   at: z.string().min(1),
+  /** The rule that decided the ticks, when one was named; a later --set keeps it, so the table reads the same. */
+  tick: RecipeTick.optional(),
   histories: z.array(RecipeHistory),
   rows: z.array(RecipeRow),
+  /** Rows outside the catalog, added on purpose; a recipe written before they existed carries none. */
+  custom: z.array(RecipeCustomRow).optional(),
 });
 export type Recipe = z.infer<typeof Recipe>;
+
+/** The custom rows a recipe carries: the one reading of a recipe that has none. */
+export function customRows(recipe: Pick<Recipe, "custom">): readonly RecipeCustomRow[] {
+  return recipe.custom ?? [];
+}
+
+/** What a row added without a check of its own is checked with: its command on PATH. */
+export function commandCheck(bin: string): string {
+  return `command -v ${shellQuote(bin)}`;
+}
+
+/** The why on a row an agent added without saying more. */
+export const ADDED_BY_AGENT = "added by the agent";
 
 /** The live machine a person sets up before sealing it as a golden. It is not
  * a workspace and never appears in the rail; `screen` is present when the
@@ -1553,7 +1605,9 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, behindGoldenLine, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, notifyLine, titleLine, turnCutLine, type DurationStyle, type GoldenChange, type TurnCutRule } from "./format.js";
+export { actionRefusal, goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, behindGoldenLine, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, notifyLine, plural, titleLine, turnCutLine, type DurationStyle, type GoldenChange, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";
+export { underProject } from "./project-path.js";
+export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import type { RecipeDigest } from "@wsp/protocol";
+import { LOGIN_CHOICES, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
 import { SMALL_BYTES, SMALL_TOOLS, changeCounts, describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, retiredBy, rowsToApply, type RecipeDiff } from "../src/golden-diff.js";
 import type { RecipeEntry } from "../src/golden-import.js";
 
@@ -245,7 +245,7 @@ describe("what the build line counts", () => {
 });
 
 describe("a login answered with an API key", () => {
-  const keyed = (from: string, to: string) => diffRecipes(snap([row("logins", "logins/claude", { choice: from })]), snap([row("logins", "logins/claude", { choice: to })]));
+  const keyed = (from: LoginChoice, to: LoginChoice) => diffRecipes(snap([row("logins", "logins/claude", { choice: from })]), snap([row("logins", "logins/claude", { choice: to })]));
 
   it("is named for what it is, never as a login taken off the machine", () => {
     expect(describeDiff(keyed("copy", "key"))).toEqual(["claude: the API key is set when the machine is created, so it would not be on an updated one; pick the rebuild for it"]);
@@ -264,8 +264,20 @@ describe("a login answered with an API key", () => {
     expect(retiredBy(keyed("machine", "key"))).toEqual([]);
   });
 
-  it("an answer no screen gives yet reads as a row the recipe dropped, never as something taken off the machine", () => {
-    const later = diffRecipes(snap([row("logins", "logins/claude", { choice: "copy" })]), snap([row("logins", "logins/claude", { choice: "device-code" })]));
-    expect(describeDiff(later)).toEqual(["retire the claude, left signed in on the image"]);
+  it("a row the new recipe carries no answer for is retired, not taken off the machine", () => {
+    const gone = diffRecipes(snap([row("logins", "logins/claude", { choice: "copy" })]), snap([row("logins", "logins/claude")]));
+    expect(describeDiff(gone)).toEqual(["retire the claude, left signed in on the image"]);
+  });
+
+  it("every answer the sign-ins screen can give has its own words and its own road: a fifth one does not compile", () => {
+    // LOGIN_ANSWERS is keyed by LoginChoice, so an answer added to the union without an entry fails the build.
+    // This proves the entries that exist say something of their own rather than all falling to the same line.
+    const dropped = describeDiff(diffRecipes(snap([row("logins", "logins/claude", { choice: "copy" })]), snap([row("logins", "logins/claude")])));
+    for (const choice of LOGIN_CHOICES) {
+      const line = describeDiff(keyed(choice === "copy" ? "machine" : "copy", choice));
+      expect(line).toHaveLength(1);
+      if (choice !== "skip") expect(line).not.toEqual(dropped);
+    }
+    expect(new Set(LOGIN_CHOICES.map(c => describeDiff(keyed(c === "copy" ? "machine" : "copy", c))[0])).size).toBe(LOGIN_CHOICES.length);
   });
 });

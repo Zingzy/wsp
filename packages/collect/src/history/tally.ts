@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { catalogToolFor } from "@wsp/catalog";
+import { underProject } from "@wsp/protocol";
 import { commandNames, installNames } from "./commands.js";
 import type { Call } from "./reader.js";
 
@@ -45,8 +46,16 @@ class Tally {
   }
 }
 
-/** Reduces a reader's calls to names and counts; shell lines are read for their command words here and dropped. */
-export async function tally(calls: AsyncIterable<Call>): Promise<Usage> {
+/** Whether a call counts when the recipe is weighed against named folders: its session ran at one of them or
+ * inside it. A call whose store records no folder counts for nothing, since nothing says it is this project's. */
+export function inFolders(call: Call, folders: readonly string[]): boolean {
+  const folder = call.folder;
+  return folder !== undefined && folders.some(f => underProject(folder, f));
+}
+
+/** Reduces a reader's calls to names and counts; shell lines are read for their command words here and dropped.
+ * With `folders`, only the calls whose session ran at one of them or inside it are counted. */
+export async function tally(calls: AsyncIterable<Call>, folders?: readonly string[]): Promise<Usage> {
   const sessions = new Set<string>();
   let total = 0;
   const commands = new Tally();
@@ -57,6 +66,7 @@ export async function tally(calls: AsyncIterable<Call>): Promise<Usage> {
     if (t !== undefined) tools.add(t.id, session);
   };
   for await (const c of calls) {
+    if (folders !== undefined && !inFolders(c, folders)) continue;
     sessions.add(c.session);
     total += 1;
     switch (c.kind) {

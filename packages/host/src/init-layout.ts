@@ -103,9 +103,12 @@ export function colourDepth(tty: boolean, env: NodeJS.ProcessEnv = process.env):
 
 /** One 256-colour grey around text; written only where colourDepth says the terminal has 256 colours (8 bits) or more. */
 export const grey = (n: number, s: string): string => `\x1b[38;5;${n}m${s}\x1b[39m`;
-// Greys from the middle of the ramp, so they read on dark and light backgrounds alike; the keys a step brighter than what they do.
-const KEY_GREY = 247;
-const DESC_GREY = 243;
+/** The greys the screens paint from, brightest first. From the middle of the ramp, so they read on dark and light
+ * backgrounds alike; a key sits a step brighter than what it does, a heavy size a step brighter than the rest. */
+export const GREY = { bright: 247, mid: 243, dim: 239 } as const;
+/** The one accent beside the ramp: a tick that is on, the row under the cursor, the screen being answered, and the
+ * rows this computer's own agents ran. Nothing else on a screen takes a hue. */
+export const accent = (s: string): string => styleText("cyan", s);
 const DOT = unicode ? " • " : "   ";
 
 export interface HelpKey {
@@ -117,7 +120,7 @@ export interface HelpKey {
 export function helpLine(keys: readonly HelpKey[], depth: number): string {
   if (depth <= 1) return keys.map(k => `${k.key} ${k.does}`).join(DOT);
   if (depth < 8) return keys.map(k => `${k.key} ${styleText("dim", k.does)}`).join(styleText("dim", DOT));
-  return keys.map(k => `${grey(KEY_GREY, k.key)} ${grey(DESC_GREY, k.does)}`).join(grey(DESC_GREY, DOT));
+  return keys.map(k => `${grey(GREY.bright, k.key)} ${grey(GREY.mid, k.does)}`).join(grey(GREY.mid, DOT));
 }
 
 /** The columns a card's bar and its two spaces take before each line. clack's log.message writes lines as they are

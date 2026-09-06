@@ -51,26 +51,31 @@ export function workspaceWord(state: WorkspaceState): string {
   return WORDS[state];
 }
 
-/** Why a turn cannot be sent in this state; null while running. goneWords are the provider's, quoted when the
- * caller holds them (the runtime does, the composer does not). */
-export function sendRefusal(state: WorkspaceState, goneWords?: string): string | null {
+/** Why an action that needs the machine (send, import, export) cannot run in this state; null while running.
+ * goneWords are the provider's, quoted when the caller holds them (the runtime does, the composer does not). */
+export function actionRefusal(state: WorkspaceState, action: string, goneWords?: string): string | null {
   switch (state) {
     case "running":
       return null;
     case "pausing":
     case "paused":
-      return `Workspace is ${state}; wake it to send`;
+      return `Workspace is ${state}; wake it to ${action}`;
     case "waking":
-      return "Workspace is waking; sends open when it is running";
+      return `Workspace is waking; ${action}s open when it is running`;
     case "unreachable":
-      return "Workspace is unreachable; sends open when the machine answers";
+      return `Workspace is unreachable; ${action}s open when the machine answers`;
     case "gone":
-      return goneRefusal("send", goneWords);
+      return goneRefusal(action, goneWords);
     default: {
       const _exhaustive: never = state;
       return null;
     }
   }
+}
+
+/** Why a turn cannot be sent in this state; null while running. */
+export function sendRefusal(state: WorkspaceState, goneWords?: string): string | null {
+  return actionRefusal(state, "send", goneWords);
 }
 
 /** Rebuild is the one action left: the machine is gone, or a zombie the provider still calls running. Every

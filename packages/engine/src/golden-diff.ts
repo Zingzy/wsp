@@ -2,7 +2,7 @@
 // The recipe diff: what a golden was built from (the digest its seal wrote)
 // against the recipe now, as rows to apply on top and rows the recipe stopped
 // asking for. Pure; golden.ts runs the result on a fork or on the kept builder.
-import { MCP_ID_PREFIX, type GoldenChange, type GoldenRetired, type RecipeDigest } from "@wsp/protocol";
+import { MCP_ID_PREFIX, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
 
 type Tick = RecipeDigest["ticks"][number];
 type DigestFile = RecipeDigest["files"][number];
@@ -36,8 +36,8 @@ export interface LoginChange {
   id: string;
   label: string;
   /** The login choice before and after; absent when the row was not ticked. */
-  from?: string;
-  to?: string;
+  from?: LoginChoice;
+  to?: LoginChoice;
 }
 
 export interface RecipeDiff {
@@ -131,19 +131,28 @@ export function retiredBy(d: RecipeDiff, previous: readonly GoldenRetired[] = []
   return [...new Map(rows.map(r => [r.id, r])).values()];
 }
 
-/** A login row the new recipe carries no answer for: the row left it, so the update stops asking for that login. */
-const DROPPED = "\0dropped";
+/** What an update does with one login answer. `needsFreshMachine` is true for an answer that only takes on a
+ * machine built for it: a sign-in wants a pty on a builder before the seal, and a key is set in the environment at
+ * create time, so neither reaches a machine that is already running. */
+interface LoginAnswer {
+  line: (label: string) => string;
+  needsFreshMachine: boolean;
+}
 
-/** What an update does with each login answer, in the person's words. One entry per answer the sign-ins screen can
- * give, so a new answer is a line here and nowhere else; an answer with no entry reads as one the recipe dropped,
- * which is what an unticked row is. */
-const LOGIN_LINES: Record<string, (label: string) => string> = {
-  copy: label => `copy the ${label}`,
-  machine: label => `${label}: sign in on the machine is not done by an update, so it would not be in the golden; pick the rebuild for it`,
-  key: label => `${label}: the API key is set when the machine is created, so it would not be on an updated one; pick the rebuild for it`,
-  skip: label => `retire the ${label}, left signed in on the image`,
-  [DROPPED]: label => `retire the ${label}, left signed in on the image`,
+/** One entry per answer the sign-ins screen can give, keyed by the union itself: a fifth answer fails to compile
+ * here until it says what it does and whether an update can land it. This is the one place that knows, so the words
+ * and the road can never drift apart the way they did when a new answer fell through a catch-all. */
+const LOGIN_ANSWERS: Record<LoginChoice, LoginAnswer> = {
+  copy: { line: label => `copy the ${label}`, needsFreshMachine: false },
+  machine: { line: label => `${label}: sign in on the machine is not done by an update, so it would not be in the golden; pick the rebuild for it`, needsFreshMachine: true },
+  key: { line: label => `${label}: the API key is set when the machine is created, so it would not be on an updated one; pick the rebuild for it`, needsFreshMachine: true },
+  skip: { line: label => `retire the ${label}, left signed in on the image`, needsFreshMachine: false },
 };
+
+/** A login row the new recipe carries no answer for: the row left it, so the update stops asking for that login. */
+const dropped: LoginAnswer = { line: label => `retire the ${label}, left signed in on the image`, needsFreshMachine: false };
+
+const answerFor = (choice: LoginChoice | undefined): LoginAnswer => (choice === undefined ? dropped : LOGIN_ANSWERS[choice]);
 
 /** One line per change, for the person. */
 export function describeDiff(d: RecipeDiff): string[] {
@@ -164,7 +173,7 @@ export function describeDiff(d: RecipeDiff): string[] {
       group(change, agents.filter(a => a.id.startsWith(MCP_ID_PREFIX)).map(a => a.label), "MCP server");
     }
   }
-  for (const l of d.logins) lines.push((LOGIN_LINES[l.to ?? DROPPED] ?? LOGIN_LINES[DROPPED]!)(l.label));
+  for (const l of d.logins) lines.push(answerFor(l.to).line(l.label));
   return lines;
 }
 
@@ -184,10 +193,6 @@ export function changeCounts(d: RecipeDiff): GoldenChange[] {
   ];
 }
 
-/** Login answers an update cannot land: a sign-in on the machine needs a pty on a builder before the seal, and an
- * API key is set in the environment at create time, so neither reaches a machine that is already running. */
-const NEEDS_FRESH_MACHINE = new Set(["machine", "key"]);
-
 /** A change small enough that applying it on a fork beats a rebuild: no
  * agent to install, no login answer needing a machine built for it, at most
  * this many tool installs, and this much to upload. `bytesOf` is a row's size on this computer. */
@@ -196,7 +201,7 @@ export const SMALL_BYTES = 50 * 1024 * 1024;
 
 export function isSmallDelta(d: RecipeDiff, bytesOf: (id: string) => number): boolean {
   if (d.agents.some(a => a.change === "added")) return false;
-  if (d.logins.some(l => NEEDS_FRESH_MACHINE.has(l.to ?? ""))) return false;
+  if (d.logins.some(l => answerFor(l.to).needsFreshMachine)) return false;
   if (d.tools.filter(t => t.change !== "removed").length > SMALL_TOOLS) return false;
   const bytes = [...rowsToApply(d)].filter(id => rungOf(id) !== "tools").reduce((n, id) => n + bytesOf(id), 0);
   return bytes <= SMALL_BYTES;

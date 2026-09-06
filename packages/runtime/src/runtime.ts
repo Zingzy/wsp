@@ -94,7 +94,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -3046,7 +3046,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const projects: Runtime["projects"] = {
     async import(o) {
       const entry = await entryOf(o.workspaceId);
-      if (entry.record.phase !== "running") throw new Error(`workspace ${o.workspaceId} is ${entry.record.phase}; wake it before importing`);
+      const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "import", entry.record.gone);
+      if (refusal !== null) throw new Error(refusal);
       const began = clock.now();
       const report = (stage: ProjectImportStage, message: string, progress?: { bytes: number; total: number }): void => {
         bus.emit({ type: "project.import", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });
@@ -3135,7 +3136,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     async export(o) {
       const entry = await entryOf(o.workspaceId);
-      if (entry.record.phase !== "running") throw new Error(`workspace ${o.workspaceId} is ${entry.record.phase}; wake it before exporting`);
+      const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "export", entry.record.gone);
+      if (refusal !== null) throw new Error(refusal);
       const began = clock.now();
       const report = (stage: ProjectExportStage, message: string, progress?: { bytes: number; total: number }): void => {
         bus.emit({ type: "project.export", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });
