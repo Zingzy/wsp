@@ -18,7 +18,7 @@ export { type Presence, presenceOf } from "./detect/presence.js";
 export * from "./history/index.js";
 export { type CommandCount, type RecipeOptions, computeRecipe, floorApplies, unknownCommands } from "./recipe.js";
 export { MCP_BIN_DIRS, MCP_REMOTE_ID, MCP_REMOTE_LABEL, detectMcp, homePaths, linuxFit, mcpRemoteHash, type LinuxFit } from "./detect/mcp.js";
-export { CLAUDE_KEY_ENV, CLAUDE_SETTINGS, apiKeyHelperOf, detectLogins } from "./detect/logins.js";
+export { CLAUDE_KEY_ENV, apiKeyHelperOf, detectLogins } from "./detect/logins.js";
 export { FISH_CONF_D, RC_NAMES, RC_PATHS, isRcPath, isSecretName, rcFiles, simpleCommands, sourcedPaths, stripExports } from "./detect/shell-rc.js";
 export { type Signal, MAX_BYTES, bareUrls, fileSignals, keysSignal, modeSignal, nameSignal, pemSignal, topLevelKeys, urlSignal } from "./credential-signals.js";
 export { CACHE_WORD, FINDER_METADATA, INSTALL_NAMES, OUTPUT_NAMES } from "./cache-names.js";

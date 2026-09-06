@@ -6,9 +6,9 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, CLAUDE_SETTINGS, FISH_CONF_D, MCP_BIN_DIRS, type ManifestEntry, RC_NAMES, guardSources, isRcPath, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, FISH_CONF_D, MCP_BIN_DIRS, type ManifestEntry, RC_NAMES, guardSources, isRcPath, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
 import {
   agentInstallsFor,
   mcpPlanFor,
@@ -32,8 +32,8 @@ import {
   secretPath,
   withApiKeyHelper,
 } from "@wsp/engine";
-import { CLAUDE_CONFIG_DIR, MCP_AGENTS } from "@wsp/catalog";
-import type { RecipeCustomRow } from "@wsp/protocol";
+import { CATALOG_AGENTS, CLAUDE_CONFIG_DIR, CLAUDE_SETTINGS_FILE, MCP_AGENTS } from "@wsp/catalog";
+import type { GoldenLeftBehind, RecipeCustomRow } from "@wsp/protocol";
 import { tarPackCommand } from "./doctor.js";
 
 const execFileAsync = promisify(execFile);
@@ -326,17 +326,22 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     // The copied Claude settings name a helper that runs on this computer. On the machine it reads the key file the
     // login row placed, or goes when no key travelled: Claude Code runs a configured helper for every request, so
     // one that fails there would shadow any other login (measured on 2.1.257).
-    const settingsSource = join(opts.home, CLAUDE_SETTINGS.slice(2));
-    const claude = files.find(f => f.source === settingsSource || f.source === dirname(settingsSource));
-    const settingsStaged = claude === undefined ? undefined : join(stage, claude.dir ? `${claude.dest}/settings.json` : claude.dest);
+    // A laptop config file is staged by its own row or by the row of the directory holding it.
+    const stagedFor = (tildePath: string): { owner: PlannedFile; staged: string } | undefined => {
+      const source = join(opts.home, tildePath.slice(2));
+      const owner = files.find(f => f.source === source || f.source === dirname(source));
+      return owner === undefined ? undefined : { owner, staged: join(stage, owner.dir ? `${owner.dest}/${basename(source)}` : owner.dest) };
+    };
+    const settings = stagedFor(CLAUDE_SETTINGS_FILE);
+    const claude = settings?.owner;
     const key = plan.secrets.find(s => s.command !== undefined && opts.secrets.has(secretKey(s)));
     const reads = (k: PlannedSecret): string => `cat ${GUEST_HOME}/${k.dest}`;
-    if (claude !== undefined && settingsStaged !== undefined && existsSync(settingsStaged)) {
-      const text = readFileSync(settingsStaged, "utf8");
+    if (settings !== undefined && existsSync(settings.staged)) {
+      const text = readFileSync(settings.staged, "utf8");
       const rewritten = withApiKeyHelper(text, key === undefined ? undefined : reads(key));
       if (rewritten !== undefined && rewritten !== text) {
-        writeFileSync(settingsStaged, rewritten);
-        if (key === undefined) skipped.push({ id: claude.id, path: CLAUDE_SETTINGS, note: "apiKeyHelper left out of the copy: the command runs on this computer only" });
+        writeFileSync(settings.staged, rewritten);
+        if (key === undefined) skipped.push({ id: settings.owner.id, path: CLAUDE_SETTINGS_FILE, note: "apiKeyHelper left out of the copy: the command runs on this computer only" });
       }
     } else if (key !== undefined && (claude !== undefined || !opts.settingsPlanned)) {
       // A settings.json that did not travel stays here whole, by the person's tick; the one written names the key file and nothing else.
@@ -348,6 +353,27 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
         skipped.push({ id: key.id, path: secretPath(key), note: "the machine's settings.json names only the key file; your Claude Code config stayed here" });
       }
     }
+    // A hook's script travels beside the settings when it is a plain file under home, at the path the machine reads
+    // it from; a hook the machine could not run comes out, since the agent prints not found for it on every start.
+    const left: GoldenLeftBehind[] = [];
+    for (const a of CATALOG_AGENTS) {
+      if (a.hooks === undefined) continue;
+      const found = stagedFor(a.hooks.file);
+      if (found === undefined || !existsSync(found.staged)) continue;
+      const { owner, staged } = found;
+      const text = readFileSync(staged, "utf8");
+      const carried = a.hooks.carry(text, opts.home, abs => hookDest(abs, opts.home));
+      for (const c of carried.carried) {
+        const target = join(stage, c.to.slice(GUEST_HOME.length + 1));
+        if (existsSync(target)) continue;
+        mkdirSync(dirname(target), { recursive: true });
+        cpSync(c.from, target, { dereference: true });
+        chmodSync(target, statSync(c.from).mode & 0o7777);
+      }
+      for (const path of carried.left) left.push({ id: owner.id, path: a.hooks.file, note: leftBehind("hook", path) });
+      if (carried.text !== text) writeFileSync(staged, carried.text);
+    }
+    skipped.push(...left);
     for (const [g, mode] of modes) if (existsSync(join(stage, g))) chmodSync(join(stage, g), mode);
     if (existsSync(join(stage, ".ssh"))) chmodSync(join(stage, ".ssh"), 0o700);
     const unpacked = treeBytes(stage);
@@ -356,11 +382,19 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     const { file, args, env } = tarPackCommand(stage, tgz);
     await execFileAsync(file, args, { env });
     const tar = readFileSync(tgz);
-    return { tar, bytes: tar.length, unpacked, skipped, cut };
+    return { tar, bytes: tar.length, unpacked, skipped, cut, ...(left.length > 0 ? { leftBehind: left } : {}) };
   } finally {
     rmSync(stage, { recursive: true, force: true });
     rmSync(out, { recursive: true, force: true });
   }
+}
+
+/** Where a script a hook names lands on the guest: a plain file under home, resolving there, that the pack would
+ * copy, at the rewrite the plan applies to its directory; nothing otherwise. */
+function hookDest(abs: string, home: string): string | undefined {
+  if (!under(abs, home) || !under(resolved(abs) ?? "", home) || !isFile(abs)) return undefined;
+  const rel = relative(home, abs);
+  return refusedPath(rel, false) === undefined ? guestPath(`~/${rel}`) : undefined;
 }
 
 export interface ImportOptions {
@@ -504,7 +538,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
       return value === undefined ? [] : [{ id: s.id, path: secretPath(s), dest: s.dest, digest: createHash("sha256").update(value).digest("hex"), volatile: true }];
     });
   const hash = recipeHash(recipeDigest(bring, digested, opts.custom));
-  const settingsSource = join(home, CLAUDE_SETTINGS.slice(2));
+  const settingsSource = join(home, CLAUDE_SETTINGS_FILE.slice(2));
   const packOpts: PackOptions = { secrets: opts.secrets, home, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)) };
   const pack = (): Promise<PackedFiles> => packPlan(plan, packOpts);
   const volatileFiles = files.filter(f => f.volatile);

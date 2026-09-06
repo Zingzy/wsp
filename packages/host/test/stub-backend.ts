@@ -54,6 +54,27 @@ function vaultServer(downloads: () => StubBackend["downloads"]): () => Promise<s
 /** The Node the fake's base image ships, as the real one did before the base floor. */
 const BASE_NODE = "v18.20.4";
 
+export interface McpEditPlan {
+  write: boolean;
+  agents: { scopes: { files: string[]; keep: string[]; drop: { name: string }[] }[] }[];
+}
+
+/** The plan the MCP edit script was handed, read off the command's last quoted argument; nothing for any other command. */
+export function mcpEditPlan(cmd: string): McpEditPlan | undefined {
+  if (!cmd.includes("const plan = JSON.parse(process.argv[1]);")) return undefined;
+  const quoted = /'(\{"agents".*\})'\s*$/s.exec(cmd);
+  return quoted === null ? undefined : (JSON.parse(quoted[1]!.replaceAll(String.raw`'\''`, "'")) as McpEditPlan);
+}
+
+/** The MCP edit script's report for the plan it was handed: every kept server written, every dropped one gone, as a
+ * machine whose config holds them all would answer. Nothing for any other command. */
+export function mcpReport(cmd: string): string | undefined {
+  const plan = mcpEditPlan(cmd);
+  if (plan === undefined) return undefined;
+  const scopes = plan.agents.flatMap(a => a.scopes.map(s => ({ file: s.files[0] ?? null, results: [...s.keep.map(name => ({ name, outcome: "written" })), ...s.drop.map(d => ({ name: d.name, outcome: "dropped" }))] })));
+  return JSON.stringify({ scopes });
+}
+
 /** What a bare guest answers: nothing, except a Node step, which keeps the base's Node when it meets the step's floor
  * and installs the pinned release when it does not, and the reach check. */
 export function guestAnswer(cmd: string): ExecResult {
@@ -63,6 +84,8 @@ export function guestAnswer(cmd: string): ExecResult {
     return { exitCode: 0, stdout: `NODE_HAVE ${BASE_NODE}\n${kept ? `NODE_KEPT ${BASE_NODE}` : `NODE_INSTALLED v${NODE_RELEASES[22].version}`}\n`, stderr: "" };
   }
   if (cmd === "echo ok") return { exitCode: 0, stdout: "ok\n", stderr: "" };
+  const mcp = mcpReport(cmd);
+  if (mcp !== undefined) return { exitCode: 0, stdout: `${mcp}\n`, stderr: "" };
   // The machine context probe answers with its markers and nothing found, as a bare guest would.
   if (cmd.includes("echo WSP_CTX")) return { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" };
   return { exitCode: 0, stdout: "", stderr: "" };

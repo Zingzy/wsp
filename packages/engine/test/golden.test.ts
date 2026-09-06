@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, removalsFor, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import type { RecipeDigest } from "@wsp/protocol";
@@ -1557,6 +1557,20 @@ describe("golden import stages", () => {
     expect(again.ledger.missingTools).toEqual([{ id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }]);
   });
 
+  it("the ledger carries what the pack left off the image, the seal stamps it on the version, and an attach whose files are already there keeps it", async () => {
+    const { backend, fetch } = backendFor();
+    const leftBehind = [{ id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: /opt/homebrew/bin/terminal-notifier" }];
+    const files = { ...importOf().files!, pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [...leftBehind], cut: [], leftBehind }) };
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ files }) });
+    expect(builder.import?.leftBehind).toEqual(leftBehind);
+    expect((await sealGolden(builder, { backend, smoke: "true" })).version.leftBehind).toEqual(leftBehind);
+    const again = await applyGoldenImport(builder.machine, { import: importOf(), setup: "true", ledger: builder.import, fetch });
+    expect(again.ledger.leftBehind).toEqual(leftBehind);
+    const clean = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    expect(clean.import?.leftBehind).toBeUndefined();
+    expect((await sealGolden(clean, { backend, smoke: "true" })).version.leftBehind).toBeUndefined();
+  });
+
   describe("golden update", () => {
     const SNAPSHOT: RecipeDigest = { ticks: [], files: [] };
     const head: GoldenVersion = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", kind: "desktop", setupSha: "s1", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "claude --version && gemini --version", exitCode: 0 }, size: { cpu: 2, memMb: 8192 }, base: [{ name: "node", version: "22.23.2" }, { name: "jq", version: "1.7.1" }] };
@@ -1727,6 +1741,30 @@ describe("golden import stages", () => {
       expect(ledger.missingTools).toEqual([gopls, { id: "tools/brew/jq", name: "jq", outcome: "skipped", note: "no Linux bottle known" }]);
       const clean = await applyDelta(await backend.create({ kind: "sandbox", template: "base" }), deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, previousMissing: [bun, jq], fetch });
       expect(clean.ledger.missingTools).toBeUndefined();
+    });
+
+    it("nextLeftBehind keeps the previous version's notes for rows the delta neither planned again nor removed, beside what this pack left behind", () => {
+      const hook = { id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: ~/.claude/hooks/gone" };
+      const codexNote = { id: "agents/codex", path: "~/.codex/config.toml", note: "hook left behind: ~/x" };
+      // deltaOf removes agents/claude and plans agents/codex again.
+      expect(nextLeftBehind([hook, codexNote], deltaOf(), [])).toEqual([]);
+      const untouched = deltaOf({ removals: [], import: { ...deltaOf().import, agents: [] } });
+      expect(nextLeftBehind([hook], untouched, [])).toEqual([hook]);
+      const replanned = deltaOf({ removals: [], import: { ...deltaOf().import, agents: [{ id: "agents/claude", name: "Claude Code", install: "claude-install", smoke: "claude --version" }] } });
+      const fresh = { ...hook, note: "hook left behind: ~/.claude/hooks/new" };
+      expect(nextLeftBehind([hook], replanned, [fresh])).toEqual([fresh]);
+    });
+
+    it("applyDelta and upgradeBuilder carry the head's left-behind notes through that rule, and the next seal stamps them", async () => {
+      const { backend, fetch } = backendFor();
+      const hook = { id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: ~/.claude/hooks/gone" };
+      const untouched = deltaOf({ removals: [], import: { ...deltaOf().import, agents: [] } });
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const { ledger } = await applyDelta(machine, untouched, { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, previousLeftBehind: [hook], fetch });
+      expect(ledger.leftBehind).toEqual([hook]);
+      const builder = await upgradeBuilder({ backend, head: { ...head, leftBehind: [hook] }, delta: untouched, setup: "true", fetch });
+      expect(builder.import?.leftBehind).toEqual([hook]);
+      expect((await sealGolden(builder, { backend, smoke: "true" })).version.leftBehind).toEqual([hook]);
     });
 
     it("upgradeBuilder hands the head's missing tools to the delta, so the next version still names them", async () => {

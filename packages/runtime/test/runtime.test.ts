@@ -4226,6 +4226,25 @@ describe("runtime golden update and the post-seal grace", () => {
     expect((await rt.golden.get())?.versions.map(v => v.missingTools)).toEqual([want, want, want]);
   });
 
+  it("the seal stamps what the pack left off the image on the version, and an update carries it on both roads", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const left = [{ id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: /opt/homebrew/bin/terminal-notifier" }];
+    const imp = importOf();
+    const files = { ...imp.files!, pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [...left], cut: [], leftBehind: left }) };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith({ ...imp, files }), clock: fakeClock().clock });
+    const b = await rt.golden.prepare();
+    expect((await rt.golden.seal(b.id)).version.leftBehind).toEqual(left);
+    const two = await rt.golden.upgrade({ delta: deltaOf("h2") });
+    expect(two.road).toBe("builder");
+    expect(two.version.leftBehind).toEqual(left);
+    backend.machines[0]!.killed = true;
+    const three = await rt.golden.upgrade({ delta: deltaOf("h3") });
+    expect(three.road).toBe("fork");
+    expect(three.version.leftBehind).toEqual(left);
+    expect((await rt.golden.get())?.versions.map(v => v.leftBehind)).toEqual([left, left, left]);
+  });
+
   it("an update stamps the logins it is given on the new version, on both roads; one given none carries none", async () => {
     const { backend, rt } = started();
     const b = await rt.golden.prepare();

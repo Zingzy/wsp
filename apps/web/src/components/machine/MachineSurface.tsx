@@ -4,7 +4,7 @@
 // workspace's machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { foldThreads, needsRebuild, type GoldenMissingTool, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, needsRebuild, type GoldenLeftBehind, type GoldenMissingTool, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -534,6 +534,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                 below={
                   <>
                     {fork && v.missingTools !== undefined && v.missingTools.length > 0 && <MissingTools tools={v.missingTools} />}
+                    {fork && v.leftBehind !== undefined && v.leftBehind.length > 0 && <LeftBehind rows={v.leftBehind} />}
                     {under(v.snapshotId)}
                   </>
                 }
@@ -619,23 +620,33 @@ function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGol
   );
 }
 
-/** One row per tool the import left off the image, with its cause and reason: a count would not say why a tool is missing. */
-function MissingTools({ tools }: { tools: GoldenMissingTool[] }) {
+/** A micro-label over rows of name and note under a version; `keys` are the data-k of the list, the name and the note. */
+function VersionNotes({ label, aria, keys, rows }: { label: string; aria: string; keys: [string, string, string]; rows: { key: string; name: string; note: string }[] }) {
   return (
-    <div className="mt-1.5 ml-3.5" data-k="missing-tools">
-      <p className="text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">not on this image</p>
-      <ul className="mt-0.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted-foreground" aria-label="tools not on this image">
-        {tools.map(t => (
-          <li key={t.id} className="contents">
-            <span data-k="missing-tool">{t.name}</span>
-            <span className="min-w-0 break-words" data-k="missing-note">
-              {t.outcome}: {t.note}
+    <div className="mt-1.5 ml-3.5" data-k={keys[0]}>
+      <p className="text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+      <ul className="mt-0.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted-foreground" aria-label={aria}>
+        {rows.map(r => (
+          <li key={r.key} className="contents">
+            <span data-k={keys[1]}>{r.name}</span>
+            <span className="min-w-0 break-words" data-k={keys[2]}>
+              {r.note}
             </span>
           </li>
         ))}
       </ul>
     </div>
   );
+}
+
+/** One row per tool the import left off the image, with its cause and reason: a count would not say why a tool is missing. */
+function MissingTools({ tools }: { tools: GoldenMissingTool[] }) {
+  return <VersionNotes label="not on this image" aria="tools not on this image" keys={["missing-tools", "missing-tool", "missing-note"]} rows={tools.map(t => ({ key: t.id, name: t.name, note: `${t.outcome}: ${t.note}` }))} />;
+}
+
+/** One row per path the pack left off the image, the file it was read from beside the reason. */
+function LeftBehind({ rows }: { rows: GoldenLeftBehind[] }) {
+  return <VersionNotes label="left on this computer" aria="left on this computer" keys={["left-behind", "left-path", "left-note"]} rows={rows.map(r => ({ key: `${r.path} ${r.note}`, name: r.path, note: r.note }))} />;
 }
 
 function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; status: WorkspaceStatus | null; upgrade: Upgrade }) {

@@ -249,13 +249,18 @@ export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, s
   };
 }
 
-export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string> = new Map()): void {
-  const entries = manifest.entries.map(e => {
+/** The collector's rows as the screens left them: every row with its tick, and on each row that took an answer the
+ * word it got. The one reading of ticks and answers the build, the MCP plan and the saved recipe share. */
+export function answeredRows(manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string>): ManifestEntry[] {
+  return manifest.entries.map(e => {
     const choice = choices.get(e.id);
     return { ...e, bring: ticks.has(e.id), ...(isLoginChoice(choice) ? { choice } : {}) };
   });
+}
+
+export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string> = new Map()): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ entries }, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify({ entries: answeredRows(manifest, ticks, choices) }, null, 2)}\n`);
 }
 
 export function agentName(e: ManifestEntry): string {
