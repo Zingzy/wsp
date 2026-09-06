@@ -10,11 +10,11 @@ import { styleText } from "node:util";
 import { Prompt, isCancel } from "@clack/core";
 import { S_BAR, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT } from "@clack/prompts";
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, type CatalogEntry, type ToolEntry, agentName as catalogName } from "@wsp/catalog";
-import type { LoginChoice, Manifest, ManifestEntry } from "@wsp/collect";
+import { withProject, type LoginChoice, type Manifest, type ManifestEntry, type ProjectScan } from "@wsp/collect";
 import { MEASURED_ON, estimateDisk, isMcpRow, parseMcpId, type BrewTable, type DiskEstimate } from "@wsp/engine";
 import { fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
-import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, colourDepth, helpLine, isTTY, widthOf, wrap, type HelpKey } from "./init-layout.js";
+import { GUTTER, S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, helpLine, isTTY, table, textPrompt, widthOf, wrap, type HelpKey } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginShown, loginTool, rowsHere } from "./init-recipe.js";
 import { rungSelect, type FooterLine, type SelectItem } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
@@ -25,6 +25,12 @@ export const NEED_TITLE = "What they need";
 export const SIGN_INS_TITLE = "Sign-ins and keys";
 /** The word over the floor rows on the tools list: they are on every machine, whatever is ticked. */
 export const BASE_WORD = "in the base";
+/** The group over the rows the project's own manifests asked for; first after the base, since a repo that will not
+ * build without a tool outranks anything this Mac happens to have. */
+export const PROJECT_WORD = "your project needs";
+/** The first screen's own question when no folder was named on the command line; nothing has to answer it. */
+export const PROJECT_QUESTION = "Which project are you bringing first?";
+const PROJECT_HINT = "optional; a folder on this Mac, read for what its own files say it needs";
 /** The word over the logins that run on the machine after the build; nothing here changes them. */
 export const MACHINE_WORD = "sign in on the machine after the build";
 /** The group over the rows that write on this Mac, under the keys that travel to the machine. */
@@ -33,17 +39,22 @@ export const ON_THIS_MAC = "On this Mac";
 const dim = (s: string): string => styleText("dim", s);
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/** A source word as its group heading: the same word, its first letter raised. */
+export const groupLabel = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
+
 const rowOf = (recipe: Recipe, id: string): RecipeRow | undefined => recipe.rows.find(r => r.id === id);
 /** Whether the recipe found the entry on this Mac. */
 const onThisMac = (recipe: Recipe, id: string): boolean => rowOf(recipe, id)?.source.kind === "installed";
 
 /** Where a tool's tick comes from, in the words the screen uses: the base for a floor row, else its recipe source. */
-export type SourceWord = typeof BASE_WORD | "installed here" | "used by your agents" | "popular in the catalog";
-const SOURCE_ORDER: readonly SourceWord[] = [BASE_WORD, "installed here", "used by your agents", "popular in the catalog"];
+export type SourceWord = typeof BASE_WORD | typeof PROJECT_WORD | "installed here" | "used by your agents" | "popular in the catalog";
+const SOURCE_ORDER: readonly SourceWord[] = [BASE_WORD, PROJECT_WORD, "installed here", "used by your agents", "popular in the catalog"];
 
 export function sourceWord(e: ToolEntry, r: RecipeRow | undefined): SourceWord {
   if (e.floor) return BASE_WORD;
   switch (r?.source.kind) {
+    case "project":
+      return PROJECT_WORD;
     case "installed":
       return "installed here";
     case "used":
@@ -131,6 +142,8 @@ export function agentItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
 /** The recipe source in words with its counts, for a tool's detail pane. */
 function sourceLine(e: ToolEntry, r: RecipeRow | undefined): string {
   switch (r?.source.kind) {
+    case "project":
+      return r.source.why;
     case "installed":
       return r.source.bin ? "installed on this Mac" : `on this Mac: ${r.source.paths.join(", ")}`;
     case "used":
@@ -157,7 +170,7 @@ export function toolItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
       word,
       ...(e.size !== undefined ? { hint: fmtBytes(e.size) } : {}),
       detail: [e.floor ? `${sourceLine(e, r)}; on every machine` : sourceLine(e, r), build],
-      ...(e.floor ? { lock: "on" } : { group: word.charAt(0).toUpperCase() + word.slice(1) }),
+      ...(e.floor ? { lock: "on" } : { group: groupLabel(word) }),
     };
   });
   return SOURCE_ORDER.flatMap(w => items.filter(i => i.word === w)).map(({ word: _word, ...item }) => item);
@@ -337,6 +350,19 @@ export async function needScreen(o: NeedOptions): Promise<NeedAnswer | "cancel">
 
 // --- the flow ------------------------------------------------------------------
 
+/** What the folder asked for, in the card the question leaves behind: a row per catalog tool with the file that asked,
+ * then the names the catalog carries no row for. */
+export function projectNote(scan: ProjectScan): string[] {
+  if (scan.rows.length === 0 && scan.candidates.length === 0) return [`Nothing in ${scan.dir} named a tool the catalog carries.`];
+  return [
+    ...table(scan.rows.map(n => [n.name, n.why])),
+    ...(scan.candidates.length > 0 ? [`Not in the catalog: ${scan.candidates.map(n => `${n.name} (${n.why})`).join(", ")}`] : []),
+  ];
+}
+
+/** What the card says when the answer names no folder that is there. */
+export const noFolderNote = (folder: string): string => `There is no folder at ${folder}; nothing was read.`;
+
 export interface PickOptions {
   /** The collector's rows, every catalog agent among them. */
   manifest: Manifest;
@@ -346,6 +372,10 @@ export interface PickOptions {
   from: "agents" | "logins";
   /** The person's home, where an agent's config is read for the wsp tools rows. */
   home: string;
+  /** The project folder named on the command line, already weighed into the recipe; absent, the first screen asks for one. */
+  project?: string;
+  /** Reads one project folder's own manifests for what it needs; nothing when there is no folder there. */
+  scanProject(folder: string): Promise<ProjectScan | undefined>;
   input: Readable;
   output: Writable;
 }
@@ -360,10 +390,27 @@ export interface Picked {
 
 type Screen = "agents" | "need" | "logins";
 
+/** The recipe with the answered folder's needs ticked and a card naming them; an empty answer leaves it as it was,
+ * and a folder that is not there is said so rather than read as a project that needs nothing. */
+async function askProject(o: PickOptions, recipe: Recipe): Promise<Recipe | "cancel"> {
+  const answer = await textPrompt({ message: PROJECT_QUESTION, hint: PROJECT_HINT, input: o.input, output: o.output });
+  if (typeof answer === "symbol") return "cancel";
+  const folder = answer.trim();
+  if (folder === "") return recipe;
+  const scan = await o.scanProject(folder);
+  card(groupLabel(PROJECT_WORD), scan === undefined ? [noFolderNote(folder)] : projectNote(scan), o.output);
+  return scan === undefined ? recipe : withProject(recipe, scan);
+}
+
 /** The screens in order, esc stepping back one; the recipe carries the ticks between them. */
 export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
   const screens: readonly Screen[] = o.from === "agents" ? ["agents", "need", "logins"] : ["logins"];
   let recipe = o.recipe;
+  if (o.from === "agents" && o.project === undefined) {
+    const asked = await askProject(o, recipe);
+    if (asked === "cancel") return "cancel";
+    recipe = asked;
+  }
   let logins = new Map<string, LoginChoice>();
   let wspTools = new Set<string>();
   const streams = { input: o.input, output: o.output };

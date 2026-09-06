@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 import { isCancel } from "@clack/core";
 import { unicode } from "@clack/prompts";
-import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, passwordPrompt, plainLine, rowsOf, summarize, table, viewport, widthOf, wrap } from "../src/init-layout.js";
+import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, fmtDuration, helpLine, passwordPrompt, plainLine, rowsOf, summarize, table, textPrompt, viewport, widthOf, wrap } from "../src/init-layout.js";
 
 describe("init layout", () => {
   it("plainLine leaves what a terminal would: later carriage-return segments overprint earlier ones, escapes and controls go, a tab is a space", () => {
@@ -408,4 +408,37 @@ describe("password prompt", () => {
         await p;
       }),
     ));
+});
+
+describe("text prompt", () => {
+  it("draws the question and the hint down the thick bar, the placeholder until something is typed, and gives back what was typed on enter", async () => {
+    const { input, output, text } = streams();
+    const p = textPrompt({ message: "Which project are you bringing first?", hint: "optional; a folder on this Mac", placeholder: "~/code/app", input, output });
+    await settle();
+    expect(text()).toBe(`◆  Which project are you bringing first?\n┃  optional; a folder on this Mac\n┃  ~/code/app\n┗  ${PASSWORD_HELP}`);
+    await press(input, "~/proj");
+    expect(text().slice(text().lastIndexOf("◆"))).toContain("┃  ~/proj");
+    await press(input, KEY.enter);
+    expect(await p).toBe("~/proj");
+    expect(text().slice(text().lastIndexOf("◇"))).toBe("◇  Which project are you bringing first?\n│  optional; a folder on this Mac\n│  ~/proj\n");
+  });
+
+  it("enter on an empty line answers with nothing and leaves no line behind, so an optional question costs one keypress", async () => {
+    const { input, output, text } = streams();
+    const p = textPrompt({ message: "Which project are you bringing first?", input, output });
+    await settle();
+    await press(input, KEY.enter);
+    expect(await p).toBe("");
+    expect(text().slice(text().lastIndexOf("◇"))).toBe("◇  Which project are you bringing first?\n");
+  });
+
+  it("esc cancels: the typed line is struck through and the answer is clack's cancel", async () => {
+    const { input, output, text } = streams();
+    const p = textPrompt({ message: "Which project are you bringing first?", input, output });
+    await settle();
+    await press(input, "~/proj");
+    await press(input, KEY.esc);
+    expect(isCancel(await p)).toBe(true);
+    expect(text()).toContain("~/proj");
+  });
 });

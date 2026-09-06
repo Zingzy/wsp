@@ -10,7 +10,7 @@ import type { Readable, Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import { isCancel } from "@clack/prompts";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
-import { collect, computeRecipe, nodeHost, type Manifest, type Rung } from "@wsp/collect";
+import { collect, computeRecipe, expand, nodeHost, scanProject, type Manifest, type Rung } from "@wsp/collect";
 import {
   SolariBackend,
   createRuntime,
@@ -51,9 +51,11 @@ usage:
                      need and the sign-ins, three screens, then the build and
                      the browser
   wsp recipe         write the recipe: every catalog agent and tool with a tick
-                     from what is installed here, what your agents used (their
-                     session histories, read here, names and counts only) or the
-                     catalog's own default; review it, then wsp init --recipe
+                     from what the project you point it at needs (its own
+                     manifests), what is installed here, what your agents used
+                     (their session histories, read here, names and counts only)
+                     or the catalog's own default; review it, then
+                     wsp init --recipe
   wsp doctor         run the reach loop end to end against one live machine
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
@@ -85,6 +87,12 @@ options:
                      straight to the sign-ins; this machine is still read for
                      what travels
   --out PATH         recipe: where to write it (default <state dir>/recipe.json)
+  --project PATH     the project folder you are bringing first: its own files
+                     (package.json, the lockfiles, pyproject, go.mod,
+                     Cargo.toml, the compose files, .tool-versions, the CI
+                     workflows) say what it needs, and those rows are ticked
+                     first, each saying which file asked. On init, the first
+                     screen asks for one when this is not given
   --agent ID         mcp install: the agent whose MCP config gets the server
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
@@ -304,17 +312,52 @@ function stopOnSignals(handle: HostHandle, io: CliIO): void {
   process.once("SIGTERM", stop);
 }
 
+/** A folder a `~/`-relative answer or a flag named: where it is, and whether there is one there. The one place both
+ * the flag and the wizard's own question resolve a folder. */
+export function projectFolder(folder: string): { path: string; exists: boolean } {
+  const path = resolve(expand({ home: homedir() }, folder.trim()));
+  return { path, exists: existsSync(path) };
+}
+
+/** What a --project flag named: the folder, nothing when the flag was not given, or the sentence to print, since a
+ * folder that is not there is a typo and not an empty project. */
+type ProjectFlag = { ok: true; path?: string } | { ok: false; message: string };
+
+function projectFlag(verb: string, folder: string | undefined): ProjectFlag {
+  if (folder === undefined) return { ok: true };
+  const { path, exists } = projectFolder(folder);
+  return exists ? { ok: true, path } : { ok: false, message: `wsp ${verb}: no folder at ${path}` };
+}
+
+/** wsp recipe: this computer against the catalog, weighed for a project folder when one is named. */
+async function recipe(io: CliIO, statePath: string, out: string | undefined, folder: string | undefined): Promise<number> {
+  const flag = projectFlag("recipe", folder);
+  if (!flag.ok) {
+    io.error(flag.message);
+    return 1;
+  }
+  const project = flag.path;
+  await writeRecipe(nodeHost(), resolve(out ?? join(dirname(statePath), "recipe.json")), line => io.log(line), project !== undefined ? { project } : {});
+  return 0;
+}
+
 /** Init ends by starting a host on this state, which the lock would refuse only after the builder is booted and billed. */
 function initRefusal(lock: HostLock, statePath: string): string {
   return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
 }
 
-async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; recipe?: string }): Promise<number> {
+async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; recipe?: string; project?: string }): Promise<number> {
   const held = servingHost(opts.statePath);
   if (held !== undefined) {
     io.error(initRefusal(held, opts.statePath));
     return 1;
   }
+  const flag = projectFlag("init", flags.project);
+  if (!flag.ok) {
+    io.error(flag.message);
+    return 1;
+  }
+  const project = flag.path;
   const screen = terminalInitIO();
   opening(screen, { command: "init", version: VERSION, yes: flags.yes });
   const keys = await loadKeys(io, undefined, { anthropic: false });
@@ -322,8 +365,13 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
     {
       yes: flags.yes,
       ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
+      ...(project !== undefined ? { project } : {}),
       collect: collectThisComputer,
-      recipe: onHistory => computeRecipe(nodeHost(), { onHistory }),
+      recipe: (onHistory, onProject) => computeRecipe(nodeHost(), { onHistory, onProject, ...(project !== undefined ? { project } : {}) }),
+      scanProject: async folder => {
+        const { path, exists } = projectFolder(folder);
+        return exists ? scanProject(nodeHost(), path) : undefined;
+      },
       keys,
       pricing: new SolariBackend({ apiKey: keys.solari }).pricing,
       statePath: opts.statePath,
@@ -456,7 +504,7 @@ async function mcp(io: CliIO, statePath: string, words: string[], agent: string 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
   if (verb !== undefined) return runVerb(verb, argv, io, defaultStatePath);
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; recipe?: string; out?: string; agent?: string };
+  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; recipe?: string; out?: string; agent?: string; project?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -471,6 +519,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         recipe: { type: "string" },
         out: { type: "string" },
         agent: { type: "string" },
+        project: { type: "string" },
       },
       allowPositionals: true,
     }));
@@ -501,10 +550,9 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
       return 0;
     }
     case "init":
-      return init(io, opts, { yes: values.yes === true, ...(values.recipe !== undefined ? { recipe: values.recipe } : {}) });
+      return init(io, opts, { yes: values.yes === true, ...(values.recipe !== undefined ? { recipe: values.recipe } : {}), ...(values.project !== undefined ? { project: values.project } : {}) });
     case "recipe":
-      await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line));
-      return 0;
+      return recipe(io, opts.statePath, values.out, values.project);
     case "mcp":
       return mcp(io, opts.statePath, positionals.slice(1), values.agent);
     case "doctor": {

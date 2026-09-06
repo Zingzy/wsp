@@ -791,10 +791,12 @@ export const RecipeDigest = z.object({
 });
 export type RecipeDigest = z.infer<typeof RecipeDigest>;
 
-/** Where a recipe row's tick comes from: the entry is on this computer (what was found: its config paths and
- * whether its command is on PATH), the agents' session histories on this computer used it (in how many sessions,
- * how many calls), or nothing local says anything and the catalog's own evidence decides. */
+/** Where a recipe row's tick comes from: the project the recipe was written for names it in its own manifests (with
+ * the line saying which file said so), the entry is on this computer (what was found: its config paths and whether
+ * its command is on PATH), the agents' session histories on this computer used it (in how many sessions, how many
+ * calls), or nothing local says anything and the catalog's own evidence decides. */
 export const RecipeSource = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("project"), why: z.string().min(1) }),
   z.object({ kind: z.literal("installed"), paths: z.array(z.string()), bin: z.boolean() }),
   z.object({ kind: z.literal("used"), sessions: z.number().int().nonnegative(), calls: z.number().int().nonnegative() }),
   z.object({ kind: z.literal("popular"), sessions: z.number().int().nonnegative(), images: z.number().int().nonnegative() }),

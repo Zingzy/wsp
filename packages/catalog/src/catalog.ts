@@ -285,7 +285,7 @@ export const CATALOG: readonly CatalogEntry[] = [
 
   // --- tools on by default: both sources agree or one is overwhelming --------------------------------------------
   // The floor rows first, in the order the base stage installs them: a row waits only on rows above it.
-  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, floor: true, covers: ["node@22"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: NODE_BYTES },
+  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, floor: true, covers: ["node@22", "nodejs"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: NODE_BYTES },
   { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", installRoad: npm("pnpm", "11.9.0"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
   { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL }, floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" } },
   { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL }, floor: true, after: "uv", covers: ["python@3.12"], major: { name: "Python", version: "3.12" }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" } },
@@ -299,7 +299,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "agent-browser", name: "agent-browser", bin: "agent-browser", installRoad: npm("agent-browser", "0.31.1"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 45, images: 0, road: "unmeasured", note: "sessions counted on one Mac only; on by default for this user until a second data point" } },
 
   // --- tools on request ---------------------------------------------------------------------------------------------
-  { ...tool, id: "go", name: "Go", bin: "go", ...brew("go"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 9, images: 4, road: "measured" } },
+  { ...tool, id: "go", name: "Go", bin: "go", ...brew("go"), covers: ["golang"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 9, images: 4, road: "measured" } },
   { ...tool, id: "rust", name: "Rust with cargo", bin: "cargo", ...brew("rust"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 4, images: 3, road: "unmeasured" } },
   { ...tool, id: "java", name: "Java 21", bin: "java", ...brew("openjdk@21"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
   { ...tool, id: "maven", name: "Maven", bin: "mvn", ...brew("maven"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "unmeasured" } },

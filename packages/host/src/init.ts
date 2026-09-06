@@ -8,7 +8,7 @@
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
-import { MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type ProjectScan, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { Recipe, RecipeHistory } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
@@ -42,7 +42,7 @@ import {
   withTicksOf,
   withoutAgentTools,
 } from "./init-recipe.js";
-import { pickScreens } from "./init-pick.js";
+import { PROJECT_WORD, groupLabel, pickScreens, projectNote } from "./init-pick.js";
 import { installLines, installMcp, mcpServerSpec } from "./mcp-install.js";
 import { historyLine } from "./recipe-command.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, fmtDuration, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
@@ -77,11 +77,18 @@ export interface InitOptions {
   /** The small recipe of catalog ids that ticks the agents and tools rows: the screens for them are skipped and the
    * run lands on the sign-ins. This machine is still read for the rows and files. */
   recipeFile?: string;
+  /** A project folder named on the command line, already weighed into the recipe opts.recipe returns; absent, the
+   * first screen asks for one. */
+  project?: string;
+  /** Reads one project folder's own manifests for what it needs, for the folder the first screen asks for; nothing
+   * when there is no folder there. */
+  scanProject(folder: string): Promise<ProjectScan | undefined>;
   /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
   collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   /** Reads this computer against the catalog and the agents' session histories for the recipe the screens start
-   * from, telling onHistory each agent's counts as its history is read. */
-  recipe(onHistory: (h: RecipeHistory) => void): Promise<Recipe>;
+   * from, telling onHistory each agent's counts as its history is read and onProject what a named project asked
+   * for, so the flag path shows the same card the wizard's own question leaves. */
+  recipe(onHistory: (h: RecipeHistory) => void, onProject: (scan: ProjectScan) => void): Promise<Recipe>;
   keys: Keys;
   /** Prices the builder the confirm names. */
   pricing: BackendPricing;
@@ -629,8 +636,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // their sources are what is here, so a row about this Mac (an agent's config to write) never follows another's.
   let catalogRecipe: Recipe;
   const histories = spin(io.output, "Reading what your agents used", io.isTTY);
+  let projectScan: ProjectScan | undefined;
   try {
-    const here = await opts.recipe(h => histories.detail(historyLine(h)));
+    const here = await opts.recipe(h => histories.detail(historyLine(h)), scan => (projectScan = scan));
     catalogRecipe = given === undefined ? here : withTicksOf(here, given);
   } catch (e) {
     histories.stop();
@@ -660,12 +668,24 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   manifest = applyRecipe(withCatalogAgents(manifest), catalogRecipe);
   if (notes.length > 0) log.warn(notes.join("\n"), out);
   card("Found on this computer", detectionNote(found, source), io.output);
+  // The folder named on the command line gets the card the wizard's own question leaves, so both paths say the same.
+  if (projectScan !== undefined) card(groupLabel(PROJECT_WORD), projectNote(projectScan), io.output);
 
   let answers: Answers;
   // The agents here whose config gets the wsp MCP server: only a tick on the screens, never a default.
   let wspTools = new Set<string>();
   if (interactive) {
-    const picked = await pickScreens({ manifest, recipe: catalogRecipe, brew, from: opts.recipeFile === undefined ? "agents" : "logins", home: opts.home, input: io.input, output: io.output });
+    const picked = await pickScreens({
+      manifest,
+      recipe: catalogRecipe,
+      brew,
+      from: opts.recipeFile === undefined ? "agents" : "logins",
+      home: opts.home,
+      ...(opts.project !== undefined ? { project: opts.project } : {}),
+      scanProject: opts.scanProject,
+      input: io.input,
+      output: io.output,
+    });
     if (picked === "cancel") {
       cancel("Nothing was changed.", out);
       return { code: 1 };

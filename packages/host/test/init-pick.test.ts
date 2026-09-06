@@ -11,7 +11,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BASE_WORD, ON_THIS_MAC, agentItems, needLine, needScreen, pickEstimate, signInItems, toolItems, withAgents, withTools, wspToolsItems } from "../src/init-pick.js";
+import { BASE_WORD, ON_THIS_MAC, PROJECT_WORD, agentItems, needLine, needScreen, pickEstimate, projectNote, signInItems, toolItems, withAgents, withTools, wspToolsItems } from "../src/init-pick.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 
@@ -41,6 +41,37 @@ describe("what they need", () => {
     expect(by("agent-browser").detail).toEqual(["in no lab image; on by default in the catalog", "size not measured yet; no row here; installed by its npm road"]);
     expect(by("java").detail[0]).toBe("ships in 4 lab images; on request");
     expect(BASE_WORD).toBe("in the base");
+  });
+
+  it("the project's own needs are their own group, first after the base, ticked, with the file that asked in the detail", () => {
+    const recipe = {
+      ...RECIPE,
+      rows: [
+        ...RECIPE.rows,
+        row({ id: "go", source: { kind: "project", why: "go.mod needs Go" } }),
+        row({ id: "wrangler", source: { kind: "project", why: "package.json scripts run wrangler" } }),
+        row({ id: "yq", source: { kind: "installed", paths: [], bin: true } }),
+      ],
+    };
+    const items = toolItems(recipe, FIXTURE);
+    expect([...new Set(items.map(i => i.group))]).toEqual([undefined, "Your project needs", "Installed here", "Popular in the catalog"]);
+    expect(items.filter(i => i.group === "Your project needs").map(i => i.label)).toEqual(["Go", "Cloudflare Wrangler"]);
+    const by = (id: string) => items.find(i => i.id === id)!;
+    expect(by("go")).toMatchObject({ hint: "251.0 MB", detail: ["go.mod needs Go", "about 251.0 MB on the machine; no row here; installed by its brew road"] });
+    expect(by("wrangler").detail[0]).toBe("package.json scripts run wrangler");
+    // A floor row the project also names stays in the base, where it is installed whatever anyone ticks.
+    expect(by("docker")).toMatchObject({ lock: "on" });
+    expect(needLine(recipe)).toBe("13 tools: 9 in the base, 2 your project needs, 2 installed here");
+    expect(PROJECT_WORD).toBe("your project needs");
+  });
+
+  it("the card after the question names what the folder asked for, the file that asked, and what the catalog has no row for", () => {
+    expect(projectNote({ dir: "/Users/dev/proj", rows: [{ id: "go", name: "Go", why: "go.mod needs Go" }, { id: "docker", name: "Docker engine and compose", why: "compose.yaml needs Docker" }], candidates: [{ id: "ruby", name: "Ruby", why: "Gemfile needs Ruby" }] })).toEqual([
+      "Go                         go.mod needs Go",
+      "Docker engine and compose  compose.yaml needs Docker",
+      "Not in the catalog: Ruby (Gemfile needs Ruby)",
+    ]);
+    expect(projectNote({ dir: "/Users/dev/proj", rows: [], candidates: [] })).toEqual(["Nothing in /Users/dev/proj named a tool the catalog carries."]);
   });
 
   it("ticks go back onto the recipe: a floor row stays on however the list left it, an agent follows its tick, and an entry the recipe never named gets a row on the catalog's evidence", () => {

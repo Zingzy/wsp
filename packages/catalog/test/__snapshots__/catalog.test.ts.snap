@@ -129,6 +129,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "configPaths": 0,
     "covers": [
       "node@22",
+      "nodejs",
     ],
     "defaultOn": true,
     "floor": true,
@@ -332,6 +333,9 @@ exports[`catalog > is the seeded catalog 1`] = `
   {
     "argument": "go",
     "configPaths": 0,
+    "covers": [
+      "golang",
+    ],
     "defaultOn": false,
     "floor": false,
     "id": "go",
