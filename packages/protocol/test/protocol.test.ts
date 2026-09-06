@@ -714,6 +714,11 @@ describe("thread provenance", () => {
     expect(ThreadView.parse(worked!).cwd).toBe("/root/work/proj/packages");
   });
 
+  it("foldThreads titles a thread by its opening prompt's first line, so the CLI's table and the sidebar show one line for a multi-paragraph brief", () => {
+    const [t] = foldThreads([{ ...row, prompt: "You are a builder.\n\nTicket: Zingzy/wsp-map#292.\nBuild: the fix." }]);
+    expect(t!.title).toBe("You are a builder.");
+  });
+
   it("a thread always says who opened it: the fold reads a row from before provenance as a person's, once, for every client", () => {
     const [t] = foldThreads([{ ...row, prompt: "old" }]);
     expect(t!.startedBy).toBe("person");

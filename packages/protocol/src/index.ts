@@ -5,6 +5,7 @@
 // handlers are the reference implementation they mirror.
 
 import { z } from "zod";
+import { titleLine } from "./format.js";
 
 /** The one rule for a URL a guest may hand to the laptop: http or https in any
  * case, no whitespace or control characters, at most HTTP_URL_MAX bytes, and
@@ -249,7 +250,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       harness: first.harness,
       startedBy: first.startedBy ?? "person",
       status: latest.status,
-      title: first.prompt ?? first.claudeSessionId ?? first.id,
+      title: first.prompt !== undefined ? titleLine(first.prompt) : first.claudeSessionId ?? first.id,
       ...(latest.claudeSessionId !== undefined ? { claudeSessionId: latest.claudeSessionId } : {}),
       ...(latest.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
@@ -1530,6 +1531,6 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, notifyLine, turnCutLine, type TurnCutRule } from "./format.js";
+export { fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, notifyLine, titleLine, turnCutLine, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";
