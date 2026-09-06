@@ -5,6 +5,7 @@
 // what it runs on top of, and how the install reads to a person. The stages
 // and the wizard ask a module through roadModule(); nothing outside this file
 // decides by a road's name. Every line is text: nothing here runs a command.
+import { shellQuote } from "@wsp/protocol";
 import { caskVersion, type LinuxCask } from "./linux-casks.js";
 import type { InstallRoad, PackageRoad, RoadName, ToolPin } from "./roads.js";
 
@@ -36,10 +37,6 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
   bin?(road: R): string | undefined;
 }
 
-function squote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
 const pinned = (pkg: string, version: string | undefined, sep: string): string => (version === undefined ? pkg : `${pkg}${sep}${version}`);
 
 /** The pseudo step every apt row waits on: the index read once, before the first of them. */
@@ -63,11 +60,11 @@ export const BREW = `${BREW_PREFIX}/bin/brew`;
 // Homebrew refuses to run as root, so it lives under its own user at the
 // prefix its Linux bottles are built for; anything else compiles from source.
 export function asLinuxbrewScript(script: string): string {
-  return `su -s /bin/bash linuxbrew -c ${squote(`export ${BREW_ENV}\n${script}`)}`;
+  return `su -s /bin/bash linuxbrew -c ${shellQuote(`export ${BREW_ENV}\n${script}`)}`;
 }
 
 export function asLinuxbrew(cmd: string): string {
-  return `su -s /bin/bash linuxbrew -c ${squote(`${BREW_ENV} ${BREW} ${cmd}`)}`;
+  return `su -s /bin/bash linuxbrew -c ${shellQuote(`${BREW_ENV} ${BREW} ${cmd}`)}`;
 }
 
 const brew: RoadModule<Road<"brew">> = {
@@ -79,7 +76,7 @@ const brew: RoadModule<Road<"brew">> = {
     if (!r.formula.includes("/")) return { cmd: asLinuxbrew(`uninstall ${r.formula}`) };
     // A tap formula with no Linux bottle took the road to /usr/local/bin under the formula's name, not to the cellar.
     const bin = r.formula.slice(r.formula.lastIndexOf("/") + 1);
-    return { cmd: `if [ -x ${BREW} ] && ${asLinuxbrew(`list --formula ${r.formula}`)} >/dev/null 2>&1; then ${asLinuxbrew(`uninstall ${r.formula}`)}; else rm -f /usr/local/bin/${squote(bin)}; fi` };
+    return { cmd: `if [ -x ${BREW} ] && ${asLinuxbrew(`list --formula ${r.formula}`)} >/dev/null 2>&1; then ${asLinuxbrew(`uninstall ${r.formula}`)}; else rm -f /usr/local/bin/${shellQuote(bin)}; fi` };
   },
   names: r => [r.formula],
 };
@@ -171,12 +168,12 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
   const goBin = goBinary(go);
   return [
     "set -euo pipefail",
-    `name=${squote(name)}`,
+    `name=${shellQuote(name)}`,
     'arch="$(uname -m)"',
     'case "$arch" in x86_64) pat="amd64|x86_64|x64" ;; aarch64) pat="arm64|aarch64" ;; *) echo "Error: unsupported arch: $arch" >&2; exit 1 ;; esac',
     'tmp="$(mktemp -d /tmp/wsp-road-XXXXXX)"',
     "trap 'rm -rf \"$tmp\"' EXIT",
-    `release="$(curl -fsSL ${squote(api)} || true)"`,
+    `release="$(curl -fsSL ${shellQuote(api)} || true)"`,
     ...(tag === undefined ? [`tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"`] : []),
     `urls="$(printf '%s\\n' "$release" | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
     `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk)$' | head -1 || true)"`,
@@ -184,7 +181,7 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
     '  asset="${url##*/}"',
     '  curl -fsSL -o "$tmp/$asset" "$url"',
     `  sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`,
-    ...(pin !== undefined && tag !== undefined ? [`  [ "$sum" = ${squote(pin)} ] || { echo "Error: $asset does not match the checksum recorded on the first install of "${squote(tag)} >&2; exit 1; }`] : []),
+    ...(pin !== undefined && tag !== undefined ? [`  [ "$sum" = ${shellQuote(pin)} ] || { echo "Error: $asset does not match the checksum recorded on the first install of "${shellQuote(tag)} >&2; exit 1; }`] : []),
     '  case "$asset" in',
     '    *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" ;;',
     '    *.tar.xz) tar -xJf "$tmp/$asset" -C "$tmp" ;;',
@@ -195,13 +192,13 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
     `  [ -n "$bin" ] || bin="$(find "$tmp" -type f -perm -u+x ! -name "\${asset:-.}" ! -name '*.md' ! -name '*.txt' -printf '%s %p\\n' | sort -rn | head -1 | cut -d' ' -f2-)"`,
     '  [ -n "$bin" ] || { echo "Error: no binary in ${asset:-the release}" >&2; exit 1; }',
     '  install -m 0755 "$bin" "/usr/local/bin/$name"',
-    tag === undefined ? '  echo "WSP_ROAD release ${asset:-$url} $sum $tag"' : `  echo "WSP_ROAD release \${asset:-$url} $sum "${squote(tag)}`,
+    tag === undefined ? '  echo "WSP_ROAD release ${asset:-$url} $sum $tag"' : `  echo "WSP_ROAD release \${asset:-$url} $sum "${shellQuote(tag)}`,
     "elif command -v go >/dev/null 2>&1; then",
-    `  GOBIN=/usr/local/bin go install ${squote(go)}`,
-    ...(goBin === name ? [] : [`  mv ${squote(`/usr/local/bin/${goBin}`)} "/usr/local/bin/$name"`]),
-    `  echo "WSP_ROAD go "${squote(go)}`,
+    `  GOBIN=/usr/local/bin go install ${shellQuote(go)}`,
+    ...(goBin === name ? [] : [`  mv ${shellQuote(`/usr/local/bin/${goBin}`)} "/usr/local/bin/$name"`]),
+    `  echo "WSP_ROAD go "${shellQuote(go)}`,
     "else",
-    `  echo "Error: ${tag === undefined ? "the current release" : `release "${squote(tag)}"`} of "${squote(repo)}" has no Linux build, and go is not on the machine" >&2`,
+    `  echo "Error: ${tag === undefined ? "the current release" : `release "${shellQuote(tag)}"`} of "${shellQuote(repo)}" has no Linux build, and go is not on the machine" >&2`,
     "  exit 1",
     "fi",
   ].join("\n");
@@ -215,7 +212,7 @@ const release: RoadModule<Road<"release">> = {
     const tag = r.version ?? r.pin?.tag;
     return releaseInstall(bin, r.repo, tag, pinStateOf(tag, r.pin) === "same" ? r.pin!.sha256 : undefined, r.go);
   },
-  uninstall: (_r, bin) => ({ cmd: `rm -f /usr/local/bin/${squote(bin)}` }),
+  uninstall: (_r, bin) => ({ cmd: `rm -f /usr/local/bin/${shellQuote(bin)}` }),
   names: () => [],
 };
 
