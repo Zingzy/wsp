@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsup src/index.ts src/bin.ts --format esm --dts",
     "postinstall": "node scripts/fix-node-pty-perms.mjs",
-    "test": "vitest run"
+    "test": "vitest run packages/daemon"
   },
   "dependencies": {
     "node-pty": "^1.1.0",

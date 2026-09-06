@@ -1662,7 +1662,7 @@ describe("golden import stages", () => {
     });
 
     const gopls = { id: "tools/brew/gopls", name: "gopls", outcome: "skipped" as const, note: "no Linux bottle" };
-    const bun = { id: "tools/brew/bun", name: "bun", outcome: "skipped" as const, note: "no Linux bottle known" };
+    const bun = { id: "tools/npm/bun", name: "bun", outcome: "skipped" as const, note: "no Linux bottle known" };
     const jq = { id: "tools/brew/jq", name: "jq", outcome: "failed" as const, note: "exit 1: no bottle available" };
     const raycast = { id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped" as const, note: "macOS app, no Linux build" };
     it.each([
@@ -1672,6 +1672,17 @@ describe("golden import stages", () => {
       [[jq], [jq], [jq]],
     ])("nextMissing(%j, delta, %j) is %j", (previous, fresh, want) => {
       expect(nextMissing(previous, deltaOf(), fresh)).toEqual(want);
+    });
+
+    it("nextMissing drops the tool whose id the delta addressed, not every tool sharing its label", () => {
+      const brewGh = { id: "tools/brew/gh", name: "gh", outcome: "skipped" as const, note: "no Linux bottle" };
+      const cliGh = { id: "tools/cli/gh", name: "gh", outcome: "failed" as const, note: "exit 1: download refused" };
+      const removed = deltaOf({ removals: [{ what: "tool", id: "tools/brew/gh", label: "gh", cmd: "brew uninstall gh" }] });
+      expect(nextMissing([brewGh, cliGh], removed, [])).toEqual([cliGh]);
+      const replanned = deltaOf({ import: { ...deltaOf().import, tools: [{ id: "tools/cli/gh", label: "gh", manager: "script", cmd: "install-gh" }] } });
+      expect(nextMissing([brewGh, cliGh], replanned, [])).toEqual([brewGh]);
+      const setAside = deltaOf({ import: { ...deltaOf().import, tools: [], skippedTools: [{ id: "tools/cli/gh", label: "gh", note: "no Linux build" }] } });
+      expect(nextMissing([brewGh, cliGh], setAside, [])).toEqual([brewGh]);
     });
 
     it("applyDelta keeps the previous version's missing tools the delta neither removed nor planned again, beside what this run skipped or failed", async () => {
