@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The import dialog over a fake api: a folder is read into one summary, the
+// agents with sessions for it are ticked rows whose ids the request names,
 // secrets box is the only loud element and only when the plan found one,
 // ticks become carry and rewrite, the import's events fill the step rows,
 // the landed line names the folder on the machine and what was cut, editing
@@ -7,7 +8,7 @@
 // runtime's words with replace as the one follow-up.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventUnion, ProjectImportEvent, ProjectPlan, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, ProjectAgent, ProjectImportEvent, ProjectPlan, WorkspaceView } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ImportProjectDialog } from "../src/sidebar/ImportProjectDialog.js";
@@ -27,6 +28,11 @@ const PLAN: ProjectPlan = {
   skipped: [{ path: "link-out", note: "points outside the folder; not followed" }],
   agents: [],
 };
+
+const AGENTS: ProjectAgent[] = [
+  { agent: "claude", name: "Claude Code", sessions: 46, bytes: 9_400_000, carry: "moves" },
+  { agent: "codex", name: "Codex", sessions: 1, bytes: 12_000, carry: "transcript-only" },
+];
 
 const event = (over: Partial<ProjectImportEvent>): EventUnion => ({
   type: "project.import",
@@ -166,6 +172,74 @@ describe("import project dialog", () => {
     expect(within(root).getByRole("checkbox", { name: /\.env/ }).getAttribute("aria-checked")).toBe("false");
     fireEvent.click(within(root).getByRole("button", { name: "Import" }));
     expect(api.importProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/var/other", dest: "/private/var/other", carry: [], rewrite: [".git/config"] });
+  });
+
+  it("one ticked row per agent with sessions, named as the plan names it with its count in muted mono, and Import names both ids", async () => {
+    const { api } = fakeApi({ ...PLAN, agents: AGENTS });
+    useStore.getState().bind(api);
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await readFolder(root);
+    const box = root.querySelector<HTMLElement>("[data-k=agents]")!;
+    expect(within(box).getByText("2 agents on this Mac with sessions for the folder")).toBeDefined();
+    const rows = within(box).getAllByRole("checkbox");
+    expect(rows.map(r => r.getAttribute("aria-label"))).toEqual(["Claude Code", "Codex"]);
+    expect(rows.map(r => r.getAttribute("aria-checked"))).toEqual(["true", "true"]);
+    expect(Array.from(box.querySelectorAll<HTMLElement>("[data-k=state]")).map(el => el.textContent)).toEqual(["46 sessions", "1 session"]);
+    fireEvent.click(within(root).getByRole("button", { name: "Import" }));
+    expect(api.importProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], agents: ["claude", "codex"] });
+  });
+
+  it("unticking an agent drops it from the request, and unticking every one sends no agents at all", async () => {
+    const { api } = fakeApi({ ...PLAN, agents: AGENTS });
+    useStore.getState().bind(api);
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await readFolder(root);
+    const codex = within(root).getByRole("checkbox", { name: "Codex" });
+    fireEvent.click(codex);
+    expect(codex.getAttribute("aria-checked")).toBe("false");
+    api.importProject.mockRejectedValueOnce(new RequestError("/private/var/proj exists on the machine", "exists"));
+    fireEvent.click(within(root).getByRole("button", { name: "Import" }));
+    expect(api.importProject).toHaveBeenLastCalledWith({ workspaceId: "ws_a", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], agents: ["claude"] });
+    await waitFor(() => expect(within(root).getByRole("button", { name: "Replace and import" })).toBeDefined());
+    fireEvent.click(within(root).getByRole("checkbox", { name: "Claude Code" }));
+    fireEvent.click(within(root).getByRole("button", { name: "Replace and import" }));
+    expect(api.importProject).toHaveBeenLastCalledWith({ workspaceId: "ws_a", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], replace: true });
+  });
+
+  it("an agent whose store could not be read renders unticked with the error as its words and cannot be ticked", async () => {
+    const { api } = fakeApi({ ...PLAN, agents: [AGENTS[0]!, { agent: "opencode", name: "OpenCode", sessions: 0, bytes: 0, carry: "moves", error: "state.db is locked by another process" }] });
+    useStore.getState().bind(api);
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await readFolder(root);
+    const box = root.querySelector<HTMLElement>("[data-k=agents]")!;
+    const opencode = within(box).getByRole("checkbox", { name: "OpenCode" });
+    expect(opencode.getAttribute("aria-checked")).toBe("false");
+    expect(opencode.hasAttribute("disabled") || opencode.getAttribute("aria-disabled") === "true").toBe(true);
+    expect(Array.from(box.querySelectorAll<HTMLElement>("[data-k=state]")).map(el => el.textContent)).toEqual(["46 sessions", "state.db is locked by another process"]);
+    fireEvent.click(opencode);
+    expect(opencode.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(within(root).getByRole("button", { name: "Import" }));
+    expect(api.importProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], agents: ["claude"] });
+  });
+
+  it("with no agent the rows are not rendered, and editing the path after a read drops the agent ticks with the plan", async () => {
+    const { api } = fakeApi({ ...PLAN, agents: AGENTS });
+    api.planProject.mockImplementation(async (source: string) => ({ ...PLAN, agents: AGENTS, source: `/private${source}` }));
+    useStore.getState().bind(api);
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    expect(root.querySelector("[data-k=agents]")).toBeNull();
+    await readFolder(root);
+    fireEvent.click(within(root).getByRole("checkbox", { name: "Codex" }));
+    const input = within(root).getByLabelText("Folder on this Mac");
+    fireEvent.change(input, { target: { value: "/var/other" } });
+    expect(root.querySelector("[data-k=agents]")).toBeNull();
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(value(root, "dest")).toBe("/private/var/other"));
+    expect(within(root).getByRole("checkbox", { name: "Codex" }).getAttribute("aria-checked")).toBe("true");
   });
 
   it("with no secret-shaped file the box is not rendered", async () => {

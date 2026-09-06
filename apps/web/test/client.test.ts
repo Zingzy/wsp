@@ -56,8 +56,8 @@ describe("makeApi wrappers", () => {
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "project.plan", source: "/var/proj" });
     const imported = { dest: "/private/var/proj", files: 2, bytes: 800, parts: 1, cut: [".env"], rewritten: [], agents: [] };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, imported });
-    expect(await api.importProject!({ workspaceId: "ws_1", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], replace: true })).toEqual(imported);
-    expect(lastSent()).toEqual({ id: expect.any(Number), op: "project.import", workspaceId: "ws_1", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], replace: true });
+    expect(await api.importProject!({ workspaceId: "ws_1", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], agents: ["claude"], replace: true })).toEqual(imported);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "project.import", workspaceId: "ws_1", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], agents: ["claude"], replace: true });
     // A reply without the plan must not become a plan.
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true });
     await expect(api.planProject!("/var/proj")).rejects.toThrow();
