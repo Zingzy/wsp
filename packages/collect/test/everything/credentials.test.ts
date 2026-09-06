@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { type CredentialsOptions, type Dir, GITLEAKS_MAX_ROOTS, type Machine, type RolesOptions, credentials as scanCredentials, keysSignal, modeSignal, nameSignal, parseGitleaks, pemSignal, roles as scanRoles, topLevelKeys } from "../../src/index.js";
+import { type CredentialsOptions, type Dir, GITLEAKS_MAX_ROOTS, type Machine, type RolesOptions, bareUrls, credentials as scanCredentials, fileSignals, keysSignal, modeSignal, nameSignal, parseGitleaks, pemSignal, roles as scanRoles, topLevelKeys, urlSignal } from "../../src/index.js";
 import { EXPECTED_SHAPES, HOME, home, laptop, many, shapes } from "./fixture.js";
 
 const rel = (p: string): string => p.replace(HOME, "~");
@@ -125,6 +125,26 @@ describe("pass 4: credential shape", () => {
     expect(pemSignal("-----BEGIN RSA PRIVATE KEY-----\n")).toBe(true);
     expect(pemSignal("-----BEGIN CERTIFICATE-----\n")).toBe(false);
     expect(pemSignal("ssh-ed25519 AAAA\n")).toBe(false);
+  });
+
+  it("URL credentials: a password in the userinfo anywhere in the text; a username alone, a bare host or an scp path is not one", async () => {
+    const config = '[remote "origin"]\n\turl = https://x-access-token:ghp_fake_token_000@github.com/example/proj.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[http]\n\tproxy = http://dev:fakepw@proxy.local:3128\n';
+    expect(urlSignal(config)).toBe(true);
+    expect(bareUrls(config)).toEqual({
+      text: '[remote "origin"]\n\turl = https://github.com/example/proj.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[http]\n\tproxy = http://proxy.local:3128\n',
+      urls: ["https://github.com/example/proj.git", "http://proxy.local:3128"],
+    });
+    for (const clean of ["url = https://github.com/example/proj.git\n", "url = https://dev@github.com/example/proj.git\n", "url = git@github.com:example/proj.git\n", "url = ssh://git@github.com/example/proj.git\n", "listen = http://localhost:8080/@me\n"]) {
+      expect(urlSignal(clean), clean).toBe(false);
+      expect(bareUrls(clean)).toEqual({ text: clean, urls: [] });
+    }
+    expect(bareUrls('url = "https://dev:fakepw@github.com/example/proj.git"\n')).toEqual({ text: 'url = "https://github.com/example/proj.git"\n', urls: ["https://github.com/example/proj.git"] });
+    for (const empty of ["url = https://:ghp_fake_token_000@github.com/o/r\n", "REDIS_URL=redis://:fakepw@cache.local:6379\n"]) expect(urlSignal(empty), empty).toBe(true);
+    expect(bareUrls("url = https://:ghp_fake_token_000@github.com/o/r\n")).toEqual({ text: "url = https://github.com/o/r\n", urls: ["https://github.com/o/r"] });
+    const read = (text: string) => fileSignals("config", { bytes: Buffer.byteLength(text), mode: 0o644 }, async () => text, false);
+    expect(await read(config)).toEqual(["url"]);
+    expect(await read("[remote \"origin\"]\n\turl = https://github.com/example/proj.git\n[credential]\n\thelper = osxkeychain\n")).toBeUndefined();
+    expect(await read("https://dev:ghp_fake@github.com\n")).toEqual(["url"]);
   });
 
   it("gitleaks runs once per small unknown root only when present, redacted, and adds a signal by file", async () => {

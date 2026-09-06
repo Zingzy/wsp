@@ -200,19 +200,22 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
   idleWindowMs?: number | null;
 }
 
-/** A folder's archive as the host packs it: the bytes, what went in, and the secret-shaped paths left out. */
+/** A folder's archive as the host packs it: the bytes, what went in, the secret-shaped paths left out, and the ones
+ * that went in rewritten as the plan offered. */
 export interface PackedProject {
   tar: Buffer;
   files: number;
   bytes: number;
   cut: string[];
+  rewritten: string[];
 }
 
 /** A folder on this computer as the host reads it; the runtime never touches the disk itself. `plan` reads names
- * and sizes, `pack` reads the bytes once consent is known: a secret-shaped file travels only when `carry` names it. */
+ * and sizes, `pack` reads the bytes once consent is known: a secret-shaped file travels only when `carry` names it,
+ * or rewritten when `rewrite` names a path the plan offered a rewrite for. */
 export interface ProjectBundler {
   plan(): Promise<ProjectPlan>;
-  pack(carry: ReadonlySet<string>): Promise<PackedProject>;
+  pack(carry: ReadonlySet<string>, rewrite: ReadonlySet<string>): Promise<PackedProject>;
 }
 
 export interface ProjectImportOptions {
@@ -223,8 +226,10 @@ export interface ProjectImportOptions {
   dest: string;
   /** Remove what is at dest first; without it an existing dest is refused with kind "exists". */
   replace?: boolean;
-  /** The secret-shaped paths from the plan that may travel; every other one is cut and named. */
+  /** The secret-shaped paths from the plan that may travel as they are; every other one is cut and named. */
   carry?: readonly string[];
+  /** The paths the plan offered a rewrite for that land rewritten; wins over carry for the same path. */
+  rewrite?: readonly string[];
   bundler: ProjectBundler;
 }
 
@@ -2406,16 +2411,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const plan = await o.bundler.plan();
         report("planned", `${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}${plan.repo ? " and the repository" : ""}; ${plural(plan.secrets.length, "secret-shaped file")}; ${plural(plan.excluded.length, "cache")} left behind.`);
         const carry = new Set(o.carry ?? []);
-        const carried = plan.secrets.filter(s => carry.has(s.path)).map(s => s.path);
-        const cut = plan.secrets.filter(s => !carry.has(s.path)).map(s => s.path);
-        report(
-          "consented",
-          plan.secrets.length === 0
-            ? "No secret-shaped files."
-            : `${carried.length === 0 ? "No secret-shaped file travels" : `Carrying ${carried.join(", ")}`}; ${cut.length === 0 ? "nothing cut" : `cut ${cut.join(", ")}`}.`,
-        );
+        const rewrite = new Set(o.rewrite ?? []);
+        const rewriting = plan.secrets.flatMap(s => (s.rewrite !== undefined && rewrite.has(s.path) ? [{ path: s.path, ...s.rewrite }] : []));
+        const rewritten = new Set(rewriting.map(r => r.path));
+        const carried = plan.secrets.filter(s => carry.has(s.path) && !rewritten.has(s.path)).map(s => s.path);
+        const cut = plan.secrets.filter(s => !carry.has(s.path) && !rewritten.has(s.path)).map(s => s.path);
+        const clauses = [
+          ...(carried.length > 0 ? [`carrying ${carried.join(", ")}`] : []),
+          ...(rewriting.length > 0 ? [`rewriting ${rewriting.map(r => `${r.path}${r.urls.length > 0 ? ` to ${r.urls.join(", ")}` : ""}${r.drop.length > 0 ? ` without ${r.drop.join(", ")}` : ""}`).join(", ")}`] : []),
+          ...(carried.length === 0 && rewriting.length === 0 ? ["no secret-shaped file travels"] : []),
+          cut.length === 0 ? "nothing cut" : `cut ${cut.join(", ")}`,
+        ].join("; ");
+        report("consented", plan.secrets.length === 0 ? "No secret-shaped files." : `${clauses.charAt(0).toUpperCase()}${clauses.slice(1)}.`);
         report("packing", `Packing ${plural(plan.files - cut.length, "file")}.`);
-        const packed = await o.bundler.pack(carry);
+        const packed = await o.bundler.pack(carry, rewrite);
         report("uploading", `Uploading ${fmtBytes(packed.tar.length)}.`, { bytes: 0, total: packed.tar.length });
         const { parts } = await landBundle(entry.machine, packed.tar, o.dest, {
           ...(o.replace !== undefined ? { replace: o.replace } : {}),
@@ -2424,7 +2433,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           onLanding: () => report("landing", `Landing at ${o.dest}.`),
         });
         report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}.`);
-        return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut };
+        return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten };
       } catch (e) {
         report("failed", e instanceof Error ? e.message : String(e));
         throw e;
