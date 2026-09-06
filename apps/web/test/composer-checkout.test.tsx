@@ -134,7 +134,7 @@ async function setup(api: Api, threadId: string | null = null) {
 const row = () => document.querySelector<HTMLElement>("[data-composer-checkout]");
 const folder = () => document.querySelector<HTMLElement>("[data-composer-folder]")?.dataset["composerFolder"];
 const branch = () => document.querySelector<HTMLElement>("[data-composer-branch]")?.dataset["composerBranch"];
-const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, DAEMON_ROOT);
+const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, [DAEMON_ROOT]);
 const menuEntry = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-entry="${path}"]`);
 const menuPick = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-pick="${path}"]`);
 

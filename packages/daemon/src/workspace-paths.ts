@@ -38,18 +38,23 @@ async function nearestExisting(p: string): Promise<string> {
   }
 }
 
+function outsideRoot(requested: string): OpError {
+  return new OpError("outside-root", `${requested} resolves outside the workspace root`);
+}
+
 /**
- * Resolves requested (relative to root, or absolute) to a real path inside
- * root. The lexical check runs first so nothing outside the root is ever
- * stat'ed; the realpath check then refuses symlinks that leave, including a
- * symlinked parent of a missing leaf, which stays outside-root rather than
- * not-found so the refusal never confirms what exists there.
+ * Resolves requested (relative to the first root, or absolute) to a real path
+ * inside one of the roots. The lexical check runs first so nothing outside
+ * every root is ever stat'ed; the realpath check then refuses symlinks that
+ * leave them all, including a symlinked parent of a missing leaf, which stays
+ * outside-root rather than not-found so the refusal never confirms what
+ * exists there.
  */
-export async function resolveInside(root: string, requested: string): Promise<string> {
-  const lexicalRoot = resolve(root);
-  const lexical = resolve(lexicalRoot, requested);
-  if (!isInside(lexicalRoot, lexical)) throw new OpError("outside-root", `${requested} resolves outside the workspace root`);
-  const realRoot = await realpath(lexicalRoot);
+export async function resolveInside(roots: readonly string[], requested: string): Promise<string> {
+  const lexicalRoots = roots.map(root => resolve(root));
+  const lexical = resolve(lexicalRoots[0] ?? "/", requested);
+  if (!lexicalRoots.some(root => isInside(root, lexical))) throw outsideRoot(requested);
+  const realRoots = await Promise.all(lexicalRoots.map(root => realpath(root).catch((e: unknown) => (isMissing(e) ? null : Promise.reject(e)))));
   let real: string;
   let exists = true;
   try {
@@ -59,7 +64,12 @@ export async function resolveInside(root: string, requested: string): Promise<st
     exists = false;
     real = await nearestExisting(dirname(lexical));
   }
-  if (!isInside(realRoot, real)) throw new OpError("outside-root", `${requested} resolves outside the workspace root`);
+  if (!realRoots.some(root => root !== null && isInside(root, real))) {
+    // A root that is gone (an imported folder since removed) hides nothing, so a leaf under it is missing, not outside.
+    const underGoneRoot = lexicalRoots.some((root, i) => realRoots[i] === null && isInside(root, lexical));
+    if (!exists && underGoneRoot) throw new OpError("not-found", `${requested} does not exist`);
+    throw outsideRoot(requested);
+  }
   if (!exists) throw new OpError("not-found", `${requested} does not exist`);
   return real;
 }

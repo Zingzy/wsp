@@ -260,7 +260,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, storage: (await rt.golden.storage()) ?? null });
               return;
             case "cost.history":
-              send({ id: msg.id, ok: true, points: rt.status.history(msg.workspaceId) });
+              send({ id: msg.id, ok: true, points: await rt.status.history(msg.workspaceId) });
               return;
             case "snapshots.rollback": {
               const name = msg.name ?? "default";

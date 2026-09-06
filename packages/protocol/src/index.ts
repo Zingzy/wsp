@@ -465,7 +465,7 @@ export const WorkspaceCostEvent = z.object({
   phase: WorkspacePhase,
   /** Current burn: the size's awake rate while running, 0 while napping. */
   rateUsdPerHour: z.number(),
-  /** Total awake milliseconds behind accruedUsd since this runtime began tracking. */
+  /** Total awake milliseconds behind accruedUsd since metering began; carried across host restarts. */
   awakeMs: z.number(),
   accruedUsd: z.number(),
   at: z.string(),
@@ -1018,10 +1018,11 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("proc.kill"), pid: z.number().int().positive(), signal: ProcSignal }),
   z.object({ id: reqId, op: z.literal("ping") }),
   /** Lists one directory's direct children, each request under its own entry
-   * cap. Paths are relative to the daemon's workspace root (HOME unless
-   * started with --root) or absolute inside it; anything resolving outside,
-   * through .. or a symlink, is refused with code outside-root. gitignore
-   * hides .git and the entries git would ignore. */
+   * cap. Paths are relative to the daemon's home root (HOME unless started
+   * with --root) or absolute inside it or an imported project folder named in
+   * DAEMON_ROOTS_PATH; anything resolving outside every root, through .. or a
+   * symlink, is refused with code outside-root. gitignore hides .git and the
+   * entries git would ignore. */
   z.object({
     id: reqId,
     op: z.literal("fs.list"),
@@ -1090,11 +1091,15 @@ export const ProcSnapshot = z.object({
 });
 export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
 
-/** The daemon's protocol version, carried in its hello and bumped whenever an op is added, so a client can tell
- * which ops a machine's daemon answers before asking. A hello without one is version 1: every daemon deployed
+/** The daemon's protocol version, carried in its hello and bumped whenever an op is added or widened, so a client
+ * can tell what a machine's daemon answers before asking. A hello without one is version 1: every daemon deployed
  * before the field existed, which has the pty, ports, manifest, inbox, fs, git and tunnel ops and no sys or
- * proc ops. */
-export const DAEMON_VERSION = 2;
+ * proc ops. Version 3 browses the imported project folders named in DAEMON_ROOTS_PATH beside its home. */
+export const DAEMON_VERSION = 3;
+
+/** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it
+ * when a project lands, the daemon reads it on every files and diff op and browses those folders beside its home. */
+export const DAEMON_ROOTS_PATH = "/root/.wsp/roots";
 
 /** The version a hello announces, 1 when it carries none. */
 export function daemonVersionOf(hello: { version?: number }): number {
@@ -1264,8 +1269,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   /** Replies with { storage: SnapshotStorage | null }: every snapshot on the account by count, size and monthly
    * cost; null on a backend whose capabilities lack snapshotListing. */
   z.object({ id: reqId, op: z.literal("snapshots.storage") }),
-  /** Replies with { points: WorkspaceCostEvent[] }: the workspace's cost ticks since this runtime began metering it,
-   * folded to the ticks where the rate changed plus the newest (appendCostPoint); empty before the first tick. */
+  /** Replies with { points: WorkspaceCostEvent[] }: the workspace's cost ticks since metering began, across host
+   * restarts, folded to the ticks where the rate changed plus the newest (appendCostPoint); empty before the first tick. */
   z.object({ id: reqId, op: z.literal("cost.history"), workspaceId: z.string() }),
   /** Moves the golden's head to a version already in its manifest; replies with a
    * SnapshotRollbackResult. A version outside the manifest fails with kind "missing". */

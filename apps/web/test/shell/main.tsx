@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the app shell over a fake api with three
-// workspaces (one gone) and two threads, in either theme (?theme=light), so a
-// test can measure the chrome's geometry, which jsdom cannot lay out.
+// workspaces (one gone) and two threads, in either theme (?theme=light) and
+// with a status toast in the footer (?toast=...), so a test can measure the
+// chrome's geometry, which jsdom cannot lay out.
 import { createRoot } from "react-dom/client";
 import type { SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
@@ -60,7 +61,8 @@ const api: Api = {
   getGolden: async () => undefined,
 };
 
-useStore.setState({ conn: "live" });
+const toast = params.get("toast");
+useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}) });
 useStore.getState().bind(api);
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>

@@ -21,7 +21,8 @@ import { DiffSurface } from "../src/diffs/DiffSurface.js";
 import { useDiffStore } from "../src/diffs/store.js";
 import { useRootStore } from "../src/files/root.js";
 import { provideDaemonWire } from "../src/files/wire.js";
-import { fakeWire, LISTING, resetSurfaces, WS } from "./surface-harness.js";
+import { useStore } from "../src/protocol/store.js";
+import { fakeWire, imported, LISTING, PROJECT_DEST, resetSurfaces, WS } from "./surface-harness.js";
 
 const patch = (path: string, from: string, to: string) =>
   [`diff --git a/${path} b/${path}`, "index 1111111..2222222 100644", `--- a/${path}`, `+++ b/${path}`, "@@ -1 +1 @@", `-${from}`, `+${to}`, ""].join("\n");
@@ -94,6 +95,22 @@ describe("diff surface", () => {
     await settle();
     expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/other", scope: "unstaged" });
     expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-cwd")).toBe("/root/other");
+  });
+
+  it("runs git in the agent's shell folder inside the imported project, the same roots the Files pane reads", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": { ...STATUS, root: PROJECT_DEST } });
+    provideDaemonWire(WS, wire);
+    act(() => {
+      useRootStore.getState().follow(WS, "/root");
+      useRootStore.getState().shell(WS, `${PROJECT_DEST}/packages`);
+    });
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "unstaged" }]);
+
+    act(() => useStore.setState({ workspaces: [imported] }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: `${PROJECT_DEST}/packages`, scope: "unstaged" }));
+    await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe(PROJECT_DEST));
   });
 
   it("says when the root is outside any repository", async () => {
