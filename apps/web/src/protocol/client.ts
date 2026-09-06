@@ -25,6 +25,7 @@ import {
   type SnapshotRollbackResult,
   type SnapshotStorage,
   type WorkspaceCreateResult,
+  WorkspaceCostEvent,
   type WorkspaceStatus,
   type WorkspaceView,
 } from "@wsp/protocol";
@@ -287,6 +288,9 @@ export interface Api {
   listSnapshots(name?: string): Promise<SnapshotLineage>;
   /** Every snapshot on the account by count, size and monthly cost; null when the provider cannot list them. */
   snapshotStorage(): Promise<SnapshotStorage | null>;
+  /** The workspace's cost ticks since the runtime began metering it, folded to the rate changes and the newest. Optional
+   * so fixtures without a usage chart need not fake it; without it the chart starts with the next tick. */
+  costHistory?(workspaceId: string): Promise<WorkspaceCostEvent[]>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
   rollbackSnapshot(version: number, name?: string): Promise<SnapshotRollbackResult>;
 }
@@ -373,6 +377,8 @@ export function makeApi(c: ProtocolClient): Api {
     listSnapshots: async name =>
       (await c.request<{ lineage: SnapshotLineage }>("snapshots.list", name !== undefined ? { name } : {})).lineage,
     snapshotStorage: async () => (await c.request<{ storage: SnapshotStorage | null }>("snapshots.storage")).storage,
+    // Parsed, not trusted: the chart interpolates whatever numbers it is handed.
+    costHistory: async workspaceId => WorkspaceCostEvent.array().parse((await c.request<{ points?: unknown }>("cost.history", { workspaceId })).points),
     rollbackSnapshot: async (version, name) => {
       const { lineage, existingWorkspaces } = await c.request<SnapshotRollbackResult>("snapshots.rollback", {
         version,
