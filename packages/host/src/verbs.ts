@@ -20,7 +20,7 @@ import {
   defaultConsent,
   deleteNotice,
   fmtBytes,
-  fmtCount,
+  plural,
   fmtThreads,
   foldThreads,
   forgetNotice,
@@ -443,11 +443,17 @@ export interface Turn {
   afterCut?: true;
 }
 
+/** A path a caller named, refused unless absolute: whoever reads it has a working folder of its own that the caller
+ * cannot see, so a relative path resolves somewhere neither of them meant. `named` opens the line. */
+export function absolutePath(named: string, path: string): string {
+  if (!path.startsWith("/")) throw new Error(`${named}, absolute: got ${JSON.stringify(path)}`);
+  return path;
+}
+
 /** A folder named for a thread, refused unless absolute: the harness would run a relative one against its own home
  * and fail inside the guest, where the person reads it as a harness failure. */
 export function absoluteFolder(cwd: string | undefined): string | undefined {
-  if (cwd !== undefined && !cwd.startsWith("/")) throw new Error(`--cwd is a path on the machine, absolute: got "${cwd}"`);
-  return cwd;
+  return cwd === undefined ? undefined : absolutePath("--cwd is a path on the machine", cwd);
 }
 
 /** The folder a new thread works in: the one named, else the workspace's imported project folder, else none, and the
@@ -715,15 +721,15 @@ export function agentsChosen(plan: ProjectPlan, named: readonly string[] | undef
 export function planLines(plan: ProjectPlan, ticked: ReadonlySet<string>, agents: ReadonlySet<string>): string[] {
   const rows: string[][] = [
     ["Repository", plan.repo ? "git, .git travels whole" : "none"],
-    ["Files", `${fmtCount(plan.files, "file")}, ${fmtBytes(plan.bytes)}`],
+    ["Files", `${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}`],
     ["Caches left behind", plan.excluded.length === 0 ? "none" : plan.excluded.join(", ")],
-    ["Not carried", plan.skipped.length === 0 ? "none" : fmtCount(plan.skipped.length, "path")],
+    ["Not carried", plan.skipped.length === 0 ? "none" : plural(plan.skipped.length, "path")],
     ...plan.skipped.map(s => [`  ${s.path}`, s.note]),
     ["Lands at", plan.source],
-    ["Secret-shaped", plan.secrets.length === 0 ? "none" : fmtCount(plan.secrets.length, "file")],
+    ["Secret-shaped", plan.secrets.length === 0 ? "none" : plural(plan.secrets.length, "file")],
     ...plan.secrets.map(s => [`  ${s.path}`, `${s.signals.join(", ")}, ${fmtBytes(s.bytes)}`, secretOffer(s, ticked.has(s.path)).full]),
-    ["Agents", plan.agents.length === 0 ? "none with sessions for the folder" : `${fmtCount(plan.agents.length, "agent")} with sessions for the folder`],
-    ...plan.agents.map(a => [`  ${a.name}`, a.error ?? fmtCount(a.sessions, "session"), agents.has(a.agent) ? "sessions travel" : "stays"]),
+    ["Agents", plan.agents.length === 0 ? "none with sessions for the folder" : `${plural(plan.agents.length, "agent")} with sessions for the folder`],
+    ...plan.agents.map(a => [`  ${a.name}`, a.error ?? plural(a.sessions, "session"), agents.has(a.agent) ? "sessions travel" : "stays"]),
   ];
   return table(rows);
 }

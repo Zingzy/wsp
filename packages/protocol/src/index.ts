@@ -805,7 +805,8 @@ export const RecipeSource = z.discriminatedUnion("kind", [
 export type RecipeSource = z.infer<typeof RecipeSource>;
 
 /** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an
- * API key the tool reads, or left out. One list, read by the collector's rows and by a recipe's rows alike. */
+ * API key the tool reads, or left out. One list, read by the collector's rows, by a recipe's rows and by the words
+ * `wsp recipe --signin` takes. */
 export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
 export const LoginChoice = z.enum(LOGIN_CHOICES);
 export type LoginChoice = z.infer<typeof LoginChoice>;
@@ -831,6 +832,14 @@ export const RecipeHistory = z.object({
   calls: z.number().int().nonnegative(),
 });
 export type RecipeHistory = z.infer<typeof RecipeHistory>;
+
+/** Which rule decided every tick in a recipe: what the person's agents used on this computer, what is installed on
+ * it, or the catalog's own default. `wsp recipe --tick` names one; a recipe written without one (the wizard's
+ * screens) carries none and its rows say for themselves where each tick came from. */
+export const RecipeTick = z.enum(["used", "installed", "default"]);
+export type RecipeTick = z.infer<typeof RecipeTick>;
+/** The words `--tick` takes, in the order the help lists them. */
+export const RECIPE_TICKS: readonly RecipeTick[] = RecipeTick.options;
 
 /** A tool the recipe carries that the catalog does not, because an agent added it for the person's own projects:
  * the lines that install it, run as given on the builder after every catalog road, and one command that exits 0
@@ -858,6 +867,8 @@ export const Recipe = z.object({
   version: z.literal(1),
   /** When it was written, ISO 8601. */
   at: z.string().min(1),
+  /** The rule that decided the ticks, when one was named; a later --set keeps it, so the table reads the same. */
+  tick: RecipeTick.optional(),
   histories: z.array(RecipeHistory),
   rows: z.array(RecipeRow),
   /** Rows outside the catalog, added on purpose; a recipe written before they existed carries none. */
@@ -1585,7 +1596,8 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { actionRefusal, goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtCount, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
+export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, plural, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";
+export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";

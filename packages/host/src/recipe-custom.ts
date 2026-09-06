@@ -55,7 +55,7 @@ export function customCells(row: RecipeCustomRow): string[] {
 }
 
 /** The custom rows as printed lines, headed like the table above them; nothing when the recipe has none. */
-export function customTableLines(recipe: Recipe): string[] {
+export function customTableLines(recipe: Pick<Recipe, "custom">): string[] {
   const rows = customRows(recipe);
   if (rows.length === 0) return [];
   return ["Rows the catalog does not carry:", ...table([["id", "on", "why", "size", "install"], ...rows.map(customCells)]).map(l => `  ${l}`)];

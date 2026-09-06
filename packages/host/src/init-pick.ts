@@ -16,7 +16,7 @@ import { GUTTER, card, colourDepth, isTTY, table, textPrompt } from "./init-layo
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
 import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, scannedTicks, withScanned } from "./init-also.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
-import { BASE_GROUP, PROJECT_GROUP, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow } from "./init-table.js";
+import { BASE_GROUP, PROJECT_GROUP, candidatesLine, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
 import { hasLogin, signInFor, type SignIn } from "./signin-table.js";
 import { SIGN_IN_CHOICES, SIGN_IN_WORDS, signInChoice } from "./signin-words.js";
@@ -111,6 +111,8 @@ export function agentItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
 /** The recipe source in words with its counts, for a tool's detail pane. */
 function sourceLine(e: ToolEntry, r: RecipeRow | undefined): string {
   switch (r?.source.kind) {
+    case "project":
+      return r.source.why;
     case "installed":
       return r.source.bin ? "installed on this Mac" : `on this Mac: ${r.source.paths.join(", ")}`;
     case "used":
@@ -319,10 +321,8 @@ export function tableScreen(o: TableScreenOptions): Promise<RungSelectResult> {
  * asked, then the names the catalog carries no row for. */
 export function projectNote(scan: ProjectScan): string[] {
   if (scan.rows.length === 0 && scan.candidates.length === 0) return [`Nothing in ${scan.dir} named a tool the catalog carries.`];
-  return [
-    ...table(scan.rows.map(n => [n.name, n.why])),
-    ...(scan.candidates.length > 0 ? [`Not in the catalog: ${scan.candidates.map(n => `${n.name} (${n.why})`).join(", ")}`] : []),
-  ];
+  const candidates = candidatesLine(scan);
+  return [...table(scan.rows.map(n => [n.name, n.why])), ...(candidates === undefined ? [] : [candidates])];
 }
 
 /** What the card says when the answer names no folder that is there. */

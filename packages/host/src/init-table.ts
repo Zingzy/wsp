@@ -4,8 +4,8 @@
 // and the size its install downloads. wsp recipe prints it as text; wsp init's
 // agents and tools screens are the same rows as a list.
 import { CATALOG, MIB, type CatalogEntry } from "@wsp/catalog";
-import { plural } from "@wsp/engine";
-import { fmtBytes, type Recipe, type RecipeRow } from "@wsp/protocol";
+import type { ProjectScan } from "@wsp/collect";
+import { fmtBytes, plural, type Recipe, type RecipeRow } from "@wsp/protocol";
 import { GREY, GUTTER, accent, grey } from "./init-layout.js";
 import type { Cell } from "./init-select.js";
 
@@ -19,7 +19,7 @@ export const CATALOG_GROUP = "Also in the catalog";
 export type Group = typeof BASE_GROUP | typeof PROJECT_GROUP | typeof USED_GROUP | typeof HERE_GROUP | typeof CATALOG_GROUP;
 /** The project's own needs come first after the base: a repo that will not build without a tool outranks anything
  * this computer happens to have. */
-export const GROUP_ORDER: readonly Group[] = [BASE_GROUP, PROJECT_GROUP, USED_GROUP, HERE_GROUP, CATALOG_GROUP];
+export const GROUP_ORDER = [BASE_GROUP, PROJECT_GROUP, USED_GROUP, HERE_GROUP, CATALOG_GROUP] as const;
 /** The one word that stands for a group where colour cannot say it. */
 export const GROUP_LABEL: Record<Group, string> = { [BASE_GROUP]: "base", [PROJECT_GROUP]: "project", [USED_GROUP]: "used", [HERE_GROUP]: "installed", [CATALOG_GROUP]: "catalog" };
 /** Over this a row is heavy: it comes first inside its group and its size is drawn brighter. */
@@ -103,6 +103,12 @@ export function recipeTable(recipe: Recipe, catalog: readonly CatalogEntry[] = C
     const group = rows.filter(r => r.group === g);
     return [...group.filter(r => r.heavy), ...group.filter(r => !r.heavy)];
   });
+}
+
+/** The names a project asked for that the catalog carries no row for, each with the file that asked; nothing when it
+ * named none. One sentence, drawn by the recipe verb and by the wizard's card alike. */
+export function candidatesLine(scan: ProjectScan): string | undefined {
+  return scan.candidates.length === 0 ? undefined : `Not in the catalog: ${scan.candidates.map(n => `${n.name} (${n.why})`).join(", ")}`;
 }
 
 /** A row's size, or that the catalog has none for it. */

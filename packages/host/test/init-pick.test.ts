@@ -35,7 +35,7 @@ import {
 } from "../src/init-pick.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { LATER_LINE, answerOf } from "../src/init-select.js";
-import { BASE_GROUP, CATALOG_GROUP, HERE_GROUP, USED_GROUP, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
+import { BASE_GROUP, CATALOG_GROUP, HERE_GROUP, PROJECT_GROUP, USED_GROUP, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 
 const KEY = { up: "\x1b[A", down: "\x1b[B", left: "\x1b[D", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
@@ -79,6 +79,19 @@ describe("the tools screen", () => {
     expect(by("node").detail).toEqual(["ships in 5 lab images; on by default in the catalog; on every machine", "part of the base on every machine"]);
     expect(by("go").detail).toEqual(["your agents used it in 1 session (2 calls)", "about 251.0 MB on the machine; no row here; installed by its brew road"]);
     expect(by("java").detail[0]).toBe("ships in 4 lab images; on request");
+  });
+
+  it("a row the project asked for says so in its detail pane too, not only in its group and its why column", () => {
+    const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "go", source: { kind: "project", why: "go.mod needs Go" } })] };
+    const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true);
+    const go = items.find(i => i.id === "go")!;
+    expect(go.group).toBe(PROJECT_GROUP);
+    expect(text(go.why)).toBe("project    go.mod needs Go");
+    expect(go.detail).toEqual(["go.mod needs Go", "about 251.0 MB on the machine; no row here; installed by its brew road"]);
+    // A floor row the project also named says so under the cursor, even though the base is what puts it on the machine.
+    const based = { ...RECIPE, rows: [...RECIPE.rows.filter(r => r.id !== "pnpm"), row({ id: "pnpm", source: { kind: "project", why: "pnpm-lock.yaml needs pnpm" } })] };
+    const pnpm = tableItems(recipeTable(based, CATALOG_TOOLS), based, FIXTURE, 4, true).find(i => i.id === "pnpm")!;
+    expect(pnpm.detail[0]).toBe("pnpm-lock.yaml needs pnpm; on every machine");
   });
 
   it("ticks go back onto the recipe: a floor row stays on however the list left it, and an entry the recipe never named gets a row on the catalog's evidence", () => {
