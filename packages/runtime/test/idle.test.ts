@@ -158,7 +158,7 @@ function heldSession(): { factory: HarnessAdapterFactory; end: () => void } {
         };
       });
       o.onEvent({ type: "session.start", sessionId: "c1" } as AdapterEvent);
-      return { localId: "s1", claudeSessionId: "c1", finished, interrupt: async () => {} };
+      return { localId: "s1", finished, interrupt: async () => {} };
     },
   });
   return { factory, end: () => end() };

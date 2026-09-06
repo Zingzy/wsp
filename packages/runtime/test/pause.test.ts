@@ -32,7 +32,6 @@ function hangingAdapter() {
       onEvent({ type: "turn.delta", sessionId, kind: "text", text: "working" });
       return {
         localId: sessionId,
-        claudeSessionId: sessionId,
         finished,
         interrupt: async () => {
           interrupts.push(workspaceId);

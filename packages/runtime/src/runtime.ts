@@ -103,7 +103,6 @@ export interface HarnessStartOptions {
 
 export interface HarnessSession {
   readonly localId: string;
-  readonly claudeSessionId: string;
   readonly finished: Promise<TurnResult>;
   /** Stops the process this session owns; finished settles after it, once session.end has been emitted. */
   interrupt(): Promise<void>;
@@ -1583,7 +1582,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const turnId = randomUUID();
       const threadId = threadOf(workspaceId, o.resume);
       // Created before adapter.start so events that fire synchronously during
-      // start() still land on the view.
+      // start() still land on the view. A resume id was announced by the harness
+      // in an earlier turn, so the row carries it before this one answers.
       const sessionView: SessionView = {
         id: "",
         workspaceId,
@@ -1592,6 +1592,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         threadId,
         prompt: o.prompt,
         startedAt: Date.now(),
+        ...(o.resume !== undefined ? { claudeSessionId: o.resume } : {}),
         ...(o.cwd !== undefined ? { cwd: o.cwd } : {}),
         ...(o.model !== undefined ? { model: o.model } : {}),
         ...(o.effort !== undefined ? { effort: o.effort } : {}),
@@ -1684,7 +1685,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       );
       const handleId = started.localId;
       sessionView.id = handleId;
-      sessionView.claudeSessionId ??= started.claudeSessionId;
 
       const handle: SessionHandle = {
         id: handleId,

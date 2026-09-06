@@ -45,7 +45,7 @@ export interface ChatThreadHandle {
   readonly sending: boolean;
   /** True from a new-thread request until its first session.start: the next send must not resume the old session. */
   readonly fresh: boolean;
-  /** The harness session the next send resumes: the shown thread's last started turn, else, on an empty latest view, the workspace's remembered one; none while fresh. */
+  /** The harness session the next send resumes: the shown thread's last started turn, else, on an empty latest view, the workspace's remembered one, else, pinned, the one its session row carries; none while fresh. */
   readonly resume: string | undefined;
   /** True while the turn a new thread left behind is still running on the machine. */
   readonly finishing: boolean;
@@ -377,6 +377,8 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   // Moves when a reconnect could not replay what the socket missed: the thread below is rebuilt from history.
   const gaps = useStore(s => s.gaps);
   const remembered = useStore(s => s.workspaces.find(w => w.id === workspaceId)?.claudeSessionId);
+  // The runtime stamps a row only once the harness announced its session, so a capped pinned thread resumes by its row and a dead one resumes nothing.
+  const rowSession = useStore(s => (threadId === null ? undefined : s.sessions[workspaceId]?.findLast(r => r.threadId === threadId && r.claudeSessionId !== undefined)?.claudeSessionId));
   const viewKey = threadId === null ? workspaceId : `${workspaceId}/${threadId}`;
   const [state, setState] = useState<ThreadState>(EMPTY);
   const [viewed, setViewed] = useState({ workspaceId, threadId });
@@ -468,7 +470,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     busy: state.sending !== null || view.running || finishing,
     sending: state.sending !== null,
     fresh: state.fresh,
-    resume: state.fresh ? undefined : (startedSession(state.events) ?? (threadId === null && state.events.length === 0 ? remembered : undefined)),
+    resume: state.fresh ? undefined : (startedSession(state.events) ?? (threadId === null ? (state.events.length === 0 ? remembered : undefined) : rowSession)),
     finishing,
     threadKey: heldThreadId(state) ?? threadId ?? workspaceId,
     named: state.named,
