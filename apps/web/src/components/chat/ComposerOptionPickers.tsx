@@ -10,13 +10,13 @@
 import { BrainIcon, ChevronDownIcon, CircleSlashIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import type { HarnessCatalog, HarnessModel, HarnessOption } from "@wsp/protocol";
+import { contextWindowsFor, effortsFor, type HarnessCatalog, type HarnessModel, type HarnessOption } from "@wsp/protocol";
 import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useStore, useWorkspace } from "../../protocol/store";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey } from "./composerOptionsStore";
-import { contextWindowsFor, effectivePicks, effortsFor, resolveModel, runningPicks, startOptionsFrom, type ResolvedPicks, type StartPicks } from "./composerPicks";
+import { effectivePicks, resolveModel, runningPicks, startOptionsFrom, type ComposerStart, type ResolvedPicks } from "./composerPicks";
 import type { ChatThreadHandle } from "./useChatThread";
 
 export const DEFAULT_HARNESS = DEFAULT_AGENT.id;
@@ -44,7 +44,7 @@ export interface ComposerPicks {
   readonly model: HarnessModel | null;
   readonly picks: ResolvedPicks | null;
   /** What rides the next sessions.start. */
-  readonly startOptions: StartPicks;
+  readonly startOptions: ComposerStart;
   /** The thread has a turn on this harness, so the rail offers no other. */
   readonly pinned: boolean;
 }

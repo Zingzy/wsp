@@ -91,7 +91,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, notifyLine, sendRefusal, shellQuote, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, NOTIFY_ME, fmtBytes, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -1869,6 +1869,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return catalog;
   };
 
+  /** The mark goes on the way out, never into the cache: a start and a list share one cached table. */
+  const markDefault = (c: HarnessCatalog): HarnessCatalog => ({ ...c, ...(c.harness === DEFAULT_AGENT.id ? { isDefault: true } : {}) });
+
   /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. */
   const adapterFor = (entry: LiveWorkspace, named?: string): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
@@ -1969,6 +1972,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       }
       const notify = o.notify ?? notifyOf(threadId);
+      const table = harnessCatalog(harness);
+      // Checked against the binary's own lists, the ones the composer shows for this workspace.
+      const picks = startPicks(table === undefined ? undefined : await catalogOn(table, entry.machine, adapter), o, o.resume === undefined);
       let outcome: SessionStartOutcome = "started";
       // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time.
       for (let running = runningOn(threadId); running !== undefined; running = runningOn(threadId)) {
@@ -1981,10 +1987,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await running.handle.finished.catch(() => {});
         refuse();
       }
-      const table = harnessCatalog(harness);
-      // A start is when the binary may have changed under us, so the catalog is refreshed here too, within its TTL.
-      if (table !== undefined) void catalogOn(table, entry.machine, adapter);
-
       const turnId = randomUUID();
       const cwd = (o.resume !== undefined ? folderOf(workspaceId, o.resume) : undefined) ?? o.cwd;
       // Created before adapter.start so events that fire synchronously during
@@ -2001,9 +2003,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         startedAt: Date.now(),
         ...(o.resume !== undefined ? { claudeSessionId: o.resume } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
-        ...(o.model !== undefined ? { model: o.model } : {}),
-        ...(o.effort !== undefined ? { effort: o.effort } : {}),
-        ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
+        ...picks,
         ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
       };
       let ended = false;
@@ -2077,9 +2077,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           prompt: o.prompt,
           ...(o.resume !== undefined ? { resume: o.resume } : {}),
           ...(cwd !== undefined ? { cwd } : {}),
-          ...(o.model !== undefined ? { model: o.model } : {}),
-          ...(o.effort !== undefined ? { effort: o.effort } : {}),
-          ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
+          ...picks,
           ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
           onEvent: forward,
         });
@@ -2906,11 +2904,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     harnesses: {
       list: async workspaceId => {
         // Only a harness with an adapter can run a turn; the rest of the table waits for one.
-        const table = HARNESS_CATALOGS.filter(c => c.harness in adapters).map(c => ({ ...c }));
-        if (workspaceId === undefined) return table;
+        const table = HARNESS_CATALOGS.filter(c => c.harness in adapters);
+        if (workspaceId === undefined) return table.map(markDefault);
         const entry = await entryOf(workspaceId);
-        if (entry.record.phase !== "running") return table;
-        return Promise.all(table.map(c => catalogOn(c, entry.machine, adapters[c.harness]!({ machine: entry.machine, workspaceId }))));
+        if (entry.record.phase !== "running") return table.map(markDefault);
+        return Promise.all(table.map(c => catalogOn(c, entry.machine, adapters[c.harness]!({ machine: entry.machine, workspaceId })).then(markDefault)));
       },
     },
     golden,
