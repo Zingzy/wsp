@@ -4,7 +4,6 @@
 // and used only for direct calls from this process to the machine API.
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
@@ -26,6 +25,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENTS } from "@wsp/catalog";
+import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { readBrewTable } from "./init-brew.js";
@@ -246,11 +246,6 @@ export function goldenRecipe(
   };
 }
 
-/** The built web app, next to the @wsp/web package the host depends on. */
-function defaultWebDir(): string {
-  return join(dirname(createRequire(import.meta.url).resolve("@wsp/web/package.json")), "dist");
-}
-
 function defaultStatePath(): string {
   // A .env in cwd marks a dev checkout; share its .wsp state with wspx.
   if (existsSync(join(process.cwd(), ".env"))) return join(process.cwd(), ".wsp", "state.json");
@@ -393,7 +388,7 @@ async function hostFor(
       runtime: rt,
       port: opts.port,
       wsPort: opts.wsPort,
-      webDir: opts.webDir ?? defaultWebDir(),
+      webDir: opts.webDir ?? assetDir("web"),
       ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
       ...(keys.anthropic !== undefined ? { workspaceEnvs: (golden: GoldenVersion) => claudeEnvs(keys.anthropic, golden) } : {}),
       ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),

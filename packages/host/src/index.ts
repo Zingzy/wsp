@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+export { ASSETS_DIR, ASSET_KINDS, assetDir, assetProof, packedAsset, stageAsset, stagedAsset, workspaceAsset, type AssetKind } from "./assets.js";
 export {
   startHost,
   type HostOptions,

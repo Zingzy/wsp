@@ -6,17 +6,23 @@
 // node_modules; the packaged app carries it as an extra resource one
 // directory above the app, on the same parent walk.
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
+// The table of shipped assets lives in @wsp/host's build output, and build:app
+// runs on its own from `start`, so a tree that has not built it is named here
+// instead of in a resolver stack trace.
+const { workspaceAsset } = await import("@wsp/host").catch(e => {
+  if (e.code !== "ERR_MODULE_NOT_FOUND") throw e;
+  throw new Error("@wsp/host is not built: run pnpm --filter @wsp/desktop build:deps first");
+});
+
 const root = fileURLToPath(new URL("..", import.meta.url));
 const app = join(root, "build", "app");
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 
-const webDir = join(dirname(require.resolve("@wsp/web/package.json")), "dist");
-const daemonDir = dirname(require.resolve("@wsp/daemon/package.json"));
+const webDir = workspaceAsset("web");
+const daemonDir = workspaceAsset("daemon");
 for (const [what, path] of [
   ["main bundle", join(app, "main", "main.mjs")],
   ["web app", join(webDir, "index.html")],

@@ -23,6 +23,11 @@ On a small computer run vitest by file:
 tests, which create real machines, are described in
 [docs/canary.md](docs/canary.md).
 
+`wspx` and `@wsp/desktop` bundle their dependencies into one file, so their
+`build` uses whatever those last built. Building either on its own starts
+with `pnpm --filter <name> build:deps`. `pnpm build` and `pnpm release`
+already build everything in dependency order, so they need no such step.
+
 ## The rules the code follows
 
 These are the decisions the project has already paid for. A change that
