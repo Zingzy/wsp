@@ -282,9 +282,9 @@ export const HarnessCatalogSource = z.enum(["harness", "table"]);
 export type HarnessCatalogSource = z.infer<typeof HarnessCatalogSource>;
 
 /** What one harness's CLI takes at launch. A list is empty when the CLI has no such flag or its values are open,
- * and the composer hides that picker; sessions.start passes a picked value through unchanged. source says whether the
- * binary on the workspace's machine answered or the runtime's table stood in, and version is the binary's, else the
- * table's pin. */
+ * and the composer hides that picker; sessions.start refuses a value a non-empty list does not carry and passes any
+ * value through where the list is empty. source says whether the binary on the workspace's machine answered or the
+ * runtime's table stood in, and version is the binary's, else the table's pin. */
 export const HarnessCatalog = z.object({
   harness: z.string(),
   label: z.string(),
@@ -297,8 +297,65 @@ export const HarnessCatalog = z.object({
   /** Whether a running turn of this harness takes a message (sessions.steer); false where the runtime's table alone
    * answers, since only the adapter on a machine knows. The composer picks send-now's road from this before the click. */
   steers: z.boolean(),
+  /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
+  isDefault: z.boolean().optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
+
+/** The option a list marks as its default, if one is: what an unpicked picker shows and an unnamed start runs. */
+export function markedDefault<T extends HarnessOption>(options: ReadonlyArray<T>): T | undefined {
+  return options.find(o => o.isDefault === true);
+}
+
+function narrowed(all: ReadonlyArray<HarnessOption>, subset: ReadonlyArray<string> | undefined): HarnessOption[] {
+  return subset === undefined ? [...all] : all.filter(o => subset.includes(o.value));
+}
+
+/** The efforts a model takes: its own subset of the catalog's, in the catalog's order, else all of them. */
+export function effortsFor(catalog: HarnessCatalog, model: HarnessModel | null): HarnessOption[] {
+  return narrowed(catalog.efforts, model?.efforts);
+}
+
+/** None without a model: the window rides the model as a suffix, so there is nothing to offer it on. */
+export function contextWindowsFor(catalog: HarnessCatalog, model: HarnessModel | null): HarnessOption[] {
+  return model === null ? [] : narrowed(catalog.contextWindows, model.contextWindows);
+}
+
+/** The picks a start names, as sessions.start carries them. */
+export interface StartPicks {
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+}
+
+const optionWords = (options: ReadonlyArray<HarnessOption>): string => options.map(o => `${o.label} (${o.value})`).join(", ");
+
+function listed(subject: string, word: string, options: ReadonlyArray<HarnessOption>, value: string | undefined): void {
+  if (value === undefined || options.some(o => o.value === value)) return;
+  throw new Error(options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}`);
+}
+
+function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined): void {
+  if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model);
+  const chosen = model === undefined ? null : catalog.models.find(m => m.value === model) ?? { value: model, label: model };
+  if (catalog.efforts.length > 0) listed(chosen?.efforts !== undefined ? chosen.label : catalog.harness, "effort", effortsFor(catalog, chosen), picks.effort);
+  if (catalog.permissionModes.length > 0) listed(catalog.harness, "access mode", catalog.permissionModes, picks.permissionMode);
+}
+
+/** The picks a start runs with, checked against the catalog: a value a list does not carry is refused naming the
+ * list in the composer's words, and a list the CLI leaves empty (no such flag, or open values) takes any value. A
+ * start that opens a thread without a model runs the one the catalog marks default, so every door runs what the
+ * composer shows; a resume keeps the thread's own model. Without a catalog (a harness the runtime has no table row
+ * for) every value passes and no default is filled. Only the three picks come out, whatever else rides in. */
+export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPicks, opensThread: boolean): StartPicks {
+  const model = picks.model ?? (opensThread && catalog !== undefined ? markedDefault(catalog.models)?.value : undefined);
+  if (catalog !== undefined) checkedAgainst(catalog, picks, model);
+  return {
+    ...(model !== undefined ? { model } : {}),
+    ...(picks.effort !== undefined ? { effort: picks.effort } : {}),
+    ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}),
+  };
+}
 
 // --- session events (mirroring @wsp/adapter-claude's AdapterEvent) ----------
 
@@ -1240,7 +1297,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     harness: z.string().optional(),
     resume: z.string().optional(),
     cwd: z.string().optional(),
-    /** Values from the harness's catalog; absent means the CLI's own default for that flag. */
+    /** Values from the harness's catalog for the workspace (harnesses.list), refused with that list on a miss. A
+     * start that opens a thread without a model runs the one the catalog marks default, so the app, the command line
+     * and the MCP server run the same model; an absent effort or mode leaves the CLI's own. */
     model: z.string().optional(),
     effort: z.string().optional(),
     permissionMode: z.string().optional(),

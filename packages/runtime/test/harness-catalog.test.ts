@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { HarnessCatalog } from "@wsp/protocol";
+import { HarnessCatalog, startPicks } from "@wsp/protocol";
 import { HARNESS_CATALOGS, TABLE_PIN, catalogFromProbe, harnessCatalog, type HarnessCatalogProbe } from "../src/harness-catalog.js";
 
 describe("harness catalogs", () => {
@@ -39,6 +39,51 @@ describe("harness catalogs", () => {
   });
 });
 
+describe("startPicks", () => {
+  const claude = harnessCatalog("claude")!;
+  const MODELS = "Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)";
+
+  it("a start that opens a thread without a model runs the catalog's default, the one the composer shows; a resume keeps the thread's own", () => {
+    expect(startPicks(claude, {}, true)).toEqual({ model: "claude-opus-5" });
+    expect(startPicks(claude, {}, false)).toEqual({});
+    expect(startPicks(claude, { model: "claude-sonnet-5", effort: "low", permissionMode: "plan" }, true)).toEqual({ model: "claude-sonnet-5", effort: "low", permissionMode: "plan" });
+    expect(startPicks(claude, { effort: "max" }, false)).toEqual({ effort: "max" });
+    const noDefault = { ...claude, models: claude.models.map(({ isDefault: _d, ...m }) => m) };
+    expect(startPicks(noDefault, {}, true)).toEqual({});
+  });
+
+  it("refuses a value the catalog does not list, naming the list in the composer's words", () => {
+    expect(() => startPicks(claude, { model: "claude-haiku-4-5" }, true)).toThrow(`model "claude-haiku-4-5" is not one claude takes; one of: ${MODELS}`);
+    expect(() => startPicks(claude, { effort: "ultra" }, false)).toThrow('effort "ultra" is not one claude takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max)');
+    expect(() => startPicks(claude, { permissionMode: "yolo" }, true)).toThrow(
+      'access mode "yolo" is not one claude takes; one of: Default (default), Accept edits (acceptEdits), Plan (plan), Bypass (bypassPermissions), Auto (auto), Manual (manual), Don\'t ask (dontAsk)',
+    );
+  });
+
+  it("an effort is checked against the model's own list where the model has one, the chosen or the default model", () => {
+    const narrowed = { ...claude, models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, efforts: ["high", "max"] }, { value: "claude-haiku-4-5", label: "Haiku", efforts: [] }] };
+    expect(startPicks(narrowed, { effort: "max" }, true)).toEqual({ model: "claude-opus-5", effort: "max" });
+    expect(() => startPicks(narrowed, { effort: "low" }, true)).toThrow('effort "low" is not one Opus 5 takes; one of: High (high), Max (max)');
+    expect(() => startPicks(narrowed, { model: "claude-haiku-4-5", effort: "low" }, true)).toThrow("Haiku takes no effort");
+    expect(startPicks(narrowed, { effort: "low" }, false)).toEqual({ effort: "low" });
+  });
+
+  it("a list the CLI leaves empty takes any value, since the values are open or the flag does not exist", () => {
+    const codex = harnessCatalog("codex")!;
+    expect(startPicks(codex, { model: "gpt-5-codex" }, true)).toEqual({ model: "gpt-5-codex" });
+    expect(startPicks(codex, {}, true)).toEqual({});
+    expect(() => startPicks(codex, { effort: "ultra" }, true)).toThrow('effort "ultra" is not one codex takes');
+    const pi = harnessCatalog("pi")!;
+    expect(startPicks(pi, { permissionMode: "anything" }, true)).toEqual({ permissionMode: "anything" });
+  });
+
+  it("a harness without a catalog takes any value and fills no default; only the three picks come out, whatever else the request carries", () => {
+    const request = { prompt: "go", harness: "aider", model: "gpt-9", effort: "high", requestId: "r1", startedBy: "cli", cwd: "/w" };
+    expect(startPicks(undefined, request, true)).toEqual({ model: "gpt-9", effort: "high" });
+    expect(startPicks(claude, { ...request, model: "claude-sonnet-5" }, false)).toEqual({ model: "claude-sonnet-5", effort: "high" });
+  });
+});
+
 describe("catalogFromProbe", () => {
   const probe: HarnessCatalogProbe = {
     version: "2.1.257",
@@ -72,5 +117,10 @@ describe("catalogFromProbe", () => {
 
   it("a probe without a version says so instead of pretending to the table's pin", () => {
     expect(catalogFromProbe(harnessCatalog("claude")!, { ...probe, version: null }).version).toBeNull();
+  });
+
+  it("keeps the harness-level flags the runtime set on the table: the default harness stays marked when its binary answered", () => {
+    expect(catalogFromProbe({ ...harnessCatalog("claude")!, isDefault: true, steers: true }, probe)).toMatchObject({ isDefault: true, steers: true });
+    expect(catalogFromProbe(harnessCatalog("claude")!, probe).isDefault).toBeUndefined();
   });
 });
