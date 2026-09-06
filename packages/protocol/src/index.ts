@@ -447,8 +447,19 @@ export type ProjectRewrite = z.infer<typeof ProjectRewrite>;
  * is the credential there. Offered only when the rewrite removes every secret shape the file has. */
 export const ProjectSecret = z.object({ path: z.string(), bytes: z.number(), signals: z.array(CredentialSignal), rewrite: ProjectRewrite.optional() });
 export type ProjectSecret = z.infer<typeof ProjectSecret>;
+/** How an agent's state for the folder travels by file: `moves` when the files carry every key and the resolver
+ * re-keys them to the new path so the agent resumes there, `transcript-only` when the rows in a shared store that
+ * hold or find the sessions stay behind and only the files travel, if there are any. */
+export const ProjectCarry = z.enum(["moves", "transcript-only"]);
+export type ProjectCarry = z.infer<typeof ProjectCarry>;
+/** One agent whose home on this computer holds sessions for the folder, by catalog id: the count, the bytes of the
+ * state files that would travel and the carry answer. An agent whose store could not be read keeps its row with
+ * `error` saying why and zero sessions; it never travels. */
+export const ProjectAgent = z.object({ agent: z.string(), name: z.string(), sessions: z.number(), bytes: z.number(), carry: ProjectCarry, error: z.string().optional() });
+export type ProjectAgent = z.infer<typeof ProjectAgent>;
 /** What a project import would carry, for the person to read before anything is packed: the files and their bytes,
- * the secret-shaped ones, the caches left behind (relative paths) and the paths named but not carried, with why. */
+ * the secret-shaped ones, the caches left behind (relative paths), the paths named but not carried, with why, and the
+ * agents with sessions for the folder. */
 export const ProjectPlan = z.object({
   /** The folder on this computer, absolute. */
   source: z.string(),
@@ -460,6 +471,7 @@ export const ProjectPlan = z.object({
   secrets: z.array(ProjectSecret),
   excluded: z.array(z.string()),
   skipped: z.array(z.object({ path: z.string(), note: z.string() })),
+  agents: z.array(ProjectAgent),
 });
 export type ProjectPlan = z.infer<typeof ProjectPlan>;
 /** The steps of one import in order; `failed` ends one that threw. */
@@ -479,9 +491,18 @@ export const ProjectImportEvent = z.object({
   total: z.number().optional(),
 });
 export type ProjectImportEvent = z.infer<typeof ProjectImportEvent>;
+/** What became of one agent the import named: `moved` when the agent is on the machine and its module re-keyed every
+ * file to dest, `transcript-only` when it is on the machine but only its files landed and the rows in its shared store
+ * that list them stayed behind, `carried` when it is not there so the files landed as they were, `nothing` when no
+ * file of its travelled, `failed` when the move raised and nothing of that agent landed; files and bytes are what landed. */
+export const ProjectAgentOutcome = z.enum(["moved", "transcript-only", "carried", "nothing", "failed"]);
+export type ProjectAgentOutcome = z.infer<typeof ProjectAgentOutcome>;
+export const ProjectAgentResult = z.object({ agent: z.string(), files: z.number(), bytes: z.number(), outcome: ProjectAgentOutcome, error: z.string().optional() });
+export type ProjectAgentResult = z.infer<typeof ProjectAgentResult>;
 /** What landed: the path on the machine, the files and bytes extracted there, the upload parts, the secret-shaped
- * paths that were cut because the import did not name them, and the ones that landed rewritten as the plan offered. */
-export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()), rewritten: z.array(z.string()) });
+ * paths that were cut because the import did not name them, the ones that landed rewritten as the plan offered, and
+ * each named agent's outcome. */
+export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()), rewritten: z.array(z.string()), agents: z.array(ProjectAgentResult) });
 export type ProjectImportResult = z.infer<typeof ProjectImportResult>;
 
 // --- desktop shell bridge (preload to page) -----------------------------------
@@ -1161,7 +1182,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the
    * reply is { imported: ProjectImportResult }. `carry` names the secret-shaped paths from the plan that may travel as
    * they are; `rewrite` names the ones the plan offered a rewrite for, which land rewritten as offered and win over
-   * carry; every other secret-shaped file is cut and named. An existing `dest` is refused (kind "exists") unless `replace`. */
+   * carry; every other secret-shaped file is cut and named. `agents` names the plan's agents whose state for the
+   * folder travels; nothing of an agent not named is read. An existing `dest` is refused (kind "exists") unless `replace`. */
   z.object({
     id: reqId,
     op: z.literal("project.import"),
@@ -1171,6 +1193,7 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     replace: z.boolean().optional(),
     carry: z.array(z.string()).optional(),
     rewrite: z.array(z.string()).optional(),
+    agents: z.array(z.string()).optional(),
   }),
 ]);
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;

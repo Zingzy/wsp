@@ -14,6 +14,8 @@ import {
   landBundle,
   fmtBytes,
   plural,
+  agentsOnMachine,
+  guestAgentHomes,
   killUntilGone,
   prepareBuilder,
   reap,
@@ -61,6 +63,8 @@ import type {
   RecipeDigest,
   PortProbeView,
   PortReachView,
+  ProjectAgentOutcome,
+  ProjectAgentResult,
   ProjectImportResult,
   ProjectImportStage,
   ProjectPlan,
@@ -210,12 +214,28 @@ export interface PackedProject {
   rewritten: string[];
 }
 
+/** The agents whose state for the folder travels: each with its home on the machine and whether the agent is there
+ * to read the state once it is keyed to `dest`. */
+export interface StateRequest {
+  dest: string;
+  agents: readonly { agent: string; home: string; present: boolean }[];
+}
+
+/** The agents' state as the host packs it: an archive of each agent's files at its machine home, for the guest's
+ * root, and what became of each agent. */
+export interface PackedState {
+  tar: Buffer;
+  agents: ProjectAgentResult[];
+}
+
 /** A folder on this computer as the host reads it; the runtime never touches the disk itself. `plan` reads names
  * and sizes, `pack` reads the bytes once consent is known: a secret-shaped file travels only when `carry` names it,
- * or rewritten when `rewrite` names a path the plan offered a rewrite for. */
+ * or rewritten when `rewrite` names a path the plan offered a rewrite for. `packState` reads the named agents'
+ * homes for their state for the folder, re-keyed to the destination for the agents on the machine. */
 export interface ProjectBundler {
   plan(): Promise<ProjectPlan>;
   pack(carry: ReadonlySet<string>, rewrite: ReadonlySet<string>): Promise<PackedProject>;
+  packState(req: StateRequest): Promise<PackedState>;
 }
 
 export interface ProjectImportOptions {
@@ -230,6 +250,8 @@ export interface ProjectImportOptions {
   carry?: readonly string[];
   /** The paths the plan offered a rewrite for that land rewritten; wins over carry for the same path. */
   rewrite?: readonly string[];
+  /** The plan's agents whose state for the folder travels, by catalog id; nothing of any other agent is read. */
+  agents?: readonly string[];
   bundler: ProjectBundler;
 }
 
@@ -334,6 +356,14 @@ export interface WakeOptions {
 const WAKE_PING_TIMEOUT_MS = 30_000;
 /** The probe's fetch bound; the frame keeps loading meanwhile, so silence costs nothing but the sentence. */
 const PORT_PROBE_TIMEOUT_MS = 10_000;
+/** How the import's done line reads each agent's outcome, after the agent's name. */
+const OUTCOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {
+  moved: "moved",
+  "transcript-only": "transcripts landed but not yet in its session list",
+  carried: "carried unchanged since it is not on the machine",
+  nothing: "had nothing to carry",
+};
+
 /** Vite's and Next's refusals fit in a few hundred bytes; a page that loaded fine is not carried back whole. */
 export const PORT_PROBE_BODY_CAP = 2048;
 const VAULT_CAP_BYTES = 200 * 1024 * 1024;
@@ -2422,9 +2452,34 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(carried.length === 0 && rewriting.length === 0 ? ["no secret-shaped file travels"] : []),
           cut.length === 0 ? "nothing cut" : `cut ${cut.join(", ")}`,
         ].join("; ");
-        report("consented", plan.secrets.length === 0 ? "No secret-shaped files." : `${clauses.charAt(0).toUpperCase()}${clauses.slice(1)}.`);
+        const named = new Set(o.agents ?? []);
+        const readable = plan.agents.filter(a => a.error === undefined);
+        const unreadable = plan.agents.filter(a => a.error !== undefined);
+        const travelling = readable.filter(a => named.has(a.agent));
+        const staying = readable.filter(a => !named.has(a.agent));
+        const withCount = (a: ProjectPlan["agents"][number]): string => `${a.name} (${plural(a.sessions, "session")})`;
+        const notes = [
+          ...(plan.agents.length === 0 ? [] : travelling.length === 0 ? ["No agent sessions travel"] : [`Sessions travel for ${travelling.map(withCount).join(", ")}`]),
+          ...(travelling.length > 0 && staying.length > 0 ? [`${staying.map(a => a.name).join(", ")} ${staying.length === 1 ? "stays" : "stay"}`] : []),
+          ...unreadable.map(a => `${a.name} could not be read (${a.error})`),
+        ];
+        const agentsLine = notes.length === 0 ? "" : ` ${notes.join("; ")}.`;
+        report("consented", `${plan.secrets.length === 0 ? "No secret-shaped files." : `${clauses.charAt(0).toUpperCase()}${clauses.slice(1)}.`}${agentsLine}`);
         report("packing", `Packing ${plural(plan.files - cut.length, "file")}.`);
         const packed = await o.bundler.pack(carry, rewrite);
+        let state: PackedState | undefined;
+        if (travelling.length > 0) {
+          const present = await agentsOnMachine(entry.machine, travelling.map(a => a.agent));
+          const homes = guestAgentHomes();
+          state = await o.bundler.packState({
+            dest: o.dest,
+            agents: travelling.map(a => {
+              const home = homes[a.agent];
+              if (home === undefined) throw new Error(`${a.agent} is not an agent the catalog knows`);
+              return { agent: a.agent, home, present: present.has(a.agent) };
+            }),
+          });
+        }
         report("uploading", `Uploading ${fmtBytes(packed.tar.length)}.`, { bytes: 0, total: packed.tar.length });
         const { parts } = await landBundle(entry.machine, packed.tar, o.dest, {
           ...(o.replace !== undefined ? { replace: o.replace } : {}),
@@ -2432,8 +2487,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           onPart: p => report("uploading", `Part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, { bytes: p.bytes, total: p.total }),
           onLanding: () => report("landing", `Landing at ${o.dest}.`),
         });
-        report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}.`);
-        return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten };
+        const nameOf = (id: string): string => plan.agents.find(a => a.agent === id)?.name ?? id;
+        const outcomes = (state?.agents ?? []).map(a => `${nameOf(a.agent)} ${a.outcome === "failed" ? `failed: ${a.error ?? "no reason given"}` : OUTCOME_WORDS[a.outcome]}`);
+        if (state !== undefined && state.agents.some(a => a.files > 0)) {
+          const files = state.agents.reduce((n, a) => n + a.files, 0);
+          report("uploading", `Uploading ${plural(files, "session file")}, ${fmtBytes(state.tar.length)}.`, { bytes: 0, total: state.tar.length });
+          await importInto(entry.machine, state.tar, "/", {
+            overlay: true,
+            timeoutMs: 600_000,
+            onPart: p => report("uploading", `Part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, { bytes: p.bytes, total: p.total }),
+          });
+          report("landing", `Landing sessions: ${outcomes.join(", ")}.`);
+        }
+        report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${outcomes.length > 0 ? `; sessions: ${outcomes.join(", ")}` : ""}.`);
+        return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents: state?.agents ?? [] };
       } catch (e) {
         report("failed", e instanceof Error ? e.message : String(e));
         throw e;

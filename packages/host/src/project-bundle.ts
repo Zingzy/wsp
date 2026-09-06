@@ -2,12 +2,13 @@
 // A project folder on this computer, read for the trip to a workspace: the tracked tree, the state beside it
 // that is not a cache, and the repository whole. A cache is recreated on the machine, never carried.
 import { execFile } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { CACHE_WORD, FINDER_METADATA, INSTALL_NAMES, OUTPUT_NAMES, bareUrls, fileSignals, keysSignal } from "@wsp/collect";
-import { TAR_MAX_FILE_BYTES, fitsTar, resolveProjectPath, tarOf, underProject, type TarEntry } from "@wsp/engine";
-import { CredentialSignal, type ProjectPlan, type ProjectRewrite, type ProjectSecret } from "@wsp/protocol";
-import type { PackedProject, ProjectBundler } from "@wsp/runtime";
+import { PROJECT_STATE_RESOLVERS, TAR_MAX_FILE_BYTES, countProjectState, filesUnder, fitsTar, moveProjectState, resolveProjectPath, tarOf, underProject, type AgentMoveReport, type TarEntry } from "@wsp/engine";
+import { CredentialSignal, type ProjectAgentOutcome, type ProjectAgentResult, type ProjectCarry, type ProjectPlan, type ProjectRewrite, type ProjectSecret } from "@wsp/protocol";
+import type { PackedProject, PackedState, ProjectBundler, StateRequest } from "@wsp/runtime";
 
 /** A virtual environment goes by any name; this file inside it says what it is. */
 const VENV_MARKER = "pyvenv.cfg";
@@ -225,8 +226,10 @@ function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked:
 
 /** What an import of the folder would carry. Names and sizes are read, file bodies only for the secret scan of small
  * structured files; a .git file (a worktree or a submodule checkout) is named and left, since its repository lives
- * elsewhere. Throws when the folder is not an absolute path to a directory. */
-export async function planProject(source: string): Promise<ProjectListing> {
+ * elsewhere. The agents with sessions for the folder are counted in `homes`, each agent's home by catalog id, which
+ * the caller names so a test never opens the homes on this computer. Throws when the folder is not an absolute path
+ * to a directory. */
+export async function planProject(source: string, homes: Readonly<Record<string, string>>): Promise<ProjectListing> {
   if (!isAbsolute(source)) throw new Error(`the folder must be an absolute path, got ${source}`);
   const root = resolveProjectPath(source);
   if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`${root} is not a folder on this computer`);
@@ -245,6 +248,7 @@ export async function planProject(source: string): Promise<ProjectListing> {
     secrets: w.secrets,
     excluded: w.excluded,
     skipped: w.skipped,
+    agents: await countProjectState(root, homes),
   };
   return { plan, files: w.files };
 }
@@ -283,12 +287,66 @@ export function packProject(listing: ProjectListing, carry: ReadonlySet<string>,
   return { tar: tarOf(entries), files, bytes, cut, rewritten };
 }
 
-/** The folder as the runtime's project.import op reads it: planned once, packed when consent is known. */
-export function projectBundler(source: string): ProjectBundler {
+/** One agent's outcome from what travelled and what its module did with it: files the module re-keyed are moved only
+ * when its carry says they hold every key; otherwise the rows that list them stayed behind and it is transcript-only. */
+function outcomeOf(files: number, present: boolean, carry: ProjectCarry | undefined, report: AgentMoveReport | undefined): ProjectAgentOutcome {
+  if (report?.outcome === "failed") return "failed";
+  if (files === 0) return "nothing";
+  if (!present) return "carried";
+  return report?.outcome === "moved" && carry === "moves" ? "moved" : "transcript-only";
+}
+
+/** Each named agent's state for the folder, copied out of its home on this computer into a home of its own under a
+ * scratch directory, re-keyed there to the destination for the agents on the machine, and archived at the agent's
+ * machine home for the guest's root. The homes on this computer are read, never written; an agent whose move raises
+ * lands nothing and carries the error. */
+export async function packState(root: string, homes: Readonly<Record<string, string>>, req: StateRequest): Promise<PackedState> {
+  const scratch = mkdtempSync(join(tmpdir(), "wsp-state-"));
+  try {
+    const skeletons: Record<string, string> = {};
+    for (const { agent } of req.agents) {
+      const resolver = PROJECT_STATE_RESOLVERS.get(agent);
+      const home = homes[agent];
+      if (resolver === undefined || home === undefined || !existsSync(home)) continue;
+      const skeleton = join(scratch, agent);
+      for (const file of await resolver.entries(home, root)) {
+        const copy = join(skeleton, relative(home, file));
+        mkdirSync(dirname(copy), { recursive: true });
+        copyFileSync(file, copy);
+      }
+      skeletons[agent] = skeleton;
+    }
+    const present = req.agents.filter(a => a.present).map(a => ({ id: a.agent }));
+    const reports = new Map((await moveProjectState({ from: root, to: req.dest, homes: skeletons }, present)).map(r => [r.agent, r]));
+    const entries: TarEntry[] = [];
+    const agents: ProjectAgentResult[] = [];
+    for (const { agent, home, present } of req.agents) {
+      const report = reports.get(agent);
+      const skeleton = skeletons[agent];
+      const files = skeleton === undefined || report?.outcome === "failed" ? [] : filesUnder(skeleton, "").map(f => ({ abs: f, rel: relative(skeleton, f) }));
+      let bytes = 0;
+      for (const f of files) {
+        const content = readFileSync(f.abs);
+        entries.push({ path: `${home}/${f.rel}`, mode: statSync(f.abs).mode & 0o7777, content });
+        bytes += content.length;
+      }
+      const outcome = outcomeOf(files.length, present, PROJECT_STATE_RESOLVERS.get(agent)?.carry, report);
+      agents.push({ agent, files: files.length, bytes, outcome, ...(report?.outcome === "failed" ? { error: report.error } : {}) });
+    }
+    return { tar: tarOf(entries), agents };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/** The folder as the runtime's project.import op reads it: planned once, packed when consent is known; `homes` is
+ * each agent's home by catalog id, the production caller's under the real home directory. */
+export function projectBundler(source: string, homes: Readonly<Record<string, string>>): ProjectBundler {
   let listing: Promise<ProjectListing> | undefined;
-  const listed = (): Promise<ProjectListing> => (listing ??= planProject(source));
+  const listed = (): Promise<ProjectListing> => (listing ??= planProject(source, homes));
   return {
     plan: async () => (await listed()).plan,
     pack: async (carry, rewrite) => packProject(await listed(), carry, rewrite),
+    packState: async req => packState((await listed()).plan.source, homes, req),
   };
 }
