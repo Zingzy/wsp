@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, removalsFor, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import type { RecipeDigest } from "@wsp/protocol";
@@ -249,8 +249,29 @@ describe("interactive golden: prepare then seal", () => {
     expect(manifest.head).toBe(1);
     expect(sansBase(stages)).toEqual([
       "creating:desktop from default", "deploying-daemon", "installing-harness", "ready",
-      "snapshotting:golden-v1", "smoke-forking:claude --version", "sealed:v1",
+      "snapshotting:golden-v1", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
     ]);
+  });
+
+  it("the smoke stage ends on what the checks proved, not on the last line an agent printed", async () => {
+    const smoke = "claude --version && hermes --version";
+    const banner = "Update available: 5343 commits behind, run 'hermes update'";
+    const { backend } = recordingBackend({ [smoke]: { exitCode: 0, stdout: `2.1.263 (Claude Code)\n${banner}\n`, stderr: "" } }, { stream: true });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    await sealGolden(builder, { backend, smoke, onStage });
+    const forking = stages.filter(s => s.startsWith("smoke-forking:"));
+    expect(forking).toContain(`smoke-forking:${banner}`);
+    expect(forking.at(-1)).toBe("smoke-forking:2 agents answer: Claude Code, Hermes Agent");
+    expect(stages.at(-1)).toBe("sealed:v1");
+  });
+
+  it.each([
+    ["true", "no agent to check; the fork booted"],
+    ["codex --version", "1 agent answers: Codex"],
+    ["aider --version && node --version", "2 agents answer: Aider, node --version"],
+  ])("smokeTally(%j) is %j", (smoke, want) => {
+    expect(smokeTally(smoke)).toBe(want);
   });
 
   it("seal records whether the image carries the browser shim, read on the smoke fork", async () => {

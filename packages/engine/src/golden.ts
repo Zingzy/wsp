@@ -9,9 +9,9 @@
 import { createHash } from "node:crypto";
 import { ALREADY_APPLIED, fmtBytes, goldenHead, type GoldenBaseTool, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import type { Removal } from "./golden-diff.js";
-import { NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { MIB, TOOL_TIMEOUT_S, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
+import { MIB, TOOL_TIMEOUT_S, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
@@ -387,7 +387,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         const header = failed.length > 0 ? `${failed.length === 1 ? "an agent" : `${failed.length} agents`} did not install, so nothing is sealed:` : "no agent installed, so there is nothing to seal:";
         throw new Error([header, ...result.agents.filter(r => r.outcome !== "installed").map(a => `${a.name}: ${a.note ?? "unknown reason"}`)].join("\n"));
       }
-      ledger.smoke = installed.length > 0 ? installed.map(a => a.smoke).join(" && ") : "true";
+      ledger.smoke = joinSmoke(installed.map(a => a.smoke));
       const summary = result.agents.length === 0 ? "no agent ticked" : summarizeAgents(result.agents);
       stage("installing-harness", imp.agents.length > 0 || node !== undefined ? closing(summary, await sweepCaches(machine), await freeNote(machine)) : summary);
     }
@@ -678,6 +678,8 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
         `golden smoke failed (exit ${smokeRes.exitCode}) for ${JSON.stringify(smoke)}: ${smokeRes.stderr.slice(-500)}`,
       );
     }
+    // The stage's last detail is what the terminal keeps as its end line, so the tally follows the agents' output.
+    stage("smoke-forking", smokeTally(smoke));
     // Read on the fork, which is the image: forks of this version get BROWSER only when the shim is there.
     const browserShim = (await fork.exec(`test -x ${BROWSER_SHIM_PATH}`, { timeoutMs: INLINE_EXEC_MS })).exitCode === 0;
     // The image is proven by now; a fork that outlives its kills is a leak to
@@ -746,12 +748,30 @@ function refusePreFloor(base: readonly GoldenBaseTool[] | undefined, which: stri
   if (base === undefined) throw new Error(`${which} was sealed before the base tools existed and cannot take an update; run wsp init and pick the rebuild`);
 }
 
+const SMOKE_JOIN = " && ";
+/** The agents' version checks as one command for the fork; none is `true`, so the fork still boots and runs. */
+function joinSmoke(checks: readonly string[]): string {
+  return checks.length === 0 ? "true" : checks.join(SMOKE_JOIN);
+}
+function smokeChecks(smoke: string): string[] {
+  return smoke.split(SMOKE_JOIN).filter(p => p !== "true");
+}
+
 /** The version checks of what is on the image after the delta: the previous
  * smoke without the removed agents', joined with the added agents'. */
 export function nextSmoke(previous: string, removed: readonly string[], added: string): string {
-  const parts = previous.split(" && ").filter(p => p !== "true" && !removed.includes(p));
-  for (const p of added.split(" && ")) if (p !== "true" && !parts.includes(p)) parts.push(p);
-  return parts.length === 0 ? "true" : parts.join(" && ");
+  const parts = smokeChecks(previous).filter(p => !removed.includes(p));
+  for (const p of smokeChecks(added)) if (!parts.includes(p)) parts.push(p);
+  return joinSmoke(parts);
+}
+
+/** What a passed smoke proved, for the stage's end line: each check's agent, named by the installer table the
+ * check came from; a check the table does not know is shown as itself. */
+export function smokeTally(smoke: string): string {
+  const checks = smokeChecks(smoke);
+  if (checks.length === 0) return "no agent to check; the fork booted";
+  const names = checks.map(c => Object.values(AGENT_INSTALLERS).find(i => i.smoke === c)?.name ?? c);
+  return `${plural(checks.length, "agent")} ${checks.length === 1 ? "answers" : "answer"}: ${names.join(", ")}`;
 }
 
 /** What an updated image is missing: the previous version's missing tools the delta neither removed nor planned again,
