@@ -382,10 +382,14 @@ export const InboxFileEvent = z.object({
  * exports, or by git history. */
 export const CredentialSignal = z.enum(["name", "mode", "keys", "pem", "url", "gitleaks", "catalog", "exports", "history"]);
 export type CredentialSignal = z.infer<typeof CredentialSignal>;
+/** How a repository config lands when its rewrite is accepted: `urls` as they then read, their userinfo removed,
+ * and `drop` the config keys (http.extraheader carrying an Authorization header) whose lines are left out. */
+export const ProjectRewrite = z.object({ urls: z.array(z.string()), drop: z.array(z.string()) });
+export type ProjectRewrite = z.infer<typeof ProjectRewrite>;
 /** A secret-shaped file in the folder, by path relative to it; it travels only when the import names it in carry,
- * or in rewrite when `rewrite` is offered: then it lands with those URLs in place of the ones carrying credentials,
- * and the machine's own login (gh's) is the credential there. Offered only when the URL is the file's one secret shape. */
-export const ProjectSecret = z.object({ path: z.string(), bytes: z.number(), signals: z.array(CredentialSignal), rewrite: z.array(z.string()).optional() });
+ * or in rewrite when `rewrite` is offered: then it lands rewritten as described, and the machine's own login (gh's)
+ * is the credential there. Offered only when the rewrite removes every secret shape the file has. */
+export const ProjectSecret = z.object({ path: z.string(), bytes: z.number(), signals: z.array(CredentialSignal), rewrite: ProjectRewrite.optional() });
 export type ProjectSecret = z.infer<typeof ProjectSecret>;
 /** What a project import would carry, for the person to read before anything is packed: the files and their bytes,
  * the secret-shaped ones, the caches left behind (relative paths) and the paths named but not carried, with why. */
@@ -420,7 +424,7 @@ export const ProjectImportEvent = z.object({
 });
 export type ProjectImportEvent = z.infer<typeof ProjectImportEvent>;
 /** What landed: the path on the machine, the files and bytes extracted there, the upload parts, the secret-shaped
- * paths that were cut because the import did not name them, and the ones that landed with their URLs rewritten. */
+ * paths that were cut because the import did not name them, and the ones that landed rewritten as the plan offered. */
 export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()), rewritten: z.array(z.string()) });
 export type ProjectImportResult = z.infer<typeof ProjectImportResult>;
 
@@ -1074,7 +1078,7 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the
    * reply is { imported: ProjectImportResult }. `carry` names the secret-shaped paths from the plan that may travel as
-   * they are; `rewrite` names the ones the plan offered a rewrite for, which land with the rewritten URLs and win over
+   * they are; `rewrite` names the ones the plan offered a rewrite for, which land rewritten as offered and win over
    * carry; every other secret-shaped file is cut and named. An existing `dest` is refused (kind "exists") unless `replace`. */
   z.object({
     id: reqId,

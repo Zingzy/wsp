@@ -139,6 +139,8 @@ describe("pass 4: credential shape", () => {
       expect(bareUrls(clean)).toEqual({ text: clean, urls: [] });
     }
     expect(bareUrls('url = "https://dev:fakepw@github.com/example/proj.git"\n')).toEqual({ text: 'url = "https://github.com/example/proj.git"\n', urls: ["https://github.com/example/proj.git"] });
+    for (const empty of ["url = https://:ghp_fake_token_000@github.com/o/r\n", "REDIS_URL=redis://:fakepw@cache.local:6379\n"]) expect(urlSignal(empty), empty).toBe(true);
+    expect(bareUrls("url = https://:ghp_fake_token_000@github.com/o/r\n")).toEqual({ text: "url = https://github.com/o/r\n", urls: ["https://github.com/o/r"] });
     const read = (text: string) => fileSignals("config", { bytes: Buffer.byteLength(text), mode: 0o644 }, async () => text, false);
     expect(await read(config)).toEqual(["url"]);
     expect(await read("[remote \"origin\"]\n\turl = https://github.com/example/proj.git\n[credential]\n\thelper = osxkeychain\n")).toBeUndefined();

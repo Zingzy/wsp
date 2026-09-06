@@ -197,7 +197,7 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
 }
 
 /** A folder's archive as the host packs it: the bytes, what went in, the secret-shaped paths left out, and the ones
- * that went in with their URLs' credentials removed. */
+ * that went in rewritten as the plan offered. */
 export interface PackedProject {
   tar: Buffer;
   files: number;
@@ -2334,13 +2334,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         report("planned", `${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}${plan.repo ? " and the repository" : ""}; ${plural(plan.secrets.length, "secret-shaped file")}; ${plural(plan.excluded.length, "cache")} left behind.`);
         const carry = new Set(o.carry ?? []);
         const rewrite = new Set(o.rewrite ?? []);
-        const rewriting = plan.secrets.flatMap(s => (s.rewrite !== undefined && rewrite.has(s.path) ? [{ path: s.path, to: s.rewrite.join(", ") }] : []));
+        const rewriting = plan.secrets.flatMap(s => (s.rewrite !== undefined && rewrite.has(s.path) ? [{ path: s.path, ...s.rewrite }] : []));
         const rewritten = new Set(rewriting.map(r => r.path));
         const carried = plan.secrets.filter(s => carry.has(s.path) && !rewritten.has(s.path)).map(s => s.path);
         const cut = plan.secrets.filter(s => !carry.has(s.path) && !rewritten.has(s.path)).map(s => s.path);
         const clauses = [
           ...(carried.length > 0 ? [`carrying ${carried.join(", ")}`] : []),
-          ...(rewriting.length > 0 ? [`rewriting ${rewriting.map(r => `${r.path} to ${r.to}`).join(", ")}`] : []),
+          ...(rewriting.length > 0 ? [`rewriting ${rewriting.map(r => `${r.path}${r.urls.length > 0 ? ` to ${r.urls.join(", ")}` : ""}${r.drop.length > 0 ? ` without ${r.drop.join(", ")}` : ""}`).join(", ")}`] : []),
           ...(carried.length === 0 && rewriting.length === 0 ? ["no secret-shaped file travels"] : []),
           cut.length === 0 ? "nothing cut" : `cut ${cut.join(", ")}`,
         ].join("; ");

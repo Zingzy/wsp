@@ -139,8 +139,8 @@ export function pemSignal(text: string): boolean {
   return /^-----BEGIN[ A-Z0-9_-]*PRIVATE KEY/.test(text.trimStart());
 }
 
-/** A URL whose userinfo carries a password, `scheme://user:secret@host`; a username alone is a name, not a secret. */
-const URL_CREDENTIAL = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@([^\s"']+)/gi;
+/** A URL whose userinfo carries a password, `scheme://user:secret@host` or `scheme://:secret@host`; a username alone is a name, not a secret. */
+const URL_CREDENTIAL = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]*:[^\s/@]+@([^\s"']+)/gi;
 
 export function urlSignal(text: string): boolean {
   return bareUrls(text).urls.length > 0;

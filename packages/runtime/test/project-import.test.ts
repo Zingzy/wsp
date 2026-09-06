@@ -24,7 +24,8 @@ afterEach(async () => {
 const BINARY = Buffer.concat([Buffer.from("#!/bin/sh\necho run\n"), randomBytes(2048), Buffer.from([0x00, 0xff, 0x0a])]);
 const SOURCE = "/Users/dev/code/proj";
 
-const GIT_CONFIG: ProjectSecret = { path: ".git/config", bytes: 300, signals: ["url"], rewrite: ["https://github.com/example/proj.git"] };
+const GIT_CONFIG: ProjectSecret = { path: ".git/config", bytes: 300, signals: ["url"], rewrite: { urls: ["https://github.com/example/proj.git"], drop: [] } };
+const AUTH_CONFIG: ProjectSecret = { path: ".git/config", bytes: 300, signals: ["keys", "url"], rewrite: { urls: ["https://github.com/example/proj.git"], drop: ["http.extraheader"] } };
 
 /** What the host would hand the runtime for a small folder: three secret-shaped files, one binary with an exec bit. */
 function fakeBundler(extra: ProjectSecret[] = []): ProjectBundler & { calls: string[] } {
@@ -126,8 +127,11 @@ describe("project.import on a workspace", () => {
     expect(stages[0]!.message).toBe("6 files, 4.2 KB and the repository; 4 secret-shaped files; 2 caches left behind.");
     expect(stages[1]!.message).toBe("Carrying .env; rewriting .git/config to https://github.com/example/proj.git; cut config/secrets.json, keys/id_ed25519.");
     events.length = 0;
-    await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/other", rewrite: [".git/config"], bundler: fakeBundler([GIT_CONFIG]) });
-    expect(imports(events)[1]!.message).toBe("Rewriting .git/config to https://github.com/example/proj.git; cut .env, config/secrets.json, keys/id_ed25519.");
+    await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/other", rewrite: [".git/config"], bundler: fakeBundler([AUTH_CONFIG]) });
+    expect(imports(events)[1]!.message).toBe("Rewriting .git/config to https://github.com/example/proj.git without http.extraheader; cut .env, config/secrets.json, keys/id_ed25519.");
+    events.length = 0;
+    await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/third", rewrite: [".git/config"], bundler: fakeBundler([{ ...AUTH_CONFIG, rewrite: { urls: [], drop: ["http.extraheader"] } }]) });
+    expect(imports(events)[1]!.message).toBe("Rewriting .git/config without http.extraheader; cut .env, config/secrets.json, keys/id_ed25519.");
   });
 
   it("an existing path is refused with kind exists before any byte goes up, and replaced when asked", async () => {

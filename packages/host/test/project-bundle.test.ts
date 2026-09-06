@@ -18,6 +18,9 @@ const BINARY = Buffer.concat([Buffer.from("#!/bin/sh\necho run\n"), randomBytes(
 const FAKE_TOKEN = "ghp_fake_token_000";
 const BARE_URL = "https://github.com/example/proj.git";
 const TOKEN_URL = `https://x-access-token:${FAKE_TOKEN}@github.com/example/proj.git`;
+const USERNAME_TOKEN_URL = `https://${FAKE_TOKEN}@github.com/example/proj.git`;
+const AUTH_HEADER = "AUTHORIZATION: basic ZmFrZTpnaHBfZmFrZQ==";
+const REWRITE = { urls: [BARE_URL], drop: [] };
 
 function put(root: string, rel: string, content: string | Buffer, mode?: number): void {
   const abs = join(root, rel);
@@ -116,8 +119,59 @@ describe("planProject", () => {
     git(root, "remote", "add", "origin", TOKEN_URL);
     const { plan } = await planProject(root);
     expect(plan.secrets.map(s => s.path)).toEqual([".env", ".git/config", "config/secrets.json", "keys/id_ed25519"]);
-    expect(plan.secrets[1]).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["url"], rewrite: [BARE_URL] });
+    expect(plan.secrets[1]).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["url"], rewrite: REWRITE });
     expect(JSON.stringify(plan)).not.toContain(FAKE_TOKEN);
+  });
+
+  it("in .git/config any userinfo on an http(s) URL is auth material: a token as the username is named and offered bare", async () => {
+    const root = fixture();
+    git(root, "remote", "add", "origin", USERNAME_TOKEN_URL);
+    git(root, "remote", "add", "up", "https://dev@example.com/team/proj.git");
+    const { plan } = await planProject(root);
+    expect(plan.secrets[1]).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["url"], rewrite: { urls: [BARE_URL, "https://example.com/team/proj.git"], drop: [] } });
+    expect(JSON.stringify(plan)).not.toContain(FAKE_TOKEN);
+    const packed = packProject(await planProject(root), new Set(), new Set([".git/config"]));
+    expect(gunzipSync(packed.tar).includes(FAKE_TOKEN)).toBe(false);
+    const out = extract(packed.tar);
+    expect(git(out, "remote", "get-url", "origin").trim()).toBe(BARE_URL);
+    expect(git(out, "remote", "get-url", "up").trim()).toBe("https://example.com/team/proj.git");
+  });
+
+  it("an Authorization header in http.extraheader is named by the key rule, and the offer is to drop the line", async () => {
+    const root = fixture();
+    git(root, "config", "http.extraheader", AUTH_HEADER);
+    git(root, "config", "http.https://dev.azure.com/.extraheader", AUTH_HEADER);
+    const { plan } = await planProject(root);
+    expect(plan.secrets[1]).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["keys"], rewrite: { urls: [], drop: ["http.extraheader", "http.https://dev.azure.com/.extraheader"] } });
+    expect(JSON.stringify(plan)).not.toContain("ZmFrZ");
+    const packed = packProject(await planProject(root), new Set(), new Set([".git/config"]));
+    expect(packed.rewritten).toEqual([".git/config"]);
+    expect(gunzipSync(packed.tar).includes("AUTHORIZATION")).toBe(false);
+    const out = extract(packed.tar);
+    expect(git(out, "config", "--list")).not.toMatch(/extraheader|AUTHORIZATION/i);
+    expect(readFileSync(join(root, ".git/config"), "utf8")).toContain(AUTH_HEADER);
+    git(root, "remote", "add", "origin", TOKEN_URL);
+    const both = (await planProject(root)).plan.secrets[1];
+    expect(both).toMatchObject({ signals: ["keys", "url"], rewrite: { urls: [BARE_URL], drop: ["http.extraheader", "http.https://dev.azure.com/.extraheader"] } });
+  });
+
+  it("every .git/config under the folder is judged: a nested repository's and a submodule's under .git/modules", async () => {
+    const root = fixture();
+    put(root, ".git/modules/lib/config", `[core]\n\tbare = false\n[remote "origin"]\n\turl = ${TOKEN_URL}\n`);
+    mkdirSync(join(root, "vendor/tool"), { recursive: true });
+    git(join(root, "vendor/tool"), "init", "-q");
+    git(join(root, "vendor/tool"), "remote", "add", "origin", USERNAME_TOKEN_URL);
+    const { plan } = await planProject(root);
+    expect(plan.secrets.map(s => s.path)).toEqual([".env", ".git/modules/lib/config", "config/secrets.json", "keys/id_ed25519", "vendor/tool/.git/config"]);
+    expect(plan.secrets[1]).toMatchObject({ signals: ["url"], rewrite: REWRITE });
+    expect(plan.secrets[4]).toMatchObject({ signals: ["url"], rewrite: REWRITE });
+    expect(JSON.stringify(plan)).not.toContain(FAKE_TOKEN);
+    const packed = packProject(await planProject(root), new Set(), new Set([".git/modules/lib/config", "vendor/tool/.git/config"]));
+    expect(packed.rewritten).toEqual([".git/modules/lib/config", "vendor/tool/.git/config"]);
+    expect(gunzipSync(packed.tar).includes(FAKE_TOKEN)).toBe(false);
+    const out = extract(packed.tar);
+    expect(git(join(out, "vendor/tool"), "remote", "get-url", "origin").trim()).toBe(BARE_URL);
+    expect(readFileSync(join(out, ".git/modules/lib/config"), "utf8")).toContain(`url = ${BARE_URL}`);
   });
 
   it("an inline credential helper is read by the key-name rule and gets no rewrite; nothing else under .git is judged", async () => {
@@ -127,6 +181,10 @@ describe("planProject", () => {
     const { plan } = await planProject(root);
     expect(plan.secrets.map(s => s.path)).toEqual([".env", ".git/config", "config/secrets.json", "keys/id_ed25519"]);
     expect(plan.secrets[1]).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["keys"] });
+    git(root, "config", "credential.helper", `!/usr/local/bin/helper --token=${FAKE_TOKEN}`);
+    git(root, "remote", "add", "origin", TOKEN_URL);
+    const flagged = (await planProject(root)).plan.secrets[1];
+    expect(flagged).toEqual({ path: ".git/config", bytes: statSync(join(root, ".git/config")).size, signals: ["keys", "url"] });
   });
 
   it("a .git/config with a bare remote and a helper by name is not a hit", async () => {
