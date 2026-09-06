@@ -57,7 +57,7 @@ export interface McpGuestLib {
 }
 
 /** Edits one config file in place on the machine: kept servers' strings rewritten, dropped ones out, every other
- * key, server and comment as written; reports each kept and dropped name. Throws when the text is not the format. */
+ * key and server kept; reports each kept and dropped name. Throws when the text is not the format. */
 export type McpGuestEditor = (lib: McpGuestLib, scope: McpGuestScope, file: string) => McpGuestResult[];
 
 export interface McpFormat {
@@ -373,10 +373,11 @@ const tomlString = (s: string): string => JSON.stringify(s);
 /** `[mcp_servers.<name>]` with command and args. The table is replaced in place when it is there (up to the next
  * table header), appended after a blank line when it is not; every other line stays as written. */
 function placeCodex(text: string | undefined, name: string, server: McpServerSpec): string {
-  const table = `[mcp_servers.${name}]\ncommand = ${tomlString(server.command)}\nargs = [${server.args.map(tomlString).join(", ")}]\n`;
+  const header = `[mcp_servers.${/^[A-Za-z0-9_-]+$/.test(name) ? name : tomlString(name)}]`;
+  const table = `${header}\ncommand = ${tomlString(server.command)}\nargs = [${server.args.map(tomlString).join(", ")}]\n`;
   if (text === undefined || text.trim() === "") return table;
   const lines = text.split("\n");
-  const start = lines.findIndex(l => l.trim() === `[mcp_servers.${name}]`);
+  const start = lines.findIndex(l => l.trim() === header);
   if (start === -1) return `${text.endsWith("\n") ? text : `${text}\n`}\n${table}`;
   let end = start + 1;
   while (end < lines.length && !/^\s*\[/.test(lines[end]!)) end++;

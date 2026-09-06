@@ -143,4 +143,16 @@ describe("place", () => {
     const placed = CODEX_TOML.place(undefined, "wsp", { command: 'C:\\node "x".exe', args: [] }).text;
     expect(placed).toContain('command = "C:\\\\node \\"x\\".exe"');
   });
+
+  it("Codex's TOML quotes a server name that is not a bare key in the table header, and reads it back; a rerun still replaces it", () => {
+    const placed = CODEX_TOML.place(undefined, "my server]\n[mcp_servers.other", SERVER).text;
+    expect(placed.split("\n").filter(l => l.startsWith("[")).length).toBe(1);
+    expect(placed).toContain('[mcp_servers."my server]\\n[mcp_servers.other"]');
+    const spaced = CODEX_TOML.place("[other]\nx = 1\n", "my server", SERVER).text;
+    expect(spaced).toContain('[mcp_servers."my server"]\n');
+    expect(CODEX_TOML.read(spaced, "/home/u").map(s => s.name)).toEqual(["my server"]);
+    const rerun = CODEX_TOML.place(spaced, "my server", { command: "/new/node", args: [] }).text;
+    expect(rerun.match(/\[mcp_servers\./g)?.length).toBe(1);
+    expect(rerun).toContain('command = "/new/node"');
+  });
 });
