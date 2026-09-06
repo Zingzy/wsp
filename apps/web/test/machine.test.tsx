@@ -370,6 +370,21 @@ describe("lineage", () => {
     expect(screen.queryByText("Raycast")).toBeNull();
   });
 
+  it("two missing tools sharing a label are two rows keyed apart", async () => {
+    const missing = [
+      { id: "tools/brew/gh", name: "gh", outcome: "skipped" as const, note: "no Linux bottle" },
+      { id: "tools/cli/gh", name: "gh", outcome: "failed" as const, note: "curl: not found" },
+    ];
+    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), { ...gv(12), missingTools: missing }] };
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await mount([onV12()], CAPS, lineage);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    const rows = [...document.querySelectorAll("[data-k='missing-tools'] li")].map(li => li.querySelector("[data-k='missing-note']")?.textContent);
+    expect(rows).toEqual(["skipped: no Linux bottle", "failed: curl: not found"]);
+    expect(errors.mock.calls.map(c => String(c[0]))).not.toContainEqual(expect.stringContaining("same key"));
+    errors.mockRestore();
+  });
+
   it("a version that recorded no missing tools gets no list and no label", async () => {
     await mount([onV12()], CAPS, twoVersions);
     await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));

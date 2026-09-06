@@ -594,6 +594,31 @@ describe("golden import stages", () => {
     expect(outcomes[1]).toEqual({ context: [], contextFailure: expect.stringMatching(/^write failed: .*HTTP 413/) });
   });
 
+  it("a quiet attach whose MCP rewrite is refused hands nothing over: the build's write landed and its saved result stands", async () => {
+    const { backend, puts, fetch: accept } = backendFor();
+    const refused = new Set<number>();
+    const fetch: typeof globalThis.fetch = async (url, init) => {
+      if (!refused.has(puts.length)) return accept(url, init);
+      puts.push(Buffer.from(init?.body as Uint8Array));
+      return new Response(JSON.stringify({ error: "Payload Too Large", limit: 1024 }), { status: 413 });
+    };
+    const mcp = { agents: [], guestHome: "/root", rewrites: [], binDirs: [], tools: [] };
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ mcp }) });
+    expect(builder.import?.applied).toContain("installing-mcp");
+    const outcomes: Pick<ImportResult, "context" | "contextFailure">[] = [];
+    // The MCP plan rewrites the context on every attach; this one is refused.
+    refused.add(puts.length);
+    const { stages, onStage } = stageRecorder();
+    const again = await applyGoldenImport(builder.machine, { import: importOf({ mcp, onContext: o => void outcomes.push(o) }), setup: "true", ledger: builder.import, fetch, onStage });
+    expect(stages.at(-1)).toMatch(/^installing-mcp:machine context: not written \(write failed: .*HTTP 413/);
+    expect(again.ledger.applied).toContain("installing-mcp");
+    expect(outcomes).toEqual([]);
+
+    // A rewrite that lands is handed over as before: the same outcome the build saved.
+    await applyGoldenImport(builder.machine, { import: importOf({ mcp, onContext: o => void outcomes.push(o) }), setup: "true", ledger: again.ledger, fetch });
+    expect(outcomes).toEqual([{ context: [] }]);
+  });
+
   it("an archive over one upload part says how many parts it went up in", async () => {
     const { backend, puts, fetch } = backendFor();
     const stages: string[] = [];

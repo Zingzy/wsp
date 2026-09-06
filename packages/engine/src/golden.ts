@@ -427,13 +427,15 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       stage("installing-mcp", "none configured");
     }
     // The stage is applied once the context is on the machine, so an attach after a failed write runs it again.
-    if (harnessRan || ran || edited || !done("installing-mcp")) {
+    const contextWasOn = done("installing-mcp");
+    if (harnessRan || ran || edited || !contextWasOn) {
       // After the tools, so the document can name what did not install.
       const context = await applyMachineContext(machine, { result: withSkippedStages(result, ledger, imp, { tools: toolsRan, harness: harnessRan }), ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}) });
       result.context = context.context;
       if (context.failure !== undefined) result.contextFailure = context.failure;
       else mark("installing-mcp");
-      if (!ran) imp.onContext?.({ context: context.context, ...(context.failure !== undefined ? { contextFailure: context.failure } : {}) });
+      // A refused rewrite over a document that landed leaves the saved result true: the machine still holds it.
+      if (!ran && (context.failure === undefined || !contextWasOn)) imp.onContext?.({ context: context.context, ...(context.failure !== undefined ? { contextFailure: context.failure } : {}) });
       stage("installing-mcp", `machine context: ${context.summary}`);
     }
     if (ran || edited) {

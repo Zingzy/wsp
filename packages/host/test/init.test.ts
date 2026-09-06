@@ -2154,7 +2154,8 @@ describe("wsp init, flags and no terminal", () => {
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ context: [], contextFailure: expect.stringMatching(/^write failed: vault import untar failed/) });
   });
 
-  it("an attach whose retried context write lands takes the failure out of the saved result and keeps the build's tools and agents", async () => {
+  /** A build whose context write the builder refused once, so the results file carries contextFailure; the next init over the same store attaches and the retried write lands. */
+  async function builtWithRefusedContextWrite() {
     const store = memoryStore();
     const shared = stubBackend();
     let refusals = 0;
@@ -2172,17 +2173,34 @@ describe("wsp init, flags and no terminal", () => {
     expect(built).toMatchObject({ context: [], contextFailure: expect.stringMatching(/^write failed: vault import untar failed/) });
     expect(built.tools.length).toBeGreaterThan(0);
     expect(built.agents.length).toBeGreaterThan(0);
+    const attach = async (): Promise<Fake> => {
+      const f = fake({ yes: true, tty: false, home: first.opts.home, statePath: first.opts.statePath });
+      f.opts.runtime = runtimeOver(f);
+      await bootedOnly(f);
+      expect(f.text()).toMatch(/Attaching to your earlier builder/);
+      expect(shared.machines).toHaveLength(1);
+      return f;
+    };
+    return { resultsPath, built, attach };
+  }
 
-    const f = fake({ yes: true, tty: false, home: first.opts.home, statePath: first.opts.statePath });
-    f.opts.runtime = runtimeOver(f);
-    await bootedOnly(f);
-    expect(f.text()).toMatch(/Attaching to your earlier builder/);
-    expect(shared.machines).toHaveLength(1);
+  it("an attach whose retried context write lands takes the failure out of the saved result and keeps the build's tools and agents", async () => {
+    const { resultsPath, built, attach } = await builtWithRefusedContextWrite();
+    const f = await attach();
+    expect(f.text()).not.toContain("could not be read");
     const after = JSON.parse(readFileSync(resultsPath, "utf8")) as typeof built;
     expect(after.contextFailure).toBeUndefined();
     expect(after.context).toEqual([]);
     expect(after.tools).toEqual(built.tools);
     expect(after.agents).toEqual(built.agents);
+  });
+
+  it("an attach whose retried write lands over a results file that no longer parses says the file was rewritten with the context alone", async () => {
+    const { resultsPath, attach } = await builtWithRefusedContextWrite();
+    writeFileSync(resultsPath, "{ not json");
+    const f = await attach();
+    expect(f.text()).toContain(`${resultsPath} could not be read; it was rewritten with the machine context alone.`);
+    expect(JSON.parse(readFileSync(resultsPath, "utf8"))).toEqual({ context: [] });
   });
 
   it("a line on stderr while the stages animate is drawn by the stream, and a build that fails hands the streams back", async () => {
