@@ -186,7 +186,8 @@ export const SessionView = z.object({
   claudeSessionId: z.string().optional(),
   /** The thread this turn belongs to, as the runtime stamps its events; rows sharing one are one sidebar thread. */
   threadId: z.string().optional(),
-  /** The user's turn that started this session. */
+  /** The turn that opened this row's thread; a resumed turn keeps it, and its own prompt rides its session.start
+   * event, so the title every client derives from a row never follows the latest send. */
   prompt: z.string().optional(),
   /** Ms epoch, runtime clock; endedAt is unset while the session runs. */
   startedAt: z.number().optional(),
