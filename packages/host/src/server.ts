@@ -4,7 +4,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import type { BootPayload } from "@wsp/protocol";
-import { describeAge, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { projectBundler } from "./project-bundle.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { describeStorage } from "./storage.js";
 
@@ -210,7 +211,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   });
   let rtServer: RuntimeServer;
   try {
-    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken, forwards: relay });
+    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken, forwards: relay, projects: projectBundler });
   } catch (e) {
     await relay.close();
     throw e;
@@ -229,8 +230,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   }
 
   const createWorkspace = async (name: string): Promise<CreatedWorkspace> => {
-    const manifest = await rt.golden.get();
-    const head = manifest?.versions.find(v => v.version === manifest.head);
+    const head = goldenHead(await rt.golden.get());
     if (!head) throw new NoGoldenError();
     return rt.workspaces.create({
       golden: head.snapshotId,

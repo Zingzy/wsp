@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SEALED_GOLDEN } from "./sealed-golden.js";
 
 const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
@@ -62,8 +63,10 @@ describe("the wsp bin stops cleanly on a signal", () => {
   it.each(["SIGINT", "SIGTERM"] as const)("%s removes host.lock and frees both ports", async signal => {
     const statePath = join(home, "state", "state.json");
     const lockPath = join(home, "state", "host.lock");
+    mkdirSync(join(home, "state"));
+    writeFileSync(statePath, JSON.stringify({ goldens: { default: SEALED_GOLDEN } }));
     const output: string[] = [];
-    child = spawn(process.execPath, [BIN, "--port", "0", "--ws-port", "0", "--state", statePath], {
+    child = spawn(process.execPath, [BIN, "up", "--port", "0", "--ws-port", "0", "--state", statePath], {
       cwd: home,
       env: { ...process.env, SOLARI_API_KEY: "slr_live_fake_signal_key", HOME: home, WSP_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],

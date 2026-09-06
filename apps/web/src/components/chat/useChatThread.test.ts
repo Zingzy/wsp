@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
-import { deriveChatThread, dropEvent, reduceEvent, reloadTranscript, stabilizeEntries, type StaleTurn, type ThreadState } from "./useChatThread";
+import { deriveChatThread, dropEvent, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type StaleTurn, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
 const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> = {}): ThreadState => ({
@@ -80,6 +80,24 @@ describe("stabilizeEntries", () => {
     expect(stable).toEqual(a);
     stable.forEach((entry, i) => expect(entry).toBe(a[i]));
     expect(stabilizeEntries([], a)).toEqual([]);
+  });
+});
+
+describe("startedSession", () => {
+  const dead = { workspaceId: CHAT_WS, sessionId: "local_0002", turnId: "turn_0002" };
+  const DEATH: SessionEvent[] = [
+    { type: "session.done", ...dead, result: { status: "failed", error: "claude exited before init" } },
+    { type: "session.end", ...dead, exitCode: 1, sawResult: true },
+  ];
+
+  it("names the session of the last session.start; a turn that ended without one names nothing", () => {
+    expect(startedSession(CHAT_STREAM)).toBe("sess_0001");
+    expect(startedSession(DEATH)).toBeUndefined();
+    expect(startedSession([])).toBeUndefined();
+  });
+
+  it("a death before init on a thread that has a started turn keeps that turn's session", () => {
+    expect(startedSession([...CHAT_STREAM, ...DEATH])).toBe("sess_0001");
   });
 });
 
@@ -241,6 +259,38 @@ describe("reloadTranscript", () => {
     const leftA = state([], { fresh: true, left: "thr_a", known: ["thr_a", "thr_b"] });
     expect(reloadTranscript(leftA, [...B_DONE, ...A_RUNNING], T0).stale).toEqual(A_TURN);
   });
+
+  it("a pending send left behind takes its stale turn from the left thread or one the view never knew, not from a known thread another client runs", () => {
+    const pending = state([], { fresh: true, left: "thr_a", known: ["thr_a", "thr_b"], stale: { kind: "pending-send", after: "turn_0001" } });
+    expect(reloadTranscript(pending, [...A, ...B_RUNNING], T0).stale).toEqual({ kind: "pending-send", after: "turn_0001" });
+    const a2 = { workspaceId: CHAT_WS, sessionId: "sess_0001", turnId: "turn_0002", threadId: "thr_a" };
+    expect(reloadTranscript(pending, [...A, ...B_DONE, { type: "session.start", ...a2, prompt: "one" }], T0).stale).toEqual({ kind: "turn", turnId: "turn_0002", sessionId: "sess_0001" });
+    const z = { workspaceId: CHAT_WS, sessionId: "sess_z", turnId: "turn_z1", threadId: "thr_z" };
+    expect(reloadTranscript(pending, [...A, ...B_DONE, { type: "session.start", ...z, prompt: "one" }], T0).stale).toEqual({ kind: "turn", turnId: "turn_z1", sessionId: "sess_z" });
+  });
+
+  it("a pinned thread whose harness died before its start follows, while a send is in flight, a reply's last thread the view never knew; a known one or a quiet reply keeps the pin, and a started pin keeps its own", () => {
+    const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    const DEAD: SessionEvent[] = [
+      { type: "session.done", ...x, result: { status: "failed", error: "claude exited before init" } },
+      { type: "session.end", ...x, exitCode: 1, sawResult: true },
+    ];
+    const idle = reloadTranscript(state([], { known: ["thr_a"] }), [...DEAD, ...A], T0, "thr_x");
+    expect(idle.events).toEqual(DEAD);
+    const next = reloadTranscript({ ...idle, sending: { after: "turn_x1" } }, [...DEAD, ...A, ...B_DONE], T0, "thr_x");
+    expect(next.events).toEqual(B_DONE);
+    expect(next.sending).toBeNull();
+    expect(next.named).toEqual({ key: "thr_x", thread: "thr_b" });
+    const quiet = reloadTranscript({ ...idle, sending: { after: "turn_x1" } }, [...DEAD, ...A], T0, "thr_x");
+    expect(quiet.events).toEqual(DEAD);
+    expect(quiet.sending).toEqual({ after: "turn_x1" });
+    const elsewhere = reloadTranscript({ ...idle, known: ["thr_a", "thr_b", "thr_x"], sending: { after: "turn_x1" } }, [...DEAD, ...A, ...B_DONE], T0, "thr_x");
+    expect(elsewhere.events).toEqual(DEAD);
+    expect(elsewhere.sending).toEqual({ after: "turn_x1" });
+    const pinnedA = reloadTranscript(state(A, { known: ["thr_a"], sending: { after: "turn_0001" } }), [...A, ...B_DONE], T0, "thr_a");
+    expect(pinnedA.events).toEqual(A);
+    expect(pinnedA.sending).toEqual({ after: "turn_0001" });
+  });
 });
 
 describe("reduceEvent", () => {
@@ -376,6 +426,28 @@ describe("reduceEvent", () => {
     const diedAgain = reduceEvent(sending, { type: "session.end", ...z, exitCode: 127, sawResult: true }, T0);
     expect(diedAgain.events).toHaveLength(3);
     expect(diedAgain.sending).toBeNull();
+  });
+
+  it("a pinned thread whose harness died before its start admits, while a send is in flight, the thread the runtime mints for it and names the rows under the pin; an empty pin holds its own thread", () => {
+    const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    const deadEvents: SessionEvent[] = [
+      { type: "session.done", ...x, result: { status: "failed", error: "claude exited before init" } },
+      { type: "session.end", ...x, exitCode: 1, sawResult: true },
+    ];
+    const dead = state(deadEvents, { known: ["thr_a", "thr_x"] });
+    expect(reduceEvent(dead, A[1]!, T0, "thr_x")).toBe(dead);
+    const sending = { ...dead, sending: { after: "turn_x1" } };
+    expect(reduceEvent(sending, A[1]!, T0, "thr_x")).toBe(sending);
+    const z = { workspaceId: CHAT_WS, sessionId: "sess_z", turnId: "turn_z1", threadId: "thr_z" };
+    const started = reduceEvent(sending, { type: "session.start", ...z, prompt: "retry" }, T0, "thr_x");
+    expect(started.events).toHaveLength(3);
+    expect(started.sending).toBeNull();
+    expect(started.named).toEqual({ key: "thr_x", thread: "thr_z" });
+    expect(reduceEvent(started, { type: "session.delta", ...z, kind: "text", text: "Second time lucky." }, T0, "thr_x").events).toHaveLength(4);
+    expect(reduceEvent(started, deadEvents[0]!, T0, "thr_x")).toBe(started);
+    const empty = state([], { known: ["thr_a"] });
+    expect(reduceEvent(empty, A[0]!, T0, "thr_x")).toBe(empty);
+    expect(reduceEvent(empty, deadEvents[0]!, T0, "thr_x").events).toHaveLength(1);
   });
 
   it("the thread of a dropped event becomes known, once, so it cannot pass for the person's own send later", () => {

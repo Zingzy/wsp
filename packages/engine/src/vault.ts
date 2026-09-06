@@ -101,28 +101,54 @@ async function putPart(doFetch: Fetch, url: string, bytes: Uint8Array<ArrayBuffe
   }
 }
 
-/** A file for the upload road: its path on the guest, its mode and its text. */
-export interface TarEntry {
+/** A file for the upload road: its path on the guest, its mode and its bytes. */
+export interface TarFile {
   path: string;
   mode: number;
-  content: string;
+  content: string | Uint8Array;
 }
+/** A directory of its own, so an empty one and its mode survive the trip. */
+export interface TarDir {
+  path: string;
+  mode: number;
+  dir: true;
+}
+/** A symbolic link, carried as one: the target is written as it is, never followed. */
+export interface TarLink {
+  path: string;
+  target: string;
+}
+export type TarEntry = TarFile | TarDir | TarLink;
 
 const TAR_BLOCK = 512;
+/** The ustar size field is eleven octal digits. */
+export const TAR_MAX_FILE_BYTES = 0o77777777777;
+const TAR_LINK_MAX = 100;
 
 function tarField(header: Buffer, at: number, length: number, value: string): void {
   header.write(value, at, length, "utf8");
 }
 
-/** A ustar name of at most 100 bytes with a prefix of at most 155, split at a slash; a path neither field holds is refused. */
-function tarName(path: string): { name: string; prefix: string } {
+/** A ustar name of at most 100 bytes with a prefix of at most 155, split at a slash; undefined when neither field holds the path. */
+function splitName(path: string): { name: string; prefix: string } | undefined {
   if (Buffer.byteLength(path) <= 100) return { name: path, prefix: "" };
   for (let cut = path.lastIndexOf("/"); cut > 0; cut = path.lastIndexOf("/", cut - 1)) {
     const prefix = path.slice(0, cut);
     const name = path.slice(cut + 1);
     if (Buffer.byteLength(prefix) <= 155 && Buffer.byteLength(name) <= 100) return { name, prefix };
   }
-  throw new Error(`${path} does not fit a ustar header`);
+  return undefined;
+}
+
+function tarName(path: string): { name: string; prefix: string } {
+  const split = splitName(path);
+  if (split === undefined) throw new Error(`${path} does not fit a ustar header`);
+  return split;
+}
+
+/** Whether tarOf can hold an entry at this path, with this link target when it is a link. */
+export function fitsTar(path: string, target?: string): boolean {
+  return splitName(path.replace(/^\/+/, "")) !== undefined && (target === undefined || Buffer.byteLength(target) <= TAR_LINK_MAX);
 }
 
 /** A gzipped ustar archive of the entries, each at its path with its mode and owned by root, for importInto to land
@@ -131,17 +157,21 @@ export function tarOf(entries: readonly TarEntry[]): Buffer {
   const mtime = Math.floor(Date.now() / 1000);
   const blocks: Buffer[] = [];
   for (const e of entries) {
-    const body = Buffer.from(e.content, "utf8");
+    const link = "target" in e;
+    const body = "content" in e ? (typeof e.content === "string" ? Buffer.from(e.content, "utf8") : Buffer.from(e.content.buffer, e.content.byteOffset, e.content.byteLength)) : Buffer.alloc(0);
+    if (body.length > TAR_MAX_FILE_BYTES) throw new Error(`${e.path} is ${body.length} bytes, over what a ustar header holds`);
+    if (link && Buffer.byteLength(e.target) > TAR_LINK_MAX) throw new Error(`${e.path} links to a target too long for a ustar header`);
     const { name, prefix } = tarName(e.path.replace(/^\/+/, ""));
     const header = Buffer.alloc(TAR_BLOCK);
     tarField(header, 0, 100, name);
-    tarField(header, 100, 8, `${e.mode.toString(8).padStart(7, "0")}\0`);
+    tarField(header, 100, 8, `${(link ? 0o777 : e.mode).toString(8).padStart(7, "0")}\0`);
     tarField(header, 108, 8, "0000000\0");
     tarField(header, 116, 8, "0000000\0");
     tarField(header, 124, 12, `${body.length.toString(8).padStart(11, "0")}\0`);
     tarField(header, 136, 12, `${mtime.toString(8).padStart(11, "0")}\0`);
     tarField(header, 148, 8, "        ");
-    tarField(header, 156, 1, "0");
+    tarField(header, 156, 1, link ? "2" : "dir" in e ? "5" : "0");
+    if (link) tarField(header, 157, TAR_LINK_MAX, e.target);
     tarField(header, 257, 6, "ustar\0");
     tarField(header, 263, 2, "00");
     tarField(header, 265, 32, "root");
@@ -193,6 +223,7 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
     `trap "rm -f ${partPaths.map(quote).join(" ")}" EXIT`,
     `sum=$(${joined} | sha256sum | cut -d' ' -f1)`,
     `test "$sum" = ${digest} || exit ${HASH_MISMATCH_EXIT}`,
+    `mkdir -p ${quote(destDir)}`,
     `${joined} | tar xzf - -C ${quote(destDir)} ${flags}`,
   ].join("\n");
   const untar = await machine.run(script, { deadlineMs: opts.timeoutMs ?? 120_000 });
@@ -202,5 +233,53 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
   if (untar.exitCode !== 0) {
     throw new Error(`vault import untar failed (exit ${untar.exitCode}): ${untar.stderr.slice(-500)}`);
   }
+  return { parts };
+}
+
+export interface LandOptions {
+  fetch?: Fetch;
+  timeoutMs?: number;
+  /** Remove what is at the destination first; without it an existing path is refused with kind "exists". */
+  replace?: boolean;
+  onPart?: (progress: UploadProgress) => void;
+  /** Called once the archive is extracted, right before it is moved into place. */
+  onLanding?: () => void;
+}
+
+// The landing refuses with its own code so an existing path can be told from a failed move.
+const EXISTS_EXIT = 66;
+
+const exists = (path: string): Error => Object.assign(new Error(`${path} already exists on the machine; import with replace to overwrite it`), { kind: "exists" });
+
+/** Lands an archive of a folder at an absolute path on the guest: extracted beside it into a staging directory,
+ * then moved into place in one rename, so a failed upload or extraction leaves nothing at the destination. An
+ * existing destination is refused before any byte goes up, and again at the move, unless `replace` removes it. */
+export async function landBundle(machine: Machine, tar: Buffer, dest: string, opts: LandOptions = {}): Promise<{ parts: number }> {
+  const target = dest.replace(/\/+$/, "");
+  if (!dest.startsWith("/") || target === "") throw new Error(`destination must be an absolute path below /, got ${dest}`);
+  const probe = await machine.exec(`test -e ${quote(target)} && echo yes || echo no`, { timeoutMs: INLINE_EXEC_MS });
+  if (probe.exitCode !== 0) throw new Error(`could not look at ${target} on the machine: ${probe.stderr.slice(-200)}`);
+  if (probe.stdout.trim() === "yes" && opts.replace !== true) throw exists(target);
+  const staging = `${target}.wsp-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const { parts } = await importInto(machine, tar, staging, {
+    overlay: true,
+    ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
+    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    ...(opts.onPart !== undefined ? { onPart: opts.onPart } : {}),
+  }).catch(async (e: unknown) => {
+    await machine.exec(`rm -rf ${quote(staging)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+    throw e;
+  });
+  opts.onLanding?.();
+  const script = [
+    "set -e",
+    `trap "rm -rf ${quote(staging)}" EXIT`,
+    `mkdir -p ${quote(target.slice(0, target.lastIndexOf("/")) || "/")}`,
+    opts.replace === true ? `rm -rf ${quote(target)}` : `test ! -e ${quote(target)} || exit ${EXISTS_EXIT}`,
+    `mv ${quote(staging)} ${quote(target)}`,
+  ].join("\n");
+  const moved = await machine.run(script, { deadlineMs: opts.timeoutMs ?? 120_000 });
+  if (moved.exitCode === EXISTS_EXIT) throw exists(target);
+  if (moved.exitCode !== 0) throw new Error(`landing at ${target} failed (exit ${moved.exitCode}): ${moved.stderr.slice(-500)}`);
   return { parts };
 }

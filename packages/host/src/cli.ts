@@ -15,6 +15,7 @@ import { collect, nodeHost, nodeMachine, type Manifest, type Rung } from "@wsp/c
 import {
   SolariBackend,
   createRuntime,
+  goldenHead,
   hostIdentity,
   jsonFileStore,
   machineExecStream,
@@ -43,7 +44,8 @@ const VERSION = (
 export const HELP = `wsp - ${TAGLINE}
 
 usage:
-  wsp                start the runtime and serve the app on localhost
+  wsp up             start the app and the runtime over the golden you sealed
+                     (plain wsp does the same)
   wsp init           set up your first golden image: tick what comes along from
                      this machine, build it, then finish in the browser
   wsp recipe         write the recipe: every catalog agent and tool with a tick
@@ -412,12 +414,28 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
   return result.code;
 }
 
-export async function serve(
-  io: CliIO,
-  opts: { port: number; wsPort: number; statePath: string; webDir?: string; runtime?: Runtime; openUrl?: UrlOpener },
-): Promise<HostHandle> {
+export interface ServeOptions {
+  port: number;
+  wsPort: number;
+  statePath: string;
+  webDir?: string;
+  runtime?: Runtime;
+  openUrl?: UrlOpener;
+}
+
+export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   const keys = await loadKeys(io);
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
+  return hostFor(rt, keys, opts, io);
+}
+
+export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | undefined> {
+  const keys = await loadKeys(io, undefined, { anthropic: false });
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
+  if (goldenHead(await rt.golden.get()) === undefined) {
+    io.error("no golden yet; run wsp init");
+    return undefined;
+  }
   return hostFor(rt, keys, opts, io);
 }
 
@@ -524,8 +542,12 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   const [cmd] = positionals;
   switch (cmd) {
     case undefined:
-      stopOnSignals(await serve(io, opts), io);
+    case "up": {
+      const handle = await up(io, opts);
+      if (handle === undefined) return 1;
+      stopOnSignals(handle, io);
       return 0;
+    }
     case "init":
       if (values.manifest !== undefined && values.recipe !== undefined) {
         io.error("wsp init takes --manifest or --recipe, not both: a manifest carries its own ticks.");

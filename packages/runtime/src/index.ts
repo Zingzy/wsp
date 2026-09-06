@@ -14,6 +14,7 @@ export {
   SolariBackend,
   applyDotfiles,
   describeAge,
+  goldenHead,
   type SolariBackendOptions,
   type GoldenManifest,
   type GoldenVersion,

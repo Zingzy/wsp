@@ -65,6 +65,8 @@ export function fmtBytes(n: number): string {
   return `${Math.round(n / MIB)} MB`;
 }
 
+export const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 function squote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
