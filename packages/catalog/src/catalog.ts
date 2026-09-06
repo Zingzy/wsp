@@ -69,6 +69,9 @@ export interface SessionHistory {
 /** An agent is never on by default: the wizard ticks the ones found on the Mac. */
 export interface AgentEntry extends EntryBase {
   kind: "agent";
+  /** wsp drives this agent's threads through a harness adapter of its own; absent, it installs and runs by hand
+   * on the machine but no thread can be started for it yet. Set it when the adapter lands. */
+  threads?: true;
   /** The directory the projectState rows sit under, relative to the home directory of the computer the agent ran on. */
   stateHome: string;
   /** Where that directory is on the guest when it is not stateHome under the guest's home, absolute. */
@@ -158,6 +161,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   // --- agents: the six whose project state a move can follow -------------------------------------------------------
   {
     ...agent("claude"),
+    threads: true,
     stateHome: ".claude",
     guestStateHome: CLAUDE_CONFIG_DIR,
     stateHomeEnv: "CLAUDE_CONFIG_DIR",

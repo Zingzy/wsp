@@ -32,7 +32,7 @@ describe("rung screen without unicode", () => {
     const lines = text().split("\n");
     expect(lines[0]).toMatch(/^\*  Tools\s+5\/7$/);
     expect(lines.slice(1, -1).every(l => l.startsWith("|"))).toBe(true);
-    expect(lines.at(-1)).toBe("+  space tick   ← → fold   enter next   esc back");
+    expect(lines.at(-1)).toBe("+  space on or off   ← → fold   enter next   esc back");
     expect(text()).not.toMatch(/[\u2014•┃┗│└]/);
     input.write("\r");
     await p;

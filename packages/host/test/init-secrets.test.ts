@@ -66,10 +66,13 @@ function scripted(machine: { present?: string[]; fish?: boolean; exit?: number; 
 
 const writes = (link: FakePtyLink): FakePty[] => link.ptys.filter(p => !p.writes[0]!.startsWith(readCommand()));
 
-function stage(link: FakePtyLink, t: ReturnType<typeof terminal>, over: { cut?: { path: string; names: string[] }[]; skipWhy?: string } = {}) {
+function stage(link: FakePtyLink, t: ReturnType<typeof terminal>, over: { asks?: { name: string; from: string }[]; skipWhy?: string } = {}) {
   const hidden: string[] = [];
   const run = secretsStage({
-    cut: over.cut ?? [{ path: "~/.zshrc", names: ["A_KEY", "B_TOKEN"] }],
+    asks: over.asks ?? [
+      { name: "A_KEY", from: "cut from ~/.zshrc" },
+      { name: "B_TOKEN", from: "cut from ~/.zshrc" },
+    ],
     dial: async () => ({ link: link.dial(), close: () => {} }),
     input: t.input,
     output: t.output,
@@ -93,6 +96,26 @@ describe("the lines and the commands", () => {
 });
 
 describe("the secrets step", () => {
+  it("one variable is asked for once however many rows want it, and the question names every reason", async () => {
+    const link = scripted();
+    const t = terminal();
+    // The rc file exported the key and the sign-ins screen chose an API key for the same variable.
+    const { run } = stage(link, t, {
+      asks: [
+        { name: "ANTHROPIC_API_KEY", from: "cut from ~/.zshrc" },
+        { name: "ANTHROPIC_API_KEY", from: "the key Claude Code reads on the machine" },
+      ],
+    });
+    await t.until("ANTHROPIC_API_KEY");
+    expect(t.text()).toContain("cut from ~/.zshrc; the key Claude Code reads on the machine");
+    await t.press(...SECRET.split(""), KEY.enter);
+    const outcomes = await run;
+    expect(outcomes).toEqual<SecretOutcome[]>([{ name: "ANTHROPIC_API_KEY", from: "cut from ~/.zshrc; the key Claude Code reads on the machine", state: "set" }]);
+    // One read of the machine and one write: the second row never asked and never appended.
+    expect(link.ptys).toHaveLength(2);
+    expect(t.text().match(/◆  ANTHROPIC_API_KEY/g)).toHaveLength(1);
+  });
+
   it("a pasted value travels in the pty's environment, never on the command line or the screen, and lands in profile.d; an empty answer skips", async () => {
     const link = scripted();
     const t = terminal();
@@ -105,8 +128,8 @@ describe("the secrets step", () => {
     await t.press(KEY.enter);
     const outcomes = await run;
     expect(outcomes).toEqual<SecretOutcome[]>([
-      { name: "A_KEY", path: "~/.zshrc", state: "set" },
-      { name: "B_TOKEN", path: "~/.zshrc", state: "skipped", note: "skipped by you" },
+      { name: "A_KEY", from: "cut from ~/.zshrc", state: "set" },
+      { name: "B_TOKEN", from: "cut from ~/.zshrc", state: "skipped", note: "skipped by you" },
     ]);
     // One read of the machine, then one write.
     expect(link.ptys).toHaveLength(2);
@@ -127,11 +150,11 @@ describe("the secrets step", () => {
   it("with fish on the machine the value is written to profile.d and fish's conf.d, each in its own syntax", async () => {
     const link = scripted({ fish: true });
     const t = terminal();
-    const { run } = stage(link, t, { cut: [{ path: "~/.config/fish/config.fish", names: ["A_KEY"] }] });
+    const { run } = stage(link, t, { asks: [{ name: "A_KEY", from: "cut from ~/.config/fish/config.fish" }] });
     await t.until("A_KEY");
     await t.press(...SECRET.split(""), KEY.enter);
     await t.until(`A_KEY: set in ${SH_FILE} and ${FISH_FILE} on the machine`);
-    expect(await run).toEqual<SecretOutcome[]>([{ name: "A_KEY", path: "~/.config/fish/config.fish", state: "set" }]);
+    expect(await run).toEqual<SecretOutcome[]>([{ name: "A_KEY", from: "cut from ~/.config/fish/config.fish", state: "set" }]);
     const pty = writes(link)[0]!;
     expect(pty.created["env"]).toEqual({ PS1: "", WSP_SECRET_LINE: `export A_KEY='pa'\\''ss word'`, WSP_FISH_LINE: `set -gx A_KEY 'pa\\'ss word'` });
     expect(pty.writes).toEqual([`${appendCommand(true)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
@@ -148,8 +171,8 @@ describe("the secrets step", () => {
     expect(t.text()).not.toContain("was not read");
     expect(t.text()).not.toMatch(/A_KEY\s*$/m);
     expect(outcomes).toEqual<SecretOutcome[]>([
-      { name: "A_KEY", path: "~/.zshrc", state: "set", note: "on the machine from an earlier run" },
-      { name: "B_TOKEN", path: "~/.zshrc", state: "set" },
+      { name: "A_KEY", from: "cut from ~/.zshrc", state: "set", note: "on the machine from an earlier run" },
+      { name: "B_TOKEN", from: "cut from ~/.zshrc", state: "set" },
     ]);
     expect(hidden).toEqual(["x"]);
     expect(writes(link)).toHaveLength(1);
@@ -180,8 +203,8 @@ describe("the secrets step", () => {
     await t.until("B_TOKEN: not set");
     const outcomes = await run;
     expect(outcomes).toEqual<SecretOutcome[]>([
-      { name: "A_KEY", path: "~/.zshrc", state: "skipped", note: "skipped by you" },
-      { name: "B_TOKEN", path: "~/.zshrc", state: "failed", note: "the shell answered exit 1" },
+      { name: "A_KEY", from: "cut from ~/.zshrc", state: "skipped", note: "skipped by you" },
+      { name: "B_TOKEN", from: "cut from ~/.zshrc", state: "failed", note: "the shell answered exit 1" },
     ]);
     expect(writes(link)).toHaveLength(1);
     expect(t.raw()).not.toContain("ab");
@@ -207,13 +230,13 @@ describe("the secrets step", () => {
     const t = terminal();
     const { run } = stage(link, t, { skipWhy: "--yes asks nothing" });
     expect(await run).toEqual<SecretOutcome[]>([
-      { name: "A_KEY", path: "~/.zshrc", state: "skipped", note: "--yes asks nothing" },
-      { name: "B_TOKEN", path: "~/.zshrc", state: "skipped", note: "--yes asks nothing" },
+      { name: "A_KEY", from: "cut from ~/.zshrc", state: "skipped", note: "--yes asks nothing" },
+      { name: "B_TOKEN", from: "cut from ~/.zshrc", state: "skipped", note: "--yes asks nothing" },
     ]);
-    expect(t.text()).toContain("Secrets skipped: A_KEY, B_TOKEN (~/.zshrc). --yes asks nothing.");
+    expect(t.text()).toContain("Secrets skipped: A_KEY, B_TOKEN (cut from ~/.zshrc). --yes asks nothing.");
     expect(link.ptys).toEqual([]);
     const quiet = terminal();
-    expect(await stage(link, quiet, { cut: [{ path: "~/.zshrc", names: [] }] }).run).toEqual([]);
+    expect(await stage(link, quiet, { asks: [] }).run).toEqual([]);
     expect(quiet.text()).toBe("");
   });
 });

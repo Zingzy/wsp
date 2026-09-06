@@ -5,8 +5,7 @@ description: How to set a person up on wsp from nothing and how to run work on w
 
 # wsp
 
-wsp runs cloud machines called workspaces, forked in seconds from a golden image the person sealed with wsp init, each with coding agents working inside it as threads. The host on the person's computer (wsp up, or the desktop app) owns the machines and the keys; the wsp command line and the wsp MCP server are thin clients of that same host, so whatever you do here shows in the person's sidebar and they can read and answer any thread. Start with `workspaces` (or `wsp threads` on the command line) to see what is running. Open a thread with `thread_new`, giving the workspace, the task and the agent to run; it returns the reply when the turn ends. Continue a thread with `send`; `stop` ends a thread's running turn; run a command on a machine with `exec`; `snapshot` a workspace with a project loaded as a project golden and `new` from it so the next machine starts with the project in place; `export` brings a folder and its agent sessions home; `forget` drops a workspace whose machine the provider no longer has, and `delete` deletes a workspace's machine and drops it here. `pause` naps a machine and `wake` wakes it; `thread_new`, `send` and `exec` wake a paused workspace themselves before running, so a paused one needs no wake first.
-
+wsp runs cloud machines called workspaces, forked in seconds from a golden image the person sealed with wsp init, each with coding agents working inside it as threads. The host on the person's computer (wsp up, or the desktop app) owns the machines and the keys; the wsp command line and the wsp MCP server are thin clients of that same host, so whatever you do here shows in the person's sidebar and they can read and answer any thread. Start with `workspaces` (or `wsp threads` on the command line) to see what is running. Open a thread with `thread_new`, giving the workspace, the task and the agent to run; it returns the reply when the turn ends. Continue a thread with `send`; `stop` ends a thread's running turn; run a command on a machine with `exec`; `snapshot` a workspace with a project loaded as a project golden and `new` from it so the next machine starts with the project in place; `import` lands a folder from this computer on a workspace's machine, `export` brings a folder and its agent sessions home; `forget` drops a workspace whose machine the provider no longer has, and `delete` deletes a workspace's machine and drops it here. `pause` naps a machine and `wake` wakes it; `thread_new`, `send` and `exec` wake a paused workspace themselves before running, so a paused one needs no wake first. Setting someone up from nothing is its own sequence, and the next section is that sequence: a health check, then `recipe_scan`, which writes nothing and gives every row a recommended value with one line of why, so you apply those and put only the rows whose reason says worth a question, then `recipe` with their answers, then `wsp init --recipe <path>`, which they run in their own terminal because the sign-ins open in their browser, then `wsp up`, which you run yourself.
 ## Setting a person up from nothing
 
 Asked to set a person up, read this section before running a single verb: a verb's refusal is a branch in this list, not an answer to hand back. The road is a health check, then `wsp recipe scan`, which prints every option and writes nothing, then two questions to them, the heavy rows with their sizes and the sign-ins with their default choice, then `wsp recipe --tick used` with their answers, which writes the recipe, then the one line they run themselves in their own terminal, `wsp init --recipe ~/.wsp/recipe.json`, because its sign-ins open in their browser, then `wsp up`, which you run yourself, then `wsp new <name>` for the first workspace and `wsp thread new --in <name>` for the first thread. Two things are theirs and never yours: that init line, and the keys, which live in their `.env` and are never typed into your terminal or read back to them. Starting the host is not one of them; `wsp up` reads those keys off the file itself, so nothing about them passes through you. Every step below ends in an `Expect:` line; run the command, read that line, and stop at the first one that does not match rather than carrying on. Read where they already are before running anything, and skip the steps that state has passed.
@@ -55,7 +54,7 @@ Asked to set a person up, read this section before running a single verb: a verb
 
    Expect: `created dev <id>`, printed when the machine is booted and reachable, or with `--json` the creating stages and then the workspace, one JSON line each. `wsp new: no golden yet; run wsp init` instead means the host is serving without a sealed golden, because an init is still running in their terminal or ended without sealing: wait for it, or go back to step 6. A refusal that names the account's machine cap means two are already up, and the person chooses which workspace to pause.
 
-9. The project is theirs to import too: `wsp import` is not here yet, so point them at the app on the URL from step 2 or step 7, the import dialog on that workspace, and the folder they want. Take `wsp snapshot dev` once it lands, so the next workspace starts from a project golden with the project in place and no second upload.
+9. The project is theirs to import too: `wsp import <folder> --to dev` prints the plan (the repository, the files and their size, the caches left behind, each secret-shaped file with its default, cut unless a rewrite is offered, and the agents with sessions for the folder) and moves nothing; put the secret-shaped rows to the person, then run it again with `--yes` for the defaults or `--keep <path>` for a row they want on the machine. It lands at the same path on the machine. Take `wsp snapshot dev` once it lands, so the next workspace starts from a project golden with the project in place and no second upload.
 
    Expect: `wsp exec dev -- ls <folder>` lists the repo on the machine and exits 0, and `wsp snapshot dev` prints a `project golden <id>` line naming the project.
 
@@ -86,7 +85,9 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | `wsp exec <workspace> -- <command...>` | `exec` | runs the command on the machine, each word as given, waking it first when it is paused; output lines and the exit code |
 | `wsp snapshot <workspace>` | `snapshot` | a project golden: the golden plus the loaded project as it stands |
 | `wsp export <workspace> <folder> [--from <path>] [--replace] [--agents <ids>]` | `export` | the folder and the agent sessions keyed to it come home to this computer |
-| `wsp import <folder> --to <workspace>` | none | not here yet; import a project from the app's import dialog |
+| `wsp import <folder> --to <workspace> [--yes] [--keep, --cut <path>] [--agents <ids>] [--replace]` | `import` | the folder lands on the machine at its path here, as the app's import does; without yes, keep or cut it answers with the plan and moves nothing (a person at a terminal is asked once instead) |
+| `wsp recipe scan [--project <folder>] [--json]` | `recipe_scan` | reads this computer and prints every option, writing nothing: the agents, the tools with why and size, what else a package manager here has that the image could take, the commands the agents ran, and the sign-ins, each with what to do about it and why |
+| `wsp recipe [--tick used\|installed\|default] [--set <id>=on\|off] [--signin <id>=copy\|machine\|key\|skip] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--json]` | `recipe` | writes the recipe for a machine and prints it as a table: every catalog agent and tool with its tick, why, and its size, and the commands the agents ran that the catalog does not carry |
 
 `wsp mcp` serves these tools over stdio; `wsp mcp install --agent <id>` writes the server into that agent's own MCP config and this skill into its skills folder. `--agent` repeats to do several in one call, one failing id costing the others nothing, and `--json` answers with one line holding what each agent took and a `failures` array, exit 1 when that array is not empty. An entry under `installed` with no `path` took the skill and not the server, which is the by-hand line the prose prints. Only agents the catalog knows an MCP config for get the server: claude, codex, gemini, opencode. The rest get the skill and a by-hand line.
 
@@ -134,6 +135,16 @@ wsp fork dev --send "Run the gate."   # a sibling machine from dev's golden vers
 
 `fork` copies the golden version, not the live disk: work on the source's disk is not on the fork. Fork from a project golden when the fork needs the project. When a fork's first turn fails, the workspace still exists and the error names it; continue with `thread new` on it, do not fork again. `snapshot` takes only a running first-life machine with a project imported; a woken machine or one without a project is refused in one line and nothing is taken.
 
+### import
+
+```
+wsp import /Users/zingzy/wsp --to dev            # the plan; a person is asked once, a pipe or an agent gets the plan and nothing moves
+wsp import /Users/zingzy/wsp --to dev --yes      # the plan's defaults: secret-shaped files cut, rewrites taken, sessions of every listed agent
+wsp import /Users/zingzy/wsp --to dev --keep .env --agents claude
+```
+
+The folder lands at the same path on the machine, which must not exist there unless `--replace`; caches (installs, build output) stay behind and are recreated on the machine. A secret-shaped file is cut unless `--keep` names it; a repository config with a token in a URL is offered rewritten and lands bare by default, `--cut` keeps it off. `--agents` narrows whose sessions travel, keyed to the path on the machine; each id must have sessions in the plan. The workspace must be running: a paused one is refused in one line, wake it first. `--json` prints the plan and then the result as one JSON line each.
+
 ### export
 
 ```
@@ -144,7 +155,7 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 
 ## The loop for building with wsp
 
-1. One workspace with the repo imported (the app's import dialog on a fresh workspace, or `new --from` a project golden taken after an import). `wsp threads --in <workspace>` shows what is on it.
+1. One workspace with the repo imported (`wsp import <folder> --to <workspace>` on a fresh workspace, the app's import dialog, or `new --from` a project golden taken after an import). `wsp threads --in <workspace>` shows what is on it.
 2. One thread per ticket, each in its own worktree: the brief opens with `git worktree add -b ticket/<n>-<slug> <folder> origin/main`, and `--cwd` points at the repo. Two threads writing in one checkout collide.
 3. The brief names the ticket, the files to read whole, the laws (the repo's review skill), the exact test commands and the proof required. A brief that says "fix the bug" comes back with a guess.
 4. Start builder threads with `--notify me` when you are a person, or `--notify <your thread>` when you are an agent that wants to keep working; then do not poll `threads`, the line arrives. Both `wsp thread new` and the `thread_new` tool follow the first turn and return only when it ends, so over MCP a coordinator runs one builder at a time. On the command line a builder that should run beside you is started detached, `nohup wsp thread new ... > /tmp/<name>.log 2>&1 &` (a Mac has no `setsid`; a wsp machine does), and its id is the log's first `thread <id>` line.
@@ -159,7 +170,7 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 - The account holds two machines at once. A third `new` or `fork` is refused; the person decides which workspace to pause.
 - A pause or a wake that does not return is stuck on the provider side; tell the person rather than retrying in a loop.
 - Every workspace is the golden's size (2 vCPU, 4 GB); there is no size to choose at fork yet.
-- Importing a project is done from the app; `wsp import` is not here yet.
+- An import cuts every secret-shaped file unless `--keep` names it; the plan's rows are the person's to answer before `--yes`.
 - wsp init is the person's to run: it opens sign-ins in their browser.
 
 ## Costs and limits
@@ -170,6 +181,24 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 - The root disk is 20 GB; wsp keeps 2 GB free and skips tool installs that would go under it.
 - One thread runs one agent process; a 4 GB machine runs one build or one agent at a time. Put a second builder on a second workspace, not a second thread on the same one.
 - The model, effort and permission mode are the agent's own defaults; the command line and the MCP tools cannot choose them yet. Choose the role by the brief and the agent, and keep review threads short.
+
+## Tools the catalog does not carry
+
+`wsp recipe` ticks catalog rows. A tool the person's projects use that the catalog has no row for goes on the image as its own row:
+
+```
+wsp recipe --add just="brew install just" --add-check just="just --version"
+wsp recipe --add ruff="uv tool install ruff"
+```
+
+`--add <id>=<install command>` is repeatable and `--add-check <id>=<command>` says what proves the tool landed (without one, `command -v <id>`). The line runs on the machine as given, as root, after every catalog install, with Homebrew and apt already there. Rules for adding one:
+
+- Add only what the person's own history or their repository files show in use: a formula in their Brewfile, a tool their agents ran, a runner their project's config names. Never add on a guess.
+- Prefer a Homebrew, npm, uv or apt form (`brew install x`, `npm install -g x`, `uv tool install x`, `apt-get install -y x`) over a downloader. A line that pipes a download into a shell is refused in review.
+- One tool per row, so a row that fails names the tool that failed. A failed row does not fail the build; it is listed as failed on the machine's lineage.
+- There is no sign-in for these rows. A tool that needs a login needs a catalog row; say so instead of adding it.
+
+`wsp init` also offers what this Mac's package managers already have, on the Also on this Mac screen, and a tick there writes the same kind of row with the size measured here.
 
 ## Rules learned the hard way
 

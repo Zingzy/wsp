@@ -3,15 +3,17 @@
 // what a login defaults to, the recipe file (the same list with the person's
 // ticks, saved next to the state so golden v2 is a re-run of it), and the
 // golden recipe the ticked rows add up to.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { LoginChoice, Manifest, ManifestEntry, Rung } from "@wsp/collect";
+import { LOGIN_CHOICES, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { CATALOG_AGENTS, catalogEntry, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, isMcpRow, neverCopied, packageOf, parseMcpId, rowRoad, type RecipeDigest } from "@wsp/engine";
-import { Recipe } from "@wsp/protocol";
+import { Recipe, type LoginChoice } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
+import { SIGN_IN_WORDS } from "./signin-words.js";
+export { loadRecipe, saveSmallRecipe, smallRecipePath, withTicksOf } from "./recipe-file.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
@@ -21,13 +23,6 @@ export const RUNG_TITLE: Record<Rung, string> = {
   agents: "Agents",
   logins: "Sign-ins",
 };
-
-/** The prompt's words for each login choice; the choices themselves are the collector's. */
-export const LOGIN_CHOICES: readonly { value: LoginChoice; label: string }[] = [
-  { value: "copy", label: "copy" },
-  { value: "machine", label: "sign in" },
-  { value: "skip", label: "skip" },
-];
 
 /** The plan's note when every path of a row is refused by name, asked of the same rule the pack asks with the
  * same answer about what is on disk (`isDir`: true, false, or undefined when the path is not there). */
@@ -72,10 +67,10 @@ function rowBin(t: ManifestEntry): string | undefined {
   return catalogToolFor(pkg)?.bin ?? planned.bin ?? pkg.slice(pkg.lastIndexOf("/") + 1);
 }
 
-/** What brings a command no tools row lists: its catalog entry, ticked under What they need. */
+/** What brings a command no tools row lists: its catalog entry, ticked under Tools. */
 function brings(bin: string): string {
   const entry = catalogToolFor(bin);
-  return entry !== undefined ? `tick ${entry.name} under What they need to bring it` : `installing ${bin} brings it`;
+  return entry !== undefined ? `tick ${entry.name} under Tools to bring it` : `installing ${bin} brings it`;
 }
 
 export interface LoginTool {
@@ -189,21 +184,7 @@ export function withCatalogAgents(manifest: Manifest): Manifest {
 }
 
 export function isLoginChoice(v: unknown): v is LoginChoice {
-  return LOGIN_CHOICES.some(c => c.value === v);
-}
-
-/** The small recipe wsp recipe wrote (or a person or an agent did), checked against the protocol's shape. */
-export function loadRecipe(path: string): Recipe {
-  if (!existsSync(path)) throw new Error(`no recipe at ${path}`);
-  let data: unknown;
-  try {
-    data = JSON.parse(readFileSync(path, "utf8"));
-  } catch (e) {
-    throw new Error(`${path}: ${e instanceof Error ? e.message : String(e)}`);
-  }
-  const r = Recipe.safeParse(data);
-  if (r.success) return r.data;
-  throw new Error(`${path}: invalid recipe: ${r.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  return LOGIN_CHOICES.includes(v as LoginChoice);
 }
 
 /** The catalog id a collector row stands for: an agents row its agent, a tools row the tool its package names. */
@@ -255,13 +236,8 @@ export function recipePath(statePath: string): string {
   return join(dirname(statePath), "golden-recipe.json");
 }
 
-/** Where the small recipe lives, beside the saved manifest: what wsp recipe writes and wsp init --recipe reads. */
-export function smallRecipePath(statePath: string): string {
-  return join(dirname(statePath), "recipe.json");
-}
-
-/** The small recipe with the login answers written on: a row whose login row was answered carries the answer, a row
- * whose login nobody answered carries none. The ticks are the recipe's own, as the screens left them. */
+/** The small recipe with the login answers written on: a row whose login rows were answered carries the word they
+ * add up to, a row nobody answered carries none. The ticks are the recipe's own, as the screens left them. */
 export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, string>): Recipe {
   return {
     ...recipe,
@@ -271,29 +247,6 @@ export function recipeWithAnswers(recipe: Recipe, choices: ReadonlyMap<string, s
       return { ...rest, ...(isLoginChoice(answer) ? { signIn: answer } : {}) };
     }),
   };
-}
-
-/** This computer's recipe with a saved one's ticks and answers written on, by id: a row the saved one lacks is off
- * and unanswered, and a saved row this computer's recipe does not carry follows them as it was saved. */
-export function withTicksOf(here: Recipe, saved: Recipe): Recipe {
-  const rows = new Map(saved.rows.map(r => [r.id, r]));
-  const ids = new Set(here.rows.map(r => r.id));
-  return {
-    ...here,
-    rows: [
-      ...here.rows.map(r => {
-        const { signIn: _signIn, ...rest } = r;
-        const s = rows.get(r.id);
-        return { ...rest, on: s?.on === true, ...(s?.signIn === undefined ? {} : { signIn: s.signIn }) };
-      }),
-      ...saved.rows.filter(r => !ids.has(r.id)),
-    ],
-  };
-}
-
-export function saveSmallRecipe(path: string, recipe: Recipe): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`);
 }
 
 export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string> = new Map()): void {
@@ -315,7 +268,7 @@ export function agentName(e: ManifestEntry): string {
  * files that came or went with it are not listed again. */
 export function recipeChanges(from: RecipeDigest, to: RecipeDigest, manifest: Manifest): string[] {
   const label = (id: string): string => manifest.entries.find(e => e.id === id)?.label ?? id;
-  const word = (choice: string | undefined): string => LOGIN_CHOICES.find(c => c.value === choice)?.label ?? choice ?? "ticked";
+  const word = (choice: string | undefined): string => (isLoginChoice(choice) ? SIGN_IN_WORDS[choice].short : (choice ?? "ticked"));
   const out: string[] = [];
   const noted = new Set<string>();
   const was = new Map(from.ticks.map(t => [t.id, t]));

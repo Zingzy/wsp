@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { UNMEASURED_ROAD, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
+import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, removalsFor, rowsToApply } from "../src/golden-diff.js";
 import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
@@ -800,6 +800,17 @@ describe("golden import stages", () => {
     expect(results[0]!.tools[1]).toEqual({ id: "tools/brew/gh", label: "gh", outcome: "failed", note: "Error: gh: no bottle available!", ms: expect.any(Number) });
     const { version } = await sealGolden(builder, { backend, smoke: "should-not-run" });
     expect(version.smoke.cmd).toBe("claude --version && codex --version");
+  });
+
+  it("a row outside the catalog that fails is listed as failed with its reason, and the golden still seals", async () => {
+    const custom = customInstallsFor([{ kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" }]);
+    // The needle is the line the row installs with: the prelude around it is quoted again by the guard.
+    const { backend, fetch } = backendFor([["brew install just", { exitCode: 1, stdout: "", stderr: "Error: no formula just\n" }]]);
+    const results: ImportResult[] = [];
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ tools: [...importOf().tools, ...custom], onResult: r => void results.push(r) }) });
+    expect(results[0]!.tools.at(-1)).toEqual({ id: "tools/custom/just", label: "just", outcome: "failed", note: "Error: no formula just", ms: expect.any(Number) });
+    const { version } = await sealGolden(builder, { backend, smoke: "should-not-run" });
+    expect(version.version).toBe(1);
   });
 
   it("a road install names the road it took: the result carries it and the stage summary says so", async () => {
