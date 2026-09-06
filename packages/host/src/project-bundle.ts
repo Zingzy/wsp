@@ -4,14 +4,19 @@
 import { execFile } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { CACHE_WORD, FINDER_METADATA, INSTALL_NAMES, OUTPUT_NAMES, fileSignals } from "@wsp/collect";
+import { CACHE_WORD, FINDER_METADATA, INSTALL_NAMES, OUTPUT_NAMES, bareUrls, fileSignals, keysSignal } from "@wsp/collect";
 import { TAR_MAX_FILE_BYTES, fitsTar, resolveProjectPath, tarOf, underProject, type TarEntry } from "@wsp/engine";
-import type { ProjectPlan, ProjectSecret } from "@wsp/protocol";
+import { CredentialSignal, type ProjectPlan, type ProjectSecret } from "@wsp/protocol";
 import type { PackedProject, ProjectBundler } from "@wsp/runtime";
 
 /** A virtual environment goes by any name; this file inside it says what it is. */
 const VENV_MARKER = "pyvenv.cfg";
 const GIT_DIR = ".git";
+/** The one file under .git that is judged: remote URLs and credential helpers live here. */
+const GIT_CONFIG = ".git/config";
+/** An inline credential helper is a shell command, quoted by git when it holds a semicolon; its words are read as
+ * KEY=value lines by the collector's key-name rule. */
+const INLINE_HELPER = /^\s*helper\s*=\s*"?!(.*)$/gm;
 const LS_FILES_MAX_BYTES = 256 * 1024 * 1024;
 
 /** The cache rule, from the collector's rules: what an install recreates, what a build regenerates, a name that says cache, or Finder metadata. */
@@ -76,7 +81,22 @@ interface Walk {
 
 const codeOf = (e: unknown): string => (e as { code?: string }).code ?? "error";
 
-/** One directory level. Under .git nothing is judged; under a cache-named directory only tracked paths are kept.
+const bySignalOrder = (a: CredentialSignal, b: CredentialSignal): number => CredentialSignal.options.indexOf(a) - CredentialSignal.options.indexOf(b);
+
+/** The repository's config under the collector's rules: the url rule over the whole file, the key-name rule over
+ * inline helpers. The rewrite to the bare URLs is offered when a URL is the one secret shape in the content. */
+async function gitConfigSecret(path: string, st: { size: number; mode: number }, read: () => Promise<string | undefined>): Promise<ProjectSecret | undefined> {
+  const text = await read();
+  if (text === undefined) return undefined;
+  const signals = (await fileSignals("config", { bytes: st.size, mode: st.mode }, async () => text, false)) ?? [];
+  if (!signals.includes("keys") && [...text.matchAll(INLINE_HELPER)].some(m => keysSignal((m[1] ?? "").split(/\s+/).join("\n")))) signals.push("keys");
+  if (signals.length === 0) return undefined;
+  signals.sort(bySignalOrder);
+  const content = signals.filter(s => s !== "mode");
+  return { path, bytes: st.size, signals, ...(content.length === 1 && content[0] === "url" ? { rewrite: bareUrls(text).urls } : {}) };
+}
+
+/** One directory level. Under .git only config is judged; under a cache-named directory only tracked paths are kept.
  * A directory or entry the process cannot read is named in skipped and the walk goes on; only the folder itself throws. */
 function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked: boolean): void {
   let names: string[];
@@ -144,7 +164,7 @@ function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked:
     }
     const file: BundleFile = { rel, abs, kind: "file", mode, bytes: st.size, secret: false };
     w.files.push(file);
-    if (inGit) continue;
+    if (inGit && rel !== GIT_CONFIG) continue;
     const read = async (): Promise<string | undefined> => {
       try {
         return readFileSync(abs, "utf8");
@@ -152,11 +172,12 @@ function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked:
         return undefined;
       }
     };
+    const scan = rel === GIT_CONFIG ? gitConfigSecret(rel, st, read) : fileSignals(name, { bytes: st.size, mode: st.mode }, read, false).then(signals => signals && { path: rel, bytes: st.size, signals });
     w.scans.push(
-      fileSignals(name, { bytes: st.size, mode: st.mode }, read, false).then(signals => {
-        if (signals === undefined) return;
+      scan.then(secret => {
+        if (secret === undefined) return;
         file.secret = true;
-        w.secrets.push({ path: rel, bytes: st.size, signals });
+        w.secrets.push(secret);
       }),
     );
   }
@@ -189,25 +210,37 @@ export async function planProject(source: string): Promise<ProjectListing> {
 }
 
 /** The gzipped archive of a listing, every entry at its path relative to the folder with its mode; a secret-shaped
- * file travels only when `carry` names its path. Bytes are read now, so a file that changed since the plan travels
- * as it is at this moment. */
-export function packProject(listing: ProjectListing, carry: ReadonlySet<string>): PackedProject {
+ * file travels only when `carry` names its path, or with its URLs' credentials removed when `rewrite` names a path
+ * the plan offered that for. Bytes are read now, so a file that changed since the plan travels as it is at this
+ * moment; the file on this computer is never written. */
+export function packProject(listing: ProjectListing, carry: ReadonlySet<string>, rewrite: ReadonlySet<string>): PackedProject {
+  const offered = new Set(listing.plan.secrets.filter(s => s.rewrite !== undefined).map(s => s.path));
   const entries: TarEntry[] = [];
   const cut: string[] = [];
+  const rewritten: string[] = [];
   let files = 0;
   let bytes = 0;
   for (const f of listing.files) {
-    if (f.kind === "dir") entries.push({ path: f.rel, mode: f.mode, dir: true });
-    else if (f.kind === "link") entries.push({ path: f.rel, target: f.target });
-    else if (f.secret && !carry.has(f.rel)) cut.push(f.rel);
-    else {
-      const content = readFileSync(f.abs);
-      entries.push({ path: f.rel, mode: f.mode, content });
-      files += 1;
-      bytes += content.length;
+    if (f.kind === "dir") {
+      entries.push({ path: f.rel, mode: f.mode, dir: true });
+      continue;
     }
+    if (f.kind === "link") {
+      entries.push({ path: f.rel, target: f.target });
+      continue;
+    }
+    const rewriting = f.secret && offered.has(f.rel) && rewrite.has(f.rel);
+    if (f.secret && !rewriting && !carry.has(f.rel)) {
+      cut.push(f.rel);
+      continue;
+    }
+    const content = rewriting ? Buffer.from(bareUrls(readFileSync(f.abs, "utf8")).text) : readFileSync(f.abs);
+    if (rewriting) rewritten.push(f.rel);
+    entries.push({ path: f.rel, mode: f.mode, content });
+    files += 1;
+    bytes += content.length;
   }
-  return { tar: tarOf(entries), files, bytes, cut };
+  return { tar: tarOf(entries), files, bytes, cut, rewritten };
 }
 
 /** The folder as the runtime's project.import op reads it: planned once, packed when consent is known. */
@@ -216,6 +249,6 @@ export function projectBundler(source: string): ProjectBundler {
   const listed = (): Promise<ProjectListing> => (listing ??= planProject(source));
   return {
     plan: async () => (await listed()).plan,
-    pack: async carry => packProject(await listed(), carry),
+    pack: async (carry, rewrite) => packProject(await listed(), carry, rewrite),
   };
 }

@@ -139,6 +139,23 @@ export function pemSignal(text: string): boolean {
   return /^-----BEGIN[ A-Z0-9_-]*PRIVATE KEY/.test(text.trimStart());
 }
 
+/** A URL whose userinfo carries a password, `scheme://user:secret@host`; a username alone is a name, not a secret. */
+const URL_CREDENTIAL = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@([^\s"']+)/gi;
+
+export function urlSignal(text: string): boolean {
+  return bareUrls(text).urls.length > 0;
+}
+
+/** The text with every such URL's userinfo removed, and those URLs as they now read. */
+export function bareUrls(text: string): { text: string; urls: string[] } {
+  const urls: string[] = [];
+  const bare = text.replace(URL_CREDENTIAL, (_, scheme: string, rest: string) => {
+    urls.push(`${scheme}${rest}`);
+    return `${scheme}${rest}`;
+  });
+  return { text: bare, urls };
+}
+
 // Mode alone is believed only for a structured file right inside its app directory whose content did
 // not parse as plain config: deeper down, or once the keys read as settings, it marks tracker files,
 // lock files and themes far more often than secrets.
@@ -158,6 +175,7 @@ export async function fileSignals(name: string, e: { bytes: number; mode: number
       parsed = topLevelKeys(text).length > 0;
       if (keysSignal(text)) signals.push("keys");
       if (pemSignal(text)) signals.push("pem");
+      if (urlSignal(text)) signals.push("url");
     }
   }
   if (signals.length === 0) return undefined;
