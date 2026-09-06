@@ -38,7 +38,7 @@ interface Box {
 }
 
 const LONG = "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo";
-const LONG_LANDED = `spoo is at ${LONG} on api; cut .env, config/service-account.json; sessions: Claude Code moved, Codex transcripts landed, not yet listed, 1 rollout skipped, Gemini CLI nothing to bring, OpenCode failed: state.db is locked by another process on the machine.`;
+const LONG_LANDED = `spoo is at ${LONG} on api; cut 2 files, listed above; sessions: Claude Code moved, Codex transcripts landed, not yet listed, 1 rollout skipped, Gemini CLI nothing to bring, OpenCode failed: state.db is locked by another process on the machine.`;
 /** Two lines of the status line's text, its floor; a third line grows it past this. */
 const ROW = 28;
 
@@ -123,7 +123,7 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
     await page!.locator("button:has-text('Import')").click();
     await page!.waitForFunction(() => document.querySelector("[data-step=done]")?.textContent?.includes("landed at"));
     expect(await page!.locator("[data-step=consented]").textContent()).toContain("Sessions travel for Claude Code (46 sessions), Codex (2 sessions).");
-    await page!.waitForFunction(() => document.querySelector("[role=status]")?.textContent === "spoo is at /Users/me/code/spoo on api; cut .env, config/service-account.json.");
+    await page!.waitForFunction(() => document.querySelector("[role=status]")?.textContent === "spoo is at /Users/me/code/spoo on api; cut 2 files, listed above.");
     expect(await uncut("[role=status]")).toBe(true);
     const after = {
       files: (await boxes("[data-k=files]"))[0]!,

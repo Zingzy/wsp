@@ -118,11 +118,12 @@ describe("consent", () => {
 });
 
 describe("the landed line", () => {
-  it("names the folder, its path on the machine and the workspace, then what was cut", () => {
+  it("names the folder, its path on the machine and the workspace, then how many were cut and where the list is", () => {
     const result = { dest: "/Users/me/code/proj", files: 11, bytes: 2_900, parts: 1, cut: [], rewritten: [".git/config"], agents: [] };
     expect(landedLine(result, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api.");
     expect(landedLine(result, "/Users/me/code/proj/", "api")).toBe("proj is at /Users/me/code/proj on api.");
-    expect(landedLine({ ...result, cut: ["keys/id_ed25519", ".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; cut keys/id_ed25519, .env.");
+    expect(landedLine({ ...result, cut: ["keys/id_ed25519", ".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; cut 2 files, listed above.");
+    expect(landedLine({ ...result, cut: [".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; cut 1 file, listed above.");
     expect(landedLine({ ...result, agents: [{ agent: "claude", files: 2, bytes: 100, outcome: "moved", sessions: 2 }, { agent: "codex", files: 0, bytes: 0, outcome: "carried" }] }, "/Users/me/code/proj", "api")).toBe(
       "proj is at /Users/me/code/proj on api; sessions: Claude Code moved, Codex carried unchanged.",
     );

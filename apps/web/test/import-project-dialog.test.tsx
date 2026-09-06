@@ -284,7 +284,7 @@ describe("import project dialog", () => {
     emit(event({ stage: "landing", message: "Landing at /private/var/proj.", elapsedMs: 70 }));
     emit(event({ stage: "done", message: "11 files, 2.8 KB, landed at /private/var/proj.", elapsedMs: 80 }));
     await act(async () => finish());
-    await waitFor(() => expect(within(root).getByRole("status").textContent).toBe("proj is at /private/var/proj on api; cut keys/id_ed25519."));
+    await waitFor(() => expect(within(root).getByRole("status").textContent).toBe("proj is at /private/var/proj on api; cut 1 file, listed above."));
     expect(within(root).queryByRole("button", { name: "Cancel" })).toBeNull();
     const done = within(root).getByRole("button", { name: "Done" });
     fireEvent.click(done);

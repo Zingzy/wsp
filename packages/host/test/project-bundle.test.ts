@@ -117,6 +117,29 @@ describe("planProject", () => {
     ]);
   });
 
+  it("a git-tracked file is never secret-shaped and never cut: its content is in the repository, which travels whole", async () => {
+    const root = fixture();
+    put(root, ".github/workflows/ci.yml", "jobs:\n  build:\n    steps:\n      - with:\n          token: ${{ secrets.GITHUB_TOKEN }}\n");
+    put(root, "deploy/credentials.json", JSON.stringify({ token: "sk-ant-x" }));
+    git(root, "add", "-f", ".github", "deploy");
+    git(root, "commit", "-q", "-m", "ci");
+    const listing = await planProject(root, {});
+    expect(listing.plan.secrets.map(s => s.path)).toEqual([".env", "config/secrets.json", "keys/id_ed25519"]);
+    expect(listing.files.find(f => f.rel === "deploy/credentials.json")).toMatchObject({ kind: "file", secret: false });
+    const packed = packProject(listing, new Set(), new Set());
+    expect(packed.cut).toEqual([".env", "config/secrets.json", "keys/id_ed25519"]);
+    expect(listed(packed.tar)).toContain("deploy/credentials.json");
+  });
+
+  it("an untracked file whose keys and URL passwords are environment references raises nothing; one holding a value still does", async () => {
+    const root = fixture();
+    put(root, "docker-compose.yml", "services:\n  db:\n    environment:\n      POSTGRES_PASSWORD: ${PW}\n      DATABASE_URL: postgres://u:${PW}@db:5432/app\n");
+    put(root, "vector.toml", '[sinks.axiom]\napi_key = "${AXIOM_TOKEN}"\n');
+    put(root, "live.toml", '[sinks.axiom]\napi_key = "xaat-000-fake"\n');
+    const { plan } = await planProject(root, {});
+    expect(plan.secrets.map(s => s.path)).toEqual([".env", "config/secrets.json", "keys/id_ed25519", "live.toml"]);
+  });
+
   it("a token in a remote URL in .git/config is named by the url rule, with the bare URL offered as the rewrite", async () => {
     const root = fixture();
     git(root, "remote", "add", "origin", TOKEN_URL);
