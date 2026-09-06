@@ -115,7 +115,8 @@ export interface HarnessAdapter {
   start(options: HarnessStartOptions): HarnessSession;
   /** A shell line that makes the binary describe itself for harnesses.list; without one the table answers. */
   readonly catalogProbe?: string;
-  /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. */
+  /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
+   * means nothing is exported and both run with the machine's own environment only. */
   readonly env?: Readonly<Record<string, string>>;
 }
 
@@ -738,6 +739,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
   /** A row read back from the store has no handle: its process died with the runtime that started it. */
   const sessions = new Map<string, { view: SessionView; turnId: string; handle?: SessionHandle; end?: (reason: string) => void }>();
+  /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
+  const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
   const transcripts = new Map<string, SessionEvent[]>();
   // Puts are chained per workspace so the later snapshot always lands last,
@@ -1120,9 +1123,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const idleWindowOf = (r: WorkspaceRecord): number | null => (r.idleWindowMs === undefined ? defaultIdleWindowMs : r.idleWindowMs);
 
-  /** Every live session of a workspace ends here when its machine goes away under it; the harness's own end, if it ever comes, is dropped. */
+  /** Every live session and exec of a workspace ends here when its machine goes away under it; the harness's own end, if it ever comes, is dropped. */
   const endSessions = (workspaceId: string, reason: string): void => {
     for (const s of sessions.values()) if (s.view.workspaceId === workspaceId) s.end?.(reason);
+    for (const e of execs) if (e.workspaceId === workspaceId) e.end(reason);
   };
 
   // Pausing is persisted and pushed before the provider is asked, so a list
@@ -1549,8 +1553,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async execStream(id, argv) {
       const entry = await entryOf(id);
       const { adapter } = adapterFor(entry);
-      // Only the socket ends a command; a build may outlive the deadline a harness turn gets.
-      return machineExecStream(entry.machine, { deadlineMs: Number.POSITIVE_INFINITY })(argv.map(shellQuote).join(" "), { env: { ...adapter.env } });
+      // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
+      const inner = machineExecStream(entry.machine, { deadlineMs: Number.POSITIVE_INFINITY })(argv.map(shellQuote).join(" "), { env: { ...adapter.env } });
+      let endWith: (reason: string) => void = () => {};
+      const ended = new Promise<{ reason: string }>(resolve => {
+        endWith = reason => resolve({ reason });
+      });
+      const running = {
+        workspaceId: id,
+        end: (reason: string): void => {
+          endWith(reason);
+          inner.kill();
+        },
+      };
+      execs.add(running);
+      // The inner poll loop notices the kill one poll late; the reason reaches the reader as soon as it is known.
+      const lines = async function* (): AsyncGenerator<string> {
+        const it = inner.lines[Symbol.asyncIterator]();
+        try {
+          while (true) {
+            const next = await Promise.race([it.next(), ended]);
+            if ("reason" in next) throw new Error(next.reason);
+            if (next.done) return;
+            yield next.value;
+          }
+        } finally {
+          execs.delete(running);
+        }
+      };
+      return { ...inner, lines: lines(), exited: Promise.race([inner.exited, ended.then(() => null)]) };
     },
 
     async daemonReach(id) {

@@ -654,4 +654,46 @@ describe("serveRuntime workspaces.exec", () => {
     c.close();
     await until(() => log.some(cmd => cmd.includes("kill -TERM")));
   });
+
+  it("deleting the workspace ends a running exec with the deleted reason on the asking socket", async () => {
+    const backend = stubBackend();
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: { claude: envAdapter({}) } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    execGuest(backend, "", undefined);
+    const started = await c.request("workspaces.exec", { workspaceId, argv: ["sleep", "600"] });
+    const execId = started["execId"] as string;
+    const log = backend.machines[0]!.execLog;
+    await until(() => log.some(cmd => cmd.includes("__WSP_EOF_")));
+    const deleted = await c.request("workspaces.delete", { workspaceId });
+    expect(deleted.ok).toBe(true);
+    await until(() => c.events.some(e => e.type === "exec.exit"));
+    expect(c.events.filter(e => e.type === "exec.exit")).toEqual([
+      { type: "exec.exit", execId, exitCode: null, error: "machine deleted while the agent was working" },
+    ]);
+    c.close();
+  });
+
+  it("napping the workspace ends a running exec with the paused reason on the asking socket", async () => {
+    const backend = stubBackend();
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: { claude: envAdapter({}) } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    execGuest(backend, "", undefined);
+    const started = await c.request("workspaces.exec", { workspaceId, argv: ["sleep", "600"] });
+    const execId = started["execId"] as string;
+    const log = backend.machines[0]!.execLog;
+    await until(() => log.some(cmd => cmd.includes("__WSP_EOF_")));
+    const napped = await c.request("workspaces.nap", { workspaceId });
+    expect(napped.ok).toBe(true);
+    await until(() => c.events.some(e => e.type === "exec.exit"));
+    expect(c.events.filter(e => e.type === "exec.exit")).toEqual([
+      { type: "exec.exit", execId, exitCode: null, error: "machine paused while the agent was working" },
+    ]);
+    c.close();
+  });
 });

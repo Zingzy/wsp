@@ -1085,7 +1085,8 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * with the environment the harness adapter exports for a turn. argv is the command word by word; the runtime
    * quotes each for the machine's shell, so a word stays one word. Replies { execId } once launched, then pushes
    * ExecEvent frames to this socket only: exec.output per line, exec.exit last. The socket closing ends the
-   * command; nothing else does, there is no deadline. */
+   * command, and so does the machine going away under it (deleted, paused, or unanswering: exec.exit then carries
+   * the reason as its error); nothing else does, there is no deadline. */
   z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1) }),
   /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),

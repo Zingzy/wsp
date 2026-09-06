@@ -446,9 +446,9 @@ export function findVerb(argv: ReadonlyArray<string>): Verb | undefined {
   });
 }
 
-/** One line per verb for the top-level help: its usage, then what it does. */
+/** Two lines per verb for the top-level help: its usage, then what it does indented under it, so no line runs wide. */
 export function verbHelp(): string {
-  return table(VERBS.map(v => [`  ${v.usage}`, v.about])).join("\n");
+  return VERBS.map(v => `  ${v.usage}\n      ${v.about}`).join("\n");
 }
 
 /** The usage of every verb that opens with this word, for a command that stopped short of one; none when no verb does. */

@@ -214,6 +214,11 @@ describe("wsp verbs over the host", () => {
     expect(io.lines[0]).toContain(line);
   });
 
+  it("every line of wsp --help fits 100 columns", () => {
+    const wide = HELP.split("\n").filter(l => l.length > 100);
+    expect(wide).toEqual([]);
+  });
+
   it("pause naps the workspace and says so in the state vocabulary", async () => {
     await run("new", "alpha");
     const { code, io } = await run("pause", "alpha");
@@ -371,6 +376,18 @@ describe("wsp verbs over the host", () => {
     expect(t.io.lines).toHaveLength(1);
     expect(c.code).toBe(1);
     expect(c.io.errors).toEqual(["wsp exec: the host closed the connection"]);
+  });
+
+  it("the workspace being deleted under a running exec fails the verb with the reason and exit 1", async () => {
+    await run("new", "alpha");
+    execGuest(backend, "", undefined);
+    const command = run("exec", "alpha", "--", "sleep", "600");
+    await new Promise(r => setTimeout(r, 300));
+    const [alpha] = await rt.workspaces.list();
+    await rt.workspaces.delete(alpha!.id);
+    const c = await command;
+    expect(c.code).toBe(1);
+    expect(c.io.errors).toEqual(["machine deleted while the agent was working"]);
   });
 
   it("a port that accepts but never answers fails the dial within its deadline, before and after the handshake", async () => {
