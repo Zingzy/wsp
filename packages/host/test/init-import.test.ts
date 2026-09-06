@@ -1028,7 +1028,7 @@ describe("importFor", () => {
     const covered = ticks(home, row({ rung: "tools", id: "tools/brew/jq", label: "jq" }), row({ rung: "tools", id: "tools/npm/pnpm", label: "pnpm" }));
     expect(covered.tools.map(t => t.id)).not.toContain("tools/brew/jq");
     expect(covered.skippedTools!.map(s => s.id)).not.toContain("tools/brew/jq");
-    expect(covered.baseTools).toEqual([{ id: "tools/brew/jq", label: "jq", name: "jq" }, { id: "tools/npm/pnpm", label: "pnpm", name: "pnpm" }]);
+    expect(covered.baseTools).toEqual([{ id: "tools/brew/jq", label: "jq", note: "jq is part of the base" }, { id: "tools/npm/pnpm", label: "pnpm", note: "pnpm is part of the base" }]);
   });
 
   it("carries the person's shell when zsh's rows are ticked, with the frameworks among them, and none when only bash's are", () => {

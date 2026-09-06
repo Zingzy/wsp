@@ -60,6 +60,7 @@ describe("the Mac's Homebrew as a table", () => {
     // Direct and transitive runtime dependencies, each once.
     expect(ffmpeg.deps.sort()).toEqual(["ca-certificates", "openssl@3", "x264"]);
     expect(ffmpeg.bytes).toBe(102400 * 1024);
+    expect(ffmpeg.version).toBe("8.1.2");
     expect(TABLE.get("gh")!.source).toEqual({ repo: "cli/cli", tag: "v2.100.0" });
     expect(TABLE.get("zingzy/tap/diskbloom")!.source).toEqual({ repo: "Zingzy/diskbloom", tag: "v0.1.0" });
     expect(TABLE.get("someone/tap/gitonly")!.source).toEqual({ repo: "someone/gitonly", tag: "v3.1.0" });

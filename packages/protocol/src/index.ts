@@ -439,6 +439,9 @@ export const GoldenVersion = z.object({
   /** The snapshot the builder that sealed this version descends from: an update's head. Absent on a version built
    * from a fresh machine, and on versions sealed before this was recorded. */
   parentSnapshotId: z.string().optional(),
+  /** Every base tool's command with the version read after the base stage on the builder this version descends from.
+   * Absent on a version sealed before the base tools existed; its forks never ran them, so an update is refused. */
+  base: z.array(z.object({ name: z.string(), version: z.string() })).optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 

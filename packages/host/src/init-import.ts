@@ -581,7 +581,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     agents: agents.installs,
     skippedAgents: agents.skipped.map(s => ({ id: s.id, name: label(s.id), note: s.note })),
     skippedTools: [...editors.skipped, ...tools.skipped].map(s => ({ id: s.id, label: label(s.id), note: s.note })),
-    baseTools: tools.base.map(b => ({ id: b.id, label: label(b.id), name: b.name })),
+    baseTools: tools.base.map(b => ({ id: b.id, label: label(b.id), note: b.note })),
     ...(mcp !== undefined ? { mcp } : {}),
     ...(opts.onResult !== undefined ? { onResult: opts.onResult } : {}),
   };

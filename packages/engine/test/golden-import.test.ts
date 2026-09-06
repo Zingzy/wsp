@@ -669,7 +669,7 @@ describe("toolInstallsFor", () => {
       { id: "tools/brew/mas", note: "no Linux bottle" },
       { id: "tools/go/junk", note: "no module to install from" },
     ]);
-    expect(t.base).toEqual([{ id: "tools/npm/pnpm", name: "pnpm" }]);
+    expect(t.base).toEqual([{ id: "tools/npm/pnpm", name: "pnpm", note: "pnpm is part of the base" }]);
     expect(t.brewfile).toBe(['tap "zingzy/tap"', 'brew "gh"', ""].join("\n"));
   });
 
@@ -702,28 +702,39 @@ describe("toolInstallsFor", () => {
   });
 
   it("rows the base floor covers install nothing and are listed as the base's, whatever road the Mac had them by; a hand copy still travels", () => {
+    // Homebrew's node is the current major and its python the current 3.x: the Mac's versions come from the brew table.
+    const table: BrewTable = new Map([
+      ["node", { name: "node", fullName: "node", deps: [], macosOnly: false, version: "24.1.0" }],
+      ["python", { name: "python", fullName: "python", deps: [], macosOnly: false, version: "3.14.0" }],
+      ["python@3.12", { name: "python@3.12", fullName: "python@3.12", deps: [], macosOnly: false, version: "3.12.7" }],
+    ]);
     const t = toolInstallsFor([
       row({ rung: "tools", id: "tools/brew/jq", linux: "yes" }),
       row({ rung: "tools", id: "tools/npm/pnpm", label: "pnpm", version: "10.0.0" }),
       row({ rung: "tools", id: "tools/brew/python@3.12", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew/node", linux: "yes" }),
+      row({ rung: "tools", id: "tools/brew/python", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew/uv", linux: "yes" }),
       row({ rung: "tools", id: "tools/cargo/ripgrep", label: "ripgrep", version: "14.1.0" }),
       row({ rung: "tools", id: "tools/brew-cask/docker", linux: "no" }),
       row({ rung: "tools", id: "tools/brew/docker-compose", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew/python@3.14", linux: "yes" }),
       row({ rung: "tools", id: "tools/hand/jq", label: "jq", paths: ["~/.local/bin/jq"], linux: "yes" }),
-    ]);
+    ], table);
     expect(t.base).toEqual([
-      { id: "tools/brew/jq", name: "jq" },
-      { id: "tools/npm/pnpm", name: "pnpm" },
-      { id: "tools/brew/python@3.12", name: "Python 3.12" },
-      { id: "tools/brew/node", name: "Node 22 with npm" },
-      { id: "tools/brew/uv", name: "uv" },
-      { id: "tools/cargo/ripgrep", name: "ripgrep" },
-      { id: "tools/brew-cask/docker", name: "Docker engine and compose" },
-      { id: "tools/brew/docker-compose", name: "Docker engine and compose" },
+      { id: "tools/brew/jq", name: "jq", note: "jq is part of the base" },
+      { id: "tools/npm/pnpm", name: "pnpm", note: "pnpm is part of the base" },
+      { id: "tools/brew/python@3.12", name: "Python 3.12", note: "Python 3.12 is part of the base" },
+      { id: "tools/brew/node", name: "Node 22 with npm", note: "Node 22 is part of the base; this Mac runs Node 24" },
+      { id: "tools/brew/python", name: "Python 3.12", note: "Python 3.12 is part of the base; this Mac runs Python 3.14" },
+      { id: "tools/brew/uv", name: "uv", note: "uv is part of the base" },
+      { id: "tools/cargo/ripgrep", name: "ripgrep", note: "ripgrep is part of the base" },
+      { id: "tools/brew-cask/docker", name: "Docker engine and compose", note: "Docker engine and compose is part of the base" },
+      { id: "tools/brew/docker-compose", name: "Docker engine and compose", note: "Docker engine and compose is part of the base" },
     ]);
+    // A row with no table entry and no version says the base row alone; a versioned row on the floor's major does too.
+    expect(toolInstallsFor([row({ rung: "tools", id: "tools/brew/node", linux: "yes" })]).base[0]!.note).toBe("Node 22 with npm is part of the base");
+    expect(toolInstallsFor([row({ rung: "tools", id: "tools/npm/node", label: "node", version: "22.20.0" })]).base[0]!.note).toBe("Node 22 with npm is part of the base");
     expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/python@3.14"]);
     expect(t.skipped).toEqual([]);
     expect(t.brewfile).toBe('brew "python@3.14"\n');

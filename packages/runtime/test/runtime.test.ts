@@ -1164,7 +1164,8 @@ describe("runtime golden builders", () => {
     const seen: GoldenExec[] = [];
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, onExec: e => void seen.push(e) } });
     await rt.golden.prepare({ name: "default" });
-    expect(backend.machines[0]!.runLog).toEqual(["install"]);
+    // The base stage's steps and the cache sweeps run under the guard; the harness install is the one bare run.
+    expect(backend.machines[0]!.runLog.filter(s => !s.includes("setsid bash -c"))).toEqual(["install"]);
     expect(seen.filter(e => e.cmd === "install")).toEqual([expect.objectContaining({ machineId: "m1", exitCode: 0, stdout: "harness on\n" })]);
   });
 
@@ -2293,6 +2294,11 @@ describe("runtime golden import", () => {
     const b = await rt.golden.prepare();
     expect(frames.filter(f => !f.startsWith("uploading-files:"))).toEqual([
       "creating:sandbox from base",
+      "deploying-daemon",
+      ...["Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose"].map((label, i) => `deploying-daemon:${label} (${i + 1}/10)`),
+      "deploying-daemon:10 installed; caches swept; 3000 MB free",
+      // The stub answers the versions read with nothing, so the stage closes on the disk alone.
+      "deploying-daemon:3000 MB free",
       "applying-setup:1 file: shell 1",
       "applying-setup:10 B packed",
       "installing-harness",

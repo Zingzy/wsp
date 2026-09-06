@@ -175,6 +175,39 @@ describe("installBase", () => {
     expect(g.ran).toHaveLength(11);
   });
 
+  it("reads df once between installs, and sizes an install after the rescue from the reading the cleanup left", async () => {
+    let free = 1800;
+    const g = guest(script => {
+      if (script.includes("rm -rf /root/.npm")) {
+        free = 3000;
+        return ok;
+      }
+      if (script.includes("nodejs.org/dist")) {
+        free -= 250;
+        return { exitCode: 0, stdout: "NODE_INSTALLED v22.23.2\n", stderr: "" };
+      }
+      return undefined;
+    }, () => mb(free));
+    const { stages, stage } = recorder();
+    const out = await installBase(g.machine, stage);
+    expect(stages[0]).toBe("deploying-daemon:1800 MB free, under the 2048 MB floor; cleaning up before skipping");
+    expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
+      ["base/node", "installed", 250 * 1024 * 1024],
+      ["base/pnpm", "installed", 0],
+      ["base/uv", "installed", 0],
+      ["base/python", "installed", 0],
+      ["base/apt-index", "installed", 0],
+      ["base/git", "installed", 0],
+      ["base/jq", "installed", 0],
+      ["base/ripgrep", "installed", 0],
+      ["base/curl", "installed", 0],
+      ["base/docker", "installed", 0],
+    ]);
+    // One read before the loop; the rescue's sweep reads before and after itself and the loop reads once more after
+    // it; one after each of the ten installs; the closing sweep and line read three more.
+    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(17);
+  });
+
   it("a step that fails is named on the stage and in the line, and what waited on it is skipped by its name", async () => {
     const g = guest(script => (script.includes("apt-get update -qq") ? { exitCode: 100, stdout: "", stderr: "E: Could not get lock /var/lib/apt/lists/lock" } : script.includes("VERSION node:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\nVERSION npm: 10.9.4\nVERSION pnpm: 11.9.0\nVERSION uv: uv 0.12.9\nVERSION python3: Python 3.12.13\n", stderr: "" } : undefined));
     const { stages, stage } = recorder();

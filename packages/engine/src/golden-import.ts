@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 import { MCP_ID_PREFIX, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { CATALOG_AGENTS, CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, agentInstallLine, baseEntryFor, caskVersion, linuxCaskFor, nodeInstallScript, smokeOf, type NodeMajor, type ToolPin } from "@wsp/catalog";
+import { CATALOG_AGENTS, CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV_INSTALL, baseEntryFor, baseNote, caskVersion, installLine, linuxCaskFor, nodeInstallScript, smokeOf, type NodeMajor, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -512,6 +512,8 @@ export interface BaseRow {
   id: string;
   /** The base row it stands for, as the catalog names it. */
   name: string;
+  /** What the build reports for the row: the base row's name, and this Mac's major beside the floor's when they differ. */
+  note: string;
 }
 
 export interface PlannedRoad {
@@ -534,11 +536,12 @@ const handCopy = (e: RecipeEntry): boolean => e.id.startsWith(HAND_PREFIX) && e.
 const packageOf = (e: RecipeEntry): string => e.id.split("/").slice(2).join("/");
 
 /** The base row a tools row stands for, when the base stage installs the same tool on every golden; a hand copy is a
- * file of the person's and travels whatever the base has. */
-export function baseRowFor(e: RecipeEntry): BaseRow | undefined {
+ * file of the person's and travels whatever the base has. The Mac's version is the row's, or the brew table's for a formula. */
+export function baseRowFor(e: RecipeEntry, brew: BrewTable = new Map()): BaseRow | undefined {
   if (e.rung !== "tools" || e.id.startsWith(HAND_PREFIX)) return undefined;
-  const entry = baseEntryFor(packageOf(e));
-  return entry === undefined ? undefined : { id: e.id, name: entry.name };
+  const pkg = packageOf(e);
+  const entry = baseEntryFor(pkg);
+  return entry === undefined ? undefined : { id: e.id, name: entry.name, note: baseNote(entry, e.version ?? brew.get(pkg)?.version) };
 }
 
 /** A command cask's road, from its paths as the collector wrote them: the release's `github.com/owner/repo@tag`
@@ -572,6 +575,8 @@ export interface BrewFormula {
   deps: string[];
   /** The Cellar entry's size on the Mac, when read. */
   bytes?: number;
+  /** The version installed on the Mac, as brew reported it. */
+  version?: string;
   macosOnly: boolean;
   source?: ToolSource;
 }
@@ -656,7 +661,7 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
   const out: Brewfile = { text: "", taps: [], formulae: [], skipped: [], roads: [], base: [] };
   for (const e of entries) {
     if (!ticked(e) || e.rung !== "tools") continue;
-    const base = baseRowFor(e);
+    const base = baseRowFor(e, brew);
     if (base !== undefined) {
       out.base.push(base);
     } else if (e.id.startsWith("tools/brew-tap/")) {
@@ -699,8 +704,8 @@ const MANAGER_ORDER: readonly Exclude<ToolManager, "brew" | "github">[] = ["npm"
 export const BREW_TOOLCHAIN: readonly string[] = ["glibc", "gcc"];
 
 /** How a manager the base does not carry gets onto the machine before its first tool: as a Homebrew for Linux
- * formula. npm, pnpm and uv are on every golden from the base stage. */
-export const MANAGER_FORMULA: Record<Exclude<ToolManager, "brew" | "npm" | "pnpm" | "uv" | "github">, string> = { bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
+ * formula. A manager the floor brings (see baseEntryFor) needs none. */
+export const MANAGER_FORMULA: Readonly<Partial<Record<ToolManager, string>>> = { bun: "bun", pipx: "pipx", cargo: "rust", go: "go" };
 
 /** The collector puts a Go binary's `path@version` in its first path; recipes saved
  * before that carried it in the label as `name (path@version)`. */
@@ -856,9 +861,10 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const managers = new Map<ToolManager, { after: string; step?: ToolInstall }>();
   const managerFormulae: string[] = [];
   for (const manager of MANAGER_ORDER) {
-    if (manager === "npm" || manager === "pnpm" || manager === "uv" || rowsOf(manager).length === 0) continue;
+    if (rowsOf(manager).length === 0 || baseEntryFor(manager) !== undefined) continue;
     const own = `tools/manager/${manager}`;
     const formula = MANAGER_FORMULA[manager];
+    if (formula === undefined) throw new Error(`${manager} is neither in the base nor a formula`);
     if (brew.formulae.includes(formula)) managers.set(manager, { after: `tools/brew/${formula}` });
     else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
     else {
@@ -1134,7 +1140,7 @@ export function nodeMajorFor(floor: number, now: Date): NodeMajor | undefined {
  * catalog agent (its project state has no measured resolver, so wsp does not ship it); its line stays for recipes
  * that tick it: https://aider.chat/docs/install.html, the uv tool line. */
 export const AGENT_INSTALLERS: Record<string, AgentInstaller> = {
-  ...Object.fromEntries(CATALOG_AGENTS.filter(a => a.id !== "claude").map(a => [a.id, { name: a.name, install: agentInstallLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}) }])),
+  ...Object.fromEntries(CATALOG_AGENTS.filter(a => a.id !== "claude").map(a => [a.id, { name: a.name, install: installLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}) }])),
   aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version" },
 };
 

@@ -139,6 +139,7 @@ describe("the probe", () => {
     expect(cmd).toContain('echo "VERSION node: $(node --version 2>/dev/null | head -n 1)"');
     expect(cmd).toContain('echo "VERSION python3: $(python3 --version 2>/dev/null | head -n 1)"');
     expect(cmd).toContain('echo "VERSION docker compose: $(docker compose version 2>/dev/null | head -n 1)"');
+    expect(cmd.split("\n").filter(l => l.startsWith("export PATH="))).toHaveLength(1);
   });
 });
 

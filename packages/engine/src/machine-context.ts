@@ -9,7 +9,7 @@
 // hook the person's own file already claims is left alone and named in the result.
 import type { GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { BASE_VERSIONS_CMD, parseVersions, type ToolVersion } from "./golden-base.js";
+import { BASE_VERSION_LINES, parseVersions, type ToolVersion } from "./golden-base.js";
 import { TOOLS_PATH } from "./golden-import.js";
 import { TOOLS_DISK_FLOOR, fmtBytes } from "./golden-tools.js";
 import type { ImportResult } from "./golden.js";
@@ -221,7 +221,7 @@ export function probeCommand(roots: GuestRoots = GUEST_ROOTS): string {
     'for b in docker podman tmux fish brew; do if command -v "$b" >/dev/null 2>&1; then echo "HAS $b"; fi; done',
     `if [ -f ${e}/profile.d/wsp-golden.sh ]; then echo "HAS golden-path"; fi`,
     `if [ -x ${BROWSER_SHIM_PATH} ]; then echo "HAS wsp-open"; fi`,
-    BASE_VERSIONS_CMD,
+    BASE_VERSION_LINES,
     `for a in ${CONTEXT_AGENTS.join(" ")}; do if command -v "$a" >/dev/null 2>&1; then echo "AGENT $a"; fi; done`,
     `sed -n 's/^export \\([A-Za-z_][A-Za-z0-9_]*\\)=.*/SECRET \\1/p' ${e}/profile.d/wsp-secrets.sh 2>/dev/null`,
     'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7); shell=${shell##*/}; shell=${shell:-bash}',

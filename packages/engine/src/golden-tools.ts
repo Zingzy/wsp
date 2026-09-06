@@ -242,6 +242,8 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
   let floor: string | undefined;
   let dfWarned = false;
   let cleanedAtFloor = false;
+  /** Nothing touches the disk between the read after an install and the next tool's turn, so that read serves both. */
+  let reading: FreeDisk | undefined;
   const floorNote = (reading: string): string => `${reading}, keeping ${fmtBytes(TOOLS_DISK_FLOOR)} free`;
   const cleanupAtFloor = async (low: number): Promise<FreeDisk | undefined> => {
     if (cleanedAtFloor) return undefined;
@@ -262,18 +264,20 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       out.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
       continue;
     }
-    const free = await freeBytes(machine);
+    let free = reading ?? (await freeBytes(machine));
+    reading = undefined;
     if (free.kind === "unknown" && !dfWarned) {
       dfWarned = true;
       stage(`free disk unknown (${free.reason}); installing without the ${fmtBytes(TOOLS_DISK_FLOOR)} floor`);
     } else if (free.kind === "free" && free.bytes < TOOLS_DISK_FLOOR) {
       const after = await cleanupAtFloor(free.bytes);
       if (after === undefined || after.kind === "unknown" || after.bytes < TOOLS_DISK_FLOOR) {
-        const reading = after === undefined ? `${fmtBytes(free.bytes)} free` : after.kind === "free" ? `${fmtBytes(after.bytes)} free after cleanup` : `${fmtBytes(free.bytes)} free before cleanup, df failed after`;
-        floor = floorNote(reading);
+        const words = after === undefined ? `${fmtBytes(free.bytes)} free` : after.kind === "free" ? `${fmtBytes(after.bytes)} free after cleanup` : `${fmtBytes(free.bytes)} free before cleanup, df failed after`;
+        floor = floorNote(words);
         out.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
         continue;
       }
+      free = after;
     }
     stage(`${tool.label} (${i + 1}/${tools.length})`);
     const t0 = Date.now();
@@ -289,6 +293,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       if (tool.id === "tools/homebrew") out.homebrew = { ...HOMEBREW };
       const road = roadOf(res.stdout);
       const left = await freeBytes(machine);
+      reading = left;
       const bytes = free.kind === "free" && left.kind === "free" ? Math.max(0, free.bytes - left.bytes) : undefined;
       out.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ms, ...(bytes !== undefined ? { bytes } : {}), ...(road !== undefined ? { road } : {}) });
     } else {

@@ -1396,7 +1396,7 @@ describe("golden import stages", () => {
 
   describe("golden update", () => {
     const SNAPSHOT: RecipeDigest = { ticks: [], files: [] };
-    const head: GoldenVersion = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", kind: "desktop", setupSha: "s1", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "claude --version && gemini --version", exitCode: 0 }, size: { cpu: 2, memMb: 8192 } };
+    const head: GoldenVersion = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", kind: "desktop", setupSha: "s1", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "claude --version && gemini --version", exitCode: 0 }, size: { cpu: 2, memMb: 8192 }, base: [{ name: "node", version: "22.23.2" }, { name: "jq", version: "1.7.1" }] };
     const deltaOf = (over: Partial<GoldenDelta> = {}): GoldenDelta => ({
       import: importOf({ recipeHash: "h2", recipe: SNAPSHOT, tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }], agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }] }),
       removals: [
@@ -1466,7 +1466,7 @@ describe("golden import stages", () => {
       const { backend, cmds, ran, fetch } = backendFor([["npm uninstall -g bun", { exitCode: 1, stdout: "", stderr: "npm ERR! not installed" }]]);
       const machine = await backend.create({ kind: "sandbox", template: "base" });
       const { stages, onStage } = stageRecorder();
-      const { ledger } = await applyDelta(machine, deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, fetch, onStage });
+      const { ledger } = await applyDelta(machine, deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, fetch, onStage });
       expect(ran.filter(r => r.script.includes("npm uninstall -g bun"))).toHaveLength(1);
       expect(stages.slice(0, 2)).toEqual([
         "applying-setup:removing 4 items",
@@ -1498,7 +1498,7 @@ describe("golden import stages", () => {
       const { backend, cmds, fetch } = backendFor();
       const machine = await backend.create({ kind: "sandbox", template: "base" });
       const { stages, onStage } = stageRecorder();
-      await applyDelta(machine, deltaOf({ removals: [] }), { setup: "true", previousSmoke: "true", fetch, onStage });
+      await applyDelta(machine, deltaOf({ removals: [] }), { setup: "true", previousSmoke: "true", previousBase: head.base, fetch, onStage });
       expect(stages[0]).toBe("applying-setup:3 files: identity 1, shell 2");
       expect(cmds.slice(0, 2)).toEqual(["uname -m", FREE_KB_CMD]);
     });
@@ -1531,9 +1531,9 @@ describe("golden import stages", () => {
       const machine = await backend.create({ kind: "sandbox", template: "base" });
       const previousMissing = [gopls, bun, jq];
       const replanned = deltaOf({ import: { ...deltaOf().import, tools: [], skippedTools: [{ id: "tools/brew/jq", label: "jq", note: "no Linux bottle known" }] } });
-      const { ledger } = await applyDelta(machine, replanned, { setup: "true", previousSmoke: head.smoke.cmd, previousMissing, fetch });
+      const { ledger } = await applyDelta(machine, replanned, { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, previousMissing, fetch });
       expect(ledger.missingTools).toEqual([gopls, { name: "jq", outcome: "skipped", note: "no Linux bottle known" }]);
-      const clean = await applyDelta(await backend.create({ kind: "sandbox", template: "base" }), deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, previousMissing: [bun, jq], fetch });
+      const clean = await applyDelta(await backend.create({ kind: "sandbox", template: "base" }), deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, previousMissing: [bun, jq], fetch });
       expect(clean.ledger.missingTools).toBeUndefined();
     });
 
@@ -1542,6 +1542,37 @@ describe("golden import stages", () => {
       const builder = await upgradeBuilder({ backend, head: { ...head, missingTools: [gopls] }, delta: deltaOf({ removals: [] }), setup: "true", fetch });
       expect(builder.import?.missingTools).toEqual([gopls]);
       expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual([gopls]);
+    });
+
+    it("the seal records the floor read on the builder, an upgrade's fork carries its head's, and a version without one is refused before any machine boots", async () => {
+      const read = "VERSION node: v22.23.2\nVERSION npm: 10.9.4\nVERSION jq: jq-1.7.1\n";
+      const { backend, created } = recordingBackend({}, { exec: cmd => (cmd.includes("VERSION node:") && !cmd.includes("WSP_CTX") ? { exitCode: 0, stdout: read, stderr: "" } : cmd === FREE_KB_CMD ? { exitCode: 0, stdout: `${mb(3000)}\n`, stderr: "" } : cmd === "echo ok" ? REACH_OK : ok) });
+      const fetch: typeof globalThis.fetch = async () => new Response(null, { status: 200 });
+      const floor = [{ name: "node", version: "22.23.2" }, { name: "npm", version: "10.9.4" }, { name: "jq", version: "1.7.1" }];
+      const builder = await prepareBuilder({ backend, setup: "true" });
+      expect(builder.base).toEqual(floor);
+      const v1 = await sealGolden(builder, { backend, smoke: "true" });
+      expect(v1.version.base).toEqual(floor);
+      const b2 = await upgradeBuilder({ backend, head: v1.version, delta: deltaOf({ removals: [] }), setup: "true", fetch });
+      expect(b2.base).toEqual(floor);
+      expect((await sealGolden(b2, { backend, smoke: "true", manifest: v1.manifest })).version.base).toEqual(floor);
+
+      const booted = created.length;
+      const { base: _floor, ...preFloor } = v1.version;
+      await expect(upgradeBuilder({ backend, head: preFloor, delta: deltaOf({ removals: [] }), setup: "true", fetch })).rejects.toThrow("golden v1 was sealed before the base tools existed and cannot take an update; run wsp init and pick the rebuild");
+      expect(created).toHaveLength(booted);
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      await expect(applyDelta(machine, deltaOf({ removals: [] }), { setup: "true", previousSmoke: "true", previousBase: undefined, fetch })).rejects.toThrow("this golden was sealed before the base tools existed and cannot take an update; run wsp init and pick the rebuild");
+    });
+
+    it("an update on a version with the floor reports a newly ticked covered row as the base's, by the planner's note", async () => {
+      const { backend, cmds, fetch } = backendFor();
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const results: ImportResult[] = [];
+      const delta = deltaOf({ removals: [], import: importOf({ recipeHash: "h2", recipe: SNAPSHOT, tools: [], agents: [], baseTools: [{ id: "tools/brew/jq", label: "jq", note: "jq is part of the base" }], onResult: r => void results.push(r) }) });
+      await applyDelta(machine, delta, { setup: "true", previousSmoke: "true", previousBase: head.base, fetch });
+      expect(results.at(-1)!.tools).toEqual([{ id: "tools/brew/jq", label: "jq", outcome: "installed", note: "jq is part of the base" }]);
+      expect(cmds.some(c => c.includes("apt-get install") || c.includes("brew install"))).toBe(false);
     });
 
     it("upgradeBuilder forks the head at its kind and size as a builder, applies only the delta, and returns a first-life builder with the new ledger", async () => {
@@ -1649,7 +1680,7 @@ describe("golden import stages", () => {
       const one = [ext("ms-python.python")];
       const two = [...one, ext("esbenp.prettier-vscode")];
       const listWrites = (from: number) => cmds.slice(from).filter(c => c.includes("setsid bash -c") && c.includes('> "$HOME/.vscode-server/extensions.txt"'));
-      const apply = (delta: GoldenDelta) => applyDelta(machine, delta, { setup: "true", previousSmoke: "true", fetch, onStage });
+      const apply = (delta: GoldenDelta) => applyDelta(machine, delta, { setup: "true", previousSmoke: "true", previousBase: head.base, fetch, onStage });
 
       const n0 = cmds.length;
       const more = deltaBetween(one, two, "h2");
@@ -1682,7 +1713,7 @@ describe("golden import stages", () => {
       const results: ImportResult[] = [];
       const delta = deltaOf();
       delta.import.onResult = r => void results.push(r);
-      await applyDelta(machine, delta, { setup: "true", previousSmoke: head.smoke.cmd, fetch });
+      await applyDelta(machine, delta, { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, fetch });
       expect(results).toHaveLength(1);
       expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/brew/jq", "installed"]]);
       expect(results[0]!.removed).toEqual([

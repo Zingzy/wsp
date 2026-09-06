@@ -214,7 +214,7 @@ describe("stage stream on a terminal", () => {
         const stream = new StageStream(output, true);
         stream.start();
         stream.push(ev("creating", 0, "sandbox from base"));
-        stream.push(ev("deploying-daemon", 1_000, "node v18.20.4"));
+        stream.push(ev("deploying-daemon", 1_000, "daemon on node v22.23.2"));
         stream.push(ev("applying-setup", 2_000, "zsh: installing, with shell/oh-my-zsh"));
         const progress = ["(Reading database ... ", ...[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map(n => `(Reading database ... ${n}%`), "(Reading database ... 12345 files and directories currently installed.)"];
         stream.push(ev("applying-setup", 3_000, `zsh: ${progress.join("\r")}`));
@@ -453,7 +453,7 @@ describe("stage stream on a terminal", () => {
         const stream = new StageStream(output, true, undefined, line => sunk.push(line), stderr);
         stream.start();
         stream.push(ev("creating", 0, "sandbox from base"));
-        stream.push(ev("deploying-daemon", 5_200, "node v18.20.4"));
+        stream.push(ev("deploying-daemon", 5_200, "daemon on node v22.23.2"));
         stream.push(ev("applying-setup", 14_100, "zsh installed as the login shell; shell/oh-my-zsh reinstalled"));
         stream.push(ev("uploading-files", 30_200, "38 MB"));
         vi.advanceTimersByTime(100);
@@ -487,7 +487,7 @@ describe("stage stream on a terminal", () => {
       const stream = new StageStream(output, true);
       stream.start();
       stream.push(ev("creating", 0, "sandbox from base"));
-      stream.push(ev("deploying-daemon", 5_200, "node v18.20.4"));
+      stream.push(ev("deploying-daemon", 5_200, "daemon on node v22.23.2"));
       stream.push(ev("applying-setup", 14_100, "zsh installed as the login shell; shell/oh-my-zsh reinstalled"));
       stream.push(ev("uploading-files", 30_200, "38 MB"));
       vi.advanceTimersByTime(100);

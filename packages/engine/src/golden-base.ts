@@ -3,7 +3,7 @@
 // the catalog's floor rows by each row's own road, and the versions read back
 // once they are on. It runs under the base stage ahead of the daemon, so the
 // daemon's native module compiles against the Node the agents will run.
-import { BASE_FLOOR, smokeOf, type InstallRoad, type ToolEntry } from "@wsp/catalog";
+import { BASE_FLOOR, installAfter, installLine, smokeOf } from "@wsp/catalog";
 import type { GoldenStage } from "@wsp/protocol";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
@@ -15,39 +15,18 @@ const BASE_STAGE: GoldenStage = "deploying-daemon";
 const APT_INDEX = "base/apt-index";
 const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
 
-const stepId = (e: ToolEntry): string => `base/${e.id}`;
-
-function roadCommand(road: InstallRoad): string {
-  switch (road.road) {
-    case "script":
-      return road.script;
-    case "npm":
-      if (road.version === undefined) throw new Error(`${road.package} names no version to pin`);
-      return `npm install -g ${road.ignoreScripts === true ? "--ignore-scripts " : ""}${road.package}@${road.version}`;
-    case "apt":
-      return `${APT_ENV}\napt-get install -y -qq ${road.packages.join(" ")}`;
-    default:
-      throw new Error(`the ${road.road} road is not one the base stage runs`);
-  }
-}
-
-/** What a floor row waits on: pnpm on the Node it rides, Python on the uv that fetches it, every apt row on the one index read. */
-function after(e: ToolEntry): string | undefined {
-  if (e.id === "pnpm") return stepId(BASE_FLOOR.find(x => x.id === "node")!);
-  if (e.id === "python") return stepId(BASE_FLOOR.find(x => x.id === "uv")!);
-  if (e.installRoad.road === "apt") return APT_INDEX;
-  return undefined;
-}
+const stepId = (id: string): string => `base/${id}`;
 
 const withEnv = (cmd: string): string => `${PRELUDE}\n${PATH_LINE}\n${cmd}`;
 
-/** The floor as the tools loop runs it: one guarded step per row in catalog order, the apt index read once before the first apt row. */
+/** The floor as the tools loop runs it: one guarded step per row in catalog order by the catalog's install line, each
+ * after the row the catalog says it runs on top of; the apt index is read once, before the first row that waits on it. */
 export function baseInstalls(): ToolInstall[] {
   const out: ToolInstall[] = [];
   for (const e of BASE_FLOOR) {
-    if (e.installRoad.road === "apt" && !out.some(t => t.id === APT_INDEX)) out.push({ id: APT_INDEX, label: "apt index", manager: "apt", cmd: withEnv(`${APT_ENV}\napt-get update -qq`) });
-    const dep = after(e);
-    out.push({ id: stepId(e), label: e.name, manager: e.installRoad.road === "script" ? "script" : e.installRoad.road, cmd: withEnv(roadCommand(e.installRoad)), ...(dep !== undefined ? { after: dep } : {}), bin: e.bin });
+    const dep = installAfter(e);
+    if (dep !== undefined && stepId(dep) === APT_INDEX && !out.some(t => t.id === APT_INDEX)) out.push({ id: APT_INDEX, label: "apt index", manager: "apt", cmd: withEnv(`${APT_ENV}\napt-get update -qq`) });
+    out.push({ id: stepId(e.id), label: e.name, manager: e.installRoad.road, cmd: withEnv(installLine(e)), ...(dep !== undefined ? { after: stepId(dep) } : {}), bin: e.bin });
   }
   return out;
 }
@@ -60,16 +39,13 @@ interface VersionCheck {
   id?: string;
 }
 
-/** What comes along with a floor row and has a version of its own. */
-const COMPANIONS: Record<string, readonly { name: string; cmd: string }[]> = {
-  node: [{ name: "npm", cmd: "npm --version" }],
-  docker: [{ name: "docker compose", cmd: "docker compose version" }],
-};
+const VERSION_CHECKS: readonly VersionCheck[] = BASE_FLOOR.flatMap(e => [{ name: e.bin, cmd: smokeOf(e), id: e.id }, ...(e.brings ?? []).map(b => ({ name: b.bin, cmd: b.version }))]);
 
-const VERSION_CHECKS: readonly VersionCheck[] = BASE_FLOOR.flatMap(e => [{ name: e.bin, cmd: smokeOf(e), id: e.id }, ...(COMPANIONS[e.id] ?? [])]);
+/** One `VERSION <name>: <first line>` echo per floor command, an empty value for one that is not there; the caller puts the tools PATH ahead. */
+export const BASE_VERSION_LINES = VERSION_CHECKS.map(c => `echo "VERSION ${c.name}: $(${c.cmd} 2>/dev/null | head -n 1)"`).join("\n");
 
-/** One exec that prints `VERSION <name>: <first line>` for every floor command, an empty line for one that is not there. */
-export const BASE_VERSIONS_CMD = [`export PATH=${TOOLS_PATH}:$PATH`, ...VERSION_CHECKS.map(c => `echo "VERSION ${c.name}: $(${c.cmd} 2>/dev/null | head -n 1)"`)].join("\n");
+/** The read as one exec, as the base stage runs it. */
+export const BASE_VERSIONS_CMD = `export PATH=${TOOLS_PATH}:$PATH\n${BASE_VERSION_LINES}`;
 
 export interface ToolVersion {
   name: string;
@@ -102,6 +78,8 @@ export function versionsLine(versions: readonly ToolVersion[], results: readonly
 
 export interface BaseOutcome {
   tools: ToolResult[];
+  /** What the read found on the machine; the sealed version records it. */
+  versions: ToolVersion[];
   /** The stage's closing words. */
   line: string;
 }
@@ -110,5 +88,6 @@ export interface BaseOutcome {
 export async function installBase(machine: Machine, stage: (stage: GoldenStage, detail?: string) => void): Promise<BaseOutcome> {
   const { tools } = await installTools(machine, baseInstalls(), stage, BASE_STAGE);
   const read = await machine.exec(BASE_VERSIONS_CMD, { timeoutMs: INLINE_EXEC_MS });
-  return { tools, line: versionsLine(parseVersions(read.stdout), tools) };
+  const versions = parseVersions(read.stdout);
+  return { tools, versions, line: versionsLine(versions, tools) };
 }

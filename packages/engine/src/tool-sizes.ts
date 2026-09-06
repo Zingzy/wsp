@@ -93,7 +93,8 @@ export function parseBrewInfo(json: unknown): BrewFormula[] {
     const macosOnly = MACOS_ONLY_FORMULAE.has(fullName) || requirements.some(r => isRecord(r) && r["name"] === "macos");
     const urls = isRecord(f["urls"]) && isRecord(f["urls"]["stable"]) ? f["urls"]["stable"] : undefined;
     const source = sourceOf(str(urls?.["url"]), urls === undefined ? undefined : (str(urls["tag"]) ?? null));
-    out.push({ name, fullName, deps, macosOnly, ...(source !== undefined ? { source } : {}) });
+    const version = str(installed?.["version"]);
+    out.push({ name, fullName, deps, macosOnly, ...(version !== undefined ? { version } : {}), ...(source !== undefined ? { source } : {}) });
   }
   return out;
 }

@@ -61,8 +61,16 @@ export interface AgentEntry extends EntryBase {
 export interface ToolEntry extends EntryBase {
   kind: "tool";
   defaultOn: boolean;
+  /** On every golden from the base stage, whatever the Mac has; the floor runs these in catalog order. */
+  floor: boolean;
+  /** The floor row a script road runs on top of, by id; the npm and apt roads say it themselves. */
+  after?: string;
+  /** Commands that come along with this row and have a version of their own. */
+  brings?: readonly { bin: string; version: string }[];
   /** Package names a recipe's tools row may carry for this same tool, besides its id, its command and its road's argument. */
   covers?: readonly string[];
+  /** The major the floor pins, with the tool's plain name: a Mac on another major hears both in the covered row's note. */
+  major?: { name: string; version: string };
 }
 
 export type CatalogEntry = AgentEntry | ToolEntry;
@@ -111,7 +119,7 @@ const brew = (formula: string): { installRoad: InstallRoad; size?: number } => {
 const apt = (...packages: string[]): InstallRoad => ({ road: "apt", packages });
 const npm = (pkg: string, version?: string): InstallRoad => ({ road: "npm", package: pkg, ...(version !== undefined ? { version } : {}) });
 const github = (repo: string): InstallRoad => ({ road: "release", asset: { github: repo } });
-const tool = { kind: "tool", configPaths: [] } as const;
+const tool = { kind: "tool", configPaths: [], floor: false } as const;
 const agent = (id: keyof typeof AGENT_MIB) => ({ id, kind: "agent", bin: id, size: AGENT_MIB[id] * MIB }) as const;
 
 export const CATALOG: readonly CatalogEntry[] = [
@@ -213,16 +221,18 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
 
   // --- tools on by default: both sources agree or one is overwhelming --------------------------------------------
-  { ...tool, id: "git", name: "git", bin: "git", installRoad: apt("git"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 118, images: 5, road: "unmeasured" } },
+  // The floor rows first, in the order the base stage installs them: a row waits only on rows above it.
+  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, floor: true, covers: ["node@22"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: NODE_BYTES },
+  { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", installRoad: npm("pnpm", "11.9.0"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
+  { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL }, floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" } },
+  { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL }, floor: true, after: "uv", covers: ["python@3.12"], major: { name: "Python", version: "3.12" }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" } },
+  { ...tool, id: "git", name: "git", bin: "git", installRoad: apt("git"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 118, images: 5, road: "unmeasured" } },
+  { ...tool, id: "jq", name: "jq", bin: "jq", installRoad: apt("jq"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 17, images: 5, road: "unmeasured" } },
+  { ...tool, id: "ripgrep", name: "ripgrep", bin: "rg", installRoad: apt("ripgrep"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 10, images: 4, road: "unmeasured" } },
+  { ...tool, id: "curl", name: "curl", bin: "curl", installRoad: apt("curl"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 87, images: 4, road: "unmeasured" } },
+  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: apt("docker.io", "docker-compose-v2"), floor: true, covers: ["docker-compose"], brings: [{ bin: "docker compose", version: "docker compose version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" } },
+  // gh has no pinned release yet and agent-browser waits on a second data point: default-on through the tools stage.
   { ...tool, id: "gh", name: "GitHub CLI", bin: "gh", installRoad: github("cli/cli"), signIn: SIGN_IN_ROWS.gh, defaultOn: true, source: { sessions: 100, images: 3, road: "unmeasured" } },
-  { ...tool, id: "curl", name: "curl", bin: "curl", installRoad: apt("curl"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 87, images: 4, road: "unmeasured" } },
-  { ...tool, id: "jq", name: "jq", bin: "jq", installRoad: apt("jq"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 17, images: 5, road: "unmeasured" } },
-  { ...tool, id: "ripgrep", name: "ripgrep", bin: "rg", installRoad: apt("ripgrep"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 10, images: 4, road: "unmeasured" } },
-  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: NODE_BYTES },
-  { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", installRoad: npm("pnpm", "11.9.0"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
-  { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL }, covers: ["python@3.12"], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" } },
-  { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" } },
-  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: apt("docker.io", "docker-compose-v2"), covers: ["docker-compose"], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 30, images: 3, road: "unmeasured" } },
   { ...tool, id: "agent-browser", name: "agent-browser", bin: "agent-browser", installRoad: npm("agent-browser", "0.31.1"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 45, images: 0, road: "unmeasured", note: "sessions counted on one Mac only; on by default for this user until a second data point" } },
 
   // --- tools on request ---------------------------------------------------------------------------------------------
@@ -254,10 +264,21 @@ export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is Ag
 
 const BY_ID: ReadonlyMap<string, CatalogEntry> = new Map(CATALOG.map(e => [e.id, e]));
 
-/** What every golden gets in its base stage, whatever the Mac has, in install order: the default-on tools with a
- * pinned road. gh has no pinned release yet and agent-browser waits on a second data point. pnpm needs node first and
- * python needs uv. */
-export const BASE_FLOOR: readonly ToolEntry[] = ["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker"].map(id => BY_ID.get(id) as ToolEntry);
+/** What every golden gets in its base stage, whatever the Mac has: the entries flagged for the floor, in catalog order. */
+export const BASE_FLOOR: readonly ToolEntry[] = CATALOG.filter((e): e is ToolEntry => e.kind === "tool" && e.floor);
+
+/** The floor row an entry's install runs on top of: the npm road on node, an apt package on the index read once
+ * (`apt-index`), a script on what its entry names. */
+export function installAfter(e: ToolEntry): string | undefined {
+  switch (e.installRoad.road) {
+    case "npm":
+      return "node";
+    case "apt":
+      return "apt-index";
+    default:
+      return e.after;
+  }
+}
 
 const roadNames = (road: InstallRoad): readonly string[] => {
   switch (road.road) {
@@ -272,9 +293,19 @@ const roadNames = (road: InstallRoad): readonly string[] => {
   }
 };
 
-/** The base row a recipe's tools row stands for, by the package name the collector wrote, or nothing. */
+/** The base row a recipe's tools row stands for, by the package name the collector wrote (or a command the row
+ * brings along), or nothing. */
 export function baseEntryFor(pkg: string): ToolEntry | undefined {
-  return BASE_FLOOR.find(e => e.id === pkg || e.bin === pkg || roadNames(e.installRoad).includes(pkg) || (e.covers ?? []).includes(pkg));
+  return BASE_FLOOR.find(e => e.id === pkg || e.bin === pkg || roadNames(e.installRoad).includes(pkg) || (e.covers ?? []).includes(pkg) || (e.brings ?? []).some(b => b.bin === pkg));
+}
+
+/** What a ticked row the floor covers says in the build: the base row's name, or both majors when this Mac's differs
+ * from the one the floor pins (as many dot-separated parts of the Mac's version as the pin names). */
+export function baseNote(e: ToolEntry, macVersion: string | undefined): string {
+  const own = `${e.name} is part of the base`;
+  if (e.major === undefined || macVersion === undefined) return own;
+  const mac = macVersion.replace(/^v/, "").split(".").slice(0, e.major.version.split(".").length).join(".");
+  return mac === e.major.version ? own : `${e.major.name} ${e.major.version} is part of the base; this Mac runs ${e.major.name} ${mac}`;
 }
 
 /** The entry by its id, or nothing. */
@@ -287,8 +318,9 @@ export function smokeOf(e: CatalogEntry): string {
   return `${e.bin} --version`;
 }
 
-/** The bash line an agent's road runs; only the npm and script roads install an agent, and an npm agent is pinned. */
-export function agentInstallLine(e: CatalogEntry): string {
+/** The bash line an entry's road runs on the guest as it is: an npm package pinned, a script, an apt package. The
+ * brew and release roads install through the tools stage's own machinery and have no line of their own. */
+export function installLine(e: CatalogEntry): string {
   const road = e.installRoad;
   switch (road.road) {
     case "npm":
@@ -296,7 +328,9 @@ export function agentInstallLine(e: CatalogEntry): string {
       return `npm install -g ${road.ignoreScripts === true ? "--ignore-scripts " : ""}${road.package}@${road.version}`;
     case "script":
       return road.script;
+    case "apt":
+      return `export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq ${road.packages.join(" ")}`;
     default:
-      throw new Error(`${e.id} takes the ${road.road} road, which installs no agent`);
+      throw new Error(`${e.id} takes the ${road.road} road, which has no install line of its own`);
   }
 }
