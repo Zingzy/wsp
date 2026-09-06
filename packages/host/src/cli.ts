@@ -87,6 +87,14 @@ options:
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
                      what travels
+  --first-workspace NAME
+                     init: fork the first workspace under this name once the
+                     golden seals, without asking (default first)
+  --import FOLDER    init: import this folder's project onto that first
+                     workspace, with the consent the app's import starts from:
+                     caches left behind, secret-shaped files cut unless a
+                     rewrite drops their credentials, and the sessions your
+                     agents have for the folder travelling with it
   --out PATH         recipe: where to write it (default <state dir>/recipe.json)
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
@@ -317,7 +325,7 @@ function initRefusal(lock: HostLock, statePath: string): string {
   return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
 }
 
-async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; recipe?: string }): Promise<number> {
+async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, flags: { yes: boolean; recipe?: string; firstWorkspace?: string; importFolder?: string }): Promise<number> {
   const held = servingHost(opts.statePath);
   if (held !== undefined) {
     io.error(initRefusal(held, opts.statePath));
@@ -330,6 +338,8 @@ async function init(io: CliIO, opts: { port: number; wsPort: number; statePath: 
     {
       yes: flags.yes,
       ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
+      ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
+      ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
       collect: collectThisComputer,
       recipe: onHistory => computeRecipe(nodeHost(), { onHistory }),
       keys,
@@ -505,7 +515,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   const verb = findVerb(argv);
   if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom);
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom);
-  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; recipe?: string; out?: string };
+  let values: { version?: boolean; help?: boolean; port?: string; "ws-port"?: string; state?: string; yes?: boolean; recipe?: string; "first-workspace"?: string; import?: string; out?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -518,6 +528,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
         state: { type: "string" },
         yes: { type: "boolean", short: "y" },
         recipe: { type: "string" },
+        "first-workspace": { type: "string" },
+        import: { type: "string" },
         out: { type: "string" },
       },
       allowPositionals: true,
@@ -549,7 +561,12 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
       return 0;
     }
     case "init":
-      return init(io, opts, { yes: values.yes === true, ...(values.recipe !== undefined ? { recipe: values.recipe } : {}) });
+      return init(io, opts, {
+        yes: values.yes === true,
+        ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
+        ...(values["first-workspace"] !== undefined ? { firstWorkspace: values["first-workspace"] } : {}),
+        ...(values.import !== undefined ? { importFolder: values.import } : {}),
+      });
     case "recipe":
       await writeRecipe(nodeHost(), resolve(values.out ?? join(dirname(opts.statePath), "recipe.json")), line => io.log(line));
       return 0;

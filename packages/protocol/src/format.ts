@@ -16,6 +16,9 @@ export function fmtBytes(n: number): string {
   return `${(n / GIB).toFixed(1)} GB`;
 }
 
+/** A count with its word, pluralised by an s: "1 file", "12 files". */
+export const fmtCount = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 /** A machine size's memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
 export function fmtMemGb(memMb: number): string {
   return `${Number((memMb / 1024).toFixed(1))} GB`;

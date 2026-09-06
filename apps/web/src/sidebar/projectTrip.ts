@@ -5,7 +5,7 @@
 // one set of words the web has for it, and the refusal a caught error becomes
 // with the tone the status line gives it. No React here.
 import { agentName } from "@wsp/catalog";
-import type { ProjectAgentOutcome, ProjectAgentResult } from "@wsp/protocol";
+import { fmtCount, type ProjectAgentOutcome, type ProjectAgentResult } from "@wsp/protocol";
 import { errorText } from "../lib/utils.js";
 import { RequestError } from "../protocol/client.js";
 
@@ -39,7 +39,8 @@ export function stepRows<S extends string>(steps: readonly S[], events: readonly
   });
 }
 
-export const count = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+/** The protocol's rule under the name this folder's files already call it by; there is one implementation. */
+export const count = fmtCount;
 
 /** The folder's own name from the path as typed. */
 export const folderName = (path: string): string => path.replace(/\/+$/, "").split("/").at(-1) ?? path;

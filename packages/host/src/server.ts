@@ -5,8 +5,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { agentHomes } from "@wsp/engine";
-import type { BootPayload } from "@wsp/protocol";
-import { describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import type { BootPayload, ProjectImportResult, ProjectPlan } from "@wsp/protocol";
+import { describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { projectBundler } from "./project-bundle.js";
 import { projectLander } from "./project-export.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
@@ -50,6 +50,10 @@ export interface HostHandle {
   authToken: string;
   /** Forks the golden's head into a new workspace, with the envs and labels the app's own create gives it. */
   createWorkspace(name: string): Promise<CreatedWorkspace>;
+  /** Reads a folder on this computer as the app's import dialog reads it; nothing is packed or uploaded. */
+  planProject(source: string): Promise<ProjectPlan>;
+  /** Lands that folder on a workspace's machine through the bundler the app's import goes through. */
+  importProject(opts: Omit<ProjectImportOptions, "bundler">): Promise<ProjectImportResult>;
   close(): Promise<void>;
 }
 
@@ -202,6 +206,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const webDir = resolvePath(opts.webDir);
   const log = opts.log ?? (() => {});
 
+  // One bundler road for the app's import op and the handle's own: a folder is read and packed the same either way.
+  const homes = agentHomes(homedir());
+  const bundlerFor = (source: string) => projectBundler(source, homes);
+
   // Before the runtime socket: the app lists and stops the relay's forwards through it.
   const relay = startCallbackRelay({
     runtime: rt,
@@ -213,8 +221,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   });
   let rtServer: RuntimeServer;
   try {
-    const homes = agentHomes(homedir());
-    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken, forwards: relay, projects: source => projectBundler(source, homes), landing: projectLander(homes) });
+    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken, forwards: relay, projects: bundlerFor, landing: projectLander(homes) });
   } catch (e) {
     await relay.close();
     throw e;
@@ -231,6 +238,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     await rtServer.close();
     throw e;
   }
+
+  const planProject = (source: string): Promise<ProjectPlan> => bundlerFor(source).plan();
+
+  const importProject = (o: Omit<ProjectImportOptions, "bundler">): Promise<ProjectImportResult> => rt.projects.import({ ...o, bundler: bundlerFor(o.source) });
 
   const createWorkspace = async (name: string): Promise<CreatedWorkspace> => {
     const head = goldenHead(await rt.golden.get());
@@ -322,6 +333,8 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     wsPort: rtServer.port,
     authToken,
     createWorkspace,
+    planProject,
+    importProject,
     close: async () => {
       clearInterval(reapTimer);
       await relay.close();

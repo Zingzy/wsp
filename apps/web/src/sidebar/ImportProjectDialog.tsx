@@ -10,14 +10,14 @@
 // the person read: editing the path drops the plan and its ticks until the
 // folder is read again.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fmtBytes, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
+import { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, fmtBytes, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
-import { agentState, agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "./importProject.js";
+import { agentState, importStepRows, isImportOf, landedLine, secretOffer } from "./importProject.js";
 import { count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
 import { FactRow, FolderField, StatusLine, StepRows } from "./ProjectTripRows.js";
 
