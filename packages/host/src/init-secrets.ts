@@ -9,6 +9,7 @@
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { S_BAR, isCancel, log } from "@clack/prompts";
+import { shellQuote } from "@wsp/protocol";
 import { passwordPrompt } from "./init-layout.js";
 import type { BuilderLink } from "./init-signin.js";
 import { runQuiet, type QuietRun } from "./signin-relay.js";
@@ -51,7 +52,7 @@ const dim = (s: string): string => styleText("dim", s);
 
 /** The line profile.d gets: single quotes keep the value byte for byte. */
 export function exportLine(name: string, value: string): string {
-  return `export ${name}='${value.replace(/'/g, `'\\''`)}'`;
+  return `export ${name}=${shellQuote(value)}`;
 }
 
 /** The line fish's conf.d gets, quoted the way fish reads single quotes. */

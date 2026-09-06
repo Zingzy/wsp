@@ -15,7 +15,7 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { caskPinState, catalogEntry, linuxCaskFor } from "@wsp/catalog";
+import { ROAD_MODULES, caskPinState, linuxCaskFor } from "@wsp/catalog";
 import { BREW_TOOLCHAIN_BYTES, BUILDER_DISK_GB, MEASURED_ON, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, agentSize, assumedSize, brewfileFor, cliRoad, editorInstallsFor, estimateDisk, extensionsFile, pinState, remoteEditorFor, remoteSettingsPath, toolInstallsFor, toolSize, type BrewTable, type DiskEstimate, type ImportResult, type ToolSize } from "@wsp/engine";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import { CLAUDE_INSTALLER, importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
@@ -45,7 +45,6 @@ import {
   saveSmallRecipe,
   smallRecipePath,
   tickLoginTools,
-  unbuiltRows,
   withCatalogAgents,
   withoutAgentTools,
 } from "./init-recipe.js";
@@ -539,8 +538,7 @@ function editorWhy(e: ManifestEntry): string | undefined {
   }
   const step = editorInstallsFor([{ ...e, bring: true }]).installs[0];
   if (step === undefined) return undefined;
-  const how = step.manager === "release" ? "from its pinned release" : "by apt";
-  return `installed on the machine ${how}${e.paths.length > 0 ? "; your config comes along" : ""}`;
+  return `installed on the machine ${ROAD_MODULES[step.manager].words}${e.paths.length > 0 ? "; your config comes along" : ""}`;
 }
 
 const isMcpRow = (e: ManifestEntry): boolean => e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX);
@@ -841,7 +839,7 @@ export function summaryNote(
   const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
   const agents = agentInstallsFor(bring, { claude: CLAUDE_INSTALLER }).installs.map(a => a.name);
   // The terminal editors by name; an extension list is a file, not an install.
-  const editors = editorInstallsFor(bring).installs.filter(s => s.manager !== "list").map(s => s.label);
+  const editors = editorInstallsFor(bring).installs.filter(s => remoteEditorFor(s.id) === undefined).map(s => s.label);
   // Only what the person ticked counts as their tools; Homebrew and its toolchain are named apart.
   const steps = toolInstallsFor(bring, brew).installs;
   const tools = steps.filter(t => ticks.has(t.id)).length;
@@ -1027,13 +1025,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   // A heavy formula starts unticked, judged on the sizes just read.
   manifest = { ...manifest, entries: weighed(linuxCaskRows(withoutAgentTools(manifest.entries)), brew) };
-  // The card counts what the collector found; the catalog's bare agent rows join the manifest after it.
+  // The card counts what the collector found; the catalog's bare rows join the manifest after it.
   const found = manifest;
-  if (catalogRecipe !== undefined) {
-    manifest = applyRecipe(withCatalogAgents(manifest), catalogRecipe);
-    const unbuilt = unbuiltRows(catalogRecipe, manifest.entries).map(r => catalogEntry(r.id)?.name ?? r.id);
-    if (unbuilt.length > 0) notes.push(`Ticked in the recipe but not on this computer, so not in this build: ${unbuilt.join(", ")}.`);
-  }
+  if (catalogRecipe !== undefined) manifest = applyRecipe(withCatalogAgents(manifest), catalogRecipe);
   if (notes.length > 0) log.warn(notes.join("\n"), out);
   card("Found on this computer", detectionNote(found, source), io.output);
 
@@ -1105,6 +1099,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
           manifest = { ...manifest, entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: pins.get(e.id)! } : e)) };
           saveRecipe(path, manifest, ticks, choices);
         }
+      },
+      // An attach reports no result, so the build's file stands; the retried write's outcome replaces the failure it recorded.
+      onContext: o => {
+        if (noteOutcomes(resultsPath, { context: o.context, contextFailure: o.contextFailure }).replaced) log.warn(`${resultsPath} could not be read; it was rewritten with the machine context alone.`, out);
       },
     });
   let imp = importOf(bring);

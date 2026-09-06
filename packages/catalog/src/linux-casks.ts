@@ -5,6 +5,7 @@
 // records the checksum and the next install of that version checks it. The
 // version is the Mac's when the cask's version names the Linux build; else the
 // vendor's current one is fetched once and the pin holds it from then on.
+import { shellQuote } from "@wsp/protocol";
 import type { ToolPin } from "./roads.js";
 
 export interface LinuxCask {
@@ -21,10 +22,6 @@ export interface LinuxCask {
   /** One bash script; version is what caskVersion picked, pin what a first install recorded. */
   install(version: string | undefined, pin: ToolPin | undefined): string;
   uninstall: string;
-}
-
-function squote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 /** The version a row's install is fixed to by the Mac: its version when the cask's names the Linux build, else none. */
@@ -46,13 +43,13 @@ function pinStateOf(version: string | undefined, pin: ToolPin | undefined): "non
 /** The version the script installs: the Mac's, else the pinned one, else the vendor's current one by `latest`. */
 function versionLines(version: string | undefined, pin: ToolPin | undefined, latest: string): string[] {
   const fixed = version ?? pin?.tag;
-  return fixed !== undefined ? [`ver=${squote(fixed)}`] : [`ver="$(${latest})"`, '[ -n "$ver" ] || { echo "Error: could not read the current version" >&2; exit 1; }'];
+  return fixed !== undefined ? [`ver=${shellQuote(fixed)}`] : [`ver="$(${latest})"`, '[ -n "$ver" ] || { echo "Error: could not read the current version" >&2; exit 1; }'];
 }
 
 /** The checksum check, only when the version installed is the one the pin recorded. */
 function pinLines(version: string | undefined, pin: ToolPin | undefined, what: string): string[] {
   if (pinStateOf(version, pin) !== "same") return [];
-  return [`[ "$sum" = ${squote(pin!.sha256)} ] || { echo "Error: ${what} does not match the checksum recorded on the first install of $ver" >&2; exit 1; }`];
+  return [`[ "$sum" = ${shellQuote(pin!.sha256)} ] || { echo "Error: ${what} does not match the checksum recorded on the first install of $ver" >&2; exit 1; }`];
 }
 
 const PRELUDE = ["set -euo pipefail", 'arch="$(uname -m)"', 'tmp="$(mktemp -d /tmp/wsp-cask-XXXXXX)"', "trap 'rm -rf \"$tmp\"' EXIT"];

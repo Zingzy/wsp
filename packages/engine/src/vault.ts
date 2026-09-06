@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
+import { shellQuote } from "@wsp/protocol";
 import { backoffMs, classify, shouldRetry } from "./errors.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import type { Machine } from "./machine.js";
@@ -24,23 +25,19 @@ export interface UploadProgress {
   total: number;
 }
 
-function quote(p: string): string {
-  return `'${p.replace(/'/g, `'\\''`)}'`;
-}
-
 // Signed-URL transport on both directions (PoC P5: ~1s round trips). exec
 // stdout could carry base64 for small exports but hits response-size limits.
 export async function exportPaths(machine: Machine, paths: string[], opts: VaultOptions = {}): Promise<Buffer> {
   const doFetch = opts.fetch ?? globalThis.fetch;
   const tmp = `/tmp/wsp-vault-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
-  const rel = paths.map(p => quote(p.replace(/^\//, "")));
-  const tar = await machine.run(`tar czf ${quote(tmp)} -C / ${rel.join(" ")}`, { deadlineMs: opts.timeoutMs ?? 120_000 });
+  const rel = paths.map(p => shellQuote(p.replace(/^\//, "")));
+  const tar = await machine.run(`tar czf ${shellQuote(tmp)} -C / ${rel.join(" ")}`, { deadlineMs: opts.timeoutMs ?? 120_000 });
   if (tar.exitCode !== 0) {
     throw new Error(`vault export tar failed (exit ${tar.exitCode}): ${tar.stderr.slice(-500)}`);
   }
   try {
     if (opts.maxBytes !== undefined) {
-      const stat = await machine.exec(`stat -c %s ${quote(tmp)}`, { timeoutMs: INLINE_EXEC_MS });
+      const stat = await machine.exec(`stat -c %s ${shellQuote(tmp)}`, { timeoutMs: INLINE_EXEC_MS });
       const bytes = Number(stat.stdout.trim());
       if (stat.exitCode !== 0 || !Number.isFinite(bytes)) throw new Error(`vault export size unknown: ${stat.stderr.slice(-200)}`);
       if (bytes > opts.maxBytes) {
@@ -52,7 +49,7 @@ export async function exportPaths(machine: Machine, paths: string[], opts: Vault
     if (!res.ok) throw new Error(`vault export download failed: HTTP ${res.status}`);
     return Buffer.from(await res.arrayBuffer());
   } finally {
-    await machine.exec(`rm -f ${quote(tmp)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+    await machine.exec(`rm -f ${shellQuote(tmp)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
   }
 }
 
@@ -206,7 +203,7 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
     }
   } catch (e) {
     // Every part path, not only those that answered ok: a body can land before the response fails.
-    await machine.exec(`rm -f ${partPaths.map(quote).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+    await machine.exec(`rm -f ${partPaths.map(shellQuote).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
     throw e;
   }
   const digest = createHash("sha256").update(tar).digest("hex");
@@ -217,14 +214,14 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
   const flags = opts.overlay ? "--no-same-owner" : "--recursive-unlink";
   // The parts are streamed into tar in order, never joined on disk, so the guest holds the archive once.
   // pipefail: a part cat cannot read fails the hash line with cat's message instead of hashing what flowed.
-  const joined = `cat ${partPaths.map(quote).join(" ")}`;
+  const joined = `cat ${partPaths.map(shellQuote).join(" ")}`;
   const script = [
     "set -eo pipefail",
-    `trap "rm -f ${partPaths.map(quote).join(" ")}" EXIT`,
+    `trap "rm -f ${partPaths.map(shellQuote).join(" ")}" EXIT`,
     `sum=$(${joined} | sha256sum | cut -d' ' -f1)`,
     `test "$sum" = ${digest} || exit ${HASH_MISMATCH_EXIT}`,
-    `mkdir -p ${quote(destDir)}`,
-    `${joined} | tar xzf - -C ${quote(destDir)} ${flags}`,
+    `mkdir -p ${shellQuote(destDir)}`,
+    `${joined} | tar xzf - -C ${shellQuote(destDir)} ${flags}`,
   ].join("\n");
   const untar = await machine.run(script, { deadlineMs: opts.timeoutMs ?? 120_000 });
   if (untar.exitCode === HASH_MISMATCH_EXIT) {
@@ -257,7 +254,7 @@ const exists = (path: string): Error => Object.assign(new Error(`${path} already
 export async function landBundle(machine: Machine, tar: Buffer, dest: string, opts: LandOptions = {}): Promise<{ parts: number }> {
   const target = dest.replace(/\/+$/, "");
   if (!dest.startsWith("/") || target === "") throw new Error(`destination must be an absolute path below /, got ${dest}`);
-  const probe = await machine.exec(`test -e ${quote(target)} && echo yes || echo no`, { timeoutMs: INLINE_EXEC_MS });
+  const probe = await machine.exec(`test -e ${shellQuote(target)} && echo yes || echo no`, { timeoutMs: INLINE_EXEC_MS });
   if (probe.exitCode !== 0) throw new Error(`could not look at ${target} on the machine: ${probe.stderr.slice(-200)}`);
   if (probe.stdout.trim() === "yes" && opts.replace !== true) throw exists(target);
   const staging = `${target}.wsp-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -267,16 +264,16 @@ export async function landBundle(machine: Machine, tar: Buffer, dest: string, op
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     ...(opts.onPart !== undefined ? { onPart: opts.onPart } : {}),
   }).catch(async (e: unknown) => {
-    await machine.exec(`rm -rf ${quote(staging)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+    await machine.exec(`rm -rf ${shellQuote(staging)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
     throw e;
   });
   opts.onLanding?.();
   const script = [
     "set -e",
-    `trap "rm -rf ${quote(staging)}" EXIT`,
-    `mkdir -p ${quote(target.slice(0, target.lastIndexOf("/")) || "/")}`,
-    opts.replace === true ? `rm -rf ${quote(target)}` : `test ! -e ${quote(target)} || exit ${EXISTS_EXIT}`,
-    `mv ${quote(staging)} ${quote(target)}`,
+    `trap "rm -rf ${shellQuote(staging)}" EXIT`,
+    `mkdir -p ${shellQuote(target.slice(0, target.lastIndexOf("/")) || "/")}`,
+    opts.replace === true ? `rm -rf ${shellQuote(target)}` : `test ! -e ${shellQuote(target)} || exit ${EXISTS_EXIT}`,
+    `mv ${shellQuote(staging)} ${shellQuote(target)}`,
   ].join("\n");
   const moved = await machine.run(script, { deadlineMs: opts.timeoutMs ?? 120_000 });
   if (moved.exitCode === EXISTS_EXIT) throw exists(target);

@@ -699,7 +699,7 @@ function MissingTools({ tools }: { tools: GoldenMissingTool[] }) {
       <p className="text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">not on this image</p>
       <ul className="mt-0.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted-foreground" aria-label="tools not on this image">
         {tools.map(t => (
-          <li key={t.name} className="contents">
+          <li key={t.id} className="contents">
             <span data-k="missing-tool">{t.name}</span>
             <span className="min-w-0 break-words" data-k="missing-note">
               {t.outcome}: {t.note}

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The roads a catalog entry can take onto a Linux machine, and the pinned
+// The roads a catalog entry or a recipe's tools row can take onto a Linux
+// machine (the modules that walk them are in road-modules.ts), and the pinned
 // installers the script road carries: uv and Node by their checksummed
 // releases, Hermes by a git checkout at a commit, Claude Code by its vendor's
 // installer. Every pin here is checked on the machine before anything runs.
@@ -13,21 +14,35 @@ export interface ToolPin {
   sha256: string;
 }
 
-/** A release asset: a GitHub repository whose Linux asset for the arch is picked at install and pinned by its
- * sha256 on the first install, or a vendor's own download the cask's script names and hashes the same way. */
-export type ReleaseAsset = { github: string } | { vendor: LinuxCask };
+/** A package manager's global; `version` absent means the current one, or the laptop's when a row mirrors one. */
+export interface PackageRoad<K extends string> {
+  road: K;
+  package: string;
+  version?: string;
+}
 
 export type InstallRoad =
   | { road: "brew"; formula: string }
-  /** An npm global; `version` absent means the version the laptop runs when the row mirrors one, else the current one. */
-  | { road: "npm"; package: string; version?: string; ignoreScripts?: true }
-  | { road: "release"; asset: ReleaseAsset }
+  | (PackageRoad<"npm"> & { ignoreScripts?: true })
+  | PackageRoad<"pnpm">
+  | PackageRoad<"bun">
+  | PackageRoad<"uv">
+  | PackageRoad<"pipx">
+  | PackageRoad<"cargo">
+  /** `go install` of a module at a version; a row whose module nobody could read carries none and installs nothing. */
+  | { road: "go"; module?: string; version?: string }
+  /** A GitHub repository's Linux asset for the arch, at `version` (a tag) or the current release; `pin` is what the first
+   * install of that tag recorded and `go` the module `go install` falls back to. A row that came back from a golden's
+   * digest names no repository: it only ever comes off. */
+  | { road: "release"; repo?: string; version?: string; pin?: ToolPin; go?: string }
+  /** A vendor's own Linux download, as its cask row scripts and hashes it. */
+  | { road: "vendor"; cask: LinuxCask; version?: string; pin?: ToolPin }
   | { road: "apt"; packages: readonly string[] }
   /** A vendor installer with its own pin, as the stage runs it. */
   | { road: "script"; script: string };
 
 export type RoadName = InstallRoad["road"];
-export const ROADS: readonly RoadName[] = ["brew", "npm", "release", "apt", "script"];
+export const ROADS: readonly RoadName[] = ["brew", "npm", "pnpm", "bun", "uv", "pipx", "cargo", "go", "release", "vendor", "apt", "script"];
 
 /** The one curl into a shell the rules allow: the harness vendor's own installer, run on a first-life builder and
  * recorded in the manifest as setupSha; the smoke is what proves the result. */

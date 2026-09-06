@@ -2,6 +2,7 @@
 // NOTICE; logic only) and measured behavior in solari-poc/RESULTS.md.
 
 import { randomUUID } from "node:crypto";
+import { shellQuote } from "@wsp/protocol";
 
 // Inherited CLAUDE_CODE_*/CLAUDECODE mark the child as nested inside another
 // Claude Code run; FORCE_CODE_TERMINAL flips terminal detection (t3code unsets
@@ -83,10 +84,6 @@ export interface BuildCommandOptions {
   permissionMode?: string;
   /** "1m" or "200k" from the catalog; the CLI takes 1M as a "[1m]" suffix on the model, so it needs one. */
   contextWindow?: string;
-}
-
-export function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
 // Model names carry a context suffix like "claude-opus-5[1m]"; nothing else a catalog value needs is outside this set.
