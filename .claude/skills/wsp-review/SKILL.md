@@ -42,6 +42,7 @@ Review wsp changes against the laws this project has already paid for. Generic c
 ## Design laws (web)
 
 - The approved mock is law for layout/feel (prototype/design-direction branch of the tracker). Where the mock is silent, the ticket wins; conflicts get a coordinator ruling, not silent invention.
+- Catalog law (his ruling, 2026-09-06): adding an agent or a tool is one catalog entry plus, for an agent, one resolver module the entry names; nothing else changes. Code that switches on an agent or tool id outside the catalog and its per-agent modules is a finding. Per-agent behaviour (project-state resolver, config paths, sign-in, status, install road) lives behind one interface per concern, registered from the entry, so the wizard, the bundle, the import and the command line stay agent-agnostic. Shared logic is written once; a second copy of a predicate, a path rule or a marker parser is a finding.
 - Color law: green = running, ONLY; orange = spend/confirm, and the middle weight tier (disk 65 to 75 percent in the app and the wizard, sizes 500 MB to 1 GB in the wizard), ONLY; yellow and red exist only as the tiers beside it; everything else zinc. Terminal pane darker than chrome (content-well inversion) stays.
 - Tokens come from tokens.css; no literal colors in components.
 - Phase vocab: code says `napping` (protocol), UI may render it as paused/hollow.
