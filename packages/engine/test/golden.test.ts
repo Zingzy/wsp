@@ -553,6 +553,72 @@ describe("golden import stages", () => {
     expect(still.ledger.applied).not.toContain("installing-mcp");
   });
 
+  it("a retried context write names what the build left off the machine, and hands its outcome over in place of a result", async () => {
+    const { backend, puts, fetch: accept } = backendFor();
+    const refused = new Set([1]);
+    const fetch: typeof globalThis.fetch = async (url, init) => {
+      if (!refused.has(puts.length)) return accept(url, init);
+      puts.push(Buffer.from(init?.body as Uint8Array));
+      return new Response(JSON.stringify({ error: "Payload Too Large", limit: 1024 }), { status: 413 });
+    };
+    const skippedTools = [{ id: "tools/brew-cask/raycast", label: "Raycast", note: "macOS app, no Linux build" }];
+    const skippedAgents = [{ id: "agents/zed", name: "Zed", note: "no installer known" }];
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ skippedTools, skippedAgents }) });
+    expect(builder.import?.missingTools).toEqual([{ id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }]);
+    const results: ImportResult[] = [];
+    const outcomes: Pick<ImportResult, "context" | "contextFailure">[] = [];
+    const plan = () => importOf({ skippedTools, skippedAgents, onResult: r => void results.push(r), onContext: o => void outcomes.push(o) });
+    const again = await applyGoldenImport(builder.machine, { import: plan(), setup: "true", ledger: builder.import, fetch });
+    // The skipped stages ran on the build: the ledger's tools, the plan's agents and files are the facts the guest gets.
+    const tgz = puts.at(-1)!;
+    expect(JSON.parse(fileIn(tgz, "etc/wsp/machine-context.json"))).toEqual({
+      tools: [{ id: "tools/brew-cask/raycast", label: "Raycast", note: "macOS app, no Linux build" }],
+      agents: [{ id: "agents/zed", label: "Zed", note: "no installer known" }],
+      files: [{ path: "~/.bashrc", note: "no longer on this computer" }],
+    });
+    const skill = fileIn(tgz, "etc/wsp/skills/wsp-machine/SKILL.md");
+    expect(skill).toContain("- Tools that did not install: Raycast (macOS app, no Linux build).");
+    expect(skill).toContain("- Agents that did not install: Zed (no installer known).");
+    // The attach reports no result, so the saved one from the build stands; the write's outcome alone goes out.
+    expect(results).toEqual([]);
+    expect(outcomes).toEqual([{ context: [] }]);
+    expect(again.result.tools).toEqual([]);
+    expect(again.ledger.applied).toContain("installing-mcp");
+
+    // A retry that fails again hands the new reason over the same way.
+    refused.add(puts.length + 1).add(puts.length + 2);
+    const other = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ skippedTools, skippedAgents }) });
+    await applyGoldenImport(other.machine, { import: plan(), setup: "true", ledger: other.import, fetch });
+    expect(results).toEqual([]);
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes[1]).toEqual({ context: [], contextFailure: expect.stringMatching(/^write failed: .*HTTP 413/) });
+  });
+
+  it("a quiet attach whose MCP rewrite is refused hands nothing over: the build's write landed and its saved result stands", async () => {
+    const { backend, puts, fetch: accept } = backendFor();
+    const refused = new Set<number>();
+    const fetch: typeof globalThis.fetch = async (url, init) => {
+      if (!refused.has(puts.length)) return accept(url, init);
+      puts.push(Buffer.from(init?.body as Uint8Array));
+      return new Response(JSON.stringify({ error: "Payload Too Large", limit: 1024 }), { status: 413 });
+    };
+    const mcp = { agents: [], guestHome: "/root", rewrites: [], binDirs: [], tools: [] };
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ mcp }) });
+    expect(builder.import?.applied).toContain("installing-mcp");
+    const outcomes: Pick<ImportResult, "context" | "contextFailure">[] = [];
+    // The MCP plan rewrites the context on every attach; this one is refused.
+    refused.add(puts.length);
+    const { stages, onStage } = stageRecorder();
+    const again = await applyGoldenImport(builder.machine, { import: importOf({ mcp, onContext: o => void outcomes.push(o) }), setup: "true", ledger: builder.import, fetch, onStage });
+    expect(stages.at(-1)).toMatch(/^installing-mcp:machine context: not written \(write failed: .*HTTP 413/);
+    expect(again.ledger.applied).toContain("installing-mcp");
+    expect(outcomes).toEqual([]);
+
+    // A rewrite that lands is handed over as before: the same outcome the build saved.
+    await applyGoldenImport(builder.machine, { import: importOf({ mcp, onContext: o => void outcomes.push(o) }), setup: "true", ledger: again.ledger, fetch });
+    expect(outcomes).toEqual([{ context: [] }]);
+  });
+
   it("an archive over one upload part says how many parts it went up in", async () => {
     const { backend, puts, fetch } = backendFor();
     const stages: string[] = [];
@@ -1435,9 +1501,9 @@ describe("golden import stages", () => {
     const skippedTools = [{ id: "tools/brew-cask/raycast", label: "Raycast", note: "macOS app, no Linux build" }];
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ skippedTools }) });
     const want = [
-      { name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" },
-      { name: "Homebrew", outcome: "failed", note: "git: not found" },
-      { name: "gh", outcome: "skipped", note: "Homebrew did not install" },
+      { id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" },
+      { id: "tools/homebrew", name: "Homebrew", outcome: "failed", note: "git: not found" },
+      { id: "tools/brew/gh", name: "gh", outcome: "skipped", note: "Homebrew did not install" },
     ];
     expect(builder.import?.missingTools).toEqual(want);
     expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual(want);
@@ -1455,7 +1521,7 @@ describe("golden import stages", () => {
     const skippedTools = [{ id: "tools/brew-cask/raycast", label: "Raycast", note: "macOS app, no Linux build" }];
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ skippedTools }) });
     const again = await applyGoldenImport(builder.machine, { import: importOf(), setup: "true", ledger: builder.import, fetch });
-    expect(again.ledger.missingTools).toEqual([{ name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }]);
+    expect(again.ledger.missingTools).toEqual([{ id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }]);
   });
 
   describe("golden update", () => {
@@ -1595,10 +1661,10 @@ describe("golden import stages", () => {
       expect(nextSmoke(previous, removed, added)).toBe(want);
     });
 
-    const gopls = { name: "gopls", outcome: "skipped" as const, note: "no Linux bottle" };
-    const bun = { name: "bun", outcome: "skipped" as const, note: "no Linux bottle known" };
-    const jq = { name: "jq", outcome: "failed" as const, note: "exit 1: no bottle available" };
-    const raycast = { name: "Raycast", outcome: "skipped" as const, note: "macOS app, no Linux build" };
+    const gopls = { id: "tools/brew/gopls", name: "gopls", outcome: "skipped" as const, note: "no Linux bottle" };
+    const bun = { id: "tools/brew/bun", name: "bun", outcome: "skipped" as const, note: "no Linux bottle known" };
+    const jq = { id: "tools/brew/jq", name: "jq", outcome: "failed" as const, note: "exit 1: no bottle available" };
+    const raycast = { id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped" as const, note: "macOS app, no Linux build" };
     it.each([
       [[], [], []],
       [[gopls, bun, jq], [], [gopls]],
@@ -1614,7 +1680,7 @@ describe("golden import stages", () => {
       const previousMissing = [gopls, bun, jq];
       const replanned = deltaOf({ import: { ...deltaOf().import, tools: [], skippedTools: [{ id: "tools/brew/jq", label: "jq", note: "no Linux bottle known" }] } });
       const { ledger } = await applyDelta(machine, replanned, { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, previousMissing, fetch });
-      expect(ledger.missingTools).toEqual([gopls, { name: "jq", outcome: "skipped", note: "no Linux bottle known" }]);
+      expect(ledger.missingTools).toEqual([gopls, { id: "tools/brew/jq", name: "jq", outcome: "skipped", note: "no Linux bottle known" }]);
       const clean = await applyDelta(await backend.create({ kind: "sandbox", template: "base" }), deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, previousMissing: [bun, jq], fetch });
       expect(clean.ledger.missingTools).toBeUndefined();
     });

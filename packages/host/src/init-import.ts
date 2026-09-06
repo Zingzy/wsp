@@ -427,6 +427,7 @@ export interface ImportOptions {
   /** This Mac's Homebrew, for the tap formulae with no Linux bottle: their source repositories. */
   brew?: BrewTable;
   onResult?: (result: ImportResult) => void;
+  onContext?: GoldenImport["onContext"];
 }
 
 /** What is at a laptop path: a link is followed and reports where it lands. */
@@ -587,6 +588,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     baseTools: tools.base.map(b => ({ id: b.id, label: label(b.id), note: b.note })),
     ...(mcp !== undefined ? { mcp } : {}),
     ...(opts.onResult !== undefined ? { onResult: opts.onResult } : {}),
+    ...(opts.onContext !== undefined ? { onContext: opts.onContext } : {}),
   };
 }
 

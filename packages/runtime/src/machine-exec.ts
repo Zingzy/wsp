@@ -10,7 +10,8 @@
 
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, type ExecResult, type Machine } from "@wsp/engine";
-import { shellQuote, type ExecStream, type ExecStreamFactory } from "@wsp/adapter-claude";
+import type { ExecStream, ExecStreamFactory } from "@wsp/adapter-claude";
+import { shellQuote } from "@wsp/protocol";
 
 export interface MachineExecOptions {
   /** Delay between log polls. */

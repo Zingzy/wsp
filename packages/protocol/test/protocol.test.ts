@@ -532,11 +532,12 @@ describe("golden version logins", () => {
   });
 
   it("carries the tools missing from the image with the cause and reason, and stays optional for versions sealed before", () => {
-    const missingTools = [{ name: "gopls", outcome: "skipped", note: "no Linux bottle" }, { name: "Homebrew", outcome: "failed", note: "git: not found" }];
+    const missingTools = [{ id: "tools/brew/gopls", name: "gopls", outcome: "skipped", note: "no Linux bottle" }, { id: "tools/homebrew", name: "Homebrew", outcome: "failed", note: "git: not found" }];
     expect(GoldenVersion.parse({ ...base, missingTools })).toEqual({ ...base, missingTools });
     expect(GoldenVersion.parse(base).missingTools).toBeUndefined();
-    expect(() => GoldenVersion.parse({ ...base, missingTools: [{ name: "gopls", note: "no Linux bottle" }] })).toThrow();
-    expect(() => GoldenVersion.parse({ ...base, missingTools: [{ name: "gopls", outcome: "installed", note: "" }] })).toThrow();
+    expect(() => GoldenVersion.parse({ ...base, missingTools: [{ id: "tools/brew/gopls", name: "gopls", note: "no Linux bottle" }] })).toThrow();
+    expect(() => GoldenVersion.parse({ ...base, missingTools: [{ name: "gopls", outcome: "skipped", note: "no Linux bottle" }] })).toThrow();
+    expect(() => GoldenVersion.parse({ ...base, missingTools: [{ id: "tools/brew/gopls", name: "gopls", outcome: "installed", note: "" }] })).toThrow();
   });
 });
 
