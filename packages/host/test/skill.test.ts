@@ -53,7 +53,7 @@ describe("the wsp skill", () => {
     expect(WSP_SKILL).not.toContain("\u2014");
   });
 
-  it("walks an agent from nothing to the first thread: the health check, the three states, and the two lines the person runs", () => {
+  it("walks an agent from nothing to the first thread: the health check, the three states, the init it runs and the sign-in lines it hands over", () => {
     const setup = WSP_SKILL.slice(WSP_SKILL.indexOf(SETUP_HEADING), WSP_SKILL.indexOf("## Verbs and tools"));
     expect(setup).toContain("wsp --version");
     expect(setup).toContain("wsp threads --json");
@@ -62,10 +62,13 @@ describe("the wsp skill", () => {
     expect(setup).toContain("no golden yet; run wsp init");
     expect(setup).toContain("Solari API key: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.");
     expect(setup).toContain("wsp init --recipe ~/.wsp/recipe.json");
-    expect(setup).toContain("in their own terminal, not yours");
+    expect(setup).toContain("--non-interactive --json > /tmp/wsp-init.jsonl");
+    expect(setup).toContain('{"event":"sign-in","tool":"gh","label":"GitHub CLI login","browserUrl":"https://github.com/login/device","code":"8F4A-C21B","nextCommand":"open \'https://github.com/login/device\'","waitSeconds":960}');
+    expect(setup).toContain('{"event":"sign-in-result","tool":"gh","label":"GitHub CLI login","state":"signed-in"}');
+    expect(setup).toContain("Hand that line to the person as it comes");
     expect(setup).toContain("SOLARI_API_KEY=");
     expect(setup).toContain("Do not ask them to paste a key into this conversation");
-    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", "--signin <id>=copy|machine|key|skip", "--project <folder>", "wsp new dev", "wsp snapshot dev", "wsp thread new --in dev"]) expect(setup, step).toContain(step);
+    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", "--signin <id>=copy|machine|key|skip", "--project <folder>", "wsp new dev", "wsp snapshot first", "wsp thread new --in first"]) expect(setup, step).toContain(step);
     expect(setup.split("\n").filter(l => /^\d+\. /.test(l))).toHaveLength(10);
   });
 
@@ -78,9 +81,9 @@ describe("the wsp skill", () => {
     expect(setup).toContain("over 300 MB");
     // Nothing is written before everything is read, and the person answers before the init line goes over.
     expect(setup.indexOf("wsp recipe scan")).toBeLessThan(setup.indexOf("wsp recipe --tick used"));
-    expect(setup.indexOf("--tick used")).toBeLessThan(setup.indexOf("wsp init --recipe ~/.wsp/recipe.json"));
+    expect(setup.indexOf("--tick used")).toBeLessThan(setup.indexOf("nohup wsp init --recipe ~/.wsp/recipe.json --non-interactive --json"));
     // The wizard the init line opens, named as the plan names it, so the person knows what is coming.
-    for (const screen of ["Agents, Tools, Also on this Mac, Sign-ins, wsp for your agents, and Build"]) expect(setup).toContain(screen);
+    for (const screen of ["Agents, Tools, Also on this Mac, Sign-ins, wsp for your agents on this Mac, and Build"]) expect(setup).toContain(screen);
     // The first wsp up of the run is the one that meets a busy port, so its branch lives with the command.
     expect(setup.slice(setup.indexOf("\n2. "), setup.indexOf("\n3. "))).toContain("--port 4401 --ws-port 4411");
     expect(setup).toContain("The host is yours to start");
@@ -128,8 +131,10 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).toContain("`wsp recipe --tick used`");
     expect(INSTRUCTIONS).toContain("`wsp recipe scan`, which prints every option and writes nothing");
     expect(INSTRUCTIONS).toContain("two questions to them, the heavy rows with their sizes and the sign-ins with their default choice");
-    expect(INSTRUCTIONS).toContain("the one line they run themselves in their own terminal, `wsp init --recipe ~/.wsp/recipe.json`");
-    expect(INSTRUCTIONS).toContain("then `wsp up`, which you run yourself");
+    expect(INSTRUCTIONS).toContain("then `wsp init --recipe ~/.wsp/recipe.json --non-interactive --json`, which you run detached from a shell");
+    expect(INSTRUCTIONS).toContain("prints one JSON line per sign-in");
+    expect(INSTRUCTIONS).toContain("then `wsp up`, which you run yourself when nothing serves");
+    expect(INSTRUCTIONS).not.toContain("their own terminal");
     expect(INSTRUCTIONS).toContain("prefer the `wsp` command line");
     expect(INSTRUCTIONS).not.toContain("\n");
     expect(INSTRUCTIONS).not.toContain("## ");

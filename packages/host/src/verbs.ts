@@ -225,7 +225,8 @@ interface Verb {
   run(ctx: VerbContext): Promise<number>;
 }
 
-const COMMON: NonNullable<ParseArgsConfig["options"]> = {
+/** The flags every verb takes beside its own. */
+export const COMMON: NonNullable<ParseArgsConfig["options"]> = {
   state: { type: "string" },
   json: { type: "boolean" },
   help: { type: "boolean", short: "h" },

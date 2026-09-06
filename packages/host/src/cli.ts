@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { parseArgs } from "node:util";
+import { parseArgs, type ParseArgsConfig } from "node:util";
 import { isCancel } from "@clack/prompts";
 import { collect, computeRecipe, nodeHost, type Manifest, type Rung } from "@wsp/collect";
 import {
@@ -42,7 +42,7 @@ import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from
 import { startHost, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
-import { findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
+import { COMMON, VERBS, findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 export const HELP = `wsp - ${TAGLINE}
@@ -50,9 +50,9 @@ export const HELP = `wsp - ${TAGLINE}
 usage:
   wsp up             start the app and the runtime over the golden you sealed
                      (plain wsp does the same)
-  wsp init           set up your first golden image: the agents, what they
-                     need and the sign-ins, three screens, then the build and
-                     the browser
+  wsp init           set up your first golden image in six screens: Agents,
+                     Tools, Also on this Mac, Sign-ins, wsp for your agents
+                     on this Mac, and Build, then the browser
   wsp recipe scan    read this computer and print every option, writing
                      nothing: the agents, the tools with why and size, what
                      else a package manager here has that the image could
@@ -497,7 +497,6 @@ interface SharedFlags {
   "non-interactive"?: boolean;
   json?: boolean;
   recipe?: string;
-  out?: string;
 }
 
 interface Command {
@@ -550,6 +549,22 @@ const RECIPE_COMMAND = "recipe";
  * something that will not happen, and it is refused rather than dropped. */
 const WRITE_ONLY_FLAGS = ["tick", "set", "signin", "add", "add-check", "out"] as const;
 
+type Options = NonNullable<ParseArgsConfig["options"]>;
+
+/** The flags `wsp recipe` parses; scan refuses the write-only ones. */
+export const RECIPE_OPTIONS: Options = {
+  out: { type: "string" },
+  tick: { type: "string" },
+  set: { type: "string", multiple: true },
+  signin: { type: "string", multiple: true },
+  add: { type: "string", multiple: true },
+  "add-check": { type: "string", multiple: true },
+  project: { type: "string", multiple: true },
+  json: { type: "boolean" },
+  state: { type: "string" },
+  help: { type: "boolean", short: "h" },
+};
+
 const recipeUsage = (): string =>
   `usage: wsp ${RECIPE_COMMAND} [--tick used|installed|default] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>] [--json]\n       wsp ${RECIPE_COMMAND} scan [--project <folder>] [--json]`;
 
@@ -560,22 +575,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
   let values: { out?: string; tick?: string; set?: string[]; signin?: string[]; add?: string[]; "add-check"?: string[]; project?: string[]; json?: boolean; state?: string; help?: boolean };
   let words: string[];
   try {
-    ({ values, positionals: words } = parseArgs({
-      args: argv,
-      options: {
-        out: { type: "string" },
-        tick: { type: "string" },
-        set: { type: "string", multiple: true },
-        signin: { type: "string", multiple: true },
-        add: { type: "string", multiple: true },
-        "add-check": { type: "string", multiple: true },
-        project: { type: "string", multiple: true },
-        json: { type: "boolean" },
-        state: { type: "string" },
-        help: { type: "boolean", short: "h" },
-      },
-      allowPositionals: true,
-    }));
+    ({ values, positionals: words } = parseArgs({ args: argv, options: RECIPE_OPTIONS, allowPositionals: true }));
   } catch (e) {
     io.error(`${e instanceof Error ? e.message : String(e)}\n\n${usage}`);
     return 1;
@@ -646,6 +646,14 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
  * that word before the shared parse ever sees them. */
 const MCP_COMMAND = "mcp";
 
+/** The flags `wsp mcp` and `wsp mcp install` parse. */
+export const MCP_OPTIONS: Options = {
+  agent: { type: "string", multiple: true },
+  json: { type: "boolean" },
+  state: { type: "string" },
+  help: { type: "boolean", short: "h" },
+};
+
 const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--json]   (${MCP_AGENT_IDS})`;
 const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND}\n       ${mcpInstallUsage()}`;
 
@@ -667,16 +675,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   let values: { agent?: string[]; json?: boolean; state?: string; help?: boolean };
   let words: string[];
   try {
-    ({ values, positionals: words } = parseArgs({
-      args: argv,
-      options: {
-        agent: { type: "string", multiple: true },
-        json: { type: "boolean" },
-        state: { type: "string" },
-        help: { type: "boolean", short: "h" },
-      },
-      allowPositionals: true,
-    }));
+    ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
   } catch (e) {
     io.error(`${e instanceof Error ? e.message : String(e)}\n\n${usage}`);
     return 1;
@@ -709,6 +708,38 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   return report.failures.length > 0 ? 1 : 0;
 }
 
+/** The flags the shared parse reads for up, init and doctor. */
+export const SHARED_OPTIONS: Options = {
+  version: { type: "boolean", short: "v" },
+  help: { type: "boolean", short: "h" },
+  port: { type: "string" },
+  "ws-port": { type: "string" },
+  state: { type: "string" },
+  yes: { type: "boolean", short: "y" },
+  "non-interactive": { type: "boolean" },
+  json: { type: "boolean" },
+  recipe: { type: "string" },
+};
+
+const without = (options: Options, names: readonly string[]): Options => Object.fromEntries(Object.entries(options).filter(([name]) => !names.includes(name)));
+
+export interface CommandLine {
+  /** The words after `wsp` that select it. */
+  words: string;
+  /** Every flag that line parses; anything else is a usage error. */
+  options: Options;
+}
+
+/** Every line `wsp` answers, with the flags it takes: what the skill's examples and the MCP tools are held to. */
+export const COMMAND_LINES: readonly CommandLine[] = [
+  ...VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options } })),
+  { words: RECIPE_COMMAND, options: RECIPE_OPTIONS },
+  { words: `${RECIPE_COMMAND} scan`, options: without(RECIPE_OPTIONS, WRITE_ONLY_FLAGS) },
+  { words: MCP_COMMAND, options: MCP_OPTIONS },
+  { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS },
+  ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: command.json ? SHARED_OPTIONS : without(SHARED_OPTIONS, ["json"]) })),
+];
+
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
   if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom);
@@ -717,24 +748,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   let values: SharedFlags;
   let positionals: string[];
   try {
-    ({ values, positionals } = parseArgs({
-      args: argv,
-      options: {
-        version: { type: "boolean", short: "v" },
-        help: { type: "boolean", short: "h" },
-        port: { type: "string" },
-        "ws-port": { type: "string" },
-        state: { type: "string" },
-        yes: { type: "boolean", short: "y" },
-        "non-interactive": { type: "boolean" },
-        json: { type: "boolean" },
-        recipe: { type: "string" },
-        out: { type: "string" },
-        add: { type: "string", multiple: true },
-        "add-check": { type: "string", multiple: true },
-      },
-      allowPositionals: true,
-    }));
+    ({ values, positionals } = parseArgs({ args: argv, options: SHARED_OPTIONS, allowPositionals: true }));
   } catch (e) {
     io.error(e instanceof Error ? e.message : String(e));
     return 1;
