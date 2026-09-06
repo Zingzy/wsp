@@ -7,8 +7,8 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { ThreadView } from "@wsp/protocol";
-import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { ThreadView, markedDefault } from "@wsp/protocol";
+import { createRuntime, harnessCatalog, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, cli, serve } from "../src/cli.js";
@@ -236,11 +236,64 @@ describe("wsp verbs over the host", () => {
     expect(claude.starts.at(-1)?.cwd).toBe("/root/work/proj");
   });
 
+  it("--model, --effort and --access on thread new, fork --send and send reach the start as the fields the composer sends; a new thread without --model runs the catalog's default, the model the composer shows", async () => {
+    await run("new", "alpha");
+    const picked = await run("thread", "new", "--in", "alpha", "--model", "claude-sonnet-5", "--effort", "low", "--access", "plan", "review it");
+    expect(picked.code).toBe(0);
+    expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "plan"]]);
+
+    const bare = await run("thread", "new", "--in", "alpha", "hello");
+    expect(bare.code).toBe(0);
+    const shown = markedDefault(harnessCatalog("claude")!.models)!.value;
+    expect(shown).toBe("claude-opus-5");
+    expect(claude.starts.at(-1)).toMatchObject({ model: shown });
+    expect(claude.starts.at(-1)!.effort).toBeUndefined();
+    expect(claude.starts.at(-1)!.permissionMode).toBeUndefined();
+    const [, thread] = await rt.sessions.list();
+
+    const same = await run("send", thread!.threadId!, "go on");
+    expect(same.code).toBe(0);
+    expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId });
+    expect(claude.starts.at(-1)!.model).toBeUndefined();
+    const changed = await run("send", thread!.threadId!, "--model", "claude-fable-5-1", "--effort", "max", "--access", "acceptEdits", "now think");
+    expect(changed.code).toBe(0);
+    expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, model: "claude-fable-5-1", effort: "max", permissionMode: "acceptEdits" });
+
+    const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "bypassPermissions");
+    expect(forked.code).toBe(0);
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions" });
+    expect(claude.starts.at(-1)!.effort).toBeUndefined();
+  });
+
+  it("a model, effort or access mode the agent's catalog does not list is refused with that list, in the composer's words, and nothing starts", async () => {
+    await run("new", "alpha");
+    const model = await run("thread", "new", "--in", "alpha", "--model", "claude-haiku-4-5", "review it");
+    expect(model.code).toBe(1);
+    expect(model.io.errors).toEqual(['wsp thread new: model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)']);
+    const effort = await run("thread", "new", "--in", "alpha", "--effort", "ultra", "review it");
+    expect(effort.code).toBe(1);
+    expect(effort.io.errors).toEqual(['wsp thread new: effort "ultra" is not one claude takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max)']);
+    const access = await run("fork", "alpha", "--send", "build it", "--access", "yolo");
+    expect(access.code).toBe(1);
+    expect(access.io.errors[0]).toMatch(/^wsp fork: access mode "yolo" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), /);
+    // Checked against the table before the fork is minted, for the named agent or the default one.
+    const other = await run("fork", "alpha", "--send", "build it", "--agent", "codex", "--effort", "ultra");
+    expect(other.code).toBe(1);
+    expect(other.io.errors).toEqual(['wsp fork: effort "ultra" is not one codex takes; one of: Minimal (minimal), Low (low), Medium (medium), High (high), Extra high (xhigh)']);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
+    expect(claude.starts).toEqual([]);
+    expect(codex.starts).toEqual([]);
+    expect(await rt.sessions.list()).toEqual([]);
+    const dangling = await run("fork", "alpha", "--model", "claude-sonnet-5");
+    expect(dangling.code).toBe(1);
+    expect(dangling.io.errors).toEqual(["wsp fork: --model needs --send"]);
+  });
+
   it("a --cwd that is not absolute is refused with the usage line before anything is created, started or dialled; fork's --cwd needs --send", async () => {
     await run("new", "alpha");
     const relative = await run("thread", "new", "--in", "alpha", "--cwd", "packages/host", "look here");
     expect(relative.code).toBe(1);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent <name>] [--cwd <path>] [--notify <thread|me>] "<task>"']);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"']);
     const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
     expect(forked.code).toBe(1);
     expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute: got "packages\/host"\n\nusage: wsp fork /);
@@ -290,8 +343,8 @@ describe("wsp verbs over the host", () => {
     const listed = await run("threads", "--json");
     const [{ threads }] = json(listed.io) as [{ threads: ThreadView[] }];
     expect(threads.map(t => [t.id, t.harness, t.startedBy, t.title, t.turns])).toEqual([
-      [byCli!.threadId, "codex", "cli", "second", 1],
-      [byPerson!.threadId, "claude", "person", "and this", 1],
+      [byCli!.threadId, "codex", "cli", "first", 1],
+      [byPerson!.threadId, "claude", "person", "from the app", 1],
     ]);
 
     const prefixed = await run("send", byCli!.threadId!.slice(0, 8), "third");
@@ -311,14 +364,15 @@ describe("wsp verbs over the host", () => {
     const first = run("thread", "new", "--in", "alpha", "loop for a minute, then say done");
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
     const [row] = await rt.sessions.list();
-    const sent = run("send", row!.threadId!, "end your last line with STEERED");
+    const sent = run("send", row!.threadId!, "--model", "claude-sonnet-5", "--effort", "low", "end your last line with STEERED");
     await vi.waitFor(() => expect(held.steered).toEqual(["end your last line with STEERED"]));
     expect(held.starts).toHaveLength(1);
     held.release(0, "done STEERED");
     const opened = await first;
     const joined = await sent;
     expect(joined.code).toBe(0);
-    expect(joined.io.errors).toEqual(["joined the running turn"]);
+    // The picks cannot change a turn already running; the one line says which were dropped.
+    expect(joined.io.errors).toEqual(["joined the running turn; --model, --effort dropped, it keeps its own model, effort and access"]);
     expect(joined.io.lines).toEqual(["done STEERED"]);
     expect(joined.io.streamed).toBe("done STEERED");
     expect(opened.io.lines).toEqual([`thread ${row!.threadId}`, "done STEERED"]);
@@ -697,7 +751,7 @@ describe("wsp verbs over the host", () => {
     expect(bad.io.errors[0]).toContain("usage: wsp threads");
     const half = await run("thread");
     expect(half.code).toBe(1);
-    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent <name>] [--cwd <path>] [--notify <thread|me>] "<task>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {

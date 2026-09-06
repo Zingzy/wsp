@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import type { HarnessCatalog, SessionView } from "@wsp/protocol";
-import { contextWindowsFor, effectivePicks, effortsFor, resolveModel, runningPicks, startOptionsFrom } from "./composerPicks";
+import { contextWindowsFor, type HarnessCatalog, type SessionView } from "@wsp/protocol";
+import { effectivePicks, resolveModel, runningPicks, startOptionsFrom } from "./composerPicks";
 
 const CLAUDE: HarnessCatalog = {
   harness: "claude",
@@ -34,18 +34,6 @@ describe("resolveModel", () => {
     expect(resolveModel(noDefault, { picked: undefined, running: undefined })).toBeNull();
     expect(contextWindowsFor(noDefault, null)).toEqual([]);
     expect(startOptionsFrom(noDefault, { contextWindow: "1m" })).toEqual({});
-  });
-});
-
-describe("effortsFor and contextWindowsFor", () => {
-  it("a model without its own lists takes the catalog's; a model with lists narrows them in the catalog's order", () => {
-    expect(effortsFor(CLAUDE, CLAUDE.models[0]!).map(o => o.value)).toEqual(["low", "high"]);
-    expect(effortsFor(CLAUDE, CLAUDE.models[3]!).map(o => o.value)).toEqual(["high"]);
-    expect(effortsFor(CLAUDE, CLAUDE.models[2]!)).toEqual([]);
-    expect(contextWindowsFor(CLAUDE, CLAUDE.models[0]!).map(o => o.value)).toEqual(["200k", "1m"]);
-    expect(contextWindowsFor(CLAUDE, CLAUDE.models[1]!)).toEqual([]);
-    expect(contextWindowsFor(CLAUDE, CLAUDE.models[3]!).map(o => o.value)).toEqual(["200k", "1m"]);
-    expect(effortsFor(CLAUDE, null)).toEqual(CLAUDE.efforts);
   });
 });
 

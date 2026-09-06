@@ -130,14 +130,11 @@ export function catalogFromProbe(table: HarnessCatalog, probe: HarnessCatalogPro
     contextWindows: [...m.contextWindows],
   }));
   return {
-    harness: table.harness,
-    label: table.label,
+    ...table,
     source: "harness",
     version: probe.version,
     models,
     efforts: probe.efforts.map(value => known(table.efforts, value) ?? option(value, capitalize(value))),
-    contextWindows: table.contextWindows,
     permissionModes: probe.permissionModes.map(value => known(table.permissionModes, value) ?? option(value, value)),
-    steers: table.steers,
   };
 }

@@ -483,14 +483,29 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
-  it("a start without picks hands the harness none, so the CLI's own defaults apply", async () => {
+  it("a harness with an adapter but no table row gets the picks as named and nothing else of the request", async () => {
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { aider: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go", harness: "aider", model: "gpt-9", cwd: "/w", startedBy: "cli", requestId: "r1" });
+    expect(Object.keys(m.lastStart()!).sort()).toEqual(["cwd", "model", "onEvent", "prompt"]);
+    expect(m.lastStart()).toMatchObject({ model: "gpt-9", cwd: "/w" });
+    expect(handle.view()).not.toHaveProperty("requestId");
+    expect(handle.view()).toMatchObject({ harness: "aider", model: "gpt-9", startedBy: "cli" });
+    m.done("done");
+    m.end();
+    await handle.finished;
+    await rt.close();
+  });
+
+  it("a start without picks hands the harness the catalog's default model and nothing else, so the CLI's own defaults apply to the rest", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
-    expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "onEvent"]);
+    expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "model", "onEvent"]);
     const view = handle.view();
-    expect(view.model).toBeUndefined();
+    expect(view.model).toBe("claude-opus-5");
     expect(view.effort).toBeUndefined();
     expect(view.permissionMode).toBeUndefined();
     m.done("done");
@@ -506,7 +521,8 @@ describe("runtime session history", () => {
     expect(catalogs.map(c => c.harness)).toEqual(["claude"]);
     const claude = catalogs[0]!;
     expect(claude.efforts.length).toBeGreaterThan(0);
-    expect(claude).toMatchObject({ source: "table", version: TABLE_PIN });
+    // Marked as the one an unnamed start runs, so a client without the catalog package can pick its list.
+    expect(claude).toMatchObject({ source: "table", version: TABLE_PIN, isDefault: true });
     expect((await createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} }).harnesses.list()).length).toBe(0);
   });
 
@@ -521,13 +537,26 @@ describe("runtime session history", () => {
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
       const catalogs = await rt.harnesses.list(ws.id);
       const claude = catalogs.find(c => c.harness === "claude")!;
-      expect(claude).toMatchObject({ source: "harness", version: "2.1.257" });
+      // The wire's isDefault is the harness an unnamed start runs, whichever source answered.
+      expect(claude).toMatchObject({ source: "harness", version: "2.1.257", isDefault: true });
       expect(claude.models.map(m => m.value)).toEqual(["claude-opus-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
       expect(claude.models[0]).toMatchObject({ label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] });
       expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
       expect(probes(backend)).toHaveLength(1);
       // The probe is the adapter's line, so it runs under the session's isolated config dir, never HOME.
       expect(probes(backend)[0]).toContain("CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
+      await rt.close();
+    });
+
+    it("a start before any list fills the cache, and the list still marks the default harness", async () => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter } });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      await rt.sessions.start(ws.id, { prompt: "first" });
+      const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
+      expect(claude).toMatchObject({ source: "harness", version: "2.1.257", isDefault: true });
+      expect(probes(backend)).toHaveLength(1);
       await rt.close();
     });
 
@@ -567,6 +596,7 @@ describe("runtime session history", () => {
       expect(catalogs.find(c => c.harness === "claude")).toMatchObject({ source: "harness", version: "2.1.257" });
       const codex = catalogs.find(c => c.harness === "codex")!;
       expect(codex).toMatchObject({ source: "harness", version: "0.9.0", label: "Codex" });
+      expect(codex.isDefault).toBeUndefined();
       expect(codex.models).toEqual([{ value: "gpt-5-codex", label: "Codex", isDefault: true, efforts: ["high"], contextWindows: [] }]);
       // The table lends the words for values the binary only names.
       expect(codex.permissionModes).toEqual([{ value: "read-only", label: "Read only", description: "No edits, no commands that write" }]);
@@ -642,6 +672,33 @@ describe("runtime session history", () => {
       const later = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
       expect(probes(backend)).toHaveLength(2);
       expect(later.source).toBe("table");
+      await rt.close();
+    });
+
+    it("a start's model, effort and access mode are checked against the binary's catalog and refused with its list; a new thread without a model runs the default it marks", async () => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+      const m = manual();
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: m.adapter } });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      await expect(rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-4-1" })).rejects.toThrow(
+        'model "claude-opus-4-1" is not one claude takes; one of: Opus 5 (claude-opus-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku (claude-haiku-4-5-20251001)',
+      );
+      await expect(rt.sessions.start(ws.id, { prompt: "go", permissionMode: "yolo" })).rejects.toThrow(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
+      expect(m.lastStart()).toBeUndefined();
+      expect(await rt.sessions.list(ws.id)).toEqual([]);
+      const handle = await rt.sessions.start(ws.id, { prompt: "go", effort: "high", permissionMode: "plan" });
+      expect(m.lastStart()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+      m.start();
+      m.done("ok");
+      m.end();
+      await handle.finished;
+      const resumed = await rt.sessions.start(ws.id, { prompt: "more", resume: "33333333-3333-4333-8333-333333333333" });
+      expect(m.lastStart()!.model).toBeUndefined();
+      m.done("ok");
+      m.end();
+      await resumed.finished;
+      expect(probes(backend)).toHaveLength(1);
       await rt.close();
     });
 
@@ -3731,8 +3788,8 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(await store.list("builders")).toEqual([]);
     expect(ws.machineId).toBe(backend.machines[2]!.id);
     // The person who asked for the workspace reads why a builder of theirs went, on the create's own result.
-    expect(ws.notice).toBe(`Stopped the builder kept from golden v1 (${b.id}) to make room at the machine cap.`);
-    expect(said).toEqual([`workspace ${ws.id}: stopped the builder kept from golden v1 (${b.id}) to make room at the machine cap`]);
+    expect(ws.notice).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
+    expect(said).toEqual([`workspace ${ws.id}: stopped the builder kept from golden v1 to make room at the machine cap (${b.id})`]);
 
     // Nothing left to stop: the refusal reaches the caller with its kind, and nothing of ours is killed.
     await expect(rt.workspaces.create({ golden: version.snapshotId, name: "two" })).rejects.toMatchObject({ kind: "concurrency" });
@@ -3758,7 +3815,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(stages[1]).toMatchObject({
       workspaceId: ws.id,
       message: "Fork of the golden image requested again.",
-      notice: `Stopped the builder kept from golden v1 (${b.id}) to make room at the machine cap.`,
+      notice: "Stopped the builder kept from golden v1 to make room at the machine cap.",
     });
     expect(stages.map(e => (e.type === "workspace.creating" ? e.name : ""))).toEqual(Array<string>(5).fill("one"));
   });
@@ -3784,7 +3841,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const made = await wsRequest(srv.port, "t", { op: "workspaces.create", golden: version.snapshotId, name: "room" });
     warn.mockRestore();
     expect(made["ok"]).toBe(true);
-    expect(made["notice"]).toBe(`Stopped the builder kept from golden v1 (${second.id}) to make room at the machine cap.`);
+    expect(made["notice"]).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
     expect(made["workspace"]).not.toHaveProperty("notice");
     await srv.close();
   });
@@ -3806,7 +3863,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const stopped = [a.id, b.id].filter(id => backend.machines.find(m => m.id === id)!.killed);
     expect(stopped).toHaveLength(1);
     expect((await store.list("builders")).map(r => (r as { id: string }).id)).toEqual([a.id, b.id].filter(id => !stopped.includes(id)));
-    expect(ws.notice).toBe(`Stopped the builder kept from golden v1 (${stopped[0]}) to make room at the machine cap.`);
+    expect(ws.notice).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
 
     // The cap at one: the next create needs a second slot, so the remaining kept builder goes on the second refusal.
     backend.create = async spec => {
@@ -3817,7 +3874,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const two = await rt.workspaces.create({ golden: sealedA.version.snapshotId, name: "two" });
     quiet.mockRestore();
     expect(await store.list("builders")).toEqual([]);
-    expect(two.notice).toMatch(/^Stopped the builder kept from golden v1 \(m[0-9]+\) to make room at the machine cap\.$/);
+    expect(two.notice).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
   });
 
   it("a kept builder another live process holds is not stopped to make room; the refusal stands", async () => {
