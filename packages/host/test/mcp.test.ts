@@ -20,7 +20,7 @@ import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, projectBundler, heldAgent, scriptedAgent, stuckAgent } from "./verbs-fixture.js";
+import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
 
 interface Called {
   text: string;
@@ -338,6 +338,21 @@ describe("the MCP server over the host", () => {
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [row] = await rt.sessions.list(worker.id);
     expect((await rt.sessions.history(worker.id)).find(e => e.type === "session.notify")).toMatchObject({ threadId: row!.threadId, notify: "me", text: `thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it` });
+  });
+
+  it("thread_new and send return the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {
+    const agent = doneOnlyAgent(prompt => `re: ${prompt}`);
+    await restartHost({ claude: agent.adapter });
+    await call("new", { name: "alpha" });
+    const made = await call("thread_new", { workspace: "alpha", task: "first" });
+    expect(made.isError).toBe(false);
+    expect(made.text).toBe("re: first");
+    const [row] = await rt.sessions.list();
+    const sent = await call("send", { thread: row!.threadId!, message: "second" });
+    expect(sent.isError).toBe(false);
+    expect(sent.text).toBe("re: second");
+    expect(agent.starts.map(s => s.prompt)).toEqual(["first", "second"]);
+    expect((await rt.sessions.history(row!.workspaceId)).map(e => e.type)).not.toContain("session.end");
   });
 
   it("a failed turn is a tool error carrying the harness's reason", async () => {

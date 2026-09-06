@@ -1797,7 +1797,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id);
       const { adapter } = adapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
-      const inner = machineExecStream(entry.machine, { deadlineMs: Number.POSITIVE_INFINITY })(argv.map(shellQuote).join(" "), { env: { ...adapter.env } });
+      const inner = machineExecStream(entry.machine, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(argv.map(shellQuote).join(" "), { env: { ...adapter.env } });
       let endWith: (reason: string) => void = () => {};
       const ended = new Promise<{ reason: string }>(resolve => {
         endWith = reason => resolve({ reason });

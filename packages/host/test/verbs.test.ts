@@ -17,7 +17,7 @@ import type { HostHandle } from "../src/server.js";
 import { dialHost } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, doneOnlyAgent, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -365,10 +365,33 @@ describe("wsp verbs over the host", () => {
     const { code, io } = await run("send", first!.threadId!, "second", "--json");
     expect(code).toBe(0);
     const events = json(io) as { type: string; threadId?: string; kind?: string; text?: string }[];
-    expect(events.map(e => e.type)).toEqual(["session.start", "session.delta", "session.delta", "session.delta", "session.done", "session.end"]);
+    expect(events.map(e => e.type)).toEqual(["session.start", "session.delta", "session.delta", "session.delta", "session.done"]);
     expect(new Set(events.map(e => e.threadId))).toEqual(new Set([first!.threadId]));
     expect(events[1]).toMatchObject({ kind: "text", text: "re: " });
     expect(io.streamed).toBe("");
+  });
+
+  it("thread new, send and fork --send return with the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {
+    const agent = doneOnlyAgent(prompt => `re: ${prompt}`);
+    await handle?.close();
+    rt = createRuntime({ backend, store, adapters: { claude: agent.adapter } });
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
+    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    vi.stubEnv("SOLARI_API_KEY", "");
+    await run("new", "alpha");
+    const opened = await run("thread", "new", "--in", "alpha", "first");
+    const [row] = await rt.sessions.list();
+    expect(opened.code).toBe(0);
+    expect(opened.io.lines).toEqual([`thread ${row!.threadId}`, "re: first"]);
+    expect(opened.io.errors).toEqual([]);
+    const sent = await run("send", row!.threadId!, "second", "--json");
+    expect(sent.code).toBe(0);
+    expect((json(sent.io) as { type: string }[]).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done"]);
+    const forked = await run("fork", "alpha", "--name", "worker", "--send", "third");
+    expect(forked.code).toBe(0);
+    expect(forked.io.lines.slice(1)).toEqual([expect.stringMatching(/^thread /), "re: third"]);
+    expect(agent.starts.map(s => s.prompt)).toEqual(["first", "second", "third"]);
+    expect((await rt.sessions.history(row!.workspaceId)).map(e => e.type)).not.toContain("session.end");
   });
 
   it("exec runs the command on the workspace's machine, streams its output and exits with its code", async () => {

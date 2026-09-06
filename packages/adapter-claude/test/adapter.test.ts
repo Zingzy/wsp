@@ -496,6 +496,37 @@ describe("result classification", () => {
     expect(end.sawResult).toBe(false);
   });
 
+  it("when the transport ends the turn itself, its line is the turn's error, word for word", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const cut = "stopped after 15m 00s with no output for 10m";
+    let resolveExit: (code: number | null) => void = () => {};
+    const exited = new Promise<number | null>((resolve) => {
+      resolveExit = resolve;
+    });
+    const factory: ExecStreamFactory = () => ({
+      lines: (async function* () {
+        yield init;
+        resolveExit(null);
+        throw new Error(cut);
+      })(),
+      exited,
+      teardown: () => {},
+      kill: () => {},
+      write: async () => "written" as const,
+      closeInput: () => {},
+    });
+    const adapter = createClaudeAdapter({ exec: factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+
+    const result = await adapter.start({ prompt: "x", onEvent }).finished;
+
+    expect(result).toEqual({ status: "failed", error: cut });
+    const end = events.at(-1);
+    if (end?.type !== "session.end") throw new Error("expected session.end");
+    expect(end.exitCode).toBeNull();
+    expect(end.sawResult).toBe(false);
+  });
+
   it("skips lines that are not stream-json events", async () => {
     const lines = [
       "not json at all",

@@ -20,6 +20,12 @@ export const HTTP_URL_MAX = 8192;
 export const EXEC_BODY_MAX = 16 * 1024;
 /** How much of a detached command's output one poll exec reads; a full read is followed by another at once. */
 export const EXEC_CHUNK_BYTES = 262_144;
+/** How long a turn's stream may go without a byte before the runtime cuts it. A turn that is working writes a delta,
+ * a tool event or a log line well inside this, so it is the one rule that ends a turn the harness left hanging: a
+ * fixed wall clock cut a build that was still working at 15 minutes on 2026-09-06. */
+export const TURN_IDLE_MS = 10 * 60_000;
+/** The longest one turn may run however much it prints, a safety cap only; a per-workspace setting is a follow-up. */
+export const TURN_WALL_MS = 6 * 60 * 60_000;
 export function isHttpUrl(url: unknown): url is string {
   if (typeof url !== "string" || url.length > HTTP_URL_MAX || !HTTP_URL_RE.test(url)) return false;
   try {
@@ -1444,6 +1450,6 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { fmtBytes, fmtCost, fmtDuration, fmtMemGb, notifyLine } from "./format.js";
+export { fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, notifyLine, turnCutLine, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";

@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fmtBytes, fmtCost, fmtDuration, fmtMemGb, notifyLine } from "../src/index.js";
+import { fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, notifyLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -47,6 +47,25 @@ describe("notifyLine", () => {
     expect(notifyLine(THREAD, { status: "interrupted", durationMs: 12_000, costUsd: 0.03, text: "Stopped mid-way." })).toBe("thread c452d1e8 finished (interrupted, 12s, $0.03): Stopped mid-way.");
     expect(notifyLine(THREAD, { status: "failed", error: "machine paused while the agent was working" })).toBe("thread c452d1e8 finished (failed): machine paused while the agent was working");
     expect(notifyLine(THREAD, { status: "interrupted" })).toBe("thread c452d1e8 finished (interrupted)");
+  });
+});
+
+describe("fmtElapsed and turnCutLine", () => {
+  it("minutes and two-digit seconds, hours ahead once there are any", () => {
+    expect([0, 999, 61_000, 900_000, 3_599_499, 3_600_000, 6 * 3_600_000 + 65_000].map(fmtElapsed)).toEqual([
+      "0m 00s",
+      "0m 01s",
+      "1m 01s",
+      "15m 00s",
+      "59m 59s",
+      "1h 00m 00s",
+      "6h 01m 05s",
+    ]);
+  });
+
+  it("names the rule, how long the turn ran and the limit, in the words the ticket row shows", () => {
+    expect(turnCutLine("idle", 900_000, TURN_IDLE_MS)).toBe("stopped after 15m 00s with no output for 10m");
+    expect(turnCutLine("wall", TURN_WALL_MS, TURN_WALL_MS)).toBe("stopped after 6h 00m 00s at the 6h cap on one turn");
   });
 });
 

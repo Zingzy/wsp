@@ -51,3 +51,25 @@ export function notifyLine(threadId: string, result: TurnResult): string {
   const tail = lines.at(-1) ?? result.error;
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
+
+/** Minutes and two-digit seconds, with whole hours ahead when there are any: how long a turn ran. */
+export function fmtElapsed(ms: number): string {
+  const s = Math.round(ms / 1000);
+  const sec = `${String(s % 60).padStart(2, "0")}s`;
+  return s < 3600 ? `${Math.floor(s / 60)}m ${sec}` : `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m ${sec}`;
+}
+
+/** A limit as one unit: whole hours when it is hours, else whole minutes. */
+function fmtLimit(ms: number): string {
+  return ms >= 3_600_000 && ms % 3_600_000 === 0 ? `${ms / 3_600_000}h` : `${Math.round(ms / 60_000)}m`;
+}
+
+/** Which rule ended a turn: idle is no byte from the harness for the limit, wall is the cap on one turn's run. */
+export type TurnCutRule = "idle" | "wall";
+
+/** The one line every client shows for a turn the runtime cut: which rule, how long the turn ran, the limit. */
+export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: number): string {
+  return rule === "idle"
+    ? `stopped after ${fmtElapsed(elapsedMs)} with no output for ${fmtLimit(limitMs)}`
+    : `stopped after ${fmtElapsed(elapsedMs)} at the ${fmtLimit(limitMs)} cap on one turn`;
+}
