@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { INSTALL_NAMES, OUTPUT_NAMES } from "@wsp/collect";
 import { afterEach, describe, expect, it } from "vitest";
@@ -221,6 +221,23 @@ describe("planProject", () => {
     expect(files.map(f => f.rel)).toContain("src/index.ts");
   });
 
+  it("names each agent with sessions for the folder from its home on this computer; a home with none, or none on disk, gives no row", async () => {
+    const root = fixture();
+    const real = realpathSync(root);
+    const homes = mkdtempSync(join(tmpdir(), "wsp-homes-"));
+    dirs.push(homes);
+    const claude = join(homes, "claude");
+    const key = real.replace(/[^A-Za-z0-9]/g, "-");
+    const line = (id: string): string => `{"type":"user","cwd":"${real}","sessionId":"${id}"}\n`;
+    for (const id of ["S1", "S2"]) put(claude, `projects/${key}/${id}.jsonl`, line(id));
+    put(claude, `projects/${key}-old/S3.jsonl`, `{"type":"user","cwd":"${real}-old","sessionId":"S3"}\n`);
+    const pi = join(homes, "pi");
+    mkdirSync(join(pi, "sessions"), { recursive: true });
+    const { plan } = await planProject(root, { claude, pi, codex: join(homes, "none") });
+    expect(plan.agents).toEqual([{ agent: "claude", name: "Claude Code", sessions: 2, bytes: Buffer.byteLength(line("S1")) + Buffer.byteLength(line("S2")), carry: "moves" }]);
+    expect((await planProject(root, {})).plan.agents).toEqual([]);
+  });
+
   it("refuses a relative path and a path that is not a folder", async () => {
     await expect(planProject("relative/dir")).rejects.toThrow(/absolute path/);
     const root = fixture();
@@ -337,5 +354,84 @@ describe("projectBundler", () => {
     const names = listed(packed.tar);
     expect(names).toContain(".env");
     expect(names).not.toContain("config/secrets.json");
+  });
+});
+
+describe("packState", () => {
+  const session = (id: string, cwd: string): string => `{"type":"user","cwd":"${cwd}","sessionId":"${id}"}\n`;
+  const piSession = (cwd: string): string => `{"type":"session","cwd":"${cwd}"}\n`;
+  /** Every regular file under dir by relative path with its text. */
+  const snapshot = (dir: string): Record<string, string> =>
+    Object.fromEntries(
+      readdirSync(dir, { recursive: true, withFileTypes: true })
+        .filter(e => e.isFile())
+        .map(e => [relative(dir, join(e.parentPath, e.name)), readFileSync(join(e.parentPath, e.name), "utf8")]),
+    );
+
+  /** Homes on this computer: Claude Code with a session, its tool results and memory for the folder plus a session
+   * for another project and its prompt history; Pi with one session for the folder. */
+  function homes(real: string): { dir: string; claude: string; pi: string; key: string; piKey: string } {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-homes-"));
+    dirs.push(dir);
+    const claude = join(dir, "claude");
+    const key = real.replace(/[^A-Za-z0-9]/g, "-");
+    put(claude, `projects/${key}/S1.jsonl`, session("S1", real));
+    put(claude, `projects/${key}/S1/tool-results/t1.txt`, "out\n");
+    put(claude, `projects/${key}/memory/MEMORY.md`, "notes\n");
+    put(claude, "projects/-Users-me-other/S2.jsonl", session("S2", "/Users/me/other"));
+    put(claude, "history.jsonl", `{"display":"hi","project":"${real}"}\n`);
+    const pi = join(dir, "pi");
+    const piKey = `--${real.replace(/^\//, "").replace(/[/\\:]/g, "-")}--`;
+    put(pi, `sessions/${piKey}/2026-09-05T21-56-00-000Z_s1.jsonl`, piSession(real));
+    return { dir, claude, pi, key, piKey };
+  }
+
+  it("copies each named agent's state for the folder to its machine home, re-keyed to dest when the agent is on the machine and as it was when not; another project, the shared files and an agent not named stay out; the homes here are untouched", async () => {
+    const root = fixture();
+    const real = realpathSync(root);
+    const h = homes(real);
+    const before = { claude: snapshot(h.claude), pi: snapshot(h.pi) };
+    const b = projectBundler(root, { claude: h.claude, pi: h.pi, codex: join(h.dir, "codex") });
+    const packed = await b.packState({ dest: "/root/work/proj", agents: [{ agent: "claude", home: "/root/.claude-cfg", present: true }, { agent: "pi", home: "/root/.pi/agent", present: false }] });
+    const moved = session("S1", "/root/work/proj");
+    expect(packed.agents).toEqual([
+      { agent: "claude", files: 3, bytes: Buffer.byteLength(moved) + 4 + 6, outcome: "moved" },
+      { agent: "pi", files: 1, bytes: Buffer.byteLength(piSession(real)), outcome: "carried" },
+    ]);
+    expect(listed(packed.tar)).toEqual([
+      "root/.claude-cfg/projects/-root-work-proj/S1.jsonl",
+      "root/.claude-cfg/projects/-root-work-proj/S1/tool-results/t1.txt",
+      "root/.claude-cfg/projects/-root-work-proj/memory/MEMORY.md",
+      `root/.pi/agent/sessions/${h.piKey}/2026-09-05T21-56-00-000Z_s1.jsonl`,
+    ]);
+    const out = extract(packed.tar);
+    expect(readFileSync(join(out, "root/.claude-cfg/projects/-root-work-proj/S1.jsonl"), "utf8")).toBe(moved);
+    expect(readFileSync(join(out, `root/.pi/agent/sessions/${h.piKey}/2026-09-05T21-56-00-000Z_s1.jsonl`), "utf8")).toBe(piSession(real));
+    expect(snapshot(h.claude)).toEqual(before.claude);
+    expect(snapshot(h.pi)).toEqual(before.pi);
+  });
+
+  it("an agent whose state is rows alone lands nothing and says so; a move that raises leaves that agent out of the archive and carries the error", async () => {
+    const root = fixture();
+    const real = realpathSync(root);
+    const h = homes(real);
+    // A session for a folder inside the project whose key is the destination's own: the root's move finds it in the way.
+    put(h.claude, `projects/${h.key}-inner/S9.jsonl`, session("S9", `${real}/inner`));
+    const hermes = join(h.dir, "hermes");
+    mkdirSync(hermes);
+    const b = projectBundler(root, { claude: h.claude, pi: h.pi, hermes });
+    const packed = await b.packState({
+      dest: `${real}/inner`,
+      agents: [{ agent: "claude", home: "/root/.claude-cfg", present: true }, { agent: "hermes", home: "/root/.hermes", present: true }, { agent: "pi", home: "/root/.pi/agent", present: true }],
+    });
+    expect(packed.agents).toEqual([
+      { agent: "claude", files: 0, bytes: 0, outcome: "failed", error: expect.stringMatching(/already exists$/) },
+      { agent: "hermes", files: 0, bytes: 0, outcome: "moved" },
+      { agent: "pi", files: 1, bytes: Buffer.byteLength(piSession(`${real}/inner`)), outcome: "moved" },
+    ]);
+    const key = `${h.piKey.slice(0, -2)}-inner--`;
+    expect(listed(packed.tar)).toEqual([`root/.pi/agent/sessions/${key}/2026-09-05T21-56-00-000Z_s1.jsonl`]);
+    expect(readFileSync(join(extract(packed.tar), `root/.pi/agent/sessions/${key}/2026-09-05T21-56-00-000Z_s1.jsonl`), "utf8")).toBe(piSession(`${real}/inner`));
+    expect(existsSync(join(h.claude, "projects", h.key, "S1.jsonl"))).toBe(true);
   });
 });

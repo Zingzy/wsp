@@ -2,12 +2,13 @@
 // Each fixture is the tree an agent left after one headless scratch run, as
 // measured on 2026-09-05; the move runs against it and the tree is compared
 // byte for byte with what the agent needs at the new path.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { PROJECT_STATE_RESOLVERS, moveProjectState, resolveProjectPath, underProject, type ProjectStateResolver } from "../src/project-state/index.js";
+import { ProjectCarry } from "@wsp/protocol";
+import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, resolveProjectPath, underProject, type ProjectStateResolver } from "../src/project-state/index.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
@@ -450,6 +451,7 @@ describe("moveProjectState", () => {
       const measured = entry.projectState.filter(s => s.status === "measured").map(s => s.state);
       expect(r.states.length, id).toBeGreaterThan(0);
       for (const s of r.states) expect(measured, `${id} ${s}`).toContain(s);
+      expect(ProjectCarry.options, id).toContain(r.carry);
     }
   });
 
@@ -515,5 +517,124 @@ describe("moveProjectState", () => {
     const report = await moveProjectState({ from: FROM, to: TO, homes: { claude, hermes } });
     expect(report.find(r => r.agent === "hermes")).toMatchObject({ outcome: "failed", error: expect.stringMatching(/not a database/) });
     expect(report.find(r => r.agent === "claude")).toMatchObject({ outcome: "moved" });
+  });
+});
+
+// --- sessions per agent -----------------------------------------------------------------------------------------------
+
+describe("sessions", () => {
+  it("counts every agent's sessions at the path or under it: never a sibling sharing the prefix, another project or a subagent transcript", async () => {
+    const root = scratch();
+    expect(await resolverFor("claude").sessions(claudeHome(root), FROM)).toBe(2);
+    expect(await resolverFor("pi").sessions(piHome(root), FROM)).toBe(2);
+    expect(await resolverFor("codex").sessions(codexHome(root), FROM)).toBe(2);
+    expect(await resolverFor("hermes").sessions(hermesHome(root), FROM)).toBe(3);
+    expect(await resolverFor("gemini").sessions(geminiHome(root), FROM)).toBe(1);
+    expect(await resolverFor("opencode").sessions(opencodeHome(root), FROM)).toBe(2);
+  });
+
+  it("counts one for a sub-folder alone and nothing for a path no agent ran in or an empty home", async () => {
+    const root = scratch();
+    const homes = { claude: claudeHome(root), pi: piHome(root), codex: codexHome(root), hermes: hermesHome(root), gemini: geminiHome(root), opencode: opencodeHome(root) };
+    expect(await resolverFor("claude").sessions(homes.claude, FROM_SUB)).toBe(1);
+    expect(await resolverFor("codex").sessions(homes.codex, FROM_SUB)).toBe(1);
+    for (const [agent, home] of Object.entries(homes)) {
+      expect(await resolverFor(agent).sessions(home, "/Users/me/never"), agent).toBe(0);
+      const empty = join(root, `${agent}-empty`);
+      mkdirSync(empty);
+      expect(await resolverFor(agent).sessions(empty, FROM), agent).toBe(0);
+    }
+  });
+
+  it("a Claude Code directory holding memory alone is zero sessions", async () => {
+    const home = join(scratch(), "claude");
+    write(join(home, "projects", "-private-tmp-wsp-r212-proj-b-2-x", "memory", "MEMORY.md"), "notes\n");
+    expect(await resolverFor("claude").sessions(home, FROM)).toBe(0);
+  });
+});
+
+describe("entries", () => {
+  it("names the files holding the project's state alone: keyed directories whole, indexed rollouts, slug directories; never a shared index or another project's", async () => {
+    const root = scratch();
+    const claude = claudeHome(root);
+    const key = join(claude, "projects", "-private-tmp-wsp-r212-proj-b-2-x");
+    expect(await resolverFor("claude").entries(claude, FROM)).toEqual([
+      join(key, "S1.jsonl"),
+      join(key, "S1", "subagents", "agent-a1.jsonl"),
+      join(key, "S1", "tool-results", "t1.txt"),
+      join(key, "memory", "MEMORY.md"),
+      join(claude, "projects", "-private-tmp-wsp-r212-proj-b-2-x-sub", "S3.jsonl"),
+    ]);
+    const pi = piHome(root);
+    expect(await resolverFor("pi").entries(pi, FROM)).toEqual([
+      join(pi, "sessions", "--private-tmp-wsp-r212-proj-b_2.x--", "2026-09-05T21-56-00-000Z_s1.jsonl"),
+      join(pi, "sessions", "--private-tmp-wsp-r212-proj-b_2.x-sub--", "2026-09-05T21-57-00-000Z_s2.jsonl"),
+    ]);
+    const codex = codexHome(root);
+    expect(await resolverFor("codex").entries(codex, FROM)).toEqual([
+      join(codex, "sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl"),
+      join(codex, "sessions", "2026", "09", "05", "rollout-2026-09-05T22-00-00-t3.jsonl"),
+    ]);
+    const gemini = geminiHome(root);
+    expect(await resolverFor("gemini").entries(gemini, FROM)).toEqual([
+      join(gemini, "history", "b_2.x", ".project_root"),
+      join(gemini, "tmp", "b_2.x", ".project_root"),
+      join(gemini, "tmp", "b_2.x", "chats", "session-2026-09-05T21-59-a1b2c3d4.jsonl"),
+      join(gemini, "tmp", "sub", ".project_root"),
+    ]);
+    expect(await resolverFor("hermes").entries(hermesHome(root), FROM)).toEqual([]);
+    expect(await resolverFor("opencode").entries(opencodeHome(root), FROM)).toEqual([]);
+    for (const [agent, home] of [["claude", claude], ["pi", pi], ["codex", codex], ["gemini", gemini]] as const) expect(await resolverFor(agent).entries(home, "/Users/me/never"), agent).toEqual([]);
+  });
+});
+
+const bytesOf = (files: readonly string[]): number => files.reduce((n, f) => n + statSync(f).size, 0);
+
+describe("countProjectState", () => {
+  it("lists each agent whose home holds sessions for the folder with its catalog name, in catalog order, skipping absent homes and agents with none", async () => {
+    const root = scratch();
+    const claude = claudeHome(root);
+    const pi = piHome(root);
+    const gemini = join(root, "gemini-empty");
+    mkdirSync(gemini);
+    const rows = await countProjectState(FROM, { claude, pi, gemini, codex: join(root, "no-such-home") });
+    expect(rows).toEqual([
+      { agent: "claude", name: "Claude Code", sessions: 2, bytes: bytesOf(await resolverFor("claude").entries(claude, FROM)), carry: "moves" },
+      { agent: "pi", name: "Pi", sessions: 2, bytes: bytesOf(await resolverFor("pi").entries(pi, FROM)), carry: "moves" },
+    ]);
+    expect(rows[0]!.bytes).toBeGreaterThan(rows[1]!.bytes);
+    const rows2 = await countProjectState(FROM, { codex: codexHome(root), gemini: geminiHome(root), hermes: hermesHome(root), opencode: opencodeHome(root) });
+    expect(rows2.map(r => [r.agent, r.sessions, r.carry, r.bytes > 0])).toEqual([
+      ["codex", 2, "transcript-only", true],
+      ["gemini", 1, "transcript-only", true],
+      ["opencode", 2, "transcript-only", false],
+      ["hermes", 3, "transcript-only", false],
+    ]);
+  });
+
+  it("keys on the real path and skips a catalog agent with no module, whose home it never opens", async () => {
+    const root = scratch();
+    const claude = claudeHome(root);
+    mkdirSync(join(root, "real", "proj"), { recursive: true });
+    symlinkSync(join(root, "real"), join(root, "link"));
+    const real = realpathSync(join(root, "real", "proj"));
+    write(join(claude, "projects", real.replace(/[^A-Za-z0-9]/g, "-"), "S7.jsonl"), lines(claudeUser(real)));
+    const hermes = hermesHome(root);
+    const before = tree(hermes);
+    const rows = await countProjectState(join(root, "link", "proj") + "/", { claude, newagent: hermes }, [...CATALOG_AGENTS, { id: "newagent", name: "New" }]);
+    expect(rows).toEqual([{ agent: "claude", name: "Claude Code", sessions: 1, bytes: expect.any(Number), carry: "moves" }]);
+    expect(tree(hermes)).toEqual(before);
+  });
+
+  it("agentHomes places every registered agent's home under the given home directory", () => {
+    const homes = agentHomes("/Users/me");
+    expect(Object.keys(homes)).toEqual(CATALOG_AGENTS.map(a => a.id));
+    expect(homes["claude"]).toBe("/Users/me/.claude");
+    expect(homes["opencode"]).toBe("/Users/me/.local/share/opencode");
+    expect(homes["pi"]).toBe("/Users/me/.pi/agent");
+    const guest = guestAgentHomes();
+    expect(Object.keys(guest)).toEqual(CATALOG_AGENTS.map(a => a.id));
+    expect(guest["claude"]).toBe("/root/.claude-cfg");
+    expect(guest["codex"]).toBe("/root/.codex");
   });
 });

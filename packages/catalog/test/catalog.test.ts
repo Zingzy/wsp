@@ -75,10 +75,13 @@ describe("catalog", () => {
     expect(CATALOG_AGENTS.map(a => a.id)).toEqual(["claude", "codex", "gemini", "opencode", "pi", "hermes"]);
     for (const a of CATALOG_AGENTS) {
       expect(a.projectState.length, a.id).toBeGreaterThan(0);
+      expect(a.stateHome, a.id).toMatch(/^\.[\w./-]*[\w-]$/);
+      if (a.guestStateHome !== undefined) expect(a.guestStateHome, a.id).toMatch(/^\/root\//);
       expect(hasLogin(a.signIn), a.id).toBe(true);
       expect(smokeOf(a)).toBe(`${a.id} --version`);
       expect(a.size, a.id).toBeGreaterThan(0);
     }
+    expect(CATALOG_AGENTS.filter(a => a.guestStateHome !== undefined).map(a => [a.id, a.guestStateHome])).toEqual([["claude", "/root/.claude-cfg"]]);
     expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.153.0");
     expect(installLine(catalogEntry("pi")!)).toBe("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4");
     expect(installLine(catalogEntry("claude")!)).toBe("curl -fsSL https://claude.ai/install.sh | bash");

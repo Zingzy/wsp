@@ -8,6 +8,7 @@ import { chmod, rename, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { once } from "node:events";
 import { finished } from "node:stream/promises";
+import type { ProjectCarry } from "@wsp/protocol";
 
 /** One catalog projectState row the module moved: the files it touched and how many directories, keys, lines or rows changed. */
 export interface MovedState {
@@ -22,8 +23,16 @@ export interface ProjectStateResolver {
   agent: string;
   /** The catalog projectState rows this module moves, by their `state`. */
   states: readonly string[];
+  /** How the files `entries` names travel: whether they carry every key the agent needs to find the project's
+   * sessions at the new path, or a shared store left behind holds one. */
+  carry: ProjectCarry;
   /** Applies the move; an empty list means nothing in this home was keyed to `from`. */
   move(home: string, from: string, to: string): Promise<MovedState[]>;
+  /** How many sessions in this home ran at `path` or in a folder under it. */
+  sessions(home: string, path: string): Promise<number>;
+  /** The files under home holding state for `path` and the folders under it alone, absolute; a store shared with
+   * other projects (an index, a registry) is never one. */
+  entries(home: string, path: string): Promise<string[]>;
 }
 
 /** The path as the agents store it: absolute, no trailing slash, symlinks resolved when it exists. */
@@ -75,24 +84,33 @@ function cwdOf(line: string): string | undefined {
 }
 
 /**
- * Moves every directory under parent keyed by `keyOf` to a path at or under `from`: the key is lossy (a slash and a
- * dash key alike), so the transcript's recorded cwd decides, and a directory with no transcript moves only when it is
- * the project's own key. A directory two projects share through the key moves or stays whole on its first transcript.
- * Returns the renamed directories and every transcript whose cwd was rewritten.
+ * Every directory under parent keyed to the project or a folder inside it, with the tail of its recorded cwd past the
+ * project root: the key is lossy (a slash and a dash key alike), so the transcript's recorded cwd decides, and a
+ * directory with no transcript belongs only when it is the project's own key. A directory two projects share through
+ * the key belongs, or not, on its first transcript.
  */
-export async function moveKeyedDirectories(parent: string, keyOf: (path: string) => string, from: string, to: string): Promise<{ files: string[]; changed: number }> {
-  const files: string[] = [];
-  let changed = 0;
-  if (!existsSync(parent)) return { files, changed };
+export async function keyedDirectories(parent: string, keyOf: (path: string) => string, from: string): Promise<{ dir: string; tail: string }[]> {
+  if (!existsSync(parent)) return [];
   const own = keyOf(from);
   const stem = commonPrefix(own, keyOf(`${from}/x`));
+  const out: { dir: string; tail: string }[] = [];
   for (const name of readdirSync(parent).filter(n => n.startsWith(stem)).sort()) {
     const dir = join(parent, name);
     if (!statSync(dir).isDirectory()) continue;
     const cwd = (await recordedCwd(dir)) ?? (name === own ? from : undefined);
-    const target = cwd === undefined ? undefined : movedPath(cwd, from, to);
-    if (target === undefined) continue;
-    const moved = join(parent, keyOf(target));
+    if (cwd === undefined || !underProject(cwd, from)) continue;
+    out.push({ dir, tail: cwd.slice(from.length) });
+  }
+  return out;
+}
+
+/** Moves every directory keyed to the project to its key under `to`; returns the renamed directories and every
+ * transcript whose cwd was rewritten. */
+export async function moveKeyedDirectories(parent: string, keyOf: (path: string) => string, from: string, to: string): Promise<{ files: string[]; changed: number }> {
+  const files: string[] = [];
+  let changed = 0;
+  for (const { dir, tail } of await keyedDirectories(parent, keyOf, from)) {
+    const moved = join(parent, keyOf(to + tail));
     if (existsSync(moved)) throw new Error(`${moved} already exists`);
     renameSync(dir, moved);
     files.push(moved);
@@ -106,6 +124,19 @@ export async function moveKeyedDirectories(parent: string, keyOf: (path: string)
     }
   }
   return { files, changed };
+}
+
+/** The transcripts directly under the directories keyed to the project, one per session; a subagent's transcript
+ * sits a level down and is not one. */
+export async function keyedSessions(parent: string, keyOf: (path: string) => string, path: string): Promise<number> {
+  let n = 0;
+  for (const { dir } of await keyedDirectories(parent, keyOf, path)) n += readdirSync(dir, { withFileTypes: true }).filter(e => e.isFile() && e.name.endsWith(".jsonl")).length;
+  return n;
+}
+
+/** Every file under the directories keyed to the project. */
+export async function keyedEntries(parent: string, keyOf: (path: string) => string, path: string): Promise<string[]> {
+  return (await keyedDirectories(parent, keyOf, path)).flatMap(({ dir }) => filesUnder(dir, ""));
 }
 
 /** What the project's own key and every key under it start with, whatever the key wraps around the path. */

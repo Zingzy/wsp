@@ -5,9 +5,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tarOf } from "@wsp/engine";
-import type { EventUnion, ProjectImportEvent, ProjectPlan, ProjectSecret } from "@wsp/protocol";
+import type { EventUnion, ProjectAgent, ProjectImportEvent, ProjectPlan, ProjectSecret } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { createRuntime, type PackedProject, type ProjectBundler } from "../src/runtime.js";
+import { createRuntime, type PackedProject, type PackedState, type ProjectBundler } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -27,8 +27,15 @@ const SOURCE = "/Users/dev/code/proj";
 const GIT_CONFIG: ProjectSecret = { path: ".git/config", bytes: 300, signals: ["url"], rewrite: { urls: ["https://github.com/example/proj.git"], drop: [] } };
 const AUTH_CONFIG: ProjectSecret = { path: ".git/config", bytes: 300, signals: ["keys", "url"], rewrite: { urls: ["https://github.com/example/proj.git"], drop: ["http.extraheader"] } };
 
-/** What the host would hand the runtime for a small folder: three secret-shaped files, one binary with an exec bit. */
-function fakeBundler(extra: ProjectSecret[] = []): ProjectBundler & { calls: string[] } {
+const AGENTS: ProjectAgent[] = [
+  { agent: "claude", name: "Claude Code", sessions: 2, bytes: 4096, carry: "moves" },
+  { agent: "pi", name: "Pi", sessions: 1, bytes: 512, carry: "moves" },
+  { agent: "codex", name: "Codex", sessions: 3, bytes: 900, carry: "transcript-only" },
+];
+
+/** What the host would hand the runtime for a small folder: three secret-shaped files, one binary with an exec bit,
+ * and, when asked, three agents with sessions for it; the state pack lands one file per agent under its machine home. */
+function fakeBundler(extra: ProjectSecret[] = [], agents: ProjectAgent[] = []): ProjectBundler & { calls: string[] } {
   const plan: ProjectPlan = {
     source: SOURCE,
     repo: true,
@@ -42,6 +49,7 @@ function fakeBundler(extra: ProjectSecret[] = []): ProjectBundler & { calls: str
     ],
     excluded: ["dist", "node_modules"],
     skipped: [],
+    agents,
   };
   const calls: string[] = [];
   return {
@@ -61,6 +69,11 @@ function fakeBundler(extra: ProjectSecret[] = []): ProjectBundler & { calls: str
         ...plan.secrets.filter(s => carry.has(s.path) || rewritten.includes(s.path)).map(s => ({ path: s.path, mode: 0o600, content: `${s.path} body\n` })),
       ]);
       return { tar, files: plan.files - cut.length, bytes: 4000, cut, rewritten };
+    },
+    packState: async (req): Promise<PackedState> => {
+      calls.push(`state ${req.agents.map(a => `${a.agent}${a.present ? "+" : "-"}`).join(",")} to ${req.dest}`);
+      const files = req.agents.map(a => ({ path: `${a.home}/sessions/${a.agent}.jsonl`, mode: 0o600, content: `${a.agent} at ${a.present ? req.dest : SOURCE}\n` }));
+      return { tar: tarOf(files), agents: files.map((f, i) => ({ agent: req.agents[i]!.agent, files: 1, bytes: f.content.length, outcome: req.agents[i]!.present ? "moved" : "carried" })) };
     },
   };
 }
@@ -86,7 +99,7 @@ describe("project.import on a workspace", () => {
     const bundler = fakeBundler();
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", carry: [".env"], bundler });
     expect(bundler.calls).toEqual(["plan", "pack .env"]);
-    expect(result).toEqual({ dest: "/root/work/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [] });
+    expect(result).toEqual({ dest: "/root/work/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [], agents: [] });
     const stages = imports(events);
     expect(stages.map(e => e.stage)).toEqual(["planned", "consented", "packing", "uploading", "uploading", "landing", "done"]);
     expect(stages[0]!.message).toBe("6 files, 4.2 KB and the repository; 3 secret-shaped files; 2 caches left behind.");
@@ -122,7 +135,7 @@ describe("project.import on a workspace", () => {
     const bundler = fakeBundler([GIT_CONFIG]);
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", carry: [".env"], rewrite: [".git/config"], bundler });
     expect(bundler.calls).toEqual(["plan", "pack .env rewrite .git/config"]);
-    expect(result).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [".git/config"] });
+    expect(result).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [".git/config"], agents: [] });
     const stages = imports(events);
     expect(stages[0]!.message).toBe("6 files, 4.2 KB and the repository; 4 secret-shaped files; 2 caches left behind.");
     expect(stages[1]!.message).toBe("Carrying .env; rewriting .git/config to https://github.com/example/proj.git; cut config/secrets.json, keys/id_ed25519.");
@@ -159,6 +172,59 @@ describe("project.import on a workspace", () => {
     expect(landing).not.toContain("exit 66");
   });
 
+  it("the agents named travel: their state is packed with the machine's presence per agent, lands as an overlay on the guest's root after the project, and the result says what became of each; an agent not named is never read", async () => {
+    const backend = stubBackend();
+    const base = backend.execImpl;
+    backend.execImpl = (m, cmd) => (cmd.includes('echo "missing') ? { exitCode: 0, stdout: "missing pi\n", stderr: "" } : base(m, cmd));
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const before = backend.puts.length;
+    const bundler = fakeBundler([], AGENTS);
+    const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", carry: [".env"], agents: ["claude", "pi"], bundler });
+    expect(bundler.calls).toEqual(["plan", "pack .env", "state claude+,pi- to /root/work/proj"]);
+    expect(result.agents).toEqual([
+      { agent: "claude", files: 1, bytes: Buffer.byteLength("claude at /root/work/proj\n"), outcome: "moved" },
+      { agent: "pi", files: 1, bytes: Buffer.byteLength(`pi at ${SOURCE}\n`), outcome: "carried" },
+    ]);
+    const probe = backend.machines[0]!.execLog.find(c => c.includes('echo "missing'))!;
+    expect(probe).toContain("for b in 'claude' 'pi'; do command -v");
+    expect(probe).not.toContain("codex");
+    const stages = imports(events);
+    expect(stages.map(e => e.stage)).toEqual(["planned", "consented", "packing", "uploading", "uploading", "landing", "uploading", "uploading", "landing", "done"]);
+    expect(stages[1]!.message).toBe("Carrying .env; cut config/secrets.json, keys/id_ed25519. Sessions travel for Claude Code (2 sessions), Pi (1 session); Codex stays.");
+    expect(stages[6]!.message).toMatch(/^Uploading 2 session files, /);
+    expect(stages[8]!.message).toBe("Landing sessions: Claude Code moved, Pi carried.");
+    expect(stages[9]!.message).toBe("4 files, 3.9 KB, landed at /root/work/proj; sessions: Claude Code moved, Pi carried.");
+    expect(backend.puts).toHaveLength(before + 2);
+    const out = extract(backend.puts[before + 1]!.body);
+    expect(readFileSync(join(out, "root/.claude-cfg/sessions/claude.jsonl"), "utf8")).toBe("claude at /root/work/proj\n");
+    expect(readFileSync(join(out, "root/.pi/agent/sessions/pi.jsonl"), "utf8")).toBe(`pi at ${SOURCE}\n`);
+    const machine = backend.machines[0]!;
+    // The create landed the machine context by the same road; the import's two archives are the last two.
+    const untars = machine.runLog.filter(s => s.includes("tar xzf")).slice(-2);
+    expect(untars[0]).toMatch(/tar xzf - -C '\/root\/work\/proj\.wsp-in-[^']+' --no-same-owner/);
+    expect(untars[1]).toMatch(/tar xzf - -C '\/' --no-same-owner/);
+    expect(machine.runLog.findIndex(s => s.includes("mv "))).toBeLessThan(machine.runLog.indexOf(untars[1]!));
+  });
+
+  it("with no agent named nothing about them is read and the consented line says so", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const before = backend.puts.length;
+    const bundler = fakeBundler([], AGENTS);
+    const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", bundler });
+    expect(bundler.calls).toEqual(["plan", "pack "]);
+    expect(result.agents).toEqual([]);
+    expect(backend.puts).toHaveLength(before + 1);
+    expect(backend.machines[0]!.execLog.some(c => c.includes('echo "missing'))).toBe(false);
+    expect(imports(events)[1]!.message).toBe("No secret-shaped file travels; cut .env, config/secrets.json, keys/id_ed25519. No agent sessions travel.");
+  });
+
   it("a napping workspace and an unknown one are refused before the folder is read", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
@@ -178,7 +244,7 @@ describe("project.import on a workspace", () => {
       authToken: "t",
       projects: source => {
         sources.push(source);
-        return fakeBundler([GIT_CONFIG]);
+        return fakeBundler([GIT_CONFIG], AGENTS);
       },
     });
     const planned = await wsRequest(srv.port, "t", { op: "project.plan", source: SOURCE });
@@ -186,9 +252,9 @@ describe("project.import on a workspace", () => {
     expect((planned["plan"] as ProjectPlan).secrets).toEqual(expect.arrayContaining([GIT_CONFIG]));
     expect((planned["plan"] as ProjectPlan).secrets.map(s => s.path)).toEqual([".env", ".git/config", "config/secrets.json", "keys/id_ed25519"]);
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
-    const imported = await wsRequest(srv.port, "t", { op: "project.import", workspaceId: ws.id, source: SOURCE, dest: "/root/proj", carry: ["keys/id_ed25519"], rewrite: [".git/config"] });
+    const imported = await wsRequest(srv.port, "t", { op: "project.import", workspaceId: ws.id, source: SOURCE, dest: "/root/proj", carry: ["keys/id_ed25519"], rewrite: [".git/config"], agents: ["pi"] });
     expect(imported["ok"]).toBe(true);
-    expect(imported["imported"]).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: [".env", "config/secrets.json"], rewritten: [".git/config"] });
+    expect(imported["imported"]).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: [".env", "config/secrets.json"], rewritten: [".git/config"], agents: [{ agent: "pi", files: 1, bytes: Buffer.byteLength("pi at /root/proj\n"), outcome: "moved" }] });
     expect(sources).toEqual([SOURCE, SOURCE]);
     await srv.close();
     srv = await serveRuntime(rt, { port: 0, authToken: "t" });

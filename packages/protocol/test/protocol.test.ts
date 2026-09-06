@@ -24,6 +24,8 @@ import {
   goldenHead,
   HarnessCatalog,
   PortReachView,
+  ProjectImportResult,
+  ProjectPlan,
   RuntimeErrorResponse,
   RuntimeRequest,
   RuntimeResponse,
@@ -619,5 +621,22 @@ describe("the small recipe", () => {
     expect(Recipe.safeParse({ ...recipe, histories: [{ agent: "claude", state: "read", sessions: -1, calls: 0 }] }).success).toBe(false);
     expect(RecipeSource.parse({ kind: "installed", paths: ["~/.claude/settings.json"], bin: true })).toEqual({ kind: "installed", paths: ["~/.claude/settings.json"], bin: true });
     expect(RecipeSource.safeParse({ kind: "installed", paths: ["~/.claude/settings.json"] }).success).toBe(false);
+  });
+});
+
+describe("the project plan", () => {
+  it("names each agent with sessions for the folder and how its state travels", () => {
+    const plan = { source: "/Users/dev/proj", repo: true, files: 1, bytes: 2, secrets: [], excluded: [], skipped: [], agents: [{ agent: "claude", name: "Claude Code", sessions: 2, bytes: 4096, carry: "moves" }] };
+    expect(ProjectPlan.parse(plan)).toEqual(plan);
+    expect(ProjectPlan.safeParse({ ...plan, agents: [{ ...plan.agents[0], carry: "maybe" }] }).success).toBe(false);
+    expect(ProjectPlan.safeParse({ ...plan, agents: undefined }).success).toBe(false);
+  });
+
+  it("the import names the agents that travel and the result says what became of each", () => {
+    const req = { id: "r1", op: "project.import", workspaceId: "ws_1", source: "/Users/dev/proj", dest: "/root/proj", agents: ["claude"] };
+    expect(RuntimeRequest.parse(req)).toEqual(req);
+    const result = { dest: "/root/proj", files: 1, bytes: 2, parts: 1, cut: [], rewritten: [], agents: [{ agent: "claude", files: 3, bytes: 40, outcome: "moved" }, { agent: "pi", files: 0, bytes: 0, outcome: "failed", error: "x already exists" }] };
+    expect(ProjectImportResult.parse(result)).toEqual(result);
+    expect(ProjectImportResult.safeParse({ ...result, agents: [{ agent: "pi", files: 0, bytes: 0, outcome: "lost" }] }).success).toBe(false);
   });
 });

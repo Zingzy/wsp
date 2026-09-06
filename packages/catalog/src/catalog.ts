@@ -5,7 +5,7 @@
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
-import { GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
@@ -66,6 +66,10 @@ export interface SessionHistory {
 /** An agent is never on by default: the wizard ticks the ones found on the Mac. */
 export interface AgentEntry extends EntryBase {
   kind: "agent";
+  /** The directory the projectState rows sit under, relative to the home directory of the computer the agent ran on. */
+  stateHome: string;
+  /** Where that directory is on the guest when it is not stateHome under the guest's home, absolute. */
+  guestStateHome?: string;
   /** Every store that holds the project's path. */
   projectState: readonly ProjectState[];
   /** Absent while the agent's session format has no reader: its history reads as none. */
@@ -140,6 +144,8 @@ export const CATALOG: readonly CatalogEntry[] = [
   // --- agents: the six whose project state a move can follow -------------------------------------------------------
   {
     ...agent("claude"),
+    stateHome: ".claude",
+    guestStateHome: CLAUDE_CONFIG_DIR,
     name: "Claude Code",
     installRoad: { road: "script", script: GOLDEN_SETUP },
     signIn: SIGN_IN_ROWS.claude,
@@ -160,6 +166,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     ...agent("codex"),
+    stateHome: ".codex",
     name: "Codex",
     installRoad: npm("@openai/codex", "0.153.0"),
     node: 16,
@@ -176,6 +183,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     ...agent("gemini"),
+    stateHome: ".gemini",
     name: "Gemini CLI",
     installRoad: npm("@google/gemini-cli", "0.58.0"),
     node: 20,
@@ -192,6 +200,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     ...agent("opencode"),
+    stateHome: ".local/share/opencode",
     name: "OpenCode",
     installRoad: npm("opencode-ai", "1.18.27"),
     signIn: SIGN_IN_ROWS.opencode,
@@ -208,6 +217,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     ...agent("pi"),
+    stateHome: ".pi/agent",
     name: "Pi",
     installRoad: { road: "npm", package: "@earendil-works/pi-coding-agent", version: "0.84.4", ignoreScripts: true },
     node: 22,
@@ -225,6 +235,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     ...agent("hermes"),
+    stateHome: ".hermes",
     name: "Hermes Agent",
     installRoad: { road: "script", script: HERMES_INSTALL },
     signIn: SIGN_IN_ROWS.hermes,

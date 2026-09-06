@@ -34,8 +34,10 @@ export const ROADS: readonly RoadName[] = ["brew", "npm", "release", "apt", "scr
 export const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
 export const GOLDEN_SMOKE = "claude --version";
 
+/** The guest's home directory: every machine runs as root. */
+export const GUEST_HOME = "/root";
 /** Claude Code's config dir on the guest, always CLAUDE_CONFIG_DIR and never HOME. */
-export const CLAUDE_CONFIG_DIR = "/root/.claude-cfg";
+export const CLAUDE_CONFIG_DIR = `${GUEST_HOME}/.claude-cfg`;
 /** The file under Claude Code's config dir that the apiKeyHelper's key is placed in and the copied settings read. */
 export const CLAUDE_KEY_FILE = "anthropic-api-key";
 
