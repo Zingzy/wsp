@@ -6,7 +6,7 @@ export { nodeHost } from "./live-host.js";
 export type { Detector } from "./detect/common.js";
 export { detectIdentity } from "./detect/identity.js";
 export { detectShell } from "./detect/shell.js";
-export { bareSources, guardSources, shellSources } from "./detect/sources.js";
+export { bareSources, guardLine, guardSources, shellSources } from "./detect/sources.js";
 export { LIST_BUDGET_MS, LIST_SCRIPTS, type ShellDef, parseShell, programOf, shellAliases, words } from "./detect/aliases.js";
 export { TERMINAL_FONT_ID, alacrittyFont, detectTerminalFont, ghosttyFont, itermFont, kittyFont, weztermFont } from "./detect/terminal.js";
 export { detectEditors, parseExtensionList } from "./detect/editors.js";

@@ -5,16 +5,17 @@
 // the pack wraps those lines and the machine skips them. The pack decides from
 // what it actually carries; these lines are the hint.
 import type { ManifestEntry } from "@wsp/collect";
-
-const under = (path: string, root: string): boolean => path === root || path.startsWith(`${root}/`);
+import type { BrewTable } from "@wsp/engine";
+import { capped, rowFate } from "./init-aliases.js";
+import { under } from "./init-import.js";
 
 /** The rows whose paths hold the file, excludes honoured. */
 function carriers(path: string, rows: readonly ManifestEntry[]): ManifestEntry[] {
   return rows.filter(r => r.paths.some(root => under(path, root)) && !(r.excludes ?? []).some(x => under(path, x)));
 }
 
-/** The detail pane's lines under a shell row: one per sourced file no coming row carries or outside home, capped, the rest named. */
-export function sourceLines(row: ManifestEntry, rows: readonly ManifestEntry[], coming: ReadonlySet<string>, max: number): string[] {
+/** The detail pane's lines under a shell row: one per sourced file no ticked row carries or outside home, capped, the rest named. */
+export function sourceLines(row: ManifestEntry, rows: readonly ManifestEntry[], ticks: ReadonlySet<string>, brew: BrewTable, max: number): string[] {
   const said: { path: string; line: string }[] = [];
   for (const path of row.sources ?? []) {
     if (!path.startsWith("~/")) {
@@ -22,11 +23,11 @@ export function sourceLines(row: ManifestEntry, rows: readonly ManifestEntry[], 
       continue;
     }
     const by = carriers(path, rows);
-    if (by.some(r => coming.has(r.id))) continue;
-    const why = by[0] === undefined ? "which nothing here brings" : `which is not coming (${by[0].label} unticked, tick to bring)`;
+    const carrier = by.find(r => ticks.has(r.id)) ?? by[0];
+    const fate = rowFate(carrier, ticks, brew);
+    if (fate.fate === "coming") continue;
+    const why = fate.fate === "missing" && carrier !== undefined ? `which is not coming (${carrier.label} ${fate.why})` : "which nothing here brings";
     said.push({ path, line: `sources ${path}, ${why}; the machine skips that line` });
   }
-  if (said.length <= max) return said.map(s => s.line);
-  const shown = said.slice(0, max - 1);
-  return [...shown.map(s => s.line), `${said.length - shown.length} more: ${said.slice(shown.length).map(s => s.path).join(", ")}`];
+  return capped(said, max, s => s.line, s => s.path);
 }

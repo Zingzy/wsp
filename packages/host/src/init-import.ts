@@ -443,7 +443,7 @@ export function statOf(abs: string): PathInfo | undefined {
   return { kind: st.isDirectory() ? "dir" : "file", mode: st.mode & 0o7777, size: st.size, mtimeMs: st.mtimeMs, realpath };
 }
 
-const underHome = (abs: string, home: string): boolean => abs === home || abs.startsWith(`${home}/`);
+export const under = (path: string, root: string): boolean => path === root || path.startsWith(`${root}/`);
 
 /** sha256 of what a planned path ships: every entry under it by relative path,
  * mode and bytes, excludes left out, links followed only into home and never
@@ -468,7 +468,7 @@ export function digestOf(source: string, excludes: readonly string[], home: stri
         // walked or one already walked, never into a refused path.
         const parent = resolved(dirname(abs)) ?? dirname(abs);
         const own = parent === target || parent.startsWith(`${target}/`);
-        const why = !underHome(target, home) ? "outside home" : own ? "own directory" : entered.has(target) ? "already walked" : refusedPath(relative(home, target), statSync(target).isDirectory());
+        const why = !under(target, home) ? "outside home" : own ? "own directory" : entered.has(target) ? "already walked" : refusedPath(relative(home, target), statSync(target).isDirectory());
         if (why !== undefined) {
           hash.update(`L ${rel} ${relative(home, target)} ${why}\n`);
           return;

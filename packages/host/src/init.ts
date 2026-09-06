@@ -643,7 +643,7 @@ const SOURCE_LINES = 2;
 export function shellItems(entries: readonly ManifestEntry[], all: readonly ManifestEntry[], toolTicks: ReadonlySet<string> | undefined, brew: BrewTable): SelectItem[] {
   const ticks = toolTicks ?? new Set(all.filter(e => e.rung === "tools" && initialTicks(e)).map(e => e.id));
   const coming = new Set(all.filter(e => initialTicks(e)).map(e => e.id));
-  return entries.map(e => selectItem(e, undefined, brew, [...aliasLines(e, all, ticks, brew, ALIAS_LINES), ...sourceLines(e, all, coming, SOURCE_LINES)]));
+  return entries.map(e => selectItem(e, undefined, brew, [...aliasLines(e, all, ticks, brew, ALIAS_LINES), ...sourceLines(e, all, coming, brew, SOURCE_LINES)]));
 }
 
 const TOOLCHAIN_ROW = "tools/homebrew-toolchain";

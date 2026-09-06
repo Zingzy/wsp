@@ -29,6 +29,7 @@ const RC = [
   ".",
   "sourced=1",
   "source ~/.x; source ~/.y",
+  '. "/Users/dev/.zsh/functions.zsh"',
 ].join("\n");
 
 describe("bareSources", () => {
@@ -59,13 +60,19 @@ describe("guardSources", () => {
     expect(lines[1]).toBe('[ -r "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"');
     expect(lines[2]).toBe("[ -r ~/.deno/env ] && source ~/.deno/env # deno");
     expect(lines[3]).toBe(before[3]);
-    expect(lines[4]).toBe("[ -r /Users/dev/.local/share/x/env ] && . /Users/dev/.local/share/x/env");
-    expect(lines[5]).toBe(before[5]);
+    expect(lines[4]).toBe('[ -r "$HOME"/.local/share/x/env ] && . "$HOME"/.local/share/x/env');
+    expect(lines[5]).toBe('[ -r "$HOME"\'/.aliases\' ] && source "$HOME"\'/.aliases\'');
     expect(lines[6]).toBe('[ -r "$HOME/.bun/_bun" ] && \\. "$HOME/.bun/_bun"');
     expect(lines[9]).toBe('  [ -r "$HOME/.sdkman/bin/sdkman-init.sh" ] && source "$HOME/.sdkman/bin/sdkman-init.sh"');
     expect(lines[13]).toBe("[ -r /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh");
     expect(lines[17]).toBe("[ -r ~/.deno/env ] && source ~/.deno/env");
     for (const i of [0, 7, 8, 10, 11, 12, 14, 15, 16, 18, 19, 20, 21, 22]) expect(lines[i]).toBe(before[i]);
+  });
+
+  it("a line naming this computer's home literally is wrapped even when its file travels, the home prefix written as \"$HOME\" so the machine reads the carried file; the token's own quoting stays around the rest", () => {
+    const rc = ['. "/Users/dev/.zsh/functions.zsh"', "source /Users/dev/.zsh/functions.zsh", "source '/Users/dev/.zsh/functions.zsh'  # fns", "source /Users/developer/.x", ""].join("\n");
+    expect(guardSources(rc, HOME, () => true)).toBe(['[ -r "$HOME/.zsh/functions.zsh" ] && . "$HOME/.zsh/functions.zsh"', '[ -r "$HOME"/.zsh/functions.zsh ] && source "$HOME"/.zsh/functions.zsh', '[ -r "$HOME"\'/.zsh/functions.zsh\' ] && source "$HOME"\'/.zsh/functions.zsh\' # fns', "[ -r /Users/developer/.x ] && source /Users/developer/.x", ""].join("\n"));
+    expect(bareSources(rc, HOME)).toEqual(["~/.zsh/functions.zsh", "/Users/developer/.x"]);
   });
 
   it("everything present leaves the text as it was, line endings and trailing newline included", () => {
