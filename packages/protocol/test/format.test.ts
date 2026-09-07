@@ -11,6 +11,7 @@ import {
   outOfMemoryRowLine,
   stillWorkingRefusal,
   LINEAGE_MARKS,
+  REPO_STATE_WORDS,
   missingToolRow,
   behindGoldenLine,
   builderStaysLine,
@@ -579,6 +580,21 @@ describe("goldenBuildLine", () => {
   it("a build with no version under it names no version to build on, and a build that changes nothing says only what it makes", () => {
     expect(goldenBuildLine(0, 1, [{ count: 4, noun: "tool", word: "added" }])).toBe("Builds version 1: 4 tools added");
     expect(goldenBuildLine(2, 3, [{ count: 0, noun: "tool", word: "added" }])).toBe("Builds version 3 on top of version 2");
+  });
+});
+
+describe("REPO_STATE_WORDS", () => {
+  it("says nothing for a folder outside any repository or one not yet asked, and one short lowercase word or two for a read the machine refused", () => {
+    expect(REPO_STATE_WORDS.unknown).toEqual({ word: "", note: "" });
+    expect(REPO_STATE_WORDS.none).toEqual({ word: "", note: "" });
+    expect(REPO_STATE_WORDS.refused.word).toBe("git unread");
+    expect(REPO_STATE_WORDS.refused.word).toMatch(/^[a-z]+( [a-z]+)?$/);
+    expect(REPO_STATE_WORDS.refused.word.length).toBeLessThanOrEqual(12);
+  });
+
+  it("explains the word beside it in one dry sentence about the machine and this folder's git state", () => {
+    expect(REPO_STATE_WORDS.refused.note).toBe("The machine could not read this folder's git state, so no branch is shown.");
+    expect(REPO_STATE_WORDS.refused.note).toMatch(/^[^.]+\.$/);
   });
 });
 

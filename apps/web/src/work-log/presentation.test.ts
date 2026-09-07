@@ -6,27 +6,7 @@ import {
   commandDetailRepeatsCommand,
   extractCommandOutputText,
   normalizeCompactToolLabel,
-  resolveWorkEntryToolPresentation,
 } from "./presentation";
-
-describe("resolveWorkEntryToolPresentation", () => {
-  it("does not brand any tool", () => {
-    for (const label of ["mcp__github__preview_click", "preview_click", "Search files"]) {
-      expect(resolveWorkEntryToolPresentation({ label })).toBeNull();
-    }
-    expect(
-      resolveWorkEntryToolPresentation(
-        {
-          label: "Tool call complete",
-          toolTitle: "Inspect the current page",
-          toolData: { server: "another-server", tool: "preview_snapshot" },
-          toolLifecycleStatus: "completed",
-        },
-        "inProgress",
-      ),
-    ).toBeNull();
-  });
-});
 
 describe("normalizeCompactToolLabel", () => {
   it("removes trailing completion wording from command labels", () => {

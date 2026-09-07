@@ -209,7 +209,7 @@ looks like, is in [docs/reach.md](docs/reach.md). Cutting a release is
 
 | package | what it is |
 |---|---|
-| `@wsp/protocol` | zod schemas for every wire message, and the one place text is formatted |
+| `@wsp/protocol` | zod schemas for every wire message, the harness adapter port, and the one place text is formatted |
 | `@wsp/catalog` | the agents and tools wsp can put on a machine: install roads, sign-ins, config paths |
 | `@wsp/collect` | reads your computer: installed tools, session histories, shell files, logins |
 | `@wsp/engine` | machine backends, workspace lifecycle, golden images, vault |

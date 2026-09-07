@@ -372,7 +372,7 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
   };
 }
 
-// --- session events (mirroring @wsp/adapter-claude's AdapterEvent) ----------
+// --- session events (the wire form of adapter-port.ts's AdapterEvent) ------
 
 export const DeltaKind = z.enum(["text", "thinking", "tool_use", "tool_result"]);
 export type DeltaKind = z.infer<typeof DeltaKind>;
@@ -1709,3 +1709,4 @@ export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { workspaceFromHash, workspaceHash } from "./app-address.js";
+export type { AdapterEvent, ExecStream, ExecStreamFactory } from "./adapter-port.js";

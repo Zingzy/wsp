@@ -28,14 +28,6 @@ export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
 
-/** Resolves tool identity before choosing labels or icons in either client. */
-export function resolveWorkEntryToolPresentation(
-  entry: Pick<WorkLogPresentationEntry, "label" | "toolTitle" | "toolData" | "toolLifecycleStatus">,
-  fallbackStatus?: "inProgress" | "completed",
-): { displayName: string; icon: "browser" } | null {
-  return null;
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

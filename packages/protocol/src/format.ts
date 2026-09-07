@@ -425,6 +425,14 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
+/** When a turn is over, in the one sentence every door the agent reads quotes whole: the skill, the tool
+ * descriptions, the command line's help and the machine's own context. The reply comes back at once from a follow;
+ * the row settles only at the process exit, since a harness can keep working after it answers. */
+export const TURN_END_WORDS = "A turn ends when the agent process exits, not at its reply, and the thread reads running until then";
+
+/** When the notify line goes, quoted the same way: with the reply, once, never again at the exit. */
+export const NOTIFY_WORDS = "The notify line goes once, at the reply";
+
 /** What a send meets when its thread's last turn has replied but its agent process is still running (a child it did
  * not wait for, a lingering task): the row still reads running and is not free for a new turn, so the caller is told
  * in words, by thread, instead of starting a second agent in the same worktree. */
@@ -657,6 +665,16 @@ export function behindGoldenLine(on: number, head: number): string {
  * never a badge, and a missing tool's outcome indexes this table as it is. */
 export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
+
+/** What the composer's branch slot says for each folder git named no branch for, and what the word explains on
+ * hover: nothing for a folder outside any repository or one not yet asked, both ordinary; a word and one sentence for
+ * a read the machine refused or failed, an outside cause the person should see rather than an empty slot. */
+export const REPO_STATE_WORDS = {
+  unknown: { word: "", note: "" },
+  none: { word: "", note: "" },
+  refused: { word: "git unread", note: "The machine could not read this folder's git state, so no branch is shown." },
+} as const;
+export type RepoStateWord = keyof typeof REPO_STATE_WORDS;
 
 /** A missing tool's row as the lineage shows it. A record sealed before the name and outcome were recorded still
  * carries its id, so it reads by that and as failed rather than as a blank row. */
