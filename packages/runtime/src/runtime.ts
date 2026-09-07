@@ -97,7 +97,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -1880,6 +1880,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       },
       firstLife: true,
     };
+    // Only an asked size is checked: the golden's own is what it was built at, whatever the provider offers today.
+    if ((o.cpu !== undefined || o.memMb !== undefined) && !offeredSize(backend.capabilities.sizes, record.size)) {
+      throw Object.assign(new Error(sizeRefusal(sizeWord(record.size), backend.capabilities.sizes)), { kind: "invalid" });
+    }
     const bind = (m: Machine): void => {
       record.machineId = m.id;
       attach(record, m).creating = true;

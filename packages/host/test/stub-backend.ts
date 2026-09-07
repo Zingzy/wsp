@@ -102,7 +102,17 @@ export function stubBackend(): StubBackend {
   const vaultOrigin = vaultServer(() => backend.downloads);
 
   const backend: StubBackend = {
-    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true },
+    capabilities: {
+      liveCloneForks: true,
+      ramPreservingPause: true,
+      resize: true,
+      previewUrls: true,
+      signedUrls: true,
+      containers: true,
+      callbackRelay: true,
+      snapshotListing: true,
+      sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }, { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 }],
+    },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE },
     machines,
     snapshots,

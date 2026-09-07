@@ -135,9 +135,9 @@ describe("the MCP server over the host", () => {
     expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "forget", "fork", "import", "new", "pause", "recipe", "recipe_scan", "send", "snapshot", "stop", "thread_new", "threads", "wake", "workspaces"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
-    expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
+    expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name", "size"]);
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "task", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "size", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "effort", "message", "model", "thread"]);
     expect(Object.keys((tools.find(t => t.name === "exec")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["argv", "cwd", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
@@ -186,6 +186,19 @@ describe("the MCP server over the host", () => {
     const missing = await call("new", { name: "task-c", from: "nope" });
     expect(missing).toEqual({ text: "no project golden named nope; wsp snapshot <workspace> takes one", structured: undefined, isError: true });
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
+  });
+
+  it("new and fork take size as <cpu>x<memGb>, which reaches the machine; one the provider does not offer is a tool error naming the list", async () => {
+    const big = await call("new", { name: "big", size: "2x8" });
+    expect(big.isError).toBe(false);
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
+    const wide = await call("fork", { workspace: "big", name: "wide", size: "4x8" });
+    expect(wide.isError).toBe(false);
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 4, memMb: 8192 });
+    const odd = await call("new", { name: "odd", size: "8x16" });
+    expect(odd.isError).toBe(true);
+    expect(odd.text).toBe("8x16 is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)");
+    expect(backend.machines).toHaveLength(2);
   });
 
   it("new forks the golden's head into a workspace of that name; workspaces lists it as the app sees it", async () => {

@@ -73,8 +73,8 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | command line | MCP tool | what it does |
 |---|---|---|
 | `wsp threads [--in <workspace>]` | `workspaces`, `threads` (workspace) | the sidebar's rows: workspace, agent, state (running, completed, interrupted, failed), who opened it (person, cli, agent), the folder it works in, the title; `workspaces` is the workspace rows alone |
-| `wsp new <name> [--from <project golden>]` | `new` (name, from) | a workspace forked from the golden's head, or from a project golden by project name or snapshot id; booted and reachable when it returns |
-| `wsp fork <workspace> [--name <n>] [--send "<task>"] [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--cwd <path>] [--notify <thread\|me>]` | `fork` (workspace, name, task, agent, model, effort, access, cwd, notify) | a sibling from the source's golden version (a new machine, not a copy of its live disk); with a task, its first thread, and the flags after `--send` are thread new's |
+| `wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>]` | `new` (name, from, size) | a workspace forked from the golden's head, or from a project golden by project name or snapshot id; booted and reachable when it returns. `--size` picks a machine size the provider offers, `2x4` for 2 vCPU and 4 GB; absent, the golden's size |
+| `wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>"] [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--cwd <path>] [--notify <thread\|me>]` | `fork` (workspace, name, size, task, agent, model, effort, access, cwd, notify) | a sibling from the source's golden version (a new machine, not a copy of its live disk); with a task, its first thread, and the flags after `--send` are thread new's |
 | `wsp pause <workspace>` | `pause` (workspace) | naps the machine; it wakes on the next thread or command |
 | `wsp wake <workspace>` | `wake` (workspace) | wakes the machine ahead of a thread or command and prints its state after; a running one comes back unchanged |
 | `wsp forget <workspace> [--yes]` | `forget` (workspace) | drops a workspace whose machine is gone: its record and threads leave this computer; refused while the machine exists |
@@ -134,6 +134,7 @@ Each word after `--` reaches the machine as one argument; a shell line goes thro
 wsp snapshot dev                      # project golden of dev: its golden plus the imported project
 wsp new dev-2 --from wsp              # a machine from that project golden, project in place, no upload
 wsp fork dev --send "Run the gate."   # a sibling machine from dev's golden version, first thread opened
+wsp new gate --size 2x8               # a machine at a size the provider offers; the refusal lists them
 ```
 
 `fork` copies the golden version, not the live disk: work on the source's disk is not on the fork. Fork from a project golden when the fork needs the project. When a fork's first turn fails, the workspace still exists and the error names it; continue with `thread new` on it, do not fork again. `snapshot` takes only a running first-life machine with a project imported; a woken machine or one without a project is refused in one line and nothing is taken.
@@ -172,7 +173,7 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 - Keys (the Solari key, an Anthropic key) live in the person's `.env` and never reach a thread. A secret a thread needs is asked for through wsp, not typed into a terminal.
 - The account holds two machines at once. A third `new` or `fork` is refused; the person decides which workspace to pause.
 - A pause or a wake that does not return is stuck on the provider side; tell the person rather than retrying in a loop.
-- Every workspace is the golden's size (2 vCPU, 4 GB); there is no size to choose at fork yet.
+- A workspace is the golden's size unless `new` or `fork` is given `--size`; a size the provider does not offer is refused in one line that names the ones it does, with the rate of each. A build or a test run wants the largest memory offered: on 4 GB one build starves the machine.
 - An import cuts every secret-shaped file unless `--keep` names it; the plan's rows are the person's to answer before `--yes`.
 - The heavy rows and the sign-in choices in the recipe are the person's answers, put to them before anything is built.
 
@@ -217,4 +218,4 @@ wsp recipe --add ruff="uv tool install ruff"
 - A resumed thread runs in the folder its session started in, whatever folder is followed in the app (#236).
 - A send carries its own request id, so two clients sending the same text do not adopt each other's turn (#239).
 - The MCP server and the command line refuse a host of another version in one line; restart it with wsp up (#290).
-- Not here yet: picking a machine size (#301), a GitHub credential on the machine outside a sign-in during init (#279).
+- Not here yet: a GitHub credential on the machine outside a sign-in during init (#279).

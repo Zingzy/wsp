@@ -43,6 +43,16 @@ export const EXEC_ENV = "export HOME=/root USER=root";
 /** Measured 2026-09-07: Solari's replies carry no request id header, so requestId stays unset; the common name is read should one appear. */
 export const REQUEST_ID_HEADER = "x-request-id";
 
+/** Solari's published Starter pricing: per vCPU-hour plus per GB-hour (2 vCPU, 4 GB comes to about $0.11/hr). */
+const rateUsdPerHour = (size: { cpu: number; memMb: number }): number => size.cpu * 0.035 + (size.memMb / 1024) * 0.01;
+
+/** The Starter plan clamps every sandbox to 2 vCPU, so the rows differ by memory alone. 4 GB is the shape of every
+ * machine measured so far; 8 GB is the next value the create API takes and has not been measured on this account. */
+const SIZES: readonly { cpu: number; memMb: number }[] = [
+  { cpu: 2, memMb: 4096 },
+  { cpu: 2, memMb: 8192 },
+];
+
 function fail(e: WspError): never {
   throw Object.assign(new Error(e.message || `${e.kind} (${e.status})`), e);
 }
@@ -57,15 +67,13 @@ export class SolariBackend implements MachineBackend {
     containers: false, // guest kernel 6.6.30 lacks overlayfs and netfilter: dockerd falls back to vfs with no bridge and runc fails (measured)
     callbackRelay: true, // the daemon link rides previewUrls
     snapshotListing: true,
+    sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: rateUsdPerHour(size) })),
   };
 
-  // Solari's published Starter pricing: per vCPU-hour + per GB-hour
-  // (2 vCPU / 4 GB comes to ~$0.11/hr). The Starter clamp doubles as the
-  // assumed shape for specs that never named a size.
+  // The Starter clamp doubles as the assumed shape for specs that never named a size.
   readonly pricing = {
-    rateUsdPerHour: (size: { cpu: number; memMb: number }): number =>
-      size.cpu * 0.035 + (size.memMb / 1024) * 0.01,
-    defaultSize: { cpu: 2, memMb: 4096 },
+    rateUsdPerHour,
+    defaultSize: SIZES[0]!,
     snapshotStorage: SNAPSHOT_STORAGE,
   };
 

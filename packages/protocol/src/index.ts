@@ -62,6 +62,13 @@ export type PortForward = z.infer<typeof PortForward>;
 
 // --- backend capabilities ----------------------------------------------------
 
+export const WorkspaceSize = z.object({ cpu: z.number(), memMb: z.number() });
+export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
+
+/** One size a create may ask for, with what it costs awake. */
+export const MachineSizeOffer = WorkspaceSize.extend({ rateUsdPerHour: z.number() });
+export type MachineSizeOffer = z.infer<typeof MachineSizeOffer>;
+
 /** Honest per-backend feature flags; the UI degrades based on these, never on probing. */
 export const Capabilities = z.object({
   liveCloneForks: z.boolean(),
@@ -76,6 +83,9 @@ export const Capabilities = z.object({
   callbackRelay: z.boolean(),
   /** The provider lists every snapshot on the account with its size, so storage can be counted and priced. */
   snapshotListing: z.boolean(),
+  /** Every size a create may ask for; a create that names another is refused with this list. A create that names
+   * none takes the golden's size, which need not be on it. */
+  sizes: z.array(MachineSizeOffer),
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 
@@ -132,9 +142,6 @@ export type PortReachView = z.infer<typeof PortReachView>;
  * host check, the edge) instead of showing a white page. */
 export const PortProbeView = z.object({ status: z.number().int(), body: z.string() });
 export type PortProbeView = z.infer<typeof PortProbeView>;
-
-export const WorkspaceSize = z.object({ cpu: z.number(), memMb: z.number() });
-export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
 
 /** The project a workspace holds: the folder the bundle landed at, named by its last segment, and when the bundle
  * landed. Set by an import, inherited by every fork of a project golden. */
@@ -1632,7 +1639,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { actionRefusal, goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, backgroundTasksLine, behindGoldenLine, builderStaysLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, execFolderLine, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, machineUnreachedLine, notifyLine, plural, providerAnswerLine, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, stepRetryLine, timedOutLine, titleLine, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, type BuilderReading, type DurationStyle, type GoldenChange, type ProviderAnswer, type TurnCutRule } from "./format.js";
+export { AFTER_CUT_LINE, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, backgroundTasksLine, behindGoldenLine, builderStaysLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, execFolderLine, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtRate, fmtSize, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, machineUnreachedLine, notifyLine, offeredSize, plural, providerAnswerLine, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, sizeFromWord, sizeRefusal, sizeWord, snapshotAttemptLine, snapshotFailedLine, stepRetryLine, timedOutLine, titleLine, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, type BuilderReading, type DurationStyle, type GoldenChange, type ProviderAnswer, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";

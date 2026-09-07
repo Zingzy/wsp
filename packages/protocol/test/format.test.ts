@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, TURN_IDLE_MS, TURN_WALL_MS, backgroundTasksLine, behindGoldenLine, builderStaysLine, deleteNotice, execFolderLine, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, machineUnreachedLine, notifyLine, plural, providerAnswerLine, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, stepRetryLine, timedOutLine, titleLine, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine } from "../src/index.js";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, TURN_IDLE_MS, TURN_WALL_MS, backgroundTasksLine, behindGoldenLine, builderStaysLine, deleteNotice, execFolderLine, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, machineUnreachedLine, notifyLine, plural, providerAnswerLine, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, stepRetryLine, timedOutLine, titleLine, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, fmtRate, fmtSize, offeredSize, sizeFromWord, sizeRefusal, sizeWord } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -178,6 +178,36 @@ describe("machineUnreachedLine", () => {
   it("says the machine could not be reached from this computer, with the attempts counted and the time they took", () => {
     expect(machineUnreachedLine(6, 23_400)).toBe("the machine could not be reached from this computer after 6 attempts over 23s");
     expect(machineUnreachedLine(1, 800)).toBe("the machine could not be reached from this computer after 1 attempt over 800ms");
+  });
+});
+
+describe("machine size words", () => {
+  const offers = [
+    { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
+    { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
+  ];
+
+  it("fmtSize is the one line for a size in the app: vCPUs, a dot, the GB", () => {
+    expect([{ cpu: 2, memMb: 4096 }, { cpu: 4, memMb: 1536 }].map(fmtSize)).toEqual(["2 vCPU · 4 GB", "4 vCPU · 1.5 GB"]);
+  });
+
+  it("sizeWord spells vCPUs, an x and the GB the size table names, and sizeFromWord reads the same word back", () => {
+    expect([{ cpu: 2, memMb: 4096 }, { cpu: 4, memMb: 8192 }, { cpu: 1, memMb: 512 }].map(sizeWord)).toEqual(["2x4", "4x8", "1x0.5"]);
+    expect(["2x4", " 4x8 ", "1x0.5"].map(sizeFromWord)).toEqual([{ cpu: 2, memMb: 4096 }, { cpu: 4, memMb: 8192 }, { cpu: 1, memMb: 512 }]);
+    for (const s of offers) expect(sizeFromWord(sizeWord(s))).toEqual({ cpu: s.cpu, memMb: s.memMb });
+  });
+
+  it("sizeFromWord names nothing for a word that is not a size", () => {
+    expect(["big", "2", "x4", "2x", "0x4", "2x0", "2 x 4", "2x4x8", "-2x4"].map(sizeFromWord)).toEqual(Array(9).fill(undefined));
+  });
+
+  it("offeredSize is the one membership rule, and the refusal names the word as given and every offer with its rate", () => {
+    expect(offeredSize(offers, { cpu: 2, memMb: 8192 })).toBe(true);
+    expect(offeredSize(offers, { cpu: 4, memMb: 8192 })).toBe(false);
+    expect(offeredSize([], { cpu: 2, memMb: 4096 })).toBe(false);
+    expect(fmtRate(0.11)).toBe("$0.11/hr");
+    expect(sizeRefusal("4x8", offers)).toBe("4x8 is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
+    expect(sizeRefusal("big", offers)).toBe("big is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
   });
 });
 
