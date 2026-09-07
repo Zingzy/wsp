@@ -19,8 +19,6 @@ import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "../src/keybindingDefaults";
-import { shortcutLabelForCommand } from "../src/keybindings";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -85,7 +83,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 30_000);
 
-  it("the search row and the Workspaces row are one height, start where the workspace rows do, paint nothing at rest, carry the chord at the right edge, and open the palette without moving anything", async () => {
+  it("the search row and the Workspaces row are one height, start where the workspace rows do, paint nothing at rest, carry one glyph each at the right edge and no chord on their faces, and open the palette without moving anything", async () => {
     const shot = async (name: string, theme: string): Promise<void> => {
       const path = join(SHOTS_DIR, `sidebar-top-${name}-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -108,12 +106,11 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(await transparent("button[aria-label='Search']")).toBe(true);
       expect(await transparent("button[aria-label='Workspaces']")).toBe(true);
       expect(await page!.locator("[data-slot=sidebar] input").count()).toBe(0);
-      const chord = await box("button[aria-label='Search'] kbd");
-      const platform = await page!.evaluate(() => navigator.platform);
-      expect(await page!.locator("button[aria-label='Search'] kbd").textContent()).toBe(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle", platform));
-      expect(chord.x + chord.width).toBeLessThanOrEqual(search.x + search.width);
-      expect(chord.x).toBeGreaterThan(search.x + search.width / 2);
-      expect(Math.abs(chord.y + chord.height / 2 - (search.y + search.height / 2))).toBeLessThan(1.5);
+      expect(await page!.locator("button[aria-label='Search'] kbd").count()).toBe(0);
+      const compose = await box("button[aria-label='New thread']");
+      expect(compose.x + compose.width).toBeLessThanOrEqual(search.x + search.width);
+      expect(compose.x).toBeGreaterThan(search.x + search.width / 2);
+      expect(Math.abs(compose.y + compose.height / 2 - (search.y + search.height / 2))).toBeLessThan(1);
       const glyph = await box("button[aria-label='New workspace']");
       expect(glyph.x + glyph.width).toBeLessThanOrEqual(section.x + section.width);
       expect(Math.abs(glyph.y + glyph.height / 2 - (section.y + section.height / 2))).toBeLessThan(1);

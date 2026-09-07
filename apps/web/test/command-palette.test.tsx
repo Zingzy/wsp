@@ -3,6 +3,7 @@
 // every default shortcut dispatches into the sidebar, the right panel store
 // and the terminal link; when-clauses and typing contexts are respected.
 import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView, WorkspaceView } from "@wsp/protocol";
 import { RECENT_THREAD_LIMIT } from "../src/components/palette/CommandPalette.logic.js";
@@ -17,6 +18,17 @@ import { stepWorkspaceId } from "../src/shell/shellCommands.js";
 import { onComposerFocusRequest, onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
+
+// The triggers keep their elements, and no popup mounts: this file focuses the
+// sidebar's search row, and Base UI's positioning against jsdom's zero-size
+// rects costs seconds per open. The tooltip's own text is covered in
+// search-row.test.tsx, where the popup renders inline.
+vi.mock("../src/components/ui/tooltip.js", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render: element, children }: { render?: ReactElement<{ children?: ReactNode }>; children?: ReactNode }) =>
+    element === undefined ? <>{children}</> : cloneElement(element, {}, children ?? element.props.children),
+  TooltipPopup: () => null,
+}));
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,

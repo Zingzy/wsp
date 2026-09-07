@@ -3,18 +3,28 @@
 // workspaces, statuses, costs and sessions; grouping; search; keyboard
 // traversal; the new-workspace dialog; the zombie rebuild and the gone forget.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "../src/keybindingDefaults.js";
-import { shortcutLabelForCommand } from "../src/keybindings.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
+
+// The triggers keep their elements, and no popup mounts: this file focuses and
+// clicks the search row, and Base UI's positioning against jsdom's zero-size
+// rects costs seconds per open. The tooltip's own text is covered in
+// search-row.test.tsx, where the popup renders inline.
+vi.mock("../src/components/ui/tooltip.js", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render: element, children }: { render?: ReactElement<{ children?: ReactNode }>; children?: ReactNode }) =>
+    element === undefined ? <>{children}</> : cloneElement(element, {}, children ?? element.props.children),
+  TooltipPopup: () => null,
+}));
 
 const NOW = Date.now();
 const iso = (offsetMs: number) => NOW + offsetMs;
@@ -462,20 +472,18 @@ describe("new thread", () => {
 });
 
 describe("search", () => {
-  it("the row is the palette's door: a glyph, the word Search and the palette chord in muted mono; a click opens the palette, focus alone does not, and no field ever appears", async () => {
+  it("the row is the palette's door: a glyph and the word Search, no chord on its face, and the compose glyph alone at the right edge; a click opens the palette, focus alone does not, and no field ever appears", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
     const opened: boolean[] = [];
     const off = onOpenCommandPalette(detail => opened.push(detail.toggle === true));
     const row = screen.getByRole("button", { name: "Search" });
-    const chord = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle");
-    expect(chord).not.toBeNull();
     expect(row.querySelector("svg.lucide-search")).not.toBeNull();
-    expect(row.textContent).toBe(`Search${chord}`);
-    const kbd = row.querySelector("kbd")!;
-    expect(kbd.textContent).toBe(chord);
-    expect(kbd.className).toContain("font-mono");
-    expect(kbd.className).toContain("ms-auto");
-    expect(kbd.className).toContain("text-[var(--top-row-meta)]");
+    expect(row.textContent).toBe("Search");
+    expect(row.querySelector("kbd")).toBeNull();
+    const compose = screen.getByRole("button", { name: "New thread" });
+    expect(compose.closest("[data-sidebar-search]")).not.toBeNull();
+    expect(row.contains(compose)).toBe(false);
+    expect(row.className).toContain("pe-8");
     // The row is the kit's row: no border, no fill at rest, the hover tint every other row has.
     expect(row.className).not.toMatch(/\bborder\b|ring-1|bg-background|bg-sidebar-control-surface/);
     expect(row.className).toContain("hover:bg-sidebar-row-hover");
