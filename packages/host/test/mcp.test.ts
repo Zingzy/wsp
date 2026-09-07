@@ -12,7 +12,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG } from "@wsp/catalog";
-import { ProjectGolden, Recipe, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, ProjectGolden, Recipe, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
@@ -240,16 +240,31 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha", "worker"]);
   });
 
-  it("fork with a task under an agent the host has no adapter for still names the minted workspace beside the refusal", async () => {
+  it("fork and thread_new under an agent the host has no adapter for are refused naming the agents it has; no machine is minted or woken", async () => {
     await call("new", { name: "alpha" });
     const refused = await call("fork", { workspace: "alpha", name: "worker", task: "hi", agent: "gpt9" });
-    const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
-    expect(worker).toMatchObject({ phase: "running" });
-    expect(refused.isError).toBe(true);
-    expect(refused.text).toBe(`created worker ${worker.id}; first turn failed: no adapter registered for harness "gpt9"; agents on this host: claude, codex`);
-    expect(refused.structured).toEqual({ workspace: expect.objectContaining({ id: worker.id, name: "worker" }), failure: 'no adapter registered for harness "gpt9"; agents on this host: claude, codex' });
-    expect(await rt.sessions.list(worker.id)).toEqual([]);
-    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha", "worker"]);
+    expect(refused).toEqual({ text: 'no adapter registered for harness "gpt9"; agents on this host: claude, codex', structured: undefined, isError: true });
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
+    await call("pause", { workspace: "alpha" });
+    const opened = await call("thread_new", { workspace: "alpha", task: "hi", agent: "gpt9" });
+    expect(opened).toEqual({ text: 'no adapter registered for harness "gpt9"; agents on this host: claude, codex', structured: undefined, isError: true });
+    expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
+    expect(await rt.sessions.list()).toEqual([]);
+  });
+
+  it("an empty or whitespace task or message is refused in words by thread_new, fork and send; no machine is minted or woken and nothing starts", async () => {
+    await call("new", { name: "alpha" });
+    const first = await call("thread_new", { workspace: "alpha", task: "first" });
+    const threadId = (first.structured as { threadId: string }).threadId;
+    await call("pause", { workspace: "alpha" });
+    for (const task of ["", " \n\t "]) {
+      expect(await call("thread_new", { workspace: "alpha", task })).toEqual({ text: EMPTY_TASK_LINE, structured: undefined, isError: true });
+      expect(await call("fork", { workspace: "alpha", name: "worker", task })).toEqual({ text: EMPTY_TASK_LINE, structured: undefined, isError: true });
+      expect(await call("send", { thread: threadId, message: task })).toEqual({ text: EMPTY_TASK_LINE, structured: undefined, isError: true });
+    }
+    expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
+    expect(claude.starts).toHaveLength(1);
+    expect(await rt.sessions.list()).toHaveLength(1);
   });
 
   it("pause naps the workspace; a workspace that is not there is a tool error in one line", async () => {

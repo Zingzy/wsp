@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ASSET_KINDS, assetDir, assetProof, stagedAsset } from "@wsp/host";
+import { ASSET_KINDS, SECTION_BEGIN, assetDir, assetProof, stagedAsset } from "@wsp/host";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const SMOKE = process.env["WSP_PACK_SMOKE"] === "1";
@@ -73,12 +73,14 @@ describe.runIf(SMOKE)("the packed command, installed from its tarball", () => {
     expect(recipe.rows.filter(r => r.kind === "agent").map(r => r.id)).toContain("claude");
   });
 
-  it("installs the MCP server and the skill under this home", () => {
+  it("installs the MCP server and the skill under this home, and its own section in the folder it ran in", () => {
     const lines = wsp("mcp", "install", "--agent", "claude");
     expect(lines).toContain("~/.claude.json");
     const config = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")) as { mcpServers: Record<string, { args: string[] }> };
     expect(config.mcpServers["wsp"]?.args).toContain("mcp");
     expect(readFileSync(join(home, ".claude", "skills", "wsp", "SKILL.md"), "utf8")).toMatch(/^---\nname: wsp\n/);
+    expect(readFileSync(join(installed, "AGENTS.md"), "utf8")).toContain(SECTION_BEGIN);
+    expect(lines.trimEnd().split("\n").at(-1)).toBe("Next: run claude in this folder and say: /wsp set up wsp for me");
   });
 
   // assetDir falls back to this checkout when the packed road misses, so the resolved directory is named

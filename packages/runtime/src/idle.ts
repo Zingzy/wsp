@@ -27,8 +27,11 @@ export function idleReason(windowMs: number): string {
 export interface IdlePolicyOptions {
   /** The window for a workspace right now; null means auto-nap is off for it. */
   windowOf(id: string): number | null;
-  /** Fires once when a window runs out; the workspace is forgotten until its next touch. */
+  /** Fires when a window runs out. Resolved, the workspace is forgotten until its next touch; rejected, the deadline
+   * stands and it fires again every retryMs until one resolves, a touch or a forget. */
   onIdle(id: string, windowMs: number): Promise<void>;
+  /** How long after a nap that failed the window is asked again. */
+  retryMs: number;
   /** Defaults to the process timers; tests inject one they advance by hand. */
   clock?: Clock;
 }
@@ -69,15 +72,26 @@ export function createIdlePolicy(o: IdlePolicyOptions): IdlePolicy {
     if (closed) return;
     const windowMs = o.windowOf(id);
     if (windowMs === null) return;
-    const cancel = clock.schedule(() => {
-      armed.delete(id);
+    const entry: Armed = { at: clock.now() + windowMs, cancel: () => {} };
+    const fire = (): void => {
       if ((holds.get(id) ?? 0) > 0) {
         arm(id);
         return;
       }
-      o.onIdle(id, windowMs).catch((e: unknown) => console.warn(`idle nap of ${id} failed: ${e instanceof Error ? e.message : String(e)}`));
-    }, windowMs, { unref: true });
-    armed.set(id, { at: clock.now() + windowMs, cancel });
+      // Armed while the nap runs, so a status pushed by a nap that failed still carries the deadline and never reads active.
+      entry.cancel = () => {};
+      o.onIdle(id, windowMs).then(
+        () => {
+          if (armed.get(id) === entry) armed.delete(id);
+        },
+        (e: unknown) => {
+          console.warn(`idle nap of ${id} failed: ${e instanceof Error ? e.message : String(e)}`);
+          if (armed.get(id) === entry) entry.cancel = clock.schedule(fire, o.retryMs, { unref: true });
+        },
+      );
+    };
+    entry.cancel = clock.schedule(fire, windowMs, { unref: true });
+    armed.set(id, entry);
   };
 
   return {

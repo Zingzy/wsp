@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   backgroundTasksLine,
+  stillWorkingRefusal,
   behindGoldenLine,
   builderStaysLine,
   DAEMON_UPDATE_FAILED,
@@ -25,6 +26,7 @@ import {
   machineUnreachedLine,
   mcpServerCommandLine,
   moveTimedOutLine,
+  nextInsideAgentLine,
   notifyLine,
   offeredSize,
   plural,
@@ -374,6 +376,13 @@ describe("mcpServerCommandLine", () => {
   });
 });
 
+describe("nextInsideAgentLine", () => {
+  it("names the agent's own command and what to type at its prompt, a slash form as it stands", () => {
+    expect(nextInsideAgentLine("claude", "/wsp set up wsp for me")).toBe("Next: run claude in this folder and say: /wsp set up wsp for me");
+    expect(nextInsideAgentLine("codex", "set up wsp for me")).toBe("Next: run codex in this folder and say: set up wsp for me");
+  });
+});
+
 describe("execFolderLine", () => {
   it("names the folder a failing command ran in, or the home folder when it had none of its own", () => {
     expect(execFolderLine("/root/work/proj")).toBe("ran in /root/work/proj");
@@ -385,6 +394,14 @@ describe("backgroundTasksLine", () => {
   it("counts the tasks the harness still had running when its result arrived", () => {
     expect(backgroundTasksLine(1)).toBe("ended with 1 background task running");
     expect(backgroundTasksLine(2)).toBe("ended with 2 background tasks running");
+  });
+});
+
+describe("stillWorkingRefusal", () => {
+  it("names the thread by its first eight characters and says the reply is in but the agent is still working", () => {
+    expect(stillWorkingRefusal("5ffc2c96-1111-4222-8333-444455556666")).toBe(
+      "thread 5ffc2c96 replied, still working; wait for its turn to finish before sending",
+    );
   });
 });
 

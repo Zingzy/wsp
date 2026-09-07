@@ -62,7 +62,7 @@ const seqs = (events: WireMsg[]): number[] => events.map(e => e["seq"] as number
 const texts = (events: WireMsg[]): string[] => events.map(e => e["text"] as string);
 
 /** A runtime with one workspace and one running session: the create's four stages are seq 1 to 4, workspace.created is
- * seq 5, session.start is seq 6. */
+ * seq 5, the cost tick the create lands (the meter's first point, at the machine's rate) is seq 6, session.start is seq 7. */
 async function boot() {
   const h = drivenHarness();
   const fc = fakeClock();
@@ -80,14 +80,14 @@ describe("events.subscribe replay", () => {
     const { h, c, port } = await boot();
     h.delta("before");
     const sub = await c.request("events.subscribe");
-    expect(sub).toEqual({ id: sub.id, ok: true, seq: 7, stream: expect.any(String) });
+    expect(sub).toEqual({ id: sub.id, ok: true, seq: 8, stream: expect.any(String) });
 
     const other = await WsClient.connect(port, { token: "secret" });
-    expect((await other.request("events.subscribe"))["seq"]).toBe(7);
+    expect((await other.request("events.subscribe"))["seq"]).toBe(8);
 
     h.delta("live");
     const [mine, theirs] = await Promise.all([received(c, 1), received(other, 1)]);
-    expect(mine).toEqual([expect.objectContaining({ type: "session.delta", text: "live", seq: 8 })]);
+    expect(mine).toEqual([expect.objectContaining({ type: "session.delta", text: "live", seq: 9 })]);
     expect(theirs).toEqual(mine);
     c.close();
     other.close();
@@ -99,7 +99,7 @@ describe("events.subscribe replay", () => {
     h.delta("a");
     h.delta("b");
     const seen = await received(c, 2);
-    expect(seqs(seen)).toEqual([7, 8]);
+    expect(seqs(seen)).toEqual([8, 9]);
     const cursor = seen[seen.length - 1]!["seq"] as number;
     c.close();
     await c.closed();
@@ -110,11 +110,11 @@ describe("events.subscribe replay", () => {
 
     const back = await WsClient.connect(port, { token: "secret" });
     const sub = await back.request("events.subscribe", { after: cursor });
-    expect(sub).toEqual({ id: sub.id, ok: true, seq: 11, stream: expect.any(String) });
+    expect(sub).toEqual({ id: sub.id, ok: true, seq: 12, stream: expect.any(String) });
     h.delta("live");
     const got = await received(back, 4);
     expect(texts(got)).toEqual(["dark 1", "dark 2", "dark 3", "live"]);
-    expect(seqs(got)).toEqual([9, 10, 11, 12]);
+    expect(seqs(got)).toEqual([10, 11, 12, 13]);
     back.close();
   });
 
@@ -122,15 +122,15 @@ describe("events.subscribe replay", () => {
     const { h, port } = await boot();
     for (const t of ["1", "2", "3", "4", "5", "6"]) h.delta(t);
     const late = await WsClient.connect(port, { token: "secret" });
-    const sub = await late.request("events.subscribe", { after: 9 });
-    expect(sub).toEqual({ id: sub.id, ok: true, seq: 12, stream: expect.any(String) });
+    const sub = await late.request("events.subscribe", { after: 10 });
+    expect(sub).toEqual({ id: sub.id, ok: true, seq: 13, stream: expect.any(String) });
     h.delta("live");
     const got = await received(late, 4);
-    expect(seqs(got)).toEqual([10, 11, 12, 13]);
+    expect(seqs(got)).toEqual([11, 12, 13, 14]);
     expect(texts(got)).toEqual(["4", "5", "6", "live"]);
 
     const caughtUp = await WsClient.connect(port, { token: "secret" });
-    expect(await caughtUp.request("events.subscribe", { after: 13 })).toEqual({ id: expect.any(Number), ok: true, seq: 13, stream: expect.any(String) });
+    expect(await caughtUp.request("events.subscribe", { after: 14 })).toEqual({ id: expect.any(Number), ok: true, seq: 14, stream: expect.any(String) });
     h.delta("only this");
     expect(texts(await received(caughtUp, 1))).toEqual(["only this"]);
     late.close();
@@ -139,16 +139,16 @@ describe("events.subscribe replay", () => {
 
   it("a cursor older than the ring gets gap and no replay; sessions.history is the refetch and holds the turn", async () => {
     const { h, workspaceId, port } = await boot();
-    // 5000 deltas after the create's stages and workspace.created (1 to 5) and session.start (6): the ring keeps
-    // 7..5006 and drops the first six.
+    // 5000 deltas after the create's stages and workspace.created (1 to 5), the create's cost tick (6) and
+    // session.start (7): the ring keeps 8..5007 and drops the first seven.
     for (let i = 1; i <= 5000; i++) h.delta(`d${i}`);
 
     const stale = await WsClient.connect(port, { token: "secret" });
     const sub = await stale.request("events.subscribe", { after: 1 });
-    expect(sub).toEqual({ id: sub.id, ok: true, seq: 5006, gap: true, stream: expect.any(String) });
+    expect(sub).toEqual({ id: sub.id, ok: true, seq: 5007, gap: true, stream: expect.any(String) });
     h.delta("live");
     const got = await received(stale, 1);
-    expect(got).toEqual([expect.objectContaining({ text: "live", seq: 5007 })]);
+    expect(got).toEqual([expect.objectContaining({ text: "live", seq: 5008 })]);
 
     // The transcript is capped at the same 5000, so it too starts past the first events; its tail is the truth the chat needs.
     const history = (await stale.request("sessions.history", { workspaceId }))["events"] as { type: string; text?: string }[];
@@ -156,15 +156,15 @@ describe("events.subscribe replay", () => {
     expect(history[history.length - 1]).toMatchObject({ type: "session.delta", text: "live" });
     stale.close();
 
-    // "live" made 5007 the head, so the ring now holds 8..5007: cursor 7 is the oldest that replays, 6 is a gap.
+    // "live" made 5008 the head, so the ring now holds 9..5008: cursor 8 is the oldest that replays, 7 is a gap.
     const edge = await WsClient.connect(port, { token: "secret" });
-    expect((await edge.request("events.subscribe", { after: 7 }))["gap"]).toBeUndefined();
+    expect((await edge.request("events.subscribe", { after: 8 }))["gap"]).toBeUndefined();
     const all = await received(edge, 5000);
-    expect(seqs(all)[0]).toBe(8);
-    expect(seqs(all)[4999]).toBe(5007);
+    expect(seqs(all)[0]).toBe(9);
+    expect(seqs(all)[4999]).toBe(5008);
     edge.close();
     const out = await WsClient.connect(port, { token: "secret" });
-    expect(await out.request("events.subscribe", { after: 6 })).toMatchObject({ ok: true, seq: 5007, gap: true });
+    expect(await out.request("events.subscribe", { after: 7 })).toMatchObject({ ok: true, seq: 5008, gap: true });
     out.close();
   });
 
@@ -172,9 +172,9 @@ describe("events.subscribe replay", () => {
     const { h, port } = await boot();
     const c = await WsClient.connect(port, { token: "secret" });
     const sub = await c.request("events.subscribe", { after: 90 });
-    expect(sub).toEqual({ id: sub.id, ok: true, seq: 6, gap: true, stream: expect.any(String) });
+    expect(sub).toEqual({ id: sub.id, ok: true, seq: 7, gap: true, stream: expect.any(String) });
     h.delta("live");
-    expect(seqs(await received(c, 1))).toEqual([7]);
+    expect(seqs(await received(c, 1))).toEqual([8]);
     c.close();
   });
 
@@ -194,7 +194,7 @@ describe("events.subscribe replay", () => {
     first.delta("old 1");
     const seen = await received(c, 1);
     const cursor = seen[0]!["seq"] as number;
-    expect([streamA, cursor]).toEqual([expect.any(String), 7]);
+    expect([streamA, cursor]).toEqual([expect.any(String), 8]);
     await srv.close();
     await c.closed();
 
@@ -209,15 +209,15 @@ describe("events.subscribe replay", () => {
     for (const t of ["new 1", "new 2", "new 3"]) second.delta(t);
 
     const subB = await back.request("events.subscribe", { after: cursor, stream: streamA });
-    expect(subB).toEqual({ id: subB.id, ok: true, seq: 10, gap: true, stream: expect.any(String) });
+    expect(subB).toEqual({ id: subB.id, ok: true, seq: 11, gap: true, stream: expect.any(String) });
     expect(subB["stream"]).not.toBe(streamA);
     second.delta("live");
     const got = await received(back, 1);
     expect(texts(got)).toEqual(["live"]);
-    expect(seqs(got)).toEqual([11]);
-    // Without the stream the same cursor would have replayed 8 to 10 of a stream this client never saw.
+    expect(seqs(got)).toEqual([12]);
+    // Without the stream the same cursor would have replayed 9 to 11 of a stream this client never saw.
     const naive = await WsClient.connect(port, { token: "secret" });
-    expect(await naive.request("events.subscribe", { after: cursor })).toEqual({ id: expect.any(Number), ok: true, seq: 11, stream: subB["stream"] });
+    expect(await naive.request("events.subscribe", { after: cursor })).toEqual({ id: expect.any(Number), ok: true, seq: 12, stream: subB["stream"] });
     expect(texts(await received(naive, 4))).toEqual(["new 1", "new 2", "new 3", "live"]);
     back.close();
     naive.close();

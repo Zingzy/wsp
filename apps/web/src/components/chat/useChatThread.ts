@@ -48,6 +48,8 @@ export interface ChatThreadHandle {
   readonly fresh: boolean;
   /** The harness session the next send resumes: the shown thread's last started turn, else, on an empty latest view, the workspace's remembered one, else, pinned, the one its session row carries; none while fresh. */
   readonly resume: string | undefined;
+  /** The thread the next send names when it has no session to resume: the one the view shows, its launch having failed, so the runtime runs the message as that thread's first turn. None on a fresh view or an empty latest one, where the runtime opens a thread. */
+  readonly thread: string | undefined;
   /** True while the turn a new thread left behind is still running on the machine. */
   readonly finishing: boolean;
   /** The held thread's runtime id, else the pinned one, else the workspace id before the thread has one; keys what belongs to this thread outside the transcript. */
@@ -95,8 +97,8 @@ export interface ThreadState {
   readonly known: ReadonlyArray<string>;
   /** The last send's start once it landed: the key its rows waited under (the thread id the view held or was pinned to, or the workspace id without one) and the thread the start carried. Null from the send until then, and after a send that settled without a start. */
   readonly named: NamedStart | null;
-  /** A send from a view without a start, left in flight by a view change: the key its rows wait under (the pin, or the workspace id from the latest view) and the send itself, whose start still names those rows from whichever view sees it. */
-  readonly stray: (Sent & { readonly key: string }) | null;
+  /** A send from a view without a start, left in flight by a view change: the key its rows wait under (the pin, or the workspace id from the latest view), the thread the view showed, which its start comes under (none from an empty view, whose start opens a thread the view never knew), and the send itself, whose start still names those rows from whichever view sees it. */
+  readonly stray: (Sent & { readonly key: string; readonly thread?: string }) | null;
 }
 
 const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, stale: null, sending: null, left: undefined, known: [], named: null, stray: null };
@@ -144,14 +146,14 @@ function lastThread(events: ReadonlyArray<SessionEvent>): SessionEvent[] {
 
 /**
  * The history reply, folded to the selected thread, or to its last thread when none is. A send in flight
- * decides otherwise: a view with a start keeps its own thread, since that send resumes it and another
- * thread's start in the reply is another client's, while a view that never started takes the thread whose
- * start carries the prompt it sent, since nothing resumes a dead thread and that send opened a new one, and
- * stays where it was until the reply shows it, since any other new thread may be another client's. A
- * new-thread request that landed while history was in flight wins over the transcript it asked to leave,
- * unless the transcript already holds the thread that request opened, told the same way. Only the left
- * thread, or one the view never knew, can hold a stale turn, whether or not the person's thread is present;
- * a send whose session.start the transcript cannot hold yet stays pending, its prompt still shown.
+ * decides otherwise: a view showing a thread keeps it, whether that send resumed its session or named it
+ * for a first turn after a failed launch, since another thread's start in the reply is another client's,
+ * while a view showing none takes the thread whose start carries the prompt it sent, since that send opened
+ * a new one, and stays where it was until the reply shows it, since any other new thread may be another
+ * client's. A new-thread request that landed while history was in flight wins over the transcript it asked
+ * to leave, unless the transcript already holds the thread that request opened, told the same way. Only the
+ * left thread, or one the view never knew, can hold a stale turn, whether or not the person's thread is
+ * present; a send whose session.start the transcript cannot hold yet stays pending, its prompt still shown.
  */
 export function reloadTranscript(s: ThreadState, events: ReadonlyArray<SessionEvent>, at: string, threadId: string | null = null): ThreadState {
   const own = foldTo(s, events, threadId);
@@ -172,17 +174,17 @@ export function reloadTranscript(s: ThreadState, events: ReadonlyArray<SessionEv
 
 /**
  * The thread a reply folds to: undefined for its last one, null for none. Idle, the pin, else the last thread,
- * or, fresh, only the dead thread of a send that already settled here. During a send, a view with a start keeps
- * it; one without takes the thread its send opened, else keeps the pin or the start-less thread it showed.
+ * or, fresh, only the dead thread of a send that already settled here. During a send, a view showing a thread
+ * keeps it; one showing none takes the thread its send opened, else stays empty.
  */
 function foldTo(s: ThreadState, events: ReadonlyArray<SessionEvent>, threadId: string | null): string | null | undefined {
   const shown = s.events.length === 0 ? null : s.events.at(-1)?.threadId;
   if (s.sending === null) return s.fresh ? shown : threadId ?? undefined;
-  return heldThreadId(s) ?? sentThread(s, events) ?? threadId ?? shown;
+  return shownThread(s, threadId) ?? openedThread(s, events) ?? shown;
 }
 
-/** The thread the send in flight opened, as a reply shows it: the one whose start carries the sent prompt, else one the view never knew with no start at all, its harness dead before init. */
-function sentThread(s: ThreadState, events: ReadonlyArray<SessionEvent>): string | undefined {
+/** The thread a send from a view showing none opened, as a reply shows it: the one whose start carries the sent prompt, else one the view never knew with no start at all, its harness dead before init. */
+function openedThread(s: ThreadState, events: ReadonlyArray<SessionEvent>): string | undefined {
   const start = events.find(e => startsSend(s, e));
   if (start !== undefined) return start.threadId;
   return threadIds(events).findLast(id => !s.known.includes(id) && !events.some(e => e.type === "session.start" && e.threadId === id));
@@ -192,10 +194,9 @@ function sentThread(s: ThreadState, events: ReadonlyArray<SessionEvent>): string
 function replaySend(s: ThreadState, thread: ReadonlyArray<SessionEvent>, pinned: string | null): Pick<ThreadState, "sending" | "named"> {
   if (s.sending === null) return { sending: null, named: null };
   const { after } = s.sending;
-  const held = heldThreadId(s);
   const since = thread.slice(thread.findLastIndex(e => e.turnId === after) + 1);
-  const start = since.find(e => e.type === "session.start" && (held !== undefined || startsSend(s, e)));
-  if (start !== undefined) return { sending: null, named: nameOf(held ?? pinned ?? start.workspaceId, start) };
+  const start = since.find(e => e.type === "session.start" && (shownThread(s, pinned) !== undefined || startsSend(s, e)));
+  if (start !== undefined) return { sending: null, named: nameOf(heldThreadId(s) ?? pinned ?? start.workspaceId, start) };
   return since.some(e => e.type === "session.end") ? { sending: null, named: null } : { sending: s.sending, named: null };
 }
 
@@ -224,6 +225,20 @@ function heldThreadId(state: ThreadState): string | undefined {
   return lastStart(state.events)?.threadId;
 }
 
+/**
+ * The thread a view shows: the one its events carry, started or dead before its start, else the pin. A send from
+ * it resumes its session or, without one, names it for a first turn, so every event of that send comes under it.
+ * A fresh view or an empty latest one shows none: its send opens a thread the view never knew.
+ */
+function shownThread(state: ThreadState, pinned: string | null): string | undefined {
+  return state.events.at(-1)?.threadId ?? pinned ?? undefined;
+}
+
+/** Whether an event comes from the harness a send opened: under the thread the view showed, or, from a view showing none, under a thread the view never knew, since the runtime mints one at the start and a harness that dies before init carries it too. */
+function fromSend(state: ThreadState, e: SessionEvent, shown: string | undefined): boolean {
+  return shown === undefined ? unknownThread(state, e) : e.threadId === shown;
+}
+
 /** An event from no thread the view knows is the person's own send: the runtime mints its id at the start, and a harness that dies before init carries it too. */
 function unknownThread(state: ThreadState, e: SessionEvent): boolean {
   return e.threadId === undefined || !state.known.includes(e.threadId);
@@ -240,18 +255,18 @@ function startOf(sent: Sent, e: SessionEvent): boolean {
   return e.requestId !== undefined ? e.requestId === sent.requestId : e.prompt === sent.text;
 }
 
-/** The start of the send a view change left in flight: under a thread the view never knew, or, resumed from its row, under the thread its rows wait under. */
+/** The start of the send a view change left in flight: under the thread that view showed, or, from a view showing none, under a thread this view never knew. */
 function startsStray(state: ThreadState, e: SessionEvent): boolean {
   const { stray } = state;
-  return stray !== null && startOf(stray, e) && (unknownThread(state, e) || e.threadId === stray.key);
+  return stray !== null && startOf(stray, e) && fromSend(state, e, stray.thread);
 }
 
-/** The start of the send in flight on this view, under a thread the view never knew. */
+/** The start of the send in flight on a view showing no thread, under a thread the view never knew. */
 function startsSend(state: ThreadState, e: SessionEvent): boolean {
   return state.sending !== null && state.pendingPrompt !== null && unknownThread(state, e) && startOf(state.pendingPrompt, e);
 }
 
-/** An event of the send in flight on a view without a start: its own start, or the done and end of a thread the view never knew, its harness dying before it could start. A start with another prompt, a delta or a steer is another client's thread. */
+/** An event of the send in flight on a view showing no thread: its own start, or the done and end of a thread the view never knew, its harness dying before it could start. A start with another prompt, a delta or a steer is another client's thread. */
 function sentEvent(state: ThreadState, e: SessionEvent): boolean {
   if (state.sending === null) return false;
   if (e.type === "session.start") return startsSend(state, e);
@@ -276,26 +291,24 @@ export function dropEvent(state: ThreadState, e: SessionEvent): ThreadState {
 }
 
 /**
- * A view holds one thread: once its events carry a thread id, another thread's events are not its own. Fresh, it
- * holds only its send's own events, or the start of a new thread a send left in flight before it opened; a known
- * thread waking is not its own, whether it was left, older, or resumed by that send. A view whose thread never started (a harness that died before init, read
- * back from history) holds that thread, told by its events or by the pin, and, while a send is in flight, the
- * thread the runtime mints for the send, since nothing resumes a dead thread. An empty view idle takes anything.
+ * A view holds one thread: once its events carry a thread id, or a pin names one, another thread's events are
+ * not its own, and a send from it, resuming its session or naming it after a failed launch, lands under it too.
+ * Fresh, before any event, it holds only its send's own events, or the start of a new thread a send left in
+ * flight before it opened; a known thread waking is not its own, whether it was left, older, or resumed by that
+ * send. An empty latest view idle takes anything; sending, unstamped events and its send's own.
  */
 function inHeldThread(state: ThreadState, e: SessionEvent, pinned: string | null): boolean {
+  const shown = shownThread(state, pinned);
+  if (shown !== undefined) return e.threadId === shown;
   if (state.fresh) return sentEvent(state, e) || (startsStray(state, e) && unknownThread(state, e));
-  const held = heldThreadId(state);
-  if (held !== undefined) return e.threadId === held;
-  const last = state.events.at(-1)?.threadId ?? pinned ?? undefined;
-  if (state.sending !== null) return e.threadId === last || sentEvent(state, e);
-  return last === undefined || e.threadId === last;
+  return state.sending === null || e.threadId === undefined || sentEvent(state, e);
 }
 
 /**
  * Applies one live event; returns the same state object when the event belongs to the turn a new thread left
  * or to a thread already known. A send ends at its session.start, or at a session.end of some other turn than
- * the one that had settled when it began: that turn's own end still trails its done, which already opened the
- * composer, while a harness that dies before init produces only a done and an end under a new turn id. A
+ * the one that had settled when it began: that turn's own end still trails its done, and only the end opens
+ * the composer, while a harness that dies before init produces only a done and an end under a new turn id. A
  * pending send left behind ends the same way, from a thread the view never knew or from the left one it
  * resumed; a start or a delta seen while it waits is some other thread's, since its own harness has not
  * started, and is remembered so that thread's end cannot pass for its own.
@@ -402,12 +415,15 @@ interface ViewKey {
 /**
  * The state one view leaves for the next: nothing across workspaces; within one, what it knew, and a send
  * still in flight from a view without a start, whose rows wait under the pin or, from the latest view, the
- * workspace id: nothing resumes a dead thread, so that start opens a thread no view holds yet.
+ * workspace id, and whose start comes under the thread that view showed, or, from an empty view, under a
+ * thread no view holds yet.
  */
 export function leaveView(s: ThreadState, from: ViewKey, to: ViewKey): ThreadState {
   if (from.workspaceId !== to.workspaceId) return EMPTY;
   const sent = s.sending !== null && heldThreadId(s) === undefined ? s.pendingPrompt : null;
-  return { ...EMPTY, known: knowing(s.known, s.events), stray: sent === null ? s.stray : { text: sent.text, requestId: sent.requestId, key: from.threadId ?? from.workspaceId } };
+  if (sent === null) return { ...EMPTY, known: knowing(s.known, s.events), stray: s.stray };
+  const thread = shownThread(s, from.threadId);
+  return { ...EMPTY, known: knowing(s.known, s.events), stray: { text: sent.text, requestId: sent.requestId, key: from.threadId ?? from.workspaceId, ...(thread === undefined ? {} : { thread }) } };
 }
 
 /** The row a view without a session.start resumes from: pinned, the thread's latest turn the harness answered; on the latest view, the turn the workspace remembers. */
@@ -517,13 +533,15 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   }, []);
 
   const finishing = state.stale !== null;
+  const resume = state.fresh ? undefined : (startedSession(state.events) ?? (fromRow ? (threadId === null ? remembered : rowSession) : undefined));
   return {
     view,
     hydrated: hydratedFor === viewKey,
     busy: state.sending !== null || view.running || finishing,
     sending: state.sending !== null,
     fresh: state.fresh,
-    resume: state.fresh ? undefined : (startedSession(state.events) ?? (fromRow ? (threadId === null ? remembered : rowSession) : undefined)),
+    resume,
+    thread: resume === undefined ? shownThread(state, threadId) : undefined,
     finishing,
     threadKey: heldThreadId(state) ?? threadId ?? workspaceId,
     named: state.named,

@@ -326,8 +326,6 @@ export function goldenRecipeFor(
   return {
     setup: "true",
     smoke: "true",
-    cpu: 2,
-    memMb: 4096,
     envs,
     ...(hooks.deployDaemon !== undefined ? { deployDaemon: hooks.deployDaemon } : {}),
     ...(hooks.import !== undefined ? { import: hooks.import } : {}),

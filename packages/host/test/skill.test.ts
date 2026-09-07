@@ -27,8 +27,14 @@ describe("the wsp skill", () => {
     expect(WSP_SKILL).toContain(`get the server: ${MCP_AGENT_IDS}.`);
     // The install's flags are stated where the reader is sent to find them, not only in the walkthrough and the help.
     expect(WSP_SKILL).toContain("`--agent` repeats to do several in one call");
-    expect(WSP_SKILL).toContain("`--json` answers with one line holding the `server` command every config now runs, what each agent took and a `failures` array");
+    expect(WSP_SKILL).toContain("`--json` answers with one line holding the `server` command every config now runs, what each agent took, its `docs` naming the files the section went into, and a `failures` array");
     expect(WSP_SKILL).toContain("An entry under `installed` with no `path` took the skill and not the server");
+    // The section it keeps in the project's own instructions, both of the things a second run does to it, and the
+    // agent a run with no --agent picks off a terminal: an agent reading the skill decides on those.
+    expect(WSP_SKILL).toContain("wsp's own marked section into the instructions the folder it runs in keeps");
+    expect(WSP_SKILL).toContain("A second run replaces that section where it stands");
+    expect(WSP_SKILL).toContain("`wsp mcp install --agent <id> --remove` takes it back out");
+    expect(WSP_SKILL).toContain("off a terminal a run that names none takes every agent whose own command is on the PATH");
   });
 
   it("quotes the notify line as the protocol prints it and names every send outcome the protocol knows", () => {
