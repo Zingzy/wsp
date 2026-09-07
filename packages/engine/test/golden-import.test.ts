@@ -26,7 +26,9 @@ import {
   secretPath,
   withApiKeyHelper,
   SHELL_FRAMEWORKS,
+  imageCommands,
   shellInstallFor,
+  toolNames,
   toolInstallsFor,
   toolUninstall,
   BREW_HOUSEKEEPING,
@@ -965,6 +967,43 @@ describe("agentInstallsFor", () => {
     expect(hermes).toMatch(/rev-parse HEAD\)" = "[0-9a-f]{40}"/);
     expect(hermes).toContain("uv venv --python 3.11 /root/.hermes/venvs/hermes");
     expect(AGENT_INSTALLERS["aider"]!.install).toMatch(/uv tool install --force --python 3\.12 --with pip aider-chat==\d/);
+  });
+});
+
+describe("imageCommands", () => {
+  it("reads each step's command from the step itself: Homebrew's step and a manager's formula step name theirs", () => {
+    const plan = toolInstallsFor([row({ rung: "tools", id: "tools/brew/eza" }), row({ rung: "tools", id: "tools/pipx/black" })]);
+    expect(plan.installs.find(t => t.id === "tools/homebrew")?.bin).toBe("brew");
+    expect(plan.installs.find(t => t.id === "tools/manager/pipx")?.bin).toBe("pipx");
+    const on = imageCommands([], { ...plan, installs: plan.installs.map(t => ({ ...t, bin: t.bin === undefined ? undefined : `x-${t.bin}` })) });
+    for (const cmd of ["x-brew", "x-pipx"]) expect(on.has(cmd), cmd).toBe(true);
+    for (const cmd of ["brew", "pipx"]) expect(on.has(cmd), cmd).toBe(false);
+  });
+
+  it("names what the image answers: the base image's commands, the floor's, the shell the rows bring, each ticked tool by package and command, Homebrew when the plan brings it, each ticked agent; an unticked row adds nothing", () => {
+    const entries = [
+      row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }),
+      row({ rung: "shell", id: "shell/starship", paths: ["~/.config/starship.toml"] }),
+      row({ rung: "tools", id: "tools/brew/eza" }),
+      row({ rung: "tools", id: "tools/brew/starship", bring: false }),
+      row({ rung: "tools", id: "tools/catalog/typescript" }),
+      row({ rung: "agents", id: "agents/claude" }),
+    ];
+    const on = imageCommands(entries, toolInstallsFor(entries));
+    for (const cmd of ["ls", "dircolors", "stty", "git", "rg", "unzip", "zsh", "eza", "brew", "tsc", "claude"]) expect(on.has(cmd), cmd).toBe(true);
+    for (const cmd of ["starship", "diskbloom", "fish"]) expect(on.has(cmd), cmd).toBe(false);
+    const bare = imageCommands([row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] })], toolInstallsFor([]));
+    expect(bare.has("fish")).toBe(true);
+    for (const cmd of ["zsh", "brew", "eza"]) expect(bare.has(cmd), cmd).toBe(false);
+  });
+});
+
+describe("toolNames", () => {
+  it("names every tool the recipe or the catalog knows, ticked or not, by package and command, and never the base image's plain commands", () => {
+    const names = toolNames([row({ rung: "tools", id: "tools/brew/eza", bring: false }), row({ rung: "tools", id: "tools/npm/@railway/cli" }), row({ rung: "tools", id: "tools/brew-tap/owner/tap" }), row({ rung: "shell", id: "shell/zshrc" })]);
+    for (const n of ["eza", "railway", "gh", "gcloud", "typescript", "tsc", "rg"]) expect(names.has(n), n).toBe(true);
+    // A package's basename is not a command: the road names the package and the catalog names the command.
+    for (const n of ["cli", "tap", "ls", "z", "zshrc", "docker-compose"]) expect(names.has(n), n).toBe(false);
   });
 });
 

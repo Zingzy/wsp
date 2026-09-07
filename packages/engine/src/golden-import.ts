@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { MCP_ID_PREFIX, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, BREW, BREW_PREFIX, CATALOG_AGENTS, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, BASE_FLOOR, BASE_IMAGE_COMMANDS, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -611,6 +611,11 @@ function homebrewBootstrap(): string {
   ].join("\n");
 }
 
+const TAP_PREFIX = "tools/brew-tap/";
+/** A tap row: the tap it names, not a formula or a command. */
+const isTap = (e: Pick<RecipeEntry, "id">): boolean => e.id.startsWith(TAP_PREFIX);
+const tapOf = (e: Pick<RecipeEntry, "id">): string => e.id.slice(TAP_PREFIX.length);
+
 export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = new Map()): Brewfile {
   const out: Brewfile = { text: "", taps: [], formulae: [], skipped: [], roads: [], base: [] };
   for (const e of entries) {
@@ -618,8 +623,8 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
     const base = baseRowFor(e, brew);
     if (base !== undefined) {
       out.base.push(base);
-    } else if (e.id.startsWith("tools/brew-tap/")) {
-      out.taps.push(e.id.slice("tools/brew-tap/".length));
+    } else if (isTap(e)) {
+      out.taps.push(tapOf(e));
     } else if (e.id.startsWith("tools/brew/")) {
       const formula = e.id.slice("tools/brew/".length);
       const info = brew.get(formula);
@@ -697,7 +702,7 @@ export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string 
   const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
   const base = baseRowFor(e);
   if (base !== undefined) return { note: `${base.name} is part of the base and stays` };
-  if (e.id.startsWith("tools/brew-tap/")) return { cmd: withPath(asLinuxbrew(`untap ${e.id.slice("tools/brew-tap/".length)}`)) };
+  if (isTap(e)) return { cmd: withPath(asLinuxbrew(`untap ${tapOf(e)}`)) };
   const planned = rowRoad(e);
   if (planned === undefined) return { note: "no manager known for this row" };
   const r = roadModule(planned.road).uninstall(planned.road, planned.bin ?? packageOf(e));
@@ -785,7 +790,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     else if (fromCatalog !== undefined) managers.set(manager, { after: fromCatalog.e.id, row: fromCatalog });
     else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
     else if (formula !== undefined) {
-      managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: toolchain.last } });
+      managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", cmd: withPath(asLinuxbrew(`install ${formula}`)), after: toolchain.last, bin: manager } });
       managerFormulae.push(formula);
     } else if (entry !== undefined) managers.set(manager, { after: own, step: { id: own, label: manager, manager: entry.installRoad.road, cmd: withPath(installLine(entry)), bin: entry.bin } });
     else throw new Error(`${manager} is neither in the base, nor in the catalog, nor a formula`);
@@ -793,7 +798,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const catalogFormulae = catalog.flatMap(c => (c.planned.road.road === "brew" ? roadModule(c.planned.road).names(c.planned.road) : []));
 
   if (brew.taps.length + brew.formulae.length > 0 || managerFormulae.length + catalogFormulae.length + customOf("brew").length > 0) {
-    installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap()) });
+    installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap()), bin: "brew" });
     installs.push(...toolchain.steps);
     for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), after: toolchain.last });
     const formulae = [...brew.formulae, ...managerFormulae, ...catalogFormulae];
@@ -846,6 +851,44 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     return road === undefined ? undefined : afterRoad(road);
   }));
   return { installs, skipped, base: brew.base, brewfile: brew.text };
+}
+
+/** What a tools row is known by: the names its road gives the package (a formula is named after its command
+ * unless the catalog says otherwise), the command the road puts on PATH, and the catalog's command and the ones it
+ * brings along for a row the catalog knows. Nothing for a tap or a row no road installs. */
+function rowNames(e: RecipeEntry): string[] {
+  if (e.rung !== "tools" || isTap(e)) return [];
+  const planned = rowRoad(e);
+  const known = catalogToolFor(packageOf(e));
+  return [...(planned === undefined ? [] : [...roadModule(planned.road).names(planned.road), ...(planned.bin === undefined ? [] : [planned.bin])]), ...(known === undefined ? [] : [known.bin, ...(known.brings ?? []).map(b => b.bin)])];
+}
+
+/** Every command the golden answers, for the pack's guard over the carried rc files: the base image's, the floor's,
+ * the shell the shell rows bring, each ticked tools row by its names, the command each step of the tools plan puts
+ * on PATH, and each ticked agent's command. An unticked row adds nothing: a call to it in an rc file is what the
+ * guard covers. */
+export function imageCommands(entries: readonly RecipeEntry[], tools: ToolsPlan): Set<string> {
+  const out = new Set(BASE_IMAGE_COMMANDS);
+  for (const e of BASE_FLOOR) for (const bin of [e.bin, ...(e.brings ?? []).map(b => b.bin)]) out.add(bin);
+  const shell = shellInstallFor(entries);
+  if (shell !== undefined) out.add(shell.shell);
+  for (const e of entries) {
+    if (!ticked(e)) continue;
+    if (e.rung === "agents" && !isMcpRow(e)) out.add(catalogEntry(name(e))?.bin ?? name(e));
+    for (const n of rowNames(e)) out.add(n);
+  }
+  for (const t of tools.installs) if (t.bin !== undefined) out.add(t.bin);
+  return out;
+}
+
+/** Every command the recipe or the catalog knows a tool for, ticked or not: the catalog's tools by id and command,
+ * and each tools row by its names. An oh-my-zsh plugin by one of these names, with the tool off the image, is a
+ * plugin for a missing tool and leaves the list; a plugin by any other name is a plugin and stays. */
+export function toolNames(entries: readonly RecipeEntry[]): Set<string> {
+  const out = new Set<string>();
+  for (const e of CATALOG_TOOLS) for (const bin of [e.id, e.bin, ...(e.brings ?? []).map(b => b.bin)]) out.add(bin);
+  for (const e of entries) for (const n of rowNames(e)) out.add(n);
+  return out;
 }
 
 // --- shell -------------------------------------------------------------------

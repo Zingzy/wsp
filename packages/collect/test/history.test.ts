@@ -19,6 +19,8 @@ describe("command names", () => {
     expect(commandNames("for f in *.ts; do wc -l \"$f\"; done")).toEqual(["wc"]);
     expect(commandNames("VAR=1 sudo -u me env FOO=bar /usr/local/bin/python3 -c 1")).toEqual(["python3"]);
     expect(commandNames("time nohup node server.js &")).toEqual(["node"]);
+    // A comment ends the line's commands; a quoted # is text; a substitution inside double quotes still runs its command.
+    expect(commandNames('ls # list\ngit commit -m "fix #12"\ncat "$(mktemp)"')).toEqual(["ls", "git", "cat", "mktemp"]);
     expect(commandNames("echo $(git rev-parse HEAD) > `which out`")).toEqual(["git"]);
     expect(commandNames("2>/dev/null ls; > out.txt cat in; curl -s x >/dev/null 2>&1")).toEqual(["ls", "cat", "curl"]);
     expect(commandNames("2>&1 ls; >&2 echo x; &>/dev/null cat")).toEqual(["ls", "cat"]);

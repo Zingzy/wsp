@@ -9,7 +9,8 @@
 import { createHash } from "node:crypto";
 import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
-import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { MIB, TOOL_TIMEOUT_S, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
@@ -144,6 +145,8 @@ export interface PackedFiles {
   skipped: SkippedPath[];
   /** The rc files stripped at pack time, so the checklist names what to set from what actually left. */
   cut: CutNames[];
+  /** Commands the rc files call that the image does not have, once each; the pack defined each as a silent no-op. */
+  silenced: string[];
   /** The skips a fork should know about, stamped on the sealed version: a hook whose script did not travel. */
   leftBehind?: GoldenLeftBehind[];
 }
@@ -199,6 +202,10 @@ export interface ImportLedger {
   /** The tools the tools stage did not put on the image, skipped or failed, and why; absent when every tool installed.
    * The seal stamps it on the version. */
   missingTools?: GoldenMissingTool[];
+  /** The rc calls the pack silenced, once each; absent when every call has a command behind it. The seal stamps it on the version. */
+  silenced?: string[];
+  /** What the login shell printed to stderr on its first interactive start after the files landed, as the version records it; absent when it started quiet. */
+  shellNoise?: string;
   /** What the pack left off the image and why; absent when everything ticked travelled. The seal stamps it on the version. */
   leftBehind?: GoldenLeftBehind[];
 }
@@ -249,6 +256,12 @@ const UPLOAD_HEADROOM = 256 * MIB;
 const AGENTS_DISK_FLOOR = 800 * MIB;
 const AGENT_TIMEOUT_S = 900;
 const SHELL_TIMEOUT_S = 300;
+const SHELL_CHECK_S = 60;
+
+/** One start of the login shell the way the app's pty runs it, a login shell (profile.d puts the tools on PATH before
+ * the rc files) and interactive (the rc files are read): what it prints to stderr is what the person sees before the
+ * first prompt. The guest exec has no HOME, so the prelude sets it. */
+const shellCheck = (shell: LoginShell): string => `${PRELUDE}\nTERM=xterm-256color ${shell} -lic true </dev/null || true`;
 
 /** Runs the import stages and the harness on a builder, skipping what the
  * ledger says is already there for the same recipe. Files and upload fail the
@@ -264,6 +277,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     smoke: prior?.smoke ?? "true",
     ...(recipe !== undefined ? { recipe } : {}),
     ...(prior?.missingTools !== undefined ? { missingTools: prior.missingTools } : {}),
+    ...(prior?.silenced !== undefined ? { silenced: prior.silenced } : {}),
+    ...(prior?.shellNoise !== undefined ? { shellNoise: prior.shellNoise } : {}),
     ...(prior?.leftBehind !== undefined ? { leftBehind: prior.leftBehind } : {}),
   };
   const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [], ...(opts.base !== undefined ? { base: opts.base } : {}), ...(opts.retired !== undefined ? { retired: opts.retired } : {}) };
@@ -329,7 +344,10 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       if (packed.leftBehind !== undefined && packed.leftBehind.length > 0) ledger.leftBehind = packed.leftBehind;
       else delete ledger.leftBehind;
       const notes = packed.skipped.map(s => `${s.path} (${s.note})`);
-      stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}`);
+      const silenced = packed.silenced.length > 0 ? `; silenced in the shell: ${packed.silenced.join(", ")}` : "";
+      stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}${silenced}`);
+      if (packed.silenced.length > 0) ledger.silenced = packed.silenced;
+      else delete ledger.silenced;
       mark("applying-setup");
       // The frameworks clone into empty homes, so the shell goes on before the files land; the upload's mark covers it.
       if (imp.shell !== undefined) {
@@ -416,6 +434,20 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       else delete ledger.missingTools;
       mark("installing-tools");
     }
+    // What the person sees before the first prompt: the rc files call tools and agents, so the shell starts once
+    // everything that installs is on the machine, and only on a pass that changed it.
+    let shellLine: string | undefined;
+    if (imp.shell !== undefined && (ran || harnessRan)) {
+      const res = await machine.run(guarded(shellCheck(imp.shell.shell), SHELL_CHECK_S), { deadlineMs: guardDeadlineMs(SHELL_CHECK_S) });
+      const noise = res.exitCode === 124 ? [reasonOf(res, SHELL_CHECK_S)] : res.stderr.split("\n").filter(l => l.trim() !== "");
+      if (noise.length === 0) {
+        shellLine = `${imp.shell.shell} starts quiet`;
+        delete ledger.shellNoise;
+      } else {
+        ledger.shellNoise = res.exitCode === 124 ? noise[0]! : `${noise[0]}, ${plural(noise.length, "line")}`;
+        shellLine = `shell noise: ${ledger.shellNoise}`;
+      }
+    }
     // The edit runs on every pass that has a plan: an attach re-uploads the volatile ~/.claude.json, which brings every
     // laptop definition back as it was. It is idempotent and touches only the servers the plan names. It does not count
     // as a run for the result: on an attach the saved result from the build stands, tools and agents included.
@@ -440,8 +472,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       else mark("installing-mcp");
       // A refused rewrite over a document that landed leaves the saved result true: the machine still holds it.
       if (!ran && (context.failure === undefined || !contextWasOn)) imp.onContext?.({ context: context.context, ...(context.failure !== undefined ? { contextFailure: context.failure } : {}) });
-      // The stage's last detail is what the terminal keeps as its end line, so the servers' tally rides with the context.
-      stage("installing-mcp", closing(servers, `machine context: ${context.summary}`));
+      // The stage's last detail is what the terminal keeps as its end line, so the servers' tally and the shell's first start ride with the context.
+      stage("installing-mcp", closing(servers, shellLine, `machine context: ${context.summary}`));
     }
     if (ran || edited) {
       // A builder whose exec died (a full disk did it once) would be sealed and handed off answering nothing.
@@ -704,6 +736,8 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       browserShim,
       ...(opts.logins !== undefined ? { logins: opts.logins } : {}),
       ...(builder.import?.missingTools !== undefined ? { missingTools: builder.import.missingTools } : {}),
+      ...(builder.import?.silenced !== undefined ? { silenced: builder.import.silenced } : {}),
+      ...(builder.import?.shellNoise !== undefined ? { shellNoise: builder.import.shellNoise } : {}),
       ...(builder.import?.leftBehind !== undefined ? { leftBehind: builder.import.leftBehind } : {}),
       ...(builder.base !== undefined ? { base: builder.base } : {}),
       ...(builder.retired !== undefined && builder.retired.length > 0 ? { retired: builder.retired } : {}),

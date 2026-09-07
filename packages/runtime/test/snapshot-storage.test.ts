@@ -123,7 +123,7 @@ describe("runtime golden retention", () => {
     const { store, backend, rt } = await fourVersions();
     await rt.close();
     // The update needs a recipe; the delta below is the smallest one the stages accept.
-    const imp: GoldenImport = { recipeHash: "h1", recipe: { ticks: [], files: [] }, files: { count: 0, rungs: {}, bytes: 0, skipped: [], pack: async () => ({ tar: Buffer.alloc(0), bytes: 0, unpacked: 0, skipped: [], cut: [] }) }, tools: [], agents: [] };
+    const imp: GoldenImport = { recipeHash: "h1", recipe: { ticks: [], files: [] }, files: { count: 0, rungs: {}, bytes: 0, skipped: [], pack: async () => ({ tar: Buffer.alloc(0), bytes: 0, unpacked: 0, skipped: [], cut: [], silenced: [] }) }, tools: [], agents: [] };
     // The stages read free disk and expect the guest to answer a probe; the stub answers both.
     backend.execImpl = (_m, cmd) => (cmd.startsWith("df -Pk") ? { exitCode: 0, stdout: `${2000 * 1024}\n`, stderr: "" } : cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const updating = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", import: imp } });

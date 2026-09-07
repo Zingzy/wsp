@@ -560,6 +560,8 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                     {fork && v.missingTools !== undefined && v.missingTools.length > 0 && <MissingTools tools={v.missingTools} />}
                     {fork && v.leftBehind !== undefined && v.leftBehind.length > 0 && <LeftBehind rows={v.leftBehind} />}
                     {fork && v.retired !== undefined && v.retired.length > 0 && <RetiredRows rows={v.retired} />}
+                    {fork && v.silenced !== undefined && v.silenced.length > 0 && <LineageNote k="silenced" label="silenced in the shell" text={v.silenced.join(", ")} />}
+                    {fork && v.shellNoise !== undefined && <LineageNote k="shell-noise" label="shell noise" text={v.shellNoise} />}
                     {under(v.snapshotId)}
                   </>
                 }
@@ -707,6 +709,15 @@ function MissingTools({ tools }: { tools: GoldenMissingTool[] }) {
 /** One row per path the pack left off the image, the file it was read from beside the reason. */
 function LeftBehind({ rows }: { rows: GoldenLeftBehind[] }) {
   return <VersionNotes label="left on this computer" aria="left on this computer" keys={["left-behind", "left-path", "left-note"]} rows={rows.map(r => ({ key: `${r.path} ${r.note}`, name: r.path, note: r.note }))} />;
+}
+
+/** One line under a version about its shell: the rc calls the pack silenced, or what the shell printed on its first start, so a command that does nothing or a line before the prompt has its reason here. */
+function LineageNote({ k, label, text }: { k: string; label: string; text: string }) {
+  return (
+    <p className="mt-1.5 ml-3.5 text-[11px] text-muted-foreground" data-k={k}>
+      <span className="text-[.65rem] font-medium uppercase tracking-wider">{label}</span> <span className="font-mono">{text}</span>
+    </p>
+  );
 }
 
 function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; status: WorkspaceStatus | null; upgrade: Upgrade }) {

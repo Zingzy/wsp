@@ -2870,7 +2870,7 @@ describe("nap vault against the stub backend", () => {
 describe("runtime golden import", () => {
   const importOf = (recipeHash = "h1"): GoldenImport => ({
     recipeHash,
-    files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [], cut: [] }) },
+    files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [], cut: [], silenced: [] }) },
     tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }],
     agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }],
   });
@@ -3665,7 +3665,7 @@ describe("runtime golden update and the post-seal grace", () => {
   const importOf = (recipeHash = "h1", agents: GoldenImport["agents"] = [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }]): GoldenImport => ({
     recipeHash,
     recipe: snapshot(recipeHash, [".zshrc"]),
-    files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [], cut: [] }) },
+    files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [], cut: [], silenced: [] }) },
     tools: [],
     agents,
   });
@@ -3674,7 +3674,7 @@ describe("runtime golden update and the post-seal grace", () => {
     import: {
       recipeHash,
       recipe: snapshot(recipeHash, [".zshrc", ".config/starship.toml"]),
-      files: { count: 1, rungs: { shell: 1 }, bytes: 5, skipped: [], pack: async () => ({ tar: Buffer.from("d"), bytes: 5, unpacked: 5, skipped: [], cut: [] }) },
+      files: { count: 1, rungs: { shell: 1 }, bytes: 5, skipped: [], pack: async () => ({ tar: Buffer.from("d"), bytes: 5, unpacked: 5, skipped: [], cut: [], silenced: [] }) },
       tools: [{ id: "tools/npm/cowsay", label: "cowsay", manager: "npm", cmd: "npm install -g cowsay" }],
       agents: [],
     },
@@ -3929,7 +3929,7 @@ describe("runtime golden update and the post-seal grace", () => {
     delta.import.files!.pack = async () => {
       packing = true;
       await gate;
-      return { tar: Buffer.from("d"), bytes: 5, unpacked: 5, skipped: [], cut: [] };
+      return { tar: Buffer.from("d"), bytes: 5, unpacked: 5, skipped: [], cut: [], silenced: [] };
     };
     const running = rt.golden.upgrade({ delta });
     await vi.waitFor(() => expect(packing).toBe(true));
@@ -4231,7 +4231,7 @@ describe("runtime golden update and the post-seal grace", () => {
     backend.execImpl = dfOk;
     const left = [{ id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: /opt/homebrew/bin/terminal-notifier" }];
     const imp = importOf();
-    const files = { ...imp.files!, pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [...left], cut: [], leftBehind: left }) };
+    const files = { ...imp.files!, pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [...left], cut: [], silenced: [], leftBehind: left }) };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith({ ...imp, files }), clock: fakeClock().clock });
     const b = await rt.golden.prepare();
     expect((await rt.golden.seal(b.id)).version.leftBehind).toEqual(left);
