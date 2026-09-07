@@ -103,6 +103,15 @@ describe("promoteGoldens", () => {
     await expect(promoteGoldens(broken, again.io)).resolves.toBe("not made durable: state file unreadable");
   });
 
+  it("on a store with no golden yet the note says there is none", async () => {
+    const backend = stubBackend();
+    backend.capabilities.templates = true;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, hostId: "h1" });
+    const { lines, io: cli } = io();
+    expect(await promoteGoldens(rt, cli)).toBe("no golden to make durable");
+    expect(lines).toEqual([]);
+  });
+
   it("says so on a backend without templates and touches nothing", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });

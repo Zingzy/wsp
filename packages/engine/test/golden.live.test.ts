@@ -25,6 +25,7 @@ describe.runIf(LIVE)("golden pipeline (live: P1+P2 replay)", () => {
     const t0 = Date.now();
     const { manifest, version } = await buildGolden({
       backend,
+      hostId: "live",
       baseTemplate: "base",
       cpu: 2,
       memMb: 4096,
@@ -104,6 +105,7 @@ describe.runIf(LIVE)("interactive golden (live: prepare, sit, seal)", () => {
       const t1 = Date.now();
       sealed = await sealGolden(builder, {
         backend,
+        hostId: "live",
         smoke: "claude --version",
         envs: claudeEnvs(env),
         labels: label,

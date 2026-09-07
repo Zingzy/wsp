@@ -429,7 +429,7 @@ export async function promoteGoldens(rt: Runtime, io: Pick<CliIO, "log">): Promi
   }
   if (rows === undefined) return NO_TEMPLATES_LINE;
   for (const r of rows) io.log("error" in r ? templateSkippedLine(r.golden, r.version, r.error) : templateRecordedLine(r.golden, r.version, r.templateId, r.sharing));
-  if (rows.length === 0) return "every version already has a template";
+  if (rows.length === 0) return (await rt.golden.get()) === undefined ? "no golden to make durable" : "every version already has a template";
   const counts = [
     [rows.filter(r => !("error" in r)).length, "promoted"],
     [rows.filter(r => "error" in r).length, "not made durable"],

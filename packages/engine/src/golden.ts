@@ -7,9 +7,8 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { hostname } from "node:os";
 import { ROAD_STEPS } from "@wsp/catalog";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, goldenImage, snapshotAttemptLine, snapshotFailedLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, snapshotAttemptLine, snapshotFailedLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
@@ -133,8 +132,9 @@ export interface Templates {
 }
 
 /** The name a version's template is promoted under: one rule. The host is in it because the provider lets two
- * templates share a name, so two hosts on one account with the same golden name would otherwise read as one. */
-export const templateName = (hostId: string, golden: string, version: number): string => `wsp-${hostId}-${golden}-v${version}`;
+ * templates share a name, so two hosts on one account with the same golden name would otherwise read as one; the
+ * caller hands the host's id in lowercase letters and digits, the class the provider has taken. */
+export const templateName = (host: string, golden: string, version: number): string => `wsp-${host}-${golden}-v${version}`;
 
 /** How long a promoted template may read building before the seal gives up (a promotion reads ready at once per the
  * provider's reference; the wait covers a slower day), and how often it is read. Tests shrink both. */
@@ -163,13 +163,26 @@ export async function awaitTemplate(templates: Templates, templateId: string, wa
   }
 }
 
-/** A fresh template for a version, promoted from its snapshot and ready. A template names no source snapshot, so
- * none the provider already holds under the name is ever taken as this version's; the listing is read only to say
- * how many carry the name already, and a listing the provider will not give leaves the count out. */
+/** A fresh template for a version, promoted from its snapshot and ready: the one promote road, for the seal and the
+ * doctor alike. A template names no source snapshot, so none the provider already holds under the name is ever taken
+ * as this version's; the listing is read only to say how many carry the name already, and a listing the provider
+ * will not give leaves the count out. The provider's 404 on the promote is its word that the snapshot is gone. A
+ * template whose wait fails or runs out is deleted before the failure is thrown, so nothing stands on the snapshot
+ * unrecorded. */
 export async function promoteVersion(templates: Templates, snapshotId: string, name: string, wait: TemplateWait = {}): Promise<{ templateId: string; sharing?: number }> {
   const sharing = await templates.list().then(rows => rows.filter(t => t.name === name).length, () => undefined);
-  const templateId = await templates.promote(snapshotId, name);
-  await awaitTemplate(templates, templateId, wait);
+  let templateId: string;
+  try {
+    templateId = await templates.promote(snapshotId, name);
+  } catch (e) {
+    throw isMissing(e) ? new Error(SNAPSHOT_GONE_REASON) : e;
+  }
+  try {
+    await awaitTemplate(templates, templateId, wait);
+  } catch (e) {
+    await templates.delete(templateId).catch(() => {});
+    throw e;
+  }
   return { templateId, ...(sharing !== undefined ? { sharing } : {}) };
 }
 
@@ -665,8 +678,8 @@ export interface SealGoldenOptions extends MachineSize {
   snapshotRetryMs?: number;
   /** The golden the version belongs to, which names its template; the store's default key when absent. */
   name?: string;
-  /** The host sealing it, which names its template too; the bare hostname when absent. */
-  hostId?: string;
+  /** The host sealing it, in lowercase letters and digits, which names its template too. */
+  hostId: string;
   /** How long the seal waits for the promoted template to read ready, and how often it reads (tests shrink both). */
   templateWait?: Pick<TemplateWait, "readyMs" | "pollMs">;
 }
@@ -689,8 +702,8 @@ export interface BuildGoldenOptions extends MachineSize {
   onStage?: StageListener;
   /** The golden being built, which names the version's template; the store's default key when absent. */
   name?: string;
-  /** The host building it, which names the template too; the bare hostname when absent. */
-  hostId?: string;
+  /** The host building it, in lowercase letters and digits, which names the template too. */
+  hostId: string;
 }
 
 export interface ForkOverrides extends MachineSize {
@@ -827,11 +840,9 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     }
     // The template is what forks boot from, so the smoke proves it and not the snapshot behind it.
     if (templates !== undefined) {
-      const name = templateName(opts.hostId ?? hostname(), opts.name ?? "default", versionNum);
+      const name = templateName(opts.hostId, opts.name ?? "default", versionNum);
       stage("promoting", name);
-      // Held before the wait, so a template the provider fails is deleted with the snapshot below.
-      templateId = await templates.promote(snapshotId, name);
-      await awaitTemplate(templates, templateId, { ...opts.templateWait, onStatus: line => stage("promoting", line) });
+      templateId = (await promoteVersion(templates, snapshotId, name, { ...opts.templateWait, onStatus: line => stage("promoting", line) })).templateId;
     }
 
     stage("smoke-forking", smoke);
@@ -892,7 +903,8 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     // A refused snapshot changed nothing on the builder: it is left as the person set it up, for the next attach.
     if (builderAlive && !(e instanceof MachineAliveError) && !(e instanceof SnapshotFailedError)) await kill(builder.machine).catch(leaked);
     if (fork) await kill(fork).catch(leaked);
-    // The template goes first: the provider refuses to delete a snapshot while a template stands on it.
+    // A template that read ready and then lost its smoke goes first: the provider refuses to delete a snapshot while
+    // a template stands on it.
     if (templateId !== undefined) await templates?.delete(templateId).catch(() => {});
     if (snapshotId !== undefined) await opts.backend.deleteSnapshot(snapshotId).catch(() => {});
     stage("failed", detail);
@@ -1108,7 +1120,7 @@ export async function buildGolden(
     ...(smokeTimeoutMs !== undefined ? { smokeTimeoutMs } : {}),
     ...(onStage !== undefined ? { onStage } : {}),
     ...(name !== undefined ? { name } : {}),
-    ...(hostId !== undefined ? { hostId } : {}),
+    hostId,
   });
 }
 

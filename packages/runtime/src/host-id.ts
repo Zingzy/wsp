@@ -35,3 +35,10 @@ export function hostIdentity(dir = localConfigDir()): string {
     return hostname();
   }
 }
+
+/** The host's part of a template name: the per-install id alone, lowercase letters and digits, never the hostname
+ * (macOS hostnames carry dots and uppercase and change with the network, and the provider's name rules are not
+ * written down). An identity that fell back to the bare hostname is reduced to the same class. */
+export function templateHost(hostId: string): string {
+  return hostId.slice(hostId.lastIndexOf(":") + 1).toLowerCase().replace(/[^a-z0-9]/g, "");
+}

@@ -127,7 +127,8 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, SNAPSHOT_GONE_REASON, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { templateHost } from "./host-id.js";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -680,7 +681,7 @@ async function setHostname(machine: Machine, name: string): Promise<{ host: stri
   return { host, refused };
 }
 
-export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" | "manifest"> {
+export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" | "manifest" | "hostId"> {
   /** Store key; several goldens can coexist. */
   name?: string;
 }
@@ -1139,6 +1140,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
   const hostId = opts.hostId ?? hostname();
+  /** What names this host's templates: the id's hex alone, in the class the provider's name field has taken. */
+  const templateHostId = templateHost(hostId);
 
   const vaultPathsOf = async (m: Machine): Promise<string[]> => {
     if (opts.vaultPaths) return opts.vaultPaths;
@@ -3122,7 +3125,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(logins !== undefined ? { logins } : {}),
           keepBuilder: keep,
           name,
-          hostId,
+          hostId: templateHostId,
         }),
       );
       await store.put(GOLDENS, name, result.manifest);
@@ -3170,7 +3173,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...build,
           backend: b,
           name: key,
-          hostId,
+          hostId: templateHostId,
           labels: { ...build.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
         }),
@@ -3414,17 +3417,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // would delete under a template's forks (they hold no dependency on it).
       const standing = forkedFrom(head.snapshotId);
       if (o.keepPrevious === false) {
-        if (standing.length > 0) console.warn(`golden ${name} v${head.version} kept: ${standing.join(", ")} still on it`);
-        // A snapshot with live forks under it cannot be deleted (409 on Solari): the builder forked from it goes
-        // first, window or not.
-        else if (road === "fork" && builderKept) {
-          graceTimers.get(entry.record.id)?.();
-          graceTimers.delete(entry.record.id);
-          await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
-          await forgetBuilder(entry.record.id);
-          builderKept = false;
-        }
-        if (standing.length === 0) {
+        if (standing.length > 0) {
+          console.warn(`golden ${name} v${head.version} kept: ${standing.join(", ")} still on it`);
+        } else {
+          // A snapshot with live forks under it cannot be deleted (409 on Solari): the builder forked from it goes
+          // first, window or not.
+          if (road === "fork" && builderKept) {
+            graceTimers.get(entry.record.id)?.();
+            graceTimers.delete(entry.record.id);
+            await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
+            await forgetBuilder(entry.record.id);
+            builderKept = false;
+          }
           try {
             await dropImage(head);
             manifest = { ...manifest, versions: manifest.versions.filter(v => v.version !== head.version) };
@@ -3529,14 +3533,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const v of manifest?.versions ?? []) {
         if (v.templateId !== undefined) continue;
         try {
-          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, templateName(hostId, key, v.version));
+          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, templateName(templateHostId, key, v.version));
           const current = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
           if (current === undefined) throw new Error(`golden ${key} was dropped while its versions were being promoted`);
           await store.put(GOLDENS, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });
           rows.push({ golden: key, version: v.version, templateId, ...(sharing !== undefined ? { sharing } : {}) });
         } catch (e) {
-          // The provider's 404 on the promote is its word that the snapshot is gone; every other failure keeps its own words.
-          rows.push({ golden: key, version: v.version, error: isMissing(e) ? SNAPSHOT_GONE_REASON : e instanceof Error ? e.message : String(e) });
+          rows.push({ golden: key, version: v.version, error: e instanceof Error ? e.message : String(e) });
         }
       }
       return rows;

@@ -32,7 +32,21 @@ async function seeded(versions: ReturnType<typeof version>[], head = versions.at
 }
 
 describe("golden templates", () => {
-  it("a build on a backend with templates seals the version with the template promoted under wsp-default-v<n>, and the smoke fork boots from it", async () => {
+  it("the template's name is wsp-<hex>-<golden>-v<n>: the host's hex id alone, never the hostname, in the character class the provider has taken", async () => {
+    const backend = stubBackend();
+    backend.capabilities.templates = true;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, hostId: "zingzys-MacBook-Pro.local:9f3a1c2b" });
+    await rt.golden.build({ setup: "true", smoke: "true" });
+    expect(backend.promoted.map(p => p.name)).toEqual(["wsp-9f3a1c2b-default-v1"]);
+    expect(backend.promoted[0]!.name).toMatch(/^[a-z0-9-]+$/);
+    // The doctor's road names a version the same way the seal does.
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [version(1)] });
+    const doctorRt = createRuntime({ backend, store, adapters: {}, hostId: "zingzys-MacBook-Pro.local:9f3a1c2b" });
+    expect(await doctorRt.golden.promote()).toEqual([{ golden: "default", version: 1, templateId: "tpl_wsp-9f3a1c2b-default-v1", sharing: 1 }]);
+  });
+
+  it("a build on a backend with templates seals the version with the template promoted under wsp-<host>-default-v<n>, and the smoke fork boots from it", async () => {
     const backend = stubBackend();
     backend.capabilities.templates = true;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, hostId: "h1" });

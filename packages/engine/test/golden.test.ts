@@ -155,7 +155,7 @@ describe("golden pipeline", () => {
       "boom --version": { exitCode: 127, stdout: "", stderr: "not found" },
     });
     await expect(
-      buildGolden({ backend, setup: "true", smoke: "boom --version" }),
+      buildGolden({ backend, hostId: "h1", setup: "true", smoke: "boom --version" }),
     ).rejects.toThrow(/smoke/);
     expect(deletedSnapshots).toEqual(["snap_golden-v1"]); // the image that failed smoke does not survive
     expect(killed).toEqual(["m1", "m2"]); // builder and smoke fork both gone
@@ -164,7 +164,7 @@ describe("golden pipeline", () => {
   it("writes a complete manifest entry, sandbox kind by default, and kills builder and fork", async () => {
     const { backend, created, killed } = recordingBackend();
     const { manifest, version } = await buildGolden({
-      backend, baseTemplate: "base", setup: "echo setup", smoke: "true",
+      backend, hostId: "h1", baseTemplate: "base", setup: "echo setup", smoke: "true",
     });
     expect(version.version).toBe(1);
     expect(version.snapshotId).toBe("snap_golden-v1");
@@ -183,7 +183,7 @@ describe("golden pipeline", () => {
   it("stamps the builder as wsp-builder and the smoke fork as wsp-smoke with its own createdAt", async () => {
     const { backend, created } = recordingBackend();
     const labels = { wsp: "1", "wsp-owner": "h_me", createdAt: "2026-09-01T00:00:00.000Z" };
-    await buildGolden({ backend, setup: "true", smoke: "true", labels });
+    await buildGolden({ backend, hostId: "h1", setup: "true", smoke: "true", labels });
     expect(created[0]!.labels).toEqual({ ...labels, "wsp-builder": "1" });
     expect(created[1]!.labels).toMatchObject({ wsp: "1", "wsp-owner": "h_me", "wsp-smoke": "1" });
     expect(created[1]!.labels).not.toHaveProperty("wsp-builder");
@@ -192,8 +192,8 @@ describe("golden pipeline", () => {
 
   it("appends versions and rollback only moves head", async () => {
     const { backend } = recordingBackend();
-    const one = await buildGolden({ backend, setup: "a", smoke: "true" });
-    const two = await buildGolden({ backend, setup: "b", smoke: "true", manifest: one.manifest });
+    const one = await buildGolden({ backend, hostId: "h1", setup: "a", smoke: "true" });
+    const two = await buildGolden({ backend, hostId: "h1", setup: "b", smoke: "true", manifest: one.manifest });
     expect(two.manifest.versions.map(v => v.version)).toEqual([1, 2]);
     expect(two.manifest.head).toBe(2);
     const rolled = rollback(two.manifest, 1);
@@ -204,7 +204,7 @@ describe("golden pipeline", () => {
 
   it("fork passes envs/fromSnapshot, restores the sealed kind, and never mutates the manifest", async () => {
     const { backend, created } = recordingBackend();
-    const { manifest } = await buildGolden({ backend, kind: "desktop", setup: "s", smoke: "true" });
+    const { manifest } = await buildGolden({ backend, hostId: "h1", kind: "desktop", setup: "s", smoke: "true" });
     const before = JSON.stringify(manifest);
     const m = await forkGolden(backend, manifest, { envs: { FOO: "bar" }, labels: { wsp: "1" } });
     expect(m.id).toBe("m3");
@@ -273,7 +273,7 @@ describe("interactive golden: prepare then seal", () => {
   it("only the builder idles to kill, after a window long enough for a person; the smoke fork keeps the provider default", async () => {
     const { backend, created } = recordingBackend();
     const builder = await prepareBuilder({ backend, setup: "true" });
-    await sealGolden(builder, { backend, smoke: "true" });
+    await sealGolden(builder, { backend, hostId: "h1", smoke: "true" });
     expect(created[0]).toMatchObject({ onIdle: "kill", idleTimeoutMs: BUILDER_IDLE_MS });
     expect(BUILDER_IDLE_MS).toBeGreaterThanOrEqual(4 * 60 * 60_000);
     expect(created[1]).toMatchObject({ fromSnapshot: "snap_golden-v1" });
@@ -298,7 +298,7 @@ describe("interactive golden: prepare then seal", () => {
     const { backend, created, timeline } = recordingBackend();
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, kind: "desktop", setup: "echo setup", onStage });
-    const { manifest, version } = await sealGolden(builder, { backend, smoke: "claude --version", onStage });
+    const { manifest, version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "claude --version", onStage });
     expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
     expect(created[1]).toMatchObject({ kind: "desktop", fromSnapshot: "snap_golden-v1" });
     expect(created[1]!.template).toBeUndefined();
@@ -318,7 +318,7 @@ describe("interactive golden: prepare then seal", () => {
     const { backend } = recordingBackend({ [smoke]: { exitCode: 0, stdout: `2.1.263 (Claude Code)\n${banner}\n`, stderr: "" } }, { stream: true });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true" });
-    await sealGolden(builder, { backend, smoke, onStage });
+    await sealGolden(builder, { backend, hostId: "h1", smoke, onStage });
     const forking = stages.filter(s => s.startsWith("smoke-forking:"));
     expect(forking).toContain(`smoke-forking:${banner}`);
     expect(forking.at(-1)).toBe("smoke-forking:2 agents answer: Claude Code, Hermes Agent");
@@ -336,28 +336,28 @@ describe("interactive golden: prepare then seal", () => {
   it("seal records whether the image carries the browser shim, read on the smoke fork", async () => {
     const withShim = recordingBackend({}, { exec: cmd => (cmd === "test -x /usr/local/bin/wsp-open" ? { exitCode: 0, stdout: "", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" }) });
     const b1 = await prepareBuilder({ backend: withShim.backend, setup: "true" });
-    expect((await sealGolden(b1, { backend: withShim.backend, smoke: "true" })).version.browserShim).toBe(true);
+    expect((await sealGolden(b1, { backend: withShim.backend, hostId: "h1", smoke: "true" })).version.browserShim).toBe(true);
 
     const without = recordingBackend({}, { exec: cmd => (cmd === "test -x /usr/local/bin/wsp-open" ? { exitCode: 1, stdout: "", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" }) });
     const b2 = await prepareBuilder({ backend: without.backend, setup: "true" });
-    expect((await sealGolden(b2, { backend: without.backend, smoke: "true" })).version.browserShim).toBe(false);
+    expect((await sealGolden(b2, { backend: without.backend, hostId: "h1", smoke: "true" })).version.browserShim).toBe(false);
   });
 
   it("seal stamps the logins it is given onto the version, name and state only", async () => {
     const { backend } = recordingBackend();
     const b = await prepareBuilder({ backend, setup: "true" });
     const logins = [{ name: "GitHub CLI login", state: "signed-in" as const }, { name: "Codex login", state: "skipped" as const }];
-    const { version } = await sealGolden(b, { backend, smoke: "true", logins });
+    const { version } = await sealGolden(b, { backend, hostId: "h1", smoke: "true", logins });
     expect(version.logins).toEqual(logins);
     const b2 = await prepareBuilder({ backend, setup: "true" });
-    expect((await sealGolden(b2, { backend, smoke: "true" })).version.logins).toBeUndefined();
+    expect((await sealGolden(b2, { backend, hostId: "h1", smoke: "true" })).version.logins).toBeUndefined();
   });
 
   it("seal retries a kill the provider accepted without acting on, and forks only once the builder reads gone", async () => {
     const { backend, timeline } = recordingBackend({}, { ignoreKill: (id, nth) => id === "m1" && nth === 1 });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true" });
-    const { version } = await sealGolden(builder, { backend, smoke: "true", killConfirm: FAST_KILL, onStage });
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", killConfirm: FAST_KILL, onStage });
     expect(version.version).toBe(1);
     expect(stages.at(-1)).toBe("sealed:v1");
     expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "kill m1", "create m2", "kill m2"]);
@@ -368,7 +368,7 @@ describe("interactive golden: prepare then seal", () => {
     const { backend, created, timeline, deletedSnapshots } = recordingBackend({}, { ignoreKill: () => true });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true" });
-    const err = await sealGolden(builder, { backend, smoke: "true", killConfirm: FAST_KILL, onStage }).catch(e => e as unknown);
+    const err = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", killConfirm: FAST_KILL, onStage }).catch(e => e as unknown);
     expect(err).toBeInstanceOf(MachineAliveError);
     expect(err).toMatchObject({ kind: "machineAlive", machineId: "m1", state: "running" });
     expect((err as Error).message).toMatch(/m1/);
@@ -382,7 +382,7 @@ describe("interactive golden: prepare then seal", () => {
     const { backend, timeline, deletedSnapshots } = recordingBackend({}, { ignoreKill: id => id === "m2" });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true" });
-    const { manifest } = await sealGolden(builder, { backend, smoke: "true", killConfirm: FAST_KILL, onStage });
+    const { manifest } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", killConfirm: FAST_KILL, onStage });
     expect(manifest.head).toBe(1);
     expect(deletedSnapshots).toEqual([]);
     expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2", "kill m2"]);
@@ -392,7 +392,7 @@ describe("interactive golden: prepare then seal", () => {
   it("seal refuses a builder that is not first-life with a typed error and touches nothing", async () => {
     const { backend, timeline, snapshots } = recordingBackend();
     const builder = await prepareBuilder({ backend, setup: "true" });
-    const err = await sealGolden({ ...builder, firstLife: false }, { backend, smoke: "true" }).catch(e => e as unknown);
+    const err = await sealGolden({ ...builder, firstLife: false }, { backend, hostId: "h1", smoke: "true" }).catch(e => e as unknown);
     expect(err).toBeInstanceOf(NotFirstLifeError);
     expect((err as NotFirstLifeError).kind).toBe("notFirstLife");
     expect((err as NotFirstLifeError).machineId).toBe("m1");
@@ -404,7 +404,7 @@ describe("interactive golden: prepare then seal", () => {
     const { backend, killed, timeline } = recordingBackend({}, { snapshot: (_id, nth) => { throw refusedSnapshot(`req_${nth}`); } });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "a" });
-    const err = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
+    const err = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
     expect(err).toBeInstanceOf(SnapshotFailedError);
     expect(err).toMatchObject({ kind: "snapshotFailed", machineId: "m1", attempts: 3, builderState: "running", answer: { status: 502, message: "Failed to snapshot sandbox", requestId: "req_3" } });
     expect(timeline).toEqual(["create m1", "snapshot m1", "snapshot m1", "snapshot m1"]);
@@ -421,7 +421,7 @@ describe("interactive golden: prepare then seal", () => {
     const { backend, timeline } = recordingBackend({}, { snapshot: (_id, nth) => { if (nth === 1) throw refusedSnapshot("req_1"); } });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "a" });
-    const { version } = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 });
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, snapshotRetryMs: 1 });
     expect(version.snapshotId).toBe("snap_golden-v1");
     expect(timeline).toEqual(["create m1", "snapshot m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
     expect(stages.at(-1)).toBe("sealed:v1");
@@ -431,7 +431,7 @@ describe("interactive golden: prepare then seal", () => {
     const { backend, killed, timeline, gone } = recordingBackend({}, { snapshot: id => { gone.add(id); throw refusedSnapshot("req_1"); } });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "a" });
-    const err = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
+    const err = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
     expect(err).toMatchObject({ kind: "snapshotFailed", attempts: 1, builderState: "gone" });
     expect(timeline).toEqual(["create m1", "snapshot m1"]);
     expect(killed).toEqual([]);
@@ -442,7 +442,7 @@ describe("interactive golden: prepare then seal", () => {
     const { backend, killed, timeline } = recordingBackend({}, { snapshot: () => { throw refusedSnapshot("req_1"); }, state: () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); } });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "a" });
-    const err = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
+    const err = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
     expect(err).toMatchObject({ kind: "snapshotFailed", attempts: 1, builderState: "unread", readError: "upstream sad" });
     expect(timeline).toEqual(["create m1", "snapshot m1"]);
     expect(killed).toEqual([]);
@@ -452,7 +452,7 @@ describe("interactive golden: prepare then seal", () => {
   it("any other snapshot failure is not asked again and consumes the builder as before", async () => {
     const { backend, killed, timeline } = recordingBackend({}, { snapshot: () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); } });
     const builder = await prepareBuilder({ backend, setup: "a" });
-    await expect(sealGolden(builder, { backend, smoke: "true", snapshotRetryMs: 1 })).rejects.toThrow("upstream sad");
+    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "true", snapshotRetryMs: 1 })).rejects.toThrow("upstream sad");
     expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1"]);
     expect(killed).toEqual(["m1"]);
   });
@@ -460,10 +460,10 @@ describe("interactive golden: prepare then seal", () => {
   it("a failed seal kills every machine, drops the snapshot, and leaves the prior manifest untouched", async () => {
     const { backend, killed, deletedSnapshots } = recordingBackend({ smoke: { exitCode: 2, stdout: "", stderr: "broken" } });
     const { stages, onStage } = stageRecorder();
-    const one = await buildGolden({ backend, setup: "a", smoke: "true" });
+    const one = await buildGolden({ backend, hostId: "h1", setup: "a", smoke: "true" });
     const before = JSON.stringify(one.manifest);
     const builder = await prepareBuilder({ backend, setup: "b" });
-    await expect(sealGolden(builder, { backend, smoke: "smoke", manifest: one.manifest, onStage })).rejects.toThrow(/smoke failed/);
+    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "smoke", manifest: one.manifest, onStage })).rejects.toThrow(/smoke failed/);
     expect(JSON.stringify(one.manifest)).toBe(before);
     expect(killed).toEqual(["m1", "m2", "m3", "m4"]);
     expect(deletedSnapshots).toEqual(["snap_golden-v2"]);
@@ -474,11 +474,11 @@ describe("interactive golden: prepare then seal", () => {
 describe("golden templates", () => {
   const FAST_WAIT = { readyMs: 50, pollMs: 1 };
 
-  it("on a backend with templates the seal promotes the snapshot under wsp-<golden>-v<n> after the builder is killed, waits for ready, records the id, and the smoke fork boots from the template", async () => {
+  it("on a backend with templates the seal promotes the snapshot under wsp-<host>-<golden>-v<n> after the builder is killed, waits for ready, records the id, and the smoke fork boots from the template", async () => {
     const { backend, created, timeline, promoted } = recordingBackend({}, { templates: true });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "echo setup", onStage });
-    const { version } = await sealGolden(builder, { backend, smoke: "claude --version", onStage, name: "work", hostId: "h1", templateWait: FAST_WAIT });
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "claude --version", onStage, name: "work", templateWait: FAST_WAIT });
     expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "promote snap_golden-v1", "create m2", "kill m2"]);
     expect(promoted).toEqual([{ snapshotId: "snap_golden-v1", name: "wsp-h1-work-v1" }]);
     expect(created[1]).toMatchObject({ kind: "sandbox", template: "tpl_snap_golden-v1" });
@@ -491,16 +491,18 @@ describe("golden templates", () => {
 
   it("the template's name carries the host and the golden, the golden defaulting to the store's default key: one rule", async () => {
     const { backend, promoted } = recordingBackend({}, { templates: true });
-    await buildGolden({ backend, setup: "true", smoke: "true", hostId: "h1" });
+    await buildGolden({ backend, hostId: "h1", setup: "true", smoke: "true" });
     expect(promoted.map(p => p.name)).toEqual(["wsp-h1-default-v1"]);
     expect(templateName("h1", "default", 1)).toBe("wsp-h1-default-v1");
+    expect(templateName("9f3a1c2b", "default", 12)).toBe("wsp-9f3a1c2b-default-v12");
+    expect(templateName("9f3a1c2b", "default", 12)).toMatch(/^[a-z0-9-]+$/);
   });
 
   it("a template still building is read again until ready, each read a promoting line", async () => {
     const { backend } = recordingBackend({}, { templates: true, templateStatus: (_id, nth) => (nth < 3 ? "building" : "ready") });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true" });
-    const { version } = await sealGolden(builder, { backend, smoke: "true", onStage, hostId: "h1", templateWait: FAST_WAIT });
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, templateWait: FAST_WAIT });
     expect(version.templateId).toBe("tpl_snap_golden-v1");
     expect(stages.filter(s => s.startsWith("promoting"))).toEqual([
       "promoting:wsp-h1-default-v1", "promoting:tpl_snap_golden-v1 is building; asking again", "promoting:tpl_snap_golden-v1 is building; asking again", "promoting:tpl_snap_golden-v1 is ready",
@@ -511,7 +513,7 @@ describe("golden templates", () => {
     const { backend, created, deletedSnapshots, deletedTemplates } = recordingBackend({}, { templates: true, templateStatus: () => "failed" });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true" });
-    await expect(sealGolden(builder, { backend, smoke: "true", onStage, templateWait: FAST_WAIT })).rejects.toThrow("the provider failed the template tpl_snap_golden-v1: restore copy failed");
+    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, templateWait: FAST_WAIT })).rejects.toThrow("the provider failed the template tpl_snap_golden-v1: restore copy failed");
     expect(created).toHaveLength(1);
     expect(deletedTemplates).toEqual(["tpl_snap_golden-v1"]);
     expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
@@ -521,12 +523,12 @@ describe("golden templates", () => {
   it("a template that never reads ready inside the wait ends the seal naming the last status and the wait", async () => {
     const { backend } = recordingBackend({}, { templates: true, templateStatus: () => "building" });
     const builder = await prepareBuilder({ backend, setup: "true" });
-    await expect(sealGolden(builder, { backend, smoke: "true", templateWait: { readyMs: 20, pollMs: 1 } })).rejects.toThrow("the template tpl_snap_golden-v1 still reads building after 20ms");
+    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "true", templateWait: { readyMs: 20, pollMs: 1 } })).rejects.toThrow("the template tpl_snap_golden-v1 still reads building after 20ms");
   });
 
   it("forkGolden and the update's builder boot a durable version from its template and a version without one from its snapshot", async () => {
     const { backend, created } = recordingBackend({}, { templates: true });
-    const { manifest, version } = await buildGolden({ backend, setup: "true", smoke: "true" });
+    const { manifest, version } = await buildGolden({ backend, hostId: "h1", setup: "true", smoke: "true" });
     await forkGolden(backend, manifest);
     await upgradeBuilder({ backend, head: version, delta: { import: { recipeHash: "h2", tools: [], agents: [] }, retired: [], retiredOnImage: [] }, setup: "true" });
     expect(created.slice(2).map(c => [c.template, c.fromSnapshot])).toEqual([["tpl_snap_golden-v1", undefined], ["tpl_snap_golden-v1", undefined]]);
@@ -555,6 +557,24 @@ describe("golden templates", () => {
     expect(templates.has("tpl_his")).toBe(true);
   });
 
+  it("promoteVersion deletes the template it promoted when the ready wait fails or runs out, so nothing stands on the snapshot unrecorded, and the failure keeps the provider's words", async () => {
+    const failed = recordingBackend({}, { templates: true, templateStatus: () => "failed" });
+    await expect(promoteVersion(templatesOf(failed.backend)!, "snap_v1", "wsp-h1-default-v1", FAST_WAIT)).rejects.toThrow("the provider failed the template tpl_snap_v1: restore copy failed");
+    expect(failed.deletedTemplates).toEqual(["tpl_snap_v1"]);
+    expect(failed.templates.size).toBe(0);
+    const slow = recordingBackend({}, { templates: true, templateStatus: () => "building" });
+    await expect(promoteVersion(templatesOf(slow.backend)!, "snap_v1", "wsp-h1-default-v1", { readyMs: 20, pollMs: 1 })).rejects.toThrow("the template tpl_snap_v1 still reads building after 20ms");
+    expect(slow.deletedTemplates).toEqual(["tpl_snap_v1"]);
+  });
+
+  it("a smoke that fails after the template read ready still deletes the template before the snapshot", async () => {
+    const { backend, deletedSnapshots, deletedTemplates } = recordingBackend({ smoke: { exitCode: 2, stdout: "", stderr: "broken" } }, { templates: true });
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "smoke", templateWait: FAST_WAIT })).rejects.toThrow(/smoke failed/);
+    expect(deletedTemplates).toEqual(["tpl_snap_golden-v1"]);
+    expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
+  });
+
   it("promoteVersion leaves the count out when the provider will not give the listing, and the promote still lands", async () => {
     const { backend } = recordingBackend({}, { templates: true });
     backend.listTemplates = async () => {
@@ -568,7 +588,7 @@ describe("golden disk", () => {
   it("every create asks for the 20 GB disk: the builder, the smoke fork, a workspace fork and an upgrade fork", async () => {
     const { backend, created } = recordingBackend();
     const builder = await prepareBuilder({ backend, setup: "true" });
-    const { manifest, version } = await sealGolden(builder, { backend, smoke: "true" });
+    const { manifest, version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true" });
     await forkGolden(backend, manifest);
     await upgradeBuilder({ backend, head: version, delta: { import: { recipeHash: "h2", tools: [], agents: [] }, retired: [], retiredOnImage: [] }, setup: "true" });
     expect(created.map(c => c.diskGb)).toEqual([BUILDER_DISK_GB, BUILDER_DISK_GB, BUILDER_DISK_GB, BUILDER_DISK_GB]);
@@ -597,14 +617,14 @@ describe("golden size", () => {
   it("seal forks the smoke at the builder's size and records that size on the version", async () => {
     const { backend, created } = recordingBackend({}, { built: clamped });
     const builder = await prepareBuilder({ backend, setup: "true", memMb: 8192 });
-    const { version } = await sealGolden(builder, { backend, smoke: "true" });
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true" });
     expect(created[1]).toMatchObject({ fromSnapshot: "snap_golden-v1", cpu: 2, memMb: 2048 });
     expect(version.size).toEqual({ cpu: 2, memMb: 2048 });
   });
 
   it("forkGolden inherits the sealed size unless overridden", async () => {
     const { backend, created } = recordingBackend();
-    const { manifest } = await buildGolden({ backend, setup: "s", smoke: "true", memMb: 8192 });
+    const { manifest } = await buildGolden({ backend, hostId: "h1", setup: "s", smoke: "true", memMb: 8192 });
     expect(manifest.versions[0]!.size).toEqual({ cpu: 2, memMb: 8192 });
     await forkGolden(backend, manifest);
     await forkGolden(backend, manifest, { cpu: 4 });
@@ -911,7 +931,7 @@ describe("golden import stages", () => {
     const shell = { shell: "zsh" as const, frameworks: [], cmd: "install-zsh" };
     const node = { floor: 22, version: "v22.0.0", agents: ["Codex"], cmd: "echo NODE_HAVE v$(node -v); node-install" };
     const builder = await prepareBuilder({ backend, setup: "the-setup", deployDaemon: async () => "node v22", fetch, import: importOf({ shell, node }) });
-    await sealGolden(builder, { backend, smoke: "unused" });
+    await sealGolden(builder, { backend, hostId: "h1", smoke: "unused" });
     const scripts = ran.filter(r => r.id === "m1").map(r => r.script);
     const oneOf = (needle: string) => {
       const hits = scripts.filter(s => s.includes(needle));
@@ -1006,7 +1026,7 @@ describe("golden import stages", () => {
     for (const before of ["tar xzf", "claude-install", "codex-install", "brew install gh", "bun@1.4.0", "autoremove"]) expect(at("zsh -lic true"), before).toBeGreaterThan(at(before));
     expect(stages.some(l => l.startsWith("installing-mcp:shell noise: zsh: command not found: starship, 2 lines; machine context:"))).toBe(true);
     expect(builder.import?.shellNoise).toBe("zsh: command not found: starship, 2 lines");
-    expect((await sealGolden(builder, { backend: noisy.backend, smoke: "true" })).version.shellNoise).toBe("zsh: command not found: starship, 2 lines");
+    expect((await sealGolden(builder, { backend: noisy.backend, hostId: "h1", smoke: "true" })).version.shellNoise).toBe("zsh: command not found: starship, 2 lines");
 
     const quiet = backendFor();
     const q = stageRecorder();
@@ -1016,7 +1036,7 @@ describe("golden import stages", () => {
     const h = await prepareBuilder({ backend: hung.backend, setup: "true", fetch: hung.fetch, import: importOf({ shell }) });
     expect(h.import?.shellNoise).toBe("timed out after 60s");
     expect(b.import).not.toHaveProperty("shellNoise");
-    expect((await sealGolden(b, { backend: quiet.backend, smoke: "true" })).version).not.toHaveProperty("shellNoise");
+    expect((await sealGolden(b, { backend: quiet.backend, hostId: "h1", smoke: "true" })).version).not.toHaveProperty("shellNoise");
     const none = backendFor();
     await prepareBuilder({ backend: none.backend, setup: "true", fetch: none.fetch, import: importOf() });
     expect(none.cmds.some(c => c.includes("-lic true"))).toBe(false);
@@ -1041,7 +1061,7 @@ describe("golden import stages", () => {
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
     expect(stages).toContain("installing-tools:2 installed, 1 failed: gh (Error: gh: no bottle available!); caches swept; 2.9 GB free");
     expect(results[0]!.tools[1]).toEqual({ id: "tools/brew/gh", label: "gh", outcome: "failed", note: "Error: gh: no bottle available!", ms: expect.any(Number) });
-    const { version } = await sealGolden(builder, { backend, smoke: "should-not-run" });
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "should-not-run" });
     expect(version.smoke.cmd).toBe("claude --version && codex --version");
   });
 
@@ -1052,7 +1072,7 @@ describe("golden import stages", () => {
     const results: ImportResult[] = [];
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ tools: [...importOf().tools, ...custom], onResult: r => void results.push(r) }) });
     expect(results[0]!.tools.at(-1)).toEqual({ id: "tools/custom/just", label: "just", outcome: "failed", note: "Error: no formula just", ms: expect.any(Number) });
-    const { version } = await sealGolden(builder, { backend, smoke: "should-not-run" });
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "should-not-run" });
     expect(version.version).toBe(1);
   });
 
@@ -1914,7 +1934,7 @@ describe("golden import stages", () => {
       { id: "tools/brew/gh", name: "gh", outcome: "skipped", note: "Homebrew did not install" },
     ];
     expect(builder.import?.missingTools).toEqual(want);
-    expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual(want);
+    expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.missingTools).toEqual(want);
   });
 
   it("a base floor row that failed reaches the ledger and the sealed version with its name, outcome and reason, one shape with the tools stage", async () => {
@@ -1922,7 +1942,7 @@ describe("golden import stages", () => {
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
     const docker = { id: "base/docker", name: "Docker engine and compose", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" };
     expect(builder.import?.missingTools).toEqual([docker]);
-    expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual([docker]);
+    expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.missingTools).toEqual([docker]);
   });
 
   it("the rc calls the pack silenced land on the ledger and the seal stamps them on the version, with the stage line naming them; a pack that silenced nothing leaves both without", async () => {
@@ -1932,19 +1952,19 @@ describe("golden import stages", () => {
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ files: { ...importOf().files!, pack } }) });
     expect(builder.import?.silenced).toEqual(["starship", "eza", "diskbloom"]);
     expect(stages).toContain("applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer); silenced in the shell: starship, eza, diskbloom");
-    expect((await sealGolden(builder, { backend, smoke: "true" })).version.silenced).toEqual(["starship", "eza", "diskbloom"]);
+    expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.silenced).toEqual(["starship", "eza", "diskbloom"]);
     const again = await applyGoldenImport(builder.machine, { import: importOf(), setup: "true", ledger: builder.import, fetch });
     expect(again.ledger.silenced).toEqual(["starship", "eza", "diskbloom"]);
     const quiet = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
     expect(quiet.import).not.toHaveProperty("silenced");
-    expect((await sealGolden(quiet, { backend, smoke: "true" })).version).not.toHaveProperty("silenced");
+    expect((await sealGolden(quiet, { backend, hostId: "h1", smoke: "true" })).version).not.toHaveProperty("silenced");
   });
 
   it("a builder whose tools all installed records no missing list, and its version carries none", async () => {
     const { backend, fetch } = backendFor();
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
     expect(builder.import?.missingTools).toBeUndefined();
-    expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toBeUndefined();
+    expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.missingTools).toBeUndefined();
   });
 
   it("an attach whose tools stage is already applied carries the earlier missing list", async () => {
@@ -1961,12 +1981,12 @@ describe("golden import stages", () => {
     const files = { ...importOf().files!, pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [...leftBehind], cut: [], silenced: [], leftBehind }) };
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ files }) });
     expect(builder.import?.leftBehind).toEqual(leftBehind);
-    expect((await sealGolden(builder, { backend, smoke: "true" })).version.leftBehind).toEqual(leftBehind);
+    expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.leftBehind).toEqual(leftBehind);
     const again = await applyGoldenImport(builder.machine, { import: importOf(), setup: "true", ledger: builder.import, fetch });
     expect(again.ledger.leftBehind).toEqual(leftBehind);
     const clean = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
     expect(clean.import?.leftBehind).toBeUndefined();
-    expect((await sealGolden(clean, { backend, smoke: "true" })).version.leftBehind).toBeUndefined();
+    expect((await sealGolden(clean, { backend, hostId: "h1", smoke: "true" })).version.leftBehind).toBeUndefined();
   });
 
   describe("golden update", () => {
@@ -1993,7 +2013,7 @@ describe("golden import stages", () => {
       const { backend, killed, timeline, fetch } = backendFor();
       const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ recipe: SNAPSHOT }) });
       const { stages, onStage } = stageRecorder();
-      const result = await sealGolden(builder, { backend, smoke: "unused", keepBuilder: true, onStage });
+      const result = await sealGolden(builder, { backend, hostId: "h1", smoke: "unused", keepBuilder: true, onStage });
       expect(result.builderKept).toBe(true);
       expect(result.version.version).toBe(1);
       expect(killed).toEqual(["m2"]);
@@ -2006,7 +2026,7 @@ describe("golden import stages", () => {
       const { backend, killed } = recordingBackend();
       const builder = await prepareBuilder({ backend, setup: "true" });
       const { stages, onStage } = stageRecorder();
-      const result = await sealGolden(builder, { backend, smoke: "true", onStage });
+      const result = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage });
       expect(result.builderKept).toBe(false);
       expect(killed).toEqual(["m1", "m2"]);
       expect(stages.at(-1)).toBe("sealed:v1");
@@ -2027,7 +2047,7 @@ describe("golden import stages", () => {
       };
       const builder = await prepareBuilder({ backend: capped, setup: "true" });
       const { stages, onStage } = stageRecorder();
-      const result = await sealGolden(builder, { backend: capped, smoke: "true", keepBuilder: true, onStage });
+      const result = await sealGolden(builder, { backend: capped, hostId: "h1", smoke: "true", keepBuilder: true, onStage });
       expect(result.builderKept).toBe(false);
       expect(killed).toEqual(["m1", "m2"]);
       expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
@@ -2038,7 +2058,7 @@ describe("golden import stages", () => {
     it("a smoke that fails on a kept builder still kills the builder and drops the snapshot", async () => {
       const { backend, killed, deletedSnapshots } = recordingBackend({ "boom --version": { exitCode: 127, stdout: "", stderr: "not found" } });
       const builder = await prepareBuilder({ backend, setup: "true" });
-      await expect(sealGolden(builder, { backend, smoke: "boom --version", keepBuilder: true })).rejects.toThrow(/smoke/);
+      await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "boom --version", keepBuilder: true })).rejects.toThrow(/smoke/);
       expect(killed).toEqual(["m1", "m2"]);
       expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
     });
@@ -2163,14 +2183,14 @@ describe("golden import stages", () => {
       expect(ledger.leftBehind).toEqual([hook]);
       const builder = await upgradeBuilder({ backend, head: { ...head, leftBehind: [hook] }, delta: untouched, setup: "true", fetch });
       expect(builder.import?.leftBehind).toEqual([hook]);
-      expect((await sealGolden(builder, { backend, smoke: "true" })).version.leftBehind).toEqual([hook]);
+      expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.leftBehind).toEqual([hook]);
     });
 
     it("upgradeBuilder hands the head's missing tools to the delta, so the next version still names them", async () => {
       const { backend, fetch } = backendFor();
       const builder = await upgradeBuilder({ backend, head: { ...head, missingTools: [gopls] }, delta: deltaOf({ retired: [], retiredOnImage: [] }), setup: "true", fetch });
       expect(builder.import?.missingTools).toEqual([gopls]);
-      expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual([gopls]);
+      expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.missingTools).toEqual([gopls]);
     });
 
     it("the seal records the floor read on the builder, an upgrade's fork carries its head's, and a version without one is refused before any machine boots", async () => {
@@ -2180,11 +2200,11 @@ describe("golden import stages", () => {
       const floor = [{ name: "node", version: "22.23.2" }, { name: "npm", version: "10.9.4" }, { name: "jq", version: "1.7.1" }];
       const builder = await prepareBuilder({ backend, setup: "true" });
       expect(builder.base).toEqual(floor);
-      const v1 = await sealGolden(builder, { backend, smoke: "true" });
+      const v1 = await sealGolden(builder, { backend, hostId: "h1", smoke: "true" });
       expect(v1.version.base).toEqual(floor);
       const b2 = await upgradeBuilder({ backend, head: v1.version, delta: deltaOf({ retired: [], retiredOnImage: [] }), setup: "true", fetch });
       expect(b2.base).toEqual(floor);
-      expect((await sealGolden(b2, { backend, smoke: "true", manifest: v1.manifest })).version.base).toEqual(floor);
+      expect((await sealGolden(b2, { backend, hostId: "h1", smoke: "true", manifest: v1.manifest })).version.base).toEqual(floor);
 
       const booted = created.length;
       const { base: _floor, ...preFloor } = v1.version;
@@ -2255,7 +2275,7 @@ describe("golden import stages", () => {
       // The setup line runs on every harness stage; what this counts is the rows.
       const guardedCmds = (from: number) => cmds.slice(from).filter(c => c.includes("setsid bash -c") && !c.includes("\ntrue' &"));
 
-      const v1 = await sealGolden(await prepareBuilder({ backend, setup: "true", fetch, import: planOf(base, "h1", results) }), { backend, smoke: "true" });
+      const v1 = await sealGolden(await prepareBuilder({ backend, setup: "true", fetch, import: planOf(base, "h1", results) }), { backend, hostId: "h1", smoke: "true" });
       const n1 = cmds.length;
       expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
 
@@ -2268,7 +2288,7 @@ describe("golden import stages", () => {
       expect(installs.some(c => c.includes("uninstall"))).toBe(false);
       expect(results.at(-1)!.tools.filter(t => binaries.some(b => b.id === t.id)).map(t => [t.id, t.outcome])).toEqual([["tools/brew/gh", "installed"], ["tools/brew/zingzy/tap/diskbloom", "installed"]]);
       expect(results.at(-1)!.retired).toBeUndefined();
-      const v2 = await sealGolden(b2, { backend, smoke: "true", manifest: v1.manifest });
+      const v2 = await sealGolden(b2, { backend, hostId: "h1", smoke: "true", manifest: v1.manifest });
       expect(v2.version.version).toBe(2);
 
       const n2 = cmds.length;
@@ -2292,7 +2312,7 @@ describe("golden import stages", () => {
         ],
         context: [],
       });
-      const v3 = await sealGolden(b3, { backend, smoke: "true", manifest: v2.manifest });
+      const v3 = await sealGolden(b3, { backend, hostId: "h1", smoke: "true", manifest: v2.manifest });
       expect(v3.version.version).toBe(3);
       // The lineage carries what v3's image holds that its recipe does not ask for.
       expect(v3.version.retired).toEqual([{ id: "tools/brew/gh", name: "gh" }, { id: "tools/brew/zingzy/tap/diskbloom", name: "diskbloom" }]);
@@ -2324,7 +2344,7 @@ describe("golden import stages", () => {
       const { backend, fetch } = backendFor();
       const builder = await upgradeBuilder({ backend, head, delta: deltaOf(), setup: "true", fetch });
       expect(builder.retired).toEqual(deltaOf().retired);
-      const sealed = await sealGolden(builder, { backend, smoke: "true", manifest: { head: 1, versions: [head] } });
+      const sealed = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", manifest: { head: 1, versions: [head] } });
       expect(sealed.version).toMatchObject({ version: 2, parentSnapshotId: head.snapshotId, retired: deltaOf().retired });
     });
   });

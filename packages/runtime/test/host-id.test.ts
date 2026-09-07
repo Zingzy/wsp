@@ -3,10 +3,22 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hostIdentity, localConfigDir } from "../src/host-id.js";
+import { hostIdentity, localConfigDir, templateHost } from "../src/host-id.js";
 import { withRefused } from "./fs-refusal.js";
 
 vi.mock("node:fs", async importOriginal => (await import("./fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
+
+describe("templateHost", () => {
+  it("is the per-install hex id alone, never the hostname, so a provider name field gets lowercase letters and digits only", () => {
+    expect(templateHost("zingzys-MacBook-Pro.local:9f3a1c2b")).toBe("9f3a1c2b");
+    expect(templateHost("dev.box:00ff00ff")).toBe("00ff00ff");
+  });
+
+  it("an identity that fell back to the bare hostname is reduced to the same character class", () => {
+    expect(templateHost("zingzys-MacBook-Pro.local")).toBe("zingzysmacbookprolocal");
+    expect(templateHost("zingzys-MacBook-Pro.local")).toMatch(/^[a-z0-9]+$/);
+  });
+});
 
 describe("host identity", () => {
   const dirs: string[] = [];
