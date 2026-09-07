@@ -3,7 +3,8 @@
 // contract components code against.
 import { useEffect } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { noSuchThreadLine } from "../actions/format.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
@@ -127,6 +128,15 @@ const NO_LINES: CreationLine[] = [];
 function addressed(workspaces: readonly WorkspaceView[]): string | undefined {
   const id = typeof window === "undefined" ? undefined : workspaceFromHash(window.location.hash);
   return id !== undefined && workspaces.some(w => w.id === id) ? id : undefined;
+}
+
+/** The thread the page's address names, when the workspace the page opens on has a session of that thread; a thread
+ * the list does not carry opens the workspace alone, and says so. */
+function addressedThread(workspaceId: string | null, rows: readonly SessionView[]): { threadId: string | null; toast?: string } {
+  const found = typeof window === "undefined" ? undefined : threadFromHash(window.location.hash);
+  if (found === undefined || found.workspaceId !== workspaceId) return { threadId: null };
+  if (rows.some(r => r.workspaceId === workspaceId && r.threadId === found.threadId)) return { threadId: found.threadId };
+  return { threadId: null, toast: noSuchThreadLine(found.threadId) };
 }
 
 let creationSeq = 0;
@@ -260,7 +270,11 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       if (!api) return;
       const [workspaces, rows] = await Promise.all([api.listWorkspaces(), api.listSessions().catch(() => NO_SESSIONS)]);
-      set(s => ({ workspaces, sessions: groupSessions(rows), ready: true, selectedId: s.selectedId ?? addressed(workspaces) ?? workspaces[0]?.id ?? null }));
+      set(s => {
+        const selectedId = s.selectedId ?? addressed(workspaces) ?? workspaces[0]?.id ?? null;
+        const thread = s.selectedId === null ? addressedThread(selectedId, rows) : { threadId: s.selectedThreadId };
+        return { workspaces, sessions: groupSessions(rows), ready: true, selectedId, selectedThreadId: thread.threadId, ...(thread.toast !== undefined ? { toast: thread.toast } : {}) };
+      });
     },
     async reloadSessions(workspaceId) {
       const api = get().api;

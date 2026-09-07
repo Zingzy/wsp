@@ -2,7 +2,8 @@
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { currentHome, type CliIO } from "@wsp/host";
-import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, Menu, app, dialog, ipcMain, shell } from "electron";
+import { chooseFrom, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
 import { fromAppPage } from "./origin.js";
@@ -55,6 +56,13 @@ ipcMain.handle("folder:pick", async event => {
   const options = { properties: ["openDirectory" as const], title: "Import a project" };
   const picked = await (win === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(win, options));
   return picked.canceled ? undefined : picked.filePaths[0];
+});
+
+// The menu runs actions on the page's own registries, so only the host's page may ask for one.
+ipcMain.handle("menu:context", (event, raw: unknown) => {
+  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("menu:context: not the app's page");
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return chooseFrom(parseContextMenuItems(raw), (template, onClose) => Menu.buildFromTemplate(template).popup({ ...(win === null ? {} : { window: win }), callback: onClose }));
 });
 
 function locate(): Promise<Located> {

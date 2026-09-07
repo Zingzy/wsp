@@ -4,6 +4,7 @@
 // drives every switch here; there is no router.
 import { MessageSquarePlusIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { ContextMenuHost } from "../actions/ContextMenuHost.js";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
 import { Button } from "../components/ui/button.js";
@@ -66,6 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
       <KeybindingDispatcher />
       <CommandPalette />
+      <ContextMenuHost />
       <Sidebar
         side="left"
         collapsible="offcanvas"

@@ -1,22 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The palette's item list over the sidebar's project snapshots: actions for
-// the selected workspace, one row per workspace to switch to, recent threads
-// at rest and every thread whose title holds the typed query. Pure apart from
-// the callbacks it is handed, so the list is testable without the dialog.
-import {
-  GlobeIcon,
-  MessageSquareIcon,
-  MessageSquarePlusIcon,
-  PanelLeftIcon,
-  PanelRightIcon,
-  PauseIcon,
-  PlayIcon,
-  PlusIcon,
-  RefreshCwIcon,
-  ServerIcon,
-  SquareTerminalIcon,
-} from "lucide-react";
-import { needsRebuild } from "@wsp/protocol";
+// The palette's item list over the sidebar's project snapshots: the shell's
+// own actions, the selected workspace's actions from the workspace registry,
+// one row per workspace to switch to, recent threads at rest and every thread
+// whose title holds the typed query. Pure apart from the callbacks it is
+// handed, so the list is testable without the dialog.
+import { MessageSquareIcon, PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
+import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
+import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
 import { cn } from "../../lib/utils.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
@@ -27,13 +17,6 @@ export interface PaletteHandlers {
   readonly selectWorkspace: (workspaceId: string) => void;
   readonly selectThread: (workspaceId: string, threadId: string | null) => void;
   readonly newWorkspace: () => void;
-  readonly newThread: (workspaceId: string) => void;
-  readonly openTerminal: (workspaceId: string) => Promise<void>;
-  readonly openBrowser: (workspaceId: string) => void;
-  readonly openMachine: (workspaceId: string) => void;
-  /** Pauses a running workspace, wakes a paused one. */
-  readonly togglePhase: (workspaceId: string) => Promise<void>;
-  readonly rebuild: (workspaceId: string) => Promise<void>;
   readonly toggleSidebar: () => void;
   readonly toggleRightPanel: (workspaceId: string) => void;
 }
@@ -44,8 +27,8 @@ export interface PaletteItemsInput {
   /** What the person typed; the thread search runs over it, the at-rest list ignores it. */
   readonly query: string;
   readonly canCreate: boolean;
-  readonly canRebuild: boolean;
   readonly handlers: PaletteHandlers;
+  readonly verbs: WorkspaceVerbs;
 }
 
 export interface PaletteItems {
@@ -59,95 +42,40 @@ const sync = (fn: () => void) => async (): Promise<void> => {
   fn();
 };
 
+/** A registry action as a palette row: its refusal is the row's description and its disabled state. */
+function workspaceItem(action: ResolvedAction, project: SidebarProjectSnapshot): CommandPaletteActionItem {
+  const Icon = action.icon;
+  return {
+    kind: "action",
+    value: `action:${action.id}`,
+    searchTerms: [action.title, ...action.searchTerms],
+    icon: Icon ? <Icon className={ITEM_ICON_CLASS} /> : null,
+    title: action.title,
+    description: action.refusal ?? project.displayName,
+    disabled: action.refusal !== null,
+    ...(action.shortcutCommand !== undefined ? { shortcutCommand: action.shortcutCommand } : {}),
+    run: action.run,
+  };
+}
+
 function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
   const { handlers, selectedId } = input;
   const selected = selectedId === null ? null : (input.projects.find(project => project.id === selectedId) ?? null);
-  const scoped = (title: string, run: (workspaceId: string) => void | Promise<void>) => ({
-    title,
-    description: selected ? selected.displayName : "Select a workspace first",
-    disabled: selected === null,
-    run: async () => {
-      if (selected) await run(selected.id);
-    },
-  });
-
   const items: CommandPaletteActionItem[] = [
     {
       kind: "action",
       value: "action:new-workspace",
-      searchTerms: ["new workspace", "create workspace", "fork"],
+      searchTerms: ["new workspace", "create workspace"],
       icon: <PlusIcon className={ITEM_ICON_CLASS} />,
       title: "New workspace",
       description: input.canCreate ? "A fresh machine forked from your golden image" : "Not connected to the runtime",
       disabled: !input.canCreate,
       run: sync(handlers.newWorkspace),
     },
-    {
-      kind: "action",
-      value: "action:new-thread",
-      searchTerms: ["new thread", "new chat", "new session"],
-      icon: <MessageSquarePlusIcon className={ITEM_ICON_CLASS} />,
-      shortcutCommand: "chat.new",
-      ...scoped("New thread", handlers.newThread),
-    },
-    {
-      kind: "action",
-      value: "action:open-terminal",
-      searchTerms: ["open terminal", "new terminal", "shell"],
-      icon: <SquareTerminalIcon className={ITEM_ICON_CLASS} />,
-      shortcutCommand: "terminal.toggle",
-      ...scoped("Open terminal", handlers.openTerminal),
-    },
-    {
-      kind: "action",
-      value: "action:open-browser",
-      searchTerms: ["open browser", "preview", "ports"],
-      icon: <GlobeIcon className={ITEM_ICON_CLASS} />,
-      shortcutCommand: "preview.toggle",
-      ...scoped("Open browser", handlers.openBrowser),
-      ...(selected && selected.phase !== "running"
-        ? { disabled: true, description: `${selected.displayName} is not running` }
-        : {}),
-    },
-    {
-      kind: "action",
-      value: "action:open-machine",
-      searchTerms: ["open machine", "usage", "lineage", "upgrade"],
-      icon: <ServerIcon className={ITEM_ICON_CLASS} />,
-      ...scoped("Open machine", handlers.openMachine),
-    },
   ];
-
-  if (selected?.phase === "running") {
-    items.push({
-      kind: "action",
-      value: "action:pause",
-      searchTerms: ["pause workspace", "nap", "sleep", "stop"],
-      icon: <PauseIcon className={ITEM_ICON_CLASS} />,
-      ...scoped("Pause workspace", handlers.togglePhase),
-    });
-  } else if (selected?.phase === "napping" || selected?.phase === "pausing") {
-    items.push({
-      kind: "action",
-      value: "action:wake",
-      searchTerms: ["wake workspace", "resume", "start"],
-      icon: <PlayIcon className={ITEM_ICON_CLASS} />,
-      ...scoped("Wake workspace", handlers.togglePhase),
-    });
+  if (selected !== null) {
+    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status), input.verbs).map(action => workspaceItem(action, selected)));
   }
-
-  if (selected !== null && needsRebuild(selected)) {
-    items.push({
-      kind: "action",
-      value: "action:rebuild",
-      searchTerms: ["rebuild machine", "zombie", "gone", "replace"],
-      icon: <RefreshCwIcon className={ITEM_ICON_CLASS} />,
-      ...scoped("Rebuild machine", handlers.rebuild),
-      description: input.canRebuild ? "Replaces the machine with a fresh fork of the golden image" : "This client cannot rebuild machines",
-      disabled: !input.canRebuild,
-    });
-  }
-
   items.push(
     {
       kind: "action",
@@ -164,7 +92,12 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       searchTerms: ["toggle right panel", "hide panel", "show panel"],
       icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "rightPanel.toggle",
-      ...scoped("Toggle right panel", handlers.toggleRightPanel),
+      title: "Toggle right panel",
+      description: selected ? selected.displayName : "Select a workspace first",
+      disabled: selected === null,
+      run: async () => {
+        if (selected) handlers.toggleRightPanel(selected.id);
+      },
     },
   );
   return items;

@@ -6,11 +6,12 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { serve, startHost, type CliIO, type HostHandle } from "@wsp/host";
+import { serve, startHost, workspaceAsset, type CliIO, type HostHandle } from "@wsp/host";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
+import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
@@ -48,8 +49,10 @@ function fakeWebDir(): string {
   return webDir;
 }
 
-function testRuntime(): Runtime {
-  return createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+function testRuntime(seedGolden = false): Runtime {
+  const store = memoryStore();
+  if (seedGolden) void store.put("goldens", "default", GOLDEN);
+  return createRuntime({ backend: stubBackend(), store, adapters: {} });
 }
 
 function fixtureHost(): Promise<HostHandle> {
@@ -184,6 +187,51 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await launched.app.close();
     expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
     rmSync(user, { recursive: true, force: true });
+  });
+
+  it("a right-click on a workspace row builds the native menu from the workspace registry through the bridge", async () => {
+    // A host over the stub backend with one workspace, serving the built web app, so the sidebar has a row to right-click.
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    const first = await existing.createWorkspace("first");
+    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    const win = await launched.app.firstWindow();
+    const row = `[data-row-id='ws:${first.id}']`;
+    await win.waitForSelector(row);
+    // A native menu blocks until it is dismissed, so the main process keeps the template it would have shown and closes on nothing.
+    await launched.app.evaluate(({ Menu }) => {
+      type Kept = { type?: string; label?: string; enabled?: boolean; toolTip?: string; accelerator?: string | null };
+      const kept: Kept[][] = [];
+      (globalThis as { __menus?: Kept[][] }).__menus = kept;
+      const build = Menu.buildFromTemplate.bind(Menu);
+      Menu.buildFromTemplate = template => {
+        kept.push(template.map(({ type, label, enabled, toolTip, accelerator }) => ({ type, label, enabled, toolTip, accelerator })));
+        const menu = build(template);
+        menu.popup = options => options?.callback?.();
+        return menu;
+      };
+    });
+    await win.click(row, { button: "right" });
+    await win.waitForFunction(() => true);
+    const menus = await launched.app.evaluate(() => (globalThis as { __menus?: { type?: string; label?: string; enabled?: boolean; toolTip?: string; accelerator?: string | null }[][] }).__menus ?? []);
+    expect(menus).toHaveLength(1);
+    const rows = menus[0]!;
+    expect(rows.filter(r => r.type !== "separator").map(r => r.label)).toEqual([
+      WORKSPACE_WORDS.pause,
+      WORKSPACE_WORDS.rebuild,
+      WORKSPACE_WORDS.newThread,
+      WORKSPACE_WORDS.openTerminal,
+      WORKSPACE_WORDS.openBrowser,
+      WORKSPACE_WORDS.openMachine,
+      WORKSPACE_WORDS.rename,
+      WORKSPACE_WORDS.fork,
+      WORKSPACE_WORDS.copyId,
+      WORKSPACE_WORDS.forget,
+    ]);
+    expect(rows.filter(r => r.type === "separator")).toHaveLength(4);
+    expect(rows.find(r => r.label === WORKSPACE_WORDS.rename)).toMatchObject({ enabled: false, toolTip: "Renaming is not in the runtime yet" });
+    expect(rows.find(r => r.label === WORKSPACE_WORDS.openTerminal)).toMatchObject({ enabled: true, accelerator: "CommandOrControl+J" });
+    // The shell's page got the native menu, not the in-app one.
+    expect(await win.locator("[data-context-menu]").count()).toBe(0);
   });
 
   it("shows the setup screen naming ~/.wsp and the pointer whose host is gone", async () => {
