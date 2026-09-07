@@ -11,7 +11,7 @@
 // paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { goldenHead, type WorkspaceSize } from "@wsp/protocol";
+import { COMPUTER_OFFLINE_LINE, computerOffline, goldenHead, type WorkspaceSize } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions } from "../actions/registry.js";
 import { threadActions } from "../actions/threadActions.js";
@@ -33,7 +33,7 @@ import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
-import { ROW_LEAD_CLASS, TWO_LINE_ROW_CLASS } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
@@ -193,6 +193,7 @@ export function WorkspaceSidebar() {
     e.preventDefault();
   };
 
+  const offline = useMemo(() => computerOffline(Object.values(statuses)), [statuses]);
   const search = (
     <div className="px-[var(--sidebar-content-inset)] pt-3 pb-1" data-sidebar-search>
       <div className="relative">
@@ -217,6 +218,11 @@ export function WorkspaceSidebar() {
           }
         />
       </div>
+      {offline ? (
+        <p data-sidebar-offline className={cn(ROW_META_CLASS, "px-2 pt-1 leading-4")}>
+          {COMPUTER_OFFLINE_LINE}
+        </p>
+      ) : null}
     </div>
   );
 

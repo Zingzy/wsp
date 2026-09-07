@@ -117,6 +117,9 @@ export const ReachStatus = z.object({
   state: ReachState,
   url: z.string().optional(),
   expiresAt: z.number().optional(),
+  /** The probe never left this computer (no DNS, no network), so nothing was learnt about the machine: state is the
+   * last word the row showed, and the computer is offline. */
+  offline: z.boolean().optional(),
 });
 export type ReachStatus = z.infer<typeof ReachStatus>;
 
@@ -1803,7 +1806,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, goneRefusal, imageMoveRefusal, isBilling, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { actionRefusal, computerOffline, goneRefusal, imageMoveRefusal, isBilling, needsRebuild, reachShown, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export * from "./oom.js";
