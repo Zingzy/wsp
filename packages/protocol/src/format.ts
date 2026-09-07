@@ -450,6 +450,11 @@ export function foreignFlagLine(flag: string, readers: readonly string[], here: 
   return `${flag} belongs to ${owners}; ${here} does not read it`;
 }
 
+/** An agent id no catalog entry carries, named beside the ids the catalog does know. */
+export function unknownAgentLine(id: string, known: readonly string[]): string {
+  return `no agent called ${id}; the catalog knows ${known.join(", ")}`;
+}
+
 /** The refusal of a start naming an agent the host has no adapter for, listing the ones it has. */
 export function noAdapterLine(harness: string, agents: readonly string[]): string {
   return `no adapter registered for harness "${harness}"; agents on this host: ${agents.join(", ") || "none"}`;
@@ -660,6 +665,13 @@ export function installsByLine(words: string, shown: string): string {
 /** What the build does with a ticked tools row it sets aside, with the plan's reason. */
 export function leftOutLine(note: string): string {
   return `left out of the build: ${note}`;
+}
+
+/** Why `wsp recipe --add` refuses a package a manager on this Mac already has: that package is a row of its own,
+ * which the build installs by the road the plan resolves for it (a tap formula from its GitHub release, pinned),
+ * and a second row would install it twice by a line the image can refuse. The word that ticks the row instead. */
+export function addAlreadyHereLine(id: string, scanId: string): string {
+  return `--add ${id}: a package manager on this Mac already has ${id}, so it is a row of its own; tick it with --set ${scanId}=on, which installs it by its own road, rather than adding a second row that installs it again`;
 }
 
 /** A recipe file's tick on a tool outside the catalog that this Mac has no row for: nothing here says how to install

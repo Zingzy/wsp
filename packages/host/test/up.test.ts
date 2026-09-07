@@ -37,6 +37,7 @@ describe("wsp up", () => {
     writeFileSync(join(webDir, "index.html"), PAGE);
     statePath = join(home, "state", "state.json");
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_up_key");
+    vi.stubEnv("ANTHROPIC_API_KEY", undefined);
     vi.stubEnv("HOME", join(dir, "user"));
     vi.stubEnv("WSP_HOME", home);
   });

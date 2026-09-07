@@ -11,6 +11,7 @@ import {
   outOfMemoryRowLine,
   stillWorkingRefusal,
   foreignFlagLine,
+  unknownAgentLine,
   LINEAGE_MARKS,
   REPO_STATE_WORDS,
   missingToolRow,
@@ -771,5 +772,11 @@ describe("the import dialog's words", () => {
   it("an upload without a total still reads, and a failure has no step since the status line carries it", () => {
     expect(importProgress([ev({ stage: "uploading", message: "Uploading." })], "dev2")).toEqual({ line: "Uploading", fraction: 0 });
     expect(importProgress([ev({ stage: "packing", message: "Packing 2 files." }), ev({ stage: "failed", message: "the machine went away" })], "dev2")).toBeNull();
+  });
+});
+
+describe("unknownAgentLine", () => {
+  it("names the id nobody knows and the ids the catalog does, so a typo is a sentence", () => {
+    expect(unknownAgentLine("codx", ["claude", "codex"])).toBe("no agent called codx; the catalog knows claude, codex");
   });
 });

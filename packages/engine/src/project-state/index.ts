@@ -7,7 +7,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CATALOG_AGENTS, GUEST_HOME, type AgentEntry } from "@wsp/catalog";
-import { shellQuote, type ProjectAgent } from "@wsp/protocol";
+import { shellQuote, unknownAgentLine, type ProjectAgent } from "@wsp/protocol";
 import { missingCommands } from "../golden-tools.js";
 import type { Machine } from "../machine.js";
 import { claudeResolver } from "./claude.js";
@@ -95,7 +95,7 @@ export function guestAgentHomes(): Record<string, string> {
  */
 export function stateListing(homes: Readonly<Record<string, string>>, path: string, scratch: string, ids?: readonly string[]): string {
   const unknown = ids?.find(id => !CATALOG_AGENTS.some(a => a.id === id));
-  if (unknown !== undefined) throw new Error(`no agent called ${unknown}; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
+  if (unknown !== undefined) throw new Error(unknownAgentLine(unknown, CATALOG_AGENTS.map(a => a.id)));
   const scripts = CATALOG_AGENTS.flatMap(({ id }) => {
     const home = homes[id];
     const resolver = PROJECT_STATE_RESOLVERS.get(id);
