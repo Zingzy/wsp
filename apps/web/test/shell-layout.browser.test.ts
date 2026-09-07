@@ -473,11 +473,12 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         expect(hovered.map(g => ({ opacity: g.opacity, inside: g.inside }))).toEqual([{ opacity: "1", inside: true }, { opacity: "1", inside: true }]);
         await page!.mouse.move(600, 700);
         // The meta line in its one order, whole in the title, cut from the right when the width asks.
-        expect(rows.workspaces[0]!.meta).toBe("$0.2900 today · $0.110/hr · naps in 15m");
+        expect(rows.workspaces[0]!.meta).toBe("$0.29 today · $0.110/hr · naps in 15m");
         expect(rows.workspaces[0]!.title).toBe(rows.workspaces[0]!.meta);
         if (width === 240) expect(rows.workspaces[0]!.metaClipped).toBe(true);
-        expect(rows.workspaces[1]!.meta).toBe("");
-        expect(rows.workspaces[2]!.meta).toBe("");
+        // The rows without a tick lead with an honest zero: no second line is ever blank.
+        expect(rows.workspaces[1]!.meta).toBe("$0.00 today");
+        expect(rows.workspaces[2]!.meta).toBe("$0.00 today");
         expect(Math.round(live.metaRight)).toBe(Math.round(live.slotRight));
         // No import or export glyph anywhere; a live row's glyphs are its chevron and plus, a gone row's forget and rebuild.
         expect(rows.trips).toBe(0);

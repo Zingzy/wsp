@@ -343,14 +343,15 @@ describe("rows from the fixture wire", () => {
       ),
       "api",
     );
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.110/hr · edge slow · naps in 14m"));
+    // The cost leads before the meter's first tick too: a paused row is never a blank line.
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · $0.110/hr · edge slow · naps in 14m"));
     expect(stateSlot(rowOf("api")).textContent).toBe("");
     expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
-    expect(rowOf("web").textContent).not.toContain("/hr");
+    expect(metaOf(rowOf("web")).textContent).toBe("$0.00 today");
     act(() =>
-      useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.0037, at: new Date(NOW).toISOString() }),
+      useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
     );
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.0037 today · $0.110/hr · edge slow · naps in 14m"));
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · $0.110/hr · edge slow · naps in 14m"));
     const meta = metaOf(rowOf("api"));
     expect(meta.getAttribute("title")).toBe(meta.textContent);
     expect(meta.className).toContain("font-mono");
@@ -358,7 +359,7 @@ describe("rows from the fixture wire", () => {
     // The whole line is one span: the width cuts it from the right, nothing decides what to leave out.
     expect(meta.children).toHaveLength(0);
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.0037 today · $0.110/hr · active"));
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · $0.110/hr · active"));
   });
 
   it("every two-line row is one height, the thread rows share the workspace rows' grammar, and the Idle row is the kit row", async () => {
@@ -786,13 +787,13 @@ describe("gone machines", () => {
   it("a record still saying running whose status found the machine gone reads Gone with no rate and no countdown, even while the status carries both", async () => {
     const gone = status(API, { machineState: "gone", reach: { state: "gone" }, idleAt: NOW + 17 * 60_000, rateUsdPerHour: 0.11, reason: "machine m_ws_a is gone at the provider: the status poll found it gone at 2026-09-06T10:21:04Z" });
     await mount(fakeApi([API], [gone]), "api");
-    act(() => useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 60_000, accruedUsd: 0.0018, at: new Date(NOW).toISOString() }));
+    act(() => useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 60_000, accruedUsd: 0.18, at: new Date(NOW).toISOString() }));
     const row = rowOf("api");
     await waitFor(() => expect(row.textContent).toContain("Gone"));
     expect(row.textContent).not.toContain("/hr");
     expect(row.textContent).not.toContain("naps");
     expect(row.textContent).not.toContain("active");
-    expect(row.textContent).toContain("$0.0018 today");
+    expect(row.textContent).toContain("$0.18 today");
     expect(screen.getByRole("button", { name: "Rebuild api" }).getAttribute("title")).toBe(gone.reason!);
   });
 

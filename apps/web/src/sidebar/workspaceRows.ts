@@ -37,15 +37,16 @@ export interface WorkspaceMetaInput {
 }
 
 /** The machine row's second line, one string in one order: what it cost today, the rate while it bills, the edge
- * note, the nap countdown last. The width cuts it from the right; nothing here decides what to leave out. What the
- * runtime is doing to the machine's daemon, or a drop with memory near full, takes the whole line while it lasts: it
- * is the one thing on the row a person may be waiting on. */
+ * note, the nap countdown last. The cost always leads, an honest zero before the meter's first tick, so no row draws
+ * a blank line. The width cuts it from the right; nothing here decides what to leave out. What the runtime is doing
+ * to the machine's daemon, or a drop with memory near full, takes the whole line while it lasts: it is the one thing
+ * on the row a person may be waiting on. */
 export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
   const note = project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
   if (note !== undefined) return note;
   if (outOfMemory !== undefined) return outOfMemoryRowLine(outOfMemory);
   return [
-    accruedTodayLabel(cost?.accruedUsd ?? null),
+    accruedTodayLabel(cost?.accruedUsd ?? 0),
     isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null,
     reachNote(project.reach),
     idleCountdownLabel(project.status, nowMs),
@@ -54,9 +55,9 @@ export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: Workspa
     .join(" · ");
 }
 
-/** What a workspace has cost since the meter's midnight; the sidebar row and the switcher card read the one rule. */
+/** What a workspace has cost since the meter's midnight, in cents; the sidebar row and the switcher card read the one rule. */
 export function accruedTodayLabel(accruedUsd: number | null): string | null {
-  return accruedUsd === null ? null : `$${accruedUsd.toFixed(4)} today`;
+  return accruedUsd === null ? null : `$${accruedUsd.toFixed(2)} today`;
 }
 
 const rateLabel = (rateUsdPerHour: number | null): string | null => (rateUsdPerHour === null ? null : `$${rateUsdPerHour.toFixed(3)}/hr`);

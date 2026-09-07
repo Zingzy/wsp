@@ -112,17 +112,17 @@ describe("workspace row labels", () => {
   };
   const tick = (accruedUsd: number, rateUsdPerHour = 0.11) => ({ rateUsdPerHour, accruedUsd });
 
-  it("the meta line: what it cost today first, the rate while the machine is up (running or unreachable), the edge note, the nap countdown last; nothing before the first tick", () => {
+  it("the meta line: what it cost today first, in cents, the rate while the machine is up (running or unreachable), the edge note, the nap countdown last; the cost leads before the first tick too, as an honest zero", () => {
     const meta = (over: Partial<WorkspaceStatus>, cost: ReturnType<typeof tick> | null) => workspaceMetaLine({ project: project(over), cost, outOfMemory: undefined, nowMs: now });
-    expect(meta({ idleAt: now + 14.5 * 60_000, reach: { state: "slow" } }, tick(0.0037))).toBe("$0.0037 today · $0.110/hr · edge slow · naps in 14m");
-    expect(meta({ idleAt: now + 14.5 * 60_000 }, tick(0.29))).toBe("$0.2900 today · $0.110/hr · naps in 14m");
-    expect(meta({ reach: { state: "unreachable" } }, tick(0.0037))).toBe("$0.0037 today · $0.110/hr · active");
-    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" }, idleAt: now + 60_000 }, tick(0.0037, 0))).toBe("$0.0037 today");
-    expect(meta({ machineState: "gone", reach: { state: "gone" }, idleAt: now + 60_000 }, tick(0.0037))).toBe("$0.0037 today");
-    expect(meta({}, null)).toBe("$0.110/hr · active");
-    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } }, null)).toBe("");
+    expect(meta({ idleAt: now + 14.5 * 60_000, reach: { state: "slow" } }, tick(0.0037))).toBe("$0.00 today · $0.110/hr · edge slow · naps in 14m");
+    expect(meta({ idleAt: now + 14.5 * 60_000 }, tick(0.29))).toBe("$0.29 today · $0.110/hr · naps in 14m");
+    expect(meta({ reach: { state: "unreachable" } }, tick(1.235))).toBe("$1.24 today · $0.110/hr · active");
+    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" }, idleAt: now + 60_000 }, tick(0.18, 0))).toBe("$0.18 today");
+    expect(meta({ machineState: "gone", reach: { state: "gone" }, idleAt: now + 60_000 }, tick(0.18))).toBe("$0.18 today");
+    expect(meta({}, null)).toBe("$0.00 today · $0.110/hr · active");
+    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } }, null)).toBe("$0.00 today");
     // The tick's rate leads the size's: a resize is priced from the meter, not the status.
-    expect(meta({}, tick(0.5, 0.15))).toBe("$0.5000 today · $0.150/hr · active");
+    expect(meta({}, tick(0.5, 0.15))).toBe("$0.50 today · $0.150/hr · active");
   });
 
   it("what the runtime is doing to the machine's helper, or a drop with memory near full, takes the whole line", () => {
@@ -130,9 +130,9 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ idleAt: now + 60_000, daemonNote: "updating the helper" }), cost: tick(0.5), outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     expect(workspaceMetaLine({ project: project({ idleAt: now + 60_000 }), cost: tick(0.5), outOfMemory: { used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.4 }, nowMs: now })).toBe("out of memory, 3.6 of 3.9 GB");
     // Before a status arrives the record's own note is the line; a status without one says nothing about the helper.
-    expect(workspaceMetaLine({ project: { ...project({}), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("");
+    expect(workspaceMetaLine({ project: { ...project({}), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.00 today");
     expect(workspaceMetaLine({ project: { ...project({}, { daemonNote: "updating the helper" }), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
-    expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.110/hr · active");
+    expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.00 today · $0.110/hr · active");
   });
 
   it("the state slot says nothing while running, since the dot says it, and the state's word otherwise", () => {
