@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXEC_ENV, INLINE_EXEC_MS, MachineUnreached, type ExecResult, type Machine } from "@wsp/engine";
-import { EXEC_BODY_MAX, machineUnreachedLine, TURN_IDLE_MS, shellQuote } from "@wsp/protocol";
+import { EXEC_BODY_MAX, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
 import { machineExecStream } from "../src/machine-exec.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
@@ -193,7 +193,15 @@ describe("machineExecStream", () => {
     const launch = launchCalls(guest.calls);
     expect(launch.filter(c => c.endsWith("echo WSP_PIECE"))).toHaveLength(4);
     expect(launch).toHaveLength(5);
-    expect(guest.getScript()).toBe(`export CLAUDE_CONFIG_DIR='/root/.claude-cfg'\n${BIG_COMMAND}\necho $? > ${launch.at(-1)!.match(/> '([^']*)\.sh'/)![1]}.exit\n`);
+    expect(guest.getScript()).toBe(`${workScoreLine()}\nexport CLAUDE_CONFIG_DIR='/root/.claude-cfg'\n${BIG_COMMAND}\necho $? > ${launch.at(-1)!.match(/> '([^']*)\.sh'/)![1]}.exit\n`);
+  });
+
+  it("the run script puts the turn's processes at the work score before anything else, so a build that outgrows the machine dies before the daemon", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: "hi\n", exit: 0 }, {}]);
+    const stream = machineExecStream(machine, { pollMs: 5 })("claude -p 'hi'", { env: { PATH: "/root/.local/bin:/usr/bin" } });
+    for await (const _ of stream.lines) void _;
+    expect(guest.getScript().split("\n").slice(0, 3)).toEqual([workScoreLine(), "export PATH='/root/.local/bin:/usr/bin'", "claude -p 'hi'"]);
   });
 
   it("reassembles multi-byte characters split across poll boundaries", async () => {

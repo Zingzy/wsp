@@ -448,6 +448,49 @@ export function codexReconnectLine(elapsedMs: number): string {
   return `stopped after ${fmtDuration(elapsedMs, "clock")} of Codex reconnecting to its model provider with no answer`;
 }
 
+/** What the daemon last read of the guest's memory and load before its link went quiet. */
+export interface MemoryReading {
+  used: number;
+  total: number;
+  load1: number;
+}
+
+/** The share of memory in use past which the kernel's killer is one allocation away: 3.59 of 3.94 GB (91 percent)
+ * when a build took a daemon, measured 2026-09-06. */
+export const MEMORY_NEAR_FULL = 0.9;
+
+export function memoryNearFull(mem: { used: number; total: number }): boolean {
+  return mem.total > 0 && mem.used / mem.total >= MEMORY_NEAR_FULL;
+}
+
+/** The line every pane and row shows when a machine stopped answering with its memory near full: the last figures
+ * the daemon sent, and that the work took the memory, so nobody rebuilds a machine that is fine. */
+export function outOfMemoryLine(r: MemoryReading): string {
+  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the machine last answered; the work on it took the memory, not a fault of the machine`;
+}
+
+/** Two byte counts against each other with the unit said once when they share it: "3.6 of 3.9 GB", "900.0 MB of 3.9 GB". */
+function fmtBytesOf(used: number, total: number): string {
+  const t = fmtBytes(total);
+  const u = fmtBytes(used);
+  const unit = t.slice(t.lastIndexOf(" "));
+  return `${u.endsWith(unit) ? u.slice(0, -unit.length) : u} of ${t}`;
+}
+
+/** The sidebar row's form of the same fact, in the shape the daemon note takes: the row's second line is about
+ * thirty characters wide, so the sentence above would be cut at the figures. */
+export function outOfMemoryRowLine(r: MemoryReading): string {
+  return `out of memory, ${fmtBytesOf(r.used, r.total)}`;
+}
+
+/** What to do about it, shown ahead of any rebuild: the smallest size in the provider's table with more memory than
+ * this machine, with its rate, for the next workspace. With none in the table, less at once is the only road. */
+export function biggerSizeLine(current: WorkspaceSize, offers: readonly MachineSizeOffer[]): string {
+  const bigger = offers.filter(o => o.memMb > current.memMb).sort((a, b) => a.memMb - b.memMb)[0];
+  if (bigger === undefined) return "No size with more memory is offered; run less on the machine at once";
+  return `A workspace on ${fmtSize(bigger)} (${fmtRate(bigger.rateUsdPerHour)}) fits more; pick it when you make the next one`;
+}
+
 /** The machine row's line while the runtime replaces a daemon older than this wsp, and the line it shows instead
  * when the replacement failed. A person is never told the helper is called a daemon: they did not install it and
  * cannot run it, so its name would only be one more thing to know. Neither line carries the reason a deploy gave:
