@@ -31,6 +31,7 @@ export default defineConfig(({ command }) => ({
     alias: {
       "@wsp/engine": pkg("engine/src/index.ts"),
       "@wsp/adapter-claude": pkg("adapter-claude/src/index.ts"),
+      "@wsp/adapter-codex": pkg("adapter-codex/src/index.ts"),
       "@wsp/daemon": pkg("daemon/src/index.ts"),
       "@wsp/protocol": pkg("protocol/src/index.ts"),
       "@wsp/runtime": pkg("runtime/src/index.ts"),

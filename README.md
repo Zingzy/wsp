@@ -186,6 +186,7 @@ looks like, is in [docs/reach.md](docs/reach.md). Cutting a release is
 | `@wsp/engine` | machine backends, workspace lifecycle, golden images, vault |
 | `@wsp/daemon` | in-guest daemon: ptys, port watch, inbox, process manifest |
 | `@wsp/adapter-claude` | drives claude headless inside a workspace |
+| `@wsp/adapter-codex` | drives codex headless inside a workspace |
 | `@wsp/runtime` | embeddable runtime: workspaces, sessions, events over WebSocket |
 | `@wsp/host` | the `wsp` command: embedded runtime, the app, the verbs, the MCP server |
 | `@wsp/web` | the app |

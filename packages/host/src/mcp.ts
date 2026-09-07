@@ -13,6 +13,7 @@ import { smallRecipePath } from "./recipe-file.js";
 import { runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { INSTRUCTIONS } from "./skill.js";
+import { THREAD_AGENTS } from "./thread-agents.js";
 import { VERSION } from "./version.js";
 import { absoluteFolder, absolutePath, agentsChosen, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, resumeOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
@@ -92,7 +93,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
   const dial = opts.dial ?? dialer(statePath);
   const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: INSTRUCTIONS });
   const workspace = z.string().describe("the workspace's name, or its id when two share a name");
-  const agent = z.string().optional().describe("the agent to run in the thread, such as claude or codex; absent means the host's default");
+  const agent = z.string().optional().describe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
   const notify = z.string().optional().describe("a thread (by id, or a prefix of it) told in one line each time a turn of the new thread ends, as a message into it; or me, for the person's app");
   const cwd = z.string().optional().describe("the folder on the machine the thread works in, absolute; absent means the workspace's project folder, else the home folder");
   const confirmDelete = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");

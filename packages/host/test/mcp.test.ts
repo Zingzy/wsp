@@ -19,6 +19,7 @@ import { serve } from "../src/cli.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
 import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
 import { WSP_SKILL, instructionsOf } from "../src/skill.js";
+import { THREAD_AGENTS } from "../src/thread-agents.js";
 import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -141,13 +142,18 @@ describe("the MCP server over the host", () => {
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "add_check", "out", "project", "set", "signin", "tick", "why"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
-    expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL));
+    expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL, THREAD_AGENTS));
     expect(c.getInstructions()).toContain("thread_new");
     // The setup sequence an agent follows the first time, so it never has to guess at the order.
     expect(c.getInstructions()).toContain("then `recipe_scan`, which writes nothing");
     expect(c.getInstructions()).toContain("then `recipe` with their answers");
     expect(c.getInstructions()).toContain("wsp init --recipe <path>");
     expect(c.getInstructions()).toContain("snapshot");
+    // The instructions and the agent input promise only agents the host has adapters for, from the one list.
+    expect(c.getInstructions()).toContain(`take as agent: ${THREAD_AGENTS.join(", ")}.`);
+    for (const a of CATALOG.filter(e => e.kind === "agent")) expect(new RegExp(`\\b${a.id}\\b`).test(c.getInstructions()!), a.id).toBe(THREAD_AGENTS.some(id => id === a.id));
+    const agentInput = (tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, { description?: string }> }).properties.agent!;
+    expect(agentInput.description).toBe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
     for (const t of tools) expect(WSP_SKILL, t.name).toContain(`\`${t.name}\``);
   });
 
@@ -226,8 +232,8 @@ describe("the MCP server over the host", () => {
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     expect(worker).toMatchObject({ phase: "running" });
     expect(refused.isError).toBe(true);
-    expect(refused.text).toBe(`created worker ${worker.id}; first turn failed: no adapter registered for harness "gpt9"`);
-    expect(refused.structured).toEqual({ workspace: expect.objectContaining({ id: worker.id, name: "worker" }), failure: 'no adapter registered for harness "gpt9"' });
+    expect(refused.text).toBe(`created worker ${worker.id}; first turn failed: no adapter registered for harness "gpt9"; agents on this host: claude, codex`);
+    expect(refused.structured).toEqual({ workspace: expect.objectContaining({ id: worker.id, name: "worker" }), failure: 'no adapter registered for harness "gpt9"; agents on this host: claude, codex' });
     expect(await rt.sessions.list(worker.id)).toEqual([]);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha", "worker"]);
   });

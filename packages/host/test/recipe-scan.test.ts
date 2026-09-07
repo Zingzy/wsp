@@ -59,7 +59,7 @@ describe("wsp recipe scan", () => {
     const scan = RecipeScan.parse(await runScan(host, {}, quiet, at));
     const agent = (id: string) => scan.agents.find(r => r.id === id)!;
     expect(agent("claude")).toMatchObject({ on: true, recommended: { value: "on", why: "used here, 1 session" } });
-    expect(agent("codex")).toMatchObject({ on: false, recommended: { value: "off", why: "used here, 1 session; installs, but wsp cannot run its threads yet" } });
+    expect(agent("codex")).toMatchObject({ on: true, recommended: { value: "on", why: "used here, 1 session; 455.0 MB on the machine, worth a question" } });
     expect(agent("opencode")).toMatchObject({ on: false, recommended: { value: "off", why: "installed here, never used" } });
   });
 
@@ -78,6 +78,8 @@ describe("wsp recipe scan", () => {
     expect(heavy).toEqual({ value: "on", why: "used here, 2 sessions; 673.0 MB on the machine, worth a question" });
     // Off, so nothing is being added and there is nothing to ask about.
     expect(tickAdvice({ ...row, on: false }).why).toBe("used here, 2 sessions");
+    // An agent used here that wsp cannot run threads on says so beside its why, since the why alone argues for on.
+    expect(tickAdvice({ ...row, on: false, note: "installs, but wsp cannot run its threads yet" }).why).toBe("used here, 2 sessions; installs, but wsp cannot run its threads yet");
     expect(tickAdvice({ ...row, id: "node", kind: "tool", on: true, heavy: false, size: 250 * MB }).why).toBe("used here, 2 sessions");
   });
 
