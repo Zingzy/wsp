@@ -126,14 +126,14 @@ describe("chat tab rendering", () => {
 
 describe("chat tab: a turn whose process lives past its reply", () => {
   const thread = { ...scope, threadId: "thr_linger" };
-  const noteText = () => document.querySelector("[data-composer-turn-note]")?.textContent ?? null;
+  const noteText = () => document.querySelector("[data-composer-refusal]")?.textContent ?? null;
 
   it("holds the composer with the runtime's words from the reply until the process exits, then opens", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
     emit({ type: "session.start", ...thread });
     emit({ type: "session.delta", ...thread, kind: "text", text: "Server is live at :3000." });
-    // Working, no reply yet: the note row is reserved but silent, so the note lands without a shift.
+    // Working, no reply yet: the slot is reserved but silent, so the line lands without a shift.
     expect(stopButton()).toBeDefined();
     expect(noteText()).toBe("");
 
@@ -141,16 +141,16 @@ describe("chat tab: a turn whose process lives past its reply", () => {
     // The reply renders at once, but the process still runs: the row stays working, says so, and offers no send.
     expect(screen.getByText("Server is live at :3000.")).toBeDefined();
     expect(noteText()).toBe(stillWorkingRefusal("thr_linger"));
-    // The row is centred with the queue and the box, not laid across the page.
-    expect(document.querySelector("[data-composer-turn-note]")?.className).toContain("max-w-3xl");
+    // The slot is centred with the queue and the box, not laid across the page.
+    expect(document.querySelector("[data-composer-refusal]")?.className).toContain("max-w-3xl");
     expect(stopButton()).toBeDefined();
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
     expect(screen.queryByTestId("settled-footer")).toBeNull();
 
     emit({ type: "session.end", ...thread, exitCode: 0, sawResult: true });
-    // The process exited: the turn is over, the note is gone, and the composer opens.
+    // The process exited: the turn is over, the slot is empty again, and the composer opens.
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
-    expect(noteText()).toBeNull();
+    expect(noteText()).toBe("");
     expect(screen.getByTestId("settled-footer")).toBeDefined();
   });
 });

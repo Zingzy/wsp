@@ -5,8 +5,10 @@
 // moving a row, a thread row's title keeps its room at the
 // default width, a status toast holds a long token inside its box, the line
 // the runtime puts on a machine's row takes that row's second line whole,
-// uncut and without growing the row, and collapsing the sidebar leaves the
-// page header's left padding alone. Vite
+// uncut and without growing the row, collapsing the sidebar leaves the
+// page header's left padding alone, and a send refusal above the composer is
+// one muted mono line in a slot the composer keeps at one height whether or
+// not a line is in it. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -16,6 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../src/keybindingDefaults";
 import { shortcutLabelForCommand } from "../src/keybindings";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
@@ -307,6 +310,57 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       console.info(`sidebar out-of-memory line screenshot: ${oomPath}`);
     }
   }, 30_000);
+
+  it("a send refusal is one muted mono line, no panel, in a slot the composer keeps at one height, in both themes", async () => {
+    interface Composer {
+      shell: Box;
+      slot: Box;
+      box: Box;
+      text: string;
+      /** The line's paint, or null when the slot is empty. */
+      line: { mono: boolean; background: string; border: string; icons: number } | null;
+      panels: number;
+    }
+    const composerAt = async (query: string, theme: string, name: string): Promise<Composer> => {
+      await page!.goto(`${base}?theme=${theme}&${query}`);
+      await page!.waitForSelector("[data-composer-refusal]");
+      // The transcript is fetched after mount; the line for a lingering turn exists only once it is in.
+      await page!.waitForSelector("text=loading transcript", { state: "detached" });
+      const read = await page!.locator("[data-chat-composer]").evaluate(el => {
+        const line = el.querySelector<HTMLElement>("[data-composer-refusal] [role=status]");
+        const s = line === null ? null : getComputedStyle(line);
+        return {
+          text: el.querySelector("[data-composer-refusal]")?.textContent ?? "",
+          line: s === null || line === null ? null : { mono: /mono/i.test(s.fontFamily), background: s.backgroundColor, border: `${s.borderTopWidth} ${s.borderLeftWidth}`, icons: line.getElementsByTagName("svg").length },
+          panels: el.querySelectorAll("[data-composer-banner-surface]").length,
+        };
+      });
+      const path = join(SHOTS_DIR, `composer-${name}-${theme}.png`);
+      await page!.locator("[data-chat-composer]").screenshot({ path });
+      console.info(`composer ${name} screenshot: ${path}`);
+      return { shell: await box("[data-chat-composer]"), slot: await box("[data-composer-refusal]"), box: await box("[data-slot=composer-shell]"), ...read };
+    };
+    for (const theme of ["dark", "light"] as const) {
+      const idle = await composerAt("ws=ws_a", theme, "idle");
+      expect(idle.text).toBe("");
+      expect(idle.line).toBeNull();
+      const paused = await composerAt("ws=ws_b", theme, "paused");
+      const gone = await composerAt("ws=ws_c", theme, "gone");
+      const working = await composerAt("ws=ws_a&linger=1", theme, "working");
+      expect(paused.text).toBe(sendRefusal("paused"));
+      expect(gone.text).toBe(sendRefusal("gone"));
+      expect(working.text).toBe(stillWorkingRefusal("thr_linger"));
+      for (const state of [paused, gone, working]) {
+        // The words in mono, painted on nothing: no fill, no border, no icon, no panel anywhere in the composer.
+        expect(state.line).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0 });
+        expect(state.panels).toBe(0);
+        // The slot and the box sit where they sit for the idle composer: the line moves nothing.
+        expect(state.slot).toEqual(idle.slot);
+        expect(state.box).toEqual(idle.box);
+        expect(state.shell).toEqual(idle.shell);
+      }
+    }
+  }, 60_000);
 
   it("collapsing the sidebar leaves the page header's left padding alone", async () => {
     await open("dark");

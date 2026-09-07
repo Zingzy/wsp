@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, goneRefusal, isBilling, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, goneRefusal, isBilling, needsRebuild, sendRefusal, stillWorkingRefusal, workspaceState, workspaceWord, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -45,6 +45,19 @@ describe("workspaceState", () => {
     expect(sendRefusal("waking")).toBe("Workspace is waking; sends open when it is running");
     expect(sendRefusal("unreachable")).toBe("Workspace is unreachable; sends open when the machine answers");
     expect(sendRefusal("gone")).toBe("Workspace machine is gone; rebuild it to send");
+  });
+
+  it("sendRefusal is one table over everything that refuses a send: the socket, the lookup, the transcript, the thread, then the states", () => {
+    const blocks: Record<SendBlock, string> = {
+      connecting: "Connecting to wsp",
+      reconnecting: "wsp is not running, reconnecting",
+      closed: "wsp is not running",
+      "not-found": "Workspace not found",
+      loading: "Loading transcript",
+      finishing: "Finishing the previous turn",
+    };
+    for (const [kind, words] of Object.entries(blocks)) expect(sendRefusal(kind as SendBlock)).toBe(words);
+    expect(stillWorkingRefusal("thr_0001")).toBe("thread thr_0001 replied, still working; wait for its turn to finish before sending");
   });
 
   it("actionRefusal is the same sentence for any verb that needs the machine, and a send's is it with send", () => {
