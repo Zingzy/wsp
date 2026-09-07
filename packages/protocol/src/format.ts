@@ -130,6 +130,10 @@ export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 export const DAEMON_UPDATING = "updating the helper";
 export const DAEMON_UPDATE_FAILED = "could not update the helper";
 
+/** The machine row's line when a record that said paused met a machine the provider was running all along (a nap
+ * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
+export const ALREADY_RUNNING = "already running at the provider";
+
 /** One noun's change in a golden build line: "2 tools added". */
 export interface GoldenChange {
   count: number;

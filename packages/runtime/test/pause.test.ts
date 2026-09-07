@@ -7,7 +7,7 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AdapterEvent } from "@wsp/adapter-claude";
-import { sendRefusal, workspaceState, workspaceWord, type EventUnion, type SessionEvent } from "@wsp/protocol";
+import { ALREADY_RUNNING, sendRefusal, workspaceState, workspaceWord, type EventUnion, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
@@ -277,18 +277,123 @@ describe("sessions end when the machine stops answering", () => {
 });
 
 describe("a record left at pausing", () => {
-  it("hydrates as napping, so the next wake resumes whatever the provider did", async () => {
+  it("hydrates as napping when the provider holds the machine paused, so the next wake resumes it", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const first = createRuntime({ backend, store, adapters: {} });
     const ws = await first.workspaces.create({ golden: "snap_g", name: "x" });
     const stored = (await store.get("workspaces", ws.id)) as { phase: string };
     await store.put("workspaces", ws.id, { ...stored, phase: "pausing" });
+    backend.machines[0]!.paused = true;
     const second = createRuntime({ backend, store, adapters: {} });
     expect((await second.workspaces.get(ws.id)).phase).toBe("napping");
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "napping" });
     const woken = await second.workspaces.wake(ws.id);
     expect(woken.phase).toBe("running");
     expect(backend.machines[0]!.resumes).toBe(1);
+  });
+
+  // The host died between writing pausing and the provider's pause taking, or the pause was refused; or the nap
+  // wrote napping over a pause that never took, and the host was restarted with the store saying so.
+  it.each(["pausing", "napping"] as const)("left %s over a machine the provider runs, it hydrates running, says so in the log, and the machine bills and takes sends again", async left => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {} });
+    const ws = await first.workspaces.create({ golden: "snap_g", name: "x" });
+    const stored = (await store.get("workspaces", ws.id)) as { phase: string };
+    await store.put("workspaces", ws.id, { ...stored, phase: left });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const second = createRuntime({ backend, store, adapters: {} });
+      const hydrated = await second.workspaces.get(ws.id);
+      expect(hydrated.phase).toBe("running");
+      expect(sendRefusal(workspaceState({ phase: hydrated.phase }))).toBeNull();
+      expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "running" });
+      expect((await second.status.list())[0]).toMatchObject({ phase: "running", machineState: "running" });
+      expect(warn.mock.calls.map(c => String(c[0]))).toContain(`workspace ${ws.id} was left ${left} and its machine is running at the provider; the record hydrates running`);
+      expect(backend.machines[0]!.resumes).toBe(0);
+      expect(backend.machines[0]!.paused).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("a record that says napping over a machine the provider runs", () => {
+  /** A nap whose pause never took at the provider: the record says napping, the machine runs, and a resume would be refused. */
+  async function napThatNeverTook(): Promise<{ backend: StubBackend; rt: ReturnType<typeof createRuntime>; id: string; events: EventUnion[] }> {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.workspaces.nap(ws.id);
+    const m = backend.machines[0]!;
+    m.paused = false;
+    m.resume = async () => {
+      throw Object.assign(new Error("Sandbox is not paused"), { kind: "conflict", status: 409 });
+    };
+    events.length = 0;
+    return { backend, rt, id: ws.id, events };
+  }
+
+  it("pause asks the provider first and pauses the machine for real", async () => {
+    const { backend, rt, id } = await napThatNeverTook();
+    const napped = await rt.workspaces.nap(id);
+    expect(napped.phase).toBe("napping");
+    expect(backend.machines[0]!.paused).toBe(true);
+    expect((await rt.workspaces.get(id)).phase).toBe("napping");
+  });
+
+  it("two pauses asked at once adopt running once and pause once: one provider pause, one woken, no running push inside the pause", async () => {
+    const { backend, rt, id, events } = await napThatNeverTook();
+    const m = backend.machines[0]!;
+    let pauses = 0;
+    const pause = m.pause.bind(m);
+    m.pause = async () => {
+      pauses++;
+      return pause();
+    };
+    const [a, b] = await Promise.all([rt.workspaces.nap(id), rt.workspaces.nap(id)]);
+    expect(a.phase).toBe("napping");
+    expect(b.phase).toBe("napping");
+    expect(pauses).toBe(1);
+    expect(m.paused).toBe(true);
+    expect(events.filter(e => e.type === "workspace.woken")).toHaveLength(1);
+    const phases = events.filter(e => e.type === "workspace.status").map(e => (e.type === "workspace.status" ? e.status.phase : ""));
+    expect(phases).toEqual(["running", "pausing", "napping"]);
+  });
+
+  it("pause on a record that says napping over a machine the provider holds paused asks once and pauses nothing", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.workspaces.nap(ws.id);
+    const m = backend.machines[0]!;
+    let asked = 0;
+    let pauses = 0;
+    const state = m.state.bind(m);
+    m.state = async () => { asked++; return state(); };
+    m.pause = async () => { pauses++; };
+    expect((await rt.workspaces.nap(ws.id)).phase).toBe("napping");
+    expect(asked).toBe(1);
+    expect(pauses).toBe(0);
+  });
+
+  it("wake takes the provider's running as the fact: the record becomes running with the line in words, nothing is resumed, and the row never says waking", async () => {
+    const { backend, rt, id, events } = await napThatNeverTook();
+    const woken = await rt.workspaces.wake(id);
+    expect(woken.phase).toBe("running");
+    expect((await rt.workspaces.get(id)).phase).toBe("running");
+    expect(backend.machines[0]!.resumes).toBe(0);
+    const pushed = events.filter(e => e.type === "workspace.status").map(e => (e.type === "workspace.status" ? e.status : null)!);
+    expect(pushed.map(s => s.phase)).not.toContain("waking");
+    expect(pushed.at(-1)).toMatchObject({ phase: "running", machineState: "running", reason: ALREADY_RUNNING });
+    expect(events.map(e => e.type)).toContain("workspace.woken");
+    // The exec that asked for the wake goes on, as on any running machine.
+    expect((await rt.workspaces.exec(id, "true")).exitCode).toBe(0);
+    await rt.workspaces.nap(id);
+    expect(backend.machines[0]!.paused).toBe(true);
   });
 });
 

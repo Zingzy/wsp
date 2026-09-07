@@ -95,7 +95,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -356,6 +356,8 @@ interface LiveWorkspace {
   waking?: Promise<WorkspaceView>;
   /** The nap in flight: a second nap joins it, a wake waits for it. */
   napping?: Promise<WorkspaceView>;
+  /** The record following a machine the provider runs under a napping word: a second verb that read the same fact joins it. */
+  adopting?: Promise<void>;
   /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
   creating?: true;
 }
@@ -1151,6 +1153,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * would reset its idle timer for a fact the runtime already knows. The nap
    * countdown rides along as the poller sends it: a client replaces the whole
    * status, so leaving it out would blank the row until the next poll. */
+  /** The reach a status pushed for a running machine claims: the edge answers where the backend mints a route. */
+  const reachOf = (entry: LiveWorkspace): ReachState => (entry.machine.previewUrl ? "reachable" : "unsupported");
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
     const size = entry.record.size;
     const idleAt = entry.record.phase === "running" ? idle.idleAt(entry.record.id) : undefined;
@@ -1229,7 +1233,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * only it knows what that machine's reach is by then. */
   const pushStatus = async (entry: LiveWorkspace): Promise<void> => {
     if (entry.record.phase !== "running") return;
-    await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported");
+    await emitStatus(entry, reachOf(entry));
   };
 
   /** The line the machine's row carries while the runtime is doing something to its daemon; undefined clears it. */
@@ -1569,6 +1573,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // machine can still be told to stop them.
   const napWith = async (id: string, reason?: string): Promise<WorkspaceView> => {
     const entry = await entryOf(id);
+    if (await runsUnderNapping(entry)) await adoptRunning(entry);
     if (entry.napping) return entry.napping;
     if (entry.record.phase !== "running") return view(entry.record);
     entry.napping = (async () => {
@@ -1581,7 +1586,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         } catch (e) {
           entry.record.phase = entry.ws.currentPhase;
           await persist(entry.record);
-          await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", e instanceof Error ? e.message : String(e));
+          await emitStatus(entry, reachOf(entry), e instanceof Error ? e.message : String(e));
           throw e;
         }
         // The reason says the machine paused, so it is written once the provider has confirmed that.
@@ -1607,6 +1612,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     endSessions(entry.record.id, PAUSED_REASON);
     bus.emit({ type: "workspace.napped", workspaceId: entry.record.id, found: true });
     await emitStatus(entry, "napping", "paused outside wsp");
+  };
+  /** One read of the provider for a record that says napping: true when the machine runs there, so the pause never
+   * took or nobody wrote the resume. A read the provider refuses answers false; the record's word stands until a
+   * verb meets the machine. */
+  const runsUnderNapping = async (entry: LiveWorkspace): Promise<boolean> =>
+    entry.record.phase === "napping" && (await entry.machine.state().catch(() => "paused")) === "running";
+  /** The provider runs a machine the record calls napping: the record follows the fact and the machine is reached
+   * like any running one. Nothing is resumed, so the first life the record holds is untouched. */
+  const adoptRunning = (entry: LiveWorkspace): Promise<void> => {
+    if (entry.adopting) return entry.adopting;
+    if (entry.record.phase !== "napping" || entry.napping || entry.waking) return Promise.resolve();
+    entry.adopting = (async () => {
+      try {
+        entry.ws.noteRunning();
+        followMachine(entry);
+        await persist(entry.record);
+        bus.emit({ type: "workspace.woken", workspaceId: entry.record.id, machineId: entry.record.machineId, resurrected: false });
+        await emitStatus(entry, reachOf(entry), ALREADY_RUNNING);
+      } finally {
+        delete entry.adopting;
+      }
+    })();
+    return entry.adopting;
   };
   /** The provider stopped knowing the machine (deleted behind wsp, or expired): the record follows the fact and stays
    * there. Nothing bills, the idle window is dropped, sessions end; rebuild and delete are the roads out. */
@@ -1745,17 +1773,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         });
         // The state rides on the view get() just fetched; a second read would reset the provider's idle timer.
         const atProvider = missing !== undefined ? "gone" : (machine.seen?.state ?? (await machine.state()));
-        // A record left at pausing died mid-pause: whether or not the provider got the call, a wake resumes it either
-        // way. A record left at waking follows the provider both ways, since waking refuses sends, bills nothing and
-        // schedules no nap: paused means the resume never landed, running means it did with nobody left to write it.
+        // The record follows the provider whatever word it was left with: paused means the pause landed or the
+        // resume never did, running means the pause never took or the resume landed with nobody left to write it.
+        // Only a machine still starting leaves the stored word standing, and a pausing one then reads napping: a
+        // wake resumes it either way.
         const phase: WorkspacePhase =
           missing !== undefined || atProvider === "gone" || stored.phase === "gone"
             ? "gone"
-            : atProvider === "paused" || stored.phase === "pausing"
+            : atProvider === "paused"
               ? "napping"
-              : atProvider === "running" && stored.phase === "waking"
+              : atProvider === "running"
                 ? "running"
-                : stored.phase;
+                : stored.phase === "pausing"
+                  ? "napping"
+                  : stored.phase;
         const record: WorkspaceRecord = {
           ...stored,
           phase,
@@ -1938,8 +1969,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry.waking) return entry.waking;
       if (entry.record.phase === "gone") throw new Error(goneRefusal("wake", entry.record.gone));
       if (entry.napping) await entry.napping.catch(() => {});
-      // A wake nobody should need is the one sign the provider paused the machine on its own: one read settles it.
+      // A wake nobody should need is the one sign the provider paused the machine on its own, and a wake of a machine
+      // the provider runs would be refused with its words: one read settles either, and the record follows the fact.
       if (entry.record.phase === "running" && (await entry.machine.state().catch(() => "running")) === "paused") await adoptPause(entry);
+      else if (await runsUnderNapping(entry)) await adoptRunning(entry);
       if (entry.record.phase === "running") return view(entry.record);
       entry.waking = (async () => {
         entry.record.phase = "waking";
@@ -1951,7 +1984,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await persist(entry.record);
           bus.emit({ type: "workspace.woken", workspaceId: id, machineId: entry.record.machineId, resurrected: result.resurrected });
           if (result.reason !== undefined) console.warn(`wake of ${id}: ${result.reason}`);
-          await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", result.reason);
+          await emitStatus(entry, reachOf(entry), result.reason);
           return view(entry.record);
         } catch (e) {
           entry.record.phase = entry.ws.currentPhase;
@@ -2004,7 +2037,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       followMachine(entry);
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
-      await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", `moved from image v${from ?? "?"} to v${to.version}`);
+      await emitStatus(entry, reachOf(entry), `moved from image v${from ?? "?"} to v${to.version}`);
       return view(entry.record);
     },
 
@@ -2019,7 +2052,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
       const reason = `rebuilt: ${old} replaced by ${entry.record.machineId}, ${vaulted ? "nap-time vault imported" : "no vault to import"}`;
       console.warn(`rebuild of ${id}: ${reason}`);
-      await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", reason);
+      await emitStatus(entry, reachOf(entry), reason);
       return view(entry.record);
     },
 
