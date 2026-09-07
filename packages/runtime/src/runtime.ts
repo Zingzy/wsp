@@ -590,14 +590,15 @@ class DeadlineError extends Error {}
  * dropped), carrying the last such failure as its cause; a refusal the provider answered with is rethrown as itself. */
 class MoveUnansweredError extends Error {}
 
-/** Rejects once the deadline passes; the underlying promise is left to settle on its own. */
-function until<T>(p: Promise<T>, deadline: number, what: string): Promise<T> {
+/** Rejects once the deadline passes; the underlying promise is left to settle on its own. The deadline is read on
+ * the clock given, so a move budget measured on an injected clock times out on that clock. */
+function until<T>(p: Promise<T>, deadline: number, what: string, clock: Clock = realClock): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const ms = Math.max(0, deadline - Date.now());
-    const timer = setTimeout(() => reject(new DeadlineError(`${what} timed out after ${ms} ms`)), ms);
+    const ms = Math.max(0, deadline - clock.now());
+    const cancel = clock.schedule(() => reject(new DeadlineError(`${what} timed out after ${ms} ms`)), ms);
     p.then(
-      v => { clearTimeout(timer); resolve(v); },
-      e => { clearTimeout(timer); reject(e); },
+      v => { cancel(); resolve(v); },
+      e => { cancel(); reject(e); },
     );
   });
 }
@@ -1049,6 +1050,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const wakeDeadlineMs = opts.wake?.deadlineMs ?? WAKE_DEADLINE_MS;
   const providerReadMs = opts.providerReadMs ?? PROVIDER_READ_MS;
   const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
+  const clock = opts.clock ?? realClock;
   /** Each provider move the guest has to cooperate with: the state it leaves the machine in, and the state a
    * machine the move never touched still reads. */
   const moves: Record<ProviderMove, { leaves: MachineState; from: MachineState }> = {
@@ -1064,33 +1066,32 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const rule = moves[move];
     let unanswered: unknown;
     for (let attempt = 1; ; attempt++) {
-      const left = budget.deadline - Date.now();
+      const left = budget.deadline - clock.now();
       if (left > 0) {
         // The two attempts share what is left: the first takes half, the second the rest.
         try {
-          return await until(machine[move](), Date.now() + (attempt === 1 ? left / 2 : left), `${move} of ${machine.id}`);
+          return await until(machine[move](), clock.now() + (attempt === 1 ? left / 2 : left), `${move} of ${machine.id}`, clock);
         } catch (e) {
           if (!(e instanceof DeadlineError) && !isNetworkError(e)) throw e;
           unanswered = e;
         }
       }
-      const reads = await until(machine.state(), Date.now() + providerReadMs, `state of ${machine.id}`).catch(() => undefined);
+      const reads = await until(machine.state(), clock.now() + providerReadMs, `state of ${machine.id}`, clock).catch(() => undefined);
       if (reads === rule.leaves) return;
-      if (attempt === 1 && reads === rule.from && budget.deadline > Date.now()) continue;
-      const words = moveTimedOutLine(budget.what, Date.now() - budget.started, reads);
+      if (attempt === 1 && reads === rule.from && budget.deadline > clock.now()) continue;
+      const words = moveTimedOutLine(budget.what, clock.now() - budget.started, reads);
       console.warn(`${machine.id}: ${words}`);
       throw new MoveUnansweredError(words, { cause: unanswered });
     }
   };
   const budgetFor = (what: MoveBudget["what"], ms: number): MoveBudget => {
-    const started = Date.now();
+    const started = clock.now();
     return { what, started, deadline: started + ms };
   };
   const daemonHelloTimeoutMs = opts.daemonHelloTimeoutMs ?? DAEMON_HELLO_TIMEOUT_MS;
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
   const hostId = opts.hostId ?? hostname();
-  const clock = opts.clock ?? realClock;
 
   const vaultPathsOf = async (m: Machine): Promise<string[]> => {
     if (opts.vaultPaths) return opts.vaultPaths;

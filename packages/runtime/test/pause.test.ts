@@ -7,9 +7,10 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ALREADY_RUNNING, sendRefusal, workspaceState, workspaceWord, type AdapterEvent, type EventUnion, type SessionEvent } from "@wsp/protocol";
-import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
+import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
+import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
@@ -551,18 +552,35 @@ describe("a provider move that never answers", () => {
     return counter;
   }
   const pushes = (events: EventUnion[]) => events.filter(e => e.type === "workspace.status").map(e => (e.type === "workspace.status" ? e.status : null)!);
-
-  it("a pause the provider never finishes is tried twice, then the record goes back to running with the words on the row, and the next pause works", async () => {
+  type Budgets = Pick<RuntimeOptions, "nap" | "wake" | "providerReadMs">;
+  /** A runtime on a clock the test moves, so a move's budget is spent only where the test says and the vault stash
+   * before a pause costs it nothing. */
+  function rig(budgets: Budgets) {
     const backend = stubBackend();
     const store = memoryStore();
-    const rt = createRuntime({ backend, store, adapters: {}, nap: { pauseDeadlineMs: 20 } });
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store, adapters: {}, clock: fc.clock, ...budgets });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
+    return { backend, store, fc, rt, events };
+  }
+  /** Once the provider has been asked n times, the clock moves ms so the runtime stops waiting on that call. */
+  async function giveUp(fc: ReturnType<typeof fakeClock>, asked: () => number, n: number, ms: number): Promise<void> {
+    await until(() => asked() === n);
+    fc.advance(ms);
+  }
+
+  it("a pause the provider never finishes is tried twice, then the record goes back to running with the words on the row, and the next pause works", async () => {
+    const { backend, store, fc, rt, events } = rig({ nap: { pauseDeadlineMs: 20 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const hung = hang(backend, "pause");
     try {
-      await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(/^pause did not complete in \d+ms; the provider did not answer and reads the machine running; try again$/);
+      const failed = expect(rt.workspaces.nap(ws.id)).rejects.toThrow("pause did not complete in 20ms; the provider did not answer and reads the machine running; try again");
+      // The first call gets half the budget, the second the rest.
+      await giveUp(fc, () => hung.calls, 1, 10);
+      await giveUp(fc, () => hung.calls, 2, 10);
+      await failed;
     } finally {
       warn.mockRestore();
     }
@@ -578,27 +596,27 @@ describe("a provider move that never answers", () => {
   });
 
   it("a pause whose call never answers but landed at the provider is a pause: one call, the record says napping", async () => {
-    const backend = stubBackend();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, nap: { pauseDeadlineMs: 20 } });
+    const { backend, fc, rt } = rig({ nap: { pauseDeadlineMs: 20 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     const hung = hang(backend, "pause");
     hung.land();
-    expect((await rt.workspaces.nap(ws.id)).phase).toBe("napping");
+    const napped = rt.workspaces.nap(ws.id);
+    await giveUp(fc, () => hung.calls, 1, 10);
+    expect((await napped).phase).toBe("napping");
     expect(hung.calls).toBe(1);
   });
 
   it("a wake whose resume never lands is tried twice, then the record is paused with the words on the row and the wake control open, and the next wake works", async () => {
-    const backend = stubBackend();
-    const store = memoryStore();
-    const rt = createRuntime({ backend, store, adapters: {}, wake: { deadlineMs: 20 } });
-    const events: EventUnion[] = [];
-    rt.events.on("*", e => events.push(e));
+    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const hung = hang(backend, "resume");
     try {
-      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^wake did not complete in \d+ms; the provider did not answer and reads the machine paused; try again$/);
+      const failed = expect(rt.workspaces.wake(ws.id)).rejects.toThrow("wake did not complete in 20ms; the provider did not answer and reads the machine paused; try again");
+      await giveUp(fc, () => hung.calls, 1, 10);
+      await giveUp(fc, () => hung.calls, 2, 10);
+      await failed;
     } finally {
       warn.mockRestore();
     }
@@ -615,25 +633,27 @@ describe("a provider move that never answers", () => {
   });
 
   it("a resume whose call never answers but landed at the provider goes on to the wake check: one call, the record runs", async () => {
-    const backend = stubBackend();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, wake: { deadlineMs: 20 } });
+    const { backend, fc, rt } = rig({ wake: { deadlineMs: 20 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const hung = hang(backend, "resume");
     hung.land();
-    expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
+    const woken = rt.workspaces.wake(ws.id);
+    await giveUp(fc, () => hung.calls, 1, 10);
+    expect((await woken).phase).toBe("running");
     expect(hung.calls).toBe(1);
   });
 
   it("a provider that cannot be read after the deadline ends the move at once with that in the words: no second call", async () => {
-    const backend = stubBackend();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, nap: { pauseDeadlineMs: 20 } });
+    const { backend, fc, rt } = rig({ nap: { pauseDeadlineMs: 20 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     const hung = hang(backend, "pause");
     backend.machines[0]!.state = async () => { throw new Error("fetch failed"); };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(/^pause did not complete in \d+ms; the provider did not answer and could not be read about the machine; try again$/);
+      const failed = expect(rt.workspaces.nap(ws.id)).rejects.toThrow("pause did not complete in 10ms; the provider did not answer and could not be read about the machine; try again");
+      await giveUp(fc, () => hung.calls, 1, 10);
+      await failed;
     } finally {
       warn.mockRestore();
     }
@@ -642,27 +662,29 @@ describe("a provider move that never answers", () => {
   });
 
   it("a provider whose read hangs after the deadline is given up on within its own bound: one call, the words say it could not be read", async () => {
-    const backend = stubBackend();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, nap: { pauseDeadlineMs: 20 }, providerReadMs: 20 });
+    const { backend, fc, rt } = rig({ nap: { pauseDeadlineMs: 20 }, providerReadMs: 20 });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     const hung = hang(backend, "pause");
-    backend.machines[0]!.state = async () => new Promise<never>(() => {});
+    let reads = 0;
+    backend.machines[0]!.state = async () => {
+      reads++;
+      return new Promise<never>(() => {});
+    };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const started = Date.now();
     try {
-      await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(/^pause did not complete in \d+ms; the provider did not answer and could not be read about the machine; try again$/);
+      const failed = expect(rt.workspaces.nap(ws.id)).rejects.toThrow("pause did not complete in 30ms; the provider did not answer and could not be read about the machine; try again");
+      await giveUp(fc, () => hung.calls, 1, 10);
+      // The read has a bound of its own; the move ends when that passes, whatever is left of the budget.
+      await giveUp(fc, () => reads, 1, 20);
+      await failed;
     } finally {
       warn.mockRestore();
     }
-    expect(Date.now() - started).toBeLessThan(1_000);
     expect(hung.calls).toBe(1);
   });
 
   it("a wake carries one budget across its resume, re-pause and second resume: a re-pause that hangs ends within it, and the words measure the whole wake", async () => {
-    const backend = stubBackend();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, wake: { deadlineMs: 200 } });
-    const events: EventUnion[] = [];
-    rt.events.on("*", e => events.push(e));
+    const { backend, fc, rt, events } = rig({ wake: { deadlineMs: 200 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x", memMb: 4096 });
     await rt.workspaces.nap(ws.id);
     const m1 = backend.machines[0]!;
@@ -670,38 +692,39 @@ describe("a provider move that never answers", () => {
     m1.shape = { cpu: 2, memMb: 2048 };
     const hung = hang(backend, "pause");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const started = Date.now();
     let woken;
     try {
-      woken = await rt.workspaces.wake(ws.id);
+      const waking = rt.workspaces.wake(ws.id);
+      await giveUp(fc, () => hung.calls, 1, 100);
+      await giveUp(fc, () => hung.calls, 2, 100);
+      woken = await waking;
     } finally {
       warn.mockRestore();
     }
-    expect(Date.now() - started).toBeLessThan(2_000);
     expect(woken.machineId).toBe("m2");
     expect(hung.calls).toBe(2);
     const last = pushes(events).at(-1)!;
-    expect(last.reason).toMatch(/re-pause failed: wake did not complete in \d+ms; the provider did not answer and reads the machine running; try again/);
+    expect(last.reason).toMatch(/re-pause failed: wake did not complete in 200ms; the provider did not answer and reads the machine running; try again/);
   });
 
   it("a resume that lands after the wake gave up is found by one later read: the record follows to running instead of billing under a paused row", async () => {
-    const backend = stubBackend();
-    const store = memoryStore();
-    const rt = createRuntime({ backend, store, adapters: {}, wake: { deadlineMs: 20, lateReadMs: 50 } });
-    const events: EventUnion[] = [];
-    rt.events.on("*", e => events.push(e));
+    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20, lateReadMs: 50 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
-    hang(backend, "resume");
+    const hung = hang(backend, "resume");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^wake did not complete in /);
+      const failed = expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^wake did not complete in /);
+      await giveUp(fc, () => hung.calls, 1, 10);
+      await giveUp(fc, () => hung.calls, 2, 10);
+      await failed;
     } finally {
       warn.mockRestore();
     }
     expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
-    // The provider's resume lands once nobody is waiting on it.
+    // The provider's resume lands once nobody is waiting on it; the one late read is due 50 ms after the wake gave up.
     backend.machines[0]!.paused = false;
+    fc.advance(50);
     await until(async () => (await rt.workspaces.get(ws.id)).phase === "running", 2_000);
     expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "running" });
     expect(events.map(e => e.type)).toContain("workspace.woken");
@@ -709,8 +732,7 @@ describe("a provider move that never answers", () => {
   });
 
   it("a pause that fails on a network error is read and tried once more inside the budget; a second failure ends it with the words", async () => {
-    const backend = stubBackend();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, nap: { pauseDeadlineMs: 20 } });
+    const { backend, rt } = rig({ nap: { pauseDeadlineMs: 20 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     const m = backend.machines[0]!;
     const pause = m.pause.bind(m);
@@ -723,7 +745,7 @@ describe("a provider move that never answers", () => {
     };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(/^pause did not complete in \d+ms; the provider did not answer and reads the machine running; try again$/);
+      await expect(rt.workspaces.nap(ws.id)).rejects.toThrow("pause did not complete in 1ms; the provider did not answer and reads the machine running; try again");
     } finally {
       warn.mockRestore();
     }
@@ -736,8 +758,7 @@ describe("a provider move that never answers", () => {
   });
 
   it("a pause the provider refuses is not retried: the refusal is the answer", async () => {
-    const backend = stubBackend();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, nap: { pauseDeadlineMs: 20 } });
+    const { backend, rt } = rig({ nap: { pauseDeadlineMs: 20 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     let calls = 0;
     backend.machines[0]!.pause = async () => { calls++; throw new Error("upstream request timeout"); };
