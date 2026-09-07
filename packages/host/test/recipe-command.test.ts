@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { computeRecipe, type HistoryCache } from "@wsp/collect";
 import { LOGIN_CHOICES, Recipe, type LoginChoice } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { applySets, parseSet, parseSets, parseSignIn, runRecipe, runScan, type RecipeIo } from "../src/recipe-command.js";
+import { applySets, carriedOver, parseSet, parseSets, parseSignIn, runRecipe, runScan, type RecipeIo } from "../src/recipe-command.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
 import { historyCache, saveSmallRecipe } from "../src/recipe-file.js";
@@ -243,6 +243,22 @@ describe("wsp recipe", () => {
     expect(custom()?.every(r => !("signIn" in r))).toBe(true);
     expect(signInItems(applyRecipe(withCatalogAgents({ entries: [] }), Recipe.parse(JSON.parse(readFileSync(out, "utf8")))), new Map()).items.map(i => i.id)).not.toContain("logins/just");
     await expect(runRecipe(laptop(), { out, add: ["just"] }, quiet, at)).rejects.toThrow('--add takes <id>=<command>, not "just"');
+  });
+
+  it("keeps the wizard's ticks on this computer's tools rows outside the catalog through every run, rule or none, and hands them to the wizard beside the added rows and the pins", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-outside-"));
+    const out = outPath();
+    const tap = { id: "tools/brew/zingzy/tap/diskbloom", kind: "tool" as const, on: true, source: { kind: "installed" as const, paths: [], bin: true }, pin: { tag: "v0.1.0", sha256: "a".repeat(64) } };
+    const tsx = { id: "tools/npm/tsx", kind: "tool" as const, on: false, source: { kind: "installed" as const, paths: [], bin: true } };
+    saveSmallRecipe(out, { version: 1, at: at().toISOString(), histories: [], rows: [tap, tsx] });
+    const rows = () => Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows;
+    await runRecipe(laptop(), { out, tick: "installed" }, quiet, at);
+    expect(rows().filter(r => r.id.startsWith("tools/"))).toEqual([tap, tsx]);
+    const table = await runRecipe(laptop(), { out, set: ["java=off"] }, quiet, at);
+    expect(rows().filter(r => r.id.startsWith("tools/"))).toEqual([tap, tsx]);
+    // The table is the catalog's: it draws none of them, and the file keeps them.
+    expect(allRows(table).some(r => r.id === tap.id)).toBe(false);
+    expect(carriedOver(out, () => {})).toEqual({ custom: [], ticks: new Map([[tap.id, true], [tsx.id, false]]), pins: new Map([[tap.id, tap.pin]]) });
   });
 
   it("says so and rewrites the file when the recipe already there cannot be read, rather than refusing to run", async () => {

@@ -7,8 +7,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpath
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { PROJECT_STATE_RESOLVERS, countProjectState, destExists, moveProjectState } from "@wsp/engine";
-import type { ProjectAgentResult } from "@wsp/protocol";
+import { PROJECT_STATE_RESOLVERS, countProjectState, destExists, moveProjectState, type UnreadStore } from "@wsp/engine";
+import { storeUnreadLine, type ProjectAgentResult } from "@wsp/protocol";
 import type { LandRequest, LandedAgent, LandedProject, ProjectLander } from "@wsp/runtime";
 import { CACHE_RULE, outcomeOf } from "./project-bundle.js";
 
@@ -96,6 +96,18 @@ async function landState(state: NonNullable<LandRequest["state"]>, source: strin
   }
 }
 
+/** A store the listing on the machine could not read, as a row of the report: nothing of that agent's state
+ * travelled, so the row says which store and why rather than the export reading as a home with nothing in it. */
+const unreadRows = (unread: readonly UnreadStore[] = []): LandedAgent[] =>
+  unread.map(u => ({
+    agent: u.agent,
+    name: CATALOG_AGENTS.find(a => a.id === u.agent)?.name ?? u.agent,
+    files: 0,
+    bytes: 0,
+    outcome: "failed",
+    error: storeUnreadLine(u.store, u.why),
+  }));
+
 /** Lands the folder's archive at dest and the agents' state that came with it. The folder is extracted into a
  * staging directory beside dest, the state is opened in a scratch home, keyed to the path dest will have and laid
  * over the homes here, and only then is the staging directory renamed onto dest, so a failure anywhere before that
@@ -110,7 +122,9 @@ async function land(req: LandRequest, homes: Readonly<Record<string, string>>): 
   try {
     await extract(req.archive, staging);
     const target = join(dirname(realpathSync(staging)), basename(dest));
-    const agents = req.state === undefined ? [] : await landState(req.state, req.source, target, homes);
+    const landed = req.state === undefined ? [] : await landState(req.state, req.source, target, homes);
+    const order = (a: LandedAgent): number => CATALOG_AGENTS.findIndex(c => c.id === a.agent);
+    const agents = [...landed, ...unreadRows(req.unread)].sort((a, b) => order(a) - order(b));
     const now = filesAt(dest);
     if (now !== undefined) {
       if (!req.replace) throw destExists(dest, now.files);

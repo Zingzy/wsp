@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { join } from "node:path";
-import { keyedStep, listScript } from "./listing.js";
+import { keyedStep } from "./listing.js";
 import { pyData } from "./py.js";
 import { keyedEntries, keyedSessions, moveKeyedDirectories, type ProjectStateResolver } from "./resolver.js";
 
@@ -23,5 +23,5 @@ export const piResolver: ProjectStateResolver = {
   },
   sessions: (home, path) => keyedSessions(join(home, SESSIONS), piProjectKey, path),
   entries: (home, path) => keyedEntries(join(home, SESSIONS), piProjectKey, path),
-  listing: (home, path) => listScript(home, path, ROOTS, [keyedStep(join(home, SESSIONS), KEY_PY)]),
+  listing: home => [keyedStep(join(home, SESSIONS), KEY_PY)],
 };

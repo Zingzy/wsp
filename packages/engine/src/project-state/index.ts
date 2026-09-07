@@ -16,11 +16,12 @@ import { geminiResolver } from "./gemini.js";
 import { hermesResolver } from "./hermes.js";
 import { opencodeResolver } from "./opencode.js";
 import { piResolver } from "./pi.js";
-import { ROOTS_STEP, listScript } from "./listing.js";
+import { ROOTS_STEP, filterStep, listScript } from "./listing.js";
 import { resolveProjectPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
 export { parseMergeOutput, type MergeOutput } from "./merge.js";
-export { filesUnder, resolveProjectPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
+export { filesUnder, resolveProjectPath, type MovedState, type ProjectStateResolver, type SharedStore } from "./resolver.js";
+export { parseStateListing, storeCopy, type UnreadStore } from "./listing.js";
 export { underProject } from "@wsp/protocol";
 
 export const PROJECT_STATE_RESOLVERS: ReadonlyMap<string, ProjectStateResolver> = new Map(
@@ -85,19 +86,23 @@ export function guestAgentHomes(): Record<string, string> {
 
 /** The one command the machine runs to name the paths a trip pulls from the homes: each registered module's listing
  * script for the agents named (every one with a home when none is), in catalog order, each printing its paths on
- * stdout; a module with no listing of its own gives up its whole roots. An id the catalog does not know is refused,
- * so a typo is a sentence rather than a trip that brings nothing, and empty when no agent qualifies, so the caller
- * asks the machine nothing. A listing that will not run fails the command, since a silent empty answer would read as
- * a machine with no state for the project.
+ * stdout; a module with a store it keeps for every project writes the project's rows of it to a copy under `scratch`
+ * and names that copy in the store's place, and a module with neither a listing nor such a store gives up its whole
+ * roots. An id the catalog does not know is refused, so a typo is a sentence rather than a trip that brings nothing,
+ * and empty when no agent qualifies, so the caller asks the machine nothing. A listing that will not run fails the
+ * command, since a silent empty answer would read as a machine with no state for the project. The caller removes
+ * `scratch` once the archive is down.
  */
-export function stateListing(homes: Readonly<Record<string, string>>, path: string, ids?: readonly string[]): string {
+export function stateListing(homes: Readonly<Record<string, string>>, path: string, scratch: string, ids?: readonly string[]): string {
   const unknown = ids?.find(id => !CATALOG_AGENTS.some(a => a.id === id));
   if (unknown !== undefined) throw new Error(`no agent called ${unknown}; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
   const scripts = CATALOG_AGENTS.flatMap(({ id }) => {
     const home = homes[id];
     const resolver = PROJECT_STATE_RESOLVERS.get(id);
     if (home === undefined || resolver === undefined || (ids !== undefined && !ids.includes(id))) return [];
-    return [resolver.listing?.(home, path) ?? listScript(home, path, resolver.roots, [ROOTS_STEP])];
+    const own = resolver.listing?.(home, path) ?? [];
+    const steps = resolver.shared === undefined ? own : [filterStep(scratch, home, resolver.shared, own)];
+    return [listScript(id, home, path, resolver.roots, steps.length === 0 ? [ROOTS_STEP] : steps)];
   });
   return scripts.length === 0 ? "" : ["set -e", ...scripts.map(s => `python3 -c ${shellQuote(s)}`)].join("\n");
 }

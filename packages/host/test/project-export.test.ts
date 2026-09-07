@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { guestAgentHomes, tarOf, type TarEntry } from "@wsp/engine";
+import { storeUnreadLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { projectLander } from "../src/project-export.js";
 
@@ -158,6 +159,31 @@ describe("projectLander", () => {
     expect(existsSync(join(homes["hermes"]!))).toBe(false);
     expect(existsSync(join(homes["pi"]!))).toBe(false);
     expect(readdirSync(tmpdir()).filter(n => n.startsWith("wsp-home-"))).toEqual([]);
+  });
+
+  it("a store the listing could not read on the machine is a report row of its own naming the store and why, in catalog order, and nothing of that agent lands", async () => {
+    const root = scratch();
+    const dest = join(root, "code", "proj");
+    const real = `${realpathSync(root)}/code/proj`;
+    const homes = macHomes(real);
+    const before = snapshot(homes["codex"]!);
+    const lander = projectLander(homes);
+    // The state archive holds no Hermes home at all: the listing named nothing from it once its store would not open.
+    const state = tarOf([{ path: `root/.claude-cfg/projects/${claudeKey(SOURCE)}/S1.jsonl`, mode: 0o644, content: session("S1", SOURCE) }]);
+    const landed = await lander.land({
+      source: SOURCE,
+      dest,
+      replace: false,
+      archive: archived(folderTar()),
+      state: { archive: archived(state), homes: guestAgentHomes() },
+      unread: [{ agent: "hermes", store: "/root/.hermes/state.db", why: "file is not a database" }],
+    });
+    expect(landed.agents).toEqual([
+      { agent: "claude", name: "Claude Code", files: 1, bytes: Buffer.byteLength(session("S1", real)), outcome: "moved", sessions: 1 },
+      { agent: "hermes", name: "Hermes Agent", files: 0, bytes: 0, outcome: "failed", error: storeUnreadLine("/root/.hermes/state.db", "file is not a database") },
+    ]);
+    expect(existsSync(homes["hermes"]!)).toBe(false);
+    expect(snapshot(homes["codex"]!)).toEqual(before);
   });
 
   it("refuses an existing destination with kind exists, naming it and its files, leaves it and the homes as they were, and replaces it when told to", async () => {

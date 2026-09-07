@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { keyedStep, listScript } from "./listing.js";
+import { keyedStep } from "./listing.js";
 import { pyData } from "./py.js";
 import { keyedEntries, keyedSessions, moveKeyedDirectories, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
@@ -27,5 +27,5 @@ export const claudeResolver: ProjectStateResolver = {
   },
   sessions: (home, path) => keyedSessions(join(home, PROJECTS), claudeProjectKey, path),
   entries: (home, path) => keyedEntries(join(home, PROJECTS), claudeProjectKey, path),
-  listing: (home, path) => listScript(home, path, ROOTS, [keyedStep(join(home, PROJECTS), KEY_PY)]),
+  listing: home => [keyedStep(join(home, PROJECTS), KEY_PY)],
 };

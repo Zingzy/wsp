@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/** The timers the idle window, the transcript debounce and the status tickers run on; tests inject one they can advance by hand. */
+/** The timers the idle window, the transcript debounce, the status tickers and the pause and wake budgets run on; tests inject one they can advance by hand. */
 export interface Clock {
   /** Epoch ms. */
   now(): number;
