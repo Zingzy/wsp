@@ -17,7 +17,7 @@ import type { HostHandle } from "../src/server.js";
 import { PLAN_ONLY, dialHost } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, projectBundler, doneOnlyAgent, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, launchedScripts, projectBundler, doneOnlyAgent, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -801,7 +801,46 @@ describe("wsp verbs over the host", () => {
     execGuest(backend, "", 0);
     const { code } = await run("exec", "alpha", "--", "grep", "a b", "file.txt");
     expect(code).toBe(0);
-    expect(launchedScript(backend)).toContain("\n'grep' 'a b' 'file.txt'\n");
+    expect(launchedScript(backend)).toContain("\ncd ~ && 'grep' 'a b' 'file.txt'\n");
+  });
+
+  it("exec runs in --cwd when given, else in the workspace's imported project folder, else the home; a failing command says on stderr where it ran", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    execGuest(backend, "", 0);
+    const home = await run("exec", "alpha", "--", "git", "status");
+    expect(home.code).toBe(0);
+    expect(home.io.errors).toEqual([]);
+    expect(launchedScripts(backend).at(-1)).toContain("\ncd ~ && 'git' 'status'\n");
+
+    const named = await run("exec", "alpha", "--cwd", "/root/work/else where", "--", "git", "status");
+    expect(named.code).toBe(0);
+    expect(launchedScripts(backend).at(-1)).toContain("\ncd '/root/work/else where' && 'git' 'status'\n");
+
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
+    execGuest(backend, "fatal: not a git repository\n", 128);
+    const inProject = await run("exec", "alpha", "--", "git", "status");
+    expect(inProject.code).toBe(128);
+    expect(launchedScripts(backend).at(-1)).toContain("\ncd '/root/work/proj' && 'git' 'status'\n");
+    expect(inProject.io.lines).toEqual(["fatal: not a git repository"]);
+    expect(inProject.io.errors).toEqual(["ran in /root/work/proj"]);
+
+    const overridden = await run("exec", "alpha", "--cwd", "/root", "--", "git", "status");
+    expect(overridden.code).toBe(128);
+    expect(launchedScripts(backend).at(-1)).toContain("\ncd '/root' && 'git' 'status'\n");
+    expect(overridden.io.errors).toEqual(["ran in /root"]);
+
+    const relative = await run("exec", "alpha", "--cwd", "packages/host", "--", "git", "status");
+    expect(relative.code).toBe(1);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp exec <workspace> [--cwd <dir>] -- <command...>']);
+  });
+
+  it("a failing exec with no folder of its own says it ran in the home folder", async () => {
+    await run("new", "alpha");
+    execGuest(backend, "", 2);
+    const { code, io } = await run("exec", "alpha", "--", "false");
+    expect(code).toBe(2);
+    expect(io.errors).toEqual(["ran in the home folder"]);
   });
 
   it("the host going away mid-turn fails the verb in one line with exit 1 instead of hanging", async () => {

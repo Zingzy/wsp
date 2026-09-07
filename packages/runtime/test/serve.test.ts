@@ -688,6 +688,28 @@ describe("serveRuntime workspaces.exec", () => {
     expect(kills[0]).toMatch(/kill -TERM -- -\$P .*kill -KILL -- -\$P .*rm -rf \/tmp\/wsp-run\/[a-f0-9]{12}\.\*/);
   });
 
+  it("runs the command in the folder the request names, quoted for the machine's shell; without one, in the home, as a harness turn does", async () => {
+    const backend = stubBackend();
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: { claude: envAdapter({ PATH: "/usr/bin" }) } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    execGuest(backend, "", 0);
+    const scripts = (): string[] => backend.machines[0]!.execLog.filter(cmd => cmd.includes("base64 -d")).map(launch => Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8"));
+
+    const inFolder = await c.request("workspaces.exec", { workspaceId, argv: ["git", "status"], cwd: "/root/work/my proj" });
+    expect(inFolder.ok).toBe(true);
+    await until(() => c.events.some(e => e.type === "exec.exit" && e["execId"] === inFolder["execId"]));
+    expect(scripts().at(-1)).toContain("export PATH='/usr/bin'\ncd '/root/work/my proj' && 'git' 'status'\necho $? > ");
+
+    const bare = await c.request("workspaces.exec", { workspaceId, argv: ["git", "status"] });
+    expect(bare.ok).toBe(true);
+    await until(() => c.events.some(e => e.type === "exec.exit" && e["execId"] === bare["execId"]));
+    expect(scripts().at(-1)).toContain("export PATH='/usr/bin'\ncd ~ && 'git' 'status'\necho $? > ");
+    c.close();
+  });
+
   it("refuses like sessions.start when no adapter is registered for the harness whose environment it would run with", async () => {
     const backend = stubBackend();
     const runtime = createRuntime({ backend, store: memoryStore(), adapters: {} });

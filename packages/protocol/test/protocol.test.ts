@@ -749,6 +749,11 @@ describe("workspaces.exec", () => {
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", cmd: "ls" })).toThrow();
   });
 
+  it("takes the folder the command runs in as cwd, absent when the command runs in the home", () => {
+    expect(RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", argv: ["git", "status"], cwd: "/root/work/proj" })).toMatchObject({ cwd: "/root/work/proj" });
+    expect(RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", argv: ["git", "status"] })).not.toHaveProperty("cwd");
+  });
+
   it("pushes output lines and one exit, whose code is null with a reason when the command was ended without one", () => {
     expect(ExecEvent.parse({ type: "exec.output", execId: "e1", text: "hello" })).toEqual({ type: "exec.output", execId: "e1", text: "hello" });
     expect(ExecEvent.parse({ type: "exec.exit", execId: "e1", exitCode: 0 })).toEqual({ type: "exec.exit", execId: "e1", exitCode: 0 });
