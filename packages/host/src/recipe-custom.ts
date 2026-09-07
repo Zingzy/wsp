@@ -3,14 +3,14 @@
 // and the MCP recipe tool read them and how they join a recipe; the table
 // draws them under their own group. The install line runs as given, so nothing
 // here rewrites one; a row outside the catalog is never offered a sign-in.
-import { ADDED_BY_AGENT, commandCheck, customRows, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
+import { ADDED_BY_AGENT, commandCheck, customRows, usageRefusal, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
 
 /** `<id>=<value>`, split at the first equals; both sides have to be there. */
 export function parsePair(flag: string, spec: string): { id: string; value: string } {
   const at = spec.indexOf("=");
   const id = at < 0 ? "" : spec.slice(0, at).trim();
   const value = at < 0 ? "" : spec.slice(at + 1).trim();
-  if (id === "" || value === "") throw new Error(`${flag} takes <id>=<command>, not ${JSON.stringify(spec)}`);
+  if (id === "" || value === "") throw usageRefusal(`${flag} takes <id>=<command>, not ${JSON.stringify(spec)}`);
   return { id, value };
 }
 
@@ -35,7 +35,7 @@ export function customFromFlags(flags: AddFlags): RecipeCustomRow[] {
     const { id, value } = parsePair("--add", spec);
     rows.set(id, { kind: "custom", id, name: id, install: [value], check: checks.get(id) ?? commandCheck(id), why: flags.why ?? ADDED_BY_AGENT });
   }
-  for (const id of checks.keys()) if (!rows.has(id)) throw new Error(`--add-check ${id}: nothing was added under that id`);
+  for (const id of checks.keys()) if (!rows.has(id)) throw usageRefusal(`--add-check ${id}: nothing was added under that id`);
   return [...rows.values()];
 }
 

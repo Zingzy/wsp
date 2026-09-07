@@ -1702,6 +1702,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { actionRefusal, goneRefusal, imageMoveRefusal, isBilling, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export * from "./exit.js";
 export * from "./format.js";
 export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";

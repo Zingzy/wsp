@@ -4,11 +4,12 @@
 // a tool or says why not, every tool has a skill row, and every wsp line the
 // skill or the instructions show parses against the flag table the command
 // actually reads.
+import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
-import { NOTIFY_WORDS, SessionStartOutcome, TURN_END_WORDS, stillWorkingRefusal } from "@wsp/protocol";
+import { EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_WORDS, SessionStartOutcome, TURN_END_WORDS, stillWorkingRefusal } from "@wsp/protocol";
 import { COMMAND_LINES, HELP, JSON_COMMANDS, PROSE_COMMANDS, type CommandLine } from "../src/cli.js";
 import { mcpServer } from "../src/mcp.js";
 import { INSTRUCTIONS, WSP_SKILL } from "../src/skill.js";
@@ -18,6 +19,7 @@ interface Tool {
   name: string;
   description?: string;
   inputs: string[];
+  outputs: string[];
 }
 
 async function listTools(): Promise<Tool[]> {
@@ -28,7 +30,8 @@ async function listTools(): Promise<Tool[]> {
   await client.connect(toClient);
   try {
     const { tools } = await client.listTools();
-    return tools.map(t => ({ name: t.name, description: t.description, inputs: Object.keys((t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}).sort() }));
+    const keys = (schema: unknown): string[] => Object.keys((schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}).sort();
+    return tools.map(t => ({ name: t.name, description: t.description, inputs: keys(t.inputSchema), outputs: keys(t.outputSchema) }));
   } finally {
     await client.close();
     await server.close();
@@ -59,7 +62,7 @@ export function skillRows(skill: string): SkillRow[] {
         else break;
       }
       const named: Tool[] = [];
-      for (const m of tools!.matchAll(/`(\w+)`(?: \(([^)]*)\))?/g)) named.push({ name: m[1]!, inputs: m[2] === undefined ? [] : m[2].split(",").map(s => s.trim()).sort() });
+      for (const m of tools!.matchAll(/`(\w+)`(?: \(([^)]*)\))?/g)) named.push({ name: m[1]!, inputs: m[2] === undefined ? [] : m[2].split(",").map(s => s.trim()).sort(), outputs: [] });
       return { words: words.join(" "), flags: flagsOf(command!), tools: named };
     });
 }
@@ -182,6 +185,31 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     expect(tools.map(t => t.name).sort()).toEqual(VERBS.map(v => toolName(v.name)).sort());
     for (const verb of VERBS) expect(tools.find(t => t.name === toolName(verb.name))!.inputs, verb.name).toEqual(Object.keys(verb.tool.input).sort());
     expect(toolName("thread new")).toBe("thread_new");
+  });
+
+  it("every served tool carries an output schema with the entry's fields, so a verb cannot ship without saying what it answers with", async () => {
+    for (const tool of await listTools()) {
+      const entry = VERBS.find(v => toolName(v.name) === tool.name)!;
+      expect(tool.outputs.length, `${tool.name} serves no output schema`).toBeGreaterThan(0);
+      expect(tool.outputs, tool.name).toEqual(Object.keys(entry.tool.output).sort());
+    }
+  });
+
+  it("the skill's contract section, the help and the repo's AGENTS.md name exactly the exit codes the protocol exports, in its words", () => {
+    const rows = WSP_SKILL.split("\n")
+      .filter(line => /^\| \d+ \| `\w+` \|/.test(line))
+      .map(line => line.split("|").slice(1, -1).map(cell => cell.trim()))
+      .map(([code, cls, when]) => ({ code: Number(code), cls: cls!.replaceAll("`", ""), when }));
+    expect(rows.map(r => [r.cls, r.code])).toEqual(Object.entries(EXIT_CODES));
+    for (const row of rows) expect(row.when, row.cls).toBe(EXIT_WORDS[ExitClass.parse(row.cls)]);
+    const help = HELP.replace(/\s+/g, " ");
+    const agents = readFileSync(new URL("../../../AGENTS.md", import.meta.url), "utf8").replace(/\s+/g, " ");
+    for (const cls of ExitClass.options) {
+      expect(help).toContain(`${EXIT_CODES[cls]} ${cls}`);
+      expect(agents).toContain(`${EXIT_CODES[cls]} ${cls}`);
+    }
+    // One section says it, once: the skill names the codes in the table alone and nowhere as a bare "exit 1".
+    for (const text of [WSP_SKILL, HELP]) expect(text.match(/\bexits? [0-9]\b/g) ?? []).toEqual([]);
   });
 
   it("every command line has a tool or says why not, every tool has a skill row naming its inputs, and a tool with no command line says why", async () => {
@@ -314,7 +342,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
 
   it("reads a usage row as its words and each tool with its inputs", () => {
     const [row] = skillRows("| `wsp thread new --in <workspace> [--agent <id>] \"<task>\"` | `thread_new` (workspace, task, agent), `threads` | opens |");
-    expect(row).toEqual({ words: "thread new", flags: ["agent", "in"], tools: [{ name: "thread_new", inputs: ["agent", "task", "workspace"] }, { name: "threads", inputs: [] }] });
+    expect(row).toEqual({ words: "thread new", flags: ["agent", "in"], tools: [{ name: "thread_new", inputs: ["agent", "task", "workspace"], outputs: [] }, { name: "threads", inputs: [], outputs: [] }] });
     expect(shellWords('wsp recipe --add just="brew install just" [--set <id>=on|off] --notify <thread|me> "<the task>" # a note')).toEqual({
       words: ["wsp", "recipe", "--add", 'just="brew install just"', "--set", "<id>=on|off", "--notify", "<thread|me>", '"<the task>"'],
       comment: "a note",

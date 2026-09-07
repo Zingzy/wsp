@@ -102,7 +102,7 @@ describe("the recipe verb's flags", () => {
     dirs.push(dir);
     const lines: string[] = [];
     const errors: string[] = [];
-    expect(await cli(["recipe", "--out", join(dir, "recipe.json"), "--add", "just"], io(lines, errors))).toBe(1);
+    expect(await cli(["recipe", "--out", join(dir, "recipe.json"), "--add", "just"], io(lines, errors))).toBe(3);
     expect(errors[0]).toBe('wsp recipe: --add takes <id>=<command>, not "just"');
     expect(lines).toEqual([]);
   });

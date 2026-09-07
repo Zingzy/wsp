@@ -15,10 +15,12 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
+import { CATALOG_AGENTS } from "@wsp/catalog";
 import { nodeHost } from "@wsp/collect";
 import {
   AFTER_CUT_LINE,
   EMPTY_TASK_LINE,
+  EXIT_CODES,
   LOGIN_CHOICES,
   NOTIFY_ME,
   NOTIFY_WORDS,
@@ -36,6 +38,7 @@ import {
   ThreadView,
   WorkspaceView,
   actionRefusal,
+  authRefusal,
   canTravel,
   defaultAgents,
   defaultConsent,
@@ -61,6 +64,9 @@ import {
   toolActivityLine,
   toolResultLine,
   turnSettledLine,
+  unknownAgentLine,
+  usageRefusal,
+  verbFailure,
   workspaceState,
   workspaceWord,
   type Capabilities,
@@ -100,6 +106,10 @@ export interface HostClient {
 }
 
 const DIAL_MS = 5_000;
+/** The close code the runtime sends with every token refusal, the one fact an older host still carries. */
+const UNAUTHORIZED_CLOSE = 4401;
+/** How long a refused auth waits for the close that follows its frame before the frame's own class stands. */
+const CLOSE_GRACE_MS = 500;
 
 /** Where the host serving this state file listens and the token it wrote, or a plain refusal when none serves it. */
 export function hostAddress(statePath: string): { wsPort: number; token: string } {
@@ -110,7 +120,7 @@ export function hostAddress(statePath: string): { wsPort: number; token: string 
   try {
     token = readFileSync(tokenPath, "utf8").trim();
   } catch {
-    throw new Error(`the host's token file is missing: ${tokenPath}`);
+    throw authRefusal(`the host's token file is missing: ${tokenPath}`);
   }
   return { wsPort: lock.wsPort, token };
 }
@@ -124,7 +134,13 @@ export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise
     ws.once("open", () => done());
     ws.once("error", fail);
   });
-  const closed = new Promise<void>(done => ws.once("close", () => done()));
+  let closeCode: number | undefined;
+  const closed = new Promise<void>(done =>
+    ws.once("close", code => {
+      closeCode = code;
+      done();
+    }),
+  );
   let next = 1;
   const pending = new Map<number, { settle: (f: Frame) => void; fail: (e: Error) => void }>();
   const listeners = new Set<(f: Frame) => void>();
@@ -156,8 +172,17 @@ export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise
   const deadline = new Promise<never>((_, fail) => {
     timer = setTimeout(() => fail(new Error(`the host on port ${wsPort} did not answer within ${deadlineMs} ms`)), deadlineMs);
   });
+  // A refusal whose frame carries no kind is classed by the close code that follows it, so a host of an older version
+  // that sends the code alone still reads as auth; a frame with a kind is the source when there is one.
+  const authed = opened
+    .then(() => request("auth", { token }))
+    .catch(async (e: unknown) => {
+      if ((e as { kind?: unknown }).kind !== undefined) throw e;
+      await Promise.race([closed, new Promise(r => setTimeout(r, CLOSE_GRACE_MS))]);
+      throw closeCode === UNAUTHORIZED_CLOSE ? authRefusal(e instanceof Error ? e.message : String(e)) : e;
+    });
   try {
-    await Promise.race([opened.then(() => request("auth", { token })), deadline]);
+    await Promise.race([authed, deadline]);
   } catch (e) {
     ws.terminate();
     throw e;
@@ -258,6 +283,9 @@ export interface Tool {
   description: string;
   input: z.ZodRawShape;
   output: z.ZodRawShape;
+  /** The output fields the command line prints as frames under --json, one per line ahead of the result, which leaves
+   * them out; a result with nothing left is not printed. */
+  stream?: readonly string[];
   call(args: Record<string, unknown>, deps: VerbDeps): Promise<CallToolResult>;
 }
 
@@ -266,6 +294,7 @@ function tool<In extends z.ZodRawShape, Out extends z.ZodRawShape>(spec: {
   description: string;
   input: In;
   output: Out;
+  stream?: readonly (keyof Out & string)[];
   call(args: z.objectOutputType<In, z.ZodTypeAny>, deps: VerbDeps): Promise<CallToolResult>;
 }): Tool {
   return spec;
@@ -463,7 +492,7 @@ export async function createFromHead(client: HostClient, out: Out, name: string,
 async function sizeChosen(client: HostClient, word: string): Promise<WorkspaceSize> {
   const { capabilities } = await client.request<{ capabilities: Capabilities }>("capabilities.get");
   const size = sizeFromWord(word);
-  if (size === undefined || !offeredSize(capabilities.sizes, size)) throw new Error(sizeRefusal(word, capabilities.sizes));
+  if (size === undefined || !offeredSize(capabilities.sizes, size)) throw usageRefusal(sizeRefusal(word, capabilities.sizes));
   return size;
 }
 
@@ -528,7 +557,7 @@ export interface Turn {
 /** A path a caller named, refused unless absolute: whoever reads it has a working folder of its own that the caller
  * cannot see, so a relative path resolves somewhere neither of them meant. `named` opens the line. */
 export function absolutePath(named: string, path: string): string {
-  if (!path.startsWith("/")) throw new Error(`${named}, absolute: got ${JSON.stringify(path)}`);
+  if (!path.startsWith("/")) throw usageRefusal(`${named}, absolute: got ${JSON.stringify(path)}`);
   return path;
 }
 
@@ -563,11 +592,15 @@ export function pickFlags(flags: Flags): Picks {
  * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's table
  * does not list. The tables are what the runtime knows without a machine; the start on the machine checks the rest. */
 export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks): Promise<void> {
-  if (task.trim() === "") throw new Error(EMPTY_TASK_LINE);
+  if (task.trim() === "") throw usageRefusal(EMPTY_TASK_LINE);
   const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list");
   const table = harnesses.find(c => (harness === undefined ? c.isDefault === true : c.harness === harness));
-  if (table === undefined && harness !== undefined) throw new Error(noAdapterLine(harness, harnesses.map(c => c.harness)));
-  startPicks(table, picksOf(picks), true);
+  if (table === undefined && harness !== undefined) throw usageRefusal(noAdapterLine(harness, harnesses.map(c => c.harness)));
+  try {
+    startPicks(table, picksOf(picks), true);
+  } catch (e) {
+    throw usageRefusal(e instanceof Error ? e.message : String(e));
+  }
 }
 
 /** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the named
@@ -699,8 +732,8 @@ function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string):
 
 /** The verbs' way through a turn: text, the tool calls behind it and what each answered stream to stderr as they
  * arrive, the last message is printed on stdout when the reply is complete, with --json every event of the turn up
- * to its done is printed instead; the failure is one line on stderr, exit 1. */
-async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}): Promise<number> {
+ * to its done is printed instead; a turn that did not complete is the verb's failure, in the harness's words. */
+async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}): Promise<Turn> {
   const stream = turnStream(ctx);
   const turn = await follow(client, start, "cli", {
     queued: () => ctx.io.error(WAITING),
@@ -722,8 +755,8 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
     },
   });
   const failure = turnFailure(turn);
-  if (failure !== undefined) ctx.io.error(failure);
-  return failure === undefined ? 0 : 1;
+  if (failure !== undefined) throw new Error(failure);
+  return turn;
 }
 
 export type ExecExit = Extract<ExecEvent, { type: "exec.exit" }>;
@@ -812,7 +845,7 @@ export async function importProject(client: HostClient, workspaceId: string, req
 export function secretsChosen(plan: ProjectPlan, keep: readonly string[], cut: readonly string[]): ReadonlySet<string> {
   const listed = new Set(plan.secrets.map(s => s.path));
   for (const path of [...keep, ...cut]) {
-    if (!listed.has(path)) throw new Error(`${path} is not a secret-shaped file in the plan${listed.size === 0 ? "; the plan lists none" : `; the plan lists ${[...listed].join(", ")}`}`);
+    if (!listed.has(path)) throw usageRefusal(`${path} is not a secret-shaped file in the plan${listed.size === 0 ? "; the plan lists none" : `; the plan lists ${[...listed].join(", ")}`}`);
   }
   const ticked = new Set(defaultConsent(plan.secrets));
   for (const path of keep) ticked.add(path);
@@ -825,7 +858,7 @@ export function agentsChosen(plan: ProjectPlan, named: readonly string[] | undef
   if (named === undefined) return defaultAgents(plan.agents);
   const travelling = plan.agents.filter(canTravel);
   for (const id of named) {
-    if (!travelling.some(a => a.agent === id)) throw new Error(`${id} has no sessions for this folder${travelling.length === 0 ? "" : `; the plan lists ${travelling.map(a => a.agent).join(", ")}`}`);
+    if (!travelling.some(a => a.agent === id)) throw usageRefusal(`${id} has no sessions for this folder${travelling.length === 0 ? "" : `; the plan lists ${travelling.map(a => a.agent).join(", ")}`}`);
   }
   return new Set(named);
 }
@@ -855,17 +888,29 @@ export const PLAN_ONLY = "nothing imported; run again with --yes to take these d
 /** The one question a person at the terminal is asked under the plan; no is the default and moves nothing. */
 export const IMPORT_NOW = "Import now? y/N";
 
-/** The agents a --agents flag names, comma-separated; nothing when the flag is absent. */
+/** A destination the runtime refused as already there, with the flag that overwrites it named; any other failure as it came. */
+function withReplaceHint(e: unknown): unknown {
+  if ((e as { kind?: unknown }).kind !== "exists") return e;
+  return Object.assign(new Error(`${e instanceof Error ? e.message : String(e)}\nRun again with --replace to overwrite it.`), { kind: "exists" });
+}
+
+/** The agents a --agents flag names, comma-separated, each one the catalog knows; nothing when the flag is absent. */
 export function agentsFlag(value: string | undefined): string[] | undefined {
   if (value === undefined) return undefined;
   const ids = value.split(",").map(s => s.trim()).filter(s => s !== "");
-  if (ids.length === 0) throw new Error("--agents names at least one agent, comma-separated");
+  if (ids.length === 0) throw usageRefusal("--agents names at least one agent, comma-separated");
+  const known = CATALOG_AGENTS.map(a => a.id);
+  const unknown = ids.find(id => !known.includes(id));
+  if (unknown !== undefined) throw usageRefusal(unknownAgentLine(unknown, known));
   return ids;
 }
 
-/** The one question a drop asks unless --yes, and the one line it prints when the answer is anything but yes. */
+/** The one question a drop asks unless --yes, and the one line it prints when the answer is anything but yes. Off a
+ * terminal nobody can answer, so the line without --yes is refused as written. */
 async function confirmed(ctx: VerbContext, question: string, d: Dropping): Promise<boolean> {
-  if (ctx.flags["yes"] === true || (await ctx.io.ask(question)) === "yes") return true;
+  if (ctx.flags["yes"] === true) return true;
+  if (ctx.io.isTTY !== true) throw usageRefusal(`${question.split("\n")[0]} There is no terminal to answer on; pass --yes to say yes.`);
+  if ((await ctx.io.ask(question)) === "yes") return true;
   ctx.io.error(`${d.workspace.name} kept`);
   return false;
 }
@@ -970,9 +1015,9 @@ export const VERBS: readonly Verb[] = [
     about: "every thread as the sidebar lists it: agent, state, who opened it, the folder it works in",
     options: { in: { type: "string" } },
     run: async ctx => {
-      if (ctx.args.length !== 0) throw new Error("wsp threads takes no positional arguments");
+      if (ctx.args.length !== 0) throw usageRefusal("wsp threads takes no positional arguments");
       const rows = await threadRows(await ctx.client(), flag(ctx.flags, "in"));
-      ctx.out.emit({ threads: rows.map(({ workspaceName: _name, ...t }) => t) }, table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "FOLDER", "TITLE"], ...rows.map(threadLine)]).join("\n"));
+      ctx.out.emit({ threads: rows }, table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "FOLDER", "TITLE"], ...rows.map(threadLine)]).join("\n"));
       return 0;
     },
     tool: tool({
@@ -989,7 +1034,7 @@ export const VERBS: readonly Verb[] = [
       "read this computer and print every option, writing nothing: the agents, the tools with why and size, what else a package manager here has that the image could take, the commands your agents ran, and the sign-ins, each with what to do about it and one line of why; --project weighs the histories by a folder and --json prints it as one object",
     options: { project: { type: "string", multiple: true } },
     run: async ctx => {
-      if (ctx.args.length !== 0) throw new Error("wsp recipe scan takes no positional arguments");
+      if (ctx.args.length !== 0) throw usageRefusal("wsp recipe scan takes no positional arguments");
       const scan = await runScan(nodeHost(), { ...projectsFlag(ctx.flags), cache: historyCache(ctx.statePath), ...(ctx.alsoHere !== undefined ? { alsoHere: ctx.alsoHere } : {}) }, progress(ctx.io));
       printTable(ctx, scan, depth => scanPrintout(scan, depth), `Nothing was written. Take the do column with wsp recipe --set <id>=on and --signin <id>=machine, then run wsp init --recipe ${resolve(smallRecipePath(ctx.statePath))}.`);
       return 0;
@@ -1024,9 +1069,9 @@ export const VERBS: readonly Verb[] = [
       project: { type: "string", multiple: true },
     },
     run: async ctx => {
-      if (ctx.args.length !== 0) throw new Error("wsp recipe takes no positional arguments; wsp recipe scan is its one subcommand");
+      if (ctx.args.length !== 0) throw usageRefusal("wsp recipe takes no positional arguments; wsp recipe scan is its one subcommand");
       const tick = flag(ctx.flags, "tick");
-      if (tick !== undefined && !isRecipeTick(tick)) throw new Error(`--tick takes one of ${RECIPE_TICKS.join(", ")}, not ${JSON.stringify(tick)}`);
+      if (tick !== undefined && !isRecipeTick(tick)) throw usageRefusal(`--tick takes one of ${RECIPE_TICKS.join(", ")}, not ${JSON.stringify(tick)}`);
       const out = resolve(flag(ctx.flags, "out") ?? smallRecipePath(ctx.statePath));
       const table = await runRecipe(
         nodeHost(),
@@ -1081,7 +1126,7 @@ export const VERBS: readonly Verb[] = [
     options: { from: { type: "string" }, size: { type: "string" } },
     run: async ctx => {
       const [name] = ctx.args;
-      if (name === undefined || ctx.args.length !== 1) throw new Error("wsp new takes one name");
+      if (name === undefined || ctx.args.length !== 1) throw usageRefusal("wsp new takes one name");
       const client = await ctx.client();
       const from = flag(ctx.flags, "from");
       const size = flag(ctx.flags, "size");
@@ -1107,7 +1152,7 @@ export const VERBS: readonly Verb[] = [
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp snapshot takes one workspace");
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp snapshot takes one workspace");
       const projectGolden = await snapshot(await ctx.client(), ref);
       ctx.out.emit({ projectGolden }, projectGoldenLine(projectGolden));
       return 0;
@@ -1126,9 +1171,9 @@ export const VERBS: readonly Verb[] = [
     options: { name: { type: "string" }, size: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp fork takes one workspace");
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp fork takes one workspace");
       const task = flag(ctx.flags, "send");
-      for (const dependent of ["agent", ...PICK_FLAGS, "cwd", "notify"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw new Error(`--${dependent} needs --send`);
+      for (const dependent of ["agent", ...PICK_FLAGS, "cwd", "notify"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw usageRefusal(`--${dependent} needs --send`);
       const client = await ctx.client();
       const source = await workspaceOf(client, ref);
       if (workspaceState({ phase: source.phase }) === "gone") throw new Error(goneRefusal("fork", source.gone));
@@ -1139,12 +1184,14 @@ export const VERBS: readonly Verb[] = [
       if (task !== undefined) await checkedStart(client, task, harness, picks);
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`, flag(ctx.flags, "size"));
       if (task === undefined) return 0;
-      return followVerb(ctx, client, openingOf(created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true);
+      ctx.out.emit({ turn: turnView(await followVerb(ctx, client, openingOf(created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true)) });
+      return 0;
     },
     tool: tool({
       description: "A sibling workspace from the source's golden version (a new machine, not a copy of its live disk); with a task, its first thread is opened and the reply returned. When that first turn fails, the error still names the workspace, which exists: continue with thread_new on it rather than forking again.",
       input: { workspace: WorkspaceIn, name: z.string().optional().describe("defaults to <source>-fork"), size: SizeIn, task: z.string().optional(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn },
       output: Created.extend({ turn: TurnOut.optional(), failure: z.string().optional() }).shape,
+      stream: ["workspace", "notice"],
       call: async ({ workspace: ref, name, size: word, task, agent: harness, cwd: folder, notify: tell, ...input }, deps) => {
         absoluteFolder(folder);
         const client = await deps.client();
@@ -1173,7 +1220,7 @@ export const VERBS: readonly Verb[] = [
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp pause takes one workspace");
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp pause takes one workspace");
       const workspace = await nap(await ctx.client(), ref);
       ctx.out.emit({ workspace }, stateLine(workspace));
       return 0;
@@ -1192,7 +1239,7 @@ export const VERBS: readonly Verb[] = [
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp wake takes one workspace");
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp wake takes one workspace");
       const client = await ctx.client();
       const workspace = await awake(client, await workspaceOf(client, ref), "wake", line => ctx.io.error(line));
       ctx.out.emit({ workspace }, stateLine(workspace));
@@ -1215,12 +1262,12 @@ export const VERBS: readonly Verb[] = [
     options: { yes: { type: "boolean" } },
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp forget takes one workspace");
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp forget takes one workspace");
       const client = await ctx.client();
       const f = await dropping(client, ref);
       if (!(await confirmed(ctx, forgetQuestion(f), f))) return 1;
       await forget(client, f);
-      ctx.out.emit({ forgot: { workspaceId: f.workspace.id, name: f.workspace.name, threads: f.threads } }, forgotLine(f));
+      ctx.out.emit({ workspaceId: f.workspace.id, name: f.workspace.name, threads: f.threads }, forgotLine(f));
       return 0;
     },
     tool: tool({
@@ -1243,12 +1290,12 @@ export const VERBS: readonly Verb[] = [
     options: { yes: { type: "boolean" } },
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp delete takes one workspace");
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp delete takes one workspace");
       const client = await ctx.client();
       const d = await dropping(client, ref);
       if (!(await confirmed(ctx, deleteQuestion(d), d))) return 1;
       await deleteWorkspace(client, d);
-      ctx.out.emit({ deleted: { workspaceId: d.workspace.id, name: d.workspace.name, machineId: d.workspace.machineId, threads: d.threads } }, deletedLine(d));
+      ctx.out.emit({ workspaceId: d.workspace.id, name: d.workspace.name, machineId: d.workspace.machineId, threads: d.threads }, deletedLine(d));
       return 0;
     },
     tool: tool({
@@ -1278,15 +1325,16 @@ export const VERBS: readonly Verb[] = [
     run: async ctx => {
       const [task] = ctx.args;
       const within = flag(ctx.flags, "in");
-      if (within === undefined) throw new Error("wsp thread new needs --in <workspace>");
-      if (task === undefined || ctx.args.length !== 1) throw new Error("wsp thread new takes one task");
+      if (within === undefined) throw usageRefusal("wsp thread new needs --in <workspace>");
+      if (task === undefined || ctx.args.length !== 1) throw usageRefusal("wsp thread new takes one task");
       const client = await ctx.client();
       const found = await workspaceOf(client, within);
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
       await checkedStart(client, task, harness, picks);
       const workspace = await awake(client, found, "send", line => ctx.io.error(line));
-      return followVerb(ctx, client, openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true);
+      ctx.out.emit(turnView(await followVerb(ctx, client, openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true)));
+      return 0;
     },
     tool: tool({
       description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll. ${NOTIFY_WORDS}.`,
@@ -1309,13 +1357,14 @@ export const VERBS: readonly Verb[] = [
     options: PICK_OPTIONS,
     run: async ctx => {
       const [ref, message] = ctx.args;
-      if (ref === undefined || message === undefined || ctx.args.length !== 2) throw new Error("wsp send takes a thread and one message");
+      if (ref === undefined || message === undefined || ctx.args.length !== 2) throw usageRefusal("wsp send takes a thread and one message");
       const client = await ctx.client();
       const picks = pickFlags(ctx.flags);
       const thread = await threadOf(client, ref);
       await checkedStart(client, message, thread.harness, picks);
       await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
-      return followVerb(ctx, client, messageTo(thread, message, picks), false, picks);
+      ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks), false, picks)));
+      return 0;
     },
     tool: tool({
       description: `Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. A model, effort or access named here is the turn's; a turn that joins a running one keeps that one's. ${SEND_MEETS}`,
@@ -1338,7 +1387,7 @@ export const VERBS: readonly Verb[] = [
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
-      if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp stop takes one thread");
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp stop takes one thread");
       const stopped = await stop(await ctx.client(), ref);
       ctx.out.emit(stopped, stopLine(stopped));
       return 0;
@@ -1360,19 +1409,23 @@ export const VERBS: readonly Verb[] = [
     options: { cwd: { type: "string" } },
     run: async ctx => {
       const [ref, ...words] = ctx.args;
-      if (ref === undefined || words.length === 0) throw new Error("wsp exec takes a workspace, then -- and the command");
+      if (ref === undefined || words.length === 0) throw usageRefusal("wsp exec takes a workspace, then -- and the command");
       const client = await ctx.client();
       const workspace = await awake(client, await workspaceOf(client, ref), "exec", line => ctx.io.error(line));
       const folder = workFolder(workspace, flag(ctx.flags, "cwd"));
-      const exit = await execOn(client, workspace.id, words, folder, e => ctx.out.emit(e, e.type === "exec.output" ? e.text : undefined));
+      const exit = await execOn(client, workspace.id, words, folder, e => {
+        if (e.type === "exec.output") ctx.out.emit(e, e.text);
+      });
+      if (exit.error !== undefined) throw new Error(exit.error);
+      ctx.out.emit({ exitCode: exit.exitCode, ...(folder !== undefined ? { cwd: folder } : {}) });
       if (exit.exitCode !== null && exit.exitCode !== 0) ctx.io.error(execFolderLine(folder));
-      if (exit.error !== undefined) ctx.io.error(exit.error);
-      return exit.exitCode ?? 1;
+      return exit.exitCode ?? EXIT_CODES.provider;
     },
     tool: tool({
       description: "Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the workspace's project folder, and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the machine going away is an error.",
       input: { workspace: WorkspaceIn, argv: Argv, cwd: CwdIn },
       output: { exitCode: z.number().int().nullable(), output: z.array(z.string()), cwd: z.string().optional().describe("the folder the command ran in; absent, the home folder") },
+      stream: ["output"],
       call: async ({ workspace: ref, argv, cwd: folder }, deps) => {
         absoluteFolder(folder);
         const client = await deps.client();
@@ -1395,8 +1448,8 @@ export const VERBS: readonly Verb[] = [
     run: async ctx => {
       const [folder] = ctx.args;
       const to = flag(ctx.flags, "to");
-      if (to === undefined) throw new Error("wsp import needs --to <workspace>");
-      if (folder === undefined || ctx.args.length !== 1) throw new Error("wsp import takes one folder on this computer");
+      if (to === undefined) throw usageRefusal("wsp import needs --to <workspace>");
+      if (folder === undefined || ctx.args.length !== 1) throw usageRefusal("wsp import takes one folder on this computer");
       const source = resolve(folder);
       const named = agentsFlag(flag(ctx.flags, "agents"));
       const client = await ctx.client();
@@ -1425,9 +1478,7 @@ export const VERBS: readonly Verb[] = [
         ctx.out.emit({ imported }, done);
         return 0;
       } catch (e) {
-        if ((e as { kind?: unknown }).kind !== "exists") throw e;
-        ctx.io.error(`wsp import: ${e instanceof Error ? e.message : String(e)}\nRun again with --replace to overwrite it.`);
-        return 1;
+        throw withReplaceHint(e);
       }
     },
     tool: tool({
@@ -1443,6 +1494,7 @@ export const VERBS: readonly Verb[] = [
         replace: z.boolean().optional().describe("remove what is at the path on the machine first; without it an existing folder there is refused"),
       },
       output: { plan: ProjectPlan, imported: ProjectImportResult.optional() },
+      stream: ["plan"],
       call: async ({ workspace: ref, folder, yes, keep = [], cut = [], agents, replace }, deps) => {
         const client = await deps.client();
         const target = await workspaceOf(client, ref);
@@ -1468,7 +1520,7 @@ export const VERBS: readonly Verb[] = [
     options: { from: { type: "string" }, replace: { type: "boolean" }, agents: { type: "string" } },
     run: async ctx => {
       const [ref, folder] = ctx.args;
-      if (ref === undefined || folder === undefined || ctx.args.length !== 2) throw new Error("wsp export takes a workspace and a folder on this computer");
+      if (ref === undefined || folder === undefined || ctx.args.length !== 2) throw usageRefusal("wsp export takes a workspace and a folder on this computer");
       const dest = resolve(folder);
       const agents = agentsFlag(flag(ctx.flags, "agents"));
       const client = await ctx.client();
@@ -1480,12 +1532,10 @@ export const VERBS: readonly Verb[] = [
           if (e.stage === "done") done = e.message;
           else if (e.stage !== "failed") ctx.out.stream(`${e.message}\n`);
         });
-        ctx.out.emit({ exported }, done);
+        ctx.out.emit(exported, done);
         return 0;
       } catch (e) {
-        if ((e as { kind?: unknown }).kind !== "exists") throw e;
-        ctx.io.error(`wsp export: ${e instanceof Error ? e.message : String(e)}\nRun again with --replace to overwrite it.`);
-        return 1;
+        throw withReplaceHint(e);
       }
     },
     tool: tool({
@@ -1564,6 +1614,26 @@ function parseRefusal(verb: CliVerb, e: unknown): string {
   return readers.length === 0 ? message : foreignFlagLine(`--${named}`, readers, `wsp ${verb.name}`);
 }
 
+/** The one line a refusal or a failure leaves on stderr, the failure object under --json and the prose behind its
+ * prefix otherwise, and the exit code the failure's class owns. */
+export function failed(io: CliIO, json: boolean, e: unknown, prefix = ""): number {
+  const failure = verbFailure(e);
+  io.error(json ? JSON.stringify(failure) : `${prefix}${failure.error}`);
+  return failure.exit;
+}
+
+/** A tool call's failure: the text the agent reads, and the object a --json run prints, marked as an error. */
+export function toolFailure(e: unknown): CallToolResult {
+  const failure = verbFailure(e);
+  return { content: [{ type: "text", text: failure.error }], structuredContent: failure, isError: true };
+}
+
+/** Whether a line asked for JSON, read off the words before any `--`, for the refusal of a line the parser would not read. */
+export function jsonAsked(argv: ReadonlyArray<string>): boolean {
+  const cut = argv.indexOf("--");
+  return argv.slice(0, cut === -1 ? argv.length : cut).includes("--json");
+}
+
 export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere"> = {}): Promise<number> {
   let flags: Flags;
   let args: string[];
@@ -1573,8 +1643,7 @@ export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: Cl
     args = parsed.positionals;
     absoluteFolder(flag(flags, "cwd"));
   } catch (e) {
-    io.error(`${parseRefusal(verb, e)}\n\nusage: ${verb.usage}`);
-    return 1;
+    return failed(io, jsonAsked(argv), usageRefusal(`${parseRefusal(verb, e)}\n\nusage: ${verb.usage}`));
   }
   if (flags["help"] === true) {
     io.log(`usage: ${verb.usage}\n${aboutLines(verb, "  ").join("\n")}\n\n  --json         print the raw protocol values, one JSON line each\n  --state PATH   the state file the host serves`);
@@ -1594,8 +1663,7 @@ export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: Cl
   try {
     return await verb.run(ctx);
   } catch (e) {
-    io.error(`wsp ${verb.name}: ${e instanceof Error ? e.message : String(e)}`);
-    return 1;
+    return failed(io, flags["json"] === true, e, `wsp ${verb.name}: `);
   } finally {
     client?.close();
   }

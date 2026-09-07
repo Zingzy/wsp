@@ -22,7 +22,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS } from "@wsp/catalog";
-import { TURN_END_WORDS, fmtDuration, shellQuote } from "@wsp/protocol";
+import { EXIT_CODES, EXIT_WORDS, ExitClass, TURN_END_WORDS, authRefusal, fmtDuration, shellQuote, usageRefusal } from "@wsp/protocol";
 import { agentHomes } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { HARNESS_ADAPTERS } from "./adapters.js";
@@ -62,8 +62,11 @@ import {
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, findVerb, runVerb, toolName, verbHelp, verbUsage, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, failed, findVerb, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
+
+/** One line per exit class, the code first, wrapped to the help's width. */
+const exitCodeHelp = (): string => ExitClass.options.map(cls => wrap(`  ${EXIT_CODES[cls]} ${cls.padEnd(8)}  ${EXIT_WORDS[cls]}`, 80, " ".repeat(14)).join("\n")).join("\n");
 
 export const HELP = `wsp - ${TAGLINE}
 
@@ -76,7 +79,8 @@ usage:
   wsp down           stop the service and take it away, so nothing brings the
                      host back at the next login
   wsp status         whether a host is serving this state file, on which ports,
-                     and what keeps it there; exit 1 when none does
+                     and what keeps it there, with a non-zero exit code when
+                     none does
   wsp init           set up your first golden image in six screens: Agents,
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
                      on this Mac, and Build, then the browser
@@ -102,6 +106,9 @@ ${verbHelp()}
 ${wrap(`  ${TURN_END_WORDS}.`, 80).join("\n")}
   wsp exec streams the command's output and exits with its code. thread new,
   send and exec wake a paused workspace first, with one line on stderr saying so.
+
+exit codes; every failure is one line on stderr, the failure object with --json:
+${exitCodeHelp()}
 
 options:
   --port N           app port (default 4400)
@@ -214,8 +221,10 @@ type Stream<T> = T & { isTTY?: boolean };
 /** Questions are clack prompts on the terminal; off a terminal there is nobody to answer them. */
 export function terminalIO(input: Stream<Readable> = process.stdin, output: Stream<Writable> = process.stdout): CliIO {
   const screen = input.isTTY === true && output.isTTY === true;
-  const nobody = (q: string): Promise<never> =>
-    Promise.reject(new Error(`${q.split("\n")[0]}: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.`));
+  const nobodyLine = (q: string): string => `${q.split("\n")[0]}: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.`;
+  const nobody = (q: string): Promise<never> => Promise.reject(new Error(nobodyLine(q)));
+  // A secret nobody can type is a missing key, the contract's auth class; a yes-or-no nobody can answer is not.
+  const noKey = (q: string): Promise<never> => Promise.reject(authRefusal(nobodyLine(q)));
   // The first line of a question is the question; the lines under it are its hint.
   const split = (q: string): PromptOptions => {
     const nl = q.indexOf("\n");
@@ -233,7 +242,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     muted: text => muted(text, colourDepth(isTTY(process.stderr))),
     isTTY: screen,
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
-    askSecret: q => (screen ? answered(passwordPrompt(split(q))) : nobody(q)),
+    askSecret: q => (screen ? answered(passwordPrompt(split(q))) : noKey(q)),
   };
 }
 
@@ -242,9 +251,10 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
  * stream nobody is reading. */
 export function jsonCliIO(err: Writable = process.stderr): CliIO {
   const say = (line: string): void => void err.write(`${line}\n`);
-  const nobody = (q: string): Promise<never> =>
-    Promise.reject(new Error(`${q.split("\n")[0]}: --json asks nothing; set it in the environment, ./.env, or ~/.wsp/.env.`));
-  return { log: say, error: say, stream: text => void err.write(text), ask: nobody, askSecret: nobody };
+  const nobodyLine = (q: string): string => `${q.split("\n")[0]}: --json asks nothing; set it in the environment, ./.env, or ~/.wsp/.env.`;
+  const nobody = (q: string): Promise<never> => Promise.reject(new Error(nobodyLine(q)));
+  const noKey = (q: string): Promise<never> => Promise.reject(authRefusal(nobodyLine(q)));
+  return { log: say, error: say, stream: text => void err.write(text), ask: nobody, askSecret: noKey };
 }
 
 function parseEnvFile(path: string): Record<string, string> {
@@ -304,8 +314,10 @@ export async function loadKeys(
   let anthropic = find("ANTHROPIC_API_KEY");
   if (solari !== undefined) return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
 
+  // The prompt's own refusal travels as it is: the CLI's IOs refuse a secret as auth, and another caller (the desktop's
+  // setup check) recognises the refusal it handed in.
   solari = (await io.askSecret("Solari API key\nNo Solari key found.\nconsole.getsolari.com")).trim();
-  if (!solari) throw new Error("A Solari API key is needed to start.");
+  if (!solari) throw authRefusal("A Solari API key is needed to start.");
   const set: Record<string, string> = { SOLARI_API_KEY: solari };
 
   if (anthropic === undefined && ask.anthropic) {
@@ -455,20 +467,11 @@ async function init(
   opts: { port: number; wsPort: number; statePath: string },
   flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
-  if (flags.json && flags.yes) {
-    io.error("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
-    return 1;
-  }
+  if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
   const held = servingHost(opts.statePath);
-  if (held !== undefined) {
-    io.error(initRefusal(held, opts.statePath));
-    return 1;
-  }
+  if (held !== undefined) throw Object.assign(new Error(initRefusal(held, opts.statePath)), { kind: "conflict" });
   const flag = projectFlag("init", flags.project);
-  if (!flag.ok) {
-    io.error(flag.message);
-    return 1;
-  }
+  if (!flag.ok) throw usageRefusal(flag.message);
   const project = flag.path;
   // Under --json every line this run says, the host's own included, goes to stderr so stdout is the objects' alone.
   const say = flags.json ? jsonCliIO() : io;
@@ -878,8 +881,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
   } catch (e) {
-    io.error(`${e instanceof Error ? e.message : String(e)}\n\n${usage}`);
-    return 1;
+    return failed(io, jsonAsked(argv), usageRefusal(`${e instanceof Error ? e.message : String(e)}\n\n${usage}`));
   }
   if (values.help === true) {
     io.log(usage);
@@ -890,19 +892,15 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     await serveMcp(statePath, { alsoHere });
     return 0;
   }
-  if (words[0] !== "install" || words.length !== 1) {
-    io.error(`unknown command: ${MCP_COMMAND} ${words.join(" ")}\n\n${usage}`);
-    return 1;
-  }
   const json = values.json === true;
+  if (words[0] !== "install" || words.length !== 1) return failed(io, json, usageRefusal(`unknown command: ${MCP_COMMAND} ${words.join(" ")}\n\n${usage}`));
   const run = runningWsp();
   // Nobody named an agent: at a terminal that is a line half typed, but an agent running this has no terminal to be
   // asked at, so every agent whose own command is on this computer's PATH takes it.
   const agents = values.agent ?? (io.isTTY === true ? [] : agentsOnPath(run.PATH));
   if (agents.length === 0) {
-    if (io.isTTY !== true) io.error("wsp mcp install: no agent of the catalog's is on this computer's PATH; name one with --agent.");
-    io.error(`usage: ${mcpInstallUsage()}`);
-    return 1;
+    const none = io.isTTY !== true ? "wsp mcp install: no agent of the catalog's is on this computer's PATH; name one with --agent.\n" : "";
+    return failed(io, json, usageRefusal(`${none}usage: ${mcpInstallUsage()}`));
   }
   const project = process.cwd();
   if (values.remove === true) {
@@ -967,8 +965,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   try {
     ({ values, positionals } = parseArgs({ args: argv, options: SHARED_OPTIONS, allowPositionals: true }));
   } catch (e) {
-    io.error(e instanceof Error ? e.message : String(e));
-    return 1;
+    return failed(io, jsonAsked(argv), usageRefusal(e instanceof Error ? e.message : String(e)));
   }
   if (values.version) {
     io.log(`wsp ${VERSION}`);
@@ -985,13 +982,12 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
   };
   const word = positionals[0] ?? "up";
   const command = COMMANDS[word];
-  if (command === undefined) {
-    io.error(commandUsage(word) ?? `unknown command: ${word}\n\n${HELP}`);
-    return 1;
+  const json = values.json === true;
+  if (command === undefined) return failed(io, json, usageRefusal(commandUsage(word) ?? `unknown command: ${word}\n\n${HELP}`));
+  if (json && !command.json) return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${word}: only ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")} prints JSON.`));
+  try {
+    return await command.run(io, opts, values);
+  } catch (e) {
+    return failed(io, json, e);
   }
-  if (values.json === true && !command.json) {
-    io.error(`Unknown option '--json' for wsp ${word}: only ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")} prints JSON.`);
-    return 1;
-  }
-  return command.run(io, opts, values);
 }

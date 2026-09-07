@@ -6,7 +6,7 @@
 import { existsSync } from "node:fs";
 import { agentName, catalogEntry } from "@wsp/catalog";
 import { type AgentHistory, type HistoryCache, type HistoryProgress, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
-import { LOGIN_CHOICES, RECIPE_TICKS, customRows, plural, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick, type ToolPin } from "@wsp/protocol";
+import { LOGIN_CHOICES, RECIPE_TICKS, customRows, plural, usageRefusal, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick, type ToolPin } from "@wsp/protocol";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { loadRecipe, outsideRowsOf, pinsOf, saveSmallRecipe, withPins } from "./recipe-file.js";
 import { customFromFlags, withCustom } from "./recipe-custom.js";
@@ -44,8 +44,8 @@ export function parseSet(word: string): { id: string; on: boolean } {
   const eq = word.indexOf("=");
   const id = eq < 0 ? word : word.slice(0, eq);
   const value = eq < 0 ? "" : word.slice(eq + 1);
-  if (value !== "on" && value !== "off") throw new Error(`--set takes <id>=on or <id>=off, not ${JSON.stringify(word)}`);
-  if (catalogEntry(id) === undefined) throw new Error(`--set ${word}: the catalog has no row called ${JSON.stringify(id)}`);
+  if (value !== "on" && value !== "off") throw usageRefusal(`--set takes <id>=on or <id>=off, not ${JSON.stringify(word)}`);
+  if (catalogEntry(id) === undefined) throw usageRefusal(`--set ${word}: the catalog has no row called ${JSON.stringify(id)}`);
   return { id, on: value === "on" };
 }
 
@@ -70,8 +70,8 @@ export function parseSignIn(word: string): { id: string; choice: LoginChoice } {
   const eq = word.indexOf("=");
   const id = eq < 0 ? word : word.slice(0, eq);
   const choice = eq < 0 ? "" : word.slice(eq + 1);
-  if (!(LOGIN_CHOICES as readonly string[]).includes(choice)) throw new Error(`--signin takes <id>=${LOGIN_CHOICES.join("|")}, not ${JSON.stringify(word)}`);
-  if (catalogEntry(id) === undefined) throw new Error(`--signin ${word}: the catalog has no row called ${JSON.stringify(id)}`);
+  if (!(LOGIN_CHOICES as readonly string[]).includes(choice)) throw usageRefusal(`--signin takes <id>=${LOGIN_CHOICES.join("|")}, not ${JSON.stringify(word)}`);
+  if (catalogEntry(id) === undefined) throw usageRefusal(`--signin ${word}: the catalog has no row called ${JSON.stringify(id)}`);
   return { id, choice: choice as LoginChoice };
 }
 

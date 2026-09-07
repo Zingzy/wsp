@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
+import { exitClassOf } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { HELP, cli, forkCommandFor, jsonCliIO, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO } from "../src/cli.js";
 
@@ -41,15 +42,19 @@ describe("--json keeps stdout to the objects", () => {
     await expect(io.askSecret("Solari API key\nNo Solari key found.")).rejects.toThrow(
       "Solari API key: --json asks nothing; set it in the environment, ./.env, or ~/.wsp/.env.",
     );
+    // A secret nobody can type is the contract's auth class; a yes-or-no nobody can answer is not.
+    await expect(io.askSecret("Solari API key").then(() => "provider", exitClassOf)).resolves.toBe("auth");
     await expect(io.ask("Save the key so wsp stops asking?")).rejects.toThrow("--json asks nothing");
+    await expect(io.ask("Save the key so wsp stops asking?").then(() => "ok", exitClassOf)).resolves.toBe("provider");
     expect(said.join("")).toBe("app         http://127.0.0.1:4400\nreap: sweep failed\nhalf a line");
   });
 
   it("wsp init --yes --json is refused in one line, since --yes skips the sign-ins --json is there to print", async () => {
     const said: string[] = [];
     const io: CliIO = { log: l => said.push(`out ${l}`), error: l => said.push(`err ${l}`), ask: async () => "no", askSecret: async () => "" };
-    expect(await cli(["init", "--yes", "--json"], io)).toBe(1);
-    expect(said).toEqual(["err wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them."]);
+    expect(await cli(["init", "--yes", "--json"], io)).toBe(3);
+    // A --json line's refusal is the failure object, the one shape an agent parses on every verb and command.
+    expect(said).toEqual([`err ${JSON.stringify({ error: "wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.", class: "usage", exit: 3 })}`]);
   });
 });
 
@@ -290,6 +295,8 @@ describe("terminalIO", () => {
     await expect(loadKeys(s.io, { env: {}, cwd, home })).rejects.toThrow(
       "Solari API key: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.",
     );
+    await expect(loadKeys(s.io, { env: {}, cwd, home }).then(() => "ok", exitClassOf)).resolves.toBe("auth");
+    await expect(s.io.ask("Save the key so wsp stops asking?").then(() => "ok", exitClassOf)).resolves.toBe("provider");
     expect(s.text()).toBe("");
   });
 });
