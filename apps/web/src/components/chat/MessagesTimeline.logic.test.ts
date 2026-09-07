@@ -223,6 +223,7 @@ describe("computeStableMessagesTimelineRows", () => {
       turnId,
       sessionId: "session-1",
       state: "running",
+      replied: false,
       prompt: null,
       model: null,
       durationMs: null,

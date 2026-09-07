@@ -5,10 +5,10 @@ import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
 import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
-import { MCP_SERVERS_JSON } from "@wsp/catalog";
+import { CURL_NET, MCP_SERVERS_JSON, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import type { RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
-import { HOMEBREW, type ToolInstall } from "../src/golden-import.js";
+import { AGENT_INSTALLERS, HOMEBREW, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } from "../src/machine.js";
 
@@ -726,7 +726,8 @@ describe("golden import stages", () => {
     expect(tool).toMatch(/while \[ \$t -lt 600 \]/);
     expect(cmds.filter(c => c.includes("brew install gh") || c.includes("brew-bootstrap") || c.includes("bun@1.4.0"))).toHaveLength(3);
     const agent = cmds.find(c => c.includes("codex-install"))!;
-    expect(agent).toMatch(/\nsetsid bash -c 'set -euo pipefail\nexport PATH="\/usr\/local\/bin:\$PATH"\n/);
+    expect(agent).toMatch(/\nsetsid bash -c 'set -euo pipefail\nexport npm_config_fetch_timeout=/);
+    expect(agent).toContain(`${CURL_NET}\nexport PATH="/usr/local/bin:$PATH"\ncodex-install`);
     expect(agent).toMatch(/while \[ \$t -lt 900 \]/);
     // Agents and their checks run with the Node the golden installed ahead of any the image shipped.
     expect(cmds).toContain('export PATH="/usr/local/bin:$PATH"\nclaude --version');
@@ -955,7 +956,7 @@ describe("golden import stages", () => {
       { id: "tools/npm/wrangler", label: "wrangler", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.86.0" }, ms: expect.any(Number), bytes: 0 },
     ]);
-    expect(stages).toContain(`installing-tools:2 installed (GitHub CLI from its release, ${UNMEASURED_ROAD}); caches swept; 2.9 GB free`);
+    expect(stages).toContain(`installing-tools:2 installed (GitHub CLI from its release (${UNMEASURED_ROAD})); caches swept; 2.9 GB free`);
   });
 
   it("a catalog go row beside a go row on the guest: Homebrew installs go once, the go row runs after it, and the tally counts each install once", async () => {
@@ -991,7 +992,24 @@ describe("golden import stages", () => {
       { id: "tools/apt-index", label: "apt index", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       { id: "tools/catalog/tmux", label: "tmux", outcome: "installed", note: tmuxNote, ms: expect.any(Number), bytes: 0 },
     ]);
-    expect(stages).toContain(`installing-tools:3 installed (Cloudflare Wrangler ${UNMEASURED_ROAD}, tmux ${tmuxNote}); caches swept; 2.9 GB free`);
+    expect(stages).toContain(`installing-tools:3 installed (Cloudflare Wrangler (${UNMEASURED_ROAD}), tmux (${tmuxNote})); caches swept; 2.9 GB free`);
+  });
+
+  it("the tally names every install once: a tool carrying both a road and a note keeps its notes inside its own brackets, so no note reads as a nameless tool", async () => {
+    const { backend, fetch } = backendFor([
+      ["repos/cli/cli/releases/latest", { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${"c".repeat(64)} v2.86.0\n`, stderr: "" }],
+    ]);
+    const plan = toolInstallsFor([
+      { rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" },
+      { rung: "tools", id: "tools/catalog/tmux", label: "tmux", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes", version: "3.5a" },
+    ]);
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs }) });
+    const tmuxNote = `${UNMEASURED_ROAD}; 3.5a asked, installed by apt at its current version`;
+    const tally = stages.find(s => s.startsWith("installing-tools:3 installed"))!;
+    expect(tally).toBe(`installing-tools:3 installed (GitHub CLI from its release (${UNMEASURED_ROAD}), tmux (${tmuxNote})); caches swept; 2.9 GB free`);
+    // With the bracketed notes off, every comma left separates two named tools: the list names two, not four.
+    expect(tally.replace(/ \([^()]*\)/g, "")).toBe("installing-tools:3 installed (GitHub CLI from its release, tmux); caches swept; 2.9 GB free");
   });
 
   it("after the loop every install that names its command is checked with command -v on the tools PATH: one not there is failed with the reason, in the result and the summary", async () => {
@@ -1146,6 +1164,25 @@ describe("golden import stages", () => {
       { id: "agents/codex", name: "Codex", outcome: "installed", ms: expect.any(Number) },
       { id: "agents/pi", name: "Pi", outcome: "failed", note: "Node 22.23.2 did not install: curl: (22) The requested URL returned error: 404", ms: 0 },
     ]);
+  });
+
+  it("the Node floor and every agent installer run under the road table's network lines, so the bare curl their scripts type gets the function's flags", async () => {
+    const node = { floor: 22, version: "22.23.2", agents: ["Pi"], cmd: "node-step" };
+    const agents = [{ id: "agents/pi", name: "Pi", install: "pi-install", smoke: "pi --version", node: 22 }];
+    const { backend, cmds, fetch } = backendFor([["node-step", { exitCode: 0, stdout: "NODE_HAVE v22.1.0\nNODE_KEPT v22.1.0\n", stderr: "" }]]);
+    await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ node, agents }) });
+    for (const needle of ["node-step", "pi-install"]) {
+      const run = cmds.find(c => c.includes(needle))!;
+      expect(run, needle).toBeDefined();
+      for (const line of ROAD_STEPS.script.env) expect(run, needle).toContain(line);
+      expect(run.indexOf(CURL_NET), needle).toBeLessThan(run.indexOf(needle));
+      expect(run.indexOf("set -euo pipefail"), needle).toBeLessThan(run.indexOf(needle));
+    }
+    // The two scripts that reach this path type curl with no flags of their own.
+    for (const script of [nodeInstallScript(22, NODE_RELEASES[22]), AGENT_INSTALLERS["aider"]!.install]) {
+      expect(script).toContain("curl -o");
+      expect(script).not.toMatch(/\bcurl +-[A-Za-z]*[fsSL]\b/);
+    }
   });
 
   it("a failure's reason is Homebrew's Error: line, not the advice line that follows it", async () => {

@@ -203,7 +203,7 @@ describe("orphan reaper", () => {
     const result = await reap({ backend, owner: ME, knownIds: () => [], now: () => NOW });
     expect(result.reaped.map(r => r.id)).toEqual(["orphan-before", "orphan-after"]);
     expect(result.spared.map(s => s.id)).toEqual(["foreign"]);
-    expect(result.failed).toEqual([{ id: "bad", message: "Bad Gateway" }]);
+    expect(result.failed).toEqual([{ id: "bad", message: "could not stop: Bad Gateway" }]);
     expect(killed).toEqual(["orphan-before", "orphan-after"]);
   });
 

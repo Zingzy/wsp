@@ -83,6 +83,8 @@ export interface TurnSummary {
   readonly turnId: string;
   readonly sessionId: string;
   readonly state: TurnState;
+  /** The turn's reply is in (session.done) while its state is still running: the agent process lives past its reply. */
+  readonly replied: boolean;
   readonly prompt: string | null;
   readonly model: string | null;
   readonly durationMs: number | null;

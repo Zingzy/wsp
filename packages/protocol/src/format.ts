@@ -61,6 +61,19 @@ export function sizeRefusal(word: string, sizes: readonly MachineSizeOffer[]): s
   return `${word} is not a size this provider offers; the sizes are ${offered}`;
 }
 
+/** The one refusal a create or a fork gives when the provider is at its machine cap and no builder was left to stop
+ * for room: the machines this host knows hold the slots, and the two moves that free one. The provider's own
+ * sentence ("Too many concurrent sessions") names nothing a person can act on. A builder is named as one, since
+ * the pause it is offered beside is a workspace's move; the runtime stops the builders it may before it asks here.
+ * Only the holders are claimed: the plan's cap is nowhere in Capabilities, and a slot held by a machine this host
+ * cannot name still counts against it, so no branch but the two-holder line the ticket wrote totals the slots. */
+export function machineCapRefusal(workspaces: readonly string[], builders: readonly string[] = []): string {
+  const holders = [...workspaces, ...builders.map(name => `${name} (builder)`)];
+  if (holders.length === 0) return "the provider is at its machine cap and no machine of this computer holds a slot; free one at the provider and try again";
+  const slots = holders.length === 1 ? "a machine slot is" : holders.length === 2 ? "both machine slots are" : "machine slots are";
+  return `${slots} in use: ${holders.join(", ")}. Pause ${holders.length === 1 ? "it" : "one"} or wait for a nap.`;
+}
+
 /** How a duration reads: short is the chat footer's and the notify line's ("1.5s", "8m 12s"), clock is the cut
  * line's ("15m 00s", "1h 00m 00s"). */
 export type DurationStyle = "short" | "clock";
@@ -382,6 +395,12 @@ export function mcpServerCommandLine(command: string, args: readonly string[]): 
   return `The server command is ${shellLine([command, ...args])}`;
 }
 
+/** The very last line an MCP install prints: the thing to do next, which is inside the agent it just gave the tools
+ * to. `open` is the agent's own command and `first` what to type at its prompt, its slash form where it has one. */
+export function nextInsideAgentLine(open: string, first: string): string {
+  return `Next: run ${shellLine([open])} in this folder and say: ${first}`;
+}
+
 /** The one stderr line the command line shows under a command that exited non-zero, naming the folder it ran in:
  * the host chose it when none was named, so the person did not see it go by; absent, the runtime ran it in ~. */
 export function execFolderLine(cwd: string | undefined): string {
@@ -451,6 +470,26 @@ export function vaultKeptLine(why: string): string {
 /** The machine row's line when a record that said paused met a machine the provider was running all along (a nap
  * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
 export const ALREADY_RUNNING = "already running at the provider";
+
+/** The machine row's line on a workspace the sweep recorded from the provider's listing: a machine of this setup's
+ * that no record claimed, kept rather than killed, since a machine nobody records bills unseen. */
+export const RECORD_RESTORED = "record restored from the provider's listing";
+
+/** The host's line for it, with the name the fork stamped on the machine (or the machine id where it stamped none)
+ * and the verb that removes it. */
+export function recordRestoredLine(machineId: string, name: string, workspaceId: string): string {
+  return `reap: recorded ${machineId} as workspace ${name} (${workspaceId}): a machine from this setup that no record claimed; it bills until wsp delete ${name}`;
+}
+
+/** The refusal a fork gets for a name another workspace holds; a name names at most one workspace. */
+export function nameTakenRefusal(name: string): string {
+  return `${name} is already a workspace; pick another name, or delete it first`;
+}
+
+/** The refusal a fork gets for a name whose workspace is being deleted this moment: the two never interleave. */
+export function nameDeletingRefusal(name: string): string {
+  return `${name} is being deleted; wait for the delete to finish, then fork it again`;
+}
 
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how
  * long it was given in all, and what the provider reads about the machine after it, or that the provider could not

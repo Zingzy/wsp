@@ -156,7 +156,16 @@ const RECONCILE_MIN_MS = 5 * 60_000;
 const ZOMBIE_WINDOW_MS = 3 * 60_000;
 /** The zombies' own exec 502'd after 36 to 38 s; a live guest answers echo in under a second. */
 const ZOMBIE_PROBE_TIMEOUT_MS = 20_000;
+/** How often the poller reads the running records; the idle nap that failed is asked again on the same cadence. */
+export const POLL_INTERVAL_MS = 15_000;
 const ZOMBIE_PROBE_CMD = "echo ok";
+
+/** The total at a tick: the last tick's total plus the awake time since it at the rate that tick carried. A tick
+ * lands at every event that opens or re-prices a stretch (a create, a wake, a size change), so that rate is the one
+ * that held until this tick; only the first tick ever has none behind it, and its stretch ran at the size now. */
+function accrue(last: WorkspaceCostEvent | undefined, awakeMs: number, rateNow: number): number {
+  return (last?.accruedUsd ?? 0) + ((last?.rateUsdPerHour ?? rateNow) * (awakeMs - (last?.awakeMs ?? 0))) / 3_600_000;
+}
 
 /** Rejects once ms pass; the underlying promise is left to settle on its own. */
 function bounded<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -185,7 +194,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const zombieWindowMs = o.defaults?.zombieWindowMs ?? ZOMBIE_WINDOW_MS;
   const zombieProbeTimeoutMs = o.defaults?.zombieProbeTimeoutMs ?? ZOMBIE_PROBE_TIMEOUT_MS;
   const costIntervalMs = o.defaults?.costIntervalMs ?? 5_000;
-  const pollIntervalMs = o.defaults?.pollIntervalMs ?? 15_000;
+  const pollIntervalMs = o.defaults?.pollIntervalMs ?? POLL_INTERVAL_MS;
   const clock = o.clock ?? realClock;
   const meters = new Map<string, Meter>();
   const histories = new Map<string, WorkspaceCostEvent[]>();
@@ -422,10 +431,14 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   let stopPoll: (() => void) | undefined;
   const lastEmitted = new Map<string, string>();
 
-  const costTick = async (): Promise<void> => {
+  /** The timer's tick samples every workspace and always rides the bus. An event's tick is one workspace's: it pins
+   * a boundary in the meter and rides the bus only when it changed the rate, so a create, a wake and a size change
+   * report at once and a rebuild at the same rate reports nothing. */
+  const costTick = async (only?: string): Promise<void> => {
     await loading;
     const now = clock.now();
     for (const { size, ...view } of await o.records()) {
+      if (only !== undefined && view.id !== only) continue;
       const m = meter(view.id);
       if (view.phase === "running") m.mark ??= now;
       // A gone record's stretch is over and its end unknown (the host may have been down when the provider lost the
@@ -434,24 +447,37 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       const running = view.phase === "running" && m.mark !== undefined;
       const rate = o.rateUsdPerHour(size);
       const awakeMs = m.awakeMs + (running ? now - m.mark! : 0);
+      const before = histories.get(view.id) ?? [];
+      const last = before.at(-1);
       const tick: WorkspaceCostEvent = {
         type: "workspace.cost",
         workspaceId: view.id,
         phase: view.phase,
         rateUsdPerHour: running ? rate : 0,
         awakeMs,
-        accruedUsd: (rate * awakeMs) / 3_600_000,
+        accruedUsd: accrue(last, awakeMs, rate),
         at: new Date(now).toISOString(),
       };
-      const before = histories.get(view.id) ?? [];
       const next = appendCostPoint(before, tick);
       histories.set(view.id, next);
       // A tick that replaced the newest point lies on the stored line; only an added point changes the document.
       const added = before.length === 0 || next[next.length - 2] === before[before.length - 1];
       if (added) persist(() => o.store.put(COST_HISTORIES, view.id, { workspaceId: view.id, points: next } satisfies CostHistoryRecord));
-      o.emit(tick);
+      if (only === undefined || last?.rateUsdPerHour !== tick.rateUsdPerHour) o.emit(tick);
     }
   };
+
+  // A tick at every event that opens or re-prices a stretch: the rate a tick carries then holds until the next one,
+  // so a size change an hour after an unwatched wake still bills that hour at the size it woke at.
+  const eventTick = (id: string): void => guarded("cost", () => costTick(id))();
+  o.on("workspace.created", e => {
+    if (e.type === "workspace.created") eventTick(e.workspace.id);
+  });
+  for (const type of ["workspace.woken", "workspace.upgraded"] as const) {
+    o.on(type, e => {
+      if (e.type === type) eventTick(e.workspaceId);
+    });
+  }
 
   const pollTick = async (): Promise<void> => {
     for (const status of await list({ reconcile: "on-failure" })) {
@@ -465,7 +491,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const watch: StatusApi["watch"] = opts => {
     watchers++;
     if (watchers === 1) {
-      stopCost = every(guarded("cost", costTick), opts?.costIntervalMs ?? costIntervalMs);
+      stopCost = every(guarded("cost", () => costTick()), opts?.costIntervalMs ?? costIntervalMs);
       stopPoll = every(guarded("status poll", pollTick), opts?.pollIntervalMs ?? pollIntervalMs);
       // Every machine's state before the first cost tick: nothing polls while no client watches, so a client
       // attaching after a gap would otherwise meter a stretch the provider ended hours ago.

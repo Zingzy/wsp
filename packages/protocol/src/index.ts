@@ -556,6 +556,8 @@ export const WorkspaceCostEvent = z.object({
   rateUsdPerHour: z.number(),
   /** Total awake milliseconds behind accruedUsd since metering began; carried across host restarts. */
   awakeMs: z.number(),
+  /** The awake time so far billed stretch by stretch at the rate that held over each, so a size change or a wake at
+   * another size never re-prices what came before it. */
   accruedUsd: z.number(),
   at: z.string(),
 });
@@ -1261,11 +1263,36 @@ export const ProcSnapshot = z.object({
 });
 export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
 
-/** The daemon's protocol version, carried in its hello and bumped whenever an op is added or widened, so a client
- * can tell what a machine's daemon answers before asking. A hello without one is version 1: every daemon deployed
- * before the field existed, which has the pty, ports, manifest, inbox, fs, git and tunnel ops and no sys or
- * proc ops. Version 3 browses the imported project folders named in DAEMON_ROOTS_PATH beside its home. */
-export const DAEMON_VERSION = 4;
+/** The content of every daemon this project has deployed, oldest first, one entry per version: the last one is
+ * what a deploy installs today, so appending the sha the host's daemon-content test prints is the whole of
+ * cutting a new version. The three cut before the record existed have no sha to name. */
+const UNRECORDED = "";
+const DAEMON_CONTENTS = [
+  UNRECORDED,
+  UNRECORDED,
+  UNRECORDED,
+  "b749121a659b9c45b07285ee0f4e95f15aae26ddbc1bcba75745e83c2ae032c6",
+  "b0b88a03c649769e0676ca38eaa5035825b71302c97a2858dcf8eb57131288be",
+];
+
+/** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
+ * before asking, and a host can tell that a machine's daemon is behind the one it would deploy. It moves whenever
+ * an op is added or widened and whenever anything a deploy installs changes, because a live machine keeps the
+ * daemon it has until the version it announces is behind this one. A hello without one is version 1: every daemon
+ * deployed before the field existed, which has the pty, ports, manifest, inbox, fs, git and tunnel ops and no sys
+ * or proc ops. Version 3 browses the imported project folders named in DAEMON_ROOTS_PATH beside its home.
+ * Version 4 starts from a script that sets the guest PATH itself. Version 5 fetches its Node through the catalog's
+ * curl function. */
+export const DAEMON_VERSION = DAEMON_CONTENTS.length;
+
+/** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
+ * pins its bundle carries, the scripts the host writes beside them, and DAEMON_ROOTS_PATH. The host's
+ * daemon-content test recomputes it and fails when that content moved and this record did not, so changed content
+ * cannot reach nobody: a start script gained a PATH line under an unchanged version once and every machine
+ * already running kept the old one. Left out, and on the guest anyway because the daemon's dist bundles them: the
+ * rest of this file, the DaemonAuthRequest schema the daemon reads, and zod. Hashing the protocol whole would
+ * turn every edit to it into a redeploy of every machine. */
+export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
 
 /** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it
  * when a project lands, the daemon reads it on every files and diff op and browses those folders beside its home. */

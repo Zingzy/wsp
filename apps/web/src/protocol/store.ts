@@ -45,11 +45,9 @@ export interface CreateRefusal {
 
 export function explainCreateRefusal(error: unknown): CreateRefusal {
   const message = error instanceof Error ? error.message : String(error);
+  // The runtime names the machines holding the slots and the move that frees one; a second wording here would say less.
   if (error instanceof RequestError && error.kind === "concurrency") {
-    return {
-      title: "The provider refused: machine cap reached",
-      detail: "Your machine provider runs a fixed number of machines at once and every slot is taken. A builder kept after a save and not in use is stopped first to make room; pause or delete a workspace to free one, then try again.",
-    };
+    return { title: "The provider refused: machine cap reached", detail: message };
   }
   if (error instanceof DisconnectedError) {
     return { title: "Not connected to the runtime", detail: message };
@@ -395,14 +393,8 @@ export const useStore = create<State>((set, get) => {
           return;
         }
         case "session.done":
-          set(s => ({
-            sessions: {
-              ...s.sessions,
-              [e.workspaceId]: (s.sessions[e.workspaceId] ?? NO_SESSIONS).map(r =>
-                r.claudeSessionId === e.sessionId || r.id === e.sessionId ? { ...r, status: e.result.status } : r,
-              ),
-            },
-          }));
+          // The reply is in, but the row stays running until the process exits (session.end): a turn is not over while
+          // its agent keeps working, and a send that met a done-but-running row would be one the runtime refuses.
           return;
         case "session.end":
           set(s => ({ spending: { ...s.spending, [e.workspaceId]: Math.max(0, (s.spending[e.workspaceId] ?? 0) - 1) } }));

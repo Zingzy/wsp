@@ -6,7 +6,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
-import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import { stillWorkingRefusal, type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { useSelectedThreadId, useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
@@ -124,6 +124,37 @@ describe("chat tab rendering", () => {
   });
 });
 
+describe("chat tab: a turn whose process lives past its reply", () => {
+  const thread = { ...scope, threadId: "thr_linger" };
+  const noteText = () => document.querySelector("[data-composer-turn-note]")?.textContent ?? null;
+
+  it("holds the composer with the runtime's words from the reply until the process exits, then opens", async () => {
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    emit({ type: "session.start", ...thread });
+    emit({ type: "session.delta", ...thread, kind: "text", text: "Server is live at :3000." });
+    // Working, no reply yet: the note row is reserved but silent, so the note lands without a shift.
+    expect(stopButton()).toBeDefined();
+    expect(noteText()).toBe("");
+
+    emit({ type: "session.done", ...thread, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
+    // The reply renders at once, but the process still runs: the row stays working, says so, and offers no send.
+    expect(screen.getByText("Server is live at :3000.")).toBeDefined();
+    expect(noteText()).toBe(stillWorkingRefusal("thr_linger"));
+    // The row is centred with the queue and the box, not laid across the page.
+    expect(document.querySelector("[data-composer-turn-note]")?.className).toContain("max-w-3xl");
+    expect(stopButton()).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+
+    emit({ type: "session.end", ...thread, exitCode: 0, sawResult: true });
+    // The process exited: the turn is over, the note is gone, and the composer opens.
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+    expect(noteText()).toBeNull();
+    expect(screen.getByTestId("settled-footer")).toBeDefined();
+  });
+});
+
 describe("chat tab hydration", () => {
   const other: WorkspaceView = { ...workspace, id: "ws_chat0002", name: "web", claudeSessionId: undefined };
   const replay = (ws: string, prompt: string, text: string): SessionEvent[] => {
@@ -233,7 +264,7 @@ describe("chat tab hydration", () => {
 });
 
 describe("chat tab composer", () => {
-  it("enter sends exactly one turn with resume, queues the next while in flight, and sends it on done", async () => {
+  it("enter sends exactly one turn with resume, queues the next while in flight, and sends it when the turn ends", async () => {
     const { api, started, emit } = fixtureApi([workspace]);
     await setup(api);
     const editor = composerEditor();

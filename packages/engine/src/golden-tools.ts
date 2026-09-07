@@ -194,9 +194,11 @@ function summarize(tools: ToolResult[], housekeeping: string | undefined): strin
   const parts: string[] = [];
   const n = (o: ToolResult["outcome"]) => tools.filter(t => t.outcome === o);
   // An install is named when it says something more than that it landed: the road it took, a note its plan carried.
+  // The note is bracketed because a note carries this list's own separator, so a bare one reads as another tool.
   const named = n("installed").flatMap(t => {
-    const words = [...(t.road !== undefined ? [ROAD_MODULES[t.road.kind].words] : []), ...(t.note !== undefined ? [t.note] : [])];
-    return words.length > 0 ? [`${t.label} ${words.join(", ")}`] : [];
+    const road = t.road !== undefined ? ` ${ROAD_MODULES[t.road.kind].words}` : "";
+    const note = t.note !== undefined ? ` (${t.note})` : "";
+    return road === "" && note === "" ? [] : [`${t.label}${road}${note}`];
   });
   parts.push(`${n("installed").length} installed${named.length > 0 ? ` (${named.join(", ")})` : ""}`);
   const failed = n("failed");

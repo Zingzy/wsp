@@ -93,6 +93,12 @@ export interface AgentEntry extends EntryBase {
   /** The directory on this computer the agent loads its global skills from, `~/`-relative, one folder per skill with
    * a SKILL.md inside; the wsp skill goes there with the MCP server. */
   skills: string;
+  /** The files in a project this agent reads standing instructions from, project-relative; the MCP install keeps its
+   * own marked section in each of them. */
+  projectDocs: readonly string[];
+  /** The first thing to type inside the agent once it has the wsp tools, in its own words: a slash form where the
+   * agent has one for a skill, else the sentence that reaches the skill by its description. */
+  firstMove: string;
 }
 
 export interface ToolEntry extends EntryBase {
@@ -144,9 +150,14 @@ const uvTool = (bytes: number, pkg: string): { installRoad: InstallRoad; size: S
 /** A release road; `go` is the repository's main package for the fall-through, left off when it has none; the bytes are the binary's. */
 const github = (bytes: number, repo: string, go?: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "release", repo, ...(go !== undefined ? { go } : {}) }, size: measured("unpacked", bytes) });
 const tool = { kind: "tool", configPaths: [], floor: false } as const;
+/** The file a project keeps its standing instructions for agents in; an agent that reads another one names that too. */
+const AGENTS_MD = "AGENTS.md";
+/** What to type inside an agent that has no slash form for a skill: the sentence the wsp skill's description answers.
+ * Claude Code reaches a skill by its folder name with a slash, so its own line opens with that and carries this after. */
+const SET_UP_WSP = "set up wsp for me";
 /** An agent's bytes are what df moved across its install on the builder: the global, its caches and whatever the
  * installer put under /root; the cache sweep after the stage gives some of it back. */
-const agent = (id: string, mib: number) => ({ id, kind: "agent", bin: id, size: measured("df", mib * MIB, "2026-09-05") }) as const;
+const agent = (id: string, mib: number) => ({ id, kind: "agent", bin: id, projectDocs: [AGENTS_MD], firstMove: SET_UP_WSP, size: measured("df", mib * MIB, "2026-09-05") }) as const;
 
 export const CATALOG: readonly CatalogEntry[] = [
   // --- agents: the six whose project state a move can follow -------------------------------------------------------
@@ -158,6 +169,9 @@ export const CATALOG: readonly CatalogEntry[] = [
     name: "Claude Code",
     context: CLAUDE_CONTEXT,
     skills: "~/.claude/skills",
+    projectDocs: [AGENTS_MD, "CLAUDE.md"],
+    // The slash is the skill's folder name, host's SKILL_NAME, which the catalog cannot import; mcp-install.test.ts pins this to it.
+    firstMove: `/wsp ${SET_UP_WSP}`,
     installRoad: { road: "script", script: GOLDEN_SETUP },
     signIn: SIGN_IN_ROWS.claude,
     // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)

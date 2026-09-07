@@ -86,6 +86,16 @@ describe("deriveSession: the chat fixture", () => {
     expect(thinking).toMatchObject({ tone: "thinking", label: "Thinking", detail: "curl returned the greeting, so the server is live.", preview: "curl returned the greeting, so the server is live.", sourceActivityKind: "reasoning" });
   });
 
+  it("keeps the turn running with its reply recorded between session.done and session.end, then settles at the end", () => {
+    const replied = deriveSession([start, { type: "session.delta", ...scope, kind: "text", text: "Done." }, done]);
+    expect(replied.running).toBe(true);
+    expect(replied.latestTurn).toMatchObject({ state: "running", replied: true, durationMs: 1500, costUsd: 0.01 });
+    expect(replied.messages.map(m => [m.role, m.text])).toEqual([["user", "do it"], ["assistant", "Done."]]);
+    const settled = deriveSession([start, { type: "session.delta", ...scope, kind: "text", text: "Done." }, done, end]);
+    expect(settled.running).toBe(false);
+    expect(settled.latestTurn).toMatchObject({ state: "completed", replied: true, durationMs: 1500 });
+  });
+
   it("summarises the turn from session.done and clears running on session.end", () => {
     expect(model.turns).toEqual([
       expect.objectContaining({ turnId: CHAT_TURN, state: "completed", durationMs: 10458, costUsd: 0.0187, model: "claude-sonnet-4-5", prompt: null }),
