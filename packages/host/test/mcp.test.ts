@@ -140,7 +140,7 @@ describe("the MCP server over the host", () => {
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name", "size"]);
-    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "title", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "size", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "effort", "message", "model", "thread"]);
     expect(Object.keys((tools.find(t => t.name === "exec")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["argv", "cwd", "workspace"]);
@@ -381,6 +381,16 @@ describe("the MCP server over the host", () => {
     expect(claude.starts).toEqual([]);
     expect(made.text).toBe("codex: write tests");
     expect(made.structured).toEqual({ threadId: row!.threadId, workspaceId: alpha!.id, harness: "codex", text: "codex: write tests", outcome: "started" });
+  });
+
+  it("thread_new takes a title, which names the thread as a person's from the first second", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    const made = await call("thread_new", { workspace: "alpha", task: "build it", title: "Ticket 411 review" });
+    expect(made.isError).toBe(false);
+    expect(claude.starts.at(-1)?.title).toBe("Ticket 411 review");
+    const [row] = await rt.sessions.list(alpha!.id);
+    expect(row).toMatchObject({ harnessTitle: "Ticket 411 review", titleSource: "person" });
   });
 
   it("thread_new and fork take cwd, the folder the turn starts in; without it the workspace's project folder, else none", async () => {

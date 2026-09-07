@@ -4,11 +4,11 @@
 // thread.started names the thread a resume takes, items start and complete
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
-import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleReader, TurnResult } from "@wsp/protocol";
+import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, titlePrompt } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
-import { parseRename, parseSessionTitle, renameCommand, sessionTitleCommand } from "./session-title.js";
+import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 
 export interface CodexStartOptions {
   prompt: string;
@@ -55,6 +55,8 @@ export interface CodexAdapter {
   sessionTitle: SessionTitleReader;
   /** Names the thread in that same index, in the column the CLI's own rename writes. */
   renameSession: SessionRenamer;
+  /** Asks the CLI itself, in one read-only turn, for a name for a thread it has just replied in. */
+  titleFor: SessionTitleMaker;
   readonly env: Readonly<Record<string, string>>;
 }
 
@@ -316,6 +318,15 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     probeCatalog,
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
     renameSession: (threadId, title, exec) => exec(renameCommand({ home: deps.home, threadId, title })).then(parseRename),
+    titleFor: (turn, exec) =>
+      exec(
+        titleForCommand({
+          home: deps.home,
+          prompt: titlePrompt(turn.opening, turn.reply),
+          ...(turn.model !== undefined ? { model: turn.model } : {}),
+          ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
+        }),
+      ).then(parseTitleFor),
     env,
   };
 }

@@ -378,6 +378,50 @@ export function openingTitle(text: string): string {
   return `${kept}${ELLIPSIS}`;
 }
 
+/** The most characters a generated title takes; an answer longer than this is thrown away and the seed stands. */
+export const GENERATED_TITLE_MAX = 40;
+/** How much of the opening turn and of the reply the title question carries: the words a title comes from are at the
+ * top of both, and a whole brief would cost more to send than the answer is worth. */
+const TITLE_EXCERPT_MAX = 600;
+
+const excerpt = (text: string): string => {
+  const trimmed = text.trim();
+  return trimmed.length <= TITLE_EXCERPT_MAX ? trimmed : `${trimmed.slice(0, TITLE_EXCERPT_MAX)}${ELLIPSIS}`;
+};
+
+/**
+ * The one question every harness is asked for a thread's title, once, after its first reply. Six words and 34
+ * characters are asked for rather than the 40 the answer is measured against: claude-sonnet-5 answered 41 and 43
+ * characters twice when asked for 40 (measured 2026-09-07), and an answer over the cap is thrown away.
+ */
+export function titlePrompt(opening: string, reply: string): string {
+  return [
+    "Name this coding agent thread in 3 to 6 words, no more than 34 characters, sentence case, no quotes and no full stop.",
+    "Do not repeat the opening words, and do not say anything is done, fixed or working.",
+    "Answer with the title alone and nothing else; a longer answer is thrown away.",
+    "",
+    "The opening turn:",
+    excerpt(opening),
+    "",
+    "The reply:",
+    excerpt(reply),
+  ].join("\n");
+}
+
+/**
+ * A harness's answer to titlePrompt as a title, or nothing when it did not answer with one: a title is one line of
+ * at most GENERATED_TITLE_MAX characters, so an answer that explains itself over several lines or runs past the cap
+ * is refused whole rather than cut, and the thread keeps the words its opening turn seeded it with. Wrapping quotes
+ * and a trailing stop are the two shapes a model adds around an otherwise good title, so they come off first.
+ */
+export function generatedTitle(answer: string): string | null {
+  const line = answer.trim();
+  if (line === "" || /[\r\n]/.test(line)) return null;
+  const unquoted = /^(["'\u201c\u2018])(.*)(["'\u201d\u2019])$/.exec(line)?.[2]?.trim() ?? line;
+  const title = unquoted.replace(/[.]+$/, "").trim();
+  return title === "" || title.length > GENERATED_TITLE_MAX ? null : title;
+}
+
 /** Text cut to its last line: the last non-empty line with the whitespace collapsed, or nothing when the text has
  * none. The notify line ends with it and a switcher card shows it under the thread's title, so both read one rule. */
 export function lastLine(text: string): string | undefined {

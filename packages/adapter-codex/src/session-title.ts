@@ -7,9 +7,9 @@
 // it has one, and a rename from here writes that same column. Measured on
 // codex-cli 0.153.0 against state_5.sqlite.
 
-import { shellQuote } from "@wsp/protocol";
+import { generatedTitle, shellQuote } from "@wsp/protocol";
 import type { SessionRenameWrite } from "@wsp/protocol";
-import { slug } from "./command.js";
+import { buildCommand, buildEnv, slug } from "./command.js";
 
 /**
  * One shell line for the guest: the thread's row as JSON, out of the highest-versioned state db (the file name
@@ -49,6 +49,42 @@ export function parseSessionTitle(stdout: string): string | null {
     return null;
   }
   return null;
+}
+
+/**
+ * One shell line for the guest that asks the CLI itself to name a thread: a plain turn on the question, in the same
+ * shape every codex turn on a workspace runs in, so the prompt travels on stdin and the flags stay in one place. It
+ * runs read-only rather than with the sandbox off, since the answer is one line of words and nothing it could write
+ * belongs to the thread it names, and under the same CODEX_HOME as a session, which a guest exec would not carry.
+ */
+export function titleForCommand(options: { home: string; prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+  const env = buildEnv({ base: options.baseEnv, home: options.home });
+  const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
+  return `export ${exports}; ${buildCommand({ prompt: options.prompt, permissionMode: "read-only", ...(options.model === undefined ? {} : { model: options.model }) })}`;
+}
+
+/** The title out of the turn's events: the last agent message, sanitized; null when the turn failed, said nothing or
+ * said something that is not a title. */
+export function parseTitleFor(stdout: string): string | null {
+  let text: string | undefined;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line.startsWith("{")) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+    const event = value as Record<string, unknown>;
+    if (event.type !== "item.completed") continue;
+    const item = event.item;
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    if (row.type === "agent_message" && typeof row.text === "string") text = row.text;
+  }
+  return text === undefined ? null : generatedTitle(text);
 }
 
 /** A SQL string literal: single quotes around it, and an embedded quote doubled, which is sqlite's own escape. */

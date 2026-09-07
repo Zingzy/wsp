@@ -291,6 +291,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "wsp thread new reads --access, which its row does not show",
       "wsp thread new reads --effort, which its row does not show",
       "wsp thread new reads --model, which its row does not show",
+      "wsp thread new reads --title, which its row does not show",
       "wsp send reads --access, which its row does not show",
       "wsp send reads --effort, which its row does not show",
       "wsp send reads --model, which its row does not show",

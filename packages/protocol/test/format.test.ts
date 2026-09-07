@@ -86,7 +86,10 @@ import {
   stepRetryLine,
   timedOutLine,
   lastLine,
+  generatedTitle,
+  GENERATED_TITLE_MAX,
   openingTitle,
+  titlePrompt,
   titleLine,
   toolActivityLine,
   toolCallFacts,
@@ -488,6 +491,35 @@ describe("openingTitle", () => {
     const token = "a".repeat(60);
     expect(openingTitle(token)).toBe(`${"a".repeat(47)}\u2026`);
     expect(openingTitle("\n \n")).toBe("");
+  });
+});
+
+describe("titlePrompt", () => {
+  it("asks for a short title in words and carries the opening turn and the reply, both cut so a brief never rides whole", () => {
+    const prompt = titlePrompt("a".repeat(900), "b".repeat(900));
+    expect(prompt).toContain("3 to 6 words");
+    expect(prompt).toContain("The opening turn:");
+    expect(prompt).toContain("The reply:");
+    expect(prompt).toContain(`${"a".repeat(600)}\u2026`);
+    expect(prompt).not.toContain("a".repeat(601));
+    expect(prompt).not.toContain("b".repeat(601));
+  });
+});
+
+describe("generatedTitle", () => {
+  it("takes a one-line answer, with the quotes and the stop a model wraps it in taken off", () => {
+    expect(generatedTitle("  Seed thread titles from opening turn\n")).toBe("Seed thread titles from opening turn");
+    expect(generatedTitle('"Thread titles through the harness"')).toBe("Thread titles through the harness");
+    expect(generatedTitle("\u201cThread titles through the harness\u201d")).toBe("Thread titles through the harness");
+    expect(generatedTitle("Thread titles through the harness.")).toBe("Thread titles through the harness");
+  });
+
+  it("refuses an answer that is not a title, so the thread keeps the words its opening turn seeded it with", () => {
+    expect(generatedTitle("Sure! Here is a title:\nThread titles through the harness")).toBeNull();
+    expect(generatedTitle("a".repeat(GENERATED_TITLE_MAX + 1))).toBeNull();
+    expect(generatedTitle("a".repeat(GENERATED_TITLE_MAX))).toBe("a".repeat(GENERATED_TITLE_MAX));
+    expect(generatedTitle("   ")).toBeNull();
+    expect(generatedTitle('"."')).toBeNull();
   });
 });
 

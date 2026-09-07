@@ -189,6 +189,17 @@ describe("wsp verbs over the host", () => {
     expect(sent.io.streamed.endsWith("Ready.\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
   });
 
+  it("thread new --title names the thread from the first second, in the agent's own launch and in the table", async () => {
+    await run("new", "alpha");
+    const opened = await run("thread", "new", "--in", "alpha", "--title", "Ticket 411 review", "build it");
+    expect(opened.code).toBe(0);
+    expect(claude.starts.at(-1)?.title).toBe("Ticket 411 review");
+    const [row] = await rt.sessions.list();
+    expect(row).toMatchObject({ harnessTitle: "Ticket 411 review", titleSource: "person" });
+    const listed = await run("threads");
+    expect(listed.io.lines.join("\n")).toContain("Ticket 411 review");
+  });
+
   it("fork, thread new, exec and wake refuse a workspace whose machine is gone, quoting the provider, with no waking line", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
@@ -709,7 +720,7 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const relative = await run("thread", "new", "--in", "alpha", "--cwd", "packages/host", "look here");
     expect(relative.code).toBe(3);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"']);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title] "<task>"']);
     const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
     expect(forked.code).toBe(3);
     expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute: got "packages\/host"\n\nusage: wsp fork /);
@@ -1505,7 +1516,7 @@ describe("wsp verbs over the host", () => {
     expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(3);
-    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"\nusage: wsp thread rename <thread> "<title>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title] "<task>"\nusage: wsp thread rename <thread> "<title>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {
