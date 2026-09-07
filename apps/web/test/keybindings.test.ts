@@ -3,7 +3,7 @@
 // platforms, when-clauses gate the terminal chords, labels follow the platform.
 import { describe, expect, it } from "vitest";
 import { compileResolvedKeybindingsConfig, DEFAULT_KEYBINDINGS, DEFAULT_RESOLVED_KEYBINDINGS, parseKeybindingShortcut, parseKeybindingWhenExpression } from "../src/keybindingDefaults.js";
-import { formatShortcutLabel, resolveShortcutCommand, shortcutLabelForCommand, type ShortcutEventLike } from "../src/keybindings.js";
+import { browserTabClaimsShortcut, formatShortcutLabel, resolveShortcutCommand, shortcutLabelForCommand, type ShortcutEventLike } from "../src/keybindings.js";
 
 const MAC = "MacIntel";
 const LINUX = "Linux x86_64";
@@ -88,5 +88,92 @@ describe("shortcut labels", () => {
   it("labels a when-gated command only inside its context", () => {
     expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "terminal.split", { platform: MAC })).toBeNull();
     expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "terminal.split", { platform: MAC, context: { terminalFocus: true } })).toBe("⌘D");
+  });
+});
+
+describe("chords a browser tab cannot take", () => {
+  const claims = (chord: string, platform: string): boolean => {
+    const shortcut = parseKeybindingShortcut(chord);
+    if (shortcut === null) throw new Error(`unparsed chord ${chord}`);
+    return browserTabClaimsShortcut(shortcut, platform);
+  };
+
+  it("gives the browser Control with Tab and mod with a digit, on both platforms", () => {
+    for (const platform of [MAC, LINUX]) {
+      expect(claims("ctrl+tab", platform)).toBe(true);
+      expect(claims("ctrl+shift+tab", platform)).toBe(true);
+      expect(claims("mod+1", platform)).toBe(true);
+      expect(claims("mod+9", platform)).toBe(true);
+    }
+  });
+
+  it("leaves every other chord to the page", () => {
+    for (const platform of [MAC, LINUX]) {
+      expect(claims("mod+b", platform)).toBe(false);
+      expect(claims("mod+k", platform)).toBe(false);
+      expect(claims("tab", platform)).toBe(false);
+      expect(claims("cmd+tab", platform)).toBe(false);
+      expect(claims("ctrl+alt+tab", platform)).toBe(false);
+      expect(claims("mod+shift+1", platform)).toBe(false);
+      expect(claims("mod+0", platform)).toBe(false);
+    }
+  });
+
+  it("takes a digit only with the platform's own mod, so Control with a digit stays the page's on macOS", () => {
+    expect(claims("ctrl+1", MAC)).toBe(false);
+    expect(claims("cmd+1", MAC)).toBe(true);
+    expect(claims("cmd+1", LINUX)).toBe(false);
+    expect(claims("ctrl+1", LINUX)).toBe(true);
+    expect(claims("ctrl+cmd+1", MAC)).toBe(false);
+    expect(claims("ctrl+cmd+1", LINUX)).toBe(false);
+  });
+});
+
+describe("workspace switch", () => {
+  const resolve = (event: ShortcutEventLike, platform: string, context: Record<string, boolean> = {}) =>
+    resolveShortcutCommand(event, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context });
+  const DESKTOP = { desktopShell: true };
+  const tab = (mods: Partial<ShortcutEventLike> = {}) => key("Tab", { ctrlKey: true, code: "Tab", ...mods });
+  const digit = (n: number, mods: Partial<ShortcutEventLike> = {}) => key(String(n), { code: `Digit${n}`, ...mods });
+
+  it("walks the workspaces on ctrl+tab in the desktop shell, both platforms", () => {
+    expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
+    expect(resolve(tab(), LINUX, DESKTOP)).toBe("workspace.next");
+    expect(resolve(tab({ shiftKey: true }), MAC, DESKTOP)).toBe("workspace.previous");
+    expect(resolve(tab({ shiftKey: true }), LINUX, DESKTOP)).toBe("workspace.previous");
+  });
+
+  it("jumps to a sidebar slot on mod and a digit in the desktop shell", () => {
+    expect(resolve(digit(1, { metaKey: true }), MAC, DESKTOP)).toBe("workspace.select.1");
+    expect(resolve(digit(9, { metaKey: true }), MAC, DESKTOP)).toBe("workspace.select.9");
+    expect(resolve(digit(4, { ctrlKey: true }), LINUX, DESKTOP)).toBe("workspace.select.4");
+    expect(resolve(digit(0, { metaKey: true }), MAC, DESKTOP)).toBeNull();
+    expect(resolve(digit(1), MAC, DESKTOP)).toBeNull();
+  });
+
+  it("offers none of them in a browser tab, which keeps those chords for its own tabs", () => {
+    expect(resolve(tab(), MAC)).toBeNull();
+    expect(resolve(tab({ shiftKey: true }), LINUX)).toBeNull();
+    expect(resolve(digit(2, { metaKey: true }), MAC)).toBeNull();
+    expect(resolve(digit(2, { ctrlKey: true }), LINUX)).toBeNull();
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC })).toBeNull();
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.select.2", { platform: MAC })).toBeNull();
+  });
+
+  it("keeps the terminal's own keys: Control chords while it has focus, and a Control mod for the digits", () => {
+    expect(resolve(tab(), LINUX, { ...DESKTOP, terminalFocus: true })).toBeNull();
+    expect(resolve(tab(), MAC, { ...DESKTOP, terminalFocus: true })).toBeNull();
+    expect(resolve(digit(2, { ctrlKey: true }), LINUX, { ...DESKTOP, terminalFocus: true })).toBeNull();
+    expect(resolve(digit(2, { metaKey: true }), MAC, { ...DESKTOP, terminalFocus: true })).toBe("workspace.select.2");
+  });
+
+  it("labels the switch in the desktop shell only", () => {
+    const label = (command: "workspace.next" | "workspace.previous" | "workspace.select.3", platform: string) =>
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, command, { platform, context: DESKTOP });
+    expect(label("workspace.next", MAC)).toBe("⌃Tab");
+    expect(label("workspace.next", LINUX)).toBe("Ctrl+Tab");
+    expect(label("workspace.previous", MAC)).toBe("⌃⇧Tab");
+    expect(label("workspace.select.3", MAC)).toBe("⌘3");
+    expect(label("workspace.select.3", LINUX)).toBe("Ctrl+3");
   });
 });

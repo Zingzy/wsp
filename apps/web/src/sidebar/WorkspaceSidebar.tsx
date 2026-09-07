@@ -8,7 +8,7 @@
 // as a button or in its right-click menu, comes from the workspace and thread
 // registries. The surface itself is the shell's sidebar-glass: nothing here
 // paints a background.
-import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, MessageSquarePlusIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { agentName } from "@wsp/catalog";
 import { goldenHead, needsRebuild, outOfMemoryRowLine, type WorkspaceSize } from "@wsp/protocol";
@@ -42,7 +42,7 @@ import { useNowMinute } from "../hooks/useNowMinute.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { cn } from "../lib/utils.js";
-import { useCapabilities, useSelectedId, useSelectedThreadId, useStore, type Creation } from "../protocol/store.js";
+import { useCapabilities, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
@@ -140,6 +140,7 @@ export function WorkspaceSidebar() {
   const capabilities = useCapabilities();
   const selectedId = useSelectedId();
   const selectedThreadId = useSelectedThreadId();
+  const selectedWorkspace = useWorkspace(useSelectedWorkspaceId());
   const nowMinute = useNowMinute();
   // One clock sample per minute tick so every idle countdown reads the same now.
   const nowMs = useMemo(() => Date.now(), [nowMinute]);
@@ -243,8 +244,29 @@ export function WorkspaceSidebar() {
   };
 
   const search = (
-    <div className="px-[var(--sidebar-content-inset)] pb-1">
-      <SearchRow />
+    <div className="px-[var(--sidebar-content-inset)] pt-3 pb-1" data-sidebar-search>
+      <div className="relative">
+        <SearchRow
+          action={
+            selectedWorkspace !== null ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <SidebarGroupAction
+                      className="top-1.5 text-sidebar-muted-foreground transition-colors duration-150"
+                      aria-label="New thread"
+                      onClick={() => verbs.newThread(selectedWorkspace.id)}
+                    />
+                  }
+                >
+                  <MessageSquarePlusIcon />
+                </TooltipTrigger>
+                <TooltipPopup side="bottom">{NEW_THREAD_TITLE}</TooltipPopup>
+              </Tooltip>
+            ) : undefined
+          }
+        />
+      </div>
     </div>
   );
 

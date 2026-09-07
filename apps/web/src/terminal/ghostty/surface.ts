@@ -4,6 +4,7 @@ import { SELECTION_MULTI_CLICK_INTERVAL_MS } from "../../lib/selectionActions";
 import { collectWrappedTerminalLinkLine, extractTerminalLinks } from "../../terminal-links";
 import {
   GhosttyTerminalCore,
+  type GhosttyCursorDefaults,
   type GhosttyScrollbar,
   type GhosttySnapshot,
   type GhosttyTheme,
@@ -12,8 +13,10 @@ import {
   measureGhosttyCell,
   renderGhosttySnapshot,
   terminalGridSize,
+  uniformPadding,
   type GhosttyCellRange,
   type GhosttyCellMetrics,
+  type TerminalPadding,
 } from "./renderer";
 import symbolsFontUrl from "./fonts/SymbolsNerdFontMono-Regular.woff2?url";
 import { cssFontFamilies, isMonospaceFamily } from "../../appearanceFonts";
@@ -25,6 +28,7 @@ const MIN_TERMINAL_FONT_SIZE = 6;
 const MAX_TERMINAL_FONT_SIZE = 32;
 export const DEFAULT_TERMINAL_FONT_FAMILY = terminalFontChain(undefined);
 export const CONTENT_PADDING = 4;
+export const DEFAULT_TERMINAL_PADDING: TerminalPadding = uniformPadding(CONTENT_PADDING);
 const MIN_SCROLLBAR_THUMB_HEIGHT = 18;
 /** Half a blink cycle: the visible and hidden phases are equally long. */
 const CURSOR_BLINK_INTERVAL_MS = 500;
@@ -39,6 +43,8 @@ const TERMINAL_FONT_LOAD_VARIANTS = [
 /** Requested terminal font; omitted fields fall back to the defaults. */
 export interface GhosttyTerminalFont {
   readonly family?: string;
+  /** Faces tried after the family, in order, as a config's later font-family lines name them. */
+  readonly fallbacks?: readonly string[];
   readonly size?: number;
 }
 
@@ -63,12 +69,17 @@ function ensureTerminalSymbolsFont(): Promise<void> {
   return symbolsFontLoad;
 }
 
-function uncheckedTerminalFontFamily(family?: string): string {
-  const custom = family === undefined ? null : cssFontFamilies(family);
-  return custom === null ? DEFAULT_TERMINAL_FONT_FAMILY : terminalFontChain(custom, localFontFamilies(family));
+/** The installed faces registered for the family and each fallback, in that order. */
+function localFaces(family: string | undefined, fallbacks: readonly string[]): string[] {
+  return [family, ...fallbacks].flatMap(name => localFontFamilies(name));
 }
 
-export function terminalFontFamily(family?: string): string {
+function uncheckedTerminalFontFamily(family?: string, fallbacks: readonly string[] = []): string {
+  const custom = family === undefined ? null : cssFontFamilies(family);
+  return custom === null ? DEFAULT_TERMINAL_FONT_FAMILY : terminalFontChain(custom, [...fallbacks, ...localFaces(family, fallbacks)]);
+}
+
+export function terminalFontFamily(family?: string, fallbacks: readonly string[] = []): string {
   // Quote non-ident names ("3270 Nerd Font", "M+ 1m"): an unquoted one makes
   // the whole canvas font string invalid and the assignment silently no-ops.
   const custom = family === undefined ? null : cssFontFamilies(family);
@@ -77,20 +88,21 @@ export function terminalFontFamily(family?: string): string {
   // proportional face would draw its text narrower than its own cells. Refuse
   // it here rather than render a ragged grid with a stranded cursor.
   if (!isMonospaceFamily(custom)) return DEFAULT_TERMINAL_FONT_FAMILY;
-  return uncheckedTerminalFontFamily(family);
+  return uncheckedTerminalFontFamily(family, fallbacks);
 }
 
-/** Register the computer's faces for the family, load every style the renderer can request, then validate the actual face. */
+/** Register the computer's faces for the family and its fallbacks, load every style the renderer can request, then validate the actual face. */
 export async function loadTerminalFontFamily(
   family: string | undefined,
   size: number,
   environment?: {
     readonly load: (font: string, text: string) => Promise<unknown>;
-    readonly resolve: (family: string | undefined) => string;
+    readonly resolve: (family: string | undefined, fallbacks: readonly string[]) => string;
   },
+  fallbacks: readonly string[] = [],
 ): Promise<string> {
-  await registerLocalFonts(family);
-  const candidate = uncheckedTerminalFontFamily(family);
+  await Promise.all([family, ...fallbacks].map(name => registerLocalFonts(name)));
+  const candidate = uncheckedTerminalFontFamily(family, fallbacks);
   const load =
     environment?.load ?? ((font: string, text: string) => document.fonts.load(font, text));
   try {
@@ -102,13 +114,22 @@ export async function loadTerminalFontFamily(
   } catch {
     // The fixed-width fallback stack remains available if a face cannot load.
   }
-  return (environment?.resolve ?? terminalFontFamily)(family);
+  return (environment?.resolve ?? terminalFontFamily)(family, fallbacks);
 }
 
 export function terminalFontSize(size?: number): number {
   if (size === undefined || !Number.isFinite(size)) return DEFAULT_TERMINAL_FONT_SIZE;
   return Math.max(MIN_TERMINAL_FONT_SIZE, Math.min(MAX_TERMINAL_FONT_SIZE, Math.round(size)));
 }
+
+/** The window background's opacity clamped to Ghostty's range; absent or unreadable is opaque. */
+export function terminalBackgroundOpacity(opacity?: number): number {
+  if (opacity === undefined || !Number.isFinite(opacity)) return 1;
+  return Math.max(0, Math.min(1, opacity));
+}
+
+/** The padding the surface lays the grid in; absent, four on every side. */
+export const terminalPaddingOf = (padding?: TerminalPadding): TerminalPadding => padding ?? DEFAULT_TERMINAL_PADDING;
 
 /**
  * Whether the cursor should keep toggling. An unfocused surface draws a steady
@@ -133,14 +154,14 @@ export function shouldBlinkTerminalCursor(state: {
  */
 export function terminalContentOriginY(
   mountHeight: number,
-  padding: number,
+  padding: Pick<TerminalPadding, "top" | "bottom">,
   rows: number,
   cellHeight: number,
   anchorBottom: boolean,
 ): number {
-  if (!anchorBottom) return padding;
-  const slack = mountHeight - padding * 2 - rows * cellHeight;
-  return padding + Math.max(0, slack);
+  if (!anchorBottom) return padding.top;
+  const slack = mountHeight - padding.top - padding.bottom - rows * cellHeight;
+  return padding.top + Math.max(0, slack);
 }
 
 export interface TerminalScrollbarGeometry {
@@ -539,6 +560,12 @@ export interface GhosttySelectionPosition {
 export interface GhosttyTerminalSurfaceOptions {
   readonly theme: GhosttyTheme;
   readonly font?: GhosttyTerminalFont;
+  /** The cursor a session starts with; absent, libghostty's block with the blink on. */
+  readonly cursor?: GhosttyCursorDefaults;
+  /** The room between the mount and the grid; absent, four on every side. */
+  readonly padding?: TerminalPadding;
+  /** The window background's opacity; under 1 the canvas keeps an alpha channel and what sits behind it shows through. */
+  readonly backgroundOpacity?: number;
   readonly onData: (data: string) => void;
   readonly onResize: (cols: number, rows: number) => void;
   readonly onSelectionChange: () => void;
@@ -556,6 +583,8 @@ export class GhosttyTerminalSurface {
   readonly canvas: HTMLCanvasElement;
   readonly input: HTMLTextAreaElement;
   readonly scrollbar: HTMLDivElement;
+  /** Whether the background paints under full opacity, so the pane around the canvas knows to stop painting its own. */
+  readonly translucent: boolean;
   cols = 1;
   rows = 1;
 
@@ -566,7 +595,10 @@ export class GhosttyTerminalSurface {
   private metrics: GhosttyCellMetrics;
   private fontFamily: string;
   private requestedFontFamily: string | undefined;
+  private requestedFallbacks: readonly string[] = [];
   private fontSize: number;
+  private readonly padding: TerminalPadding;
+  private readonly backgroundOpacity: number;
   private fontEpoch = 0;
   private pendingFontEpoch: number | null = null;
   private readonly resizeObserver: ResizeObserver;
@@ -585,7 +617,7 @@ export class GhosttyTerminalSurface {
   private scrollbarPointerOffset = 0;
   private disposed = false;
   private resizeNotifyTimer: number | null = null;
-  private originY = CONTENT_PADDING;
+  private originY: number;
   private mountHeight = 0;
   private selectionEnd: { x: number; y: number } | null = null;
   private selectionAnchorScreen: { x: number; y: number } | null = null;
@@ -653,7 +685,12 @@ export class GhosttyTerminalSurface {
     this.theme = options.theme;
     this.fontFamily = fontFamily;
     this.requestedFontFamily = options.font?.family;
+    this.requestedFallbacks = options.font?.fallbacks ?? [];
     this.fontSize = terminalFontSize(options.font?.size);
+    this.padding = terminalPaddingOf(options.padding);
+    this.originY = this.padding.top;
+    this.backgroundOpacity = terminalBackgroundOpacity(options.backgroundOpacity);
+    this.translucent = this.backgroundOpacity < 1;
     this.resizeObserver = new ResizeObserver(() => this.fit());
     this.installEvents();
     this.watchDevicePixelRatio();
@@ -693,12 +730,16 @@ export class GhosttyTerminalSurface {
     scrollbar.append(scrollbarThumb);
     mount.replaceChildren(canvas, input, scrollbar);
 
-    const context = canvas.getContext("2d", { alpha: false });
+    const backgroundOpacity = terminalBackgroundOpacity(options.backgroundOpacity);
+    const padding = terminalPaddingOf(options.padding);
+    // A translucent background needs the alpha channel an opaque backing store lacks; the choice is made once here.
+    const context = canvas.getContext("2d", { alpha: backgroundOpacity < 1 });
     if (!context) throw new Error("Canvas 2D is unavailable");
     // An opaque canvas backing store initializes to solid black, and the font
     // and WASM loads below leave it on screen for the whole setup window; paint
     // the theme background first so the mount never flashes a black box.
-    context.fillStyle = `rgb(${options.theme.background.r}, ${options.theme.background.g}, ${options.theme.background.b})`;
+    const { r, g, b } = options.theme.background;
+    context.fillStyle = backgroundOpacity < 1 ? `rgba(${r}, ${g}, ${b}, ${backgroundOpacity})` : `rgb(${r}, ${g}, ${b})`;
     context.fillRect(0, 0, canvas.width, canvas.height);
     const fontSize = terminalFontSize(options.font?.size);
     try {
@@ -708,9 +749,9 @@ export class GhosttyTerminalSurface {
     } catch {
       // Metrics fall back to whichever faces are already available.
     }
-    const fontFamily = await loadTerminalFontFamily(options.font?.family, fontSize);
+    const fontFamily = await loadTerminalFontFamily(options.font?.family, fontSize, undefined, options.font?.fallbacks);
     const metrics = measureGhosttyCell(context, fontSize, fontFamily);
-    const grid = terminalGridSize(mount.clientWidth, mount.clientHeight, metrics, CONTENT_PADDING);
+    const grid = terminalGridSize(mount.clientWidth, mount.clientHeight, metrics, padding);
     const core = await GhosttyTerminalCore.create(
       grid.cols,
       grid.rows,
@@ -718,6 +759,7 @@ export class GhosttyTerminalSurface {
       metrics.height,
       options.theme,
       options.onData,
+      options.cursor,
     );
     const surface = new GhosttyTerminalSurface(
       mount,
@@ -775,11 +817,12 @@ export class GhosttyTerminalSurface {
     // the epoch lets the newest overlapping call win regardless of load order.
     const epoch = ++this.fontEpoch;
     this.pendingFontEpoch = epoch;
-    const fontFamily = await loadTerminalFontFamily(font.family, fontSize);
+    const fontFamily = await loadTerminalFontFamily(font.family, fontSize, undefined, font.fallbacks);
     if (this.disposed || epoch !== this.fontEpoch) return;
     this.pendingFontEpoch = null;
     this.fontFamily = fontFamily;
     this.requestedFontFamily = font.family;
+    this.requestedFallbacks = font.fallbacks ?? [];
     this.fontSize = fontSize;
     this.applyFontMetrics();
   }
@@ -811,7 +854,7 @@ export class GhosttyTerminalSurface {
     if (this.pendingFontEpoch !== null) return;
     // A face may become available after an earlier fallback measurement. Run
     // the fixed-width guard again before using its newly loaded metrics.
-    const fontFamily = terminalFontFamily(this.requestedFontFamily);
+    const fontFamily = terminalFontFamily(this.requestedFontFamily, this.requestedFallbacks);
     if (fontFamily !== this.fontFamily) {
       this.fontFamily = fontFamily;
       this.applyFontMetrics();
@@ -855,7 +898,7 @@ export class GhosttyTerminalSurface {
       this.scrollbarDirty = true;
       shouldRender = true;
     }
-    const grid = terminalGridSize(width, height, this.metrics, CONTENT_PADDING);
+    const grid = terminalGridSize(width, height, this.metrics, this.padding);
     this.mountHeight = height;
     // onResize is the only PTY resize channel, so the first successful fit must
     // notify even when the measured grid equals the 1x1 construction sentinel.
@@ -942,7 +985,7 @@ export class GhosttyTerminalSurface {
     if (!viewportEnd) return null;
     const bounds = this.canvas.getBoundingClientRect();
     return {
-      right: bounds.left + CONTENT_PADDING + (viewportEnd.x + 1) * this.metrics.width,
+      right: bounds.left + this.padding.left + (viewportEnd.x + 1) * this.metrics.width,
       bottom: bounds.top + this.originY + (viewportEnd.y + 1) * this.metrics.height,
     };
   }
@@ -1666,7 +1709,7 @@ export class GhosttyTerminalSurface {
         ? null
         : terminalScrollbarGeometry(
             state,
-            Math.max(0, this.mount.clientHeight - CONTENT_PADDING * 2),
+            Math.max(0, this.mount.clientHeight - this.padding.top - this.padding.bottom),
           );
     this.scrollbar.hidden = geometry === null;
     if (state === null || geometry === null) return;
@@ -1712,7 +1755,7 @@ export class GhosttyTerminalSurface {
     const anchorBottom = scrollState !== null && scrollState.total > scrollState.len;
     const nextOriginY = terminalContentOriginY(
       this.mountHeight,
-      CONTENT_PADDING,
+      this.padding,
       this.rows,
       this.metrics.height,
       anchorBottom,
@@ -1728,8 +1771,9 @@ export class GhosttyTerminalSurface {
       metrics: this.metrics,
       fontSize: this.fontSize,
       fontFamily: this.fontFamily,
-      padding: CONTENT_PADDING,
+      padding: this.padding.left,
       originY: this.originY,
+      backgroundOpacity: this.backgroundOpacity,
       forceFull: this.forceFullRender,
       cursorOn: this.cursorOn,
       previousCursorY: this.renderedCursorY,
@@ -1781,7 +1825,7 @@ export class GhosttyTerminalSurface {
     }
     // The IME candidate window anchors to the textarea, so it must follow the
     // terminal cursor for composition to appear where the user is typing.
-    const left = CONTENT_PADDING + snapshot.cursorX * this.metrics.width;
+    const left = this.padding.left + snapshot.cursorX * this.metrics.width;
     const top = this.originY + snapshot.cursorY * this.metrics.height;
     if (left === this.inputLeft && top === this.inputTop) return;
     this.inputLeft = left;
@@ -1798,7 +1842,7 @@ export class GhosttyTerminalSurface {
         0,
         Math.min(
           this.cols - 1,
-          Math.floor((clientX - bounds.left - CONTENT_PADDING) / this.metrics.width),
+          Math.floor((clientX - bounds.left - this.padding.left) / this.metrics.width),
         ),
       ),
       y: Math.max(
@@ -1820,7 +1864,7 @@ export class GhosttyTerminalSurface {
       cols: this.cols,
       rows: this.rows,
       metrics: this.metrics,
-      padding: CONTENT_PADDING,
+      padding: this.padding.left,
       originY: this.originY,
     });
     if (!cell) return null;
@@ -1874,8 +1918,8 @@ export class GhosttyTerminalSurface {
       screenHeight: bounds.height,
       cellWidth: this.metrics.width,
       cellHeight: this.metrics.height,
-      paddingLeft: CONTENT_PADDING,
-      paddingRight: CONTENT_PADDING,
+      paddingLeft: this.padding.left,
+      paddingRight: this.padding.right,
       paddingTop: this.originY,
       paddingBottom: Math.max(0, bounds.height - this.originY - this.rows * this.metrics.height),
       anyButtonPressed: event.buttons !== 0,

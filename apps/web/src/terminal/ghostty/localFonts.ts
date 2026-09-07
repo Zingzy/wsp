@@ -4,12 +4,7 @@
 // names so the canvas can draw with the person's own face and its Nerd Font
 // variant. A browser tab has no such bridge and resolves names on its own.
 import type { DesktopBridge } from "@wsp/protocol";
-
-declare global {
-  interface Window {
-    wsp?: Partial<DesktopBridge>;
-  }
-}
+import { desktopBridge } from "../../lib/desktopShell.js";
 
 const pending = new Map<string, Promise<string[]>>();
 const registered = new Map<string, string[]>();
@@ -22,7 +17,7 @@ export function localFontFamilies(family: string | undefined): string[] {
 /** Registers the computer's faces for a family once per page and answers with their family names, in the shell's order. */
 export function registerLocalFonts(
   family: string | undefined,
-  bridge: Partial<DesktopBridge> | undefined = typeof window === "undefined" ? undefined : window.wsp,
+  bridge: Partial<DesktopBridge> | undefined = desktopBridge(),
 ): Promise<string[]> {
   if (family === undefined || family.trim().length === 0 || bridge?.localFonts === undefined) return Promise.resolve([]);
   const have = pending.get(family);

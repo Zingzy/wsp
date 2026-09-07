@@ -4,10 +4,11 @@
 // one row per workspace to switch to, recent threads at rest and every thread
 // whose title holds the typed query. Pure apart from the callbacks it is
 // handed, so the list is testable without the dialog.
-import { MessageSquareIcon, PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, MessageSquareIcon, PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
+import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
 import { cn } from "../../lib/utils.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
 import { compactTimeLabel, dotClassForTone } from "../../sidebar/workspaceRows.js";
@@ -19,6 +20,9 @@ export interface PaletteHandlers {
   readonly newWorkspace: () => void;
   readonly toggleSidebar: () => void;
   readonly toggleRightPanel: (workspaceId: string) => void;
+  /** One step down the sidebar's workspaces, and back up; both wrap. */
+  readonly nextWorkspace: () => void;
+  readonly previousWorkspace: () => void;
 }
 
 export interface PaletteItemsInput {
@@ -76,7 +80,29 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
   if (selected !== null) {
     items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status), input.verbs).map(action => workspaceItem(action, selected)));
   }
+
+  const oneWorkspace = input.projects.length < 2;
   items.push(
+    {
+      kind: "action",
+      value: "action:next-workspace",
+      searchTerms: ["next workspace", "switch workspace", "cycle workspaces"],
+      icon: <ArrowDownIcon className={ITEM_ICON_CLASS} />,
+      title: "Next workspace",
+      shortcutCommand: "workspace.next",
+      ...(oneWorkspace ? { disabled: true, description: "Only one workspace" } : {}),
+      run: sync(handlers.nextWorkspace),
+    },
+    {
+      kind: "action",
+      value: "action:previous-workspace",
+      searchTerms: ["previous workspace", "switch workspace", "cycle workspaces"],
+      icon: <ArrowUpIcon className={ITEM_ICON_CLASS} />,
+      title: "Previous workspace",
+      shortcutCommand: "workspace.previous",
+      ...(oneWorkspace ? { disabled: true, description: "Only one workspace" } : {}),
+      run: sync(handlers.previousWorkspace),
+    },
     {
       kind: "action",
       value: "action:toggle-sidebar",
@@ -104,10 +130,12 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
 }
 
 function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
-  return input.projects.map(project => {
+  return input.projects.map((project, index) => {
     const machineId = project.status?.machineId ?? project.workspace.machineId;
     const parts = [project.indicator.label, machineId];
     if (project.id === input.selectedId) parts.push("Current workspace");
+    // The projects arrive in sidebar order, so a row's index is the slot its chord jumps to.
+    const slot = WORKSPACE_SELECT_SLOTS[index];
     return {
       kind: "action",
       value: `workspace:${project.id}`,
@@ -120,6 +148,7 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       ),
       title: project.displayName,
       description: parts.join(" · "),
+      ...(slot === undefined ? {} : { shortcutCommand: workspaceSelectCommand(slot) }),
       run: sync(() => input.handlers.selectWorkspace(project.id)),
     };
   });

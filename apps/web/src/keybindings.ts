@@ -10,6 +10,7 @@ import {
   type KeybindingWhenNode,
   type ResolvedKeybindingsConfig,
 } from "./keybindingTypes.js";
+import { isDesktopShell } from "./lib/desktopShell.js";
 import { isMacPlatform } from "./lib/utils.js";
 
 export interface ShortcutEventLike {
@@ -40,6 +41,8 @@ export interface ShortcutMatchContext {
    * reads, so a Command chord the app binds fires whatever has focus.
    */
   terminalOwnsMod: boolean;
+  /** The desktop shell holds the page, so the chords a browser keeps for its own tabs reach it. */
+  desktopShell: boolean;
   [key: string]: boolean;
 }
 
@@ -94,14 +97,60 @@ function resolveEventKeys(event: ShortcutEventLike): Set<string> {
   return keys;
 }
 
+/** What mod comes to on this platform: Command on macOS, Control elsewhere. */
+function effectiveModifiers(
+  shortcut: KeybindingShortcut,
+  platform: string,
+): { metaKey: boolean; ctrlKey: boolean } {
+  const useMetaForMod = isMacPlatform(platform);
+  return {
+    metaKey: shortcut.metaKey || (shortcut.modKey && useMetaForMod),
+    ctrlKey: shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod),
+  };
+}
+
+/** Whether the chord holds the platform's mod, Command on macOS and Control elsewhere, and not the other of the two. */
+function holdsModAlone(shortcut: KeybindingShortcut, platform: string): boolean {
+  const { metaKey, ctrlKey } = effectiveModifiers(shortcut, platform);
+  return isMacPlatform(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
+}
+
+// The digits a browser keeps for its own tabs. Not the same fact as how many
+// sidebar slots this shell binds: WORKSPACE_SELECT_SLOTS moves on its own.
+const BROWSER_TAB_DIGITS: ReadonlySet<string> = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+
+/**
+ * The chords a browser keeps for switching its own tabs: Control with Tab, and
+ * the platform's mod with a digit. A page in a tab never receives them, so the
+ * rules must not fire on them and no label may offer them there. The desktop
+ * shell has no tab strip and the page gets them. Control with a digit is not
+ * one of them: macOS browsers leave those to the page.
+ */
+export function browserTabClaimsShortcut(
+  shortcut: KeybindingShortcut,
+  platform = navigator.platform,
+): boolean {
+  if (shortcut.altKey) return false;
+  const { metaKey, ctrlKey } = effectiveModifiers(shortcut, platform);
+  if (shortcut.key === "tab") return ctrlKey && !metaKey;
+  return BROWSER_TAB_DIGITS.has(shortcut.key) && holdsModAlone(shortcut, platform) && !shortcut.shiftKey;
+}
+
+/** Whether a rule's chord can reach this shell at all, whatever its when clause says. */
+function shortcutReachesShell(
+  shortcut: KeybindingShortcut,
+  platform: string,
+  context: ShortcutMatchContext,
+): boolean {
+  return context.desktopShell || !browserTabClaimsShortcut(shortcut, platform);
+}
+
 function matchesShortcutModifiers(
   event: ShortcutModifierStateLike,
   shortcut: KeybindingShortcut,
   platform = navigator.platform,
 ): boolean {
-  const useMetaForMod = isMacPlatform(platform);
-  const expectedMeta = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
-  const expectedCtrl = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
+  const { metaKey: expectedMeta, ctrlKey: expectedCtrl } = effectiveModifiers(shortcut, platform);
   return (
     event.metaKey === expectedMeta &&
     event.ctrlKey === expectedCtrl &&
@@ -132,6 +181,7 @@ function resolveContext(
     terminalOpen: false,
     previewFocus: false,
     previewOpen: false,
+    desktopShell: isDesktopShell(),
     ...options?.context,
     terminalFocus,
     terminalOwnsMod: terminalFocus && !isMacPlatform(platform),
@@ -162,10 +212,7 @@ function matchesWhenClause(
 }
 
 function shortcutConflictKey(shortcut: KeybindingShortcut, platform = navigator.platform): string {
-  const useMetaForMod = isMacPlatform(platform);
-  const metaKey = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
-  const ctrlKey = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
-
+  const { metaKey, ctrlKey } = effectiveModifiers(shortcut, platform);
   return [
     shortcut.key,
     metaKey ? "meta" : "",
@@ -188,6 +235,7 @@ function findEffectiveShortcutForCommand(
     const binding = keybindings[index];
     if (!binding) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
+    if (!shortcutReachesShell(binding.shortcut, platform, context)) continue;
 
     const conflictKey = shortcutConflictKey(binding.shortcut, platform);
     if (claimedShortcuts.has(conflictKey)) {
@@ -215,6 +263,7 @@ export function resolveShortcutCommand(
     const binding = keybindings[index];
     if (!binding) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
+    if (!shortcutReachesShell(binding.shortcut, platform, context)) continue;
     if (!matchesShortcut(event, binding.shortcut, platform)) continue;
     return binding.command;
   }
@@ -253,8 +302,7 @@ export function formatShortcutLabel(
 ): string {
   const keyLabel = formatShortcutKeyLabel(shortcut.key);
   const useMetaForMod = isMacPlatform(platform);
-  const showMeta = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
-  const showCtrl = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
+  const { metaKey: showMeta, ctrlKey: showCtrl } = effectiveModifiers(shortcut, platform);
   const showAlt = shortcut.altKey;
   const showShift = shortcut.shiftKey;
 

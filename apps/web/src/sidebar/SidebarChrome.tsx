@@ -1,42 +1,26 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/sidebar/SidebarChrome.tsx at 57a66608 (MIT).
 // The router, settings and update-pill hooks are replaced by props: the
-// header shows the brand lockup, the footer the actions it lists. The stage
-// backdrop is left out.
+// header is the shell's frame row with the wordmark, the footer the actions
+// it lists. The stage backdrop is left out.
 import type { ComponentProps, ReactNode } from "react";
 import { memo } from "react";
 
 import { Lockup } from "../brand/Brand";
-import { cn } from "../lib/utils";
 import {
   SidebarFooter,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarTrigger,
 } from "../components/ui/sidebar";
+import { HeaderRow } from "../shell/HeaderRow";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 
-export const SidebarChromeHeader = memo(function SidebarChromeHeader({
-  isElectron = false,
-  children,
-}: {
-  isElectron?: boolean;
-  children?: ReactNode;
-}) {
+export const SidebarChromeHeader = memo(function SidebarChromeHeader({ children }: { children?: ReactNode }) {
   return (
-    <SidebarHeader
-      className={cn(
-        "@container/sidebar-header relative h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0 md:px-0",
-        isElectron && "drag-region",
-      )}
-    >
-      <SidebarTrigger className="relative z-10 md:hidden" />
-      <span className="relative z-10 ml-[var(--sidebar-content-inset)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md text-foreground md:flex">
-        <Lockup className="h-3.5 -translate-y-px text-muted-foreground" />
-      </span>
+    <HeaderRow frame className="@container/sidebar-header relative" data-slot="sidebar-header">
+      <Lockup className="h-3.5 w-fit shrink-0 -translate-y-px text-muted-foreground" />
       {children}
-    </SidebarHeader>
+    </HeaderRow>
   );
 });
 

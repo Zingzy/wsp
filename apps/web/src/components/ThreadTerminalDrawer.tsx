@@ -31,6 +31,7 @@ import { actionById, resolveActions, type ResolvedAction } from "../actions/regi
 import { terminalActions, type TerminalVerbs } from "../actions/terminalActions";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults";
 import { shortcutLabelForCommand } from "../keybindings";
+import type { TerminalConfig, TerminalScheme } from "@wsp/protocol";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Button } from "./ui/button";
 import { TerminalFontButton, TerminalFontCard } from "./TerminalFontButton";
@@ -39,6 +40,8 @@ import { isTerminalAppShortcut } from "../keybindings";
 import { cn } from "../lib/utils";
 import { getTerminalLabel } from "../lib/terminalLabels";
 import { GhosttyTerminalSurface, type GhosttyTerminalFont, type GhosttyTerminalSurfaceOptions } from "../terminal/ghostty/surface";
+import { appScheme, terminalFontWith, terminalSurfaceSettings, terminalThemeWith } from "../terminal/ghosttyConfig";
+import { useStore } from "../protocol/store";
 import { type GhosttyColor, type GhosttyTheme } from "../terminal/ghostty/core";
 import type { TerminalIo } from "../terminal/pty-io";
 import { terminalEmptyLine, terminalInputRefusal, terminalPaneTitle, type TerminalPaneState } from "../adapt/index";
@@ -166,6 +169,8 @@ export function terminalThemeFromApp(mountElement?: HTMLElement | null): Ghostty
 
 export interface TerminalViewportConfig {
   font?: GhosttyTerminalFont;
+  /** Whether the viewer typed the family, which beats the one their terminal config names. */
+  chosenFont?: boolean;
   /** A modifier-click on a link in the output; by default URLs open in a new tab and paths do nothing. */
   onLinkActivate?: (text: string) => void;
 }
@@ -211,6 +216,12 @@ export function TerminalViewport({
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
   const fontRef = useRef(config.font);
+  const chosenRef = useRef(config.chosenFont === true);
+  chosenRef.current = config.chosenFont === true;
+  // The person's Ghostty config, as the host read it when this viewport opened; null until then and when no host answers.
+  const fileRef = useRef<TerminalConfig | null>(null);
+  const [translucent, setTranslucent] = useState(false);
+  const readHostConfig = useStore(s => s.api?.hostTerminalConfig);
   const activateLink = useEffectEvent((text: string) => (config.onLinkActivate ?? openInNewTab)(text));
   // The surface reads its options once, so the menu reads the pane verbs of the render it opens in.
   const contextMenu = useEffectEvent((event: MouseEvent) => {
@@ -229,7 +240,7 @@ export function TerminalViewport({
   useEffect(() => {
     if (fontRef.current === config.font) return;
     fontRef.current = config.font;
-    void terminalRef.current?.setFont(config.font ?? {});
+    void terminalRef.current?.setFont(terminalFontWith(fileRef.current, config.font, chosenRef.current) ?? {});
   }, [config.font]);
 
   useEffect(() => {
@@ -243,9 +254,18 @@ export function TerminalViewport({
 
     const setup = async (): Promise<(() => void) | null> => {
       const setupFont = fontRef.current;
+      // Read again on every open, so a saved change to the file reaches the next terminal without a reload.
+      let scheme: TerminalScheme = appScheme();
+      const file = readHostConfig === undefined ? null : await readHostConfig(scheme).catch(() => null);
+      if (cancelled) return null;
+      fileRef.current = file;
+      const settings = terminalSurfaceSettings(file, terminalThemeFromApp(mount), setupFont, chosenRef.current);
       const terminalOptions: GhosttyTerminalSurfaceOptions = {
-        theme: terminalThemeFromApp(mount),
-        ...(setupFont ? { font: setupFont } : {}),
+        theme: settings.theme,
+        ...(settings.font ? { font: settings.font } : {}),
+        ...(settings.cursor ? { cursor: settings.cursor } : {}),
+        padding: settings.padding,
+        backgroundOpacity: settings.backgroundOpacity,
         onData: (data) => {
           const refusal = inputRefusal();
           if (refusal !== null) onInputRefused(refusal);
@@ -266,11 +286,12 @@ export function TerminalViewport({
       }
       // The theme observer is not installed yet, so re-read the theme in case
       // the app toggled light/dark while the WASM surface was loading.
-      terminal.setTheme(terminalThemeFromApp(mount));
+      terminal.setTheme(terminalThemeWith(file, terminalThemeFromApp(mount)));
       setupTerminal = terminal;
       terminalRef.current = terminal;
+      setTranslucent(terminal.translucent);
       // A font change that landed while the surface was loading found terminalRef null.
-      if (fontRef.current !== setupFont) void terminal.setFont(fontRef.current ?? {});
+      if (fontRef.current !== setupFont) void terminal.setFont(terminalFontWith(file, fontRef.current, chosenRef.current) ?? {});
 
       setupCleanups.push(
         io.attach({
@@ -280,10 +301,26 @@ export function TerminalViewport({
       );
       if (autoFocus) window.requestAnimationFrame(() => terminal.focus());
 
+      // A light:...,dark:... theme has a side per scheme, so a flip of the scheme asks the host again before the
+      // colors change; any other change to the html element keeps the file already read. Only the colors follow a
+      // flip: the font, padding and opacity are the surface's construction options and stay until the next open.
       const themeObserver = new MutationObserver(() => {
         const activeTerminal = terminalRef.current;
         if (!activeTerminal) return;
-        activeTerminal.setTheme(terminalThemeFromApp(containerRef.current));
+        const app = terminalThemeFromApp(containerRef.current);
+        const next = appScheme();
+        if (readHostConfig === undefined || next === scheme) {
+          activeTerminal.setTheme(terminalThemeWith(fileRef.current, app));
+          return;
+        }
+        scheme = next;
+        void readHostConfig(next)
+          .catch(() => null)
+          .then(read => {
+            if (terminalRef.current !== activeTerminal) return;
+            fileRef.current = read;
+            activeTerminal.setTheme(terminalThemeWith(read, app));
+          });
       });
       themeObserver.observe(document.documentElement, {
         attributes: true,
@@ -372,7 +409,8 @@ export function TerminalViewport({
     <div
       ref={containerRef}
       data-terminal-viewport={terminalId}
-      className="relative h-full w-full overflow-hidden bg-[var(--terminal-background)]"
+      {...(translucent ? { "data-terminal-translucent": "" } : {})}
+      className={cn("relative h-full w-full overflow-hidden", !translucent && "bg-[var(--terminal-background)]")}
     />
   );
 }

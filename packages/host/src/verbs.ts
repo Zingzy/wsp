@@ -16,7 +16,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
 import { CATALOG_AGENTS, THREAD_AGENTS } from "@wsp/catalog";
-import { nodeHost } from "@wsp/collect";
+import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import {
   AFTER_CUT_LINE,
   EMPTY_TASK_LINE,
@@ -36,6 +36,8 @@ import {
   SessionStartOutcome,
   SessionStartResult,
   TURN_END_WORDS,
+  TerminalConfig,
+  TerminalScheme,
   ThreadView,
   WorkspaceView,
   actionRefusal,
@@ -64,6 +66,7 @@ import {
   sizeRefusal,
   startPicks,
   stillWorkingRefusal,
+  terminalConfigLines,
   toolActivityLine,
   toolResultLine,
   turnSettledLine,
@@ -985,6 +988,14 @@ const WEIGH_BY_FOLDERS = z.array(z.string()).optional().describe("folders on thi
  * path silently matches nothing. */
 const projectFolders = (folders: readonly string[]): string[] => folders.map(f => absolutePath("project is a folder on this computer", f));
 
+/** The scheme a --scheme flag names; a word outside the pair is refused before anything is read. */
+function schemeFlag(value: string | undefined): TerminalScheme | undefined {
+  if (value === undefined) return undefined;
+  const parsed = TerminalScheme.safeParse(value);
+  if (!parsed.success) throw usageRefusal(`--scheme takes one of ${TerminalScheme.options.join(", ")}, not ${JSON.stringify(value)}`);
+  return parsed.data;
+}
+
 /** The --project folders a recipe line names, resolved from where the person stands; nothing when it names none. */
 const projectsFlag = (flags: Flags): { projects?: string[] } => (Array.isArray(flags["project"]) ? { projects: (flags["project"] as string[]).map(p => resolve(p)) } : {});
 
@@ -1559,6 +1570,29 @@ export const VERBS: readonly Verb[] = [
           if (e.stage === "done") done = e.message;
         });
         return asText(done, { plan, imported });
+      },
+    }),
+  },
+  {
+    name: "terminal config",
+    usage: `wsp terminal config [--scheme ${TerminalScheme.options.join("|")}]`,
+    about:
+      "the Ghostty config on this computer as the app's terminal pane applies it, read from ~/.config/ghostty and Application Support with its includes and theme resolved: the font and its fallbacks, the size, the colors, the cursor, the padding, the background opacity, and the blur, which is read but not applied; --scheme picks the side of a light:...,dark:... theme",
+    options: { scheme: { type: "string" } },
+    run: async ctx => {
+      if (ctx.args.length !== 0) throw usageRefusal("wsp terminal config takes no positional arguments");
+      const config = await readGhosttyConfig(nodeHost(), schemeFlag(flag(ctx.flags, "scheme")));
+      ctx.out.emit(config, terminalConfigLines(config).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "The person's Ghostty config on this computer as the app's terminal pane applies it: every config file Ghostty would load and the theme it names, read now, with only the keys the pane honours. files is empty when they have no Ghostty config, and each other key is absent when no file sets it, so the pane keeps its default there. backgroundBlur is read and not applied: the desktop window's own material is the blur, and a browser tab has none. Read this to say how their terminal looks or to check what a config change did; nothing is written.",
+      input: { scheme: TerminalScheme.optional().describe("which side of a light:...,dark:... theme to resolve; dark when absent") },
+      output: TerminalConfig.shape,
+      call: async ({ scheme }, _deps) => {
+        const config = await readGhosttyConfig(nodeHost(), scheme);
+        return asText(terminalConfigLines(config).join("\n"), config);
       },
     }),
   },

@@ -2,10 +2,15 @@
 // Kept: the shortcut parser, the when-expression parser and the compiler.
 // The default list is the subset of their rules whose commands this shell
 // dispatches; the jump, model-picker, zoom, diff, stash, settings and editor
-// rules are left out with the features they drive.
+// rules are left out with the features they drive. The workspace switch is
+// ours: a Control chord is the terminal's while it has focus, and Tab and the
+// digits with mod are the browser's inside a tab, where keybindings.ts drops
+// them.
 import {
   MAX_KEYBINDINGS_COUNT,
   MAX_WHEN_EXPRESSION_DEPTH,
+  WORKSPACE_SELECT_SLOTS,
+  workspaceSelectCommand,
   type KeybindingRule,
   type KeybindingShortcut,
   type KeybindingWhenNode,
@@ -31,6 +36,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalOwnsMod" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
+  { key: "ctrl+tab", command: "workspace.next", when: "!terminalFocus" },
+  { key: "ctrl+shift+tab", command: "workspace.previous", when: "!terminalFocus" },
+  ...WORKSPACE_SELECT_SLOTS.map(slot => ({ key: `mod+${slot}`, command: workspaceSelectCommand(slot), when: "!terminalOwnsMod" })),
 ];
 
 function normalizeKeyToken(token: string): string {

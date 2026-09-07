@@ -11,6 +11,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
 import { useSelectedWorkspaceId, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
+import { goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { requestNewWorkspace } from "../../shell/shellRequests.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
 import { useSidebar } from "../ui/sidebar.js";
@@ -59,11 +60,13 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
   const handlers = useMemo<PaletteHandlers>(
     () => ({
-      selectWorkspace: select,
+      selectWorkspace: goToWorkspace,
       selectThread: select,
       newWorkspace: requestNewWorkspace,
       toggleSidebar,
       toggleRightPanel,
+      nextWorkspace: () => goToAdjacentWorkspace(1),
+      previousWorkspace: () => goToAdjacentWorkspace(-1),
     }),
     [select, toggleRightPanel, toggleSidebar],
   );

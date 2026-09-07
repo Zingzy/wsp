@@ -65,19 +65,21 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     await page!.goto(`${base}?theme=${theme}`);
     await page!.waitForSelector("[data-sidebar-row]");
   }
+  const rowGap = (selector: string): Promise<number> => page!.locator(selector).first().evaluate(el => parseFloat(getComputedStyle(el).columnGap));
   const box = async (selector: string): Promise<Box> => {
     const b = await page!.locator(selector).first().boundingBox();
     if (!b) throw new Error(`${selector} has no box`);
     return b;
   };
-  const paddingLeft = (selector: string): Promise<string> => page!.locator(selector).first().evaluate(el => getComputedStyle(el).paddingLeft);
 
-  it("the brand lockup starts where the search row does, in both themes", async () => {
+  it("the sidebar toggle starts where the search row does and the brand lockup one gap after it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
+      const toggle = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
       const lockup = await box("[data-slot=sidebar-header] [role=img][aria-label=wsp]");
       const search = await box("button[aria-label='Search']");
-      expect(Math.abs(lockup.x - search.x)).toBeLessThan(1);
+      expect(Math.abs(toggle.x - search.x)).toBeLessThan(1);
+      expect(Math.abs(lockup.x - (toggle.x + toggle.width + (await rowGap("[data-slot=sidebar-header]"))))).toBeLessThan(1);
       const path = join(SHOTS_DIR, `sidebar-header-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar header screenshot: ${path}`);
@@ -363,14 +365,23 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
-  it("collapsing the sidebar leaves the page header's left padding alone", async () => {
+  it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it", async () => {
     await open("dark");
-    const before = await paddingLeft("header");
-    await page!.locator("header button[aria-label='Toggle main sidebar']").click();
+    const before = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
+    expect(await page!.locator("header [data-slot=sidebar-trigger]").count()).toBe(0);
+    await page!.locator("[data-slot=sidebar-header] [data-slot=sidebar-trigger]").click();
     await page!.waitForSelector("[data-sidebar-state=collapsed]");
-    // The header animates padding-left; let a 200 ms transition run out.
-    await page!.waitForTimeout(400);
-    expect(await paddingLeft("header")).toBe(before);
+    // The row animates padding-left over 200 ms; the read waits for the toggle to land.
+    await page!.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().x - x) < 1, before.x);
+    const after = await box("header [data-slot=sidebar-trigger]");
+    expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+    const crumb = await box("header [data-thread-breadcrumb]");
+    expect(Math.abs(crumb.x - (after.x + after.width + (await rowGap("header [data-header-row]"))))).toBeLessThan(1);
+    expect(await page!.locator("header [data-thread-breadcrumb]").evaluate(el => el.textContent)).toBe("api/Reply with exactly the word hi.");
+    const path = join(SHOTS_DIR, "header-collapsed-dark.png");
+    await page!.screenshot({ path, clip: { x: 0, y: 0, width: 600, height: 120 } });
+    console.info(`collapsed header screenshot: ${path}`);
   }, 30_000);
   it("a right-click on a workspace row opens the in-app menu at the pointer in the tooltip skin, kept inside the viewport, and Escape closes it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {

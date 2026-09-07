@@ -9,7 +9,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RuntimeRequest, type ExecEvent, type ForwardEvent, type PortForward } from "@wsp/protocol";
-import type { HostFolders, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
+import type { HostFolders, HostTerminalConfig, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -38,6 +38,8 @@ export interface ServeOptions {
   /** How this computer's own folders are listed for host.folders, the picker a browser tab has instead of the
    * desktop shell's dialog; without it the op is refused. */
   folders?: HostFolders;
+  /** How the person's terminal config is read off this computer for host.terminalConfig; without it the op is refused. */
+  terminalConfig?: HostTerminalConfig;
 }
 
 export interface RuntimeServer {
@@ -77,10 +79,18 @@ function foldersFrom(opts: ServeOptions): () => HostFolders {
   };
 }
 
+function terminalConfigFrom(opts: ServeOptions): () => HostTerminalConfig {
+  return () => {
+    if (opts.terminalConfig === undefined) throw new Error("this runtime cannot read the terminal config on this computer");
+    return opts.terminalConfig;
+  };
+}
+
 export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<RuntimeServer> {
   const bundler = bundlerFrom(opts);
   const lander = landerFrom(opts);
   const folders = foldersFrom(opts);
+  const terminalConfig = terminalConfigFrom(opts);
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
   const now = opts.now ?? Date.now;
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
@@ -334,6 +344,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "host.folders":
               send({ id: msg.id, ok: true, listing: await folders().list({ ...(msg.dir !== undefined ? { dir: msg.dir } : {}), ...(msg.hidden !== undefined ? { hidden: msg.hidden } : {}) }) });
+              return;
+            case "host.terminalConfig":
+              send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;
             case "project.plan":
               send({ id: msg.id, ok: true, plan: await bundler(msg.source).plan() });

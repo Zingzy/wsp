@@ -13,7 +13,8 @@ import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
-import { onNewThreadRequest } from "../src/shell/shellRequests.js";
+import { stepWorkspaceId } from "../src/shell/shellCommands.js";
+import { onComposerFocusRequest, onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
 
@@ -71,6 +72,29 @@ function fakeTerminals(): WorkspaceTerminals {
 
 const mod = (key: string, mods: { shiftKey?: boolean; altKey?: boolean } = {}, target: Element | Window = window) =>
   fireEvent.keyDown(target, { key, code: `Key${key.toUpperCase()}`, metaKey: true, ...mods });
+
+const ctrlTab = (mods: { shiftKey?: boolean } = {}) => fireEvent.keyDown(window, { key: "Tab", code: "Tab", ctrlKey: true, ...mods });
+const digit = (n: number) => fireEvent.keyDown(window, { key: String(n), code: `Digit${n}`, metaKey: true });
+/** The desktop shell, told apart by the bridge its preload puts on the page. */
+const asDesktopShell = (): (() => void) => {
+  window.wsp = {};
+  return () => delete window.wsp;
+};
+/** The chord a palette row shows, by the row's title; a title also appears as another row's description, so match the title span. */
+const chordOn = (title: string): string | null => {
+  const rows = [...(palette()?.querySelectorAll<HTMLElement>("[data-slot=command-item]") ?? [])];
+  const row = rows.find(candidate => candidate.querySelector("span.truncate")?.textContent === title);
+  if (row === undefined) throw new Error(`no palette row titled ${title}`);
+  return row.querySelector("[data-slot=command-shortcut]")?.textContent ?? null;
+};
+
+/** The caret asks for one workspace from this call on; one left pending by an earlier test is dropped. */
+const watchComposerFocus = (workspaceId: string): { asks: string[]; off: () => void } => {
+  const asks: string[] = [];
+  const off = onComposerFocusRequest(workspaceId, () => asks.push(workspaceId));
+  asks.length = 0;
+  return { asks, off };
+};
 
 const palette = () => document.querySelector<HTMLElement>("[data-command-palette]");
 const inPalette = () => within(palette()!);
@@ -223,6 +247,38 @@ describe("command palette", () => {
     expect(useStore.getState().selectedThreadId).toBe("t_old");
   });
 
+  it("lists the switch with its chord and each workspace row with its slot chord, and shows no chord in a browser tab", async () => {
+    await mountShell();
+    const restore = asDesktopShell();
+    try {
+      mod("k");
+      await waitFor(() => expect(palette()).not.toBeNull());
+      expect(chordOn("Next workspace")).toBe("⌃Tab");
+      expect(chordOn("Previous workspace")).toBe("⌃⇧Tab");
+      expect(chordOn("api")).toBe("⌘1");
+      expect(chordOn("worker")).toBe("⌘2");
+    } finally {
+      restore();
+    }
+    mod("k");
+    await waitFor(() => expect(palette()).toBeNull());
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    expect(chordOn("Next workspace")).toBeNull();
+    expect(chordOn("api")).toBeNull();
+  });
+
+  it("switches workspace from the Next workspace row and lands in that composer", async () => {
+    await mountShell();
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    const { asks, off } = watchComposerFocus("ws_b");
+    fireEvent.click(inPalette().getByText("Next workspace"));
+    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+    expect(asks).toEqual(["ws_b"]);
+    off();
+  });
+
   it("opens from a focused terminal on macOS, where Command is never the shell's", async () => {
     await mountShell();
     const term = document.createElement("div");
@@ -335,6 +391,50 @@ describe("default shortcuts", () => {
     term.remove();
   });
 
+  it("ctrl+tab walks the sidebar's workspaces and wraps, and ctrl+shift+tab walks back", async () => {
+    await mountShell();
+    const restore = asDesktopShell();
+    try {
+      expect(useStore.getState().selectedId).toBe("ws_a");
+      ctrlTab();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      ctrlTab();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+      ctrlTab({ shiftKey: true });
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("mod and a digit jump to that sidebar row, and ask its composer for the caret", async () => {
+    await mountShell();
+    const restore = asDesktopShell();
+    const { asks, off } = watchComposerFocus("ws_b");
+    try {
+      digit(2);
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      expect(asks).toEqual(["ws_b"]);
+      digit(3);
+      await settle();
+      expect(useStore.getState().selectedId).toBe("ws_b");
+      digit(1);
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+    } finally {
+      off();
+      restore();
+    }
+  });
+
+  it("in a browser tab the switch chords belong to the browser and move nothing", async () => {
+    await mountShell();
+    ctrlTab();
+    ctrlTab({ shiftKey: true });
+    digit(2);
+    await settle();
+    expect(useStore.getState().selectedId).toBe("ws_a");
+  });
+
   it("reports a missing terminal link instead of failing silently", async () => {
     await mountShell();
     const term = document.createElement("div");
@@ -346,6 +446,26 @@ describe("default shortcuts", () => {
     mod("n", {}, ta);
     await waitFor(() => expect(useStore.getState().toast).toContain("no terminal link"));
     term.remove();
+  });
+});
+
+describe("stepWorkspaceId", () => {
+  const ids = ["ws_a", "ws_b", "ws_c"];
+
+  it("wraps at both ends, and starts from the near end while the selected row is no workspace", () => {
+    expect(stepWorkspaceId(ids, "ws_a", 1)).toBe("ws_b");
+    expect(stepWorkspaceId(ids, "ws_c", 1)).toBe("ws_a");
+    expect(stepWorkspaceId(ids, "ws_a", -1)).toBe("ws_c");
+    expect(stepWorkspaceId(ids, null, 1)).toBe("ws_a");
+    expect(stepWorkspaceId(ids, null, -1)).toBe("ws_c");
+    expect(stepWorkspaceId(ids, "creating:1", 1)).toBe("ws_a");
+    expect(stepWorkspaceId([], null, 1)).toBeNull();
+  });
+
+  it("answers nowhere to go for the one workspace already selected, which is what the palette's rows say", () => {
+    expect(stepWorkspaceId(["ws_a"], "ws_a", 1)).toBeNull();
+    expect(stepWorkspaceId(["ws_a"], "ws_a", -1)).toBeNull();
+    expect(stepWorkspaceId(["ws_a"], "creating:1", 1)).toBe("ws_a");
   });
 });
 

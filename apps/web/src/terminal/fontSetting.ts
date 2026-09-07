@@ -65,8 +65,11 @@ export function useTerminalFont(): { family: string; detected: string | undefine
 
 const NO_FONT: TerminalViewportConfig = {};
 
-/** The viewport config for the effective family; its identity changes only with the family, so a chunk of output never rebuilds it. */
+/** The viewport config for the effective family, saying whether the viewer typed it, since a typed family beats the
+ * one in their terminal config file where a detected one does not; its identity changes only with the family, so a
+ * chunk of output never rebuilds it. */
 export function useTerminalViewportConfig(): TerminalViewportConfig {
   const family = useSyncExternalStore(subscribe, effectiveTerminalFont, effectiveTerminalFont);
-  return useMemo(() => (family === undefined ? NO_FONT : { font: { family } }), [family]);
+  const chosenFont = useSyncExternalStore(subscribe, chosen, chosen) !== "";
+  return useMemo(() => (family === undefined ? NO_FONT : { font: { family }, chosenFont }), [family, chosenFont]);
 }
