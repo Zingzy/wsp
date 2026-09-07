@@ -6,7 +6,7 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
+import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellQuote, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
 import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
@@ -742,7 +742,7 @@ export function rowRoad(e: RecipeEntry, brew: BrewTable): PlannedRow | undefined
   const release = releaseFor(e, brew);
   if (release !== undefined) return { road: releaseRoad(release), bin: release.name };
   if (e.id.startsWith(CATALOG_PREFIX)) return undefined;
-  const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
+  const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(toolRowPrefix(m)));
   if (manager === undefined) return undefined;
   const road = ROAD_MODULES[manager].fromRow!({ name: pkg, ...(e.version !== undefined ? { version: e.version } : {}), paths: e.paths, label: e.label });
   const bin = roadModule(road).bin?.(road);
@@ -832,7 +832,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const installs: ToolInstall[] = [];
   const skipped: SkippedItem[] = [...brew.skipped];
   const toolRows = entries.filter(e => ticked(e) && e.rung === "tools" && baseRowFor(e) === undefined);
-  const rowsOf = (manager: RoadName): RecipeEntry[] => toolRows.filter(e => e.id.startsWith(`tools/${manager}/`));
+  const rowsOf = (manager: RoadName): RecipeEntry[] => toolRows.filter(e => e.id.startsWith(toolRowPrefix(manager)));
   // A catalog row installs by its entry's road; a package road's rows go with the manager's, the rest after everything else.
   // This Mac's formula for a manager's toolchain is one of them: the catalog's road, once, under the row's own id.
   const catalog = toolRows.flatMap(e => {
@@ -842,7 +842,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     return planned === undefined ? [] : [{ e, planned }];
   });
   const catalogRowsOf = (manager: RoadName): RecipeEntry[] => catalog.filter(c => c.planned.road.road === manager).map(c => c.e);
-  const npmTicked = new Set(rowsOf("npm").map(e => e.id.slice("tools/npm/".length)));
+  const npmTicked = new Set(rowsOf("npm").map(e => packageOf(e)));
 
   // Homebrew's own toolchain, each step waiting on the one before; everything brew installs waits on the last.
   const toolchain = BREW_TOOLCHAIN.reduce<{ steps: ToolInstall[]; last: string }>(
@@ -871,7 +871,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     const macFormula = [formula, manager].find(f => f !== undefined && brew.formulae.includes(f));
     if (macFormula !== undefined) managers.set(manager, { after: `${BREW_ID_PREFIX}${macFormula}` });
     else if (fromCatalog !== undefined) managers.set(manager, { after: fromCatalog.e.id, row: fromCatalog });
-    else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
+    else if (npmTicked.has(manager)) managers.set(manager, { after: toolRowId("npm", manager) });
     else if (formula !== undefined) {
       managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", ...viaBrew(formula), after: toolchain.last, bin: manager } });
       managerFormulae.push(formula);
@@ -1128,7 +1128,7 @@ const AGENT_TOOL_ROWS: ReadonlyMap<string, string> = new Map(
   Object.entries(AGENT_INSTALLERS).flatMap(([agent, a]) => {
     const npm = NPM_INSTALL_LINE.exec(a.install)?.[1];
     const uv = UV_INSTALL_LINE.exec(a.install)?.[1];
-    return [...(npm !== undefined ? [[`tools/npm/${npm}`, agent] as const] : []), ...(uv !== undefined ? [[`tools/uv/${uv}`, agent] as const] : [])];
+    return [...(npm !== undefined ? [[toolRowId("npm", npm), agent] as const] : []), ...(uv !== undefined ? [[toolRowId("uv", uv), agent] as const] : [])];
   }),
 );
 

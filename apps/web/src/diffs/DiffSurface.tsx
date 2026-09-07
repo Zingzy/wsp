@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The right panel's Diff surface over git.diff: a scope picker (working
 // tree, staged, branch against its merge-base), git run in the panes' shared
-// root (the thread's folder unless pinned) with the repository it resolved to
-// named in the header, the changed-files tree, and the copied code view with
-// per-file collapse and inline comments that stay in this surface until a
-// composer exists to hand them to.
+// root (the thread's folder unless pinned) named in the same breadcrumb row
+// the Files pane uses, with the branch git resolved there beside it, the
+// changed-files tree, and the copied code view with per-file collapse and
+// inline comments that stay in this surface until a composer exists to hand
+// them to.
 import {
   ArrowRightIcon,
   ChevronDownIcon,
@@ -28,6 +29,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js
 import { Spinner } from "../components/ui/spinner.js";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { focusPaneOnShow, FolderBreadcrumbs, useUpAFolder } from "../files/FolderBreadcrumbs.js";
 import { NotRunning } from "../files/FilesSurface.js";
 import { usePinned, useRoot, useRootStore } from "../files/root.js";
 import { useDaemonWire } from "../files/wire.js";
@@ -70,6 +72,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const renderMode = useDiffStore(s => s.renderMode);
   const setScope = useDiffStore(s => s.setScope);
   const setRenderMode = useDiffStore(s => s.setRenderMode);
+  const onKeyDown = useUpAFolder(workspaceId);
   const [load, setLoad] = useState<LoadState>({ kind: "pending", last: null });
   const [repo, setRepo] = useState<{ cwd: string; state: RepoState }>({ cwd, state: { kind: "unknown" } });
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NO_KEYS);
@@ -151,7 +154,15 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const said = shown.kind !== "repo" && REPO_STATE_WORDS[shown.kind].word !== "" ? REPO_STATE_WORDS[shown.kind] : null;
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-background" data-diff-surface data-diff-scope={scope} data-diff-cwd={cwd}>
+    <div
+      className="flex h-full min-w-0 flex-col bg-background"
+      ref={focusPaneOnShow}
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      data-diff-surface
+      data-diff-scope={scope}
+      data-diff-cwd={cwd}
+    >
       <div
         className="flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-3 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader
@@ -177,25 +188,29 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
               ))}
             </MenuPopup>
           </Menu>
-          <span
-            className="inline-flex h-6 min-w-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground"
-            title={said !== null ? undefined : shown.kind === "repo" ? `git: ${shown.root}` : shown.kind === "none" ? `no repository at or above ${cwd}` : cwd}
-            data-diff-repo={shown.kind === "repo" ? shown.root : undefined}
-            data-diff-repo-state={shown.kind}
-          >
-            <FolderGitIcon className={cn("size-3.5 shrink-0", shown.kind === "repo" ? "opacity-70" : "opacity-40")} />
-            {said === null ? (
-              <span className="min-w-0 truncate">{shown.kind === "none" ? `no git at ${cwd}` : folderLabel}</span>
-            ) : (
-              <Tooltip>
-                <TooltipTrigger render={<span className="min-w-0 truncate" tabIndex={0} />}>{said.word}</TooltipTrigger>
-                <TooltipPopup side="top" className="max-w-72">
-                  {said.note}
-                </TooltipPopup>
-              </Tooltip>
-            )}
-            {shown.kind === "repo" ? <span className="shrink-0 truncate opacity-70">· {shown.branch}</span> : null}
-          </span>
+          <FolderBreadcrumbs workspaceId={workspaceId} className="flex-initial" />
+          {shown.kind === "unknown" ? null : (
+            <span
+              className="inline-flex h-6 shrink-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground"
+              title={said !== null ? undefined : shown.kind === "repo" ? `git: ${shown.root}` : `no repository at or above ${cwd}`}
+              data-diff-repo={shown.kind === "repo" ? shown.root : undefined}
+              data-diff-repo-state={shown.kind}
+            >
+              <FolderGitIcon className={cn("size-3.5 shrink-0", shown.kind === "repo" ? "opacity-70" : "opacity-40")} />
+              {shown.kind === "repo" ? (
+                <span className="max-w-40 truncate">{shown.branch}</span>
+              ) : said === null ? (
+                <span>no git</span>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger render={<span className="max-w-40 truncate" tabIndex={0} />}>{said.word}</TooltipTrigger>
+                  <TooltipPopup side="top" className="max-w-72">
+                    {said.note}
+                  </TooltipPopup>
+                </Tooltip>
+              )}
+            </span>
+          )}
           <Tooltip>
             <TooltipTrigger
               render={

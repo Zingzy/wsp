@@ -4,12 +4,11 @@
 // command line and single rows flipped by id. Names and counts only; the
 // histories are read here and nothing of them leaves.
 import { existsSync } from "node:fs";
-import { agentName, catalogEntry } from "@wsp/catalog";
+import { THREAD_AGENTS, agentName, catalogEntry } from "@wsp/catalog";
 import { type AgentHistory, type HistoryCache, type HistoryProgress, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
-import { LOGIN_CHOICES, RECIPE_TICKS, customRows, plural, usageRefusal, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick, type ToolPin } from "@wsp/protocol";
-import { THREAD_AGENTS } from "./thread-agents.js";
-import { loadRecipe, outsideRowsOf, pinsOf, saveSmallRecipe, withPins } from "./recipe-file.js";
-import { customFromFlags, withCustom } from "./recipe-custom.js";
+import { LOGIN_CHOICES, RECIPE_TICKS, addAlreadyHereLine, customRows, plural, usageRefusal, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick, type ToolPin } from "@wsp/protocol";
+import { loadRecipe, outsideRow, outsideRowsOf, ownRowIdOf, ownRowOf, pinsOf, saveSmallRecipe, withPins } from "./recipe-file.js";
+import { customFromFlags, withCustom, withoutCustom } from "./recipe-custom.js";
 import { recipeAnswer, recipeScan, type RecipeAnswer, type RecipeScan } from "./recipe-answer.js";
 import { candidatesLine } from "./init-table.js";
 import type { ScanRow } from "./scan.js";
@@ -39,13 +38,14 @@ export function historyProgressLine(p: HistoryProgress): string {
   return `${agentName(p.agent)}: reading session ${p.read} of ${p.files}`;
 }
 
-/** What a `--set` word says: the catalog row and the tick it is to have. */
+/** What a `--set` word says: the row it names and the tick it is to have. Only the word's shape is judged here; which
+ * row the id names is answered once the file and this Mac have been read, since a catalog row, a row the file already
+ * carries outside the catalog and a package a manager here has are all rows a word may name. */
 export function parseSet(word: string): { id: string; on: boolean } {
   const eq = word.indexOf("=");
   const id = eq < 0 ? word : word.slice(0, eq);
   const value = eq < 0 ? "" : word.slice(eq + 1);
   if (value !== "on" && value !== "off") throw usageRefusal(`--set takes <id>=on or <id>=off, not ${JSON.stringify(word)}`);
-  if (catalogEntry(id) === undefined) throw usageRefusal(`--set ${word}: the catalog has no row called ${JSON.stringify(id)}`);
   return { id, on: value === "on" };
 }
 
@@ -105,6 +105,12 @@ export interface RecipeInput {
   projects?: readonly string[];
   /** Keeps what each session file came to, so a second run reads only the histories that changed. */
   cache?: HistoryCache;
+  /** What else a package manager on this computer has, as the third screen reads it. Handed in as it is to the
+   * scan, since the reader reaches the engine and the MCP server may not. Both a `--set` word naming a package and
+   * an `--add` word are answered against it. Without it nothing is here, so a `--set` no catalog row and no row of
+   * the file answers is refused, and an `--add` is taken as a row of its own: only a package the scan lists is a
+   * row already, and an unread manager lists none. */
+  alsoHere?: (recipe: readonly RecipeCustomRow[]) => Promise<readonly ScanRow[]>;
 }
 
 export interface RecipeIo {
@@ -157,6 +163,28 @@ export function carriedOver(out: string, log: (line: string) => void): { custom?
 /** Whether the run named something the rule reads, so the rule decides every row again rather than the file standing. */
 const namesRule = (input: RecipeInput): boolean => input.tick !== undefined || (input.projects ?? []).length > 0;
 
+/** Which row a `--set` word's id names, and the package it named when it named one. Three ids reach a row: a catalog
+ * row's own, a row the file already carries outside the catalog, and a package a manager on this Mac has, by the id
+ * the scan gives it. That last one is the third screen's row: its tick lands on the collector's id for the package,
+ * so the build installs it by the road the plan resolves rather than by a line of its own. */
+export function setTarget(id: string, saved: Recipe | undefined, scan: readonly ScanRow[]): { id: string; pkg?: ScanRow } | undefined {
+  if (catalogEntry(id) !== undefined || outsideRowsOf(saved).some(r => r.id === id)) return { id };
+  const pkg = scan.find(r => r.id === id);
+  return pkg === undefined ? undefined : { id: ownRowIdOf(pkg), pkg };
+}
+
+/** The recipe with a row of its own for each of these packages, off and found here, so the tick has a row to land
+ * on: the recipe verb's side of the wizard's withOutsideRows, which reads the collector's manifest this verb has
+ * not got. A package the recipe already carries a row for is left as it is. */
+export function withOwnRows(recipe: Recipe, pkgs: readonly ScanRow[]): Recipe {
+  const rows = [...new Set(pkgs.flatMap(p => (ownRowOf(recipe, p) === undefined ? [ownRowIdOf(p)] : [])))].map(id => outsideRow(id));
+  return rows.length === 0 ? recipe : { ...recipe, rows: [...recipe.rows, ...rows] };
+}
+
+/** The package a manager on this Mac already has under an `--add` word's id, by that id or by the package's own
+ * name: such a package is a row of its own, and a second row for it is a second install. */
+const scannedFor = (row: RecipeCustomRow, scan: readonly ScanRow[]): ScanRow | undefined => scan.find(r => r.id === row.id || r.name === row.id);
+
 /** What the scan reads; it decides nothing, so it names no recipe file. */
 export interface ScanInput {
   /** Folders to weigh the histories by, absolute. */
@@ -203,9 +231,25 @@ export async function runScan(host: Host, input: ScanInput = {}, io: RecipeIo = 
  * answers stand through every run, whatever the rule: nothing but the person decides one. */
 export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = QUIET, now?: () => Date): Promise<RecipeAnswer> {
   const sets = parseSets(input.set ?? []);
-  // Refused before this computer is read, as the other words are: a line that cannot be answered costs no scan.
+  // The shape of every word is judged before this computer is read: a line that cannot be parsed costs no scan.
   const added = customFromFlags({ add: input.add ?? [], ...(input.addCheck !== undefined ? { addCheck: input.addCheck } : {}), ...(input.why !== undefined ? { why: input.why } : {}) });
   const saved = readSaved(input.out, io.note);
+  // What this Mac's package managers have, read only when a word needs it: which row a `--set` word that names no
+  // catalog row and no row of the file names, and whether an `--add` word names a package that is a row already.
+  const needsScan = added.length > 0 || [...sets.keys()].some(id => setTarget(id, saved, []) === undefined);
+  const here = needsScan && input.alsoHere !== undefined ? await input.alsoHere(saved === undefined ? [] : customRows(saved)) : [];
+  for (const row of added) {
+    const already = scannedFor(row, here);
+    if (already !== undefined) throw usageRefusal(addAlreadyHereLine(row.id, already.id));
+  }
+  const looked = input.alsoHere !== undefined ? ", and no package a manager on this Mac has that id" : "";
+  const targets = [...sets].map(([id, on]) => {
+    const target = setTarget(id, saved, here);
+    if (target === undefined) throw usageRefusal(`--set ${id}=${on ? "on" : "off"}: ${JSON.stringify(id)} is no catalog row and no row of ${input.out} outside the catalog${looked}`);
+    return { ...target, on };
+  });
+  const ticks = new Map(targets.map(t => [t.id, t.on]));
+  const packages = targets.flatMap(t => (t.pkg === undefined ? [] : [t.pkg]));
   // The file's answers first, this run's words over them; a word never given leaves the file's answer standing.
   const signIns = new Map([...savedSignIns(saved), ...parseSignIns(input.signin ?? [])]);
   // The rule this run goes on: the one named, else the one the file was written under, else `used` on a first run.
@@ -234,9 +278,12 @@ export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = Q
   const base = saved !== undefined && !namesRule(input) ? withSavedTicks(computed, saved) : computed;
   // The rows outside the catalog are the file's, not this computer's: an earlier run's stand, so --add adds up, and
   // the wizard's ticks on this computer's own formulae and globals are kept, since no rule here reads those rows.
+  // They join the rows before the flips, so a --set reaches one of them as it reaches a catalog row.
   // The pins the builds recorded are facts about the golden, not ticks: they stand through every rule.
-  const decided = applySignIns(applySets(base, sets), signIns);
-  const recipe = withPins(withCustom({ ...decided, rows: [...decided.rows, ...outsideRowsOf(saved)], ...(saved !== undefined ? { custom: [...customRows(saved)] } : {}) }, added), pinsOf(saved?.rows));
+  const carried = withCustom({ ...base, rows: [...base.rows, ...outsideRowsOf(saved)], ...(saved !== undefined ? { custom: [...customRows(saved)] } : {}) }, added);
+  const decided = applySignIns(applySets(withOwnRows(carried, packages), ticks), signIns);
+  // A package ticked as its own row keeps no added row of an earlier run beside it: the row's road installs it once.
+  const recipe = withPins(withoutCustom(decided, new Set(packages.map(p => p.id))), pinsOf(saved?.rows));
   saveSmallRecipe(input.out, recipe);
   return recipeAnswer(recipe, input.out, unknownCommands(histories));
 }

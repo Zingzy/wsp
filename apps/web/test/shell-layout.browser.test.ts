@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The shell's chrome in a real Chromium: the sidebar's brand lockup starts
-// where the search box does, a thread row's title keeps its room at the
+// where the search row does, the two top rows are one height and start
+// where the workspace rows do, a thread row's title keeps its room at the
 // default width, a status toast holds a long token inside its box, the line
 // the runtime puts on a machine's row takes that row's second line whole,
 // uncut and without growing the row, and collapsing the sidebar leaves the
@@ -64,17 +65,68 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
   };
   const paddingLeft = (selector: string): Promise<string> => page!.locator(selector).first().evaluate(el => getComputedStyle(el).paddingLeft);
 
-  it("the brand lockup starts where the search box does, in both themes", async () => {
+  it("the brand lockup starts where the search row does, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const lockup = await box("[data-slot=sidebar-header] [role=img][aria-label=wsp]");
-      const search = await box("[data-slot=input-control]:has(input[aria-label='Search threads'])");
+      const search = await box("button[aria-label='Search threads']");
       expect(Math.abs(lockup.x - search.x)).toBeLessThan(1);
       const path = join(SHOTS_DIR, `sidebar-header-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar header screenshot: ${path}`);
     }
   }, 30_000);
+
+  it("the search row and the Workspaces row are one height, start where the workspace rows do, paint nothing at rest, and the field takes the row's place without moving anything", async () => {
+    const shot = async (name: string, theme: string): Promise<void> => {
+      const path = join(SHOTS_DIR, `sidebar-top-${name}-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar ${name} screenshot: ${path}`);
+    };
+    const transparent = (selector: string): Promise<boolean> =>
+      page!.locator(selector).first().evaluate(el => {
+        const s = getComputedStyle(el);
+        return s.backgroundColor === "rgba(0, 0, 0, 0)" && s.borderTopWidth === "0px" && s.boxShadow === "none";
+      });
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      const search = await box("button[aria-label='Search threads']");
+      const section = await box("button[aria-label='Workspaces']");
+      const workspace = await box("[data-row-id='ws:ws_a']");
+      const firstThread = await box("[data-row-id^='thread:']");
+      expect(search.height).toBe(section.height);
+      expect(Math.abs(search.x - section.x)).toBeLessThan(1);
+      expect(Math.abs(search.x - workspace.x)).toBeLessThan(1);
+      expect(await transparent("button[aria-label='Search threads']")).toBe(true);
+      expect(await transparent("button[aria-label='Workspaces']")).toBe(true);
+      const glyph = await box("button[aria-label='New workspace']");
+      expect(glyph.x + glyph.width).toBeLessThanOrEqual(section.x + section.width);
+      expect(Math.abs(glyph.y + glyph.height / 2 - (section.y + section.height / 2))).toBeLessThan(1);
+      await shot("rest", theme);
+
+      await page!.locator("button[aria-label='Search threads']").click();
+      const field = page!.locator("input[aria-label='Search threads']");
+      await field.waitFor();
+      expect(await field.evaluate(el => document.activeElement === el)).toBe(true);
+      const fieldRow = await box("[data-sidebar-search]");
+      expect(fieldRow.height).toBe(search.height);
+      expect(Math.abs(fieldRow.y - search.y)).toBeLessThan(1);
+      expect(await box("[data-row-id='ws:ws_a']")).toEqual(workspace);
+      expect(await box("[data-row-id^='thread:']")).toEqual(firstThread);
+      await shot("focused", theme);
+      await page!.keyboard.press("Escape");
+      await page!.locator("button[aria-label='Search threads']").waitFor();
+
+      await page!.locator("button[aria-label='Workspaces']").click();
+      await page!.waitForSelector("[data-sidebar-row]", { state: "detached" });
+      expect(await box("button[aria-label='Workspaces']")).toEqual(section);
+      // The chevron turns over 150 ms; the shot waits for it.
+      await page!.waitForTimeout(300);
+      await shot("collapsed", theme);
+      await page!.locator("button[aria-label='Workspaces']").click();
+      await page!.waitForSelector("[data-sidebar-row]");
+    }
+  }, 60_000);
 
   it("a thread row keeps twelve characters of a long title at the default width, the agent and opener whole under it, rows one height", async () => {
     for (const theme of ["dark", "light"] as const) {

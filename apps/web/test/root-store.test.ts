@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Where the panes are rooted: the thread's folder as it moves, unless pinned.
 import { beforeEach, describe, expect, it } from "vitest";
-import { parentWithin, rootOf, rootsOf, selectRoot, useRootStore } from "../src/files/root.js";
+import { folderCrumbs, parentWithin, rootOf, rootsOf, selectRoot, useRootStore } from "../src/files/root.js";
 
 const WS = "ws_root";
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, ["/root"]);
@@ -96,6 +96,28 @@ describe("the browsable roots", () => {
     expect(parentWithin(roots, "/tmp/scratch")).toBeNull();
     expect(parentWithin(["/"], "/")).toBeNull();
     expect(parentWithin(["/"], "/tmp")).toBe("/");
+  });
+
+  it("draw the shown folder as the root it sits in and one crumb per folder below it", () => {
+    const roots = ["/root", "/Users/dev/wsp"];
+    expect(folderCrumbs(roots, "/root")).toEqual([{ name: "/root", path: "/root" }]);
+    expect(folderCrumbs(roots, "/root/app/lib")).toEqual([
+      { name: "/root", path: "/root" },
+      { name: "app", path: "/root/app" },
+      { name: "lib", path: "/root/app/lib" },
+    ]);
+    expect(folderCrumbs(roots, "/Users/dev/wsp/packages")).toEqual([
+      { name: "/Users/dev/wsp", path: "/Users/dev/wsp" },
+      { name: "packages", path: "/Users/dev/wsp/packages" },
+    ]);
+    expect(folderCrumbs(roots, "/root/a//b")).toEqual([
+      { name: "/root", path: "/root" },
+      { name: "a", path: "/root/a" },
+      { name: "b", path: "/root/a/b" },
+    ]);
+    // A folder no root holds is named once, as its own crumb; nothing above it is offered.
+    expect(folderCrumbs(roots, "/tmp/scratch")).toEqual([{ name: "/tmp/scratch", path: "/tmp/scratch" }]);
+    expect(folderCrumbs(["/"], "/tmp")).toEqual([{ name: "/", path: "/" }, { name: "tmp", path: "/tmp" }]);
   });
 
   it("let the agent's shell folder root the panes inside the imported project, as inside home", () => {

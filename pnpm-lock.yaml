@@ -157,9 +157,6 @@ importers:
 
   apps/wspx:
     dependencies:
-      '@wsp/adapter-claude':
-        specifier: workspace:*
-        version: link:../../packages/adapter-claude
       '@wsp/catalog':
         specifier: workspace:*
         version: link:../../packages/catalog
@@ -262,12 +259,6 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.30.0
         version: 1.30.0(zod@3.25.76)
-      '@wsp/adapter-claude':
-        specifier: workspace:*
-        version: link:../adapter-claude
-      '@wsp/adapter-codex':
-        specifier: workspace:*
-        version: link:../adapter-codex
       '@wsp/catalog':
         specifier: workspace:*
         version: link:../catalog
@@ -311,6 +302,12 @@ importers:
 
   packages/runtime:
     dependencies:
+      '@wsp/adapter-claude':
+        specifier: workspace:*
+        version: link:../adapter-claude
+      '@wsp/adapter-codex':
+        specifier: workspace:*
+        version: link:../adapter-codex
       '@wsp/catalog':
         specifier: workspace:*
         version: link:../catalog
@@ -330,9 +327,6 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
-      '@wsp/adapter-claude':
-        specifier: workspace:*
-        version: link:../adapter-claude
       '@wsp/daemon':
         specifier: workspace:*
         version: link:../daemon

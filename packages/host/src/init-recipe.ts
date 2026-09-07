@@ -13,7 +13,7 @@ import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
 import { SIGN_IN_WORDS } from "./signin-words.js";
-import { pinsOf } from "./recipe-file.js";
+import { outsideRow, pinsOf } from "./recipe-file.js";
 export { loadRecipe, outsideCatalog, outsideRowsOf, pinsOf, saveSmallRecipe, smallRecipePath, withPins, withTicksOf } from "./recipe-file.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
@@ -204,7 +204,7 @@ export function withOutsideRows(recipe: Recipe, manifest: Manifest, brew: BrewTa
   const named = new Set(recipe.rows.map(r => r.id));
   const rows = manifest.entries.flatMap((e): RecipeRow[] => {
     if (e.rung !== "tools" || named.has(e.id) || catalogIdOf(e) !== undefined || isTap(e) || !isTickable(e) || rowRoad(e, brew) === undefined) return [];
-    return [{ id: e.id, kind: "tool", on: false, source: { kind: "installed", paths: e.paths, bin: true } }];
+    return [outsideRow(e.id, e.paths)];
   });
   return rows.length === 0 ? recipe : { ...recipe, rows: [...recipe.rows, ...rows] };
 }

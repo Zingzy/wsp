@@ -7,6 +7,8 @@
     "test": "vitest run packages/runtime"
   },
   "dependencies": {
+    "@wsp/adapter-claude": "workspace:*",
+    "@wsp/adapter-codex": "workspace:*",
     "@wsp/catalog": "workspace:*",
     "@wsp/engine": "workspace:*",
     "@wsp/protocol": "workspace:*",
@@ -15,7 +17,6 @@
   "devDependencies": {
     "@types/node": "^22.20.1",
     "@types/ws": "^8.18.1",
-    "@wsp/adapter-claude": "workspace:*",
     "@wsp/daemon": "workspace:*"
   },
   "license": "AGPL-3.0-only"

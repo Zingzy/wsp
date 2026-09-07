@@ -9,7 +9,7 @@
 // the Mac's Homebrew and hands the table in.
 import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MACOS_ONLY_FORMULAE, catalogToolOf, formulaOf, isTap, managerFormula, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
 import { MIB, ROADS, catalogEntry, catalogToolByRoad, catalogToolFor, sizeBytes, type RoadName } from "@wsp/catalog";
-import { BREW_ID_PREFIX, type RecipeCustomRow } from "@wsp/protocol";
+import { BREW_ID_PREFIX, toolRowPrefix, type RecipeCustomRow } from "@wsp/protocol";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
 
 /** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
@@ -40,12 +40,14 @@ export interface AssumedSize {
   kind: "a go install" | "a uv tool" | "an npm global" | "an agent" | "an install";
 }
 
+const NPM_MANAGERS = ["npm", "pnpm", "bun"] as const;
+
 /** The stated default for a tools or agents row nothing measured. */
 export function assumedSize(e: RecipeEntry): AssumedSize {
   if (e.rung === "agents") return { bytes: ASSUMED_MIB.agent * MIB, kind: "an agent" };
-  if (e.id.startsWith("tools/go/")) return { bytes: ASSUMED_MIB.go * MIB, kind: "a go install" };
-  if (e.id.startsWith("tools/uv/")) return { bytes: ASSUMED_MIB.uv * MIB, kind: "a uv tool" };
-  if (/^tools\/(npm|pnpm|bun)\//.test(e.id)) return { bytes: ASSUMED_MIB.npm * MIB, kind: "an npm global" };
+  if (e.id.startsWith(toolRowPrefix("go"))) return { bytes: ASSUMED_MIB.go * MIB, kind: "a go install" };
+  if (e.id.startsWith(toolRowPrefix("uv"))) return { bytes: ASSUMED_MIB.uv * MIB, kind: "a uv tool" };
+  if (NPM_MANAGERS.some(m => e.id.startsWith(toolRowPrefix(m)))) return { bytes: ASSUMED_MIB.npm * MIB, kind: "an npm global" };
   return { bytes: ASSUMED_MIB.other * MIB, kind: "an install" };
 }
 

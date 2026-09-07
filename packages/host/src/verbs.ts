@@ -15,7 +15,7 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
-import { CATALOG_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, THREAD_AGENTS } from "@wsp/catalog";
 import { nodeHost } from "@wsp/collect";
 import {
   AFTER_CUT_LINE,
@@ -90,7 +90,6 @@ import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { isRecipeTick, runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { historyCache, smallRecipePath } from "./recipe-file.js";
-import { THREAD_AGENTS } from "./thread-agents.js";
 
 type Frame = Record<string, unknown> & { id?: string | number | null; ok?: boolean; type?: string };
 
@@ -1041,7 +1040,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, what else a package manager on this computer has that the image could take (alsoHere, by manager, with the line that installs each on the machine, which is the line to hand recipe's add), whose scanned says whether anything looked, the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.",
+        "Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, what else a package manager on this computer has that the image could take (alsoHere, by manager, with the line that installs each on the machine, each row's id being the one to hand recipe's set, which ticks that package as a row of its own), whose scanned says whether anything looked, the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.",
       input: { project: PROJECT_FOLDERS },
       output: RecipeScan.shape,
       call: async ({ project }, deps) => {
@@ -1058,7 +1057,7 @@ export const VERBS: readonly Verb[] = [
     name: "recipe",
     usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>]`,
     about:
-      "write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off and --signin <id>=copy|machine|key|skip flip a row and a sign-in by catalog id, key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool the catalog does not, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe",
+      "write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this Mac's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this Mac has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe",
     options: {
       out: { type: "string" },
       tick: { type: "string" },
@@ -1084,6 +1083,7 @@ export const VERBS: readonly Verb[] = [
           add: flagList(ctx.flags, "add"),
           addCheck: flagList(ctx.flags, "add-check"),
           ...projectsFlag(ctx.flags),
+          ...(ctx.alsoHere !== undefined ? { alsoHere: ctx.alsoHere } : {}),
         },
         progress(ctx.io),
       );
@@ -1094,9 +1094,9 @@ export const VERBS: readonly Verb[] = [
       description: `The recipe for a machine, read off this computer and written to a file: every catalog agent and tool with its tick, why it has that tick, and what it adds to the machine, plus the commands the person's agents ran that no catalog row carries. tick names the rule: used ticks what their agents actually ran here, installed ticks what is on this computer, default ticks what the catalog ships on; an agent wsp cannot open a thread on is off unless installed. The file is the state, so a second call is not a fresh start: naming tick or project lets the rule decide every tick again and throws away the flips a call before it made, and a call that names neither keeps what the file says and puts its own flips on top. Sign-in answers stand through every call whatever the rule, since nothing but the person decides one. Put the heavy rows to the person with their sizes before anything is built, then flip rows with set and run \`wsp init --recipe <out> --non-interactive --json\` from a shell, handing the person each sign-in line it prints, since the sign-ins finish in their browser. Only names and counts are read; nothing a session held is returned.`,
       input: {
         tick: RecipeTick.optional().describe(`which rule decides every tick: ${RECIPE_TICKS.join(", ")}. Naming it re-decides every row from the rule, so any flip an earlier call made goes; absent, the file's own rule and its ticks stand, and used decides a first call and any row the file does not carry`),
-        set: z.array(z.string()).optional().describe('rows to flip by catalog id, "<id>=on" or "<id>=off", applied over whatever decided the row. On a call that names tick or project they sit over the rule\'s fresh answer; on any other call they sit over the ticks already in the file'),
+        set: z.array(z.string()).optional().describe('rows to flip, "<id>=on" or "<id>=off", applied over whatever decided the row: a catalog id, or the id recipe_scan gives a package one of this computer\'s own package managers has (alsoHere), which ticks that package as a row of its own and installs it by its own road. On a call that names tick or project they sit over the rule\'s fresh answer; on any other call they sit over the ticks already in the file'),
         signin: z.array(z.string()).optional().describe(`what happens to a row's sign-in, "<id>=${LOGIN_CHOICES.join("|")}"; key brings the key files beside its login and the login still runs on the machine. An answer already in the file stands until a later call names that row again, whatever tick or project do to the ticks`),
-        add: z.array(z.string()).optional().describe('tools the catalog does not carry, "<id>=<install command>"; the line runs on the machine as given after every catalog install, and such a row is never offered a sign-in. Rows an earlier call added stand, whatever tick or project do to the ticks'),
+        add: z.array(z.string()).optional().describe('tools neither the catalog carries nor this computer has, "<id>=<install command>"; the line runs on the machine as given after every catalog install, and such a row is never offered a sign-in. A package recipe_scan already lists under alsoHere is refused here and ticked with set instead, since it is a row of its own. Rows an earlier call added stand, whatever tick or project do to the ticks'),
         add_check: z.array(z.string()).optional().describe('what proves an added tool landed, "<id>=<command that exits 0>"; without one the id on PATH is the check'),
         why: z.string().optional().describe("what the rows this call adds are for, in your own words; absent, they say an agent added them"),
         project: WEIGH_BY_FOLDERS,
@@ -1114,6 +1114,7 @@ export const VERBS: readonly Verb[] = [
           ...(addCheck !== undefined ? { addCheck } : {}),
           ...(why !== undefined ? { why } : {}),
           ...(project !== undefined ? { projects: projectFolders(project) } : {}),
+          ...(deps.alsoHere !== undefined ? { alsoHere: deps.alsoHere } : {}),
         });
         return asText(recipePrintout(table).join("\n"), table);
       },

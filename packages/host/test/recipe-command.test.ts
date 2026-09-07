@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The recipe verb: which rule decides the ticks, flipping one row by id,
 // weighing the histories by project, and the table the printout draws.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { computeRecipe, type HistoryCache } from "@wsp/collect";
-import { LOGIN_CHOICES, Recipe, type LoginChoice } from "@wsp/protocol";
+import { LOGIN_CHOICES, Recipe, type LoginChoice, type RecipeCustomRow } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { applySets, carriedOver, parseSet, parseSets, parseSignIn, runRecipe, runScan, type RecipeIo } from "../src/recipe-command.js";
+import type { ScanRow } from "../src/scan.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
 import { historyCache, saveSmallRecipe } from "../src/recipe-file.js";
@@ -43,6 +44,16 @@ const collect = (): RecipeIo & { logs: string[]; notes: string[] } => {
   return { logs, notes, log: l => logs.push(l), note: l => notes.push(l) };
 };
 const at = () => new Date("2026-09-06T03:00:00Z");
+
+/** A tap formula this Mac's Homebrew has, as the scan lists it, and the recipe row the collector files it under. */
+const DISKBLOOM: ScanRow = { id: "brew/zingzy/tap/diskbloom", name: "zingzy/tap/diskbloom", manager: "brew", group: "Homebrew formulae", install: "brew install zingzy/tap/diskbloom", check: "brew list --versions zingzy/tap/diskbloom", size: 4 * 1024 * 1024, version: "0.1.0" };
+const TAP_ROW = "tools/brew/zingzy/tap/diskbloom";
+
+/** The scan the verb is handed, recording what it was asked so a test can say whether the managers were read. */
+const also = (rows: readonly ScanRow[] = [DISKBLOOM]) => {
+  const asked: (readonly RecipeCustomRow[])[] = [];
+  return { asked, alsoHere: async (recipe: readonly RecipeCustomRow[]) => { asked.push(recipe); return rows; } };
+};
 const rowOf = (recipe: Recipe, id: string) => recipe.rows.find(r => r.id === id);
 
 describe("wsp recipe", () => {
@@ -273,12 +284,53 @@ describe("wsp recipe", () => {
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).custom?.map(r => r.id)).toEqual(["just"]);
   });
 
-  it("refuses a --set word that is not <id>=on or <id>=off, or names no catalog row", () => {
+  it("refuses a --set word that is not <id>=on or <id>=off, and one whose id names no row of any of the three kinds", async () => {
     expect(() => parseSet("java")).toThrow("--set takes <id>=on or <id>=off");
     expect(() => parseSet("java=yes")).toThrow("--set takes <id>=on or <id>=off");
-    expect(() => parseSet("jaava=on")).toThrow('the catalog has no row called "jaava"');
     expect(parseSets(["java=on", "java=off"]).get("java")).toBe(false);
     expect(applySets({ version: 1, at: "x", histories: [], rows: [] }, new Map([["java", true]])).rows).toEqual([]);
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-set-unknown-"));
+    const out = outPath();
+    await expect(runRecipe(laptop(), { out, set: ["jaava=on"], alsoHere: also().alsoHere }, quiet, at)).rejects.toThrow('"jaava" is no catalog row and no row of');
+    await expect(runRecipe(laptop(), { out, set: ["jaava=on"], alsoHere: also().alsoHere }, quiet, at)).rejects.toThrow("no package a manager on this Mac has that id");
+    expect(existsSync(out)).toBe(false);
+  });
+
+  it("ticks a package one of this Mac's own managers has by the id the scan gives it, as its own row under the collector's id, and drops an added row an earlier version left for the same package", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-own-row-"));
+    const out = outPath();
+    const file = () => Recipe.parse(JSON.parse(readFileSync(out, "utf8")));
+    const scan = also();
+    // The file as a version before this one left it: an added row for the tap formula, which runs brew install on
+    // the image and fails there, since the formula has no Linux bottle.
+    const byHand = { kind: "custom" as const, id: DISKBLOOM.id, name: DISKBLOOM.name, install: [DISKBLOOM.install], check: DISKBLOOM.check, why: "added by the agent" };
+    saveSmallRecipe(out, { version: 1, at: at().toISOString(), histories: [], rows: [], custom: [byHand] });
+    const table = await runRecipe(laptop(), { out, set: [`${DISKBLOOM.id}=on`], alsoHere: scan.alsoHere }, quiet, at);
+    // The scan is asked what the file already installs by another hand, as the third screen asks it.
+    expect(scan.asked).toEqual([[byHand]]);
+    expect(file().rows.find(r => r.id === TAP_ROW)).toEqual({ id: TAP_ROW, kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } });
+    expect(file().custom).toEqual([]);
+    // The row is the recipe's, not the catalog's table's: the printed table draws catalog rows alone.
+    expect(allRows(table).some(r => r.id === TAP_ROW)).toBe(false);
+    // The same word off unticks the row it wrote, and the row's own id reaches it without the managers being read.
+    await runRecipe(laptop(), { out, set: [`${DISKBLOOM.id}=off`], alsoHere: also().alsoHere }, quiet, at);
+    expect(file().rows.find(r => r.id === TAP_ROW)?.on).toBe(false);
+    const none = also();
+    await runRecipe(laptop(), { out, set: [`${TAP_ROW}=on`], alsoHere: none.alsoHere }, quiet, at);
+    expect(none.asked).toEqual([]);
+    expect(file().rows.find(r => r.id === TAP_ROW)?.on).toBe(true);
+  });
+
+  it("refuses an --add for a package one of this Mac's managers already has, by the scan's id or the package's own name, and names the --set word that ticks it instead", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-add-here-"));
+    const out = outPath();
+    const points = `tick it with --set ${DISKBLOOM.id}=on`;
+    await expect(runRecipe(laptop(), { out, add: [`${DISKBLOOM.id}=${DISKBLOOM.install}`], alsoHere: also().alsoHere }, quiet, at)).rejects.toThrow(points);
+    await expect(runRecipe(laptop(), { out, add: [`${DISKBLOOM.name}=${DISKBLOOM.install}`], alsoHere: also().alsoHere }, quiet, at)).rejects.toThrow(points);
+    expect(existsSync(out)).toBe(false);
+    // A tool neither the catalog carries nor a manager here has is still a row of its own.
+    await runRecipe(laptop(), { out, add: ["cuda=apt-get install -y cuda"], alsoHere: also().alsoHere }, quiet, at);
+    expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).custom?.map(r => r.id)).toEqual(["cuda"]);
   });
 
   it("ticks what is installed under installed, and what the catalog ships on under default", async () => {

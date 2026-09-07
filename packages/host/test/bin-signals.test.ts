@@ -4,11 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
+import { BIN, describeWithBin } from "./built-bin.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
-
-const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
 interface Ports {
   port: number;
@@ -43,12 +41,11 @@ function exited(child: ChildProcess): Promise<{ code: number | null; signal: Nod
   return new Promise(resolve => child.once("exit", (code, signal) => resolve({ code, signal })));
 }
 
-describe("the wsp bin stops cleanly on a signal", () => {
+describeWithBin("the wsp bin stops cleanly on a signal", () => {
   let home: string;
   let child: ChildProcess | undefined;
 
   beforeEach(() => {
-    expect(existsSync(BIN), `${BIN} is missing: run pnpm build first`).toBe(true);
     home = mkdtempSync(join(tmpdir(), "wsp-bin-home-"));
   });
   afterEach(async () => {

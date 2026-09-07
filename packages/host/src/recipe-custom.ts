@@ -46,3 +46,10 @@ export function withCustom(recipe: Recipe, rows: readonly RecipeCustomRow[]): Re
   const known = new Set(kept.map(r => r.id));
   return { ...recipe, custom: [...kept, ...rows.filter(r => !known.has(r.id))] };
 }
+
+/** The recipe with the added rows under these ids gone. What both hands that tick a package by its own row do to a
+ * custom row for the same package: two rows for one package are two installs, and the row's own road is the one the
+ * plan resolves. */
+export function withoutCustom(recipe: Recipe, ids: ReadonlySet<string>): Recipe {
+  return { ...recipe, custom: customRows(recipe).filter(r => !ids.has(r.id)) };
+}
