@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Exporting a folder from a workspace's machine to this Mac, the reverse of
 // the import: the folder on the machine opens as the thread's own, the
-// destination here mirrors it until the person edits or picks one, the agents
-// with threads on the workspace are ticked rows, named as the catalog names
-// them, whose sessions come home, one
-// action starts the export, and the runtime's events fill a fixed set of step
-// rows. Nothing is read from the machine before the destination is checked, so
-// an existing folder comes back as the runtime's refusal naming it and its
-// file count, the one loud line, and the action becomes Replace and export.
+// destination here mirrors it until the person edits, browses to or picks one,
+// the folder landing inside a browsed one as it would inside a picked one, the
+// agents with threads on the workspace are ticked rows, named as the catalog
+// names them, whose sessions come home, one action starts the export, and the
+// runtime's events fill a fixed set of step rows. Nothing is read from the
+// machine before the destination is checked, so an existing folder comes back
+// as the runtime's refusal naming it and its file count, the one loud line,
+// and the action becomes Replace and export.
 import { useCallback, useMemo, useRef, useState } from "react";
 import { agentName } from "@wsp/catalog";
 import { fmtBytes, type ProjectAgentResult, type ProjectExportEvent, type ProjectExportResult, type WorkspaceView } from "@wsp/protocol";
@@ -18,6 +19,8 @@ import { useThreadFolder } from "../files/root.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { agentRows, agentsRequest, exportLandedLine, exportStepRows, isExportOf, pickedDest } from "./exportProject.js";
+import { FolderBrowser } from "./FolderBrowser.js";
+import { useLastFolderParent } from "./lastFolderStore.js";
 import { agentOutcome, count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
 import { FactRow, FolderField, StatusLine, StepRows } from "./ProjectTripRows.js";
 
@@ -31,6 +34,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
   const rows = useMemo(() => agentRows(sessions), [sessions]);
   const folder = useThreadFolder(workspace.id);
   const bridge = typeof window === "undefined" ? undefined : window.wsp?.pickFolder;
+  const lastFolder = useLastFolderParent();
   const [source, setSource] = useState(folder ?? "");
   /** The destination once the person edited or picked it; before that it mirrors the source. */
   const [chosen, setChosen] = useState<string | null>(null);
@@ -52,12 +56,15 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
   );
   useProtocolEvents(onEvent);
 
-  const pick = async (): Promise<void> => {
-    if (bridge === undefined) return;
-    const picked = await bridge();
-    if (picked === undefined) return;
+  const pick = (picked: string): void => {
     setChosen(pickedDest(picked, source));
     setRefusal(null);
+  };
+
+  const pickNative = async (): Promise<void> => {
+    if (bridge === undefined) return;
+    const picked = await bridge();
+    if (picked !== undefined) pick(picked);
   };
 
   const start = async (replace: boolean): Promise<void> => {
@@ -123,8 +130,9 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
                 setChosen(next);
                 setRefusal(null);
               }}
-              {...(bridge === undefined ? {} : { onPick: () => void pick() })}
+              {...(bridge === undefined ? {} : { onPick: () => void pickNative() })}
             />
+            {bridge === undefined ? <FolderBrowser disabled={busy || phase === "done"} start={lastFolder} onPick={pick} /> : null}
             <Agents rows={rows} ticked={ticked} disabled={phase !== "idle"} outcomeOf={outcomeOf} onToggle={toggle} />
             <div data-k="summary" className="divide-y divide-border/40 rounded-md border border-border/60 px-2.5">
               <FactRow label="Files" k="files">

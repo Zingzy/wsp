@@ -1129,6 +1129,28 @@ describe("wsp verbs over the host", () => {
   }
   const landings = (): string[] => backend.machines[0]!.runLog.filter(s => s.includes("mv "));
 
+  it("folders lists one level of this computer's folders with the repository marked and the hidden ones counted, and refuses a path outside the roots", async () => {
+    const home = join(dir, "user");
+    mkdirSync(join(home, "code", "spoo", ".git"), { recursive: true });
+    mkdirSync(join(home, "code", "notes"), { recursive: true });
+    mkdirSync(join(home, "code", ".cache"), { recursive: true });
+    const { code, io } = await run("folders", join(home, "code"));
+    expect(code).toBe(0);
+    const lines = io.lines[0]!.split("\n");
+    const cells = (line: string): string[] => line.split(/ {2,}/);
+    expect(cells(lines[0]!)).toEqual(["FOLDER", "GIT"]);
+    expect(lines.slice(1, 3).map(cells)).toEqual([[join(home, "code", "notes")], [join(home, "code", "spoo"), "git"]]);
+    expect(lines.at(-1)).toBe(`2 folders in ${join(home, "code")}, 1 hidden. Browsable: ${home}.`);
+    // The dot-named folder is a row only when it is asked for, and --json is the listing the app's picker reads.
+    const shown = await run("folders", join(home, "code"), "--hidden", "--json");
+    expect(json(shown.io)).toEqual([{ listing: { dir: join(home, "code"), roots: [home], folders: [{ path: join(home, "code", ".cache"), repo: false }, { path: join(home, "code", "notes"), repo: false }, { path: join(home, "code", "spoo"), repo: true }], hidden: 1 } }]);
+    const outside = await run("folders", "/etc");
+    expect(outside.code).toBe(1);
+    expect(outside.io.errors.join("\n")).toBe(`wsp folders: /etc is outside the folders wsp browses on this computer: ${home}`);
+    const many = await run("folders", join(home, "code"), join(home, "Applications"));
+    expect(many.io.errors.join("\n")).toContain("takes one folder on this computer at most");
+  });
+
   it("import off a terminal prints the plan with the .env cut by default, moves nothing without --yes, --keep or --cut, and names --yes on stderr", async () => {
     const proj = projectFolder();
     await run("new", "alpha");

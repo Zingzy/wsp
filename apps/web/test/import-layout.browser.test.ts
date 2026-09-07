@@ -158,6 +158,43 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
     await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, "import-plain-dark.png") });
   }, 30_000);
 
+  it.each(["dark", "light"] as const)("in the %s theme the browser a tab gets is one quiet list on the step rows' height, keeps that height across a level, and reads at AA", async theme => {
+    await page!.goto(`${base}?theme=${theme}&tab=1`);
+    // The imports above remembered their folder in this origin's local storage, which is what opens the browser there
+    // on a later visit; this case is about the layout, so it starts from a first visit.
+    await page!.evaluate(() => window.localStorage.clear());
+    await page!.reload();
+    await page!.waitForFunction(() => document.querySelectorAll("[data-k=browse-folder]").length === 8);
+    const dialog = page!.locator("[role=dialog]");
+    const size = (b: Box): { width: number; height: number } => ({ width: Math.round(b.width), height: Math.round(b.height) });
+
+    const rows = await boxes("[data-k=browse-folder]");
+    expect(new Set(heights(rows)).size).toBe(1);
+    expect(heights(rows)[0]).toBe(heights(await boxes("[data-step]"))[0]);
+    // Nothing loud: the browser's box reads like the summary's, and the crumbs name the root once.
+    expect(await color("[data-k=browse]")).toBe(await color("[data-k=summary]"));
+    expect(await page!.locator("[data-folder-crumbs]").textContent()).toBe("/Users/me");
+    // The system picker belongs to the desktop shell, which a tab is not.
+    expect(await page!.locator("button:has-text('Choose folder')").count()).toBe(0);
+    const list = size((await boxes("[data-k=browse] ul"))[0]!);
+    const stepRows = heights(await boxes("[data-step]"));
+
+    await page!.locator("[data-folder='/Users/me/code']").click();
+    await page!.waitForFunction(() => document.querySelector("[data-k=browse-state]")?.textContent === "4 folders in /Users/me/code, 2 hidden.");
+    expect(size((await boxes("[data-k=browse] ul"))[0]!)).toEqual(list);
+    expect(heights(await boxes("[data-step]"))).toEqual(stepRows);
+    expect(await whole("[data-k=browse-state]")).toEqual([true]);
+    // A folder name too long for its row is cut there and whole under the pointer.
+    expect(await page!.locator("[data-folder='/Users/me/code/billing-reconciliation-nightly-settlements-batch']").getAttribute("title")).toBe("/Users/me/code/billing-reconciliation-nightly-settlements-batch");
+    const quiet = [...(await contrast("[data-k=browse-state]")), ...(await contrast("[data-folder-crumb]"))];
+    console.info(`${theme}: the browser's state words and crumbs read at ${quiet.join(", ")} to 1`);
+    for (const ratio of quiet) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    await dialog.screenshot({ path: join(SHOTS, `import-browse-${theme}.png`) });
+
+    await page!.locator("button:has-text('Use this folder')").click();
+    await page!.waitForFunction(() => (document.querySelector("#import-source") as HTMLInputElement | null)?.value === "/Users/me/code");
+  }, 40_000);
+
   it.each(["dark", "light"] as const)("in the %s theme a landed line that needs three lines is whole and grows its box", async theme => {
     await page!.goto(`${base}?theme=${theme}&long=1`);
     await page!.waitForFunction(() => document.querySelector("[data-k=files]")?.textContent === "1204 files · 38.2 MB");

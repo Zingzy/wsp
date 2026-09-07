@@ -8,10 +8,11 @@
 // runtime's words with replace as the one follow-up.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventUnion, ProjectAgent, ProjectImportEvent, ProjectPlan, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, HostFolder, HostFolderListing, ProjectAgent, ProjectImportEvent, ProjectPlan, WorkspaceView } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ImportProjectDialog } from "../src/sidebar/ImportProjectDialog.js";
+import { useLastFolderStore } from "../src/sidebar/lastFolderStore.js";
 
 const workspace: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_a", phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
 
@@ -33,6 +34,36 @@ const AGENTS: ProjectAgent[] = [
   { agent: "claude", name: "Claude Code", sessions: 46, bytes: 9_400_000, carry: "moves" },
   { agent: "codex", name: "Codex", sessions: 1, bytes: 12_000, carry: "transcript-only" },
 ];
+
+/** This Mac's folders as the host lists them: the home folder and an imported project as the roots, one dot-named
+ * folder held back inside code, and nothing outside the roots. */
+const ROOTS = ["/Users/dev", "/Volumes/work/api"];
+const LEVELS: Record<string, HostFolder[]> = {
+  "/Users/dev": [{ path: "/Users/dev/code", repo: false }, { path: "/Users/dev/notes", repo: false }],
+  "/Users/dev/code": [{ path: "/Users/dev/code/spoo", repo: true }],
+  "/Users/dev/code/spoo": [],
+  "/Volumes/work/api": [{ path: "/Volumes/work/api/src", repo: false }],
+};
+const HELD: Record<string, HostFolder[]> = { "/Users/dev/code": [{ path: "/Users/dev/code/.cache", repo: false }] };
+/** A folder this Mac will not let the host read: with no Files and Folders grant readdir comes back EACCES, which is
+ * what a clicked Documents, Desktop or Downloads gives on a real Mac. */
+const REFUSED: Record<string, string> = { "/Users/dev/notes": "EACCES: permission denied, scandir '/Users/dev/notes'" };
+
+function fakeFolders() {
+  const asked: { dir?: string; hidden?: boolean }[] = [];
+  const hostFolders = async (dir?: string, hidden?: boolean): Promise<HostFolderListing> => {
+    asked.push({ dir, hidden });
+    const at = dir ?? ROOTS[0]!;
+    const refusal = REFUSED[at];
+    if (refusal !== undefined) throw new Error(refusal);
+    const level = LEVELS[at];
+    if (level === undefined) throw new Error(`${at} is outside the folders wsp browses on this computer: ${ROOTS.join(", ")}`);
+    const held = HELD[at] ?? [];
+    const folders = [...level, ...(hidden === true ? held : [])].sort((a, b) => a.path.localeCompare(b.path));
+    return { dir: at, roots: ROOTS, folders, hidden: held.length };
+  };
+  return { hostFolders, asked };
+}
 
 const event = (over: Partial<ProjectImportEvent>): EventUnion => ({
   type: "project.import",
@@ -79,6 +110,7 @@ function fakeApi(plan: ProjectPlan = PLAN) {
 
 beforeEach(() => {
   useStore.setState({ api: null, workspaces: [workspace], conn: "live" });
+  useLastFolderStore.setState({ folder: null });
   delete (window as { wsp?: unknown }).wsp;
   // Base UI's checkbox re-dispatches a click as a PointerEvent, which jsdom does not have.
   vi.stubGlobal("PointerEvent", class extends MouseEvent {});
@@ -91,6 +123,13 @@ afterEach(() => {
 const dialog = async (): Promise<HTMLElement> => screen.findByRole("dialog");
 const value = (root: HTMLElement, k: string): string => root.querySelector<HTMLElement>(`[data-k="${k}"]`)!.textContent ?? "";
 const step = (root: HTMLElement, stage: string): HTMLElement => root.querySelector<HTMLElement>(`[data-step="${stage}"]`)!;
+
+const browseRows = (root: HTMLElement): string[] => Array.from(root.querySelectorAll<HTMLElement>("[data-k=browse-folder]")).map(el => el.textContent ?? "");
+const repoMarks = (root: HTMLElement): boolean[] =>
+  Array.from(root.querySelectorAll<HTMLElement>("[data-k=browse-folder]")).map(el => (el.querySelector("svg")?.getAttribute("class") ?? "").includes("folder-git"));
+const crumbs = (root: HTMLElement): string[] => Array.from(root.querySelectorAll<HTMLElement>("[data-folder-crumb]")).map(el => el.textContent ?? "");
+const folderRow = (root: HTMLElement, path: string): HTMLElement => root.querySelector<HTMLElement>(`[data-folder="${path}"]`)!;
+const usePicked = (root: HTMLElement): boolean => fireEvent.click(within(root).getByRole("button", { name: "Use this folder" }));
 
 async function readFolder(root: HTMLElement, path = "/var/proj"): Promise<void> {
   const input = within(root).getByLabelText("Folder on this Mac") as HTMLInputElement;
@@ -113,6 +152,124 @@ describe("import project dialog", () => {
     expect(root.querySelector("[data-k=secrets]")).toBeNull();
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
     expect(within(root).queryByRole("button", { name: /folder/ })).toBeNull();
+  });
+
+  it("in a browser tab a folder browser follows the field: a row goes into its folder, a crumb comes back out, the repository is marked, and Use this folder is what reads the plan", async () => {
+    const { api } = fakeApi();
+    const { hostFolders, asked } = fakeFolders();
+    useStore.getState().bind({ ...api, hostFolders });
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await waitFor(() => expect(browseRows(root)).toEqual(["code", "notes"]));
+    expect(asked).toEqual([{ dir: undefined, hidden: false }]);
+    expect(crumbs(root)).toEqual(["/Users/dev"]);
+    expect(value(root, "browse-state")).toBe("2 folders in /Users/dev.");
+
+    fireEvent.click(folderRow(root, "/Users/dev/code"));
+    await waitFor(() => expect(browseRows(root)).toEqual(["spoo"]));
+    expect(crumbs(root)).toEqual(["/Users/dev", "code"]);
+    expect(repoMarks(root)).toEqual([true]);
+    expect(value(root, "browse-state")).toBe("1 folder in /Users/dev/code, 1 hidden.");
+
+    // Walking costs nothing: the folder is read only when it is named.
+    fireEvent.click(within(root).getByRole("button", { name: "/Users/dev" }));
+    await waitFor(() => expect(browseRows(root)).toEqual(["code", "notes"]));
+    expect(api.planProject).not.toHaveBeenCalled();
+
+    fireEvent.click(folderRow(root, "/Users/dev/code"));
+    await waitFor(() => expect(crumbs(root)).toEqual(["/Users/dev", "code"]));
+    usePicked(root);
+    await waitFor(() => expect(value(root, "files")).not.toBe(""));
+    expect(api.planProject).toHaveBeenCalledWith("/Users/dev/code");
+    expect((within(root).getByLabelText("Folder on this Mac") as HTMLInputElement).value).toBe("/Users/dev/code");
+    expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("counts the dot-named folders in the state words and lists them only while they are asked for", async () => {
+    const { api } = fakeApi();
+    const { hostFolders, asked } = fakeFolders();
+    useStore.getState().bind({ ...api, hostFolders });
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await waitFor(() => expect(browseRows(root)).toEqual(["code", "notes"]));
+    // The home folder holds none, so there is nothing to offer there.
+    expect(root.querySelector("[data-k=browse-hidden]")).toBeNull();
+    fireEvent.click(folderRow(root, "/Users/dev/code"));
+    await waitFor(() => expect(browseRows(root)).toEqual(["spoo"]));
+    const toggle = (): HTMLElement => root.querySelector<HTMLElement>("[data-k=browse-hidden]")!;
+    expect(toggle().textContent).toBe("show hidden");
+    fireEvent.click(toggle());
+    await waitFor(() => expect(browseRows(root)).toEqual([".cache", "spoo"]));
+    expect(asked.at(-1)).toEqual({ dir: "/Users/dev/code", hidden: true });
+    expect(toggle().textContent).toBe("hide hidden");
+    fireEvent.click(toggle());
+    await waitFor(() => expect(browseRows(root)).toEqual(["spoo"]));
+  });
+
+  it("a folder this Mac will not let the host read says so in the state slot and leaves the list on the level it was on", async () => {
+    const { api } = fakeApi();
+    const { hostFolders, asked } = fakeFolders();
+    useStore.getState().bind({ ...api, hostFolders });
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await waitFor(() => expect(browseRows(root)).toEqual(["code", "notes"]));
+
+    fireEvent.click(folderRow(root, "/Users/dev/notes"));
+    await waitFor(() => expect(value(root, "browse-state")).toBe("No folders read. EACCES: permission denied, scandir '/Users/dev/notes'"));
+    expect(browseRows(root)).toEqual(["code", "notes"]);
+    expect(crumbs(root)).toEqual(["/Users/dev"]);
+    // Read, not walked away from: nothing re-asks the first root behind the person's back.
+    expect(asked).toEqual([{ dir: undefined, hidden: false }, { dir: "/Users/dev/notes", hidden: false }]);
+  });
+
+  it("opens above the folder the last import was read from, and one the roots no longer hold opens at the first root instead", async () => {
+    const { api } = fakeApi();
+    const { hostFolders, asked } = fakeFolders();
+    useLastFolderStore.setState({ folder: "/Users/dev/code/spoo" });
+    useStore.getState().bind({ ...api, hostFolders });
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await waitFor(() => expect(browseRows(root)).toEqual(["spoo"]));
+    expect(asked).toEqual([{ dir: "/Users/dev/code", hidden: false }]);
+    cleanup();
+
+    useLastFolderStore.setState({ folder: "/elsewhere/old/proj" });
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const again = await dialog();
+    await waitFor(() => expect(browseRows(again)).toEqual(["code", "notes"]));
+    expect(asked.slice(1)).toEqual([{ dir: "/elsewhere/old", hidden: false }, { dir: undefined, hidden: false }]);
+    expect(value(again, "browse-state")).toBe("2 folders in /Users/dev.");
+  });
+
+  it("remembers the folder an import landed from, so the next open browses beside it", async () => {
+    const { api } = fakeApi();
+    const { hostFolders, asked } = fakeFolders();
+    useStore.getState().bind({ ...api, hostFolders });
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await readFolder(root, "/Users/dev/code/spoo");
+    fireEvent.click(within(root).getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(useLastFolderStore.getState().folder).toBe("/Users/dev/code/spoo"));
+    cleanup();
+
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const again = await dialog();
+    await waitFor(() => expect(browseRows(again)).toEqual(["spoo"]));
+    expect(asked.at(-1)).toEqual({ dir: "/Users/dev/code", hidden: false });
+  });
+
+  it("with the desktop shell's bridge the system picker stands where it did and no browser is drawn", async () => {
+    (window as { wsp?: { pickFolder: () => Promise<string | undefined> } }).wsp = { pickFolder: async () => "/Users/dev/code/spoo" };
+    const { api } = fakeApi();
+    const { hostFolders, asked } = fakeFolders();
+    useStore.getState().bind({ ...api, hostFolders });
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    expect(root.querySelector("[data-k=browse]")).toBeNull();
+    expect(asked).toEqual([]);
+    fireEvent.click(within(root).getByRole("button", { name: "Choose folder" }));
+    await waitFor(() => expect(value(root, "files")).not.toBe(""));
+    expect(api.planProject).toHaveBeenCalledWith("/Users/dev/code/spoo");
   });
 
   it("reads the typed folder on Enter into the summary, keeps the path as typed, and lands at the plan's realpath", async () => {

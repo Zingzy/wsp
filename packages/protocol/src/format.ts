@@ -412,6 +412,13 @@ export function nextInsideAgentLine(open: string, first: string): string {
   return `Next: run ${shellLine([open])} in this folder and say: ${first}`;
 }
 
+/** What the folder browser's state slot says for a level this computer would not let the host read, and the words the
+ * command line's own refusal line carries: the host's reason, which names the folder itself, on one line whatever the
+ * host said. A refused level leaves the list on the level it was already on, so this slot is where it is read. */
+export function folderRefusalLine(reason: string): string {
+  return `No folders read. ${reason.replace(/\s+/g, " ").trim()}`;
+}
+
 /** The one stderr line the command line shows under a command that exited non-zero, naming the folder it ran in:
  * the host chose it when none was named, so the person did not see it go by; absent, the runtime ran it in ~. */
 export function execFolderLine(cwd: string | undefined): string {

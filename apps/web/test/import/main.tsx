@@ -13,12 +13,15 @@ import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
 import { ImportProjectDialog } from "../../src/sidebar/ImportProjectDialog";
+import { fakeHostFolders } from "../host-folders-fixture";
 import "../../src/index.css";
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
-// The desktop shell's bridge, so the picker button is laid out; nothing here opens a system dialog.
-window.wsp = { pickFolder: async () => undefined };
+// The desktop shell's bridge, so the picker button is laid out; nothing here opens a system dialog. With ?tab=1
+// there is no bridge, which is a browser tab: the folder browser over the host's own folders stands there instead.
+const TAB = params.get("tab") === "1";
+if (!TAB) window.wsp = { pickFolder: async () => undefined };
 
 const LONG = params.get("long") === "1";
 const SOURCE = LONG ? "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo" : "/Users/me/code/spoo";
@@ -82,6 +85,7 @@ const api: Api = {
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
   listSessions: async () => [],
   getGolden: async () => undefined,
+  hostFolders: fakeHostFolders(),
   planProject: async () => plan,
   importProject: async o => {
     const cut = plan.secrets.filter(s => !(o.carry ?? []).includes(s.path) && !(o.rewrite ?? []).includes(s.path)).map(s => s.path);

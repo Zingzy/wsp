@@ -46,6 +46,12 @@ function holdsGitFile(dir: string): boolean {
   }
 }
 
+/** A folder git tracks, by the marker at its top: a .git directory, or the .git file a worktree or submodule
+ * checkout carries. One stat, so a picker can mark a whole level without running git once per folder. */
+export function isRepoFolder(dir: string): boolean {
+  return existsSync(join(dir, GIT_DIR));
+}
+
 /** The same rule as find spells it, for the archive a machine packs on the trip home and for the nap-time vault: the
  * directory list by name, the Finder file by name, and the venv and checkout markers for a directory under any name. */
 export const CACHE_RULE: CacheRule = {
@@ -256,7 +262,7 @@ export async function planProject(source: string, homes: Readonly<Record<string,
   if (!isAbsolute(source)) throw new Error(`the folder must be an absolute path, got ${source}`);
   const root = resolveProjectPath(source);
   if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`${root} is not a folder on this computer`);
-  const repo = existsSync(join(root, GIT_DIR));
+  const repo = isRepoFolder(root);
   const tracked = repo ? await trackedPaths(root) : new Set<string>();
   const w: Walk = { source: root, tracked, trackedDirs: ancestors(tracked), files: [], secrets: [], excluded: [], skipped: [], scans: [] };
   walk(w, root, "", false, false);

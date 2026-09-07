@@ -180,6 +180,29 @@ describe.skipIf(skipped !== undefined)("the export dialog laid out in Chromium",
     expect(await uncut("[role=status]")).toBe(true);
   }, 40_000);
 
+  it.each(["dark", "light"] as const)("in the %s theme a tab browses the destination instead of picking it, in one quiet list on the step rows' height", async theme => {
+    await page!.goto(`${base}?theme=${theme}&tab=1`);
+    // The browser opens where the last import here was read from, which nothing in this file wrote; cleared so the
+    // case starts from a first visit whatever ran before it.
+    await page!.evaluate(() => window.localStorage.clear());
+    await page!.reload();
+    await page!.waitForFunction(() => document.querySelectorAll("[data-k=browse-folder]").length === 8);
+    const rows = await boxes("[data-k=browse-folder]");
+    expect(new Set(heights(rows)).size).toBe(1);
+    expect(heights(rows)[0]).toBe(heights(await boxes("[data-step]"))[0]);
+    expect(await color("[data-k=browse]")).toBe(await color("[data-k=summary]"));
+    expect(await page!.locator("button:has-text('Choose folder')").count()).toBe(0);
+
+    await page!.locator("[data-folder='/Users/me/code']").click();
+    await page!.waitForFunction(() => document.querySelector("[data-k=browse-state]")?.textContent === "4 folders in /Users/me/code, 2 hidden.");
+    await page!.locator("button:has-text('Use this folder')").click();
+    await page!.waitForFunction(() => (document.querySelector("#export-dest") as HTMLInputElement | null)?.value === "/Users/me/code/spoo");
+    const quiet = await contrast("[data-k=browse-state]");
+    console.info(`${theme}: the browser's state words read at ${quiet.join(", ")} to 1`);
+    for (const ratio of quiet) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `export-browse-${theme}.png`) });
+  }, 40_000);
+
   it.each(["dark", "light"] as const)("in the %s theme a refusal that begins with a 120-character path wraps whole, and so does the landed line under it", async theme => {
     await page!.goto(`${base}?theme=${theme}&exists=1&long=1`);
     await page!.waitForFunction(path => (document.querySelector("#export-dest") as HTMLInputElement | null)?.value === path, LONG);
