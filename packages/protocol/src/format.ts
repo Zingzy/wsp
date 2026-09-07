@@ -644,6 +644,16 @@ export function behindGoldenLine(on: number, head: number): string {
 export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
 
+/** What the composer's branch slot says for each folder git named no branch for, and what the word explains on
+ * hover: nothing for a folder outside any repository or one not yet asked, both ordinary; a word and one sentence for
+ * a read the machine refused or failed, an outside cause the person should see rather than an empty slot. */
+export const REPO_STATE_WORDS = {
+  unknown: { word: "", note: "" },
+  none: { word: "", note: "" },
+  refused: { word: "git unread", note: "The machine could not read this folder's git state, so no branch is shown." },
+} as const;
+export type RepoStateWord = keyof typeof REPO_STATE_WORDS;
+
 /** A missing tool's row as the lineage shows it. A record sealed before the name and outcome were recorded still
  * carries its id, so it reads by that and as failed rather than as a blank row. */
 export function missingToolRow(t: { id: string; name?: string; outcome?: GoldenMissingTool["outcome"]; note: string }): { name: string; note: string; mark: LineageMark } {
