@@ -52,7 +52,7 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
 });
 const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, sizes: [] };
 
-type FakeApi = Api & { nap: ReturnType<typeof vi.fn>; interruptSession: ReturnType<typeof vi.fn>; forget: ReturnType<typeof vi.fn>; renameSession: ReturnType<typeof vi.fn> };
+type FakeApi = Api & { nap: ReturnType<typeof vi.fn>; interruptSession: ReturnType<typeof vi.fn>; forget: ReturnType<typeof vi.fn>; renameSession: ReturnType<typeof vi.fn>; wake: ReturnType<typeof vi.fn> };
 
 function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessions: SessionView[] = []): FakeApi {
   return {
@@ -62,7 +62,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     createFromGoldenHead: async () => workspaces[0]!,
     watchStatuses: async () => statuses,
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
-    wake: async id => view(id, "?", "running"),
+    wake: vi.fn(async (id: string) => view(id, "?", "running")),
     forget: vi.fn(async () => {}),
     rebuild: async id => ({ ...view(id, "?", "running"), machineId: "m_rebuilt" }),
     interruptSession: vi.fn(async () => "accepted" as const),
@@ -70,7 +70,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     renameSession: vi.fn(async (sessionId: string, title: string) => {
       const row = sessions.find(s => s.id === sessionId);
       if (row !== undefined) row.harnessTitle = title;
-      return "renamed" as const;
+      return { outcome: "renamed" as const };
     }),
     upgrade: async id => view(id, "?", "running"),
     capabilities: async () => CAPS,
@@ -295,7 +295,7 @@ describe("a thread row's menu", () => {
     const api = fakeApi([API], [statusOf(API)], [{ ...RUNNING }]);
     await mountSidebar(api, "api");
     const row = rowOf("fix the port list");
-    const height = row.className;
+    const rowClass = row.className;
     rightClick(row);
     await screen.findByRole("menu");
     expect(refusalOf(THREAD_WORDS.rename)).toBeNull();
@@ -306,7 +306,7 @@ describe("a thread row's menu", () => {
     expect(document.activeElement).toBe(input);
     // The input took the title's place inside the row, and the row is the same row it was.
     expect(input.closest("[data-sidebar-row]")).toBe(rowOf2("thread:thr_1"));
-    expect(rowOf2("thread:thr_1").className).toBe(height);
+    expect(rowOf2("thread:thr_1").className).toBe(rowClass);
 
     fireEvent.change(input, { target: { value: "the name he typed" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -338,6 +338,72 @@ describe("a thread row's menu", () => {
     await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
     expect(api.renameSession).not.toHaveBeenCalled();
     expect(screen.getByText("fix the port list")).toBeDefined();
+  });
+
+  it("a napping machine is woken by the rename itself, and the field keeps what was typed until the name has landed", async () => {
+    const api = fakeApi([view("ws_a", "api", "napping")], [statusOf(view("ws_a", "api", "napping"))], [{ ...RUNNING }]);
+    let letWake: (() => void) | undefined;
+    const woken = new Promise<void>(resolve => {
+      letWake = resolve;
+    });
+    api.wake.mockImplementation(async (id: string) => {
+      await woken;
+      return view(id, "api", "running");
+    });
+    await mountSidebar(api, "api");
+    rightClick(rowOf("fix the port list"));
+    await screen.findByRole("menu");
+    // The machine is not up and the row is still live: the rename wakes it, as the command line's own rename does.
+    expect(refusalOf(THREAD_WORDS.rename)).toBeNull();
+    fireEvent.click(item(THREAD_WORDS.rename));
+    const input = (await screen.findByRole("textbox", { name: THREAD_WORDS.rename })) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "the name he typed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // While it wakes the field is still there with the name in it, and nothing has been said in a toast.
+    await waitFor(() => expect(api.wake).toHaveBeenCalledWith("ws_a"));
+    expect(api.renameSession).not.toHaveBeenCalled();
+    expect((screen.getByRole("textbox", { name: THREAD_WORDS.rename }) as HTMLInputElement).value).toBe("the name he typed");
+    expect(useStore.getState().toast).toBeNull();
+    // A second Enter while it waits sends nothing twice.
+    fireEvent.keyDown(screen.getByRole("textbox", { name: THREAD_WORDS.rename }), { key: "Enter" });
+
+    letWake?.();
+    await waitFor(() => expect(api.renameSession).toHaveBeenCalledWith("s1", "the name he typed"));
+    expect(api.renameSession).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    expect(screen.getByText("the name he typed")).toBeDefined();
+  });
+
+  it("a name the runtime did not take stays in the field for another go, with the reason in the toast", async () => {
+    const api = fakeApi([API], [statusOf(API)], [{ ...RUNNING }]);
+    api.renameSession.mockImplementation(async () => ({ outcome: "failed" as const, error: "database is locked" }));
+    await mountSidebar(api, "api");
+    rightClick(rowOf("fix the port list"));
+    await screen.findByRole("menu");
+    fireEvent.click(item(THREAD_WORDS.rename));
+    const input = (await screen.findByRole("textbox", { name: THREAD_WORDS.rename })) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "the name he typed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(useStore.getState().toast).toBe("database is locked"));
+    // The name is where the person left it: a toast never eats it.
+    const still = screen.getByRole("textbox", { name: THREAD_WORDS.rename }) as HTMLInputElement;
+    expect(still.value).toBe("the name he typed");
+    fireEvent.keyDown(still, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    expect(screen.getByText("fix the port list")).toBeDefined();
+  });
+
+  it("a thread on a machine that is gone carries the rebuild refusal, so no box opens over it", async () => {
+    const api = fakeApi([OLD], [statusOf(OLD)], [{ ...RUNNING, id: "s9", workspaceId: "ws_c", threadId: "thr_9" }]);
+    await mountSidebar(api, "old");
+    rightClick(rowOf("fix the port list"));
+    await screen.findByRole("menu");
+    expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBe("true");
+    expect(refusalOf(THREAD_WORDS.rename)).toBe("Workspace machine is gone; rebuild it to rename (machine m_ws_c is gone at the provider: Not found)");
+    fireEvent.click(item(THREAD_WORDS.rename));
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 
   it("the keys the sidebar traverses with are the field's while a name is typed", async () => {

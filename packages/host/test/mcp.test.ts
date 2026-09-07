@@ -554,7 +554,7 @@ describe("the MCP server over the host", () => {
   });
 
   it("thread_rename names the thread in the agent's own store and returns the outcome; an agent that keeps no name is an answer, not an error", async () => {
-    const named = scriptedAgent(prompt => `re: ${prompt}`, () => "written");
+    const named = scriptedAgent(prompt => `re: ${prompt}`, () => ({ kind: "written" }));
     await restartHost({ claude: named.adapter, codex: scriptedAgent(prompt => `codex: ${prompt}`).adapter });
     await call("new", { name: "alpha" });
     await call("thread_new", { workspace: "alpha", task: "build it" });

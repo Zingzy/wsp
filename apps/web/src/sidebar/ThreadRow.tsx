@@ -25,6 +25,7 @@ export function ThreadRow({
   time,
   active,
   renaming,
+  saving,
   onSelect,
   onContextMenu,
   onRename,
@@ -35,6 +36,8 @@ export function ThreadRow({
   active: boolean;
   /** The name is being typed on this row: the title slot holds the input instead of the text. */
   renaming: boolean;
+  /** That name is on its way to the machine: the field stays exactly as it is and takes no second Enter. */
+  saving: boolean;
   onSelect: () => void;
   onContextMenu: (event: MouseEvent<HTMLElement>) => void;
   onRename: (title: string) => void;
@@ -60,7 +63,7 @@ export function ThreadRow({
         <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
           <span className="flex items-center gap-2">
             {renaming ? (
-              <ThreadNameInput title={thread.title} onRename={onRename} onCancel={onRenameCancel} />
+              <ThreadNameInput title={thread.title} saving={saving} onRename={onRename} onCancel={onRenameCancel} />
             ) : (
               <span data-thread-title className={cn("min-w-0 flex-1 truncate", idle && "text-sidebar-muted-foreground")}>
                 {thread.title}
@@ -87,8 +90,10 @@ export function ThreadRow({
 
 /** The title as a field, in the title's own font and size: the name it had, selected, so typing replaces it. Enter
  * names the thread, Escape and leaving it cancel, and a name that is blank or unchanged is a cancel too. Keys stop
- * here rather than reaching the sidebar's own traversal, which reads Home and End. */
-function ThreadNameInput({ title, onRename, onCancel }: { title: string; onRename: (title: string) => void; onCancel: () => void }) {
+ * here rather than reaching the sidebar's own traversal, which reads Home and End. While the name is on its way to
+ * the machine the field stays as it is and neither Enter nor leaving it does anything, so a wake that takes seconds
+ * cannot lose what was typed. */
+function ThreadNameInput({ title, saving, onRename, onCancel }: { title: string; saving: boolean; onRename: (title: string) => void; onCancel: () => void }) {
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
     ref.current?.focus({ preventScroll: true });
@@ -96,6 +101,7 @@ function ThreadNameInput({ title, onRename, onCancel }: { title: string; onRenam
   }, []);
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     event.stopPropagation();
+    if (saving) return;
     if (event.key === "Escape") {
       event.preventDefault();
       onCancel();
@@ -114,9 +120,11 @@ function ThreadNameInput({ title, onRename, onCancel }: { title: string; onRenam
       aria-label={THREAD_WORDS.rename}
       defaultValue={title}
       spellCheck={false}
-      className="min-w-0 flex-1 rounded-sm bg-transparent p-0 text-inherit outline-hidden ring-1 ring-ring/50"
+      className="min-w-0 flex-1 rounded-sm bg-transparent p-0 text-inherit outline-hidden ring-1 ring-ring/50 ring-offset-1 ring-offset-transparent"
       onKeyDown={onKeyDown}
-      onBlur={onCancel}
+      onBlur={() => {
+        if (!saving) onCancel();
+      }}
     />
   );
 }

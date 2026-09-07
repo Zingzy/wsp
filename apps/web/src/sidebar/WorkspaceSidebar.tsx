@@ -11,10 +11,10 @@
 // paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { COMPUTER_OFFLINE_LINE, computerOffline, goldenHead, type WorkspaceSize } from "@wsp/protocol";
+import { COMPUTER_OFFLINE_LINE, computerOffline, goldenHead, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions } from "../actions/registry.js";
-import { threadActions, type ThreadVerbs } from "../actions/threadActions.js";
+import { threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
 import { useThreadVerbs, useWorkspaceVerbs } from "../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
@@ -27,7 +27,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
-import { useCapabilities, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { catalogIn, useCapabilities, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, type ProjectTripRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
@@ -106,16 +106,19 @@ export function WorkspaceSidebar() {
   /** Workspace id to the machine id a rebuild was asked for; the action stays disabled while that machine is still the one reported. */
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
   const [forgetting, setForgetting] = useState<string | null>(null);
-  /** The session id of the thread row whose name is being typed; one row at a time, and the row is the only editor. */
-  const [renaming, setRenaming] = useState<string | null>(null);
+  /** The thread whose name is being typed, by its fold key, and whether its name is on its way to the machine; one
+   * row at a time, the row is the only editor, and the field stays until the store has taken the name. */
+  const [renaming, setRenaming] = useState<{ threadId: string; saving: boolean } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const renameThread = useStore(s => s.renameThread);
   const canRename = useStore(s => s.api?.renameSession !== undefined);
+  const harnesses = useStore(s => s.harnesses);
+  const harnessesByWorkspace = useStore(s => s.harnessesByWorkspace);
   // The sidebar draws the rows, so it owns the rename's opener, as it owns the forget's dialog; a client that cannot
   // send the name offers no box, and the action carries that refusal.
   const defaultThreadVerbs = useThreadVerbs();
   const threadVerbs = useMemo<ThreadVerbs>(
-    () => ({ ...defaultThreadVerbs, ...(canRename ? { rename: (sessionId: string) => setRenaming(sessionId) } : {}) }),
+    () => ({ ...defaultThreadVerbs, ...(canRename ? { rename: (threadId: string) => setRenaming({ threadId, saving: false }) } : {}) }),
     [canRename, defaultThreadVerbs],
   );
   const defaultVerbs = useWorkspaceVerbs();
@@ -173,23 +176,33 @@ export function WorkspaceSidebar() {
     setSettledCollapsed(prev => (prev.includes(id) ? prev.filter(other => other !== id) : [...prev, id]));
   };
 
+  /** The name a person typed on a row: the machine takes it (waking first if it naps) while the field stays as it
+   * is, and the field closes only once the store has it. A refusal leaves the name in the field to try again, with
+   * the reason in the toast, so nothing a person typed is lost to a message. */
+  const sendName = async (thread: SidebarThreadSnapshot, title: string): Promise<void> => {
+    setRenaming({ threadId: thread.id, saving: true });
+    const named = await renameThread({ sessionId: thread.sessionId, workspaceId: thread.workspaceId, harness: thread.harness, title });
+    setRenaming(open => (open?.threadId !== thread.id ? open : named ? null : { threadId: thread.id, saving: false }));
+  };
+
   /** One thread's row, wherever it is listed: the active list and the idle shelf read the same props. */
-  const threadRow = (thread: SidebarThreadSnapshot, time: string) => (
-    <ThreadRow
-      key={thread.id}
-      thread={thread}
-      time={time}
-      active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
-      renaming={renaming === thread.sessionId}
-      onSelect={() => select(thread.workspaceId, thread.threadId)}
-      onContextMenu={event => void openContextMenu(event, resolveActions(threadActions, thread, threadVerbs))}
-      onRename={title => {
-        setRenaming(null);
-        void renameThread({ sessionId: thread.sessionId, workspaceId: thread.workspaceId, harness: thread.harness, title });
-      }}
-      onRenameCancel={() => setRenaming(null)}
-    />
-  );
+  const threadRow = (thread: SidebarThreadSnapshot, time: string, machine: { state: WorkspaceState; goneWords?: string | undefined }) => {
+    const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machine });
+    return (
+      <ThreadRow
+        key={thread.id}
+        thread={thread}
+        time={time}
+        active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
+        renaming={renaming?.threadId === thread.id}
+        saving={renaming?.threadId === thread.id && renaming.saving}
+        onSelect={() => select(thread.workspaceId, thread.threadId)}
+        onContextMenu={event => void openContextMenu(event, resolveActions(threadActions, target, threadVerbs))}
+        onRename={title => void sendName(thread, title)}
+        onRenameCancel={() => setRenaming(null)}
+      />
+    );
+  };
 
   const rows = (): HTMLElement[] => Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []);
   const focusRow = (id: string | null): void => {
@@ -294,8 +307,11 @@ export function WorkspaceSidebar() {
                     const settledOpen = !settledCollapsed.includes(project.id);
                     const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
                     const showThreads = !isCollapsed && active.length + settled.length > 0;
-                    const actionsOf = resolveActions(workspaceActions, workspaceTarget(project.workspace, project.status), verbs);
+                    const workspace = workspaceTarget(project.workspace, project.status);
+                    const actionsOf = resolveActions(workspaceActions, workspace, verbs);
                     const newThreadAction = actionById(actionsOf, "new-thread");
+                    // The machine every thread of this workspace runs on: what a rename has to reach.
+                    const machine = { state: workspaceState(workspace), ...(workspace.reason !== null ? { goneWords: workspace.reason } : {}) };
                     return (
                       <SidebarMenuItem key={project.id} onContextMenu={event => void openContextMenu(event, actionsOf, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") })}>
                         <WorkspaceRow
@@ -328,7 +344,7 @@ export function WorkspaceSidebar() {
                         ) : null}
                         {showThreads ? (
                           <SidebarMenuSub>
-                            {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt)))}
+                            {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), machine))}
                             {settled.length > 0 ? (
                               <SidebarMenuSubItem data-thread-selection-safe>
                                 <button
@@ -347,7 +363,7 @@ export function WorkspaceSidebar() {
                                 </button>
                               </SidebarMenuSubItem>
                             ) : null}
-                            {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)))) : null}
+                            {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine)) : null}
                           </SidebarMenuSub>
                         ) : null}
                       </SidebarMenuItem>

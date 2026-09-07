@@ -862,7 +862,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("thread rename names the thread in the agent's own store and says so; an agent that keeps no name, one whose store has no such session, and an unknown thread each say why", async () => {
-    const named = scriptedAgent(prompt => `re: ${prompt}`, title => (title === "nowhere" ? "no-session" : "written"));
+    const named = scriptedAgent(prompt => `re: ${prompt}`, title => (title === "nowhere" ? { kind: "no-session" } : title === "locked" ? { kind: "failed", error: "database is locked" } : { kind: "written" }));
     await restartHost({ claude: named.adapter, codex: codex.adapter });
     await run("new", "alpha");
     await run("thread", "new", "--in", "alpha", "build it");
@@ -877,6 +877,14 @@ describe("wsp verbs over the host", () => {
     const nowhere = await run("thread", "rename", row!.threadId!, "nowhere", "--json");
     expect(nowhere.code).toBe(0);
     expect(json(nowhere.io)).toEqual([{ threadId: row!.threadId, title: "nowhere", harness: "claude", outcome: "no-session" }]);
+
+    // A store that refused the write says nothing about its sessions, so its own line is the answer, not "no such session".
+    const locked = await run("thread", "rename", row!.threadId!, "locked");
+    expect(locked.code).toBe(0);
+    expect(locked.io.lines).toEqual([`thread ${row!.threadId} not named: database is locked`]);
+    expect(json((await run("thread", "rename", row!.threadId!, "locked", "--json")).io)).toEqual([
+      { threadId: row!.threadId, title: "locked", harness: "claude", outcome: "failed", error: "database is locked" },
+    ]);
 
     await run("thread", "new", "--in", "alpha", "--agent", "codex", "build it there");
     const codexRow = (await rt.sessions.list()).find(v => v.harness === "codex")!;
@@ -893,7 +901,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("thread rename wakes a napping workspace first, since the name goes into a store on its machine", async () => {
-    const named = scriptedAgent(prompt => `re: ${prompt}`, () => "written");
+    const named = scriptedAgent(prompt => `re: ${prompt}`, () => ({ kind: "written" }));
     await restartHost({ claude: named.adapter });
     await run("new", "alpha");
     await run("thread", "new", "--in", "alpha", "build it");

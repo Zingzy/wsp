@@ -3,8 +3,8 @@
 // show it, the label a row button on the object's own row wears, and the one
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
-import { agentName, keepsRename } from "@wsp/catalog";
-import { actionRefusal, goneRefusal, isBilling, workspaceWord, type SessionRenameOutcome, type WorkspaceState } from "@wsp/protocol";
+import { agentName } from "@wsp/catalog";
+import { actionRefusal, goneRefusal, isBilling, keepsRename, workspaceWord, type HarnessCatalog, type SessionRenameOutcome, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -122,20 +122,26 @@ export const NO_THREAD_DELETE = "Deleting a thread is not in the runtime yet";
  * thread's next turn, so nothing offers one. The refusal and the toast both read it. */
 export const notKeptLine = (harness: string): string => `Rename in ${agentName(harness)} is not kept`;
 
-/** Why the rename cannot run, or null when it can: an agent that keeps no name of a person's refuses whatever the
- * client is, and a client with nowhere to send the name says so. */
-export function threadRenameRefusal(harness: string, hasVerb: boolean): string | null {
-  if (!keepsRename(harness)) return notKeptLine(harness);
-  return hasVerb ? null : CLIENT_CANNOT_RENAME;
+/** Why the rename cannot run, or null when it can. The harness's own catalog row answers whether a name is kept, as
+ * it answers whether a turn steers; a row the runtime's table stood in for is no answer, so the box opens and the
+ * runtime says. A machine that is not up is woken by the rename itself, as the command line's own rename does, so
+ * only a machine that cannot be woken at all refuses here. */
+export function threadRenameRefusal(opts: { catalog: HarnessCatalog | null; harness: string; state: WorkspaceState; goneWords?: string; hasVerb: boolean }): string | null {
+  if (!keepsRename(opts.catalog)) return notKeptLine(opts.harness);
+  if (!opts.hasVerb) return CLIENT_CANNOT_RENAME;
+  return opts.state === "gone" ? goneRefusal("rename", opts.goneWords) : null;
 }
 
-/** What the toast says when the runtime named nothing: the answer in the person's words, never the enum. */
-export function renameNotTakenLine(harness: string, outcome: Exclude<SessionRenameOutcome, "renamed">): string {
+/** What the toast says when the runtime named nothing: the answer in the person's words, never the enum, and the
+ * machine's own line where the store refused the write, since nothing else is known about it then. */
+export function renameNotTakenLine(harness: string, outcome: Exclude<SessionRenameOutcome, "renamed">, error?: string): string {
   switch (outcome) {
     case "unsupported":
       return notKeptLine(harness);
     case "no-session":
       return `${agentName(harness)} on the machine has no session for this thread yet`;
+    case "failed":
+      return error ?? "The machine said nothing about the write";
     case "not-found":
       return "The runtime has no such thread any more";
     default: {

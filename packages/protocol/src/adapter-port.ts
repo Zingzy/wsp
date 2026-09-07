@@ -105,10 +105,18 @@ export function catalogRefused(answer: HarnessCatalogAnswer): answer is HarnessC
 export type SessionTitleReader = (harnessSessionId: string, exec: (command: string) => Promise<string>) => Promise<string | null>;
 
 /**
+ * What a rename came to in the harness's own store. written: the store took the name. no-session: the store answered
+ * and holds no such session, so there was nothing to name. failed: the store was there and the write did not land,
+ * and `error` is the line the machine gave for it (the store's own message, a lock that never came free, no store on
+ * the machine at all); nothing may be told about a session from it.
+ */
+export type SessionRenameWrite = { kind: "written" } | { kind: "no-session" } | { kind: "failed"; error: string };
+
+/**
  * Writes the name a person gave one of the harness's sessions into the harness's own store on the machine, the same
  * field the harness writes when the person renames the session inside it, so the harness itself shows the new name
  * too. The id is the session as that harness keys it, as SessionTitleReader takes it, and one shell line goes to
- * `exec`. written: the store took the name. no-session: nothing was written, because the store holds no such session
- * or the machine carries no such store at all. Absent on an adapter whose harness keeps no name of a person's.
+ * `exec`, whose stdout says which of the three answers it is. Absent on an adapter whose harness keeps no name of a
+ * person's.
  */
-export type SessionRenamer = (harnessSessionId: string, title: string, exec: (command: string) => Promise<string>) => Promise<"written" | "no-session">;
+export type SessionRenamer = (harnessSessionId: string, title: string, exec: (command: string) => Promise<string>) => Promise<SessionRenameWrite>;

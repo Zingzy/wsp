@@ -322,6 +322,10 @@ export const HarnessCatalog = z.object({
   /** Whether a running turn of this harness takes a message (sessions.steer); false where the runtime's table alone
    * answers, since only the adapter on a machine knows. The composer picks send-now's road from this before the click. */
   steers: z.boolean(),
+  /** Whether a person's name for one of this harness's sessions survives in the harness's own store (sessions.rename);
+   * false where the runtime's table alone answers, since only the adapter on a machine knows. Read it through
+   * keepsRename, which reads a table row as no answer rather than as a no. */
+  renames: z.boolean(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -329,6 +333,13 @@ export const HarnessCatalog = z.object({
   refusal: z.string().optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
+
+/** Whether a rename of one of this harness's sessions is kept in its own store, as far as this catalog knows. The
+ * answer is the adapter's on the machine, so a row the runtime's table stood in for is not a no: a client offers the
+ * rename and the runtime answers unsupported if the adapter turns out to carry no write. */
+export function keepsRename(catalog: HarnessCatalog | null | undefined): boolean {
+  return catalog === null || catalog === undefined || catalog.source === "table" || catalog.renames;
+}
 
 /** The option a list marks as its default, if one is: what an unpicked picker shows and an unnamed start runs. */
 export function markedDefault<T extends HarnessOption>(options: ReadonlyArray<T>): T | undefined {
@@ -1752,11 +1763,12 @@ export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
 
 /** renamed: the harness's store took the name, in the field the harness itself writes, and the thread's rows carry
  * it. unsupported: the session's harness keeps no name of a person's, so nothing was written and nothing would have
- * survived its next turn. no-session: the harness's store on the machine holds no such session, or no such store is
- * there at all; nothing was written. not-found: this runtime holds no such session. None is an error reply. */
-export const SessionRenameOutcome = z.enum(["renamed", "unsupported", "no-session", "not-found"]);
+ * survived its next turn. no-session: the store answered and holds no such session, or the harness never announced
+ * one for this thread. failed: the store was there and refused the write, and `error` is the line the machine gave
+ * for it. not-found: this runtime holds no such session. None is an error reply. */
+export const SessionRenameOutcome = z.enum(["renamed", "unsupported", "no-session", "failed", "not-found"]);
 export type SessionRenameOutcome = z.infer<typeof SessionRenameOutcome>;
-export const SessionRenameResult = z.object({ outcome: SessionRenameOutcome });
+export const SessionRenameResult = z.object({ outcome: SessionRenameOutcome, error: z.string().optional() });
 export type SessionRenameResult = z.infer<typeof SessionRenameResult>;
 
 // --- session start (how the turn the caller asked for came to be) --------------
@@ -1833,4 +1845,4 @@ export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export { catalogRefused } from "./adapter-port.js";
-export type { AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionRenamer, SessionTitleReader } from "./adapter-port.js";
+export type { AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionRenameWrite, SessionRenamer, SessionTitleReader } from "./adapter-port.js";

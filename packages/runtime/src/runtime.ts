@@ -2487,7 +2487,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * not answer costs one exec, not one per composer mount. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
   const catalogOn = (table: HarnessCatalog, machine: Machine, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
-    const known: HarnessCatalog = { ...table, steers: adapter.steers };
+    const known: HarnessCatalog = { ...table, steers: adapter.steers, renames: adapter.renameSession !== undefined };
     if (adapter.probeCatalog === undefined) return Promise.resolve(known);
     const key = `${machine.id}:${table.harness}`;
     const hit = catalogs.get(key);
@@ -2924,7 +2924,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // The store is keyed by the harness's own id, so a thread whose harness never announced one has nothing to name.
       if (harnessSessionId === undefined) return { outcome: "no-session" };
       const wrote = await write(harnessSessionId, named, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout));
-      if (wrote !== "written") return { outcome: "no-session" };
+      // A store that refused the write says nothing about which sessions it has, so its own line travels as the answer.
+      if (wrote.kind === "failed") return { outcome: "failed", error: wrote.error };
+      if (wrote.kind === "no-session") return { outcome: "no-session" };
       // Every turn of the thread shares the harness's session, and the fold reads the latest turn's title.
       for (const row of sessions.values()) {
         if (row.view.workspaceId === entry.record.id && row.view.claudeSessionId === harnessSessionId) row.view.harnessTitle = named;

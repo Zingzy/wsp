@@ -7,9 +7,9 @@
 // is folded from.
 import { randomUUID } from "node:crypto";
 import { createCodexAdapter } from "@wsp/adapter-codex";
-import { THREAD_AGENTS, keepsRename } from "@wsp/catalog";
+import { THREAD_AGENTS, type ThreadAgent } from "@wsp/catalog";
 import type { Machine } from "@wsp/engine";
-import { EMPTY_TITLE_LINE, foldThreads, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { EMPTY_TITLE_LINE, foldThreads, keepsRename, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { SESSION_TITLE_REFRESH_MAX, SESSION_TITLE_TTL_MS, createRuntime, type HarnessAdapter, type HarnessAdapterFactory } from "../src/runtime.js";
@@ -25,14 +25,23 @@ const RENAME_COMMAND = "wsp-title-write";
 /**
  * An adapter whose turn runs to its end on its own, and which reads its title with one line to the machine. A
  * resumed start announces the id it was given, as both real adapters do; `rekeys` mints its own local id beside it,
- * the way the codex adapter does, so two rows can share one harness session.
+ * the way the codex adapter does, so two rows can share one harness session, and `announces: false` is a turn that
+ * died before its harness ever named a session, as a launch that never reached the machine does.
  */
-function titledAdapter(options: { keepsTitles?: boolean; keepsNames?: boolean; rekeys?: boolean; reader?: HarnessAdapter["sessionTitle"] } = {}): HarnessAdapterFactory {
+function titledAdapter(
+  options: { keepsTitles?: boolean; keepsNames?: boolean; rekeys?: boolean; announces?: boolean; reader?: HarnessAdapter["sessionTitle"] } = {},
+): HarnessAdapterFactory {
   const reader: HarnessAdapter["sessionTitle"] =
     options.reader ??
     ((sessionId, exec) => exec(`${TITLE_COMMAND} ${sessionId}`).then(stdout => (stdout.trim() === "" ? null : stdout.trim())));
+  // The three answers a real store's line gives, off the same stdout the real parsers read.
   const writer: HarnessAdapter["renameSession"] = (sessionId, title, exec) =>
-    exec(`${RENAME_COMMAND} ${sessionId} ${title}`).then(stdout => (stdout.trim() === "written" ? "written" : "no-session"));
+    exec(`${RENAME_COMMAND} ${sessionId} ${title}`).then(stdout => {
+      const said = stdout.trim();
+      if (said === "written") return { kind: "written" };
+      if (said === "no-session") return { kind: "no-session" };
+      return { kind: "failed", error: said };
+    });
   return () => ({
     steers: false,
     ...(options.keepsTitles === false ? {} : { sessionTitle: reader }),
@@ -42,7 +51,7 @@ function titledAdapter(options: { keepsTitles?: boolean; keepsNames?: boolean; r
       const result: TurnResult = { status: "completed", text: "ok" };
       const emit = (e: AdapterEvent): void => o.onEvent(e);
       const finished = Promise.resolve().then(() => {
-        emit({ type: "session.start", sessionId });
+        if (options.announces !== false) emit({ type: "session.start", sessionId });
         emit({ type: "turn.done", sessionId, result });
         emit({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
         return result;
@@ -53,9 +62,9 @@ function titledAdapter(options: { keepsTitles?: boolean; keepsNames?: boolean; r
 }
 
 /** A backend whose guest answers the title command with `titled()` and nothing else, counting the reads. With
- * `written`, it answers the write command too: the guest that takes a name says so, and one that has no such
- * session says nothing, exactly as each real store's line does. */
-function titledBackend(titled: () => string | null, written?: (title: string) => boolean) {
+ * `wrote`, it answers the write command too, in the words a real store's line prints: `written`, `no-session`, or
+ * anything else, which is the machine's own line for a write that did not land. */
+function titledBackend(titled: () => string | null, wrote?: (title: string) => string) {
   const backend = stubBackend();
   const reads: string[] = [];
   const writes: string[] = [];
@@ -64,7 +73,7 @@ function titledBackend(titled: () => string | null, written?: (title: string) =>
     if (cmd.startsWith(RENAME_COMMAND)) {
       writes.push(cmd);
       const title = cmd.slice(`${RENAME_COMMAND} `.length).split(" ").slice(1).join(" ");
-      return { exitCode: 0, stdout: written?.(title) === true ? "written" : "", stderr: "" };
+      return { exitCode: 0, stdout: wrote?.(title) ?? "", stderr: "" };
     }
     if (!cmd.startsWith(TITLE_COMMAND)) return inner(m, cmd);
     reads.push(cmd);
@@ -247,7 +256,7 @@ describe("naming a thread from wsp", () => {
     let named: string | null = null;
     const { backend, writes } = titledBackend(() => named, title => {
       named = title;
-      return true;
+      return "written";
     });
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, rekeys: true }) }, clock });
@@ -270,7 +279,7 @@ describe("naming a thread from wsp", () => {
 
   it("outlives the process: the name is on the session index the next host reads back", async () => {
     const store = memoryStore();
-    const { backend } = titledBackend(() => null, () => true);
+    const { backend } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store, adapters: { claude: titledAdapter({ keepsNames: true }) } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
@@ -280,7 +289,7 @@ describe("naming a thread from wsp", () => {
   });
 
   it("answers unsupported for a harness that keeps no name of a person's, and asks its machine nothing", async () => {
-    const { backend, writes } = titledBackend(() => null, () => true);
+    const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
@@ -291,7 +300,7 @@ describe("naming a thread from wsp", () => {
   });
 
   it("answers no-session when the store took nothing, and the row keeps the title it had", async () => {
-    const { backend } = titledBackend(() => "Building the server", () => false);
+    const { backend } = titledBackend(() => "Building the server", () => "no-session");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
@@ -301,15 +310,40 @@ describe("naming a thread from wsp", () => {
     expect(await titleOf(rt, ws.id)).toBe("Building the server");
   });
 
+  it("answers failed with the machine's own line when the store refused the write, and the row keeps the title it had", async () => {
+    const { backend } = titledBackend(() => "Building the server", () => "database is locked");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await session.finished;
+    await until(async () => (await rt.sessions.list(ws.id))[0]?.harnessTitle !== undefined);
+    // Not no-session: a store that refused the write said nothing about which sessions it has.
+    expect(await rt.sessions.rename(session.id, "the name")).toEqual({ outcome: "failed", error: "database is locked" });
+    expect(await titleOf(rt, ws.id)).toBe("Building the server");
+  });
+
+  it("answers no-session for a thread whose harness never named a session, and asks the machine nothing", async () => {
+    const { backend, writes } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, announces: false }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await session.finished;
+    // The turn ended without a session.start, so the row carries no harness id and the store is keyed by nothing.
+    expect((await rt.sessions.list(ws.id))[0]).not.toHaveProperty("claudeSessionId");
+    expect(await rt.sessions.rename(session.id, "the name")).toEqual({ outcome: "no-session" });
+    expect(writes).toEqual([]);
+    expect(await titleOf(rt, ws.id)).toBe("make a server");
+  });
+
   it("answers not-found for a session this runtime does not hold", async () => {
-    const { backend } = titledBackend(() => null, () => true);
+    const { backend } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
     await rt.workspaces.create({ golden: "snap_g", name: "a" });
     expect(await rt.sessions.rename("no-such-session", "the name")).toEqual({ outcome: "not-found" });
   });
 
   it("refuses a name that is nothing but space, before it asks anything of the machine", async () => {
-    const { backend, writes } = titledBackend(() => null, () => true);
+    const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
@@ -319,7 +353,7 @@ describe("naming a thread from wsp", () => {
   });
 
   it("refuses while the machine is not up, since the name goes into a store on it", async () => {
-    const { backend, writes } = titledBackend(() => null, () => true);
+    const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
@@ -330,7 +364,7 @@ describe("naming a thread from wsp", () => {
   });
 
   it("names the session the harness announced, whatever the runtime calls the row", async () => {
-    const { backend, writes } = titledBackend(() => null, () => true);
+    const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, rekeys: true }) } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server", resume: SESSION });
@@ -342,12 +376,33 @@ describe("naming a thread from wsp", () => {
 });
 
 describe("the agents whose store keeps a name", () => {
-  it("is one fact: every agent the catalog says keeps a rename is the one whose adapter carries the write", () => {
+  it("rides on the harness's catalog row from its adapter, as steers does, and is written nowhere else", async () => {
+    const { backend } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: HARNESS_ADAPTERS });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const rows = await rt.harnesses.list(ws.id);
+    expect(rows.map(c => c.harness).sort()).toEqual([...THREAD_AGENTS].sort());
     const machine = { id: "m_1" } as unknown as Machine;
-    for (const id of THREAD_AGENTS) {
-      const adapter = HARNESS_ADAPTERS[id]({ machine, workspaceId: "ws_1", env: {} });
-      expect(adapter.renameSession !== undefined, id).toBe(keepsRename(id));
+    for (const row of rows) {
+      const adapter = HARNESS_ADAPTERS[row.harness as ThreadAgent]({ machine, workspaceId: ws.id, env: {} });
+      expect(row.renames, row.harness).toBe(adapter.renameSession !== undefined);
+      expect(keepsRename(row), row.harness).toBe(true);
     }
-    expect(THREAD_AGENTS.filter(keepsRename)).toEqual(["claude", "codex"]);
+    // Without a machine the runtime's table answers, which is no answer: a client still offers the rename.
+    for (const row of await rt.harnesses.list()) {
+      expect(row.source).toBe("table");
+      expect(keepsRename(row), row.harness).toBe(true);
+    }
+  });
+
+  it("an adapter that carries no write says so on its row, and a client reads that as a no", async () => {
+    const { backend } = titledBackend(() => null);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const [row] = await rt.harnesses.list(ws.id);
+    expect(row).toMatchObject({ harness: "claude", renames: false, source: "table" });
+    // The row came from the table, so it is no answer yet; the same row from the machine is a no.
+    expect(keepsRename(row!)).toBe(true);
+    expect(keepsRename({ ...row!, source: "harness" })).toBe(false);
   });
 });

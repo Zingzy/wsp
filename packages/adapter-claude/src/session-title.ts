@@ -10,6 +10,7 @@
 // rename wins wherever in the file it sits.
 
 import { shellQuote } from "@wsp/protocol";
+import type { SessionRenameWrite } from "@wsp/protocol";
 
 const AI_TITLE = '"type":"ai-title"';
 const CUSTOM_TITLE = '"type":"custom-title"';
@@ -24,7 +25,7 @@ const CUSTOM_TITLE = '"type":"custom-title"';
 export function sessionTitleCommand(options: { configDir: string; sessionId: string }): string {
   const file = `${shellQuote(`${options.configDir}/projects`)}/*/${shellQuote(`${options.sessionId}.jsonl`)}`;
   return (
-    `f=$(ls -1t ${file} 2>/dev/null | head -n 1); [ -n "$f" ] || exit 0; ` +
+    `f=$(ls -1td ${file} 2>/dev/null | head -n 1); [ -n "$f" ] || exit 0; ` +
     `grep -F ${shellQuote(CUSTOM_TITLE)} "$f" | tail -n 1; ` +
     `grep -F ${shellQuote(AI_TITLE)} "$f" | tail -n 1; true`
   );
@@ -55,27 +56,37 @@ export function parseSessionTitle(stdout: string): string | null {
   return null;
 }
 
-/** What a rename prints once the record landed; an append that never ran prints nothing. */
+/** The three words the write answers with on stdout, one per line: the append landed, no file of that id under the
+ * config dir, or the shell's own message for an append that did not run. */
 const WROTE = "wrote";
+const NO_SESSION = "no-session";
+const FAILED = "failed";
 
 /**
  * One shell line for the guest: the custom-title record appended to the session's file, the same record `/rename`
  * inside the CLI appends (measured on 2.1.263: the keys in this order, one line, nothing else touched), in whichever
  * project folder holds the session, the freshest first as the read picks it. A file whose last line was left half
- * written by a crash takes a newline first, so the record is never swallowed by it. Nothing on stdout when there is
- * no such file, which reads as no session to name.
+ * written by a crash takes a newline first, so the record is never swallowed by it. The glob is the store's answer,
+ * so no file of that id is no session; an append that could not run says so with the shell's own line, since a full
+ * disk or a read-only mount says nothing about which sessions the store has.
  */
 export function renameCommand(options: { configDir: string; sessionId: string; title: string }): string {
   const file = `${shellQuote(`${options.configDir}/projects`)}/*/${shellQuote(`${options.sessionId}.jsonl`)}`;
   const record = JSON.stringify({ type: "custom-title", customTitle: options.title, sessionId: options.sessionId });
   return (
-    `f=$(ls -1t ${file} 2>/dev/null | head -n 1); [ -n "$f" ] || exit 0; ` +
-    `[ -z "$(tail -c 1 "$f")" ] || printf '\n' >> "$f"; ` +
-    `printf '%s\n' ${shellQuote(record)} >> "$f" && echo ${WROTE}`
+    `f=$(ls -1td ${file} 2>/dev/null | head -n 1); [ -n "$f" ] || { echo ${NO_SESSION}; exit 0; }; ` +
+    `[ -z "$(tail -c 1 "$f")" ] || printf '\n' >> "$f" 2>/dev/null; ` +
+    `e=$({ printf '%s\n' ${shellQuote(record)} >> "$f"; } 2>&1) && echo ${WROTE} || printf '%s %s\n' ${FAILED} "$e"`
   );
 }
 
-/** Whether the record landed: the line the append prints, else nothing was written to any file of that id. */
-export function parseRename(stdout: string): "written" | "no-session" {
-  return stdout.split("\n").some(line => line.trim() === WROTE) ? "written" : "no-session";
+/** What the write came to, in the words the line printed; a stdout with none of them is a failure with what it said,
+ * since a write nobody confirmed may not read as a session that is not there. */
+export function parseRename(stdout: string): SessionRenameWrite {
+  const lines = stdout.split("\n").map(line => line.trim());
+  if (lines.includes(WROTE)) return { kind: "written" };
+  if (lines.includes(NO_SESSION)) return { kind: "no-session" };
+  const said = lines.filter(line => line !== "");
+  const failed = said.find(line => line.startsWith(`${FAILED} `));
+  return { kind: "failed", error: failed !== undefined ? failed.slice(FAILED.length + 1) : said.join("; ") || "the machine said nothing about the write" };
 }

@@ -364,30 +364,84 @@ describe("store sessions", () => {
     api.renameSession = async (sessionId, title) => {
       renames.push([sessionId, title]);
       sessions[0]!.harnessTitle = title;
-      return "renamed";
+      return { outcome: "renamed" };
     };
     useStore.getState().bind(api);
     await flush();
     listCalls.length = 0;
 
-    await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name he typed" });
+    expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name he typed" })).toBe(true);
     expect(renames).toEqual([["s1", "the name he typed"]]);
     expect(listCalls).toEqual(["ws_a"]);
     expect(useStore.getState().sessions["ws_a"]![0]!.harnessTitle).toBe("the name he typed");
     expect(useStore.getState().toast).toBeNull();
   });
 
+  it("wakes a napping machine before the name goes, as the command line's own rename does, and paints the row from the reply", async () => {
+    const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed" }];
+    const { api } = fakeApi([{ ...view("ws_a"), phase: "napping" }], sessions);
+    const order: string[] = [];
+    api.wake = async id => {
+      order.push("wake");
+      return { ...view(id), phase: "running" };
+    };
+    api.renameSession = async () => {
+      order.push("rename");
+      return { outcome: "renamed" };
+    };
+    useStore.getState().bind(api);
+    await flush();
+
+    expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(true);
+    expect(order).toEqual(["wake", "rename"]);
+    expect(useStore.getState().workspaces[0]!.phase).toBe("running");
+    expect(useStore.getState().toast).toBeNull();
+
+    // A machine already up is not woken again.
+    order.length = 0;
+    await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "another name" });
+    expect(order).toEqual(["rename"]);
+  });
+
+  it("a wake the runtime refused is a toast and no name sent, so the caller can keep what was typed", async () => {
+    const { api } = fakeApi([{ ...view("ws_a"), phase: "napping" }], []);
+    const sent: string[] = [];
+    api.wake = async () => {
+      throw new RequestError("Workspace is pausing; it can be woken once it is paused");
+    };
+    api.renameSession = async (_id, title) => {
+      sent.push(title);
+      return { outcome: "renamed" };
+    };
+    useStore.getState().bind(api);
+    await flush();
+
+    expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
+    expect(sent).toEqual([]);
+    expect(useStore.getState().toast).toBe("the name: Workspace is pausing; it can be woken once it is paused");
+  });
+
   it("a rename the runtime named nothing for is a toast in the agent's words, and no reload", async () => {
     const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed" }];
     const { api, listCalls } = fakeApi([view("ws_a")], sessions);
-    api.renameSession = async () => "no-session";
+    api.renameSession = async () => ({ outcome: "no-session" });
     useStore.getState().bind(api);
     await flush();
     listCalls.length = 0;
 
-    await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" });
+    expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
     expect(useStore.getState().toast).toBe("Claude Code on the machine has no session for this thread yet");
     expect(listCalls).toEqual([]);
+  });
+
+  it("a write the store refused is a toast in the machine's own line, never a sentence about which sessions it has", async () => {
+    const { api } = fakeApi([view("ws_a")], [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed" }]);
+    api.renameSession = async () => ({ outcome: "failed", error: "database is locked" });
+    useStore.getState().bind(api);
+    await flush();
+
+    expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
+    expect(useStore.getState().toast).toBe("database is locked");
   });
 
   it("a rename the socket refused is a toast under the name, and a dropped socket says nothing", async () => {
@@ -397,7 +451,7 @@ describe("store sessions", () => {
     };
     useStore.getState().bind(api);
     await flush();
-    await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" });
+    expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
     expect(useStore.getState().toast).toBe("the name: the runtime refused it");
 
     api.renameSession = async () => {

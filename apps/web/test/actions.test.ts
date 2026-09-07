@@ -6,13 +6,13 @@
 // menus are built from.
 import { PauseIcon, PlayIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { goneRefusal, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { goneRefusal, type HarnessCatalog, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
 import { FILE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
-import { threadActions, type ThreadVerbs } from "../src/actions/threadActions.js";
+import { threadActions, threadTarget, type ThreadTarget, type ThreadVerbs } from "../src/actions/threadActions.js";
 import { workspaceActions, workspaceTarget, type WorkspaceTarget, type WorkspaceVerbs } from "../src/actions/workspaceActions.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../src/keybindingDefaults.js";
 import { MAX_TERMINALS_PER_GROUP } from "../src/terminal/groups.js";
@@ -180,7 +180,30 @@ describe("workspace actions", () => {
 });
 
 describe("thread actions", () => {
-  const thread = (status: "running" | "completed", threadId: string | null = "thr_1", harness = "claude") => ({ sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status });
+  /** The agent's row as its machine answered it: renames is the adapter's answer there, as steers is. */
+  const row = (harness: string, over: Partial<HarnessCatalog> = {}): HarnessCatalog => ({
+    harness,
+    label: harness === "claude" ? "Claude Code" : harness,
+    source: "harness",
+    version: "2.1.263",
+    models: [],
+    efforts: [],
+    contextWindows: [],
+    permissionModes: [],
+    steers: false,
+    renames: true,
+    ...over,
+  });
+  const thread = (
+    status: "running" | "completed",
+    threadId: string | null = "thr_1",
+    harness = "claude",
+    machine: { catalog?: HarnessCatalog | null; state?: WorkspaceState; goneWords?: string } = {},
+  ): ThreadTarget =>
+    threadTarget(
+      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, startedAt: null, endedAt: null, indicator: null, startedBy: "person" },
+      { catalog: machine.catalog === undefined ? row(harness) : machine.catalog, state: machine.state ?? "running", ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}) },
+    );
   const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), copyText: vi.fn(async () => {}), ...over });
 
   it("a running thread offers stop, rename and copy link; delete carries its refusal", async () => {
@@ -191,9 +214,9 @@ describe("thread actions", () => {
     expect(actionById(actions, "delete").refusal).toBe("Deleting a thread is not in the runtime yet");
     await actionById(actions, "stop").run();
     expect(verbs.stop).toHaveBeenCalledWith("s1");
-    // The rename opens the name on the row the session id names; the row sends it.
+    // The rename opens the name on the row the thread's own key names, which a new turn does not move.
     await actionById(actions, "rename").run();
-    expect(verbs.rename).toHaveBeenCalledWith("s1");
+    expect(verbs.rename).toHaveBeenCalledWith("thr_1");
   });
 
   it("a settled thread refuses stop; a client without the verb says so; a thread without an id has no link", () => {
@@ -202,16 +225,30 @@ describe("thread actions", () => {
     expect(actionById(resolveActions(threadActions, thread("running", null), threadVerbs()), "copy-link").refusal).toBe("This thread has no id yet");
   });
 
-  it("says the rename is not kept for an agent whose own store keeps no name, and names that agent; a client with nowhere to type says that instead", () => {
-    const renameOf = (harness: string, over: Partial<ThreadVerbs> = {}): string | null =>
-      actionById(resolveActions(threadActions, thread("completed", "thr_1", harness), threadVerbs(over)), "rename").refusal;
-    expect(renameOf("claude")).toBeNull();
-    expect(renameOf("codex")).toBeNull();
-    expect(renameOf("gemini")).toBe("Rename in Gemini CLI is not kept");
+  it("reads whether a name is kept off the agent's own catalog row, and a row the runtime's table stood in for is no answer", () => {
+    const renameOf = (target: ThreadTarget, over: Partial<ThreadVerbs> = {}): string | null =>
+      actionById(resolveActions(threadActions, target, threadVerbs(over)), "rename").refusal;
+    expect(renameOf(thread("completed"))).toBeNull();
+    expect(renameOf(thread("completed", "thr_1", "codex", { catalog: row("codex") }))).toBeNull();
+    // The machine answered no for this agent: nothing offers the rename.
+    expect(renameOf(thread("completed", "thr_1", "gemini", { catalog: row("gemini", { renames: false }) }))).toBe("Rename in Gemini CLI is not kept");
+    // Nobody has asked that machine yet: the box opens and the runtime answers.
+    expect(renameOf(thread("completed", "thr_1", "gemini", { catalog: row("gemini", { renames: false, source: "table" }) }))).toBeNull();
+    expect(renameOf(thread("completed", "thr_1", "gemini", { catalog: null }))).toBeNull();
     // The agent keeps a name and this client has no row to edit: that is the client's own refusal.
-    expect(renameOf("claude", { rename: undefined })).toBe("This client cannot rename a thread");
+    expect(renameOf(thread("completed"), { rename: undefined })).toBe("This client cannot rename a thread");
     // An agent that keeps none refuses whatever the client has.
-    expect(renameOf("gemini", { rename: undefined })).toBe("Rename in Gemini CLI is not kept");
+    expect(renameOf(thread("completed", "thr_1", "gemini", { catalog: row("gemini", { renames: false }) }), { rename: undefined })).toBe("Rename in Gemini CLI is not kept");
+  });
+
+  it("a machine that is napping is woken by the rename itself, so only one that is gone refuses before the box opens", () => {
+    const renameOf = (state: WorkspaceState, goneWords?: string): string | null =>
+      actionById(resolveActions(threadActions, thread("completed", "thr_1", "claude", { state, ...(goneWords !== undefined ? { goneWords } : {}) }), threadVerbs()), "rename").refusal;
+    expect(renameOf("paused")).toBeNull();
+    expect(renameOf("waking")).toBeNull();
+    expect(renameOf("unreachable")).toBeNull();
+    expect(renameOf("gone")).toBe("Workspace machine is gone; rebuild it to rename");
+    expect(renameOf("gone", "machine m1 is gone at the provider")).toBe("Workspace machine is gone; rebuild it to rename (machine m1 is gone at the provider)");
   });
 
   it("copy link writes the page's address for the thread", async () => {

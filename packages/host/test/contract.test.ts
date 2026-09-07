@@ -50,7 +50,7 @@ describe("the agent contract on the command line and the tool door", () => {
     backend = stubBackend();
     store = memoryStore();
     await store.put("goldens", "default", SEALED_GOLDEN);
-    const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`), () => "written");
+    const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`), () => ({ kind: "written" }));
     rt = createRuntime({ backend, store, adapters: { claude: claude.adapter } });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");

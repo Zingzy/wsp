@@ -3,7 +3,7 @@
 // scripted harness that answers every prompt, one whose turn never ends, and
 // the guest side of the exec stream over the stub backend.
 import { randomUUID } from "node:crypto";
-import type { TurnResult } from "@wsp/protocol";
+import type { SessionRenameWrite, TurnResult } from "@wsp/protocol";
 import { tarOf, type ExecResult } from "@wsp/engine";
 import type { HarnessAdapterFactory, HarnessStartOptions, ProjectBundler } from "@wsp/runtime";
 import type { CliIO } from "../src/cli.js";
@@ -41,9 +41,10 @@ export function captured(): Captured {
  * empty, with one Bash call between them carrying its input as JSON the way the adapters send it; a resumed start
  * keeps the session id, as the real one does. The prompt `cut` is a turn the transport cut,
  * as the idle deadline does: a failed done, then an end with no exit code and no result. With `names` its store
- * keeps a person's name for a session, as Claude Code's and Codex's do, and answers what that store made of it. */
+ * keeps a person's name for a session, as Claude Code's and Codex's do, and answers what that store made of it:
+ * written, no such session, or the machine's own line for a write it refused. */
 export const CUT_LINE = "stopped after 15m 00s with no output for 10m";
-export function scriptedAgent(reply: (prompt: string) => string, names?: (title: string) => "written" | "no-session") {
+export function scriptedAgent(reply: (prompt: string) => string, names?: (title: string) => SessionRenameWrite) {
   const starts: HarnessStartOptions[] = [];
   const renames: { sessionId: string; title: string }[] = [];
   const adapter: HarnessAdapterFactory = () => ({
