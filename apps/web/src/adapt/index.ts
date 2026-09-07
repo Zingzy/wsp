@@ -9,6 +9,7 @@ export {
   summarizeToolGroup,
   toolGroupAction,
   toolGroupSummaryKind,
+  workEntryKind,
   isToolLike,
   indicatesFailure,
   indicatesSuccess,

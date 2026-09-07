@@ -1,6 +1,6 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/files/filePath.ts at 57a66608 (MIT).
 // Differs from upstream: crumbs are absolute daemon paths below the daemon root, which the project crumb stands for.
-import { baseName, joinPath, relativeTo, type ProjectEntry } from "../../files/entries";
+import { baseName, pathSegments, type ProjectEntry } from "../../files/entries";
 import type { Levels } from "../../files/listing";
 
 export interface FileBreadcrumb {
@@ -15,13 +15,13 @@ export interface FileBreadcrumbChild extends ProjectEntry {
 
 /** Crumbs start at the project, which stands for the daemon root, then one per segment below it. */
 export function fileBreadcrumbs(projectName: string, root: string, path: string): FileBreadcrumb[] {
-  const parts = relativeTo(root, path).split("/").filter(Boolean);
+  const segments = pathSegments(root, path);
   return [
     { label: projectName, path: root, kind: "project" as const },
-    ...parts.map((part, index) => ({
-      label: part,
-      path: joinPath(root, parts.slice(0, index + 1).join("/")),
-      kind: index === parts.length - 1 ? ("file" as const) : ("directory" as const),
+    ...segments.map((segment, index) => ({
+      label: segment.name,
+      path: segment.path,
+      kind: index === segments.length - 1 ? ("file" as const) : ("directory" as const),
     })),
   ];
 }

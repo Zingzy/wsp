@@ -474,9 +474,14 @@ describe("idle policy in the runtime", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       fc.advance(WINDOW);
+      // The budget runs on the same clock: half of it for the first call, the rest for the second.
+      await until(() => calls === 1);
+      fc.advance(10);
+      await until(() => calls === 2);
+      fc.advance(10);
       await until(() => running(statuses.slice(since)).length > 0);
       const failed = running(statuses.slice(since)).at(-1)!;
-      expect(failed.reason).toMatch(/^pause did not complete in \d+ms; the provider did not answer and reads the machine running; try again$/);
+      expect(failed.reason).toBe("pause did not complete in 20ms; the provider did not answer and reads the machine running; try again");
       expect(failed.idleAt).toBe(deadline);
       expect(calls).toBe(2);
       hanging = false;

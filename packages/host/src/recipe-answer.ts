@@ -20,7 +20,8 @@ export const COMMANDS_SHOWN = 12;
 /** One catalog row as an answer carries it: the shared renderer's row, named field by field so a client reading
  * this over MCP has a shape and not a table of text. */
 export const RecipeAnswerRow = z.object({
-  /** The catalog id, the same word `--set` takes; for an added row, the id `--add` gave it. */
+  /** The catalog id, the same word `--set` takes; for this computer's tools row outside the catalog, the collector's
+   * id; for an added row, the id `--add` gave it. */
   id: z.string(),
   kind: z.enum(["agent", "tool", "custom"]),
   name: z.string(),

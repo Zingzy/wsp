@@ -1235,6 +1235,30 @@ describe("the tone table owns every work glyph", () => {
     expect(drawn(live)).toEqual(liveDrawing[tone]);
   });
 
+  const kindDrawing: Array<[string, Partial<WorkLogEntry>, string]> = [
+    ["a file read", { requestKind: "file-read" }, "lucide-eye"],
+    ["a file change", { itemType: "file_change", changedFiles: ["/x/a.ts"] }, "lucide-square-pen"],
+    ["a command", { itemType: "command_execution", command: "pnpm test" }, "lucide-terminal"],
+    ["a code search", { toolTitle: "Grep" }, "lucide-search"],
+    ["a web search", { itemType: "web_search" }, "lucide-globe"],
+    ["an MCP call", { itemType: "mcp_tool_call" }, "lucide-wrench"],
+    ["a dynamic tool call", { itemType: "dynamic_tool_call" }, "lucide-hammer"],
+    ["a subagent call", { itemType: "collab_agent_tool_call" }, "lucide-bot"],
+    ["a plain tool call with no item type", {}, "lucide-zap"],
+    ["a notice that is tool-like", { tone: "notice", requestKind: "mcp-elicitation" }, "lucide-info"],
+  ];
+
+  it.each(kindDrawing)("a settled row for %s draws its glyph as before", async (_name, extra, glyph) => {
+    const rows = await renderSettled([workEntry("tool", { toolLifecycleStatus: "completed", ...extra })]);
+    expect(rows).toHaveLength(1);
+    expect(drawn(rows[0]!).glyph).toBe(glyph);
+  });
+
+  it.each(kindDrawing)("a live row for %s draws its glyph as before", async (_name, extra, glyph) => {
+    const live = await renderLive(workEntry("tool", { toolLifecycleStatus: "inProgress", sourceActivityKind: "tool.started", ...extra }));
+    expect(drawn(live).glyph).toBe(glyph);
+  });
+
   it("a failed tool row, settled or live, draws the error tone's glyph from the table", async () => {
     const ErrorGlyph = WORK_TONES.error.Glyph;
     const tableGlyph = [...render(<ErrorGlyph />).container.querySelector("svg")!.classList].find(c => c.startsWith("lucide-") && c !== "lucide")!;

@@ -161,7 +161,7 @@ describe("wsp cli", () => {
 
     errs.length = 0;
     expect(await cli(["recipe", "--out", out, "--state", box.state, "--tick", "everything"], io)).toBe(1);
-    expect(errs.at(-1)).toBe('--tick takes one of used, installed, default, not "everything"');
+    expect(errs.at(-1)).toBe('wsp recipe: --tick takes one of used, installed, default, not "everything"');
     box.close();
   });
 
@@ -207,21 +207,24 @@ describe("wsp cli", () => {
 
     errs.length = 0;
     expect(await cli(["recipe", "sniff"], io)).toBe(1);
-    expect(errs.at(-1)).toContain("unknown command: wsp recipe sniff");
+    expect(errs.at(-1)).toBe("wsp recipe: wsp recipe takes no positional arguments; wsp recipe scan is its one subcommand");
 
-    // scan writes nothing, so a flag that only the write verb reads is refused by name rather than swallowed.
+    // scan reads none of the write verb's flags, so one on its line is refused naming the verb it belongs to, with scan's own usage.
     logs.length = 0;
     errs.length = 0;
     expect(await cli(["recipe", "scan", "--state", state, "--tick", "installed", "--set", "go=on", "--out", out], io)).toBe(1);
-    expect(errs[0]).toContain("wsp recipe scan writes nothing, so --tick, --set and --out are the write verb's alone");
-    expect(errs[0]).toContain("usage: wsp recipe");
+    expect(errs[0]).toBe("--tick belongs to wsp recipe; wsp recipe scan does not read it\n\nusage: wsp recipe scan [--project <folder>]");
     expect(logs).toEqual([]);
     errs.length = 0;
     expect(await cli(["recipe", "scan", "--add", "jj"], io)).toBe(1);
-    expect(errs[0]).toContain("so --add is the write verb's alone");
+    expect(errs[0]).toContain("--add belongs to wsp recipe; wsp recipe scan does not read it");
     errs.length = 0;
     expect(await cli(["recipe", "scan", "--signin", "gh=copy"], io)).toBe(1);
-    expect(errs[0]).toContain("so --signin is the write verb's alone");
+    expect(errs[0]).toContain("--signin belongs to wsp recipe; wsp recipe scan does not read it");
+    // A flag no verb reads keeps the parser's own refusal.
+    errs.length = 0;
+    expect(await cli(["recipe", "scan", "--nope"], io)).toBe(1);
+    expect(errs[0]).toContain("Unknown option '--nope'");
     // What scan does take stays taken.
     expect(await cli(["recipe", "scan", "--project", box.project, "--json"], io)).toBe(0);
     box.close();

@@ -7,7 +7,7 @@
 // members once; Homebrew's toolchain is one line; a row nothing measured counts
 // at a stated default for its kind. Nothing here runs a command: the host reads
 // the Mac's Homebrew and hands the table in.
-import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MACOS_ONLY_FORMULAE, catalogToolOf, formulaOf, managerFormula, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
+import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MACOS_ONLY_FORMULAE, catalogToolOf, formulaOf, isTap, managerFormula, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
 import { MIB, ROADS, catalogEntry, catalogToolByRoad, catalogToolFor, sizeBytes, type RoadName } from "@wsp/catalog";
 import { BREW_ID_PREFIX, type RecipeCustomRow } from "@wsp/protocol";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
@@ -164,7 +164,7 @@ function catalogSize(e: RecipeEntry): ToolSize | undefined {
 /** What one tools row puts on the machine: the catalog's measurement where it carries the tool, else a formula
  * with its closure from this Mac; nothing for a tap or a row nothing measured or read. */
 export function toolSize(e: RecipeEntry, brew: BrewTable): ToolSize | undefined {
-  if (e.id.startsWith("tools/brew-tap/")) return undefined;
+  if (isTap(e)) return undefined;
   const known = catalogSize(e);
   if (known !== undefined) return known;
   const formula = formulaOf(e);
@@ -218,7 +218,7 @@ export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew
     assumed += assumedSize(e).bytes;
   };
   for (const e of ticked) {
-    if (e.rung !== "tools" || !installs.has(e.id) || e.id.startsWith("tools/brew-tap/")) continue;
+    if (e.rung !== "tools" || !installs.has(e.id) || isTap(e)) continue;
     const formula = formulaOf(e);
     // A formula the plan installs by the catalog's road counts at the catalog's measurement, not this Mac's Cellar.
     if (formula !== undefined && catalogToolByRoad("brew", formula) === undefined && catalogToolOf(e) === undefined) {

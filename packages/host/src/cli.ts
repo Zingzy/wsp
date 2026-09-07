@@ -23,7 +23,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { LOGIN_CHOICES, RECIPE_TICKS, TURN_END_WORDS, fmtDuration, shellQuote } from "@wsp/protocol";
+import { TURN_END_WORDS, fmtDuration, shellQuote } from "@wsp/protocol";
 import { agentHomes } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
@@ -33,9 +33,7 @@ import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
 import { FIRST_WORKSPACE } from "./init-first.js";
 import { recipePath } from "./init-recipe.js";
-import { historyCache, smallRecipePath } from "./recipe-file.js";
-import { isRecipeTick, runRecipe, runScan } from "./recipe-command.js";
-import { recipeAnswer, recipePrintout, scanPrintout } from "./recipe-answer.js";
+import { historyCache } from "./recipe-file.js";
 import { scanTools } from "./scan.js";
 import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, wrap, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
@@ -63,7 +61,7 @@ import {
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp } from "./mcp-install.js";
-import { COMMON, VERBS, findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
+import { CLI_VERBS, COMMON, findVerb, runVerb, toolName, verbHelp, verbUsage, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 export const HELP = `wsp - ${TAGLINE}
@@ -81,32 +79,6 @@ usage:
   wsp init           set up your first golden image in six screens: Agents,
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
                      on this Mac, and Build, then the browser
-  wsp recipe scan    read this computer and print every option, writing
-                     nothing: the agents, the tools with why and size, what
-                     else a package manager here has that the image could
-                     take, the commands your agents ran, and the sign-ins,
-                     each with what to do about it and
-                     one line of why; --project weighs the histories by a
-                     folder and --json prints it as one object
-  wsp recipe         write the recipe and print it as a table: every catalog
-                     agent and tool with its tick, why it has it and what it
-                     costs on the machine, then the commands your agents ran
-                     that no catalog row carries. --tick used|installed|default
-                     names the rule that decides every tick (used, the default,
-                     ticks what your agents actually ran here); --set <id>=on|off
-                     and --signin <id>=copy|machine|key|skip flip a row and a
-                     sign-in by catalog id, key bringing the key files beside a
-                     login and nothing else of it; --add <id>=<command> carries
-                     a tool the catalog does not, installed by that command on
-                     the machine, with --add-check <id>=<command> saying it is
-                     there; --project reads a folder's own manifests for what it
-                     takes to build and weighs the histories by it,
-                     --out says where the file goes and --json prints the table
-                     as one object. Naming --tick or --project decides every
-                     tick again; without either, what the file says stands and
-                     the flags flip rows on top of it. A sign-in answer stands
-                     either way: no rule decides one. All of them repeat.
-                     Review it, then wsp init --recipe
   wsp doctor         run the reach loop end to end against one live machine
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
@@ -119,8 +91,9 @@ usage:
                      all three are read by mcp install alone
   wsp --version      print the version
 
-verbs, against the host wsp up started; every one takes --json for the raw
-protocol values:
+verbs; every one takes --json for its raw values. The recipe verbs read this
+computer and write beside the state file; the rest speak to the host wsp up
+started:
 ${verbHelp()}
 
   wsp send streams the reply to stderr as it arrives and prints the last message
@@ -804,6 +777,8 @@ interface SharedFlags {
 interface Command {
   /** Whether stdout is objects under --json; a command without it refuses the flag rather than hand prose to whoever reads them. */
   json: boolean;
+  /** Why the MCP server has no tool for it. */
+  cliOnly: string;
   run(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, values: SharedFlags): Promise<number>;
 }
 
@@ -811,6 +786,7 @@ interface Command {
 const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
     json: false,
+    cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
     run: async (io, opts, values) => {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
       const handle = await up(io, opts);
@@ -821,14 +797,17 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   down: {
     json: false,
+    cliOnly: "stops the service holding the host up on the person's computer, which a tool would be cutting the ground from under",
     run: (io, opts) => downCommand(io, opts, systemService()),
   },
   status: {
     json: false,
+    cliOnly: "reads this computer's lock and service manager; a tool that answers at all is proof a host is up",
     run: (io, opts) => statusCommand(io, opts, systemService()),
   },
   init: {
     json: true,
+    cliOnly: "builds the golden and serves for hours; an agent runs it from a shell and relays the sign-ins it prints",
     run: (io, opts, values) =>
       init(io, opts, {
         yes: values.yes === true,
@@ -845,6 +824,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   doctor: {
     json: false,
+    cliOnly: "forks a live machine and bills while it runs; a person decides that at a terminal",
     run: async (io, opts) => {
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);
@@ -857,107 +837,11 @@ const COMMANDS: Readonly<Record<string, Command>> = {
 export const JSON_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => COMMANDS[w]!.json);
 export const PROSE_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => !COMMANDS[w]!.json);
 
-/** The word `recipe` opens the command, as `mcp` does: its flags are its own, so `--json` and the rest never reach
- * the shared parse, where a command with no table to print would take them and answer in prose. */
-const RECIPE_COMMAND = "recipe";
-
-/** The words only the write verb reads. `scan` writes nothing, so one of these on its line is a person asking for
- * something that will not happen, and it is refused rather than dropped. */
-const WRITE_ONLY_FLAGS = ["tick", "set", "signin", "add", "add-check", "out"] as const;
-
 type Options = NonNullable<ParseArgsConfig["options"]>;
 
-/** The flags `wsp recipe` parses; scan refuses the write-only ones. */
-export const RECIPE_OPTIONS: Options = {
-  out: { type: "string" },
-  tick: { type: "string" },
-  set: { type: "string", multiple: true },
-  signin: { type: "string", multiple: true },
-  add: { type: "string", multiple: true },
-  "add-check": { type: "string", multiple: true },
-  project: { type: "string", multiple: true },
-  json: { type: "boolean" },
-  state: { type: "string" },
-  help: { type: "boolean", short: "h" },
-};
-
-const recipeUsage = (): string =>
-  `usage: wsp ${RECIPE_COMMAND} [--tick used|installed|default] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>] [--json]\n       wsp ${RECIPE_COMMAND} scan [--project <folder>] [--json]`;
-
-/** `wsp recipe` and `wsp recipe scan`: read this computer, write the recipe file (scan writes nothing) and print
- * the table, or the same object as JSON. Progress goes to stderr so what is on stdout is the whole answer. */
-async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) => string): Promise<number> {
-  const usage = recipeUsage();
-  let values: { out?: string; tick?: string; set?: string[]; signin?: string[]; add?: string[]; "add-check"?: string[]; project?: string[]; json?: boolean; state?: string; help?: boolean };
-  let words: string[];
-  try {
-    ({ values, positionals: words } = parseArgs({ args: argv, options: RECIPE_OPTIONS, allowPositionals: true }));
-  } catch (e) {
-    io.error(`${e instanceof Error ? e.message : String(e)}\n\n${usage}`);
-    return 1;
-  }
-  if (values.help === true) {
-    io.log(usage);
-    return 0;
-  }
-  const statePath = statePathOf(values.state);
-  if (words.length > 0 && (words[0] !== "scan" || words.length !== 1)) {
-    io.error(`unknown command: wsp ${RECIPE_COMMAND} ${words.join(" ")}\n\n${usage}`);
-    return 1;
-  }
-  const scanning = words[0] === "scan";
-  if (scanning) {
-    const flags = WRITE_ONLY_FLAGS.filter(f => values[f] !== undefined).map(f => `--${f}`);
-    if (flags.length > 0) {
-      const named = flags.length === 1 ? flags[0] : `${flags.slice(0, -1).join(", ")} and ${flags.at(-1)}`;
-      io.error(`wsp ${RECIPE_COMMAND} scan writes nothing, so ${named} ${flags.length === 1 ? "is" : "are"} the write verb's alone\n\n${usage}`);
-      return 1;
-    }
-  }
-  if (values.tick !== undefined && !isRecipeTick(values.tick)) {
-    io.error(`--tick takes one of ${RECIPE_TICKS.join(", ")}, not ${JSON.stringify(values.tick)}`);
-    return 1;
-  }
-  // The reading is progress, not the answer: stdout carries the table alone, so --json is one object and nothing else.
-  const streams = { log: (line: string) => io.log(line), note: (line: string) => io.error(line) };
-  const depth = colourDepth(isTTY(process.stdout));
-  const projects = values.project !== undefined ? { projects: values.project.map(p => resolve(p)) } : {};
-  const out = resolve(values.out ?? smallRecipePath(statePath));
-  try {
-    if (scanning) {
-      const scan = await runScan(nodeHost(), { ...projects, cache: historyCache(statePath), alsoHere: recipe => scanTools(nodeHost(), recipe) }, streams);
-      if (values.json === true) io.log(JSON.stringify(scan));
-      else {
-        for (const line of scanPrintout(scan, depth)) io.log(line);
-        io.log(`Nothing was written. Take the do column with wsp recipe --set <id>=on and --signin <id>=machine, then run wsp init --recipe ${out}.`);
-      }
-      return 0;
-    }
-    const table = await runRecipe(
-      nodeHost(),
-      {
-        out,
-        cache: historyCache(statePath),
-        ...(values.tick !== undefined ? { tick: values.tick } : {}),
-        ...(values.set !== undefined ? { set: values.set } : {}),
-        ...(values.signin !== undefined ? { signin: values.signin } : {}),
-        ...(values.add !== undefined ? { add: values.add } : {}),
-        ...(values["add-check"] !== undefined ? { addCheck: values["add-check"] } : {}),
-        ...projects,
-      },
-      streams,
-    );
-    if (values.json === true) io.log(JSON.stringify(table));
-    else {
-      for (const line of recipePrintout(table, depth)) io.log(line);
-      io.log(`Recipe written to ${out}. Review it, flip a row with wsp recipe --set <id>=on, then run wsp init --recipe ${out}.`);
-    }
-    return 0;
-  } catch (e) {
-    io.error(`wsp recipe: ${e instanceof Error ? e.message : String(e)}`);
-    return 1;
-  }
-}
+/** What else a package manager on this computer has, for the recipe verbs on both doors: the scanner reaches the
+ * engine, so the command line hands it in rather than the verb table importing it. */
+const alsoHere: VerbDeps["alsoHere"] = recipe => scanTools(nodeHost(), recipe);
 
 /** The word `mcp` opens the command, as a verb's words open a verb: its flags are its own, so it is dispatched on
  * that word before the shared parse ever sees them. */
@@ -975,12 +859,10 @@ export const MCP_OPTIONS: Options = {
 const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
 const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND}\n       ${mcpInstallUsage()}`;
 
-/** The usage of the command a line stopped short of, whether it is a verb, `mcp` or `recipe`; none when no command
- * owns the word. Those two need their own answer here because neither is in the verb table and their flags follow
- * the word. */
+/** The usage of the command a line stopped short of, whether it is a verb or `mcp`; none when no command owns the
+ * word. `mcp` needs its own answer here because it is not in the verb table and its flags follow the word. */
 function commandUsage(word: string): string | undefined {
   if (word === MCP_COMMAND) return mcpUsage();
-  if (word === RECIPE_COMMAND) return recipeUsage();
   return verbUsage(word);
 }
 
@@ -1004,7 +886,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   }
   const statePath = statePathOf(values.state);
   if (words.length === 0) {
-    await serveMcp(statePath, { alsoHere: recipe => scanTools(nodeHost(), recipe) });
+    await serveMcp(statePath, { alsoHere });
     return 0;
   }
   if (words[0] !== "install" || words.length !== 1) {
@@ -1063,28 +945,22 @@ export const SHARED_OPTIONS: Options = {
 
 const without = (options: Options, names: readonly string[]): Options => Object.fromEntries(Object.entries(options).filter(([name]) => !names.includes(name)));
 
-export interface CommandLine {
-  /** The words after `wsp` that select it. */
-  words: string;
-  /** Every flag that line parses; anything else is a usage error. */
-  options: Options;
-}
+/** A line `wsp` answers: the words after `wsp` that select it, every flag it parses (anything else is a usage error),
+ * and its other door: the MCP tool it is served as, or why it has none. */
+export type CommandLine = { words: string; options: Options } & ({ tool: string } | { cliOnly: string });
 
 /** Every line `wsp` answers, with the flags it takes: what the skill's examples and the MCP tools are held to. */
 export const COMMAND_LINES: readonly CommandLine[] = [
-  ...VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options } })),
-  { words: RECIPE_COMMAND, options: RECIPE_OPTIONS },
-  { words: `${RECIPE_COMMAND} scan`, options: without(RECIPE_OPTIONS, WRITE_ONLY_FLAGS) },
-  { words: MCP_COMMAND, options: MCP_OPTIONS },
-  { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS },
-  ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: command.json ? SHARED_OPTIONS : without(SHARED_OPTIONS, ["json"]) })),
+  ...CLI_VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options }, tool: toolName(v.name) })),
+  { words: MCP_COMMAND, options: MCP_OPTIONS, cliOnly: "is the tool server itself" },
+  { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS, cliOnly: "writes an agent's own config and skills folder, which is done once from a shell" },
+  ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: command.json ? SHARED_OPTIONS : without(SHARED_OPTIONS, ["json"]), cliOnly: command.cliOnly })),
 ];
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
-  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom);
+  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere });
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom);
-  if (argv[0] === RECIPE_COMMAND) return recipe(io, argv.slice(1), statePathFrom);
   let values: SharedFlags;
   let positionals: string[];
   try {

@@ -81,6 +81,17 @@ describe("the agents screen", () => {
 });
 
 describe("the tools screen", () => {
+  it("leaves this computer's tools rows outside the catalog alone: they are the Also on this Mac screen's, so a tick or an untick here never turns one off", () => {
+    const outside = (id: string, on: boolean): Recipe["rows"][number] => ({ id, kind: "tool", on, source: { kind: "installed", paths: [], bin: true } });
+    const recipe = { ...RECIPE, rows: [...RECIPE.rows, outside("tools/brew/zingzy/tap/diskbloom", true), outside("tools/npm/tsx", false)] };
+    const left = withTools(recipe, new Set(["gh"]));
+    expect(left.rows.find(r => r.id === "tools/brew/zingzy/tap/diskbloom")?.on).toBe(true);
+    expect(left.rows.find(r => r.id === "tools/npm/tsx")?.on).toBe(false);
+    expect(left.rows.find(r => r.id === "yq")?.on).toBe(false);
+    // Nor does the table draw them: the catalog is the Tools screen.
+    expect(recipeTable(recipe, CATALOG_TOOLS).some(r => r.id.startsWith("tools/"))).toBe(false);
+  });
+
   it("the base as bullets under the title, the rest grouped by why it is here, the why column and the size beside each", () => {
     const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "wrangler", source: { kind: "used", sessions: 3, calls: 40 } }), row({ id: "go", on: false, source: { kind: "used", sessions: 1, calls: 2 } })] };
     const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true);

@@ -903,3 +903,15 @@ describe("project goldens", () => {
     expect(RuntimeRequest.safeParse({ id: 32, op: "workspaces.snapshot" }).success).toBe(false);
   });
 });
+
+describe("packageOf", () => {
+  it("is what follows the manager in a tools row's id, a tap formula's slashes kept; it lives here because the collector writes these ids without the engine", () => {
+    expect(wire.packageOf({ id: "tools/brew/gh" })).toBe("gh");
+    expect(wire.packageOf({ id: "tools/brew/zingzy/tap/diskbloom" })).toBe("zingzy/tap/diskbloom");
+    expect(wire.packageOf({ id: "tools/npm/@scope/name" })).toBe("@scope/name");
+    expect(wire.packageOf({ id: `${wire.BREW_ID_PREFIX}yq` })).toBe("yq");
+    // The collector's id for a manager's package, which a scan row of the same manager and package stands for.
+    expect(wire.toolRowId("brew", "zingzy/tap/diskbloom")).toBe(`${wire.BREW_ID_PREFIX}zingzy/tap/diskbloom`);
+    expect(wire.packageOf({ id: wire.toolRowId("npm", "@scope/name") })).toBe("@scope/name");
+  });
+});

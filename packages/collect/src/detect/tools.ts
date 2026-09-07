@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { BREW_ID_PREFIX } from "@wsp/protocol";
+import { toolRowId } from "@wsp/protocol";
 import { linuxSupport } from "../brew-bottles.js";
 import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
@@ -170,7 +170,7 @@ const GLOBALS: readonly GlobalManager[] = [
 // for starts unticked without a reason, so the row stays open to a tick that tries it.
 function formulaRow(host: Host, name: string): ManifestEntry {
   const linux = host.platform === "linux" ? "yes" : linuxSupport(name);
-  const base = { rung: "tools" as const, id: `${BREW_ID_PREFIX}${name}`, label: name, group: "Homebrew", linux };
+  const base = { rung: "tools" as const, id: toolRowId("brew", name), label: name, group: "Homebrew", linux };
   if (linux === "no") return item({ ...base, default: "skip", reason: "no Linux bottle" });
   return linux === "unknown" ? item({ ...base, default: "skip" }) : item(base);
 }
@@ -188,9 +188,9 @@ async function goRows(host: Host): Promise<ManifestEntry[]> {
   for (const name of await host.fs.list(bin)) {
     const mod = parseGoVersionM((await host.exec.run("go", ["version", "-m", `${bin}/${name}`])) ?? "");
     rows.push(mod === undefined
-      ? item({ rung: "tools", id: `tools/go/${name}`, label: `${name} (no module info)`, group: "Go binaries", default: "skip", linux: "yes" })
+      ? item({ rung: "tools", id: toolRowId("go", name), label: `${name} (no module info)`, group: "Go binaries", default: "skip", linux: "yes" })
       // The module path rides in paths so the detail pane shows it first; bytes 0 says there is nothing to upload.
-      : entry({ rung: "tools", id: `tools/go/${name}`, label: name, group: "Go binaries", paths: [`${mod.path}@${mod.version}`], bytes: 0, linux: "yes", version: mod.version }));
+      : entry({ rung: "tools", id: toolRowId("go", name), label: name, group: "Go binaries", paths: [`${mod.path}@${mod.version}`], bytes: 0, linux: "yes", version: mod.version }));
   }
   return rows;
 }
@@ -207,7 +207,7 @@ export async function detectTools(host: Host): Promise<ManifestEntry[]> {
     if (!(await host.exec.which(g.bin))) continue;
     const pkgs = g.list !== undefined ? await g.list(host) : g.parse((await host.exec.run(g.bin, g.args)) ?? "");
     for (const p of pkgs) {
-      rows.push(item({ rung: "tools", id: `tools/${g.id}/${p.name}`, label: versioned(p, g.sep), group: g.group, linux: "yes", ...(p.version !== undefined ? { version: p.version } : {}) }));
+      rows.push(item({ rung: "tools", id: toolRowId(g.id, p.name), label: versioned(p, g.sep), group: g.group, linux: "yes", ...(p.version !== undefined ? { version: p.version } : {}) }));
     }
   }
   rows.push(...(await goRows(host)));

@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The right panel's Files surface: the copied tree rooted where the thread's
-// agent works, with a location bar naming the folder, a way up, a pin to stop
-// following the thread, and a new thread started in the shown folder. When
-// the daemon browses more than one root (home and an imported project), a row
-// above names them and switches between them. Picking a file opens it as its
-// own surface beside this one. A root a daemon too old for it will not browse
-// says what that daemon predates in place of its refusal, which names a path
-// nobody asked about; the runtime is already replacing that daemon.
-import { ArrowUpIcon, MessageSquarePlusIcon, PinIcon, PinOffIcon } from "lucide-react";
+// agent works, with one breadcrumb row naming the folder, a pin to stop
+// following the thread, and a new thread started in the shown folder. The
+// first crumb is the root the folder sits in, which is also where the roots
+// the daemon browses (home and an imported project) are picked between.
+// Picking a file opens it as its own surface beside this one. A root a daemon
+// too old for it will not browse says what that daemon predates in place of
+// its refusal, which names a path nobody asked about; the runtime is already
+// replacing that daemon.
+import { MessageSquarePlusIcon, PinIcon, PinOffIcon } from "lucide-react";
 import { useEffect } from "react";
 import FileBrowserPanel from "../components/files/FileBrowserPanel.js";
 import { Button } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
-import { cn } from "../lib/utils.js";
 import { daemonBehindLine } from "../machine/daemon.js";
 import { useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { requestNewThread } from "../shell/shellRequests.js";
+import { focusPaneOnShow, FolderBreadcrumbs, useUpAFolder } from "./FolderBreadcrumbs.js";
 import { useWorkspaceListing } from "./listing.js";
-import { parentWithin, rootOf, usePinned, useRoot, useRoots, useRootStore } from "./root.js";
+import { rootOf, usePinned, useRoot, useRootStore } from "./root.js";
 import { useDaemonRoot, useDaemonVersion, useDaemonWire } from "./wire.js";
 
 export function FilesSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
@@ -27,7 +28,6 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   const wire = useDaemonWire(workspaceId);
   const version = useDaemonVersion(workspaceId);
   const home = useDaemonRoot(workspaceId);
-  const roots = useRoots(workspaceId);
   const root = useRoot(workspaceId);
   const pinned = usePinned(workspaceId);
   const pin = useRootStore(s => s.pin);
@@ -35,8 +35,7 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   const follow = useRootStore(s => s.follow);
   const { levels, ensure, refresh } = useWorkspaceListing(workspaceId);
   const openFile = useRightPanelStore(s => s.openFile);
-  const parent = root === null ? null : parentWithin(roots, root);
-  const current = root === null ? null : rootOf(roots, root);
+  const onKeyDown = useUpAFolder(workspaceId);
   // A daemon that predates the roots file browses its home and nothing else, so a folder outside it comes back
   // refused, naming a path nobody asked about; that one refusal reads as what the daemon predates. Every other
   // failure, on any daemon, is its own and says so.
@@ -53,38 +52,9 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {roots.length > 1 ? (
-        <div className="flex h-7 min-h-7 shrink-0 items-center gap-3 border-b border-border/60 px-2" role="group" aria-label="Browsable folders" data-files-roots>
-          {roots.map(candidate => (
-            <button
-              key={candidate}
-              type="button"
-              className={cn(
-                "min-w-0 truncate rounded-sm font-mono text-[11px] outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-                candidate === current ? "text-foreground" : "text-muted-foreground",
-              )}
-              title={candidate}
-              aria-pressed={candidate === current}
-              onClick={() => pin(workspaceId, candidate)}
-            >
-              {candidate}
-            </button>
-          ))}
-        </div>
-      ) : null}
+    <div className="flex min-h-0 flex-1 flex-col" ref={focusPaneOnShow} tabIndex={0} onKeyDown={onKeyDown} data-files-pane>
       <div className="flex h-7 min-h-7 shrink-0 items-center gap-0.5 border-b border-border/60 px-1.5" data-files-location>
-        <Tooltip>
-          <TooltipTrigger
-            render={<Button type="button" variant="ghost" size="icon-micro" aria-label="Up one folder" disabled={parent === null} onClick={() => parent !== null && pin(workspaceId, parent)} />}
-          >
-            <ArrowUpIcon />
-          </TooltipTrigger>
-          <TooltipPopup>Up one folder</TooltipPopup>
-        </Tooltip>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={root} data-files-root>
-          {root}
-        </span>
+        <FolderBreadcrumbs workspaceId={workspaceId} />
         <Tooltip>
           <TooltipTrigger
             render={

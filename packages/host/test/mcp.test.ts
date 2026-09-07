@@ -799,9 +799,11 @@ describe("the MCP server never talks to the provider", () => {
       return seen;
     };
     const walked = closure("mcp.ts");
-    // The collector reads this computer for the recipe tool; it depends on the catalog and the protocol and nothing else.
-    // The catalog is rows and ids alone (the agents a thread can take), so it reaches no provider either.
-    expect(walked.get("mcp.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/catalog", "@wsp/collect", "@wsp/protocol"]);
+    // The tools are the verb table's; the collector reads this computer for the recipe verbs and depends on the
+    // catalog and the protocol and nothing else. The catalog is rows and ids alone (the agents a thread can take),
+    // so the list the agent argument names reaches no provider either.
+    expect(walked.get("mcp.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual([]);
+    expect(walked.get("verbs.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/catalog", "@wsp/collect", "@wsp/protocol"]);
     expect([...walked.keys()].sort()).toContain("recipe-answer.ts");
     expect([...walked.keys()].sort()).toContain("init-layout.ts");
     // The adapter packages come from the one registry's list of agents, so a new agent is banned here without an edit.
