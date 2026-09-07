@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { shellQuote } from "../src/index.js";
+import { inFolder, shellQuote } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 const TABLE: [string, string][] = [
@@ -48,5 +48,12 @@ describe("one copy of the rule", () => {
   it("no other source file spells out the '\\'' rule", () => {
     const copies = sourceFiles().filter(rel => rel !== HOME && RULE.test(readFileSync(join(ROOT, rel), "utf8")));
     expect(copies).toEqual([]);
+  });
+});
+
+describe("inFolder", () => {
+  it("prefixes the command with a cd into the quoted folder, or into ~ when none was named", () => {
+    expect(inFolder("/root/work/my proj", "'git' 'status'")).toBe("cd '/root/work/my proj' && 'git' 'status'");
+    expect(inFolder(undefined, "claude -p")).toBe("cd ~ && claude -p");
   });
 });

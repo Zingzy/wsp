@@ -82,7 +82,7 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | `wsp thread new --in <workspace> [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--cwd <path>] [--notify <thread\|me>] "<task>"` | `thread_new` (workspace, task, agent, model, effort, access, cwd, notify) | opens a thread and follows its first turn to the reply |
 | `wsp send <thread> [--model <slug>] [--effort <word>] [--access <word>] "<message>"` | `send` (thread, message, model, effort, access) | a message into an existing thread; follows the turn to the reply |
 | `wsp stop <thread>` | `stop` (thread) | ends the thread's running turn, as the app's stop button does; the machine stays up |
-| `wsp exec <workspace> -- <command...>` | `exec` (workspace, argv) | runs the command on the machine, each word as given, waking it first when it is paused; output lines and the exit code |
+| `wsp exec <workspace> [--cwd <dir>] -- <command...>` | `exec` (workspace, argv, cwd) | runs the command on the machine, each word as given, in the folder named or the workspace's project folder, waking it first when it is paused; output lines, the exit code and the folder it ran in |
 | `wsp snapshot <workspace>` | `snapshot` (workspace) | a project golden: the golden plus the loaded project as it stands |
 | `wsp export <workspace> <folder> [--from <path>] [--replace] [--agents <ids>]` | `export` (workspace, folder, from, replace, agents) | the folder and the agent sessions keyed to it come home to this computer |
 | `wsp import <folder> --to <workspace> [--yes] [--keep <path>] [--cut <path>] [--agents <ids>] [--replace]` | `import` (workspace, folder, yes, keep, cut, agents, replace) | the folder lands on the machine at its path here, as the app's import does; without yes, keep or cut it answers with the plan and moves nothing (a person at a terminal is asked once instead) |
@@ -122,10 +122,11 @@ Ends the thread's running turn through the runtime, the way the app's stop butto
 ### exec
 
 ```
-wsp exec dev -- sh -c 'cd /Users/zingzy/wsp && git status --short'
+wsp exec dev -- git status --short
+wsp exec dev --cwd /root -- sh -c 'ls | wc -l'
 ```
 
-Each word after `--` reaches the machine as one argument; a shell line goes through `sh -c`. The command's exit code is the verb's. A non-zero exit is a result; the machine going away is an error. The machine runs as root with home /root and no login shell, so `bash -c`, never `bash -lc`.
+Each word after `--` reaches the machine as one argument; a shell line goes through `sh -c`. The command runs in the folder `--cwd` names (absolute, on the machine), else in the workspace's imported project folder when it has one, else in the home folder, so `git status` on a workspace with a project needs no `cd`. The command's exit code is the verb's, and a non-zero exit is followed by one stderr line naming the folder it ran in. A non-zero exit is a result; the machine going away is an error. The machine runs as root with home /root and no login shell, so `bash -c`, never `bash -lc`.
 
 ### new, fork, snapshot
 
