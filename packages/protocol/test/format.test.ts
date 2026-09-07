@@ -86,6 +86,7 @@ import {
   stepRetryLine,
   timedOutLine,
   lastLine,
+  openingTitle,
   titleLine,
   toolActivityLine,
   toolCallFacts,
@@ -458,6 +459,34 @@ describe("titleLine", () => {
     expect(titleLine("\r\n  \n\tReply  with\texactly   the word pong.  \r\n")).toBe("Reply with exactly the word pong.");
     expect(titleLine("one line")).toBe("one line");
     expect(titleLine("\n \n")).toBe("");
+  });
+});
+
+describe("openingTitle", () => {
+  const brief = "You are a builder for the wsp repo, which is at /Users/dev/wsp on this Mac: read the ticket, then run `pnpm test` and report.\n\nTicket: Zingzy/wsp-map#408.";
+
+  it("is the opening turn's first sentence, so a brief that starts with a whole paragraph never titles a thread with all of it", () => {
+    expect(openingTitle("Bump the lockfile. Then run the gate.")).toBe("Bump the lockfile.");
+    expect(openingTitle("Is the gate green? Say so.")).toBe("Is the gate green?");
+    expect(openingTitle("You are a builder for the wsp repo.\n\nTicket: Zingzy/wsp-map#292.")).toBe("You are a builder for the wsp repo.");
+    expect(openingTitle("\r\n  \n\tReply  with\texactly   the word pong.  \r\n")).toBe("Reply with exactly the word pong.");
+    expect(openingTitle("Bump to 1.2.3 and run the gate")).toBe("Bump to 1.2.3 and run the gate");
+  });
+
+  it("cuts a long first sentence at a word boundary to at most 48 characters with the ellipsis counted, and only then", () => {
+    expect(openingTitle(brief)).toBe("You are a builder for the wsp repo, which is at\u2026");
+    expect(openingTitle(brief).length).toBeLessThanOrEqual(48);
+    const exact = "Rename the thread by its opening words and stop.";
+    expect(exact).toHaveLength(48);
+    expect(openingTitle(exact)).toBe(exact);
+    expect(openingTitle(`${exact.slice(0, -1)} now.`)).toBe("Rename the thread by its opening words and stop\u2026");
+    expect(openingTitle("Ticket: wsp-map#408, four fixes in one round, the header glyph first.")).toBe("Ticket: wsp-map#408, four fixes in one round\u2026");
+  });
+
+  it("cuts one word longer than the room inside it, and an empty turn is an empty title", () => {
+    const token = "a".repeat(60);
+    expect(openingTitle(token)).toBe(`${"a".repeat(47)}\u2026`);
+    expect(openingTitle("\n \n")).toBe("");
   });
 });
 

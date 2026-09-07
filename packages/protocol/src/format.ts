@@ -359,6 +359,25 @@ export function titleLine(text: string): string {
   return first.replace(/\s+/g, " ").trim();
 }
 
+/** The most characters a thread title made from its opening turn takes, the ellipsis counted. */
+const OPENING_TITLE_MAX = 48;
+const ELLIPSIS = "\u2026";
+
+/** A thread's title from its opening turn when the harness has no name for it: the turn's first sentence, cut at a
+ * word boundary to at most 48 characters with an ellipsis only when cut, so a brief-shaped turn never titles the row,
+ * the breadcrumb, the switcher card or the CLI's table with its whole opening words. */
+export function openingTitle(text: string): string {
+  const line = titleLine(text);
+  const sentence = /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
+  if (sentence.length <= OPENING_TITLE_MAX) return sentence;
+  const room = OPENING_TITLE_MAX - ELLIPSIS.length;
+  // One character past the room, so a word that ends exactly at the room's edge is kept whole.
+  const head = sentence.slice(0, room + 1);
+  const boundary = head.lastIndexOf(" ");
+  const kept = (boundary > 0 ? head.slice(0, boundary) : head.slice(0, room)).replace(/[\s,;:]+$/, "");
+  return `${kept}${ELLIPSIS}`;
+}
+
 /** Text cut to its last line: the last non-empty line with the whitespace collapsed, or nothing when the text has
  * none. The notify line ends with it and a switcher card shows it under the thread's title, so both read one rule. */
 export function lastLine(text: string): string | undefined {

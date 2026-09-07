@@ -37,10 +37,11 @@ import { Button } from "./ui/button";
 import { TerminalFontButton, TerminalFontCard } from "./TerminalFontButton";
 import { PanelTabCloseButton } from "./ui/panel-tab-close-button";
 import { isTerminalAppShortcut } from "../keybindings";
-import { cn } from "../lib/utils";
+import { cn, errorText } from "../lib/utils";
 import { getTerminalLabel } from "../lib/terminalLabels";
 import { GhosttyTerminalSurface, type GhosttyTerminalFont, type GhosttyTerminalSurfaceOptions } from "../terminal/ghostty/surface";
 import { appScheme, terminalFontWith, terminalSurfaceSettings, terminalThemeWith } from "../terminal/ghosttyConfig";
+import type { Api } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { type GhosttyColor, type GhosttyTheme } from "../terminal/ghostty/core";
 import type { TerminalIo } from "../terminal/pty-io";
@@ -200,6 +201,16 @@ interface TerminalViewportProps {
 const NO_REFUSAL = (): string | null => null;
 const IGNORE_REFUSED = (): void => {};
 
+/** The person's Ghostty config from the host, or null when the host cannot answer, which is said once, never swallowed. */
+async function readTerminalFile(read: NonNullable<Api["hostTerminalConfig"]>, scheme: TerminalScheme): Promise<TerminalConfig | null> {
+  try {
+    return await read(scheme);
+  } catch (e) {
+    console.warn(`terminal config not read from the host, the pane keeps its defaults until the socket is live: ${errorText(e)}`);
+    return null;
+  }
+}
+
 export function TerminalViewport({
   terminalId,
   io,
@@ -222,6 +233,7 @@ export function TerminalViewport({
   const fileRef = useRef<TerminalConfig | null>(null);
   const [translucent, setTranslucent] = useState(false);
   const readHostConfig = useStore(s => s.api?.hostTerminalConfig);
+  const live = useStore(s => s.conn === "live" && s.api !== null);
   const activateLink = useEffectEvent((text: string) => (config.onLinkActivate ?? openInNewTab)(text));
   // The surface reads its options once, so the menu reads the pane verbs of the render it opens in.
   const contextMenu = useEffectEvent((event: MouseEvent) => {
@@ -243,6 +255,23 @@ export function TerminalViewport({
     void terminalRef.current?.setFont(terminalFontWith(fileRef.current, config.font, chosenRef.current) ?? {});
   }, [config.font]);
 
+  // A read that failed while the socket was down, or a file saved since, lands on the next live socket: a pane already
+  // drawn takes the file's colours and font. Padding and opacity are the surface's construction options and take the next open.
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!live || readHostConfig === undefined || !terminal) return;
+    let stale = false;
+    void readTerminalFile(readHostConfig, appScheme()).then(file => {
+      if (stale || file === null || terminalRef.current !== terminal) return;
+      fileRef.current = file;
+      terminal.setTheme(terminalThemeWith(file, terminalThemeFromApp(containerRef.current)));
+      void terminal.setFont(terminalFontWith(file, fontRef.current, chosenRef.current) ?? {});
+    });
+    return () => {
+      stale = true;
+    };
+  }, [live, readHostConfig]);
+
   useEffect(() => {
     const mount = containerRef.current;
     if (!mount) return;
@@ -256,7 +285,7 @@ export function TerminalViewport({
       const setupFont = fontRef.current;
       // Read again on every open, so a saved change to the file reaches the next terminal without a reload.
       let scheme: TerminalScheme = appScheme();
-      const file = readHostConfig === undefined ? null : await readHostConfig(scheme).catch(() => null);
+      const file = readHostConfig === undefined ? null : await readTerminalFile(readHostConfig, scheme);
       if (cancelled) return null;
       fileRef.current = file;
       const settings = terminalSurfaceSettings(file, terminalThemeFromApp(mount), setupFont, chosenRef.current);
@@ -314,13 +343,11 @@ export function TerminalViewport({
           return;
         }
         scheme = next;
-        void readHostConfig(next)
-          .catch(() => null)
-          .then(read => {
-            if (terminalRef.current !== activeTerminal) return;
-            fileRef.current = read;
-            activeTerminal.setTheme(terminalThemeWith(read, app));
-          });
+        void readTerminalFile(readHostConfig, next).then(read => {
+          if (terminalRef.current !== activeTerminal) return;
+          fileRef.current = read;
+          activeTerminal.setTheme(terminalThemeWith(read, app));
+        });
       });
       themeObserver.observe(document.documentElement, {
         attributes: true,
