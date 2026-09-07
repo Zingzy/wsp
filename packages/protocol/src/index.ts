@@ -5,7 +5,7 @@
 // handlers are the reference implementation they mirror.
 
 import { z } from "zod";
-import { titleLine } from "./format.js";
+import { openingTitle, titleLine } from "./format.js";
 import { shellQuote } from "./shell-quote.js";
 
 /** The one rule for a URL a guest may hand to the laptop: http or https in any
@@ -267,8 +267,8 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
     const first = turns[0]!;
     const latest = turns[turns.length - 1]!;
     // The one title rule every client reads: the harness's own name for the session the next send resumes wins, so
-    // a rename made inside the harness shows here, and the opening turn's words stand until one is read.
-    const words = latest.harnessTitle ?? first.prompt;
+    // a rename made inside the harness shows here, and the opening turn's first sentence stands until one is read.
+    const title = latest.harnessTitle !== undefined ? titleLine(latest.harnessTitle) : first.prompt !== undefined ? openingTitle(first.prompt) : first.claudeSessionId ?? first.id;
     return {
       id,
       ...(first.threadId !== undefined ? { threadId: first.threadId } : {}),
@@ -276,7 +276,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       harness: first.harness,
       startedBy: first.startedBy ?? "person",
       status: latest.status,
-      title: words !== undefined ? titleLine(words) : first.claudeSessionId ?? first.id,
+      title,
       sessionId: latest.id,
       ...(latest.claudeSessionId !== undefined ? { claudeSessionId: latest.claudeSessionId } : {}),
       ...(latest.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
