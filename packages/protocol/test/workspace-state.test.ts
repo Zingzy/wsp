@@ -54,7 +54,6 @@ describe("workspaceState", () => {
       closed: "wsp is not running",
       "not-found": "Workspace not found",
       loading: "Loading transcript",
-      finishing: "Finishing the previous turn",
     };
     for (const [kind, words] of Object.entries(blocks)) expect(sendRefusal(kind as SendBlock)).toBe(words);
     expect(stillWorkingRefusal("thr_0001")).toBe("thread thr_0001 replied, still working; wait for its turn to finish before sending");

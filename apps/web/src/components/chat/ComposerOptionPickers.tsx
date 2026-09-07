@@ -2,8 +2,9 @@
 // The model, effort and access pickers inside the composer box. Each lists
 // what the runtime's catalog says the harness's CLI takes, asked of the
 // binary on the workspace's machine once it runs; a picker whose list is
-// empty does not exist. The effort button reads "<effort> · <context>" and
-// its menu has a Reasoning and a Context Window section, the default marked;
+// empty does not exist. The effort button reads "<effort> · <context>", the
+// context alone for a model that takes no effort, and its menu has a Reasoning
+// and a Context Window section, each default marked and checked until a pick;
 // the access button carries the mode's icon and each mode its one line. A
 // pick rides the next sessions.start and is remembered per workspace; a turn
 // already running keeps its flags and shows them meanwhile.
@@ -17,6 +18,7 @@ import { Menu, MenuGroup, MenuGroupLabel, MenuPopup, MenuRadioGroup, MenuRadioIt
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey } from "./composerOptionsStore";
 import { effectivePicks, resolveModel, runningPicks, startOptionsFrom, type ComposerStart, type ResolvedPicks } from "./composerPicks";
+import { effortPickerLabel } from "./format";
 import type { ChatThreadHandle } from "./useChatThread";
 
 export const DEFAULT_HARNESS = DEFAULT_AGENT.id;
@@ -102,9 +104,10 @@ function OptionRows({ options }: { options: ReadonlyArray<HarnessOption> }) {
 
 function EffortPicker({ workspaceId, efforts, contextWindows, picks }: { workspaceId: string; efforts: HarnessOption[]; contextWindows: HarnessOption[]; picks: ResolvedPicks }) {
   const pick = useComposerOptionsStore(s => s.pick);
-  const effortLabel = efforts.find(o => o.value === picks.effort)?.label ?? "Effort";
-  const contextLabel = contextWindows.find(o => o.value === picks.contextWindow)?.label;
-  const label = contextLabel !== undefined ? `${effortLabel} · ${contextLabel}` : effortLabel;
+  const label = effortPickerLabel(
+    efforts.find(o => o.value === picks.effort),
+    contextWindows.find(o => o.value === picks.contextWindow),
+  );
   const onPick = (key: ComposerOptionKey) => (next: unknown) => {
     if (typeof next === "string") pick(workspaceId, key, next);
   };

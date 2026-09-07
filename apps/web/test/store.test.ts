@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SessionView, WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
+import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
 
 const view = (id: string): WorkspaceView => ({
@@ -69,6 +70,8 @@ beforeEach(() => {
 // The address is a global the store reads: a #w/<id> left behind would pick the workspace for every test after it.
 afterEach(() => {
   window.location.hash = "";
+  window.localStorage.removeItem(LAST_WORKSPACE_KEY);
+  delete (window as unknown as { __WSP__?: unknown }).__WSP__;
 });
 
 describe("store selection", () => {
@@ -114,6 +117,45 @@ describe("the workspace the address opens on", () => {
     hash("#w/ws_b");
     useStore.setState({ selectedId: "ws_a" });
     expect(await refreshed([view("ws_a"), view("ws_b")])).toBe("ws_a");
+  });
+
+  // The rows the sidebar draws: two running workspaces, the later one on top since its creation is the latest activity.
+  const rows = () => [view("ws_a"), { ...view("ws_b"), createdAt: "2026-09-02T00:00:00Z" }];
+
+  it("with no address it opens on the first row in sidebar order, not the first of the runtime's list", async () => {
+    hash("");
+    expect(await refreshed(rows())).toBe("ws_b");
+  });
+
+  it("opens on the workspace the person had open last, remembered under the host's state file; one the list lost falls through to the first row", async () => {
+    hash("");
+    window.localStorage.setItem(LAST_WORKSPACE_KEY, JSON.stringify({ "/Users/dev/.wsp/state.json": "ws_a", "": "ws_a" }));
+    expect(await refreshed(rows())).toBe("ws_a");
+    useStore.setState({ selectedId: null });
+    window.localStorage.setItem(LAST_WORKSPACE_KEY, JSON.stringify({ "": "ws_gone" }));
+    expect(await refreshed(rows())).toBe("ws_b");
+    useStore.setState({ selectedId: null });
+    window.localStorage.setItem(LAST_WORKSPACE_KEY, "not json");
+    expect(await refreshed(rows())).toBe("ws_b");
+  });
+
+  it("a memory written under another state file is not this host's", async () => {
+    hash("");
+    window.localStorage.setItem(LAST_WORKSPACE_KEY, JSON.stringify({ "/Users/dev/other/state.json": "ws_a" }));
+    expect(await refreshed(rows())).toBe("ws_b");
+  });
+
+  it("remembers each workspace the person selects, under the state file the boot object names, and never a creation row", async () => {
+    hash("");
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, token: "t", statePath: "/Users/dev/.wsp/state.json" };
+    await refreshed(rows());
+    expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_b" });
+    useStore.getState().select("ws_a", "thr_1");
+    expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_a" });
+    useStore.setState({ creations: [{ key: "c1", name: "new", workspaceId: null, lines: [], failed: null }], selectedId: "c1" });
+    expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_a" });
+    useStore.setState({ selectedId: null });
+    expect(await refreshed(rows())).toBe("ws_a");
   });
 
   it("a thread link opens that thread when the list carries it; a thread the list does not carry falls back to the workspace with a word", async () => {

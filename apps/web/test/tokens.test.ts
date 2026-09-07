@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_TERMINAL_FONT_SIZE } from "../src/terminal/ghostty/surface.js";
 
 const css = readFileSync(join(__dirname, "../src/index.css"), "utf8");
 
@@ -14,6 +15,15 @@ describe("index.css", () => {
     expect(body).not.toMatch(/t3|T3/);
     expect(body).toContain('@import "tailwindcss";');
     expect(body).toContain("@theme inline {");
+  });
+
+  it("the mono size token is the 11px the sidebar and composer set their code and meta text in, and the terminal's default size is the same number", () => {
+    expect(css).toMatch(/^\s*--font-size-mono: 11px;$/m);
+    expect(DEFAULT_TERMINAL_FONT_SIZE).toBe(11);
+  });
+
+  it("the search row's tint is one token, a few percent of black", () => {
+    expect(css).toMatch(/^\s*--search-row-tint: [2-8]%;$/m);
   });
 
   it("pins the sidebar glass utility added after the upstream set", () => {
@@ -80,25 +90,37 @@ describe("index.css", () => {
         }
       }
 
-      /* A Ghostty config with background-opacity under 1: the viewport marks itself
-         translucent, and the pane around it stops painting so the canvas sits on the
-         app background in a browser tab. In the macOS desktop window, whose html
-         carries the class the desktop preload sets, every element between the window
-         and the pane stops painting too, so the window's own material shows through
-         the terminal; the header row, the thread beside the pane and the column that
-         does not hold it paint the app background themselves, so text never sits on
-         the desktop. */
-      .thread-terminal-drawer:has([data-terminal-translucent]),
-      .thread-terminal-drawer :has([data-terminal-translucent]) {
-        background: transparent;
+      /* The search row's word paints at the kit's 80 percent; over the glass it
+         takes the muted token whole, the step that keeps it AA over a white desktop. */
+      .desktop-mac [data-app-sidebar] [data-search-row] {
+        color: var(--sidebar-muted-foreground);
       }
 
+      /* The search row at rest: a few percent of black over the sidebar surface,
+         so over the glass it reads as a field and not loose text; hover one step
+         darker. The section rows beside it stay clear. */
+      [data-search-row] {
+        background: color-mix(in srgb, black var(--search-row-tint), transparent);
+
+        &:hover {
+          background: color-mix(in srgb, black calc(var(--search-row-tint) * 2), transparent);
+        }
+      }
+
+      /* A Ghostty config with background-opacity under 1: the viewport marks itself
+         translucent. In the macOS desktop window, whose html carries the class the
+         desktop preload sets, every element between the window and the canvas stops
+         painting so the window's own material shows through the canvas alone, and
+         the chrome around it paints the app background itself: the right pane's tab
+         strip, the terminal tabs beside a split, the header row and the thread above
+         a drawer, and every column and banner that does not hold the canvas. In a
+         browser tab there is no material, and the canvas blends over the pane's token. */
       html.desktop-mac:has([data-terminal-translucent]),
       html.desktop-mac :has([data-terminal-translucent]) {
         background: transparent;
       }
 
-      html.desktop-mac:has([data-terminal-translucent]) :is([data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
+      html.desktop-mac:has([data-terminal-translucent]) :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not(:has([data-terminal-translucent])), [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
         background: var(--background);
       }
       "

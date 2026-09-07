@@ -130,7 +130,7 @@ const CLAUDE: HarnessCatalog = {
     { value: "claude-sonnet-5", label: "Sonnet 5", contextWindows: [] },
     { value: "claude-haiku-4-5", label: "Haiku", efforts: [], contextWindows: [] },
   ],
-  efforts: [{ value: "low", label: "Low" }, { value: "high", label: "High" }],
+  efforts: [{ value: "low", label: "Low" }, { value: "high", label: "High", isDefault: true }],
   contextWindows: CONTEXT,
   permissionModes: MODES,
   steers: true,
@@ -223,7 +223,8 @@ describe("composer pickers", () => {
     // A monochrome mark would take the foreground from this span rather than the button's muted label colour.
     expect(triggerMark?.parentElement?.tagName).toBe("SPAN");
     expect(triggerMark?.parentElement?.classList.contains("text-foreground")).toBe(true);
-    expect(picker("effort")?.textContent).toBe("Effort · 1M");
+    expect(picker("effort")?.textContent).toBe("High · 1M");
+    expect(pickerValue("effort")).toBe("high");
     expect(picker("permissionMode")?.textContent).toContain("Bypass");
     expect(pickerValue("permissionMode")).toBe("bypassPermissions");
 
@@ -239,22 +240,26 @@ describe("composer pickers", () => {
     await waitFor(() => expect(pickerValue("model")).toBe("claude-sonnet-5"));
     expect(modelMenu()).toBeNull();
     // Sonnet takes no context window, so the effort button reads the effort alone.
-    expect(picker("effort")?.textContent).toBe("Effort");
+    expect(picker("effort")?.textContent).toBe("High");
 
     fireEvent.click(option("claude-opus-5") ?? (await openModelMenu(), option("claude-opus-5")!));
     await waitFor(() => expect(pickerValue("model")).toBe("claude-opus-5"));
 
-    // The effort menu: two sections, the default marked, and the button reads "<effort> · <context>".
+    // The effort menu: two sections, each default marked and checked, and the button reads "<effort> · <context>".
     fireEvent.click(picker("effort")!);
     const effortMenu = await screen.findByRole("menu");
     expect(within(effortMenu).getAllByText(/^(Reasoning|Context Window)$/).map(el => el.textContent)).toEqual(["Reasoning", "Context Window"]);
     expect(option("1m")?.textContent).toContain("default");
-    expect(option("high")?.textContent).not.toContain("default");
-    fireEvent.click(option("high")!);
-    await waitFor(() => expect(picker("effort")?.textContent).toBe("High · 1M"));
+    expect(option("high")?.textContent).toContain("default");
+    expect(option("high")?.getAttribute("aria-checked")).toBe("true");
+    expect(option("low")?.textContent).not.toContain("default");
+    fireEvent.click(option("low")!);
+    await waitFor(() => expect(picker("effort")?.textContent).toBe("Low · 1M"));
     fireEvent.click(picker("effort")!);
+    expect(option("low")?.getAttribute("aria-checked")).toBe("true");
+    expect(option("high")?.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(option("200k")!);
-    await waitFor(() => expect(picker("effort")?.textContent).toBe("High · 200k"));
+    await waitFor(() => expect(picker("effort")?.textContent).toBe("Low · 200k"));
 
     // The access menu: an icon and a line per mode, the default marked.
     fireEvent.click(picker("permissionMode")!);
@@ -268,7 +273,7 @@ describe("composer pickers", () => {
     await typeInto(editor, "go");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ prompt: "go", model: "claude-opus-5", effort: "high", contextWindow: "200k", permissionMode: "plan" });
+    expect(started[0]).toMatchObject({ prompt: "go", model: "claude-opus-5", effort: "low", contextWindow: "200k", permissionMode: "plan" });
     expect(started[0]?.harness).toBeUndefined();
   });
 
@@ -313,10 +318,10 @@ describe("composer pickers", () => {
     expect(within(modelMenu()!).getAllByRole("option").length).toBe(CODEX_TABLE.models.length);
   });
 
-  it("sends nothing for a picker left alone; a context window pick brings the model it rides on", async () => {
+  it("sends nothing for a picker left alone, though it shows the default that will run", async () => {
     const { api, started } = fixtureApi({ table: [CLAUDE] });
     await setup(api);
-    await waitFor(() => expect(picker("effort")).not.toBeNull());
+    await waitFor(() => expect(picker("effort")?.textContent).toBe("High · 1M"));
     const editor = composerEditor();
     await typeInto(editor, "go");
     await press(editor, "Enter");
@@ -339,6 +344,18 @@ describe("composer pickers", () => {
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ model: "claude-opus-5", contextWindow: "1m" });
     expect(started[0]?.effort).toBeUndefined();
+  });
+
+  it("a model with no effort levels hides the Reasoning section and the button reads the context alone", async () => {
+    const flash = { value: "claude-flash", label: "Flash", isDefault: true, efforts: [], contextWindows: ["200k", "1m"] };
+    const { api } = fixtureApi({ table: [{ ...CLAUDE, models: [flash] }] });
+    await setup(api);
+    await waitFor(() => expect(picker("effort")?.textContent).toBe("1M"));
+    expect(pickerValue("effort")).toBeUndefined();
+    fireEvent.click(picker("effort")!);
+    const effortMenu = await screen.findByRole("menu");
+    expect(within(effortMenu).getAllByText(/^(Reasoning|Context Window)$/).map(el => el.textContent)).toEqual(["Context Window"]);
+    expect(option("high")).toBeNull();
   });
 
   it("a model narrows the sections: Haiku takes no effort and no context, so the effort picker goes and a stale effort pick is not sent", async () => {

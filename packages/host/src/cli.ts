@@ -573,6 +573,7 @@ async function hostFor(
       ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
       log: line => io.log(line),
       recipePath: recipePath(opts.statePath),
+      statePath: opts.statePath,
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));
     // Other local tools read the token from disk; the WS never sees it in a URL.

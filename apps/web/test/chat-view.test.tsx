@@ -275,26 +275,24 @@ describe("ChatView", () => {
     await screen.findByText("Alpha answer.");
   });
 
-  it("drops the left turn's remaining events after a new thread is requested mid-turn and reports finishing until its end", async () => {
+  it("drops the left turn's remaining events after a new thread is requested mid-turn and is never busy for it", async () => {
     const { api, emit } = fixtureApi([workspace]);
     const handle: { current: ChatThreadHandle | null } = { current: null };
     useStore.getState().bind(api);
     await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
-    render(<ChatView workspaceId={WS}>{thread => { handle.current = thread; return <span data-testid="finishing">{String(thread.finishing)}</span>; }}</ChatView>);
+    render(<ChatView workspaceId={WS}>{thread => { handle.current = thread; return <span data-testid="busy">{String(thread.busy)}</span>; }}</ChatView>);
     await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
     for (const e of FIXTURE.slice(0, 6)) emit(e);
     await screen.findByText(/Creating the server file, then starting it\./);
+    expect(screen.getByTestId("busy").textContent).toBe("true");
     act(() => requestNewThread({ workspaceId: WS }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
-    expect(screen.getByTestId("finishing").textContent).toBe("true");
-    for (const e of FIXTURE.slice(6, -1)) emit(e);
+    expect(screen.getByTestId("busy").textContent).toBe("false");
+    for (const e of FIXTURE.slice(6)) emit(e);
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
     expect(screen.queryByTestId("settled-footer")).toBeNull();
-    expect(screen.getByTestId("finishing").textContent).toBe("true");
-    emit(FIXTURE.at(-1)!);
-    expect(screen.getByTestId("finishing").textContent).toBe("false");
-    expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+    expect(screen.getByTestId("busy").textContent).toBe("false");
     sendFrom(handle.current, "start over");
     const fresh = { workspaceId: WS, sessionId: "sess_0002", turnId: "turn_0002" };
     emit({ type: "session.start", ...fresh, at: T0 + 100_000, prompt: "start over" });
@@ -303,7 +301,7 @@ describe("ChatView", () => {
     expect(screen.getByText("start over")).toBeDefined();
   });
 
-  it("treats a running turn in the history reply as the one a pre-mount request left behind", async () => {
+  it("a running turn in the history reply of a pre-mount request is not the new thread's: the view stays empty and is never busy for it", async () => {
     const other: WorkspaceView = { ...workspace, id: "ws_chat0002", name: "beta" };
     const beta = { workspaceId: other.id, sessionId: "sess_beta", turnId: "turn_beta" };
     const betaHistory: SessionEvent[] = [
@@ -313,21 +311,21 @@ describe("ChatView", () => {
     const { api, emit } = fixtureApi([workspace, other], { [WS]: settledTurn(WS, "alpha prompt", "Alpha answer."), [other.id]: betaHistory });
     useStore.getState().bind(api);
     await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
-    const view = render(<ChatView workspaceId={WS}>{thread => <span data-testid="finishing">{String(thread.finishing)}</span>}</ChatView>);
+    const view = render(<ChatView workspaceId={WS}>{thread => <span data-testid="busy">{String(thread.busy)}</span>}</ChatView>);
     await screen.findByText("Alpha answer.");
     act(() => requestNewThread({ workspaceId: other.id }));
-    view.rerender(<ChatView workspaceId={other.id}>{thread => <span data-testid="finishing">{String(thread.finishing)}</span>}</ChatView>);
+    view.rerender(<ChatView workspaceId={other.id}>{thread => <span data-testid="busy">{String(thread.busy)}</span>}</ChatView>);
     await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");
-    expect(screen.getByTestId("finishing").textContent).toBe("true");
+    expect(screen.getByTestId("busy").textContent).toBe("false");
     emit({ type: "session.delta", ...beta, at: T0 + 600, kind: "text", text: " and the beta tail." });
     emit({ type: "session.done", ...beta, at: T0 + 900, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
     expect(screen.queryByText(/beta tail/)).toBeNull();
     expect(screen.queryByTestId("settled-footer")).toBeNull();
-    expect(screen.getByTestId("finishing").textContent).toBe("true");
+    expect(screen.getByTestId("busy").textContent).toBe("false");
     emit({ type: "session.end", ...beta, at: T0 + 950, exitCode: 0, sawResult: true });
-    expect(screen.getByTestId("finishing").textContent).toBe("false");
+    expect(screen.getByTestId("busy").textContent).toBe("false");
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
   });
 
