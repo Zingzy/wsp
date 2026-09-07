@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The screens of wsp init on the catalog: the agents (the six, the ones on
-// this Mac ticked), what they need (the whole table of agents and tools, one
+// The screens of wsp init on the catalog: the agents (the six, ticked when
+// used on this Mac and wsp can run their threads), what they need (the whole table of agents and tools, one
 // row each with its size, over the totals and the disk line), and the sign-ins
 // and keys (logins that sign in on the machine after the build listed, keys
 // ticked to copy, and the wsp tools offered to each agent here whose config
@@ -104,21 +104,6 @@ function agentDetail(recipe: Recipe, manifest: Manifest, a: AgentEntry): string[
  * measured, or the plan's words for a row nobody measured. */
 function sizeLine(size: Size): string {
   return "bytes" in size ? `about ${fmtBytes(size.bytes)} installed on the machine (measured ${size.on})` : UNKNOWN_SIZE;
-}
-
-const hintOf = (size: Size): { hint?: string } => {
-  const bytes = sizeBytes(size);
-  return bytes !== undefined ? { hint: fmtBytes(bytes) } : {};
-};
-
-/** The six agents: a size beside each, ticked when this Mac has it, the detail saying what comes and what installs. */
-export function agentItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
-  return CATALOG_AGENTS.map(a => ({
-    id: a.id,
-    label: a.name,
-    ...hintOf(a.size),
-    detail: agentDetail(recipe, manifest, a),
-  }));
 }
 
 /** The recipe source in words with its counts, for a tool's detail pane. */

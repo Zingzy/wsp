@@ -9,12 +9,14 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { CATALOG, CATALOG_AGENTS, CATALOG_TOOLS, type CatalogEntry } from "@wsp/catalog";
-import type { ManifestEntry } from "@wsp/collect";
+import { computeRecipe, type ManifestEntry } from "@wsp/collect";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { ALSO_EMPTY } from "../src/init-also.js";
 import {
   AGENT_LOGINS,
+  AGENTS_TITLE,
+  AGENTS_TOP,
   CLI_LOGINS,
   MCP_LOGINS,
   SIGN_INS_TOP,
@@ -33,7 +35,9 @@ import {
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { LATER_LINE, answerOf } from "../src/init-select.js";
 import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, HERE_GROUP, USED_GROUP, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
+import { THREAD_AGENTS } from "../src/thread-agents.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
+import { HOME, claudeLine, fakeHost } from "./recipe-fixture.js";
 
 const KEY = { up: "\x1b[A", down: "\x1b[B", left: "\x1b[D", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 const row = (r: Partial<Recipe["rows"][number]> & { id: string }): Recipe["rows"][number] => ({ kind: "tool", on: true, source: { kind: "popular", sessions: 0, images: 0 }, ...r });
@@ -215,6 +219,54 @@ function streams(columns = 100, rows = 40) {
   return { input, output, text: () => stripVTControlCharacters(chunks.join("")), raw: () => chunks.join("") };
 }
 const settle = (ms = 10) => new Promise(r => setTimeout(r, ms));
+
+describe("the agents screen drawn", () => {
+  it("ticks only an agent used here that wsp can run threads with, says why under every other, and counts the ticks", async () => {
+    // Claude Code used here, Codex used here without an adapter, OpenCode installed and never run: this Mac's own recipe.
+    const codexRollout = [JSON.stringify({ type: "session_meta", payload: { id: "t1", cwd: `${HOME}/proj` } }), JSON.stringify({ type: "response_item", payload: { type: "function_call", name: "exec_command", arguments: JSON.stringify({ cmd: "cargo build" }) } })].join("\n");
+    const host = fakeHost({
+      which: ["claude", "codex", "opencode"],
+      files: {
+        "~/.claude/settings.json": "{}",
+        "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", `${HOME}/proj`, ["gh pr list"]),
+        "~/.codex/config.toml": "",
+        "~/.codex/sessions/2026/06/01/rollout-2026-06-01T10-00-00-t1.jsonl": codexRollout,
+      },
+    });
+    const recipe = await computeRecipe(host, { threadAgents: THREAD_AGENTS, now: () => new Date("2026-09-06T03:00:00Z") });
+    const rows = recipeTable(recipe, CATALOG_AGENTS);
+    const o = streams();
+    const p = tableScreen({
+      title: AGENTS_TITLE,
+      top: AGENTS_TOP,
+      counter: "1/6",
+      rows,
+      recipe,
+      manifest: FIXTURE,
+      grouped: false,
+      footer: ticks => [totalsLine(recipeTable(withAgents(recipe, ticks), CATALOG_AGENTS), "agents")],
+      input: o.input,
+      output: o.output,
+    });
+    await settle(20);
+    const t = o.text();
+    expect(t).toContain("◆  Agents  1/6");
+    expect(t).toContain(`┃  ${AGENTS_TOP}`);
+    expect(t).toContain(`┃  ${LATER_LINE}`);
+    expect(t).toMatch(/● Claude Code\s+used\s+used here, 1 session\s+208\.0 MB\n/);
+    expect(t).toMatch(/○ Codex\s+used\s+used here, 1 session\s+455\.0 MB\n/);
+    expect(t).toMatch(/○ OpenCode\s+installed\s+installed here, never used\s+673\.0 MB\n/);
+    expect(t).toMatch(/○ Hermes Agent\s+catalog\s+not installed here/);
+    expect(t).toContain("On: 1 agent, 208.0 MB");
+    // The row under the cursor says why it installs but stays off.
+    o.input.write(KEY.down);
+    await settle();
+    expect(o.text()).toContain("installs, but wsp cannot run its threads yet");
+    o.input.write(KEY.enter);
+    const r = await p;
+    expect(r.kind === "next" && [...r.ticks]).toEqual(["claude"]);
+  });
+});
 
 describe("the tools screen drawn", () => {
   const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "go", source: { kind: "used", sessions: 3, calls: 40 } })] };

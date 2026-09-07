@@ -200,10 +200,12 @@ export const RecipeScan = z.object({
 export type RecipeScan = z.infer<typeof RecipeScan>;
 
 /** What to do with a row without asking, and why: the rule's own tick, with the one thing that makes a row worth a
- * question said in the same line. Nothing else here is a delta. */
+ * question said in the same line, and on an agent held off because wsp cannot run its threads, that too, since its
+ * own why alone would argue for on. Nothing else here is a delta. */
 export function tickAdvice(row: RecipeAnswerRow): RecipeAdvice {
   const size = row.size;
-  return { value: row.on ? "on" : "off", why: row.on && row.heavy && size !== undefined ? `${row.why}; ${fmtBytes(size)} on the machine, worth a question` : row.why };
+  if (row.on) return { value: "on", why: row.heavy && size !== undefined ? `${row.why}; ${fmtBytes(size)} on the machine, worth a question` : row.why };
+  return { value: "off", why: row.note !== undefined && row.group === USED_GROUP ? `${row.why}; ${row.note}` : row.why };
 }
 
 /** What to do with a row's sign-in without asking: key files beside a login come first, since key brings them and

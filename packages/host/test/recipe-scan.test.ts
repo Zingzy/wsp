@@ -45,6 +45,24 @@ describe("wsp recipe scan", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("recommends an agent on only when it was used here and wsp can run its threads, and says which held it off", async () => {
+    const codexRollout = [JSON.stringify({ type: "session_meta", payload: { id: "t1", cwd: PROJ } }), JSON.stringify({ type: "response_item", payload: { type: "function_call", name: "exec_command", arguments: JSON.stringify({ cmd: "cargo build" }) } })].join("\n");
+    const host = fakeHost({
+      which: ["claude", "codex", "opencode"],
+      files: {
+        "~/.claude/settings.json": "{}",
+        "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", PROJ, ["gh pr list"]),
+        "~/.codex/config.toml": "",
+        "~/.codex/sessions/2026/06/01/rollout-2026-06-01T10-00-00-t1.jsonl": codexRollout,
+      },
+    });
+    const scan = RecipeScan.parse(await runScan(host, {}, quiet, at));
+    const agent = (id: string) => scan.agents.find(r => r.id === id)!;
+    expect(agent("claude")).toMatchObject({ on: true, recommended: { value: "on", why: "used here, 1 session" } });
+    expect(agent("codex")).toMatchObject({ on: false, recommended: { value: "off", why: "used here, 1 session; installs, but wsp cannot run its threads yet" } });
+    expect(agent("opencode")).toMatchObject({ on: false, recommended: { value: "off", why: "installed here, never used" } });
+  });
+
   it("carries what to do with every row and one line of why, so an agent applies the rest and asks about the delta", async () => {
     const scan = await runScan(laptop(), {}, quiet, at);
     expect(scan.tools.find(r => r.id === "node")?.recommended).toEqual({ value: "on", why: "always on the image" });

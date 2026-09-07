@@ -7,6 +7,7 @@ import { CATALOG, type CatalogEntry, sizeBytes } from "@wsp/catalog";
 import { HEAVY_USED_FLOOR, USED_FLOOR, floorApplies, isHeavy, meetsUsedFloor } from "@wsp/collect";
 import { customRows, fmtBytes, plural, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { GREY, GUTTER, accent, grey } from "./init-layout.js";
+import { THREAD_AGENTS } from "./thread-agents.js";
 import type { Cell } from "./init-select.js";
 
 /** The groups a row falls in, in reading order: what always comes, what this computer's agents ran, what is here
@@ -103,7 +104,7 @@ export function recipeTable(recipe: Recipe, catalog: readonly CatalogEntry[] = C
       why: whyLine(e, r, sessions, size, recipe.tick),
       ...(size !== undefined ? { size } : {}),
       heavy: isHeavy(size),
-      ...(e.kind === "agent" && e.threads !== true ? { note: "installs, but wsp cannot run its threads yet" } : {}),
+      ...(e.kind === "agent" && !THREAD_AGENTS.some(id => id === e.id) ? { note: "installs, but wsp cannot run its threads yet" } : {}),
     };
   });
   return GROUP_ORDER.flatMap(g => {

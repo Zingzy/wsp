@@ -36,7 +36,7 @@ type Sources = Partial<Record<RecipeSource["kind"], RecipeSource>>;
 const catalogDefault = (_sources: Sources, entry: CatalogEntry): boolean => entry.kind === "tool" && entry.defaultOn;
 
 /** Whether what the agents ran ticks the entry: a tool at or over the floor its size sets, an agent on any session
- * of its own, since an agent's sessions are the use and an agent's row is a question of what is here. */
+ * of its own, since an agent's sessions are the use and its row is still placed by whether it is here. */
 function usedEnough(sources: Sources, entry: CatalogEntry): boolean {
   const used = sources.used;
   if (used === undefined || used.kind !== "used") return false;
@@ -50,18 +50,19 @@ const TICK_RULES: Readonly<Record<RecipeTick, TickRule>> = {
   default: { order: installedFirst, on: catalogDefault, weighsUse: false, ticksAgentsWithoutAdapter: false },
 };
 
-/** What the wizard's screens start from when no rule was named: installed here, then use over the floor, then the
- * catalog's default, and an agent only ever from this computer. A use below the floor is the row's answer and vetoes
- * the catalog default under it, so a tool looked at once stays off however popular it is. */
+/** What the wizard's screens start from when no rule was named. A tool: installed here, then use over the floor,
+ * then the catalog's default; a use below the floor is the row's answer and vetoes the catalog default under it, so
+ * a tool looked at once stays off however popular it is. An agent: only its own use here, so one installed and never
+ * run is off with the row saying so. */
 const BLENDED: TickRule = {
   // A tool says what the agents ran with it, so a row can read "installed here, never used"; an agent is placed by
-  // whether it is on this computer, which is the only thing that ticks one.
+  // whether it is on this computer, and its tick is a separate answer.
   order: entry => (entry.kind === "tool" ? USED_FIRST : INSTALLED_FIRST),
   weighsUse: true,
   ticksAgentsWithoutAdapter: false,
   on: (sources, entry) => {
+    if (entry.kind !== "tool") return usedEnough(sources, entry);
     if (sources.installed !== undefined) return true;
-    if (entry.kind !== "tool") return false;
     return sources.used !== undefined ? usedEnough(sources, entry) : catalogDefault(sources, entry);
   },
 };
@@ -82,9 +83,8 @@ export interface RecipeOptions {
    * counted, so a recipe for one project reflects that project's tools. Every session counts when this is absent. */
   folders?: readonly string[];
   /** The catalog ids of the agents this host can run a thread on. An agent outside the list is off under every
-   * rule but `installed`, since ticking it would build a machine nothing here can open a thread on. Absent, no
-   * agent is held back this way. */
-  threadAgents?: readonly string[];
+   * rule but `installed`, since ticking it would build a machine nothing here can open a thread on. */
+  threadAgents: readonly string[];
   /** Told each catalog entry found on this computer, as it is found. */
   onPresent?: (e: CatalogEntry) => void;
   /** Told each agent's history as it is read, with the counts the recipe keeps. */
@@ -121,7 +121,7 @@ export function unknownCommands(histories: readonly AgentHistory[]): CommandCoun
 /** What one agent's own store says about the agent itself: its sessions here are its use. */
 const agentUse = (h: AgentHistory | undefined): Count | undefined => (h !== undefined && h.state === "read" ? { sessions: h.sessions, calls: h.calls } : undefined);
 
-export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promise<Recipe> {
+export async function computeRecipe(host: Host, opts: RecipeOptions): Promise<Recipe> {
   const catalog = opts.catalog ?? CATALOG;
   const rule = opts.tick !== undefined ? TICK_RULES[opts.tick] : BLENDED;
   const present = new Map<string, RecipeSource>();
@@ -137,7 +137,7 @@ export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promi
   });
   const usedTools = merged(histories, u => u.tools);
   const byAgent = new Map(histories.map(h => [h.agent, h]));
-  const threads = opts.threadAgents !== undefined ? new Set(opts.threadAgents) : undefined;
+  const threads = new Set(opts.threadAgents);
   const rows = catalog.map((e): RecipeRow => {
     const used = e.kind === "tool" ? usedTools.get(e.id) : agentUse(byAgent.get(e.id));
     const bytes = sizeBytes(e.size);
@@ -150,7 +150,7 @@ export async function computeRecipe(host: Host, opts: RecipeOptions = {}): Promi
       popular,
     };
     const source = rule.order(e).flatMap(kind => sources[kind] ?? [])[0] ?? popular;
-    const held = e.kind === "agent" && threads !== undefined && !threads.has(e.id) && !rule.ticksAgentsWithoutAdapter;
+    const held = e.kind === "agent" && !threads.has(e.id) && !rule.ticksAgentsWithoutAdapter;
     return { id: e.id, kind: e.kind, on: !held && rule.on(sources, e), source, ...size };
   });
   return {

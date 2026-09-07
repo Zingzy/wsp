@@ -26,6 +26,7 @@ import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS } from "@wsp/catalog";
 import { LOGIN_CHOICES, RECIPE_TICKS } from "@wsp/protocol";
 import { assetDir } from "./assets.js";
 import { HARNESS_ADAPTERS } from "./adapters.js";
+import { THREAD_AGENTS } from "./thread-agents.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { readBrewTable } from "./init-brew.js";
@@ -393,7 +394,7 @@ async function init(
       ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
       ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
       collect: collectThisComputer,
-      recipe: onHistory => computeRecipe(nodeHost(), { onHistory }),
+      recipe: onHistory => computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory }),
       keys,
       pricing: new SolariBackend({ apiKey: keys.solari }).pricing,
       statePath: opts.statePath,
