@@ -3,7 +3,7 @@
 // runtime's import events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, MachineSizeOffer, MachineState, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, MachineSizeOffer, MachineState, ProjectImportEvent, ProjectSecret, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -779,4 +779,74 @@ export function upgradeSealFailedUnreadLine(version: number, builderId: string):
 /** The update's last line when the snapshot failed and the provider answers 404 for the machine it ran on. */
 export function upgradeSealFailedGoneLine(version: number): string {
   return `Golden v${version} is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.`;
+}
+
+/** The line under the import dialog's title: which workspace, and that the folder lands at the path it has here. */
+export function importIntoLine(workspaceName: string): string {
+  return `Into ${workspaceName}, at the same path.`;
+}
+
+/** The repository row of a plan, in words a stranger reads: the history travels with a .git, or there is none. */
+export function repoLine(repo: boolean): string {
+  return repo ? "Git repository, history travels" : "No repository";
+}
+
+/** What the ticks on the secret-shaped rows do, under how many rows there are. */
+export function secretsNote(n: number): string {
+  return `${plural(n, "file")} ${n === 1 ? "looks like a secret" : "look like secrets"}. Ticked files are copied as they are. Unticked files are left out and listed.`;
+}
+
+/** What the ticks on the agent rows do. */
+export const SESSIONS_NOTE = "Ticked agents' sessions go with the folder. The rest stay here.";
+
+/** Why a secret-shaped file was flagged and its size, as the CLI's plan column and the dialog's hover both print it. */
+export function secretSignalsLine(s: ProjectSecret): string {
+  return `${s.signals.join(", ")}, ${fmtBytes(s.bytes)}`;
+}
+
+export interface ImportProgress {
+  readonly line: string;
+  /** How far the bar is, 0 to 1; it never goes back. */
+  readonly fraction: number;
+}
+
+/** An import's events folded into the one progress line and its bar. The words are the last event's step: the two
+ * steps before packing pass in a blink and read as starting, packing keeps the runtime's count, an upload is named
+ * by its total so the words hold still while the bar moves, a landing by the workspace it lands on. The runtime lands
+ * the project and then uploads and lands the sessions tar in a second pass, so that pass is named and the bar holds
+ * its high-water mark instead of dropping to nought. A failure has no step; the status line carries it. */
+export function importProgress(events: readonly Pick<ProjectImportEvent, "stage" | "message" | "bytes" | "total">[], workspaceName: string): ImportProgress | null {
+  let line = "";
+  let fraction = 0;
+  let landings = 0;
+  for (const e of events) {
+    switch (e.stage) {
+      case "planned":
+      case "consented":
+        line = "Starting";
+        break;
+      case "packing":
+        line = e.message.replace(/\.$/, "");
+        break;
+      case "uploading": {
+        const what = landings > 0 ? " sessions" : "";
+        const size = e.total === undefined ? "" : `${what === "" ? "" : ","} ${fmtBytes(e.total)}`;
+        line = `Uploading${what}${size}`;
+        if (e.bytes !== undefined && e.total !== undefined && e.total > 0) fraction = Math.max(fraction, e.bytes / e.total);
+        break;
+      }
+      case "landing":
+        landings += 1;
+        line = `Landing on ${workspaceName}`;
+        fraction = 1;
+        break;
+      case "done":
+        line = "Done";
+        fraction = 1;
+        break;
+      case "failed":
+        return null;
+    }
+  }
+  return events.length === 0 ? null : { line, fraction };
 }

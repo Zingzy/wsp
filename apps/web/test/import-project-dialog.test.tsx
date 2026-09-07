@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The import dialog over a fake api: a folder is read into one summary, the
 // agents with sessions for it are ticked rows whose ids the request names,
-// secrets box is the only loud element and only when the plan found one,
-// ticks become carry and rewrite, the import's events fill the step rows,
-// the landed line names the folder on the machine and what was cut, editing
-// the path after a read drops the plan and its ticks, and a refusal prints the
-// runtime's words with replace as the one follow-up.
+// the secret-shaped rows are quiet and only there when the plan found one,
+// ticks become carry and rewrite, the import's events fill the one progress
+// line, the landed line names the folder on the machine and what was left
+// out, editing the path after a read drops the plan and its ticks, and a
+// refusal prints the runtime's words with replace as the one follow-up.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventUnion, ProjectAgent, ProjectImportEvent, ProjectPlan, WorkspaceView } from "@wsp/protocol";
+import { SESSIONS_NOTE, secretsNote, type EventUnion, type ProjectAgent, type ProjectImportEvent, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ImportProjectDialog } from "../src/sidebar/ImportProjectDialog.js";
@@ -90,7 +90,13 @@ afterEach(() => {
 
 const dialog = async (): Promise<HTMLElement> => screen.findByRole("dialog");
 const value = (root: HTMLElement, k: string): string => root.querySelector<HTMLElement>(`[data-k="${k}"]`)!.textContent ?? "";
-const step = (root: HTMLElement, stage: string): HTMLElement => root.querySelector<HTMLElement>(`[data-step="${stage}"]`)!;
+/** The one slot above the footer: its words, which are also the dialog's status, and the bar's percent when the bar is drawn. */
+const progress = (root: HTMLElement): { line: string; percent: string | null } => {
+  const box = root.querySelector<HTMLElement>("[data-k=progress]")!;
+  const line = box.querySelector<HTMLElement>("[data-k=progress-line]")!;
+  expect(line).toBe(within(root).getByRole("status"));
+  return { line: line.textContent ?? "", percent: box.querySelector("[role=progressbar]")?.getAttribute("aria-valuenow") ?? null };
+};
 
 async function readFolder(root: HTMLElement, path = "/var/proj"): Promise<void> {
   const input = within(root).getByLabelText("Folder on this Mac") as HTMLInputElement;
@@ -100,18 +106,22 @@ async function readFolder(root: HTMLElement, path = "/var/proj"): Promise<void> 
 }
 
 describe("import project dialog", () => {
-  it("opens with the workspace named, empty summary rows, six muted steps, the path input alone in a browser tab, and no way to import yet", async () => {
+  it("opens with one short line under the title, empty summary rows, an empty progress line and no ledger, the path input alone in a browser tab, and no way to import yet", async () => {
     const { api } = fakeApi();
     useStore.getState().bind(api);
     render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
     const root = await dialog();
     expect(within(root).getByText("Import a project")).toBeDefined();
-    expect(within(root).getByText(/Into api\./)).toBeDefined();
+    expect(within(root).getByText("Into api, at the same path.")).toBeDefined();
     for (const k of ["repository", "files", "caches", "skipped", "dest"]) expect(value(root, k)).toBe("");
-    expect(root.querySelectorAll("[data-step]")).toHaveLength(6);
-    expect(Array.from(root.querySelectorAll("[data-step]")).map(el => el.getAttribute("data-step"))).toEqual(["planned", "consented", "packing", "uploading", "landing", "done"]);
+    expect(root.querySelectorAll("[data-step]")).toHaveLength(0);
+    expect(progress(root)).toEqual({ line: "", percent: null });
     expect(root.querySelector("[data-k=secrets]")).toBeNull();
-    expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
+    const importButton = within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement;
+    expect(importButton.disabled).toBe(true);
+    // The accent sits on Import alone; Cancel is a bordered neutral key.
+    expect(importButton.className).toContain("bg-primary");
+    expect(within(root).getByRole("button", { name: "Cancel" }).className).not.toContain("bg-primary");
     expect(within(root).queryByRole("button", { name: /folder/ })).toBeNull();
   });
 
@@ -123,34 +133,44 @@ describe("import project dialog", () => {
     await readFolder(root);
     expect(api.planProject).toHaveBeenCalledWith("/var/proj");
     expect((within(root).getByLabelText("Folder on this Mac") as HTMLInputElement).value).toBe("/var/proj");
-    expect(value(root, "repository")).toBe("git, .git travels whole");
+    expect(value(root, "repository")).toBe("Git repository, history travels");
+    expect(root.querySelector<HTMLElement>("[data-k=repository]")!.className).not.toContain("font-mono");
     expect(value(root, "files")).toBe("12 files · 3.0 KB");
-    expect(value(root, "caches")).toBe("node_modules, dist");
+    expect(root.querySelector<HTMLElement>("[data-k=files]")!.className).toContain("font-mono");
+    expect(value(root, "caches")).toBe("2 folders");
+    expect(root.querySelector("[data-k=cache-list]")).toBeNull();
+    fireEvent.click(within(root).getByRole("button", { name: "2 folders" }));
+    expect(value(root, "cache-list")).toBe("node_modules, dist");
     expect(value(root, "skipped")).toBe("1 path");
     expect(root.querySelector<HTMLElement>("[data-k=skipped]")!.title).toBe("link-out: points outside the folder; not followed");
     expect(value(root, "dest")).toBe("/private/var/proj");
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("shows the secrets box only when the plan found one, with the rewrite ticked and the plain file not, each row's words following its tick", async () => {
+  it("shows the secret-shaped rows only when the plan found one, as plain rows with no fill or border colour, the rewrite ticked and the plain file not, each row's words following its tick", async () => {
     const { api } = fakeApi();
     useStore.getState().bind(api);
     render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
     const root = await dialog();
     await readFolder(root);
     const box = root.querySelector<HTMLElement>("[data-k=secrets]")!;
-    expect(within(box).getByText("2 secret-shaped files")).toBeDefined();
+    // Information, not a failure: the section carries no tint of its own and is dressed as every other section.
+    expect(box.className).not.toMatch(/warning|bg-/);
+    expect(box.className).toBe(root.querySelector<HTMLElement>("[data-k=summary]")!.className);
+    expect(within(box).getByText(secretsNote(2))).toBeDefined();
+    expect(within(box).getByRole("checkbox", { name: /\.env/ }).closest("li")!.title).toBe(".env: name, keys, 120 B");
     const env = within(box).getByRole("checkbox", { name: /\.env/ });
     const config = within(box).getByRole("checkbox", { name: /\.git\/config/ });
     expect(env.getAttribute("aria-checked")).toBe("false");
     expect(config.getAttribute("aria-checked")).toBe("true");
+    for (const tick of within(root).getAllByRole("checkbox")) expect(tick.getAttribute("data-tone")).toBe("neutral");
     const offers = (): string[] => Array.from(box.querySelectorAll<HTMLElement>("[data-k=offer]")).map(el => el.textContent ?? "");
-    expect(offers()).toEqual(["cut", "lands bare at github.com"]);
-    expect(box.querySelectorAll<HTMLElement>("[data-k=offer]")[1]!.title).toBe("lands bare at https://github.com/o/r");
-    expect(within(box).getByText("name, keys · 120 B")).toBeDefined();
+    expect(offers()).toEqual(["left out", "rewritten without keys"]);
+    expect(box.querySelectorAll<HTMLElement>("[data-k=offer]")[1]!.title).toBe("rewritten without keys; the remote reads https://github.com/o/r");
+    expect(within(box).queryByText(/name, keys/)).toBeNull();
     fireEvent.click(env);
     fireEvent.click(config);
-    expect(offers()).toEqual(["travels as it is", "cut"]);
+    expect(offers()).toEqual(["travels as is", "left out"]);
   });
 
   it("editing the path after a read drops the plan and the ticks, and Import waits for the folder to be read again", async () => {
@@ -181,7 +201,8 @@ describe("import project dialog", () => {
     const root = await dialog();
     await readFolder(root);
     const box = root.querySelector<HTMLElement>("[data-k=agents]")!;
-    expect(within(box).getByText("2 agents on this Mac with sessions for the folder")).toBeDefined();
+    expect(within(box).getByText(SESSIONS_NOTE)).toBeDefined();
+    expect(within(box).queryByText(/on this Mac/)).toBeNull();
     const rows = within(box).getAllByRole("checkbox");
     expect(rows.map(r => r.getAttribute("aria-label"))).toEqual(["Claude Code", "Codex"]);
     expect(rows.map(r => r.getAttribute("aria-checked"))).toEqual(["true", "true"]);
@@ -242,17 +263,19 @@ describe("import project dialog", () => {
     expect(within(root).getByRole("checkbox", { name: "Codex" }).getAttribute("aria-checked")).toBe("true");
   });
 
-  it("with no secret-shaped file the box is not rendered", async () => {
-    const { api } = fakeApi({ ...PLAN, secrets: [] });
+  it("with no secret-shaped file the section is not rendered, and a repository-less folder says so in words", async () => {
+    const { api } = fakeApi({ ...PLAN, secrets: [], repo: false, excluded: [] });
     useStore.getState().bind(api);
     render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
     const root = await dialog();
     await readFolder(root);
     expect(root.querySelector("[data-k=secrets]")).toBeNull();
-    expect(root.querySelectorAll("[data-step]")).toHaveLength(6);
+    expect(value(root, "repository")).toBe("No repository");
+    expect(value(root, "caches")).toBe("none");
+    expect(within(root).queryByRole("button", { name: "none" })).toBeNull();
   });
 
-  it("Import sends the ticks as carry and rewrite with dest at the realpath, fills the steps from events, and names what landed and what was cut", async () => {
+  it("Import sends the ticks as carry and rewrite with dest at the realpath, reads each event as the one progress line, and names what landed and what was left out", async () => {
     const { api, emit } = fakeApi();
     useStore.getState().bind(api);
     const onClose = vi.fn();
@@ -267,39 +290,49 @@ describe("import project dialog", () => {
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
     // The import runs on the runtime whatever this dialog does, so it cannot be dismissed while it runs, and the status line says so.
     expect((within(root).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(within(root).getByRole("status").textContent).toBe("Importing. This stays open until it lands; closing it would not stop the import.");
+    expect(within(root).getByRole("status").textContent).toBe("");
     fireEvent.keyDown(root, { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
+    expect(progress(root)).toEqual({ line: "", percent: null });
 
     emit(event({}));
+    expect(progress(root)).toEqual({ line: "Starting", percent: "0" });
     emit(event({ stage: "consented", message: "Carrying .env; rewriting .git/config to https://github.com/o/r; nothing cut.", elapsedMs: 20 }));
+    expect(progress(root)).toEqual({ line: "Starting", percent: "0" });
+    emit(event({ stage: "packing", message: "Packing 11 files.", elapsedMs: 30 }));
+    expect(progress(root)).toEqual({ line: "Packing 11 files", percent: "0" });
     emit(event({ stage: "uploading", message: "Part 1 of 2, 1.4 KB of 2.8 KB.", elapsedMs: 50, bytes: 1_400, total: 2_800 }));
+    expect(progress(root)).toEqual({ line: "Uploading 2.7 KB", percent: "50" });
     emit(event({ source: "/var/other", stage: "landing", message: "Landing at /var/other.", elapsedMs: 60 }));
-    expect(step(root, "planned").textContent).toContain("12 files, 3.0 KB and the repository");
-    expect(step(root, "consented").textContent).toContain("Carrying .env; rewriting .git/config");
-    expect(step(root, "uploading").textContent).toContain("Part 1 of 2");
-    expect(step(root, "uploading").querySelector("[role=progressbar]")?.getAttribute("aria-valuenow")).toBe("50");
-    expect(step(root, "landing").textContent).not.toContain("/var/other");
+    expect(progress(root)).toEqual({ line: "Uploading 2.7 KB", percent: "50" });
 
     emit(event({ stage: "landing", message: "Landing at /private/var/proj.", elapsedMs: 70 }));
+    expect(progress(root)).toEqual({ line: "Landing on api", percent: "100" });
     emit(event({ stage: "done", message: "11 files, 2.8 KB, landed at /private/var/proj.", elapsedMs: 80 }));
+    expect(progress(root)).toEqual({ line: "Done", percent: "100" });
     await act(async () => finish());
-    await waitFor(() => expect(within(root).getByRole("status").textContent).toBe("proj is at /private/var/proj on api; cut 1 file, listed above."));
+    // At done the slot says one thing, the landed line, over the full bar; the Done key is the only other word.
+    await waitFor(() => expect(progress(root)).toEqual({ line: "proj is at /private/var/proj on api; 1 file left out, listed above.", percent: "100" }));
     expect(within(root).queryByRole("button", { name: "Cancel" })).toBeNull();
     const done = within(root).getByRole("button", { name: "Done" });
     fireEvent.click(done);
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("a refusal prints the runtime's words in one line, and an existing destination offers replace", async () => {
-    const { api } = fakeApi();
+  it("a refusal prints the runtime's words in one line and clears the progress line, and an existing destination offers replace", async () => {
+    const { api, emit } = fakeApi();
     useStore.getState().bind(api);
     render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
     const root = await dialog();
     await readFolder(root);
-    api.importProject.mockRejectedValueOnce(new RequestError("/private/var/proj exists on the machine", "exists"));
+    let refuse!: () => void;
+    api.importProject.mockImplementationOnce(() => new Promise((_resolve, reject) => { refuse = () => reject(new RequestError("/private/var/proj exists on the machine", "exists")); }));
     fireEvent.click(within(root).getByRole("button", { name: "Import" }));
+    emit(event({ stage: "packing", message: "Packing 11 files.", elapsedMs: 30 }));
+    expect(progress(root)).toEqual({ line: "Packing 11 files", percent: "0" });
+    await act(async () => refuse());
     await waitFor(() => expect(within(root).getByRole("status").textContent).toBe("/private/var/proj exists on the machine"));
+    expect(progress(root)).toEqual({ line: "/private/var/proj exists on the machine", percent: null });
     // A replace is a caution to confirm, not a failure: the confirm colour, as the export dialog's.
     expect(within(root).getByRole("status").className).toContain("text-warning-foreground");
     const replace = within(root).getByRole("button", { name: "Replace and import" }) as HTMLButtonElement;
@@ -324,20 +357,27 @@ describe("import project dialog", () => {
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("with the desktop bridge the button opens the system picker and reads what it returns", async () => {
+  it("with the desktop bridge the folder is a picker row, no typed field: the key opens the system picker, the path it returns reads in mono and the key becomes Change", async () => {
     const { api } = fakeApi();
     useStore.getState().bind(api);
     const pickFolder = vi.fn(async () => "/Users/me/code/proj");
     (window as { wsp?: unknown }).wsp = { pickFolder };
     render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
     const root = await dialog();
+    expect(within(root).queryByLabelText("Folder on this Mac")).toBeNull();
+    expect(root.querySelector("input")).toBeNull();
+    expect(value(root, "path")).toBe("/Users/you/code/project");
     fireEvent.click(within(root).getByRole("button", { name: "Choose folder" }));
     await waitFor(() => expect(api.planProject).toHaveBeenCalledWith("/Users/me/code/proj"));
-    expect((within(root).getByLabelText("Folder on this Mac") as HTMLInputElement).value).toBe("/Users/me/code/proj");
+    const folder = root.querySelector<HTMLElement>("[data-k=path]")!;
+    expect(folder.textContent).toBe("/Users/me/code/proj");
+    expect(folder.className).toContain("font-mono");
+    expect(within(root).queryByRole("button", { name: "Choose folder" })).toBeNull();
     pickFolder.mockResolvedValueOnce(undefined as unknown as string);
-    fireEvent.click(within(root).getByRole("button", { name: "Choose folder" }));
+    fireEvent.click(within(root).getByRole("button", { name: "Change" }));
     await waitFor(() => expect(pickFolder).toHaveBeenCalledTimes(2));
     expect(api.planProject).toHaveBeenCalledTimes(1);
+    expect(folder.textContent).toBe("/Users/me/code/proj");
   });
 
   it("a folder handed in opens already read", async () => {

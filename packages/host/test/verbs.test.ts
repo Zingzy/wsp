@@ -1144,7 +1144,7 @@ describe("wsp verbs over the host", () => {
     expect(text).toMatch(/^Caches left behind {2,}none$/m);
     expect(text).toMatch(new RegExp(`^Lands at {2,}${realpathSync(proj)}$`, "m"));
     expect(text).toMatch(/^Secret-shaped {2,}1 file$/m);
-    expect(text).toMatch(/^ {2}\.env {2,}name(, \w+)*, 19 B {2,}cut$/m);
+    expect(text).toMatch(/^ {2}\.env {2,}name(, \w+)*, 19 B {2,}left out$/m);
     expect(text).toMatch(/^Agents {2,}none with sessions for the folder$/m);
     expect(landings()).toEqual([]);
     expect(io.streamed).toBe("");

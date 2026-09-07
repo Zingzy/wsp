@@ -63,19 +63,13 @@ export function importRequest(plan: ProjectPlan, source: string, ticked: Readonl
   return { source, dest: plan.source, ...consentRequest(plan.secrets, ticked), ...(travelling !== undefined ? { agents: travelling } : {}), ...(replace === true ? { replace: true } : {}) };
 }
 
-const host = (url: string): string => {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-};
-
-/** The row's words for its tick: cut, travels as it is, or lands bare at its hosts (the URLs whole in the full form) without the dropped keys. */
+/** The row's words for its tick, short for the row's end and full for its title: left out, travels as is, or rewritten
+ * without its keys, the full form naming what the remote then reads and which config keys are left out. */
 export function secretOffer(s: ProjectSecret, ticked: boolean): { short: string; full: string } {
-  if (!ticked) return { short: "cut", full: "cut" };
-  if (s.rewrite === undefined) return { short: "travels as it is", full: "travels as it is" };
-  const without = s.rewrite.drop.length > 0 ? ` without ${s.rewrite.drop.join(", ")}` : "";
-  const bare = (urls: readonly string[]): string => (urls.length > 0 ? ` bare at ${urls.join(", ")}` : "");
-  return { short: `lands${bare([...new Set(s.rewrite.urls.map(host))])}${without}`, full: `lands${bare(s.rewrite.urls)}${without}` };
+  if (!ticked) return { short: "left out", full: "left out" };
+  if (s.rewrite === undefined) return { short: "travels as is", full: "travels as is" };
+  const short = "rewritten without keys";
+  const remote = s.rewrite.urls.length > 0 ? `; the remote reads ${s.rewrite.urls.join(", ")}` : "";
+  const dropped = s.rewrite.drop.length > 0 ? `; ${s.rewrite.drop.join(", ")} left out` : "";
+  return { short, full: `${short}${remote}${dropped}` };
 }

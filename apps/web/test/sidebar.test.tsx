@@ -4,7 +4,7 @@
 // traversal; the new-workspace dialog; the zombie rebuild and the gone forget.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
@@ -425,7 +425,7 @@ describe("new thread", () => {
     await mount(api, "api");
     fireEvent.click(screen.getByRole("button", { name: "Import a project into web" }));
     const dialog = await screen.findByRole("dialog", { name: "Import a project" });
-    expect(within(dialog).getByText(/Into web\./)).toBeDefined();
+    expect(within(dialog).getByText(importIntoLine("web"))).toBeDefined();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
@@ -731,7 +731,7 @@ describe("new workspace dialog", () => {
     fireEvent.click(within(dialog).getByRole("radio", { name: /^Import a project/ }));
     fireEvent.keyDown(input, { key: "Enter" });
     const importDialog = await screen.findByRole("dialog", { name: "Import a project" });
-    expect(within(importDialog).getByText(/Into beta\./)).toBeDefined();
+    expect(within(importDialog).getByText(importIntoLine("beta"))).toBeDefined();
     expect(useStore.getState().selectedId).toBe("ws_beta");
     vi.unstubAllGlobals();
   });

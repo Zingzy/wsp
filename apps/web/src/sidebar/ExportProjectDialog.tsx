@@ -12,14 +12,13 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { agentName } from "@wsp/catalog";
 import { fmtBytes, type ProjectAgentResult, type ProjectExportEvent, type ProjectExportResult, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
-import { Checkbox } from "../components/ui/checkbox.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { useThreadFolder } from "../files/root.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { agentRows, agentsRequest, exportLandedLine, exportStepRows, isExportOf, pickedDest } from "./exportProject.js";
 import { agentOutcome, count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
-import { FactRow, FolderField, StatusLine, StepRows } from "./ProjectTripRows.js";
+import { ConsentRow, FactRow, FolderField, StepRows, TripStatus } from "./ProjectTripRows.js";
 
 type Phase = "idle" | "exporting" | "done";
 
@@ -135,7 +134,9 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
               </FactRow>
             </div>
             <StepRows label="Export steps" transfer="Download" rows={exportStepRows(events)} />
-            <StatusLine tone={refusalTone(refusal)}>{status}</StatusLine>
+            <TripStatus tone={refusalTone(refusal)} fraction={null}>
+              {status}
+            </TripStatus>
           </DialogPanel>
           <DialogFooter>
             {phase === "done" ? null : (
@@ -175,14 +176,12 @@ function Agents({
             const landed = outcomeOf(agent);
             const name = agentName(agent);
             return (
-              <li key={agent} className="flex h-7 items-center gap-2 text-xs">
-                <Checkbox checked={ticked.has(agent)} disabled={disabled} aria-label={name} onCheckedChange={next => onToggle(agent, next)} />
-                <span className="shrink-0 text-foreground">{name}</span>
+              <ConsentRow key={agent} label={name} mono={false} checked={ticked.has(agent)} disabled={disabled} onToggle={next => onToggle(agent, next)}>
                 {landed?.sessions === undefined ? null : <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{count(landed.sessions, "session")}</span>}
                 <span data-k="outcome" className="ml-auto min-w-0 truncate text-[11px] text-muted-foreground">
                   {landed === undefined ? "" : agentOutcome(landed)}
                 </span>
-              </li>
+              </ConsentRow>
             );
           })}
         </ul>
