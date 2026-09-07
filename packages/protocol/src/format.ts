@@ -662,6 +662,13 @@ export function leftOutLine(note: string): string {
   return `left out of the build: ${note}`;
 }
 
+/** Why `wsp recipe --add` refuses a package a manager on this Mac already has: that package is a row of its own,
+ * which the build installs by the road the plan resolves for it (a tap formula from its GitHub release, pinned),
+ * and a second row would install it twice by a line the image can refuse. The word that ticks the row instead. */
+export function addAlreadyHereLine(id: string, scanId: string): string {
+  return `--add ${id}: a package manager on this Mac already has ${id}, so it is a row of its own; tick it with --set ${scanId}=on, which installs it by its own road, rather than adding a second row that installs it again`;
+}
+
 /** A recipe file's tick on a tool outside the catalog that this Mac has no row for: nothing here says how to install
  * it, so the tick is said and left out rather than dropped in silence. */
 export function notHereLine(name: string, file: string): string {

@@ -29,6 +29,10 @@ export interface ScanRow {
   version?: string;
 }
 
+/** The id a scanned package has on the third screen and in a `wsp recipe --set` word, the one spelling of it: the
+ * manager and the package, unique across managers since two of them can carry one name (uv and pipx both list ruff). */
+export const scanRowId = (manager: string, pkg: string): string => `${manager}/${pkg}`;
+
 /** The last segment of a package name: the command a manager's package usually leaves on PATH. */
 const lastSegment = (name: string): string => name.slice(name.lastIndexOf("/") + 1);
 
@@ -162,12 +166,12 @@ export async function scanTools(host: Host, recipe: readonly RecipeCustomRow[] =
   const rows: ScanRow[] = [];
   for (const m of MANAGER_SCANS) {
     if (!(await host.exec.which(m.bin))) continue;
-    const pkgs = (await m.list(host)).filter(p => !carried(m.id, p.name) && !inRecipe(recipe, `${m.id}/${p.name}`, p.name));
+    const pkgs = (await m.list(host)).filter(p => !carried(m.id, p.name) && !inRecipe(recipe, scanRowId(m.id, p.name), p.name));
     const sizes = await sizesUnder(host, await m.dir(host), pkgs.map(p => p.name));
     for (const p of pkgs) {
       const size = sizes.get(p.name);
       rows.push({
-        id: `${m.id}/${p.name}`,
+        id: scanRowId(m.id, p.name),
         name: p.name,
         manager: m.id,
         group: m.group,

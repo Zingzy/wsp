@@ -98,10 +98,10 @@ describe("the MCP server over the host", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  async function connect(): Promise<Client> {
+  async function connect(over: Partial<Parameters<typeof mcpServer>[1]> = {}): Promise<Client> {
     const [toClient, toServer] = InMemoryTransport.createLinkedPair();
     const dial = dialer(statePath);
-    server = mcpServer(statePath, { dial: Object.assign(async () => (socket = await dial()), { close: dial.close }) });
+    server = mcpServer(statePath, { dial: Object.assign(async () => (socket = await dial()), { close: dial.close }), ...over });
     await server.connect(toServer);
     client = new Client({ name: "test-agent", version: "0.0.0" });
     await client.connect(toClient);
@@ -737,6 +737,9 @@ describe("the MCP server over the host", () => {
 
   it("recipe reads this computer, writes the file and answers with the same table the command line prints, set and all", async () => {
     const out = join(dir, "recipe.json");
+    // The scan this server was handed, which is what a set word naming a package this computer has is answered against.
+    const diskbloom = { id: "brew/zingzy/tap/diskbloom", name: "zingzy/tap/diskbloom", manager: "brew" as const, group: "Homebrew formulae", install: "brew install zingzy/tap/diskbloom", check: "brew list --versions zingzy/tap/diskbloom", size: 4 * 1024 * 1024 };
+    await connect({ alsoHere: async () => [diskbloom] });
     const first = await call("recipe", { out });
     const table = RecipeAnswer.parse(first.structured);
     expect(table.tick).toBe("used");
@@ -748,9 +751,17 @@ describe("the MCP server over the host", () => {
     const flipped = RecipeAnswer.parse((await call("recipe", { out, set: ["java=on"] })).structured);
     expect(allRows(flipped).find(r => r.id === "java")).toMatchObject({ on: true, size: 613280230 });
     expect(flipped.heavy.map(r => r.id)).toContain("java");
-    // A word the catalog does not know is a tool error in one line, not a rewritten file.
-    expect(await call("recipe", { out, set: ["jaava=on"] })).toMatchObject({ isError: true, text: '--set jaava=on: the catalog has no row called "jaava"' });
+    // A word no row of any kind answers is a tool error in one line, not a rewritten file.
+    expect(await call("recipe", { out, set: ["jaava=on"] })).toMatchObject({ isError: true, text: `--set jaava=on: "jaava" is no catalog row and no row of ${out} outside the catalog, and no package a manager on this Mac has that id` });
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows.find(r => r.id === "java")?.on).toBe(true);
+
+    // The id the scan gives a package this computer has ticks that package's own row, the road the third screen takes.
+    const ticked = RecipeAnswer.parse((await call("recipe", { out, set: [`${diskbloom.id}=on`] })).structured);
+    expect(allRows(ticked).some(r => r.id === diskbloom.id)).toBe(false);
+    expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows.find(r => r.id === "tools/brew/zingzy/tap/diskbloom")).toMatchObject({ on: true, kind: "tool" });
+    // An add for the same package is refused in one line naming the set word, since it is a row already.
+    expect(await call("recipe", { out, add: [`${diskbloom.id}=${diskbloom.install}`] })).toMatchObject({ isError: true, text: `--add ${diskbloom.id}: a package manager on this Mac already has ${diskbloom.id}, so it is a row of its own; tick it with --set ${diskbloom.id}=on, which installs it by its own road, rather than adding a second row that installs it again` });
+    expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).custom ?? []).toEqual([]);
   });
 
   it("recipe refuses a relative out or project by name: this server's own folder is wherever the agent launched it", async () => {

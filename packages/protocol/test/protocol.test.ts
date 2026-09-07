@@ -913,5 +913,9 @@ describe("packageOf", () => {
     // The collector's id for a manager's package, which a scan row of the same manager and package stands for.
     expect(wire.toolRowId("brew", "zingzy/tap/diskbloom")).toBe(`${wire.BREW_ID_PREFIX}zingzy/tap/diskbloom`);
     expect(wire.packageOf({ id: wire.toolRowId("npm", "@scope/name") })).toBe("@scope/name");
+    // Where a manager's rows sit, which is what the engine tests a row's id against and what the brew prefix is.
+    expect(wire.toolRowPrefix("npm")).toBe("tools/npm/");
+    expect(wire.BREW_ID_PREFIX).toBe(wire.toolRowPrefix("brew"));
+    expect(wire.toolRowId("uv", "ruff").startsWith(wire.toolRowPrefix("uv"))).toBe(true);
   });
 });

@@ -4,12 +4,14 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Recipe } from "@wsp/protocol";
+import { addAlreadyHereLine, type Recipe } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { cli, type CliIO } from "../src/cli.js";
 import { ADDED_GROUP } from "../src/init-table.js";
 import { RecipeAnswerRow, answerRows, recipeAnswer, recipePrintout } from "../src/recipe-answer.js";
 import { customFromFlags, parsePair, withCustom } from "../src/recipe-custom.js";
+import type { ScanRow } from "../src/scan.js";
+import { findVerb, runVerb } from "../src/verbs.js";
 import { withHome } from "./recipe-fixture.js";
 
 const bare: Recipe = { version: 1, at: "2026-09-06T03:00:00Z", histories: [], rows: [] };
@@ -86,6 +88,18 @@ describe("the recipe verb's flags", () => {
   const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
   const io = (lines: string[], errors: string[]): CliIO => ({ log: l => lines.push(l), error: l => errors.push(l), ask: noPrompt, askSecret: noPrompt });
 
+  /** A tap formula this computer's Homebrew has, as the scan lists it, and the recipe row a tick on it lands under. */
+  const DISKBLOOM: ScanRow = { id: "brew/zingzy/tap/diskbloom", name: "zingzy/tap/diskbloom", manager: "brew", group: "Homebrew formulae", install: "brew install zingzy/tap/diskbloom", check: "brew list --versions zingzy/tap/diskbloom", size: 4 * 1024 * 1024 };
+  const TAP_ROW = "tools/brew/zingzy/tap/diskbloom";
+
+  const verb = findVerb(["recipe"]);
+  if (verb === undefined) throw new Error("the verb table registers no recipe verb");
+
+  /** The recipe verb down the command line's own door, with what this computer's managers have handed in: `cli`
+   * reaches the same `runVerb` and hands it the real scan, which a unit test must not run. */
+  const onCli = (argv: readonly string[], out: string[], errors: string[], dir: string, here: readonly ScanRow[] = []): Promise<number> =>
+    withHome(dir, () => runVerb(verb, ["recipe", ...argv], io(out, errors), () => join(dir, "state.json"), { alsoHere: async () => here }));
+
   it("names both flags in the help, and in the recipe verb's own usage", async () => {
     const lines: string[] = [];
     expect(await cli(["--help"], io(lines, []))).toBe(0);
@@ -111,11 +125,28 @@ describe("the recipe verb's flags", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-recipe-cli-"));
     dirs.push(dir);
     const out = join(dir, "recipe.json");
-    expect(await withHome(dir, () => cli(["recipe", "--out", out, "--add", "just=brew install just", "--add-check", "just=just --version"], io([], [])))).toBe(0);
+    expect(await onCli(["--out", out, "--add", "just=brew install just", "--add-check", "just=just --version"], [], [], dir, [DISKBLOOM])).toBe(0);
     const recipe: Recipe = JSON.parse(readFileSync(out, "utf8"));
     expect(recipe.histories.filter(h => h.state === "read")).toEqual([]);
     expect(recipe.custom).toEqual([
       { kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "just --version", why: "added by the agent" },
     ]);
+  });
+
+  it("ticks a package this computer's managers have by the id the scan gives it, and refuses an --add for that same package", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-recipe-cli-here-"));
+    dirs.push(dir);
+    const out = join(dir, "recipe.json");
+    const file = (): Recipe => JSON.parse(readFileSync(out, "utf8"));
+    const errors: string[] = [];
+    expect(await onCli(["--out", out, "--set", `${DISKBLOOM.id}=on`], [], errors, dir, [DISKBLOOM])).toBe(0);
+    expect(errors.filter(l => l.startsWith("wsp recipe:"))).toEqual([]);
+    // The tick lands on the collector's id for the package, so the build installs it by that package's own road.
+    expect(file().rows.find(r => r.id === TAP_ROW)).toMatchObject({ kind: "tool", on: true });
+    expect(file().custom ?? []).toEqual([]);
+    const refusal: string[] = [];
+    expect(await onCli(["--out", out, "--add", `${DISKBLOOM.id}=${DISKBLOOM.install}`], [], refusal, dir, [DISKBLOOM])).toBe(1);
+    expect(refusal[0]).toBe(`wsp recipe: ${addAlreadyHereLine(DISKBLOOM.id, DISKBLOOM.id)}`);
+    expect(file().custom ?? []).toEqual([]);
   });
 });
