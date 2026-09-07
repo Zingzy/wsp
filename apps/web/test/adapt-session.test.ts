@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Session events into the chat view models: messages, work rows, turn
 // summaries and the timeline rows the transplanted MessagesTimeline renders.
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { fmtDuration, type SessionEvent } from "@wsp/protocol";
-import { deriveMessagesTimelineRows, deriveSession } from "../src/adapt/index.js";
-import type { WorkLogEntry } from "../src/adapt/index.js";
+import { deriveMessagesTimelineRows, deriveSession, toolGroupSummaryKind, workEntryKind } from "../src/adapt/index.js";
+import type { ToolGroupAction, ToolGroupSummaryKind, WorkLogEntry } from "../src/adapt/index.js";
 import { CHAT_STREAM, CHAT_TURN } from "./fixtures/chat-stream.js";
 import { LIVE_RUN_1, LIVE_SID, sessionEventsOf } from "./fixtures/live-run-1.js";
 
@@ -391,6 +391,43 @@ describe("the turn's duration comes from the protocol's one formatter", () => {
   it.each([
     [0, "1ms"], [7, "7ms"], [999, "999ms"], [1500, "1.5s"], [9960, "10s"], [10458, "10s"], [59_400, "59s"], [60_000, "1m"], [101_515, "1m 42s"], [862_399, "14m 22s"], [-5, "0ms"], [4000, "4.0s"],
   ])("%d ms -> %s", (ms, text) => expect(fmtDuration(ms)).toBe(text));
+});
+
+describe("workEntryKind: the one rule a tool-like row's kind is read by", () => {
+  const row = (extra: Partial<WorkLogEntry>): WorkLogEntry =>
+    ({ id: "w", createdAt: "", turnId: "turn_k", label: "row", tone: "tool", sourceActivityKind: "tool.completed", ...extra });
+
+  it.each<[string, Partial<WorkLogEntry>, ToolGroupSummaryKind | null]>([
+    ["a file read", { requestKind: "file-read" }, "read"],
+    ["a file change", { itemType: "file_change", changedFiles: ["/x/a.ts"] }, "edit"],
+    ["a command", { itemType: "command_execution", command: "pnpm test" }, "command"],
+    ["a code search", { toolTitle: "Grep" }, "code-search"],
+    ["a web search", { itemType: "web_search" }, "search"],
+    ["an MCP call", { itemType: "mcp_tool_call" }, "other"],
+    ["a dynamic tool call", { itemType: "dynamic_tool_call" }, "dynamic-tool"],
+    ["a subagent call", { itemType: "collab_agent_tool_call" }, "agent-tool"],
+    ["a plain tool call with no item type, whose tone must say", {}, null],
+    ["reasoning, whose tone must say", { tone: "thinking", detail: "weighing the options" }, null],
+    ["a notice that is tool-like, whose tone must say", { tone: "notice", requestKind: "mcp-elicitation" }, null],
+  ])("%s", (_name, extra, kind) => {
+    expect(workEntryKind(row(extra))).toBe(kind);
+  });
+
+  it("a group's kind is its rows' one kind, the tone standing in where no item type does, and mixed otherwise", () => {
+    expect(toolGroupSummaryKind([row({ itemType: "mcp_tool_call" })])).toBe("other");
+    expect(toolGroupSummaryKind([row({ itemType: "dynamic_tool_call" }), row({ itemType: "dynamic_tool_call" })])).toBe("dynamic-tool");
+    expect(toolGroupSummaryKind([row({ itemType: "collab_agent_tool_call" })])).toBe("agent-tool");
+    expect(toolGroupSummaryKind([row({})])).toBe("tone-tool");
+    expect(toolGroupSummaryKind([row({ tone: "thinking" })])).toBe("agent-tool");
+    expect(toolGroupSummaryKind([row({ tone: "notice", requestKind: "mcp-elicitation" })])).toBe("other");
+    expect(toolGroupSummaryKind([row({ itemType: "mcp_tool_call" }), row({ itemType: "dynamic_tool_call" })])).toBe("mixed");
+    expect(toolGroupSummaryKind([row({ itemType: "mcp_tool_call" }), row({ tone: "thinking" })])).toBe("mixed");
+    expect(toolGroupSummaryKind([row({ itemType: "command_execution", command: "ls" }), row({ tone: "thinking" })])).toBe("command");
+  });
+
+  it("every action a summary can name comes from a fact the adapter reads off the wire", () => {
+    expectTypeOf<ToolGroupAction>().toEqualTypeOf<"read" | "edit" | "command" | "code-search" | "search" | "other" | "update">();
+  });
 });
 
 describe("deriveSession: a thread's end told where its start said", () => {
