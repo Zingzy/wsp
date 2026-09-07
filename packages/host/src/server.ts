@@ -42,6 +42,8 @@ export interface HostOptions {
   openLine?: (workspace: string, hostname: string, url: string) => string;
   /** The saved recipe file, read for the terminal font its ticks name. */
   recipePath?: string;
+  /** The state file this host serves, named in the boot object so the page scopes its memory to it. */
+  statePath?: string;
 }
 
 /** The roads to a workspace and its project that the app's routes and wsp init share, so a workspace made without a
@@ -257,7 +259,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   // Rendered per request: wsp init saves the recipe while a host may already be serving.
   const page = (): string => {
     const terminalFont = terminalFontOf(opts.recipePath);
-    return loadPage(webDir, { wsPort: rtServer.port, token: authToken, ...(terminalFont !== undefined ? { terminalFont } : {}) });
+    return loadPage(webDir, { wsPort: rtServer.port, token: authToken, ...(terminalFont !== undefined ? { terminalFont } : {}), ...(opts.statePath !== undefined ? { statePath: opts.statePath } : {}) });
   };
   try {
     page();

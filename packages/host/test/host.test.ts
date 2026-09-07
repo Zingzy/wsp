@@ -266,6 +266,13 @@ describe("host serves the app", () => {
     expect(html).not.toContain("window.__WSP__ ||");
   });
 
+  it("the boot object names the state file the host serves, so the page keeps what it remembers per state file", async () => {
+    const { rt } = testRuntime();
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), statePath: "/Users/dev/.wsp/state.json" });
+    const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
+    expect(inlineScripts(html)).toEqual([`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","statePath":"/Users/dev/.wsp/state.json"};`]);
+  });
+
   it("the handle's createWorkspace forks the golden's head the way the app's own create does, and refuses without a golden", async () => {
     const { rt, backend } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs("sk-ant-x", g) });

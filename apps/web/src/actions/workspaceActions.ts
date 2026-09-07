@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The workspace's actions, one registry: what a workspace row, the palette,
 // the Machine tab and the row's context menu offer for one machine.
-import { CopyIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
+import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
 import { isBilling, needsRebuild, workspaceState, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
+  CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
+  CLIENT_CANNOT_IMPORT,
   CLIENT_CANNOT_REBUILD,
   FORGET_HINT,
   NEW_THREAD_WAITS,
   NO_REBUILD_NEEDED,
   NO_WORKSPACE_FORK,
   NO_WORKSPACE_RENAME,
+  PROJECTS_WAIT,
   REBUILD_HINT,
   WORKSPACE_WORDS,
   forgetRefusal,
@@ -62,6 +65,9 @@ export interface WorkspaceVerbs {
   readonly rebuild?: ((workspaceId: string) => Promise<void>) | undefined;
   /** Opens the confirmation; the dialog itself asks the host. */
   readonly forget?: ((workspaceId: string) => void) | undefined;
+  /** Open the trip's dialog; absent on a client whose host cannot read or land folders here. */
+  readonly importProject?: ((workspaceId: string) => void) | undefined;
+  readonly exportProject?: ((workspaceId: string) => void) | undefined;
 }
 
 const stateOf = (target: WorkspaceTarget): WorkspaceState => workspaceState(target);
@@ -131,6 +137,24 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     title: () => WORKSPACE_WORDS.openMachine,
     refusal: () => null,
     run: (target, verbs) => verbs.openMachine(target.id),
+  },
+  {
+    id: "import-project",
+    group: "project",
+    icon: () => FolderInputIcon,
+    searchTerms: ["import project", "import folder", "upload"],
+    title: () => WORKSPACE_WORDS.importProject,
+    refusal: (target, verbs) => (dead(target) ? PROJECTS_WAIT : verbs.importProject === undefined ? CLIENT_CANNOT_IMPORT : null),
+    run: (target, verbs) => verbs.importProject?.(target.id),
+  },
+  {
+    id: "export-project",
+    group: "project",
+    icon: () => FolderOutputIcon,
+    searchTerms: ["export project", "export folder", "download", "bring home"],
+    title: () => WORKSPACE_WORDS.exportProject,
+    refusal: (target, verbs) => (dead(target) ? PROJECTS_WAIT : verbs.exportProject === undefined ? CLIENT_CANNOT_EXPORT : null),
+    run: (target, verbs) => verbs.exportProject?.(target.id),
   },
   {
     id: "rename",

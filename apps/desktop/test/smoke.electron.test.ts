@@ -12,6 +12,7 @@ import { _electron as electron, type ElectronApplication, type Page } from "play
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
+import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
@@ -320,11 +321,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         const w = BrowserWindow.getAllWindows()[0]!;
         return { id: w.id, buttons: w.getWindowButtonPosition(), bounds: w.getBounds(), content: w.getContentBounds(), title: w.getTitle() };
       });
-      expect(frame.buttons).toEqual({ x: 16, y: 20 });
+      expect(frame.buttons).toEqual({ x: 16, y: 19 });
       expect(frame.content.height).toBe(frame.bounds.height);
       expect(frame.title).toBe("wsp");
 
-      const page = await win.evaluate(() => {
+      const page = await win.evaluate((opticalCentre: number) => {
         const style = (selector: string) => getComputedStyle(document.querySelector(selector)!);
         const region = (selector: string) => (style(selector) as unknown as { webkitAppRegion: string }).webkitAppRegion;
         const buttons = (selector: string) => Array.from(document.querySelector(selector)!.querySelectorAll("button")).map(b => (getComputedStyle(b) as unknown as { webkitAppRegion: string }).webkitAppRegion);
@@ -349,10 +350,17 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         const colorOf = (selector: string): number[] => rgb(style(selector).color);
         const lockup = document.querySelector("[data-slot=sidebar-header] [role=img][aria-label=wsp]")!.getBoundingClientRect();
         const toggle = document.querySelector("[data-slot=sidebar-header] [data-slot=sidebar-trigger]")!.getBoundingClientRect();
+        // The toggle's ink is its icon box: the panel glyph fills the box edge to edge, so the box centre is the ink's.
+        const glyph = document.querySelector("[data-slot=sidebar-header] [data-slot=sidebar-trigger] svg")!.getBoundingClientRect();
+        const searchRow = document.querySelector("button[aria-label='Search']")!.getBoundingClientRect();
         return {
           toggleLeft: toggle.left,
           toggleRight: toggle.right,
           toggleCentre: { x: toggle.left + toggle.width / 2, y: toggle.top + toggle.height / 2 },
+          glyphCentreY: glyph.top + glyph.height / 2,
+          lockupOpticalY: lockup.top + lockup.height * opticalCentre,
+          searchRow: { x: searchRow.left + searchRow.width * 0.6, y: searchRow.top + searchRow.height / 2 },
+          searchText: colorOf("button[aria-label='Search']"),
           pageToggles: document.querySelectorAll("header [data-slot=sidebar-trigger]").length,
           htmlClass: document.documentElement.className,
           container: style("[data-slot=sidebar-container]").backgroundColor,
@@ -369,11 +377,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
           muted: text("text-sidebar-muted-foreground"),
           quiet: text("text-muted-foreground"),
           icon: colorOf("[data-sidebar-search] button svg"),
-          meta: colorOf("[data-sidebar-search] kbd"),
           chevron: colorOf("button[aria-label='Workspaces'] svg"),
           sidebarWidth: document.querySelector("[data-slot=sidebar-container]")!.getBoundingClientRect().width,
         };
-      });
+      }, LOCKUP_OPTICAL_CENTRE);
       expect(page.htmlClass.split(" ")).toContain("desktop-mac");
       expect(page.container).toBe("rgba(0, 0, 0, 0)");
       expect(page.inner).toBe("rgba(0, 0, 0, 0)");
@@ -438,17 +445,20 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
             const i = (y * width + x) * 4;
             return [bitmap[i + 2]!, bitmap[i + 1]!, bitmap[i]!];
           };
-          // The red light is the leftmost and the green the rightmost; each centre is the mean of its hue's pixels in the
-          // top-left corner. Hue, not absolute values: the display's tone mapping shifts every pixel while a video plays.
+          // The red light is the leftmost and the green the rightmost; each centre is the middle of its hue's extent in the
+          // top-left corner (the extent, not the mean: the highlight on a light's crown is not its hue and would pull a
+          // mean down). Hue, not absolute values: the display's tone mapping shifts every pixel while a video plays.
           const reds: number[][] = [];
           const greens: number[][] = [];
           for (let y = 0; y < 80 * scale; y++)
             for (let x = 0; x < 80 * scale; x++) {
               const [r, g, bl] = at(x, y);
-              if (r! > 150 && r! - g! > 60 && r! - bl! > 60) reds.push([x, y]);
+              // The yellow light is red-heavy too (its red leads green by about 65); the red light's lead is over 150.
+              if (r! > 150 && r! - g! > 100 && r! - bl! > 60) reds.push([x, y]);
               if (g! > 120 && g! - r! > 50 && g! - bl! > 50) greens.push([x, y]);
             }
-          const centre = (pts: number[][]) => ({ x: pts.reduce((sum, p) => sum + p[0]!, 0) / pts.length / scale, y: pts.reduce((sum, p) => sum + p[1]!, 0) / pts.length / scale });
+          const middle = (values: number[]) => (Math.min(...values) + Math.max(...values) + 1) / 2 / scale;
+          const centre = (pts: number[][]) => ({ x: middle(pts.map(p => p[0]!)), y: middle(pts.map(p => p[1]!)) });
           return {
             scale,
             height: height / scale,
@@ -457,10 +467,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
             red: centre(reds),
             green: centre(greens),
             glass: at(Math.round(30 * scale), Math.round(height * 0.7)),
+            searchRow: at(Math.round(args.searchRow.x * scale), Math.round(args.searchRow.y * scale)),
             main: at(Math.round(width * 0.75), Math.round(height * 0.7)),
             probe: at(Math.round(args.probeX * scale), Math.round(8 * scale)),
           };
-        }, { file, width: b.width, probeX: page.lockupLeft + 2 });
+        }, { file, width: b.width, probeX: page.lockupLeft + 2, searchRow: page.searchRow });
       };
       const mainColour = (px: number[]) => px.every((v, i) => Math.abs(v - page.mainRgb[i]!) <= 6);
       // The window is in the frame when the main column shows its own opaque background and the lights are coloured (key);
@@ -498,17 +509,18 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
           state,
           { timeout: 5_000 },
         );
-      // One gap: the third light's centre to the toggle's centre, and the toggle's centre to the first glyph after it, on one vertical centre.
-      const gaps = (shot: Shot, toggleCentre: { x: number; y: number }, contentLeft: number) => ({
+      // One gap: the third light's centre to the toggle's centre, and the toggle's centre to the first glyph after it. One
+      // vertical centre, measured on ink: the lights' hue extent, the toggle glyph's icon box, the wordmark's optical centre.
+      const gaps = (shot: Shot, toggleCentre: { x: number; y: number }, contentLeft: number, glyphCentreY: number) => ({
         lightsToToggle: toggleCentre.x - shot.green.x,
         toggleToContent: contentLeft - toggleCentre.x,
-        drop: toggleCentre.y - shot.green.y,
+        drop: glyphCentreY - shot.green.y,
       });
       const expectOneGap = (g: ReturnType<typeof gaps>) => {
         expect(Math.abs(g.lightsToToggle - g.toggleToContent)).toBeLessThan(2);
         expect(g.lightsToToggle).toBeGreaterThanOrEqual(28);
         expect(g.lightsToToggle).toBeLessThanOrEqual(32);
-        expect(Math.abs(g.drop)).toBeLessThan(2);
+        expect(Math.abs(g.drop)).toBeLessThan(0.5);
       };
       const glass: Record<string, number[]> = {};
       for (const [desktop, color] of [["light", "#ffffff"], ["dark", "#101010"]] as const) {
@@ -524,8 +536,9 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         expect(shot.red.y).toBeLessThan(32);
         expect(shot.red.x).toBeGreaterThan(18);
         expect(shot.red.x).toBeLessThan(26);
-        const openGaps = gaps(shot, page.toggleCentre, page.lockupLeft);
-        console.info(`open header gaps at 1x: ${JSON.stringify(openGaps)}`);
+        const openGaps = gaps(shot, page.toggleCentre, page.lockupLeft, page.glyphCentreY);
+        const wordmarkDrop = page.lockupOpticalY - shot.green.y;
+        console.info(`open header gaps at 1x: ${JSON.stringify({ ...openGaps, wordmarkDrop, lightsY: { red: shot.red.y, green: shot.green.y }, glyphY: page.glyphCentreY, wordmarkY: page.lockupOpticalY })}`);
         glass[desktop] = shot.glass;
         const ratios = {
           foreground: contrast(page.foreground, shot.glass),
@@ -533,10 +546,14 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
           quiet: contrast(page.quiet, shot.glass),
           icon: contrast(page.icon, shot.glass),
           chevron: contrast(page.chevron, shot.glass),
-          meta: contrast(page.meta, shot.glass),
+          search: contrast(page.searchText, shot.searchRow),
         };
-        console.info(`over a ${desktop} desktop the glass is rgb(${shot.glass.join(", ")}): ${Object.entries(ratios).map(([k, v]) => `${k} ${v.toFixed(2)}:1`).join(", ")}`);
+        console.info(`over a ${desktop} desktop the glass is rgb(${shot.glass.join(", ")}) and the search row rgb(${shot.searchRow.join(", ")}): ${Object.entries(ratios).map(([k, v]) => `${k} ${v.toFixed(2)}:1`).join(", ")}`);
         expectOneGap(openGaps);
+        expect(Math.abs(wordmarkDrop)).toBeLessThan(0.5);
+        // The search row's tint: darker than the bare glass beside it in every channel, and the word Search still AA on it.
+        expect(shot.searchRow.every((v, i) => v <= shot.glass[i]!)).toBe(true);
+        expect(shot.searchRow.some((v, i) => v < shot.glass[i]!)).toBe(true);
         for (const ratio of Object.values(ratios)) expect(ratio).toBeGreaterThanOrEqual(4.5);
 
         // Collapsed, the page header is the frame row: the toggle lands where the sidebar's was, the breadcrumb after it, the row still drags.
@@ -547,10 +564,12 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         const collapsed = await win.evaluate(() => {
           const row = document.querySelector("header [data-header-row]")!;
           const toggle = row.querySelector("[data-slot=sidebar-trigger]")!.getBoundingClientRect();
+          const glyph = row.querySelector("[data-slot=sidebar-trigger] svg")!.getBoundingClientRect();
           const crumb = row.querySelector("[data-thread-breadcrumb]")!;
           return {
             toggleLeft: toggle.left,
             toggleCentre: { x: toggle.left + toggle.width / 2, y: toggle.top + toggle.height / 2 },
+            glyphCentreY: glyph.top + glyph.height / 2,
             crumbLeft: crumb.getBoundingClientRect().left,
             crumb: crumb.textContent,
             region: (getComputedStyle(row) as unknown as { webkitAppRegion: string }).webkitAppRegion,
@@ -567,7 +586,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         expect(collapsedShot.reds).toBeGreaterThan(20);
         expect(collapsedShot.red.y).toBeCloseTo(shot.red.y, 0);
         expect(collapsedShot.red.x).toBeCloseTo(shot.red.x, 0);
-        const collapsedGaps = gaps(collapsedShot, collapsed.toggleCentre, collapsed.crumbLeft);
+        const collapsedGaps = gaps(collapsedShot, collapsed.toggleCentre, collapsed.crumbLeft, collapsed.glyphCentreY);
         console.info(`desktop-mac collapsed over a ${desktop} desktop: ${collapsedFile}; header gaps at 1x: ${JSON.stringify(collapsedGaps)}`);
         expectOneGap(collapsedGaps);
         await win.click("header [data-slot=sidebar-trigger]");

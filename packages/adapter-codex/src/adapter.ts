@@ -5,8 +5,9 @@
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
 import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, TurnResult } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, SessionTitleReader, TurnResult } from "@wsp/protocol";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
+import { parseSessionTitle, sessionTitleCommand } from "./session-title.js";
 
 export interface CodexStartOptions {
   prompt: string;
@@ -47,6 +48,8 @@ export interface CodexAdapter {
   readonly sessions: ReadonlyMap<string, CodexSession>;
   /** `codex exec` reads its prompt and closes stdin; nothing reaches a running turn. */
   readonly steers: false;
+  /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
+  sessionTitle: SessionTitleReader;
   readonly env: Readonly<Record<string, string>>;
 }
 
@@ -298,5 +301,11 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     return session;
   };
 
-  return { start, sessions, steers: false, env };
+  return {
+    start,
+    sessions,
+    steers: false,
+    sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
+    env,
+  };
 }

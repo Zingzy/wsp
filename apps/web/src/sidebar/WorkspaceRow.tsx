@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// One machine's row, two lines at every width. Line one: the state dot, the
+// name, and at the right edge a slot as wide as two glyphs holding the
+// state's word in muted mono only while the state is not running (the dot
+// says running); on hover the word yields and the row's two glyphs, the
+// collapse chevron and new thread, take the slot, so nothing moves. Line
+// two: the one mono meta line over the row's whole width, cut from the right
+// and whole in its title. A dead row's glyphs are its recovery and always
+// show, so that row makes room for them beside the word: a gone row's forget
+// and rebuild, a zombie's rebuild alone. The words come from
+// workspaceRows.ts and the actions from the workspace registry.
+import { ChevronDownIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { needsRebuild, type MemoryReading } from "@wsp/protocol";
+import { runAction } from "../actions/contextMenu.js";
+import { actionById, rowLabelOf, type ResolvedAction } from "../actions/registry.js";
+import type { SidebarProjectSnapshot } from "../adapt/index.js";
+import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { cn } from "../lib/utils.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS } from "./rowGrammar.js";
+import { NEW_THREAD_TITLE, dotClassForTone, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
+
+/** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
+const GLYPH_CLASS = "peer-data-[size=lg]/menu-button:top-1 right-2";
+const INNER_GLYPH_CLASS = cn(GLYPH_CLASS, "right-7");
+/** A live row's text runs to the row's own inset; the glyphs land in the state slot. A dead row keeps two glyphs' room. */
+const LIVE_ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
+const DEAD_ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-14";
+const STATE_SLOT_CLASS = "min-w-11 shrink-0 text-right";
+const YIELDING_SLOT_CLASS = "transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0";
+
+export function WorkspaceRow({
+  project,
+  cost,
+  outOfMemory,
+  nowMs,
+  actions,
+  active,
+  collapsed,
+  rebuildAsked,
+  onSelect,
+  onToggleCollapsed,
+}: {
+  project: SidebarProjectSnapshot;
+  cost: { readonly rateUsdPerHour: number; readonly accruedUsd: number } | null;
+  outOfMemory: MemoryReading | undefined;
+  nowMs: number;
+  actions: ReadonlyArray<ResolvedAction>;
+  active: boolean;
+  collapsed: boolean;
+  rebuildAsked: boolean;
+  onSelect: () => void;
+  onToggleCollapsed: () => void;
+}) {
+  const dead = needsRebuild({ phase: project.phase, machineState: project.machineState, reach: project.reach });
+  const gone = project.state === "gone";
+  const meta = workspaceMetaLine({ project, cost, outOfMemory, nowMs });
+  const forgetAction = actionById(actions, "forget");
+  const rebuildAction = actionById(actions, "rebuild");
+  const newThreadAction = actionById(actions, "new-thread");
+  return (
+    <>
+      <SidebarMenuButton size="lg" isActive={active} data-sidebar-row data-row-id={`ws:${project.id}`} className={cn(TWO_LINE_ROW_CLASS, dead ? DEAD_ROW_CLASS : LIVE_ROW_CLASS)} onClick={onSelect}>
+        <span aria-hidden className={ROW_LEAD_CLASS}>
+          <span className={cn("size-2 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+          <span className="flex items-center gap-2">
+            <span data-workspace-name className="min-w-0 flex-1 truncate text-sidebar-foreground">
+              {project.displayName}
+            </span>
+            <span data-workspace-state className={cn(ROW_META_CLASS, STATE_SLOT_CLASS, !dead && YIELDING_SLOT_CLASS)}>
+              {stateSlotWord(project)}
+            </span>
+          </span>
+          <span data-workspace-meta className={cn(ROW_META_CLASS, "truncate")} title={meta}>
+            {meta}
+          </span>
+        </span>
+      </SidebarMenuButton>
+      {dead ? (
+        <>
+          {gone ? (
+            <SidebarMenuAction
+              className={INNER_GLYPH_CLASS}
+              aria-label={rowLabelOf(forgetAction)}
+              title={forgetAction.refusal ?? forgetAction.hint ?? undefined}
+              disabled={forgetAction.refusal !== null}
+              onClick={() => void runAction(forgetAction)}
+            >
+              <Trash2Icon />
+            </SidebarMenuAction>
+          ) : null}
+          <SidebarMenuAction
+            className={GLYPH_CLASS}
+            aria-label={rowLabelOf(rebuildAction)}
+            title={rebuildAction.refusal ?? rebuildAction.hint ?? undefined}
+            disabled={rebuildAsked || rebuildAction.refusal !== null}
+            onClick={() => void runAction(rebuildAction)}
+          >
+            <RefreshCwIcon className={cn(rebuildAsked && "animate-spin")} />
+          </SidebarMenuAction>
+        </>
+      ) : (
+        <>
+          {project.threads.length > 0 ? (
+            <SidebarMenuAction showOnHover className={INNER_GLYPH_CLASS} aria-label={collapsed ? `Expand ${project.displayName}` : `Collapse ${project.displayName}`} onClick={onToggleCollapsed}>
+              <ChevronDownIcon className={cn("transition-transform", collapsed && "-rotate-90")} />
+            </SidebarMenuAction>
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger render={<SidebarMenuAction showOnHover className={GLYPH_CLASS} aria-label={rowLabelOf(newThreadAction)} onClick={() => void runAction(newThreadAction)} />}>
+              <PlusIcon />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">{NEW_THREAD_TITLE}</TooltipPopup>
+          </Tooltip>
+        </>
+      )}
+    </>
+  );
+}

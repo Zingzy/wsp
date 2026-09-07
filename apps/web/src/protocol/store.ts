@@ -5,7 +5,9 @@ import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import { NOTIFY_ME, foldThreads, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine } from "../actions/format.js";
+import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
+import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
 export interface CostTick {
@@ -139,6 +141,17 @@ function addressedThread(workspaceId: string | null, rows: readonly SessionView[
   return { threadId: null, toast: noSuchThreadLine(found.threadId) };
 }
 
+/** The workspace the person had open last, when the list still has it. */
+function remembered(workspaces: readonly WorkspaceView[]): string | undefined {
+  const id = lastWorkspaceId();
+  return id !== undefined && workspaces.some(w => w.id === id) ? id : undefined;
+}
+
+/** The sidebar's top row: the one fallback for a selection with nothing to go on. */
+function firstRow(s: Pick<State, "workspaces" | "statuses" | "sessions">): string | null {
+  return sidebarWorkspaceOrder(s)[0] ?? null;
+}
+
 let creationSeq = 0;
 
 export const useStore = create<State>((set, get) => {
@@ -263,7 +276,7 @@ export const useStore = create<State>((set, get) => {
     dismissCreation(key) {
       set(s => ({
         creations: s.creations.filter(c => c.key !== key),
-        selectedId: s.selectedId === key ? s.workspaces[0]?.id ?? null : s.selectedId,
+        selectedId: s.selectedId === key ? firstRow(s) : s.selectedId,
       }));
     },
     async refresh() {
@@ -271,9 +284,10 @@ export const useStore = create<State>((set, get) => {
       if (!api) return;
       const [workspaces, rows] = await Promise.all([api.listWorkspaces(), api.listSessions().catch(() => NO_SESSIONS)]);
       set(s => {
-        const selectedId = s.selectedId ?? addressed(workspaces) ?? workspaces[0]?.id ?? null;
+        const sessions = groupSessions(rows);
+        const selectedId = s.selectedId ?? addressed(workspaces) ?? remembered(workspaces) ?? firstRow({ workspaces, statuses: s.statuses, sessions });
         const thread = s.selectedId === null ? addressedThread(selectedId, rows) : { threadId: s.selectedThreadId };
-        return { workspaces, sessions: groupSessions(rows), ready: true, selectedId, selectedThreadId: thread.threadId, ...(thread.toast !== undefined ? { toast: thread.toast } : {}) };
+        return { workspaces, sessions, ready: true, selectedId, selectedThreadId: thread.threadId, ...(thread.toast !== undefined ? { toast: thread.toast } : {}) };
       });
     },
     async reloadSessions(workspaceId) {
@@ -422,6 +436,11 @@ export const useStore = create<State>((set, get) => {
       }
     },
   };
+});
+
+// Every road to a workspace (a click, a chord, a finished creation, the boot fallback) lands here; a creation row is not a workspace yet.
+useStore.subscribe((s, prev) => {
+  if (s.selectedId !== prev.selectedId && s.selectedId !== null && s.workspaces.some(w => w.id === s.selectedId)) rememberWorkspace(s.selectedId);
 });
 
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
