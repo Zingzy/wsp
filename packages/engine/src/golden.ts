@@ -20,6 +20,7 @@ import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
+import { isMissing } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { importInto } from "./vault.js";
 
@@ -47,7 +48,6 @@ export class MachineAliveError extends Error {
   }
 }
 
-const isMissing = (e: unknown): boolean => (e as { kind?: unknown }).kind === "missing";
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** How often the seal asks for the snapshot the provider refused with its 502, and how long it waits between asks. */
@@ -296,7 +296,7 @@ const AGENT_TIMEOUT_S = 900;
 const SHELL_TIMEOUT_S = 300;
 /** A harness-stage install under the guard, with every road's network lines ahead of it: the Node floor and the
  * agents' installers type the bare curl the road table's function defines, and may type any manager. */
-const guardedHarness = (script: string): string => guarded(["set -euo pipefail", ...ROAD_STEPS.script.env, script].join("\n"), AGENT_TIMEOUT_S);
+const guardedHarness = (script: string): string => guarded([...ROAD_STEPS.script.env, script].join("\n"), AGENT_TIMEOUT_S);
 const SHELL_CHECK_S = 60;
 
 /** One start of the login shell the way the app's pty runs it, a login shell (profile.d puts the tools on PATH before

@@ -6,9 +6,9 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { MCP_ID_PREFIX, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
+import { BREW_ID_PREFIX, MCP_ID_PREFIX, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, BASE_FLOOR, BASE_IMAGE_COMMANDS, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, BASE_FLOOR, BASE_IMAGE_COMMANDS, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, ROADS, ROAD_MODULES, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installAfter, installLine, nodeInstallScript, pinStateOf, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -572,6 +572,11 @@ export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${BRE
 export const PATH_LINE = `export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`;
 const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
 
+/** Where a login shell reads the tools PATH: a thread's terminal is one, and it inherits nothing from the stages. */
+export const PROFILE_PATH_FILE = "/etc/profile.d/wsp-golden.sh";
+/** The base stage writes it on every golden, so a machine that never bootstraps Homebrew still answers `cargo`. */
+export const PROFILE_PATH_LINE = `printf '%s\\n' ${shellQuote(PATH_LINE)} > ${PROFILE_PATH_FILE}`;
+
 /** After the tools loop: dependencies no formula needs any more (a failed formula
  * left a 2.4 GB llvm@21 behind), then the bottle cache and old kegs (5.5 GB measured). */
 export const BREW_HOUSEKEEPING: readonly string[] = [`${PATH_LINE}\n${asLinuxbrew("autoremove")}`, `${PATH_LINE}\n${asLinuxbrew("cleanup -s --prune=all")}`];
@@ -607,7 +612,6 @@ function homebrewBootstrap(): string {
     `  ln -sfn ../Homebrew/bin/brew ${BREW_PREFIX}/bin/brew`,
     "  chown -R linuxbrew:linuxbrew /home/linuxbrew",
     "fi",
-    `printf '%s\\n' ${shellQuote(PATH_LINE)} > /etc/profile.d/wsp-golden.sh`,
     `${asLinuxbrew("--version")} >/dev/null`,
   ].join("\n");
 }
@@ -626,8 +630,10 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
       out.base.push(base);
     } else if (isTap(e)) {
       out.taps.push(tapOf(e));
-    } else if (e.id.startsWith("tools/brew/")) {
-      const formula = e.id.slice("tools/brew/".length);
+    } else if (e.id.startsWith(BREW_ID_PREFIX)) {
+      // A formula the catalog brings as a manager's toolchain takes the catalog's road, so it is no formula here.
+      if (catalogToolOf(e) !== undefined) continue;
+      const formula = e.id.slice(BREW_ID_PREFIX.length);
       const info = brew.get(formula);
       if (e.linux === "no") out.skipped.push({ id: e.id, note: "no Linux bottle" });
       else if (e.linux === "unknown" && (MACOS_ONLY_FORMULAE.has(formula) || info?.macosOnly === true)) out.skipped.push({ id: e.id, note: "macOS only" });
@@ -652,6 +658,26 @@ const MANAGER_ORDER: readonly ("npm" | "pnpm" | "bun" | "uv" | "pipx" | "cargo" 
 // Each is its own single brew process, in this order, before any formula.
 export const BREW_TOOLCHAIN: readonly string[] = ["glibc", "gcc"];
 
+/** The catalog tool this Mac's formula stands for, when a manager comes by that tool and the catalog brings it some
+ * other way: cargo's toolchain is rustup's whatever the Brewfile names, so the row takes the catalog's road and
+ * Homebrew's formula never installs beside it. */
+function managerTool(formula: string): ToolEntry | undefined {
+  const entry = catalogToolFor(formula);
+  if (entry === undefined || entry.installRoad.road === "brew") return undefined;
+  return MANAGER_ORDER.some(m => catalogToolFor(m)?.id === entry.id) ? entry : undefined;
+}
+
+/** The catalog tool a tools row is: a catalog row by the id after its prefix, this Mac's formula for a manager's
+ * toolchain by the formula; nothing for any other row. */
+export function catalogToolOf(e: RecipeEntry): ToolEntry | undefined {
+  const pkg = packageOf(e);
+  if (e.id.startsWith(CATALOG_PREFIX)) {
+    const entry = catalogEntry(pkg);
+    return entry?.kind === "tool" ? entry : undefined;
+  }
+  return e.id.startsWith(BREW_ID_PREFIX) ? managerTool(pkg) : undefined;
+}
+
 /** The formula a manager with no catalog row comes by. */
 const MANAGER_FORMULA: Readonly<Partial<Record<RoadName, string>>> = { pipx: "pipx" };
 
@@ -674,17 +700,18 @@ const releaseRoad = (r: Pick<PlannedRoad, "source" | "pin">): InstallRoad => ({ 
  * road installs. A road carries the pin the row's first install recorded. */
 export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
   const pkg = packageOf(e);
-  if (e.id.startsWith(CATALOG_PREFIX)) {
-    const entry = catalogEntry(pkg);
-    if (entry?.kind !== "tool") return undefined;
-    const mod = roadModule(entry.installRoad);
-    const road = e.version !== undefined && mod.at !== undefined ? mod.at(entry.installRoad, e.version) : entry.installRoad;
+  const known = catalogToolOf(e);
+  if (known !== undefined) {
+    const mod = roadModule(known.installRoad);
+    const road = e.version !== undefined && mod.at !== undefined ? mod.at(known.installRoad, e.version) : known.installRoad;
     const notes = [
-      ...(entry.source.road === "unmeasured" ? [UNMEASURED_ROAD] : []),
+      ...(known.source.road === "unmeasured" ? [UNMEASURED_ROAD] : []),
       ...(e.version !== undefined && mod.at === undefined ? [`${e.version} asked, installed ${mod.words} at its current version`] : []),
     ];
-    return { road: { ...road, ...pinOf(e) }, bin: entry.bin, ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };
+    const after = installAfter(known);
+    return { road: { ...road, ...pinOf(e) }, bin: known.bin, ...(after !== undefined ? { after } : {}), ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };
   }
+  if (e.id.startsWith(CATALOG_PREFIX)) return undefined;
   const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
   if (manager === undefined) return undefined;
   const road = ROAD_MODULES[manager].fromRow!({ name: pkg, ...(e.version !== undefined ? { version: e.version } : {}), paths: e.paths, label: e.label });
@@ -695,6 +722,8 @@ export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
 export interface PlannedRow {
   road: InstallRoad;
   bin?: string;
+  /** What the catalog says the row runs on top of; a row outside the catalog takes its road's word. */
+  after?: string;
   note?: string;
 }
 
@@ -775,8 +804,9 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const toolRows = entries.filter(e => ticked(e) && e.rung === "tools" && baseRowFor(e) === undefined);
   const rowsOf = (manager: RoadName): RecipeEntry[] => toolRows.filter(e => e.id.startsWith(`tools/${manager}/`));
   // A catalog row installs by its entry's road; a package road's rows go with the manager's, the rest after everything else.
+  // This Mac's formula for a manager's toolchain is one of them: the catalog's road, once, under the row's own id.
   const catalog = toolRows.flatMap(e => {
-    if (!e.id.startsWith(CATALOG_PREFIX)) return [];
+    if (!e.id.startsWith(CATALOG_PREFIX) && catalogToolOf(e) === undefined) return [];
     const planned = rowRoad(e);
     if (planned === undefined) skipped.push({ id: e.id, note: "not in the catalog" });
     return planned === undefined ? [] : [{ e, planned }];
@@ -806,10 +836,10 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     const own = `tools/manager/${manager}`;
     const entry = catalogToolFor(manager);
     const formula = managerFormula(manager);
-    const fromCatalog = entry === undefined ? undefined : catalog.find(c => packageOf(c.e) === entry.id);
+    const fromCatalog = entry === undefined ? undefined : catalog.find(c => catalogToolOf(c.e)?.id === entry.id);
     // This Mac's Brewfile may already carry the manager, under its formula's name or its own.
     const macFormula = [formula, manager].find(f => f !== undefined && brew.formulae.includes(f));
-    if (macFormula !== undefined) managers.set(manager, { after: `tools/brew/${macFormula}` });
+    if (macFormula !== undefined) managers.set(manager, { after: `${BREW_ID_PREFIX}${macFormula}` });
     else if (fromCatalog !== undefined) managers.set(manager, { after: fromCatalog.e.id, row: fromCatalog });
     else if (npmTicked.has(manager)) managers.set(manager, { after: `tools/npm/${manager}` });
     else if (formula !== undefined) {
@@ -830,12 +860,11 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), shown: `brew tap ${t}`, after: toolchain.last });
     const formulae = [...brew.formulae, ...managerFormulae, ...catalogFormulae];
     if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last });
-    for (const f of brew.formulae) installs.push({ id: `tools/brew/${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last });
+    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last });
   }
   // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, the manager's step; a floor row is there already.
   const APT_STEP = `tools/${APT_INDEX}`;
-  const afterRoad = (road: RoadName): string | undefined => {
-    const dep = ROAD_MODULES[road].after;
+  const afterDep = (dep: string | undefined, road: RoadName): string | undefined => {
     if (dep === APT_INDEX) {
       if (!installs.some(t => t.id === APT_STEP)) installs.push(aptIndexStep(APT_STEP, withPath(APT_UPDATE)));
       return APT_STEP;
@@ -843,19 +872,21 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     if (dep === HOMEBREW_STEP) return toolchain.last;
     return managers.get(road)?.after;
   };
-  const afterFor = (road: InstallRoad): string | undefined => afterRoad(road.road);
+  const afterRoad = (road: RoadName): string | undefined => afterDep(ROAD_MODULES[road].after, road);
   const plan = (e: RecipeEntry, planned: PlannedRow): void => {
     const step = viaRoad(planned.road, planned.bin ?? packageOf(e));
     if (!("cmd" in step)) {
       skipped.push({ id: e.id, note: step.note });
       return;
     }
-    const after = afterFor(planned.road);
+    const after = afterDep(planned.after ?? ROAD_MODULES[planned.road.road].after, planned.road.road);
     installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}) });
   };
+  // A catalog row that is a manager's own toolchain is planned with that manager, not again with the road it takes.
+  const asManager = new Set([...managers.values()].flatMap(m => (m.row !== undefined ? [m.row.e.id] : [])));
   for (const manager of MANAGER_ORDER) {
     const rows = rowsOf(manager);
-    const fromCatalog = catalogRowsOf(manager);
+    const fromCatalog = catalogRowsOf(manager).filter(e => !asManager.has(e.id));
     if (rows.length + fromCatalog.length + customOf(manager).length === 0) continue;
     const brings = managers.get(manager);
     if (brings?.step !== undefined) installs.push(brings.step);
@@ -869,7 +900,6 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   // Last, after any go the plan brings: a road install needs no brew and waits on nothing.
   for (const r of brew.roads) plan(entries.find(e => e.id === r.id)!, { road: releaseRoad(r), bin: r.name });
   // The catalog rows on every other road: Homebrew's (unless one went out as a manager's step above), apt's, a release, a vendor's, a script.
-  const asManager = new Set([...managers.values()].flatMap(m => (m.row !== undefined ? [m.row.e.id] : [])));
   for (const { e, planned } of catalog) if (!(MANAGER_ORDER as readonly string[]).includes(planned.road.road) && !asManager.has(e.id)) plan(e, planned);
   // Last of all: the rows the catalog does not carry, each after the manager its line calls, so every road they
   // lean on has already run.

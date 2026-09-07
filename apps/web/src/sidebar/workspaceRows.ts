@@ -3,14 +3,14 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import type { ReachState, SessionOrigin, WorkspacePhase, WorkspaceStatus } from "@wsp/protocol";
+import { isBilling, workspaceState, type ReachState, type SessionOrigin, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
 import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.logic.js";
 
-/** Countdown to the runtime's auto-nap while the workspace runs; "active" when nothing is scheduled. */
+/** Countdown to the runtime's auto-nap while the machine bills; "active" when nothing is scheduled. */
 export function idleCountdownLabel(status: WorkspaceStatus | null, nowMs: number): string | null {
-  if (!status || status.phase !== "running") return null;
+  if (!status || !isBilling(workspaceState({ phase: status.phase, machineState: status.machineState, reach: status.reach.state }))) return null;
   if (status.idleAt === undefined) return "active";
   const remaining = status.idleAt - nowMs;
   if (remaining < 60_000) return "naps soon";
@@ -29,12 +29,12 @@ export function workspaceMetaLine(daemonNote: string | undefined, parts: Readonl
 }
 
 export function costLabel(input: {
-  readonly phase: WorkspacePhase;
+  readonly state: WorkspaceState;
   readonly rateUsdPerHour: number | null;
   readonly accruedUsd: number | null;
 }): string | null {
   const parts: string[] = [];
-  if (input.phase === "running" && input.rateUsdPerHour !== null) parts.push(`$${input.rateUsdPerHour.toFixed(3)}/hr`);
+  if (isBilling(input.state) && input.rateUsdPerHour !== null) parts.push(`$${input.rateUsdPerHour.toFixed(3)}/hr`);
   if (input.accruedUsd !== null) parts.push(`$${input.accruedUsd.toFixed(4)} today`);
   return parts.length > 0 ? parts.join(" · ") : null;
 }

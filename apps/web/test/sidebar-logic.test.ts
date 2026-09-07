@@ -90,9 +90,11 @@ describe("workspace row labels", () => {
     expect(idleCountdownLabel(status({}), now)).toBe("active");
   });
 
-  it("no countdown off the running phase or without a status", () => {
+  it("no countdown off the running phase, on a machine the provider lost, or without a status", () => {
     expect(idleCountdownLabel(status({ phase: "napping", idleAt: now + 60_000 }), now)).toBeNull();
     expect(idleCountdownLabel(status({ phase: "waking" }), now)).toBeNull();
+    expect(idleCountdownLabel(status({ machineState: "gone", reach: { state: "gone" }, idleAt: now + 17 * 60_000 }), now)).toBeNull();
+    expect(idleCountdownLabel(status({ machineState: "gone", reach: { state: "gone" } }), now)).toBeNull();
     expect(idleCountdownLabel(null, now)).toBeNull();
   });
 
@@ -103,11 +105,13 @@ describe("workspace row labels", () => {
     expect(reachNote(null)).toBeNull();
   });
 
-  it("cost: rate while running, accrued always, nothing before the first tick", () => {
-    expect(costLabel({ phase: "running", rateUsdPerHour: 0.11, accruedUsd: 0.0037 })).toBe("$0.110/hr · $0.0037 today");
-    expect(costLabel({ phase: "napping", rateUsdPerHour: 0.11, accruedUsd: 0.0037 })).toBe("$0.0037 today");
-    expect(costLabel({ phase: "running", rateUsdPerHour: 0.11, accruedUsd: null })).toBe("$0.110/hr");
-    expect(costLabel({ phase: "napping", rateUsdPerHour: null, accruedUsd: null })).toBeNull();
+  it("cost: rate while the machine is up (running or unreachable), never on a paused or gone one, accrued always, nothing before the first tick", () => {
+    expect(costLabel({ state: "running", rateUsdPerHour: 0.11, accruedUsd: 0.0037 })).toBe("$0.110/hr · $0.0037 today");
+    expect(costLabel({ state: "unreachable", rateUsdPerHour: 0.11, accruedUsd: 0.0037 })).toBe("$0.110/hr · $0.0037 today");
+    expect(costLabel({ state: "paused", rateUsdPerHour: 0.11, accruedUsd: 0.0037 })).toBe("$0.0037 today");
+    expect(costLabel({ state: "gone", rateUsdPerHour: 0.11, accruedUsd: 0.0037 })).toBe("$0.0037 today");
+    expect(costLabel({ state: "running", rateUsdPerHour: 0.11, accruedUsd: null })).toBe("$0.110/hr");
+    expect(costLabel({ state: "paused", rateUsdPerHour: null, accruedUsd: null })).toBeNull();
   });
 
   it("thread pills key on the session status, wear the adapter's word, and use tokens: only running is the success colour", () => {

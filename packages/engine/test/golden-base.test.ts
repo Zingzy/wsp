@@ -7,6 +7,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { BASE_FLOOR, CURL_NET, NODE_RELEASES, ROAD_STEPS, UV_INSTALL } from "@wsp/catalog";
 import { PRELUDE } from "../src/dotfiles-presets.js";
 import { BASE_VERSIONS_CMD, baseInstalls, installBase, parseVersions, versionsLine } from "../src/golden-base.js";
+import { TOOLS_PATH } from "../src/golden-import.js";
 import { FREE_KB_CMD, guardedRoad, reasonOf, roadLimitS } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import type { GoldenStage } from "../src/golden.js";
@@ -59,6 +60,7 @@ describe("the base floor's plan", () => {
   it("is every floor entry by its catalog road, in order, each waiting on what it needs", () => {
     const plan = baseInstalls();
     expect(plan.map(t => [t.id, t.manager, t.after, t.bin])).toEqual([
+      ["base/login-path", "script", undefined, undefined],
       ["base/node", "script", undefined, "node"],
       ["base/pnpm", "npm", "base/node", "pnpm"],
       ["base/uv", "script", undefined, "uv"],
@@ -77,8 +79,16 @@ describe("the base floor's plan", () => {
       ["base/xz", "apt", "base/apt-index", "xz"],
       ["base/rsync", "apt", "base/apt-index", "rsync"],
     ]);
-    expect(plan.map(t => t.label)).toEqual(["Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
+    expect(plan.map(t => t.label)).toEqual(["login shell PATH", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
     expect(BASE_FLOOR.map(e => `base/${e.id}`)).toEqual(plan.filter(t => t.bin !== undefined).map(t => t.id));
+  });
+
+  it("writes the login shell's PATH before the floor, on every golden, so a thread's terminal finds what the stages install", () => {
+    const step = baseInstalls().find(t => t.id === "base/login-path")!;
+    expect(step.cmd).toContain(`printf '%s\\n' 'export PATH=${TOOLS_PATH} PNPM_HOME=/root/.local/share/pnpm' > /etc/profile.d/wsp-golden.sh`);
+    expect(step.shown).toBe("the tools PATH in /etc/profile.d/wsp-golden.sh");
+    // cargo comes by rustup on a golden with no Homebrew formula at all, and a login shell still finds it.
+    expect(TOOLS_PATH).toContain("/root/.cargo/bin");
   });
 
   it("every step, the apt index included, names one line a person reads for what it runs, so the Build screen's step row is one row", () => {
@@ -208,11 +218,13 @@ describe("installBase", () => {
     }, () => mb(free));
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
-    expect(stages[0]).toBe("deploying-daemon:Node 22 with npm (1/17)");
-    expect(stages).toContain("deploying-daemon:Docker engine and compose (10/17)");
-    expect(stages).toContain("deploying-daemon:rsync (17/17)");
+    expect(stages[0]).toBe("deploying-daemon:login shell PATH (1/18)");
+    expect(stages).toContain("deploying-daemon:Node 22 with npm (2/18)");
+    expect(stages).toContain("deploying-daemon:Docker engine and compose (11/18)");
+    expect(stages).toContain("deploying-daemon:rsync (18/18)");
     expect(stages.every(s => s.startsWith("deploying-daemon"))).toBe(true);
     expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
+      ["base/login-path", "installed", 0],
       ["base/node", "installed", 250 * 1024 * 1024],
       ["base/pnpm", "installed", 0],
       ["base/uv", "installed", 0],
@@ -233,7 +245,7 @@ describe("installBase", () => {
     ]);
     expect(out.line).toBe("node 22.23.2 (250.0 MB), npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13, git 2.43.0, jq 1.7.1, rg 14.1.0, curl 8.5.0, docker 27.5.1 (400.0 MB), docker compose 2.29.2");
     expect(g.cmds.filter(c => c.includes("VERSION node:"))).toHaveLength(1);
-    expect(g.ran).toHaveLength(18);
+    expect(g.ran).toHaveLength(19);
   });
 
   it("reads df once between installs, and sizes an install after the rescue from the reading the cleanup left", async () => {
@@ -253,6 +265,7 @@ describe("installBase", () => {
     const out = await installBase(g.machine, stage);
     expect(stages[0]).toBe("deploying-daemon:1.8 GB free, under the 2.0 GB floor; cleaning up before skipping");
     expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
+      ["base/login-path", "installed", 0],
       ["base/node", "installed", 250 * 1024 * 1024],
       ["base/pnpm", "installed", 0],
       ["base/uv", "installed", 0],
@@ -272,8 +285,8 @@ describe("installBase", () => {
       ["base/rsync", "installed", 0],
     ]);
     // One read before the loop; the rescue's sweep reads before and after itself and the loop reads once more after
-    // it; one after each of the seventeen installs; the closing sweep and line read three more.
-    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(24);
+    // it; one after each of the eighteen installs; the closing sweep and line read three more.
+    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(25);
   });
 
   it("a step that fails is named on the stage and in the line, and what waited on it is skipped by its name", async () => {
@@ -281,6 +294,7 @@ describe("installBase", () => {
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
     expect(out.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
+      ["base/login-path", "installed", undefined],
       ["base/node", "installed", undefined],
       ["base/pnpm", "installed", undefined],
       ["base/uv", "installed", undefined],
@@ -300,7 +314,7 @@ describe("installBase", () => {
       ["base/rsync", "skipped", "apt index did not install"],
     ]);
     expect(out.line).toBe("node 22.23.2, npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13; git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); curl skipped (apt index did not install); Docker engine and compose skipped (apt index did not install); C toolchain with cmake and ninja skipped (apt index did not install); fd skipped (apt index did not install); sqlite3 skipped (apt index did not install); wget skipped (apt index did not install); zip and unzip skipped (apt index did not install); xz skipped (apt index did not install); rsync skipped (apt index did not install)");
-    expect(stages).toContain("deploying-daemon:4 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 12 skipped: git, jq, ripgrep, curl, Docker engine and compose, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync (apt index did not install); caches swept; 2.9 GB free");
+    expect(stages).toContain("deploying-daemon:5 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 12 skipped: git, jq, ripgrep, curl, Docker engine and compose, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync (apt index did not install); caches swept; 2.9 GB free");
   });
 
   it("a floor step that fails is recorded by the last line its installer wrote, not a generic one", async () => {

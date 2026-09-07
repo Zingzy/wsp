@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The roads a catalog entry or a recipe's tools row can take onto a Linux
 // machine (the modules that walk them are in road-modules.ts), and the pinned
-// installers the script road carries: uv, Node and Docker's compose plugin by
-// their checksummed releases, Hermes by a git checkout at a commit, Claude Code
+// installers the script road carries: uv, Node, Docker's compose plugin and
+// Swift and rustup by their checksummed releases, Playwright's Chromium at the
+// Playwright the render tests run, 1Password's CLI from its own apt repository
+// under its pinned signing key, Hermes by a git checkout at a commit, Claude Code
 // by its vendor's installer. Every pin here is checked on the machine before
 // anything runs.
 import type { LinuxCask } from "./linux-casks.js";
@@ -186,6 +188,33 @@ export const PYTHON_INSTALL = [
   'ln -sfn "$(uv python find --managed-python 3.12)" /usr/local/bin/python3',
 ].join("\n");
 
+/** rustup by the installer rust-lang archives per release, checksummed against
+ * the sha256 published beside it (https://static.rust-lang.org/rustup/archive). */
+export const RUSTUP = {
+  version: "1.29.1",
+  sha256: {
+    x86_64: "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+    aarch64: "15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433",
+  },
+} as const;
+
+/** The stable toolchain in rustup's default profile, which is cargo, rustc, the standard library, clippy, rustfmt and
+ * the docs. Homebrew's rust bottle would link against llvm@22 instead, 2.5 GB of its 3.1 GB closure on Linux. The
+ * installer leaves the shell files alone: the guest's PATH already carries the cargo bin directory. */
+export const RUSTUP_INSTALL = [
+  'arch="$(uname -m)"',
+  'case "$arch" in',
+  `  x86_64) sha=${RUSTUP.sha256.x86_64} ;;`,
+  `  aarch64) sha=${RUSTUP.sha256.aarch64} ;;`,
+  '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+  "esac",
+  `curl -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/${RUSTUP.version}/$arch-unknown-linux-gnu/rustup-init"`,
+  'echo "$sha  /tmp/rustup-init" | sha256sum -c - >/dev/null',
+  "chmod +x /tmp/rustup-init",
+  "/tmp/rustup-init -y --no-modify-path --profile default --default-toolchain stable",
+  "rm -f /tmp/rustup-init",
+].join("\n");
+
 /** Debian ships fd as fdfind to dodge a name clash; agents type fd, so the row links it onto PATH under that name. */
 export const FD_INSTALL = [APT_ENV, "apt-get install -y -qq fd-find", "ln -sfn /usr/bin/fdfind /usr/local/bin/fd"].join("\n");
 
@@ -204,4 +233,66 @@ export const HERMES_INSTALL = [
   "uv venv --python 3.11 /root/.hermes/venvs/hermes",
   "uv pip install --python /root/.hermes/venvs/hermes/bin/python -e /root/.hermes/hermes-agent",
   "ln -sfn /root/.hermes/venvs/hermes/bin/hermes /usr/local/bin/hermes",
+].join("\n");
+
+/** Playwright's own Chromium build for the Playwright the web render tests import: the browser lives under
+ * ~/.cache/ms-playwright keyed by that version's revision, so a project on another Playwright looks for another one. */
+export const PLAYWRIGHT = { version: "1.62.1" } as const;
+
+/** The global first, then Playwright's installer for its Chromium and the Debian packages the browser needs; that
+ * installer reads the apt index itself. */
+export const PLAYWRIGHT_INSTALL = [APT_ENV, `npm install -g playwright@${PLAYWRIGHT.version}`, "playwright install --with-deps chromium"].join("\n");
+
+/** Swift by swift.org's Debian 12 toolchain tarball; swift.org signs it and publishes no sum, so the sums are the
+ * tarballs' own as read on 2026-09-07 (https://www.swift.org/install/linux/debian/12/). */
+export const SWIFT = {
+  version: "6.3.3",
+  sha256: {
+    x86_64: "19e0c78cad5418ad48bfa87aa20c53ac9ac9996d1695d04dd94f7c7ea4eb133f",
+    aarch64: "ecba8ef87b54a5048d466af500f3169c939a6b8a2cb7c600f76b5184457f293a",
+  },
+} as const;
+
+const SWIFT_HOME = "/opt/swift";
+
+/** The packages swift.org's own Debian 12 image installs ahead of the toolchain
+ * (https://github.com/swiftlang/swift-docker/blob/main/6.3/debian/12/Dockerfile). The toolchain unpacks under its
+ * own prefix, since it ships a clang and an lld of its own that would shadow the LLVM row's under /usr/bin. */
+export const SWIFT_INSTALL = [
+  APT_ENV,
+  "apt-get install -y -qq binutils libicu-dev libcurl4-openssl-dev libedit-dev libsqlite3-dev libncurses-dev libpython3-dev libxml2-dev pkg-config uuid-dev tzdata git gcc libstdc++-12-dev",
+  'arch="$(uname -m)"',
+  'case "$arch" in',
+  `  x86_64) dir=debian12 sha=${SWIFT.sha256.x86_64} ;;`,
+  `  aarch64) dir=debian12-aarch64 sha=${SWIFT.sha256.aarch64} ;;`,
+  '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+  "esac",
+  `pkg="swift-${SWIFT.version}-RELEASE-$dir.tar.gz"`,
+  `curl -o "/tmp/$pkg" "https://download.swift.org/swift-${SWIFT.version}-release/$dir/swift-${SWIFT.version}-RELEASE/$pkg"`,
+  'echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
+  `rm -rf ${SWIFT_HOME} && mkdir -p ${SWIFT_HOME}`,
+  `tar -xzf "/tmp/$pkg" -C ${SWIFT_HOME} --strip-components=1`,
+  'rm -f "/tmp/$pkg"',
+  `chmod -R o+r ${SWIFT_HOME}/usr/lib/swift`,
+  `ln -sfn ${SWIFT_HOME}/usr/bin/swift /usr/local/bin/swift`,
+  `ln -sfn ${SWIFT_HOME}/usr/bin/swiftc /usr/local/bin/swiftc`,
+].join("\n");
+
+/** 1Password's apt signing key as published on 2026-09-07 (https://downloads.1password.com/linux/keys/1password.asc);
+ * a rotated key fails the install instead of being trusted unread. */
+const ONE_PASSWORD_KEY_SHA256 = "f39e7dd9dedc581ced85732832f217e0de5860a3b80279b5af4bc7c6d8157bae";
+
+const ONE_PASSWORD_KEYRING = "/usr/share/keyrings/1password-archive-keyring.asc";
+const ONE_PASSWORD_LIST = "/etc/apt/sources.list.d/1password.list";
+
+/** 1Password publishes the CLI only through its own apt repository (https://developer.1password.com/docs/cli/get-started/),
+ * so the road adds the repository under its key and reads that one index before the install. */
+export const OP_INSTALL = [
+  APT_ENV,
+  `curl -o ${ONE_PASSWORD_KEYRING} https://downloads.1password.com/linux/keys/1password.asc`,
+  `echo "${ONE_PASSWORD_KEY_SHA256}  ${ONE_PASSWORD_KEYRING}" | sha256sum -c - >/dev/null`,
+  'arch="$(dpkg --print-architecture)"',
+  `echo "deb [arch=$arch signed-by=${ONE_PASSWORD_KEYRING}] https://downloads.1password.com/linux/debian/$arch stable main" > ${ONE_PASSWORD_LIST}`,
+  `apt-get update -qq -o Dir::Etc::sourcelist=${ONE_PASSWORD_LIST} -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0`,
+  "apt-get install -y -qq 1password-cli",
 ].join("\n");
