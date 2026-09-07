@@ -630,7 +630,7 @@ describe("the MCP server over the host", () => {
     const landings = (): string[] => backend.machines[0]!.runLog.filter(s => s.includes("mv "));
     const planned = await call("import", { workspace: "alpha", folder: proj });
     expect(planned.isError).toBe(false);
-    expect(planned.text).toMatch(/^ {2}\.env {2,}name(, \w+)*, 19 B {2,}cut$/m);
+    expect(planned.text).toMatch(/^ {2}\.env {2,}name(, \w+)*, 19 B {2,}left out$/m);
     expect(planned.text.split("\n").at(-1)).toBe("nothing imported; call import again with yes true to take these defaults, or keep and cut per secret-shaped row");
     expect(planned.structured).toEqual({ plan: expect.objectContaining({ source: real, files: 2, secrets: [expect.objectContaining({ path: ".env" })] }) });
     expect(landings()).toEqual([]);

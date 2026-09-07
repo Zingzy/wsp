@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The import dialog's pure parts: the step rows folded from project.import
-// events, which events belong to one import, the consent defaults for the
+// The import dialog's pure parts: which events belong to one import, the consent defaults for the
 // secret-shaped files and the agents and the request they become, the secret
 // offer wording as the tick changes it, the agent row's words, and the landed
 // line with what was cut.
 import { describe, expect, it } from "vitest";
 import type { ProjectAgent, ProjectImportEvent, ProjectSecret } from "@wsp/protocol";
-import { IMPORT_STEPS, agentState, agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "../src/sidebar/importProject.js";
+import { agentState, agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, isImportOf, landedLine, secretOffer } from "../src/sidebar/importProject.js";
 
 const ev = (over: Partial<ProjectImportEvent>): ProjectImportEvent => ({
   type: "project.import",
@@ -53,32 +52,6 @@ describe("agent consent", () => {
   });
 });
 
-describe("step rows", () => {
-  it("lists the six steps in order with no message before any event", () => {
-    expect(IMPORT_STEPS).toEqual(["planned", "consented", "packing", "uploading", "landing", "done"]);
-    expect(importStepRows([])).toEqual(IMPORT_STEPS.map(stage => ({ stage, message: null, elapsedMs: null, fraction: null })));
-  });
-
-  it("keeps the last event per step, the upload fraction from bytes of total, and leaves failed out of the rows", () => {
-    const rows = importStepRows([
-      ev({}),
-      ev({ stage: "consented", message: "Carrying .env; cut keys/id_ed25519.", elapsedMs: 20 }),
-      ev({ stage: "packing", message: "Packing 11 files.", elapsedMs: 30 }),
-      ev({ stage: "uploading", message: "Uploading 2.8 KB.", elapsedMs: 40, bytes: 0, total: 2_800 }),
-      ev({ stage: "uploading", message: "Part 1 of 2, 1.4 KB of 2.8 KB.", elapsedMs: 50, bytes: 1_400, total: 2_800 }),
-      ev({ stage: "failed", message: "the machine went away", elapsedMs: 60 }),
-    ]);
-    expect(rows.map(r => [r.stage, r.message, r.elapsedMs, r.fraction])).toEqual([
-      ["planned", "12 files, 3.0 KB and the repository; 2 secret-shaped files; 1 cache left behind.", 10, null],
-      ["consented", "Carrying .env; cut keys/id_ed25519.", 20, null],
-      ["packing", "Packing 11 files.", 30, null],
-      ["uploading", "Part 1 of 2, 1.4 KB of 2.8 KB.", 50, 0.5],
-      ["landing", null, null, null],
-      ["done", null, null, null],
-    ]);
-  });
-});
-
 describe("which events belong to the import", () => {
   const plan = { source: "/private/var/proj", repo: true, files: 1, bytes: 1, secrets: [], excluded: [], skipped: [], agents: [] };
   it("matches the workspace with the path as typed or the plan's realpath, nothing else", () => {
@@ -103,27 +76,26 @@ describe("consent", () => {
     expect(consentRequest([env, config], new Set([".env", ".git/config", "gone"]))).toEqual({ carry: [".env"], rewrite: [".git/config"] });
   });
 
-  it("words each row by its tick: unticked is cut; ticked travels as it is, or lands bare at the host without the dropped keys", () => {
-    expect(secretOffer(env, false)).toEqual({ short: "cut", full: "cut" });
-    expect(secretOffer(env, true)).toEqual({ short: "travels as it is", full: "travels as it is" });
-    expect(secretOffer(config, false)).toEqual({ short: "cut", full: "cut" });
-    expect(secretOffer(config, true)).toEqual({ short: "lands bare at github.com", full: "lands bare at https://github.com/o/r" });
-    expect(secretOffer(header, true)).toEqual({ short: "lands without http.extraheader", full: "lands without http.extraheader" });
-    expect(secretOffer({ ...config, rewrite: { urls: ["https://github.com/o/r", "https://gitlab.com/o/s", "https://github.com/o/t"], drop: ["http.extraheader"] } }, true)).toEqual({
-      short: "lands bare at github.com, gitlab.com without http.extraheader",
-      full: "lands bare at https://github.com/o/r, https://gitlab.com/o/s, https://github.com/o/t without http.extraheader",
+  it("words each row by its tick in plain words: unticked is left out; ticked travels as is, or is rewritten without its keys, the full form naming what the rewrite leaves", () => {
+    expect(secretOffer(env, false)).toEqual({ short: "left out", full: "left out" });
+    expect(secretOffer(env, true)).toEqual({ short: "travels as is", full: "travels as is" });
+    expect(secretOffer(config, false)).toEqual({ short: "left out", full: "left out" });
+    expect(secretOffer(config, true)).toEqual({ short: "rewritten without keys", full: "rewritten without keys; the remote reads https://github.com/o/r" });
+    expect(secretOffer(header, true)).toEqual({ short: "rewritten without keys", full: "rewritten without keys; http.extraheader left out" });
+    expect(secretOffer({ ...config, rewrite: { urls: ["https://github.com/o/r", "https://gitlab.com/o/s"], drop: ["http.extraheader"] } }, true)).toEqual({
+      short: "rewritten without keys",
+      full: "rewritten without keys; the remote reads https://github.com/o/r, https://gitlab.com/o/s; http.extraheader left out",
     });
-    expect(secretOffer({ ...config, rewrite: { urls: ["not a url"], drop: [] } }, true).short).toBe("lands bare at not a url");
   });
 });
 
 describe("the landed line", () => {
-  it("names the folder, its path on the machine and the workspace, then how many were cut and where the list is", () => {
+  it("names the folder, its path on the machine and the workspace, then how many were left out and where the list is", () => {
     const result = { dest: "/Users/me/code/proj", files: 11, bytes: 2_900, parts: 1, cut: [], rewritten: [".git/config"], agents: [] };
     expect(landedLine(result, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api.");
     expect(landedLine(result, "/Users/me/code/proj/", "api")).toBe("proj is at /Users/me/code/proj on api.");
-    expect(landedLine({ ...result, cut: ["keys/id_ed25519", ".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; cut 2 files, listed above.");
-    expect(landedLine({ ...result, cut: [".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; cut 1 file, listed above.");
+    expect(landedLine({ ...result, cut: ["keys/id_ed25519", ".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; 2 files left out, listed above.");
+    expect(landedLine({ ...result, cut: [".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; 1 file left out, listed above.");
     expect(landedLine({ ...result, agents: [{ agent: "claude", files: 2, bytes: 100, outcome: "moved", sessions: 2 }, { agent: "codex", files: 0, bytes: 0, outcome: "carried" }] }, "/Users/me/code/proj", "api")).toBe(
       "proj is at /Users/me/code/proj on api; sessions: Claude Code moved, Codex carried unchanged.",
     );

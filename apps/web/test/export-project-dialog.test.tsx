@@ -108,6 +108,7 @@ describe("export project dialog", () => {
     expect(field(root, "Folder on this Mac").value).toBe(SOURCE);
     await codexRow(root);
     const rows = within(root.querySelector<HTMLElement>("[data-k=agents]")!).getAllByRole("checkbox");
+    for (const row of rows) expect(row.getAttribute("data-tone")).toBe("neutral");
     expect(rows.map(r => r.getAttribute("aria-label"))).toEqual(["Claude Code", "Codex"]);
     expect(rows.map(r => r.getAttribute("aria-checked"))).toEqual(["true", "true"]);
     expect(outcomes(root)).toEqual(["", ""]);

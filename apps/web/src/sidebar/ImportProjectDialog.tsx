@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Importing a folder on this Mac into a workspace: the folder is read into one
-// dense summary, the agents with sessions for it are ticked rows whose
-// sessions travel, the secret-shaped files are the one loud element and only
-// when the plan found some, one action starts the import, and the runtime's
-// events fill a fixed set of step rows. The desktop shell offers the system
-// picker; a browser tab has the path input alone and Enter reads it. The path
-// shows as the person picked it; the plan speaks in realpaths, so the
-// destination and the events are matched on that. A consent is for the plan
-// the person read: editing the path drops the plan and its ticks until the
-// folder is read again.
+// Importing a folder on this Mac into a workspace: one container of quiet
+// sections, the folder, what travels, the agents whose sessions go with it
+// and the files that look like secrets, each a section only when the plan has
+// rows for it; one action starts the import and the runtime's events read in
+// the one slot above the footer that was empty until then. The desktop shell gives the
+// folder as a picker row; a browser tab has the path input alone and Enter
+// reads it. The path shows as the person picked it; the plan speaks in
+// realpaths, so the destination and the events are matched on that. A consent
+// is for the plan the person read: editing the path drops the plan and its
+// ticks until the folder is read again.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fmtBytes, importRequest, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
+import { ChevronDownIcon } from "lucide-react";
+import { fmtBytes, importIntoLine, importRequest, repoLine, secretSignalsLine, secretsNote, SESSIONS_NOTE, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
-import { Checkbox } from "../components/ui/checkbox.js";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
-import { agentState, canTravel, defaultAgents, defaultConsent, importStepRows, isImportOf, landedLine, secretOffer } from "./importProject.js";
-import { count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
-import { FactRow, FolderField, StatusLine, StepRows } from "./ProjectTripRows.js";
+import { agentState, canTravel, defaultAgents, defaultConsent, importProgress, isImportOf, landedLine, secretOffer } from "./importProject.js";
+import { count, refusalOf, refusalTone, type Refusal, type StatusTone } from "./projectTrip.js";
+import { ConsentRow, FactRow, FolderField, FolderPickerRow, TripSection, TripStatus } from "./ProjectTripRows.js";
 
 type Phase = "idle" | "importing" | "done";
 
@@ -35,7 +36,7 @@ interface Planned {
   readonly plan: ProjectPlan;
 }
 
-const IMPORTING = "Importing. This stays open until it lands; closing it would not stop the import.";
+const PLACEHOLDER = "/Users/you/code/project";
 
 export function ImportProjectDialog({ workspace, initialSource, onClose }: { workspace: WorkspaceView; initialSource?: string; onClose: () => void }) {
   const api = useStore(s => s.api);
@@ -133,7 +134,15 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
 
   const busy = reading || phase === "importing";
   const primary = phase === "done" ? "Done" : refusal?.exists ? "Replace and import" : "Import";
-  const status = refusal !== null ? refusal.message : result !== null ? landedLine(result, sent.current.source, workspace.name) : reading ? "Reading the folder." : phase === "importing" ? IMPORTING : "";
+  const progress = phase === "idle" ? null : importProgress(events, workspace.name);
+  const said: { words: string; tone: StatusTone } =
+    refusal !== null
+      ? { words: refusal.message, tone: refusalTone(refusal) }
+      : result !== null
+        ? { words: landedLine(result, sent.current.source, workspace.name), tone: "quiet" }
+        : progress !== null
+          ? { words: progress.line, tone: "step" }
+          : { words: reading ? "Reading the folder." : "", tone: "quiet" };
 
   return (
     <Dialog open onOpenChange={open => { if (!open && phase !== "importing") onClose(); }}>
@@ -141,25 +150,32 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
         <div className="flex min-h-0 flex-col">
           <DialogHeader>
             <DialogTitle>Import a project</DialogTitle>
-            <DialogDescription>Into {workspace.name}. The folder lands on the machine at the path it has here; caches stay behind.</DialogDescription>
+            <DialogDescription>{importIntoLine(workspace.name)}</DialogDescription>
           </DialogHeader>
-          <DialogPanel className="flex flex-col gap-3">
-            <FolderField
-              id="import-source"
-              label="Folder on this Mac"
-              placeholder="/Users/you/code/project"
-              value={source}
-              disabled={busy}
-              autoFocus={initialSource === undefined}
-              onChange={edit}
-              onEnter={() => void read(source)}
-              {...(bridge === undefined ? {} : { onPick: () => void pick() })}
-            />
-            <Summary plan={plan} />
-            {plan !== null && plan.agents.length > 0 ? <Agents agents={plan.agents} ticked={tickedAgents} disabled={phase !== "idle"} onToggle={toggleAgent} /> : null}
-            {plan !== null && plan.secrets.length > 0 ? <Secrets secrets={plan.secrets} ticked={ticked} disabled={phase !== "idle"} onToggle={toggle} /> : null}
-            <StepRows label="Import steps" transfer="Upload" rows={importStepRows(events)} />
-            <StatusLine tone={refusalTone(refusal)}>{status}</StatusLine>
+          <DialogPanel className="flex flex-col">
+            <TripSection k="folder" label="Folder on this Mac" {...(bridge === undefined ? { htmlFor: "import-source" } : {})}>
+              {bridge === undefined ? (
+                <FolderField id="import-source" placeholder={PLACEHOLDER} value={source} disabled={busy} autoFocus={initialSource === undefined} onChange={edit} onEnter={() => void read(source)} />
+              ) : (
+                <FolderPickerRow path={source} placeholder={PLACEHOLDER} disabled={busy} onPick={() => void pick()} />
+              )}
+            </TripSection>
+            <TripSection k="summary" label="What travels">
+              <Summary plan={plan} />
+            </TripSection>
+            {plan !== null && plan.agents.length > 0 ? (
+              <TripSection k="agents" label="Sessions">
+                <Agents agents={plan.agents} ticked={tickedAgents} disabled={phase !== "idle"} onToggle={toggleAgent} />
+              </TripSection>
+            ) : null}
+            {plan !== null && plan.secrets.length > 0 ? (
+              <TripSection k="secrets" label="Secrets">
+                <Secrets secrets={plan.secrets} ticked={ticked} disabled={phase !== "idle"} onToggle={toggle} />
+              </TripSection>
+            ) : null}
+            <TripStatus tone={said.tone} fraction={progress?.fraction ?? null}>
+              {said.words}
+            </TripStatus>
           </DialogPanel>
           <DialogFooter>
             {phase === "done" ? null : (
@@ -184,16 +200,14 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
 function Summary({ plan }: { plan: ProjectPlan | null }) {
   const skippedTitle = plan?.skipped.map(s => `${s.path}: ${s.note}`).join("\n");
   return (
-    <div data-k="summary" className="divide-y divide-border/40 rounded-md border border-border/60 px-2.5">
-      <FactRow label="Repository" k="repository">
-        {plan === null ? "" : plan.repo ? "git, .git travels whole" : "none"}
+    <div className="flex flex-col">
+      <FactRow label="Repository" k="repository" mono={false}>
+        {plan === null ? "" : repoLine(plan.repo)}
       </FactRow>
       <FactRow label="Files" k="files">
         {plan === null ? "" : `${count(plan.files, "file")} · ${fmtBytes(plan.bytes)}`}
       </FactRow>
-      <FactRow label="Caches left behind" k="caches">
-        {plan === null ? "" : plan.excluded.length === 0 ? "none" : plan.excluded.join(", ")}
-      </FactRow>
+      <Caches excluded={plan?.excluded ?? null} />
       <FactRow label="Not carried" k="skipped" {...(skippedTitle !== undefined && skippedTitle !== "" ? { title: skippedTitle } : {})}>
         {plan === null ? "" : plan.skipped.length === 0 ? "none" : count(plan.skipped.length, "path")}
       </FactRow>
@@ -204,49 +218,66 @@ function Summary({ plan }: { plan: ProjectPlan | null }) {
   );
 }
 
+/** The caches as a count, with the list behind a disclosure so a long one wraps below the row instead of being cut. */
+function Caches({ excluded }: { excluded: readonly string[] | null }) {
+  if (excluded === null || excluded.length === 0) {
+    return (
+      <FactRow label="Caches left behind" k="caches">
+        {excluded === null ? "" : "none"}
+      </FactRow>
+    );
+  }
+  return (
+    <Collapsible>
+      <FactRow label="Caches left behind" k="caches">
+        <CollapsibleTrigger className="group inline-flex items-center gap-1">
+          {count(excluded.length, "folder")}
+          <ChevronDownIcon aria-hidden className="size-3 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+        </CollapsibleTrigger>
+      </FactRow>
+      <CollapsiblePanel>
+        <p data-k="cache-list" className="break-all pb-1.5 text-right font-mono text-[11px] leading-4 text-muted-foreground">
+          {excluded.join(", ")}
+        </p>
+      </CollapsiblePanel>
+    </Collapsible>
+  );
+}
+
 function Agents({ agents, ticked, disabled, onToggle }: { agents: readonly ProjectAgent[]; ticked: ReadonlySet<string>; disabled: boolean; onToggle: (agent: string, on: boolean) => void }) {
   return (
-    <section data-k="agents" className="flex flex-col gap-1 rounded-md border border-border/60 px-2.5 py-2">
-      <p className="font-mono text-[11px] text-muted-foreground">{`${count(agents.length, "agent")} on this Mac with sessions for the folder`}</p>
+    <>
       <ul className="flex flex-col">
         {agents.map(a => (
-          <li key={a.agent} className="flex h-7 items-center gap-2 text-xs">
-            <Checkbox checked={ticked.has(a.agent)} disabled={disabled || !canTravel(a)} aria-label={a.name} onCheckedChange={next => onToggle(a.agent, next)} />
-            <span className="shrink-0 text-foreground">{a.name}</span>
+          <ConsentRow key={a.agent} label={a.name} mono={false} checked={ticked.has(a.agent)} disabled={disabled || !canTravel(a)} onToggle={on => onToggle(a.agent, on)}>
             <span data-k="state" className="ml-auto min-w-0 truncate font-mono text-[11px] tabular-nums text-muted-foreground" title={agentState(a)}>
               {agentState(a)}
             </span>
-          </li>
+          </ConsentRow>
         ))}
       </ul>
-      <p className="text-[11px] text-muted-foreground">Ticked agents' sessions travel keyed to the path on the machine; the rest stay here.</p>
-    </section>
+      <p className="text-[11px] leading-4 text-muted-foreground">{SESSIONS_NOTE}</p>
+    </>
   );
 }
 
 function Secrets({ secrets, ticked, disabled, onToggle }: { secrets: readonly ProjectSecret[]; ticked: ReadonlySet<string>; disabled: boolean; onToggle: (path: string, on: boolean) => void }) {
   return (
-    <section data-k="secrets" className="flex flex-col gap-1 rounded-md border border-warning/32 bg-warning-surface px-2.5 py-2">
-      <p className="font-mono text-[11px] text-warning-foreground">{count(secrets.length, "secret-shaped file")}</p>
+    <>
+      <p className="text-[11px] leading-4 text-muted-foreground">{secretsNote(secrets.length)}</p>
       <ul className="flex flex-col">
         {secrets.map(s => {
           const on = ticked.has(s.path);
           const offer = secretOffer(s, on);
           return (
-            <li key={s.path} className="flex h-7 items-center gap-2 text-xs">
-              <Checkbox checked={on} disabled={disabled} aria-label={s.path} onCheckedChange={next => onToggle(s.path, next)} />
-              <span className="max-w-[45%] shrink-0 truncate font-mono text-foreground" title={s.path}>
-                {s.path}
-              </span>
-              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{`${s.signals.join(", ")} · ${fmtBytes(s.bytes)}`}</span>
-              <span data-k="offer" className="ml-auto min-w-0 truncate text-[11px] text-muted-foreground" title={offer.full}>
+            <ConsentRow key={s.path} label={s.path} mono checked={on} disabled={disabled} title={`${s.path}: ${secretSignalsLine(s)}`} onToggle={next => onToggle(s.path, next)}>
+              <span data-k="offer" className="ml-auto min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={offer.full}>
                 {offer.short}
               </span>
-            </li>
+            </ConsentRow>
           );
         })}
       </ul>
-      <p className="text-[11px] text-muted-foreground">Ticked files travel; a ticked rewrite lands without its credentials; the rest is cut and named.</p>
-    </section>
+    </>
   );
 }

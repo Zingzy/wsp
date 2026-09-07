@@ -55,6 +55,7 @@ import {
   noAdapterLine,
   offeredSize,
   secretOffer,
+  secretSignalsLine,
   sizeFromWord,
   sizeRefusal,
   startPicks,
@@ -842,7 +843,7 @@ export function planLines(plan: ProjectPlan, ticked: ReadonlySet<string>, agents
     ...plan.skipped.map(s => [`  ${s.path}`, s.note]),
     ["Lands at", plan.source],
     ["Secret-shaped", plan.secrets.length === 0 ? "none" : plural(plan.secrets.length, "file")],
-    ...plan.secrets.map(s => [`  ${s.path}`, `${s.signals.join(", ")}, ${fmtBytes(s.bytes)}`, secretOffer(s, ticked.has(s.path)).full]),
+    ...plan.secrets.map(s => [`  ${s.path}`, secretSignalsLine(s), secretOffer(s, ticked.has(s.path)).full]),
     ["Agents", plan.agents.length === 0 ? "none with sessions for the folder" : `${plural(plan.agents.length, "agent")} with sessions for the folder`],
     ...plan.agents.map(a => [`  ${a.name}`, a.error ?? plural(a.sessions, "session"), agents.has(a.agent) ? "sessions travel" : "stays"]),
   ];

@@ -72,7 +72,8 @@ export interface Refusal {
   readonly exists: boolean;
 }
 
-export type StatusTone = "quiet" | "caution" | "error";
+/** The slot's voice: a step under way in muted mono, a quiet sentence, a caution that asks for a replace, an error. */
+export type StatusTone = "step" | "quiet" | "caution" | "error";
 
 /** A caught error as the trip's refusal: the runtime's `exists` kind is the one with a follow-up. */
 export const refusalOf = (e: unknown): Refusal => ({ message: errorText(e), exists: e instanceof RequestError && e.kind === "exists" });
