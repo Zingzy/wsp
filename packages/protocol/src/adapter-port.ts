@@ -62,3 +62,12 @@ export type ExecStreamFactory = (
  * it holds no such session at all; absent on an adapter whose harness keeps no title.
  */
 export type SessionTitleReader = (harnessSessionId: string, exec: (command: string) => Promise<string>) => Promise<string | null>;
+
+/**
+ * Writes the name a person gave one of the harness's sessions into the harness's own store on the machine, the same
+ * field the harness writes when the person renames the session inside it, so the harness itself shows the new name
+ * too. The id is the session as that harness keys it, as SessionTitleReader takes it, and one shell line goes to
+ * `exec`. written: the store took the name. no-session: nothing was written, because the store holds no such session
+ * or the machine carries no such store at all. Absent on an adapter whose harness keeps no name of a person's.
+ */
+export type SessionRenamer = (harnessSessionId: string, title: string, exec: (command: string) => Promise<string>) => Promise<"written" | "no-session">;

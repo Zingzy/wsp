@@ -134,7 +134,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "recipe", "recipe_scan", "send", "snapshot", "stop", "terminal_config", "thread_new", "threads", "wake", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "recipe", "recipe_scan", "send", "snapshot", "stop", "terminal_config", "thread_new", "thread_rename", "threads", "wake", "workspaces"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
@@ -551,6 +551,32 @@ describe("the MCP server over the host", () => {
     expect(held.interrupted).toHaveLength(1);
     const missing = await call("stop", { thread: "nope" });
     expect(missing).toEqual(failedWith("no thread nope"));
+  });
+
+  it("thread_rename names the thread in the agent's own store and returns the outcome; an agent that keeps no name is an answer, not an error", async () => {
+    const named = scriptedAgent(prompt => `re: ${prompt}`, () => "written");
+    await restartHost({ claude: named.adapter, codex: scriptedAgent(prompt => `codex: ${prompt}`).adapter });
+    await call("new", { name: "alpha" });
+    await call("thread_new", { workspace: "alpha", task: "build it" });
+    const [row] = await rt.sessions.list();
+    const renamed = await call("thread_rename", { thread: row!.threadId!.slice(0, 8), title: "the name he typed" });
+    expect(renamed).toEqual({
+      text: `thread ${row!.threadId} named the name he typed, in Claude Code too`,
+      structured: { threadId: row!.threadId, title: "the name he typed", harness: "claude", outcome: "renamed" },
+      isError: false,
+    });
+    expect(named.renames).toEqual([{ sessionId: row!.claudeSessionId, title: "the name he typed" }]);
+    expect(((await call("threads")).structured as { threads: ThreadView[] }).threads.map(t => t.title)).toEqual(["the name he typed"]);
+
+    await call("thread_new", { workspace: "alpha", task: "build it there", agent: "codex" });
+    const codexRow = (await rt.sessions.list()).find(v => v.harness === "codex")!;
+    const unsupported = await call("thread_rename", { thread: codexRow.threadId!, title: "the name" });
+    expect(unsupported).toEqual({
+      text: `thread ${codexRow.threadId} not named: Codex keeps no name of a person's for a session`,
+      structured: { threadId: codexRow.threadId, title: "the name", harness: "codex", outcome: "unsupported" },
+      isError: false,
+    });
+    expect(await call("thread_rename", { thread: "nope", title: "the name" })).toEqual(failedWith("no thread nope"));
   });
 
   it("thread_new with notify tells that thread when the new one ends, through the same start the CLI makes: the running parent is steered the line and the child's transcript names the parent", async () => {

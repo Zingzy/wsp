@@ -4,7 +4,7 @@
 // sessions.interrupt is keyed by.
 import { LinkIcon, PencilIcon, SquareIcon, Trash2Icon } from "lucide-react";
 import { threadHash, type SessionStatus } from "@wsp/protocol";
-import { CLIENT_CANNOT_STOP, NO_THREAD_DELETE, NO_THREAD_RENAME, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_WORDS } from "./format.js";
+import { CLIENT_CANNOT_STOP, NO_THREAD_DELETE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_WORDS, threadRenameRefusal } from "./format.js";
 import type { ActionEntry } from "./registry.js";
 
 export interface ThreadTarget {
@@ -13,6 +13,8 @@ export interface ThreadTarget {
   /** The latest turn's runtime session id, what a stop interrupts. */
   readonly sessionId: string;
   readonly workspaceId: string;
+  /** The agent the thread runs on: whose store a rename would have to be kept in. */
+  readonly harness: string;
   readonly title: string;
   readonly status: SessionStatus;
 }
@@ -39,7 +41,7 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     group: "edit",
     icon: () => PencilIcon,
     title: () => THREAD_WORDS.rename,
-    refusal: () => NO_THREAD_RENAME,
+    refusal: target => threadRenameRefusal(target.harness),
     run: () => {},
   },
   {

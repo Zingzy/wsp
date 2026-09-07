@@ -501,6 +501,9 @@ export function noAdapterLine(harness: string, agents: readonly string[]): strin
 /** The refusal of a thread opened on no words: an empty or whitespace task would still start a process and a turn. */
 export const EMPTY_TASK_LINE = "the task is empty; say what the thread is to do";
 
+/** The refusal of a rename to nothing: a blank name would take a thread's title away and leave nothing in its place. */
+export const EMPTY_TITLE_LINE = "the name is empty; say what the thread is called";
+
 /** The one line a codex turn fails with when its provider wants an OpenAI login the machine has not got: the CLI
  * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. */
 export function codexNotSignedInLine(login: string): string {

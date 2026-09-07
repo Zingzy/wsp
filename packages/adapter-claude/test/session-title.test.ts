@@ -3,12 +3,12 @@
 // CLAUDE_CONFIG_DIR/projects/, with the ordering measured on 2.1.263: the last
 // ai-title line of a renamed session sits AFTER its last custom-title.
 import { execFile } from "node:child_process";
-import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, copyFileSync, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
-import { parseSessionTitle, sessionTitleCommand } from "../src/session-title.js";
+import { parseRename, parseSessionTitle, renameCommand, sessionTitleCommand } from "../src/session-title.js";
 
 const SESSION = "5b3d3ddb-86d6-47ba-b216-0a510284d8b6";
 const FIXTURE = new URL("./fixtures/session-titles.jsonl", import.meta.url);
@@ -69,5 +69,52 @@ describe("the title Claude Code keeps for a session", () => {
     const command = sessionTitleCommand({ configDir: "/root/it's here", sessionId: SESSION });
     expect(command).toContain(String.raw`'/root/it'\''s here/projects'/*/`);
     expect(command).toContain(`'${SESSION}.jsonl'`);
+  });
+});
+
+/** The rename as the guest runs it: one bash line, its stdout read the way the adapter reads it. */
+const renameTo = async (configDir: string, sessionId: string, title: string): Promise<"written" | "no-session"> =>
+  parseRename((await run("bash", ["-c", renameCommand({ configDir, sessionId, title })])).stdout);
+
+describe("naming a Claude Code session from wsp", () => {
+  it("appends the record the CLI's own rename appends, and the read gives that name back", async () => {
+    const dir = configDir({ [`${SESSION}.jsonl`]: `{"type":"ai-title","aiTitle":"Understanding the build","sessionId":"${SESSION}"}\n` });
+    expect(await renameTo(dir, SESSION, "the name he typed in wsp")).toBe("written");
+    const lines = readFileSync(join(dir, "projects", "-root-work-proj", `${SESSION}.jsonl`), "utf8").split("\n").filter(l => l !== "");
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[1]!)).toEqual({ type: "custom-title", customTitle: "the name he typed in wsp", sessionId: SESSION });
+    expect(await titleOf(dir, SESSION)).toBe("the name he typed in wsp");
+  });
+
+  it("keeps a name holding a quote, a newline and a percent sign as one record", async () => {
+    const dir = configDir({ [`${SESSION}.jsonl`]: `{"type":"user","sessionId":"${SESSION}"}\n` });
+    expect(await renameTo(dir, SESSION, "it's 100%\nhere")).toBe("written");
+    expect(readFileSync(join(dir, "projects", "-root-work-proj", `${SESSION}.jsonl`), "utf8").split("\n").filter(l => l !== "")).toHaveLength(2);
+    expect(await titleOf(dir, SESSION)).toBe("it's 100%\nhere");
+  });
+
+  it("closes a half-written last line rather than being swallowed by it", async () => {
+    const dir = configDir({ [`${SESSION}.jsonl`]: `{"type":"ai-title","aiTitle":"Understanding the build","sessionId":"${SESSION}"}\n{"type":"assis` });
+    expect(await renameTo(dir, SESSION, "the name")).toBe("written");
+    expect(await titleOf(dir, SESSION)).toBe("the name");
+  });
+
+  it("writes nothing and says so when no project folder holds that session", async () => {
+    expect(await renameTo(configDir({}), SESSION, "the name")).toBe("no-session");
+  });
+
+  it("quotes the config dir and the session id, and a name that reads as shell lands as the bytes it is", async () => {
+    const command = renameCommand({ configDir: "/root/it's here", sessionId: SESSION, title: "x" });
+    expect(command).toContain(String.raw`'/root/it'\''s here/projects'/*/`);
+    expect(command).toContain(`'${SESSION}.jsonl'`);
+    const dir = configDir({ [`${SESSION}.jsonl`]: `{"type":"user","sessionId":"${SESSION}"}\n` });
+    expect(await renameTo(dir, SESSION, "$(touch /tmp/wsp-402-never) 'x'")).toBe("written");
+    expect(await titleOf(dir, SESSION)).toBe("$(touch /tmp/wsp-402-never) 'x'");
+    expect(existsSync("/tmp/wsp-402-never")).toBe(false);
+  });
+
+  it("reads a stdout with nothing on it as no session, whatever else the shell printed", () => {
+    expect(parseRename("")).toBe("no-session");
+    expect(parseRename("bash: no such file\n")).toBe("no-session");
   });
 });

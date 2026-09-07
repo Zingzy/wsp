@@ -3,6 +3,7 @@
 // show it, the label a row button on the object's own row wears, and the one
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
+import { agentName, keepsRename } from "@wsp/catalog";
 import { actionRefusal, goneRefusal, isBilling, workspaceWord, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
@@ -114,8 +115,15 @@ export const openBrowserRefusal = (state: WorkspaceState): string | null => acti
 export const THREAD_NOT_RUNNING = "Thread is not running";
 export const CLIENT_CANNOT_STOP = "This client cannot stop a turn";
 export const THREAD_HAS_NO_ID = "This thread has no id yet";
-export const NO_THREAD_RENAME = "Renaming a thread is not in the runtime yet";
+export const RENAME_NEEDS_COMMAND_LINE = "No rename box here yet; wsp thread rename names a thread";
 export const NO_THREAD_DELETE = "Deleting a thread is not in the runtime yet";
+
+/** Why the rename cannot run, per agent: an agent whose own store keeps no name of a person's would lose it at the
+ * thread's next turn, so no client offers one there; where the store does keep one, this app has nowhere to type the
+ * name yet and the command line does it. */
+export function threadRenameRefusal(harness: string): string {
+  return keepsRename(harness) ? RENAME_NEEDS_COMMAND_LINE : `Rename in ${agentName(harness)} is not kept`;
+}
 
 export const FOLDER_OPENS_IN_TREE = "A folder opens in the tree";
 export const ONLY_FILES_HAVE_DIFFS = "Only a file has a diff";

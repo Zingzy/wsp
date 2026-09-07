@@ -270,6 +270,8 @@ describe("a thread row's menu", () => {
     await screen.findByRole("menu");
     expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.delete]);
     expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBe("true");
+    // The agent's own store keeps a name; what is missing is a box here to type it in.
+    expect(refusalOf(THREAD_WORDS.rename)).toBe("No rename box here yet; wsp thread rename names a thread");
     expect(item(THREAD_WORDS.delete).getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(item(THREAD_WORDS.stop));
     await waitFor(() => expect(api.interruptSession).toHaveBeenCalledWith("s1"));

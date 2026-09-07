@@ -4,9 +4,9 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { backgroundTasksLine, fmtDuration, harnessExitLine } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, SessionHarness, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, SessionHarness, SessionRenamer, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe, type ClaudeCatalogProbe } from "./catalog.js";
-import { parseSessionTitle, sessionTitleCommand } from "./session-title.js";
+import { parseRename, parseSessionTitle, renameCommand, sessionTitleCommand } from "./session-title.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
@@ -54,6 +54,8 @@ export interface ClaudeAdapter {
   probeCatalog(exec: (command: string) => Promise<string>): Promise<ClaudeCatalogProbe | null>;
   /** What the CLI's own session file calls a session: its generated title, or the person's rename inside the CLI. */
   sessionTitle: SessionTitleReader;
+  /** Names the session in that same file, with the record the CLI's own rename appends. */
+  renameSession: SessionRenamer;
   /** What every session's command is exported with; the one environment a turn on the machine gets. */
   readonly env: Readonly<Record<string, string>>;
 }
@@ -390,6 +392,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     steers: true,
     probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir, baseEnv: deps.baseEnv })).then(parseCatalogProbe),
     sessionTitle: (sessionId, exec) => exec(sessionTitleCommand({ configDir: deps.configDir, sessionId })).then(parseSessionTitle),
+    renameSession: (sessionId, title, exec) => exec(renameCommand({ configDir: deps.configDir, sessionId, title })).then(parseRename),
     env,
   };
 }

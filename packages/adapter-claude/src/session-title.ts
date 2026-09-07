@@ -54,3 +54,28 @@ export function parseSessionTitle(stdout: string): string | null {
   }
   return null;
 }
+
+/** What a rename prints once the record landed; an append that never ran prints nothing. */
+const WROTE = "wrote";
+
+/**
+ * One shell line for the guest: the custom-title record appended to the session's file, the same record `/rename`
+ * inside the CLI appends (measured on 2.1.263: the keys in this order, one line, nothing else touched), in whichever
+ * project folder holds the session, the freshest first as the read picks it. A file whose last line was left half
+ * written by a crash takes a newline first, so the record is never swallowed by it. Nothing on stdout when there is
+ * no such file, which reads as no session to name.
+ */
+export function renameCommand(options: { configDir: string; sessionId: string; title: string }): string {
+  const file = `${shellQuote(`${options.configDir}/projects`)}/*/${shellQuote(`${options.sessionId}.jsonl`)}`;
+  const record = JSON.stringify({ type: "custom-title", customTitle: options.title, sessionId: options.sessionId });
+  return (
+    `f=$(ls -1t ${file} 2>/dev/null | head -n 1); [ -n "$f" ] || exit 0; ` +
+    `[ -z "$(tail -c 1 "$f")" ] || printf '\n' >> "$f"; ` +
+    `printf '%s\n' ${shellQuote(record)} >> "$f" && echo ${WROTE}`
+  );
+}
+
+/** Whether the record landed: the line the append prints, else nothing was written to any file of that id. */
+export function parseRename(stdout: string): "written" | "no-session" {
+  return stdout.split("\n").some(line => line.trim() === WROTE) ? "written" : "no-session";
+}

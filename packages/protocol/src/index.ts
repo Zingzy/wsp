@@ -1594,6 +1594,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   /** Sends a message into the session's running turn; replies with a SessionSteerResult. Takes the runtime's session
    * id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
+  /** Names the session's harness session in the harness's own store and keeps the name on the thread's rows; replies
+   * with a SessionRenameResult. Takes the runtime's session id, as sessions.interrupt does. */
+  z.object({ id: reqId, op: z.literal("sessions.rename"), sessionId: z.string(), title: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -1742,6 +1745,17 @@ export type SessionSteerOutcome = z.infer<typeof SessionSteerOutcome>;
 export const SessionSteerResult = z.object({ outcome: SessionSteerOutcome });
 export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
 
+// --- session rename (what a name a person typed came to in the harness's store) -
+
+/** renamed: the harness's store took the name, in the field the harness itself writes, and the thread's rows carry
+ * it. unsupported: the session's harness keeps no name of a person's, so nothing was written and nothing would have
+ * survived its next turn. no-session: the harness's store on the machine holds no such session, or no such store is
+ * there at all; nothing was written. not-found: this runtime holds no such session. None is an error reply. */
+export const SessionRenameOutcome = z.enum(["renamed", "unsupported", "no-session", "not-found"]);
+export type SessionRenameOutcome = z.infer<typeof SessionRenameOutcome>;
+export const SessionRenameResult = z.object({ outcome: SessionRenameOutcome });
+export type SessionRenameResult = z.infer<typeof SessionRenameResult>;
+
 // --- session start (how the turn the caller asked for came to be) --------------
 
 /** started: a turn of its own began. steered: the thread's turn was running and took the message mid-way, so
@@ -1815,4 +1829,4 @@ export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
-export type { AdapterEvent, ExecStream, ExecStreamFactory, SessionTitleReader } from "./adapter-port.js";
+export type { AdapterEvent, ExecStream, ExecStreamFactory, SessionRenamer, SessionTitleReader } from "./adapter-port.js";
