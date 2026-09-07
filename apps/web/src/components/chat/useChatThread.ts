@@ -294,8 +294,8 @@ function inHeldThread(state: ThreadState, e: SessionEvent, pinned: string | null
 /**
  * Applies one live event; returns the same state object when the event belongs to the turn a new thread left
  * or to a thread already known. A send ends at its session.start, or at a session.end of some other turn than
- * the one that had settled when it began: that turn's own end still trails its done, which already opened the
- * composer, while a harness that dies before init produces only a done and an end under a new turn id. A
+ * the one that had settled when it began: that turn's own end still trails its done, and only the end opens
+ * the composer, while a harness that dies before init produces only a done and an end under a new turn id. A
  * pending send left behind ends the same way, from a thread the view never knew or from the left one it
  * resumed; a start or a delta seen while it waits is some other thread's, since its own harness has not
  * started, and is remembered so that thread's end cannot pass for its own.
