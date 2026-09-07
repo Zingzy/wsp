@@ -252,10 +252,11 @@ export const OPENCODE_JSON: McpFormat = jsonFormat({
 
 // --- Codex's TOML ------------------------------------------------------------------------------------------------
 // Only the table form Codex documents and `codex mcp add` writes is read or edited, line by line, so comments and
-// order survive. The functions the machine's editor calls are written once here and travel as their own source.
+// order survive. The functions the machine's editor calls are written once here and travel as their own source, so
+// each one may only name declarations of this module: an import would reach for a binding the machine never got.
 
 /** A line without its trailing comment: `#` outside quotes ends it. */
-function uncommentToml(line: string): string {
+export function uncommentToml(line: string): string {
   let quote: string | undefined;
   for (let i = 0; i < line.length; i++) {
     const c = line[i]!;
@@ -298,8 +299,13 @@ function encodeToml(s: string): string {
 }
 
 /** Every string in the text, decoded. */
-function tomlStrings(s: string): string[] {
+export function tomlStrings(s: string): string[] {
   return [...s.matchAll(tomlStringPattern())].map(m => (m[1] !== undefined ? decodeToml(m[1]) : m[2]!));
+}
+
+/** Whether a value read so far is an array that closes on a later line. */
+export function tomlOpenArray(value: string): boolean {
+  return value.startsWith("[") && !value.endsWith("]");
 }
 
 /** A string, an array of strings, or an inline table of strings; anything else is left out. */
@@ -342,8 +348,7 @@ function readCodex(text: string): McpServer[] {
     if (eq < 0) continue;
     const key = line.slice(0, eq).trim().replace(/^"(.*)"$/, "$1");
     let value = line.slice(eq + 1).trim();
-    // A multi-line array closes on a later line.
-    while (value.startsWith("[") && !value.endsWith("]") && i + 1 < lines.length) value += uncommentToml(lines[++i]!).trim();
+    while (tomlOpenArray(value) && i + 1 < lines.length) value += uncommentToml(lines[++i]!).trim();
     const parsed = tomlValue(value);
     if (parsed === undefined) continue;
     const table = tables.get(current.name)!;
@@ -388,9 +393,24 @@ function placeCodex(text: string | undefined, name: string, server: McpServerSpe
   return [...lines.slice(0, start), ...table.slice(0, -1).split("\n"), ...gap, ...lines.slice(end)].join("\n");
 }
 
+/** A line with every string on it put through `to`, decoded and re-encoded only where the value changed, so escapes
+ * the rewrite never touched stay as written and the trailing comment is left alone. */
+export function rewriteTomlLine(line: string, to: (value: string) => string): string {
+  const code = uncommentToml(line);
+  const next = code.replace(tomlStringPattern(), (m: string, basic: string | undefined, literal: string | undefined) => {
+    if (literal !== undefined) {
+      const value = to(literal);
+      return value === literal ? m : `'${value}'`;
+    }
+    const value = decodeToml(basic!);
+    const rewritten = to(value);
+    return rewritten === value ? m : `"${encodeToml(rewritten)}"`;
+  });
+  return next + line.slice(code.length);
+}
+
 /** The machine's editor: each line belongs to the server whose header came last (its sub-tables included), so a
- * dropped server's lines go and a kept one's strings are rewritten; a token is re-emitted only when its value
- * changed, so escapes the rewrite never touched stay as written. */
+ * dropped server's lines go and a kept one's strings are rewritten. */
 function codexEditor(lib: McpGuestLib, scope: McpGuestScope, file: string): McpGuestResult[] {
   const before = lib.fs.readFileSync(file, "utf8");
   const lines = before.split("\n");
@@ -402,18 +422,8 @@ function codexEditor(lib: McpGuestLib, scope: McpGuestScope, file: string): McpG
     owner.push(current);
   }
   const rewriteLine = (line: string): string => {
-    const code = uncommentToml(line);
-    const isCommand = /^\s*command\s*=/.test(code);
-    const next = code.replace(tomlStringPattern(), (m: string, basic: string | undefined, literal: string | undefined) => {
-      if (literal !== undefined) {
-        const value = lib.rewriteString(literal, isCommand);
-        return value === literal ? m : `'${value}'`;
-      }
-      const value = decodeToml(basic!);
-      const rewritten = lib.rewriteString(value, isCommand);
-      return rewritten === value ? m : `"${encodeToml(rewritten)}"`;
-    });
-    return next + line.slice(code.length);
+    const isCommand = /^\s*command\s*=/.test(uncommentToml(line));
+    return rewriteTomlLine(line, value => lib.rewriteString(value, isCommand));
   };
   const keep = new Set(scope.keep);
   const drop = new Set(scope.drop);
@@ -448,5 +458,5 @@ function codexEditor(lib: McpGuestLib, scope: McpGuestScope, file: string): McpG
 export const CODEX_TOML: McpFormat = {
   read: readCodex,
   place: (text, name, server) => ({ text: placeCodex(text, name, server), commentsDropped: false }),
-  guest: guestSource([uncommentToml, tomlHeader, tomlStringPattern, tomlEscapes, decodeToml, encodeToml, tomlStrings, codexEditor], codexEditor.name),
+  guest: guestSource([uncommentToml, tomlHeader, tomlStringPattern, tomlEscapes, decodeToml, encodeToml, tomlStrings, rewriteTomlLine, codexEditor], codexEditor.name),
 };
