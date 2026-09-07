@@ -321,7 +321,7 @@ describe("the workspace switcher overlay", () => {
       tab();
       await waitFor(() => expect(overlay()).not.toBeNull());
       expect(cardText("ws_b", "name")).toBe("web");
-      expect(cardText("ws_b", "meta")).toBe("Running · $1.2345 today");
+      expect(cardText("ws_b", "meta")).toBe("Running · $1.23 today");
       expect(cardText("ws_b", "thread")).toBe("Bump the lockfile and run the gate.");
       expect(cardText("ws_b", "line")).toBe("All 12 tests green.");
       const meta = document.querySelector<HTMLElement>("[data-workspace-card='ws_b'] [data-card-meta]")!;

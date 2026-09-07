@@ -39,6 +39,8 @@ function workspaceVerbs(over: Partial<WorkspaceVerbs> = {}): WorkspaceVerbs {
     copyText: vi.fn(async () => {}),
     rebuild: vi.fn(async () => {}),
     forget: vi.fn(),
+    importProject: vi.fn(),
+    exportProject: vi.fn(),
     ...over,
   };
 }
@@ -47,7 +49,7 @@ const enabled = (actions: ReturnType<typeof resolveActions>) => actions.filter(a
 const titles = (actions: ReturnType<typeof resolveActions>) => actions.map(a => a.title);
 
 describe("workspace actions", () => {
-  it("a running workspace offers pause, terminal, browser, machine, new thread and copy id; rename, fork, rebuild and forget carry their refusal", () => {
+  it("a running workspace offers pause, terminal, browser, machine, new thread, the project trips and copy id; rename, fork, rebuild and forget carry their refusal", () => {
     const verbs = workspaceVerbs();
     const actions = resolveActions(workspaceActions, workspace("running"), verbs);
     expect(titles(actions)).toEqual([
@@ -57,12 +59,14 @@ describe("workspace actions", () => {
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
       WORKSPACE_WORDS.openMachine,
+      WORKSPACE_WORDS.importProject,
+      WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
       WORKSPACE_WORDS.forget,
     ]);
-    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "copy-id"]);
+    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "import-project", "export-project", "copy-id"]);
     expect(actionById(actions, "rename").refusal).toBe("Renaming is not in the runtime yet");
     expect(actionById(actions, "fork").refusal).toBe("Forking a workspace is not in the runtime yet; take a project snapshot in the Machine tab and start a workspace from it");
     expect(actionById(actions, "rebuild").refusal).toBe("Rebuild replaces a gone or zombie machine; this one answers");
@@ -96,6 +100,13 @@ describe("workspace actions", () => {
     const bare = resolveActions(workspaceActions, workspace("gone"), workspaceVerbs({ rebuild: undefined, forget: undefined }));
     expect(actionById(bare, "rebuild").refusal).toBe("This client cannot rebuild machines");
     expect(actionById(bare, "forget").refusal).toBe("This client cannot forget workspaces");
+    // The project trips: the machine must answer, and the client must have the folder ops; a browser tab without them says so.
+    expect(actionById(gone, "import-project").refusal).toBe("Projects wait for the rebuild");
+    expect(actionById(zombie, "export-project").refusal).toBe("Projects wait for the rebuild");
+    expect(actionById(resolveActions(workspaceActions, workspace("paused"), verbs), "import-project").refusal).toBeNull();
+    const noTrips = resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ importProject: undefined, exportProject: undefined }));
+    expect(actionById(noTrips, "import-project").refusal).toBe("This client cannot import projects");
+    expect(actionById(noTrips, "export-project").refusal).toBe("This client cannot export projects");
     expect(actionById(resolveActions(workspaceActions, workspace("paused"), verbs), "open-browser").refusal).toBe("Workspace is paused; wake it to preview");
     expect(actionById(resolveActions(workspaceActions, workspace("waking"), verbs), "open-browser").refusal).toBe("Workspace is waking; previews open when it is running");
   });
@@ -109,6 +120,10 @@ describe("workspace actions", () => {
     await actionById(actions, "open-browser").run();
     await actionById(actions, "open-machine").run();
     await actionById(actions, "copy-id").run();
+    await actionById(actions, "import-project").run();
+    await actionById(actions, "export-project").run();
+    expect(verbs.importProject).toHaveBeenCalledWith("ws_a");
+    expect(verbs.exportProject).toHaveBeenCalledWith("ws_a");
     expect(verbs.togglePhase).toHaveBeenCalledWith("ws_a");
     expect(verbs.newThread).toHaveBeenCalledWith("ws_a");
     expect(verbs.openTerminal).toHaveBeenCalledWith("ws_a");
@@ -257,6 +272,8 @@ describe("menu items from actions", () => {
       ["open-terminal", WORKSPACE_WORDS.openTerminal, "open", true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, "open", false],
       ["open-machine", WORKSPACE_WORDS.openMachine, "open", true],
+      ["import-project", WORKSPACE_WORDS.importProject, "project", true],
+      ["export-project", WORKSPACE_WORDS.exportProject, "project", true],
       ["rename", WORKSPACE_WORDS.rename, "edit", false],
       ["fork", WORKSPACE_WORDS.fork, "edit", false],
       ["copy-id", WORKSPACE_WORDS.copyId, "copy", true],

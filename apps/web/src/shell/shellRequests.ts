@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Requests the palette, the shortcuts and the action registries raise for
 // another region to fulfil, as window events so the raiser does not own that
-// region's state. The sidebar answers new-workspace and forget-workspace with
-// its dialogs; new-thread waits for a chat container to subscribe. Composer
+// region's state. The sidebar answers new-workspace, forget-workspace and the
+// project trips with its dialogs; new-thread waits for a chat container to
+// subscribe. Composer
 // focus is held rather than broadcast: the workspace switch selects and asks
 // in one handler, and the composer it names remounts after that handler
 // returns.
@@ -47,6 +48,24 @@ export function onForgetWorkspaceRequest(listener: (detail: ForgetWorkspaceReque
   const handler = (event: Event) => listener((event as CustomEvent<ForgetWorkspaceRequest>).detail);
   window.addEventListener(FORGET_WORKSPACE_EVENT, handler);
   return () => window.removeEventListener(FORGET_WORKSPACE_EVENT, handler);
+}
+
+const PROJECT_TRIP_EVENT = "wsp:project-trip";
+
+export interface ProjectTripRequest {
+  readonly workspaceId: string;
+  readonly trip: "import" | "export";
+}
+
+/** Asks for a project trip's dialog, the import or the export; the sidebar answers with the one it owns. */
+export function requestProjectTrip(detail: ProjectTripRequest): void {
+  window.dispatchEvent(new CustomEvent(PROJECT_TRIP_EVENT, { detail }));
+}
+
+export function onProjectTripRequest(listener: (detail: ProjectTripRequest) => void): () => void {
+  const handler = (event: Event) => listener((event as CustomEvent<ProjectTripRequest>).detail);
+  window.addEventListener(PROJECT_TRIP_EVENT, handler);
+  return () => window.removeEventListener(PROJECT_TRIP_EVENT, handler);
 }
 
 let composerFocusWanted: string | null = null;

@@ -112,6 +112,7 @@ import type {
   SessionStartOutcome,
   SessionSteerResult,
   SessionOrigin,
+  SessionTitleReader,
   SessionView,
   SnapshotStorage,
   TurnResult,
@@ -174,6 +175,8 @@ export interface HarnessAdapter {
   readonly steers: boolean;
   /** Asks the binary on the workspace's machine what it takes, null when it does not answer; absent, the table alone answers and nothing runs. */
   probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
+  /** Reads the harness's own title for a session out of its store on the machine; absent on a harness that keeps none. */
+  sessionTitle?: SessionTitleReader;
   /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
    * means nothing is exported and both run with the machine's own environment only. */
   readonly env?: Readonly<Record<string, string>>;
@@ -204,6 +207,15 @@ const EVENT_RING_CAP = 5000;
 export const CATALOG_TTL_MS = 5 * 60_000;
 /** The probe measured 1 to 3 s on a Mac; a guest that takes longer than this is answered from the table. */
 const CATALOG_PROBE_TIMEOUT_MS = 30_000;
+
+/** How long a harness's title for a session stands before its store is read again on a refresh. Clients reload the
+ * index on every session event, and a person renaming a session in the harness waits at most this long to see it. */
+export const SESSION_TITLE_TTL_MS = 10_000;
+/** A grep of one session file or a row out of one sqlite; a guest slower than this keeps the title it last gave. */
+const SESSION_TITLE_TIMEOUT_MS = 15_000;
+/** How many of a workspace's harness sessions one refresh asks about, newest first: a store read is an exec on the
+ * machine, and an index at SESSION_INDEX_CAP must not cost one per row. */
+export const SESSION_TITLE_REFRESH_MAX = 20;
 
 function eventBus(): EventBus & { emit(event: EventUnion): void } {
   const listeners = new Map<string, Set<EventListener>>();
@@ -865,6 +877,10 @@ const RESTARTED_REASON = "host restarted while the agent was working";
 const GONE_REASON = "machine gone at the provider while the agent was working";
 /** The host log's one line for a workspace found gone, from the road and from the record load alike. */
 const goneLogLine = (workspaceId: string, words: string): string => `workspace ${workspaceId} is gone: ${words}`;
+/** The host log's one line for a harness store that would not give a title; the read window keeps it to one line
+ * per session rather than one per refresh. */
+const noTitleLogLine = (sessionId: string, workspaceId: string, words: string): string =>
+  `no title for session ${sessionId.slice(0, 8)} on ${workspaceId}: ${words}`;
 /** What a cut turn's parent hears: the row's own span, since no harness result reports one. */
 const restartCutLine = (elapsedMs: number): string => `cut by a host restart after ${fmtDuration(elapsedMs, "clock")}`;
 /** A guest with no daemon is asked again after this long (one may be deployed later). */
@@ -2474,6 +2490,59 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return catalog;
   };
 
+  /** One title read per harness session per machine per TTL, a failed one included and one in flight shared: the
+   * clients reload the index on every session event and each reload must not cost an exec. */
+  const titleReads = new Map<string, { at: number; done: Promise<void>; live: boolean }>();
+  /** Asks the harness what it calls a row's session and keeps the answer on every row that shares it, so the title
+   * a client folds a thread by follows a rename made inside the harness. `force` reads past the TTL: a turn has just
+   * ended, which is when the harness writes its own title. Nothing happens while the machine cannot be asked, or
+   * when the harness has no title for the session: the rows keep the last one read rather than losing it to a nap.
+   */
+  const refreshTitle = (view: SessionView, force: boolean): Promise<void> => {
+    const sessionId = view.claudeSessionId;
+    const entry = live.get(view.workspaceId);
+    if (sessionId === undefined || entry === undefined) return Promise.resolve();
+    if (workspaceState({ phase: entry.record.phase }) !== "running" || adapters[view.harness] === undefined) return Promise.resolve();
+    const key = `${entry.machine.id}:${sessionId}`;
+    const hit = titleReads.get(key);
+    const now = clock.now();
+    if (hit !== undefined && (hit.live || (!force && now - hit.at < SESSION_TITLE_TTL_MS))) return hit.done;
+    // The adapter is built after the window is checked, so a refresh inside it costs nothing at all.
+    const read = adapterFor(entry, view.harness).adapter.sessionTitle;
+    if (read === undefined) return Promise.resolve();
+    const pending: { at: number; done: Promise<void>; live: boolean } = { at: now, live: true, done: Promise.resolve() };
+    // The read is started inside a promise and never on this stack: an adapter that refuses the id throws where it
+    // builds its command (the codex guard does), and one row's store read may never cost the listing or the turn
+    // that asked for it. Nothing here rejects, so both callers may leave it unawaited.
+    pending.done = Promise.resolve()
+      .then(() => read(sessionId, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
+      .then(
+        async title => {
+          if (title === null) return;
+          for (const s of sessions.values()) {
+            if (s.view.workspaceId === entry.record.id && s.view.claudeSessionId === sessionId) s.view.harnessTitle = title;
+          }
+          await persistSessions(entry.record.id);
+        },
+        (e: unknown) => console.warn(noTitleLogLine(sessionId, entry.record.id, e instanceof Error ? e.message : String(e))),
+      )
+      .then(() => {
+        pending.at = clock.now();
+        pending.live = false;
+      });
+    titleReads.set(key, pending);
+    return pending.done;
+  };
+
+  /** Which rows a refresh asks about: the newest turn of each harness session, newest first and no more than the cap. */
+  const titleRows = (rows: readonly SessionView[]): SessionView[] => {
+    const newest = new Map<string, SessionView>();
+    for (const view of [...rows].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))) {
+      if (view.claudeSessionId !== undefined && !newest.has(view.claudeSessionId)) newest.set(view.claudeSessionId, view);
+    }
+    return [...newest.values()].slice(0, SESSION_TITLE_REFRESH_MAX);
+  };
+
   /** The mark goes on the way out, never into the cache: a start and a list share one cached table. */
   const markDefault = (c: HarnessCatalog): HarnessCatalog => ({ ...c, ...(c.harness === DEFAULT_AGENT.id ? { isDefault: true } : {}) });
 
@@ -2767,24 +2836,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
       sessions.set(handleId, { view: sessionView, turnId, ...(notify !== undefined ? { notify } : {}), handle, end, turnLive });
       void persistSessions(workspaceId);
+      // The harness writes its own title for the session as the turn settles, so the row is asked again at both
+      // ends; the reload a client runs on session.end shares that read rather than starting a second.
       started.finished
         .then(result => {
           if (!ended) sessionView.status = result.status;
           sessionView.endedAt ??= Date.now();
           void persistSessions(workspaceId);
+          void refreshTitle(sessionView, true);
         })
         .catch(() => {
           if (!ended) sessionView.status = "failed";
           sessionView.endedAt ??= Date.now();
           void persistSessions(workspaceId);
+          void refreshTitle(sessionView, true);
         });
       return handle;
     },
 
     async list(workspaceId) {
       await ready();
-      const all = [...sessions.values()].map(s => ({ ...s.view }));
-      return workspaceId === undefined ? all : all.filter(s => s.workspaceId === workspaceId);
+      const all = [...sessions.values()].map(s => s.view);
+      const rows = workspaceId === undefined ? all : all.filter(v => v.workspaceId === workspaceId);
+      // A refresh is where a rename made inside the harness reaches us: nothing on this side changed. A row that
+      // already carries a title is answered from the index and its read goes out unawaited, so a wedged guest
+      // costs the listing nothing and the rename lands on the next refresh, which is the window the TTL promises.
+      // A row with none blocks, so a thread is titled on the first listing that sees it.
+      const asked = titleRows(rows).map(view => ({ first: view.harnessTitle === undefined, done: refreshTitle(view, false) }));
+      await Promise.all(asked.filter(a => a.first).map(a => a.done));
+      return rows.map(v => ({ ...v }));
     },
 
     async history(workspaceId) {
