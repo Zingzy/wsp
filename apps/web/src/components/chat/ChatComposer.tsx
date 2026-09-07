@@ -27,9 +27,9 @@
 // through sessions.steer and leaves the queue once the runtime took it (the
 // thread shows it from the session.steer event), while not-running leaves it
 // at the head for the turn's end. A harness that does not steer gets the turn
-// stopped first, with the one-line notice. The editor is also disabled while
-// the turn a new thread left behind is still finishing: stop reaches only the
-// visible turn, so a second session must not start until that one ends. The
+// stopped first, with the one-line notice. A new thread owes nothing to the
+// turn it left behind: the runtime runs a workspace's threads side by side
+// and holds each to one turn, so the fresh composer opens at once. The
 // checkout row under the composer picks the folder a fresh thread starts in;
 // a resumed one is started where its harness last said it was. The model,
 // effort, context window and access picks in the box's footer ride every
@@ -67,7 +67,6 @@ export function composerSendBlock(input: {
   machineState: MachineState | null;
   reach: ReachState | null;
   hydrated: boolean;
-  finishing: boolean;
 }): SendRefusalKind | null {
   if (!input.hasApi || input.conn === "connecting") return "connecting";
   if (input.conn === "reconnecting") return "reconnecting";
@@ -76,7 +75,6 @@ export function composerSendBlock(input: {
   const state = workspaceState({ phase: input.phase, machineState: input.machineState, reach: input.reach });
   if (state !== "running") return state;
   if (!input.hydrated) return "loading";
-  if (input.finishing) return "finishing";
   return null;
 }
 
@@ -136,7 +134,6 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     machineState: status?.machineState ?? null,
     reach: status?.reach.state ?? null,
     hydrated: thread.hydrated,
-    finishing: thread.finishing,
   });
   const unavailable = blocked === null ? null : sendRefusal(blocked);
   const sendDisabledReason = unavailable ?? (thread.busy ? TURN_IN_FLIGHT : null);
@@ -188,8 +185,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const activeItemId = resolveComposerMenuActiveItemId({ items, highlightedItemId, currentSearchKey: searchKey, highlightedSearchKey });
 
   useEffect(() => {
-    if (thread.fresh && !thread.finishing) editorRef.current?.focus();
-  }, [thread.fresh, thread.finishing]);
+    if (thread.fresh) editorRef.current?.focus();
+  }, [thread.fresh]);
 
   useEffect(() => onComposerFocusRequest(workspaceId, () => editorRef.current?.focus()), [workspaceId]);
 
