@@ -325,6 +325,17 @@ export function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
+/** One name inside a comma-joined list of names: quoted when the name carries that comma itself, so a free-text
+ * label an agent wrote reads as one entry and not as two nameless ones. */
+export function listedName(name: string): string {
+  return name.includes(",") ? JSON.stringify(name) : name;
+}
+
+/** A list of names as every tally that names its rows prints it, each name by the rule above. */
+export function nameList(names: readonly string[]): string {
+  return names.map(listedName).join(", ");
+}
+
 /** A thread count with its noun, as the sidebar's counts and the verbs' lines say it. */
 export function fmtThreads(n: number): string {
   return plural(n, "thread");

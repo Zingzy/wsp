@@ -15,6 +15,8 @@ import type { ExecResult, Machine } from "../src/machine.js";
 
 const just: RecipeCustomRow = { kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" };
 const ruff: RecipeCustomRow = { kind: "custom", id: "ruff", name: "ruff", install: ["uv tool install ruff"], check: "ruff --version", why: "used in wsp" };
+/** A row an agent added under a label of its own words, carrying the comma the tally joins its names with. */
+const pair: RecipeCustomRow = { kind: "custom", id: "swift-format, swiftlint", name: "swift-format, swiftlint", install: ["brew install swift-format swiftlint"], check: "command -v swift-format", why: "added by the agent" };
 
 const row = (over: Partial<RecipeEntry> & { id: string }): RecipeEntry => ({ rung: "tools", label: over.id, paths: [], bytes: 0, default: "bring", bring: true, linux: "yes", ...over });
 
@@ -26,7 +28,8 @@ function shellOut(cmd: string): ExecResult {
 
 /** A builder that answers every script from a table, keyed by a fragment of it; anything else exits 0. The batched
  * check run answers the way a guest's shell would: exit 0, with the marker line the stage reads for the row that is
- * not there. `checksBroken` is the other case, the run itself failing. */
+ * not there, naming that row by its place in the run as the emitted printf does. `checksBroken` is the other case,
+ * the run itself failing. */
 function builder(over: { fail?: string; checkFails?: string; checksBroken?: boolean } = {}): Machine & { scripts: string[]; inline: string[] } {
   const scripts: string[] = [];
   const inline: string[] = [];
@@ -35,8 +38,10 @@ function builder(over: { fail?: string; checkFails?: string; checksBroken?: bool
     if (over.fail !== undefined && text.includes(over.fail)) return { exitCode: 1, stdout: "", stderr: `Error: ${over.fail} is not available` };
     if (text.includes("wsp-check")) {
       if (over.checksBroken === true) return { exitCode: 1, stdout: "", stderr: "bash: no such shell" };
-      const id = over.checkFails !== undefined && text.includes(over.checkFails) ? `wsp-check tools/custom/ruff command not found\n` : "";
-      return { exitCode: 0, stdout: id, stderr: "" };
+      const failing = over.checkFails;
+      const checks = text.split("\n").filter(l => l.startsWith("if ! out="));
+      const at = failing === undefined ? -1 : checks.findIndex(l => l.includes(failing));
+      return { exitCode: 0, stdout: at === -1 ? "" : `wsp-check ${at} command not found\n`, stderr: "" };
     }
     return { exitCode: 0, stdout: "", stderr: "" };
   };
@@ -189,6 +194,20 @@ describe("the tools stage on rows outside the catalog", () => {
     expect(out.tools[1]!.note).toContain("definitely-not-a-command-xyz: command not found");
   });
 
+  it("reads a failed check back onto the row whose id carries a space, which the marker line's own split broke", async () => {
+    // The run names each row by its place in the run, not by an id that can carry the space the marker is parsed on.
+    const machine = builder();
+    machine.exec = async cmd => (cmd.includes("wsp-check") ? shellOut(cmd) : { exitCode: 0, stdout: "", stderr: "" });
+    const gone = { ...pair, check: "definitely-not-a-command-xyz --version" };
+    const there = { ...ruff, check: "true" };
+    const out = await installTools(machine, customInstallsFor([gone, there]), () => {});
+    expect(out.tools.map(t => ({ label: t.label, outcome: t.outcome }))).toEqual([
+      { label: "swift-format, swiftlint", outcome: "failed" },
+      { label: "ruff", outcome: "installed" },
+    ]);
+    expect(out.tools[0]!.note).toContain("definitely-not-a-command-xyz: command not found");
+  });
+
   it("says so in the stage detail when the checks could not be run at all, and counts every checked row as failed", async () => {
     const machine = builder({ checksBroken: true });
     const lines: string[] = [];
@@ -196,6 +215,25 @@ describe("the tools stage on rows outside the catalog", () => {
     expect(out.tools.map(t => t.outcome)).toEqual(["failed", "failed"]);
     expect(out.tools[0]!.note).toContain("the check could not be run (command -v just)");
     expect(lines.find(l => l.startsWith("the checks could not be run"))).toContain("just, ruff count as failed");
+  });
+
+  it("quotes a label that carries the tally's own separator, so the summary names one row where a bare label read as two", async () => {
+    const machine = builder({ fail: "brew install swift-format" });
+    const lines: string[] = [];
+    const waits = customInstallsFor([pair, ruff], c => (c.id === "ruff" ? `${CUSTOM_PREFIX}${pair.id}` : undefined));
+    await installTools(machine, waits, (_stage, detail) => lines.push(detail ?? ""));
+    const tally = lines.at(-1)!;
+    expect(tally).toContain(`1 failed: "swift-format, swiftlint" (Error: brew install swift-format is not available)`);
+    expect(tally).toContain("1 skipped: ruff (swift-format, swiftlint did not install)");
+    // With the quoted label read as one word and the bracketed reasons off, every comma left separates two entries.
+    expect(tally.replace(/"[^"]*"/g, "row").replace(/ \([^()]*\)/g, "").split("; ")[0]!.split(", ")).toEqual(["0 installed", "1 failed: row", "1 skipped: ruff"]);
+  });
+
+  it("quotes the same label in the line that says the checks could not be run, where the names stand on their own", async () => {
+    const machine = builder({ checksBroken: true });
+    const lines: string[] = [];
+    await installTools(machine, customInstallsFor([pair, ruff]), (_stage, detail) => lines.push(detail ?? ""));
+    expect(lines.find(l => l.startsWith("the checks could not be run"))).toContain(`"swift-format, swiftlint", ruff count as failed`);
   });
 
   it("lets a failed row fail alone: it is named with its reason and the rows after it still install", async () => {
