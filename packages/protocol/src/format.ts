@@ -445,6 +445,26 @@ export function vaultKeptLine(why: string): string {
  * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
 export const ALREADY_RUNNING = "already running at the provider";
 
+/** The machine row's line on a workspace the sweep recorded from the provider's listing: a machine of this setup's
+ * that no record claimed, kept rather than killed, since a machine nobody records bills unseen. */
+export const RECORD_RESTORED = "record restored from the provider's listing";
+
+/** The host's line for it, with the name the fork stamped on the machine (or the machine id where it stamped none)
+ * and the verb that removes it. */
+export function recordRestoredLine(machineId: string, name: string, workspaceId: string): string {
+  return `reap: recorded ${machineId} as workspace ${name} (${workspaceId}): a machine from this setup that no record claimed; it bills until wsp delete ${name}`;
+}
+
+/** The refusal a fork gets for a name another workspace holds; a name names at most one workspace. */
+export function nameTakenRefusal(name: string): string {
+  return `${name} is already a workspace; pick another name, or delete it first`;
+}
+
+/** The refusal a fork gets for a name whose workspace is being deleted this moment: the two never interleave. */
+export function nameDeletingRefusal(name: string): string {
+  return `${name} is being deleted; wait for the delete to finish, then fork it again`;
+}
+
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how
  * long it was given in all, and what the provider reads about the machine after it, or that the provider could not
  * be read. The person's road is to try again; the runtime never leaves the row at Pausing or Waking. */

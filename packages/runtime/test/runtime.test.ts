@@ -2024,7 +2024,7 @@ describe("runtime golden builders", () => {
     expect(await rt.reap()).toEqual({
       reaped: [{ id: second.id, builder: true, reason: "recorded" }, expect.objectContaining({ id: orphan.id, reason: "orphan" })],
       spared: [],
-      failed: [{ id: first.id, message: "502 exec failed; stays recorded, retried next sweep" }],
+      failed: [{ id: first.id, message: "could not stop: 502 exec failed; stays recorded, retried next sweep" }],
     });
     expect(backend.machines.map(m => m.killed)).toEqual([false, true, true]);
     expect((await rt.golden.builders()).map(b => b.id)).toEqual([first.id]);
@@ -4182,7 +4182,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(result.road).toBe("fork");
     // Not even the no-op runs on it, and the person hears why it is still there.
     expect(machine.execLog).toHaveLength(before);
-    expect(frames[0]).toBe(`creating:an earlier kept builder ${b.id} was not stopped (502 Bad Gateway; stays recorded, retried next sweep)`);
+    expect(frames[0]).toBe(`creating:an earlier kept builder ${b.id}: could not stop: 502 Bad Gateway; stays recorded, retried next sweep`);
     expect(frames[1]).toBe("creating:fork of golden v1");
     expect(await first.store.get("builders", b.id)).toMatchObject({ sealed: { version: 1 } });
   });
