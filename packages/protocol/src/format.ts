@@ -398,6 +398,14 @@ export function backgroundTasksLine(running: number): string {
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 
+/** The refusal of a start naming an agent the host has no adapter for, listing the ones it has. */
+export function noAdapterLine(harness: string, agents: readonly string[]): string {
+  return `no adapter registered for harness "${harness}"; agents on this host: ${agents.join(", ") || "none"}`;
+}
+
+/** The refusal of a thread opened on no words: an empty or whitespace task would still start a process and a turn. */
+export const EMPTY_TASK_LINE = "the task is empty; say what the thread is to do";
+
 /** The one line a codex turn fails with when its provider wants an OpenAI login the machine has not got: the CLI
  * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. */
 export function codexNotSignedInLine(login: string): string {

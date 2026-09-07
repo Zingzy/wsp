@@ -13,6 +13,7 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import WebSocket from "ws";
 import {
   AFTER_CUT_LINE,
+  EMPTY_TASK_LINE,
   NOTIFY_ME,
   actionRefusal,
   canTravel,
@@ -29,6 +30,7 @@ import {
   goneRefusal,
   importConsented,
   importRequest,
+  noAdapterLine,
   offeredSize,
   secretOffer,
   sizeFromWord,
@@ -497,11 +499,15 @@ export function pickFlags(flags: Flags): Picks {
   return Object.fromEntries(PICK_FLAGS.map(name => [name, flag(flags, name)]));
 }
 
-/** Refuses a pick the harness table does not list, in the runtime's own words, before a machine is minted for it;
- * the table is what the runtime knows without a machine, and the start on the new machine checks the rest. */
-export async function checkedPicks(client: HostClient, harness: string | undefined, picks: Picks): Promise<void> {
+/** Refuses, in the runtime's own words and before a machine is minted or woken for it, what the runtime would refuse
+ * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's table
+ * does not list. The tables are what the runtime knows without a machine; the start on the machine checks the rest. */
+export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks): Promise<void> {
+  if (task.trim() === "") throw new Error(EMPTY_TASK_LINE);
   const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list");
-  startPicks(harnesses.find(c => (harness === undefined ? c.isDefault === true : c.harness === harness)), picksOf(picks), true);
+  const table = harnesses.find(c => (harness === undefined ? c.isDefault === true : c.harness === harness));
+  if (table === undefined && harness !== undefined) throw new Error(noAdapterLine(harness, harnesses.map(c => c.harness)));
+  startPicks(table, picksOf(picks), true);
 }
 
 /** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the named
@@ -851,7 +857,7 @@ export const VERBS: readonly Verb[] = [
       const notify = await notifyOf(client, flag(ctx.flags, "notify"));
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
-      if (task !== undefined) await checkedPicks(client, harness, picks);
+      if (task !== undefined) await checkedStart(client, task, harness, picks);
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`, flag(ctx.flags, "size"));
       if (task === undefined) return 0;
       return followVerb(ctx, client, openingOf(created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true);
@@ -939,8 +945,12 @@ export const VERBS: readonly Verb[] = [
       if (within === undefined) throw new Error("wsp thread new needs --in <workspace>");
       if (task === undefined || ctx.args.length !== 1) throw new Error("wsp thread new takes one task");
       const client = await ctx.client();
-      const workspace = await awake(client, await workspaceOf(client, within), "send", line => ctx.io.error(line));
-      return followVerb(ctx, client, openingOf(workspace, task, { harness: flag(ctx.flags, "agent"), ...pickFlags(ctx.flags), cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true);
+      const found = await workspaceOf(client, within);
+      const harness = flag(ctx.flags, "agent");
+      const picks = pickFlags(ctx.flags);
+      await checkedStart(client, task, harness, picks);
+      const workspace = await awake(client, found, "send", line => ctx.io.error(line));
+      return followVerb(ctx, client, openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true);
     },
   },
   {
@@ -954,6 +964,7 @@ export const VERBS: readonly Verb[] = [
       const client = await ctx.client();
       const picks = pickFlags(ctx.flags);
       const thread = await threadOf(client, ref);
+      await checkedStart(client, message, thread.harness, picks);
       await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
       return followVerb(ctx, client, messageTo(thread, message, picks), false, picks);
     },
