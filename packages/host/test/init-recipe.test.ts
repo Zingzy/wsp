@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { GoldenImport } from "@wsp/runtime";
 import { Recipe } from "@wsp/protocol";
 import {
+  answeredRows,
   applyRecipe,
   goldenRecipeFor,
   hasChoices,
@@ -184,6 +185,12 @@ describe("consent rows", () => {
     expect(parseManifest({ entries: [{ ...token, choice: "copy" }] }).entries[0]).toMatchObject({ choice: "copy", consent: true });
     expect(() => parseManifest({ entries: [{ ...plain, choice: "copy" }] })).toThrow(/entries\.0\.choice: only a logins row or a consent row carries a choice/);
     expect(parseManifest({ entries: [{ ...byId("shell/zshrc"), excludes: ["~/.zshrc.d/secret"] }] }).entries[0]).toMatchObject({ excludes: ["~/.zshrc.d/secret"] });
+  });
+
+  it("answeredRows writes the screens' tick and answer on every row, so the MCP plan reads the copy a server was given and never the manifest's stale word", () => {
+    const stale = { ...token, choice: "skip" as const };
+    const rows = answeredRows({ entries: [byId("agents/claude"), stale, byId("shell/zshrc")] }, new Set(["agents/claude", "agents/mcp/claude/github"]), new Map([["agents/mcp/claude/github", "copy"], ["agents/claude", "nonsense"]]));
+    expect(rows).toEqual([{ ...byId("agents/claude"), bring: true }, { ...token, bring: true, choice: "copy" }, { ...byId("shell/zshrc"), bring: false }]);
   });
 
   it("the recipe round-trips a consent row and an excludes list: tick, answer and excludes come back as saved", () => {

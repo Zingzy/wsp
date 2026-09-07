@@ -11,7 +11,7 @@ vi.mock("@clack/prompts", async importOriginal => {
   return { ...real, unicode: false, S_BAR: "|", S_BAR_END: "\u2014", S_STEP_ACTIVE: "*", S_STEP_SUBMIT: "o", S_STEP_CANCEL: "x", S_RADIO_ACTIVE: ">", S_RADIO_INACTIVE: " " };
 });
 
-const { S_BAR_FOCUS, S_BAR_FOCUS_END, card, confirmPrompt, helpLine, passwordPrompt } = await import("../src/init-layout.js");
+const { S_BAR_FOCUS, S_BAR_FOCUS_END, card, confirmPrompt, helpLine, passwordPrompt, textPrompt } = await import("../src/init-layout.js");
 const { rungSelect } = await import("../src/init-select.js");
 
 function streams() {
@@ -64,5 +64,19 @@ describe("rung screen without unicode", () => {
     b.input.write("\r");
     expect(await pb).toBe("abc");
     expect(a.text() + b.text()).not.toMatch(/[\u2014•┃┗│└▪●○]/);
+  });
+
+  it("the project question takes the same pipe, plus and spaced help line, and its placeholder is plain text", async () => {
+    const { input, output, text } = streams();
+    const p = textPrompt({ message: "Which project are you bringing first?", hint: "optional", placeholder: "~/code/app", input, output });
+    await new Promise(r => setTimeout(r, 5));
+    expect(text()).toBe("*  Which project are you bringing first?\n|  optional\n|  ~/code/app\n+  enter next   esc cancel");
+    input.write("~/proj");
+    await new Promise(r => setTimeout(r, 5));
+    // The block is clack's own end-of-input cursor, as the inverse cell mid-string is; our chrome is what falls back.
+    expect(text().slice(text().lastIndexOf("|  ~/proj"))).toBe("|  ~/proj\u2588");
+    input.write("\r");
+    expect(await p).toBe("~/proj");
+    expect(text()).not.toMatch(/[\u2014•┃┗│└▪●○]/);
   });
 });

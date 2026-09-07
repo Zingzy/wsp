@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// How an agent's settings file names the hook scripts it runs, so a copy of
+// the file can bring each script along at its guest path or take the hook out
+// when the script cannot travel. One module per agent, registered on its
+// catalog entry: this module knows the file's shape and the command line's,
+// the host reads this computer's disk and says where a script lands.
+
+/** Where a script a hook names lands on the guest, absolute; nothing when it cannot travel. */
+export type HookPlacer = (abs: string) => string | undefined;
+
+export interface CarriedHooks {
+  /** The settings file as the machine gets it; the input byte for byte when no hook named a file. */
+  text: string;
+  /** Each script that travels, once: its path on this computer and the guest path the hook now names. */
+  carried: { from: string; to: string }[];
+  /** The hooks taken out, by the path each named as it was written. */
+  left: string[];
+}
+
+export interface HookCarry {
+  /** The settings file, `~/`-relative. */
+  file: string;
+  carry(text: string, home: string, place: HookPlacer): CarriedHooks;
+}
+
+export const CLAUDE_SETTINGS_FILE = "~/.claude/settings.json";
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** A word starting with one of these is a path under the home directory as the shell reads it. */
+const HOME_PREFIXES = ["~/", "$HOME/", "${HOME}/"];
+
+/** The directories every machine image has binaries in; a hook command under one runs there as it does here. */
+const MACHINE_BINS = ["/bin/", "/usr/bin/", "/usr/local/bin/", "/usr/sbin/"];
+
+/** Whether an absolute path names a command the machine has, so the hook passes through unchanged. */
+export const onMachine = (abs: string): boolean => MACHINE_BINS.some(d => abs.startsWith(d) && abs.length > d.length);
+
+/** A command word's path on this computer, `~` and `$HOME` expanded; nothing for a word that is not a path. */
+function pathOf(word: string, home: string): string | undefined {
+  if (word.startsWith("/")) return word;
+  const prefix = HOME_PREFIXES.find(p => word.startsWith(p));
+  return prefix === undefined ? undefined : `${home}/${word.slice(prefix.length)}`;
+}
+
+/** The command line as runs of whitespace and words, a quoted span with spaces staying one word and a `;` glued to
+ * a word its own, so the line joins back as it was. */
+function tokens(line: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < line.length) {
+    let j = i;
+    if (/\s/.test(line[i]!)) {
+      while (j < line.length && /\s/.test(line[j]!)) j++;
+      out.push(line.slice(i, j));
+    } else {
+      let quote: string | undefined;
+      while (j < line.length && (quote !== undefined || !/\s/.test(line[j]!))) {
+        const c = line[j]!;
+        if (quote === undefined && (c === '"' || c === "'")) quote = c;
+        else if (c === quote) quote = undefined;
+        j++;
+      }
+      const word = line.slice(i, j);
+      if (word.length > 1 && word.endsWith(";") && !/["']$/.test(word.slice(0, -1))) out.push(word.slice(0, -1), ";");
+      else out.push(word);
+    }
+    i = j;
+  }
+  return out;
+}
+
+/** The words that end one simple command and start the next. */
+const OPERATORS = new Set(["&&", "||", "|", ";"]);
+/** Commands whose first path argument is the script they run, so that script is the hook's file. */
+const INTERPRETERS = new Set(["env", "bash", "sh", "zsh", "dash", "node", "bun", "deno", "python", "python3", "ruby", "perl"]);
+const ENV_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+type Rewritten = { command: string; carried: { from: string; to: string }[] } | { left: string };
+
+/** The command with the first word of each simple command, and the script an interpreter runs, rewritten to its
+ * guest path or left as written when the machine has it; the first such word the placer refuses. Arguments,
+ * redirect targets and everything else pass through untouched. */
+function rewriteCommand(command: string, home: string, place: HookPlacer): Rewritten {
+  const carried: { from: string; to: string }[] = [];
+  let expect: "command" | "script" | "args" = "command";
+  const words = tokens(command).map(token => {
+    if (/^\s+$/.test(token)) return token;
+    if (OPERATORS.has(token)) {
+      expect = "command";
+      return token;
+    }
+    if (expect === "args") return token;
+    const quote = token.length >= 2 && (token[0] === '"' || token[0] === "'") && token.at(-1) === token[0] ? token[0] : "";
+    const word = quote === "" ? token : token.slice(1, -1);
+    if (ENV_ASSIGN.test(word) || (expect === "script" && word.startsWith("-"))) return token;
+    const path = pathOf(word, home);
+    const name = path === undefined ? word : word.slice(word.lastIndexOf("/") + 1);
+    expect = INTERPRETERS.has(name) ? "script" : "args";
+    if (path === undefined || onMachine(path)) return token;
+    const to = place(path);
+    if (to === undefined) return { left: word };
+    carried.push({ from: path, to });
+    return `${quote}${to}${quote}`;
+  });
+  const refused = words.find((w): w is { left: string } => typeof w !== "string");
+  return refused ?? { command: words.join(""), carried };
+}
+
+/** Claude Code's hooks: `hooks` maps an event to groups, each with a matcher and its `hooks`, each of which is a
+ * shell command or a prompt. https://docs.claude.com/en/docs/claude-code/hooks */
+export const CLAUDE_HOOKS: HookCarry = {
+  file: CLAUDE_SETTINGS_FILE,
+  carry(text, home, place) {
+    const out: CarriedHooks = { text, carried: [], left: [] };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return out;
+    }
+    if (!isRecord(parsed) || !isRecord(parsed["hooks"])) return out;
+    const hooks = parsed["hooks"];
+    const seen = new Set<string>();
+    let changed = false;
+    for (const [event, groups] of Object.entries(hooks)) {
+      if (!Array.isArray(groups)) continue;
+      const kept = groups.filter(group => {
+        if (!isRecord(group) || !Array.isArray(group["hooks"])) return true;
+        const stay = group["hooks"].filter(hook => {
+          if (!isRecord(hook) || typeof hook["command"] !== "string") return true;
+          const r = rewriteCommand(hook["command"], home, place);
+          if ("left" in r) {
+            out.left.push(r.left);
+            changed = true;
+            return false;
+          }
+          if (r.command !== hook["command"]) {
+            hook["command"] = r.command;
+            changed = true;
+          }
+          for (const c of r.carried) {
+            if (seen.has(c.from)) continue;
+            seen.add(c.from);
+            out.carried.push(c);
+          }
+          return true;
+        });
+        if (stay.length === group["hooks"].length) return true;
+        group["hooks"] = stay;
+        return stay.length > 0;
+      });
+      if (kept.length === 0) delete hooks[event];
+      else if (kept.length !== groups.length) hooks[event] = kept;
+    }
+    if (changed && Object.keys(hooks).length === 0) delete parsed["hooks"];
+    if (changed) out.text = `${JSON.stringify(parsed, null, 2)}\n`;
+    return out;
+  },
+};

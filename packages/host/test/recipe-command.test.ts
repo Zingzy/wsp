@@ -11,7 +11,7 @@ import { applySets, parseSet, parseSets, parseSignIn, runRecipe, type RecipeIo }
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
 import { saveSmallRecipe } from "../src/recipe-file.js";
-import { BASE_GROUP, HERE_GROUP, USED_GROUP } from "../src/init-table.js";
+import { BASE_GROUP, HERE_GROUP, PROJECT_GROUP, USED_GROUP } from "../src/init-table.js";
 import { allRows, commandTableLines, recipePrintout } from "../src/recipe-answer.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 
@@ -29,6 +29,10 @@ const laptop = () =>
       "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", PROJ, ["gh pr list", "gh pr merge", "node build.js"]),
       "~/.claude/projects/-Users-dev-other/s3.jsonl": claudeLine("s3", OTHER, ["go build ./...", "go test ./...", "go vet ./..."]),
       "~/.claude/projects/-Users-dev-other/s4.jsonl": claudeLine("s4", OTHER, ["go build ./...", "go mod tidy"]),
+      // The project's own manifests, which say what it takes to build whatever the histories ran.
+      [`${PROJ}/compose.yaml`]: "services:\n  db:\n    image: postgres\n",
+      [`${PROJ}/Cargo.toml`]: '[package]\nname = "x"\n',
+      [`${PROJ}/Gemfile`]: 'source "https://rubygems.org"\n',
     },
   });
 
@@ -39,6 +43,7 @@ const collect = (): RecipeIo & { logs: string[]; notes: string[] } => {
   return { logs, notes, log: l => logs.push(l), note: l => notes.push(l) };
 };
 const at = () => new Date("2026-09-06T03:00:00Z");
+const rowOf = (recipe: Recipe, id: string) => recipe.rows.find(r => r.id === id);
 
 describe("wsp recipe", () => {
   let dir: string;
@@ -97,6 +102,27 @@ describe("wsp recipe", () => {
     expect(allRows(await runRecipe(laptop(), { out, tick: "used" }, quiet, at)).find(r => r.id === "java")).toMatchObject({ on: false });
     await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
     expect(allRows(await runRecipe(laptop(), { out, projects: [PROJ] }, quiet, at)).find(r => r.id === "java")).toMatchObject({ on: false });
+  });
+
+  it("--project reads that folder's own manifests too: what it takes to build is on whatever the rule decided, in its own group", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-project-"));
+    const out = outPath();
+    const io = collect();
+    const answer = await runRecipe(laptop(), { out, projects: [PROJ], tick: "used" }, io, at);
+    // The names the catalog has no row for are in no table, so the run says them.
+    expect(io.notes).toContain(`${PROJ}: Not in the catalog: Ruby (Gemfile needs Ruby)`);
+    const saved = Recipe.parse(JSON.parse(readFileSync(out, "utf8")));
+    // Nothing here ever ran docker and the used rule leaves it off; the folder's compose file puts it on and says which file asked.
+    expect(rowOf(saved, "docker")).toMatchObject({ on: true, source: { kind: "project", why: "compose.yaml needs Docker" } });
+    // Rust is not on the floor, so the table shows it under its own group with the file that asked.
+    expect(allRows(answer).find(r => r.id === "rust")).toMatchObject({ on: true, group: PROJECT_GROUP, why: "Cargo.toml needs Rust" });
+    // Docker is on the floor, so it stays in the base, where it installs whatever anyone ticks.
+    expect(allRows(answer).find(r => r.id === "docker")).toMatchObject({ on: true, group: BASE_GROUP });
+    // The manifests add to the rule, they do not stand in for it: a row no manifest named is still the rule's call.
+    expect(rowOf(saved, "go")).toMatchObject({ on: false });
+    // A folder whose manifests name nothing the catalog carries leaves every tick to the rule.
+    const other = await runRecipe(laptop(), { out: join(dir, "other.json"), projects: [OTHER], tick: "used" }, quiet, at);
+    expect(allRows(other).find(r => r.id === "rust")).toMatchObject({ on: false });
   });
 
   it("lets the rule decide a catalog row the saved file never carried, instead of dropping it to off", async () => {

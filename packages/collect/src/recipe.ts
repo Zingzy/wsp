@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The small recipe from this computer: every catalog entry with a tick and
-// the source of it. One rule decides every tick, and which rule is the
+// the source of it. What the project folder's own manifests ask for wins over
+// every rule; under that, one rule decides each tick and which rule is the
 // caller's choice: what the agents used here, what is installed here, the
-// catalog's own default, or the three together. Names, paths and counts only;
-// nothing read leaves as a value.
+// catalog's own default, or the three together. Names, paths and counts, and
+// out of that folder's manifests a tool's name, a pinned version, a version
+// range and the file that named it; no other value of a file is read, and a
+// credential never is.
 import { CATALOG, type CatalogEntry, type AgentEntry, catalogToolFor, sizeBytes } from "@wsp/catalog";
 import type { Recipe, RecipeRow, RecipeSource, RecipeTick } from "@wsp/protocol";
 import { presenceOf } from "./detect/presence.js";
 import { type AgentHistory, type Count, type Usage, meetsUsedFloor, readHistories } from "./history/index.js";
 import type { Host } from "./host.js";
+import { type ProjectScan, scanProject } from "./project/index.js";
 
 /** How one rule reads the computer. `order` is the source kinds it reports for an entry, best first: the first kind
  * this computer has anything for is the row's source, so the words beside a row say what the rule went on. It takes
@@ -79,8 +83,9 @@ export interface RecipeOptions {
   now?: () => Date;
   /** Which rule decides every tick; the blended one when absent. */
   tick?: RecipeTick;
-  /** Absolute folders to weigh the histories against: only sessions that ran at one of them or inside it are
-   * counted, so a recipe for one project reflects that project's tools. Every session counts when this is absent. */
+  /** Absolute folders this recipe is for. Their own manifests say what they take to build, and those rows are
+   * ticked whatever the rule decides; the histories are weighed against them too, so only sessions that ran at one
+   * of them or inside it are counted. Every session counts, and no manifest is read, when this is absent. */
   folders?: readonly string[];
   /** The catalog ids of the agents this host can run a thread on. An agent outside the list is off under every
    * rule but `installed`, since ticking it would build a machine nothing here can open a thread on. */
@@ -89,6 +94,8 @@ export interface RecipeOptions {
   onPresent?: (e: CatalogEntry) => void;
   /** Told each agent's history as it is read, with the counts the recipe keeps. */
   onHistory?: (h: AgentHistory) => void;
+  /** Told what each of those folders asked for, the candidates the catalog carries no row for among them. */
+  onProject?: (scan: ProjectScan) => void;
 }
 
 /** Counts from every agent's store added together; each store's sessions are its own, so they add. */
@@ -101,6 +108,27 @@ function merged(histories: readonly AgentHistory[], of: (u: Usage) => ReadonlyMa
     }
   }
   return out;
+}
+
+/** The recipe with every row a project asked for ticked and saying which of its files asked: a project's own needs
+ * weigh before what any tick rule reads off this computer, since the repo will not build without them. A need the
+ * recipe never named gets a row of its own, so a folder can ask for a tool nothing on this computer mentioned; a
+ * need outside the catalog the caller handed in gets none, since that catalog is the whole of what it decides. */
+export function withProject(recipe: Recipe, scan: ProjectScan, catalog: readonly CatalogEntry[] = CATALOG): Recipe {
+  const needs = new Map(scan.rows.map(n => [n.id, n]));
+  const source = (why: string): RecipeSource => ({ kind: "project", why });
+  const rows = recipe.rows.map(r => {
+    const need = needs.get(r.id);
+    return need === undefined ? r : { ...r, on: true, source: source(need.why) };
+  });
+  const named = new Set(recipe.rows.map(r => r.id));
+  const missing = [...needs.values()].flatMap((need): RecipeRow[] => {
+    const e = named.has(need.id) ? undefined : catalog.find(x => x.id === need.id);
+    if (e === undefined) return [];
+    const bytes = sizeBytes(e.size);
+    return [{ id: e.id, kind: e.kind, on: true, source: source(need.why), ...(bytes !== undefined ? { size: bytes } : {}) }];
+  });
+  return { ...recipe, rows: [...rows, ...missing] };
 }
 
 /** One command the agents ran here, with how much. */
@@ -153,11 +181,18 @@ export async function computeRecipe(host: Host, opts: RecipeOptions): Promise<Re
     const held = e.kind === "agent" && !threads.has(e.id) && !rule.ticksAgentsWithoutAdapter;
     return { id: e.id, kind: e.kind, on: !held && rule.on(sources, e), source, ...size };
   });
-  return {
+  const recipe: Recipe = {
     version: 1,
     at: (opts.now ?? (() => new Date()))().toISOString(),
     ...(opts.tick !== undefined ? { tick: opts.tick } : {}),
     histories: histories.map(({ agent, state, sessions, calls }) => ({ agent, state, sessions, calls })),
     rows,
   };
+  let out = recipe;
+  for (const folder of opts.folders ?? []) {
+    const scan = await scanProject(host, folder);
+    opts.onProject?.(scan);
+    out = withProject(out, scan, catalog);
+  }
+  return out;
 }

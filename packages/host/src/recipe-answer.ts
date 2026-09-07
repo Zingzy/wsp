@@ -10,7 +10,7 @@ import { type CommandCount, floorApplies } from "@wsp/collect";
 import { RecipeCustomRow, RecipeTick, customRows, fmtBytes, type Recipe } from "@wsp/protocol";
 import { z } from "zod";
 import { table } from "./init-layout.js";
-import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, HERE_GROUP, USED_GROUP, recipeTable, tableLines, totalsLine, type TableRow } from "./init-table.js";
+import { FLOOR_LINE, GROUP_ORDER, USED_GROUP, recipeTable, tableLines, totalsLine, type TableRow } from "./init-table.js";
 import type { ScanRow } from "./scan.js";
 import { signInFor, signInWords } from "./signin-table.js";
 
@@ -28,7 +28,7 @@ export const RecipeAnswerRow = z.object({
   /** On the image whatever is ticked, so nothing can turn it off. */
   base: z.boolean(),
   /** Which of the renderer's groups it reads under. */
-  group: z.enum([BASE_GROUP, USED_GROUP, HERE_GROUP, ADDED_GROUP, CATALOG_GROUP]),
+  group: z.enum(GROUP_ORDER),
   why: z.string(),
   /** What its install downloads, when the catalog measured it. */
   size: z.number().int().nonnegative().optional(),

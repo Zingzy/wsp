@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { isCancel } from "@clack/prompts";
-import { collect, computeRecipe, nodeHost, type Manifest, type Rung } from "@wsp/collect";
+import { collect, computeRecipe, expand, nodeHost, scanProject, type Manifest, type Rung } from "@wsp/collect";
 import {
   SolariBackend,
   createRuntime,
@@ -72,7 +72,8 @@ usage:
                      login and nothing else of it; --add <id>=<command> carries
                      a tool the catalog does not, installed by that command on
                      the machine, with --add-check <id>=<command> saying it is
-                     there; --project weighs the histories by a folder,
+                     there; --project reads a folder's own manifests for what it
+                     takes to build and weighs the histories by it,
                      --out says where the file goes and --json prints the table
                      as one object. Naming --tick or --project decides every
                      tick again; without either, what the file says stands and
@@ -112,6 +113,12 @@ options:
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
                      what travels
+  --project PATH     init: the project folder you are bringing first. Its own
+                     files (package.json, the lockfiles, pyproject, go.mod,
+                     Cargo.toml, the compose files, .tool-versions, the CI
+                     workflows) say what it needs, and those rows are ticked
+                     first, each saying which file asked. Without it, init asks
+                     for one before the first screen
   --first-workspace NAME
                      init: fork the first workspace under this name once the
                      golden seals, without asking (default first)
@@ -362,6 +369,23 @@ function stopOnSignals(handle: HostHandle, io: CliIO): void {
   process.once("SIGTERM", stop);
 }
 
+/** A folder a `~/`-relative answer or a flag named: where it is, and whether there is one there. The one place both
+ * the flag and the wizard's own question resolve a folder. */
+export function projectFolder(folder: string): { path: string; exists: boolean } {
+  const path = resolve(expand({ home: homedir() }, folder.trim()));
+  return { path, exists: existsSync(path) };
+}
+
+/** What a --project flag named: the folder, nothing when the flag was not given, or the sentence to print, since a
+ * folder that is not there is a typo and not an empty project. */
+type ProjectFlag = { ok: true; path?: string } | { ok: false; message: string };
+
+function projectFlag(verb: string, folder: string | undefined): ProjectFlag {
+  if (folder === undefined) return { ok: true };
+  const { path, exists } = projectFolder(folder);
+  return exists ? { ok: true, path } : { ok: false, message: `wsp ${verb}: no folder at ${path}` };
+}
+
 /** Init ends by starting a host on this state, which the lock would refuse only after the builder is booted and billed. */
 function initRefusal(lock: HostLock, statePath: string): string {
   return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
@@ -370,7 +394,7 @@ function initRefusal(lock: HostLock, statePath: string): string {
 async function init(
   io: CliIO,
   opts: { port: number; wsPort: number; statePath: string },
-  flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string; firstWorkspace?: string; importFolder?: string },
+  flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string },
 ): Promise<number> {
   if (flags.json && flags.yes) {
     io.error("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
@@ -381,6 +405,12 @@ async function init(
     io.error(initRefusal(held, opts.statePath));
     return 1;
   }
+  const flag = projectFlag("init", flags.project);
+  if (!flag.ok) {
+    io.error(flag.message);
+    return 1;
+  }
+  const project = flag.path;
   // Under --json every line this run says, the host's own included, goes to stderr so stdout is the objects' alone.
   const say = flags.json ? jsonCliIO() : io;
   const screen = terminalInitIO(flags.json);
@@ -391,10 +421,15 @@ async function init(
       yes: flags.yes,
       nonInteractive: flags.nonInteractive,
       ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
+      ...(project !== undefined ? { project } : {}),
       ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
       ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
       collect: collectThisComputer,
-      recipe: onHistory => computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory }),
+      recipe: (onHistory, onProject) => computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, ...(project !== undefined ? { folders: [project] } : {}) }),
+      scanProject: async folder => {
+        const { path, exists } = projectFolder(folder);
+        return exists ? scanProject(nodeHost(), path) : undefined;
+      },
       keys,
       pricing: new SolariBackend({ apiKey: keys.solari }).pricing,
       statePath: opts.statePath,
@@ -512,6 +547,7 @@ interface SharedFlags {
   "non-interactive"?: boolean;
   json?: boolean;
   recipe?: string;
+  project?: string;
   "first-workspace"?: string;
   import?: string;
 }
@@ -542,6 +578,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         nonInteractive: values["non-interactive"] === true || values.json === true,
         json: values.json === true,
         ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
+        ...(values.project !== undefined ? { project: values.project } : {}),
         ...(values["first-workspace"] !== undefined ? { firstWorkspace: values["first-workspace"] } : {}),
         ...(values.import !== undefined ? { importFolder: values.import } : {}),
       }),
@@ -738,6 +775,7 @@ export const SHARED_OPTIONS: Options = {
   "non-interactive": { type: "boolean" },
   json: { type: "boolean" },
   recipe: { type: "string" },
+  project: { type: "string" },
   "first-workspace": { type: "string" },
   import: { type: "string" },
 };

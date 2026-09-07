@@ -11,6 +11,7 @@ import { THREAD_AGENTS } from "./thread-agents.js";
 import { loadRecipe, saveSmallRecipe } from "./recipe-file.js";
 import { customFromFlags, withCustom } from "./recipe-custom.js";
 import { recipeAnswer, recipeScan, type RecipeAnswer, type RecipeScan } from "./recipe-answer.js";
+import { candidatesLine } from "./init-table.js";
 import type { ScanRow } from "./scan.js";
 
 /** One line per agent: what its history here said. */
@@ -171,6 +172,12 @@ export async function runScan(host: Host, input: ScanInput = {}, io: RecipeIo = 
       histories.push(h);
       io.note(historyLine(h));
     },
+    // The rows a folder asked for are in the table under their own group; the names the catalog has no row for are
+    // nowhere else, so they are said here rather than dropped.
+    onProject: scan => {
+      const line = candidatesLine(scan);
+      if (line !== undefined) io.note(`${scan.dir}: ${line}`);
+    },
   });
   const alsoHere = input.alsoHere !== undefined ? await input.alsoHere(customRows(recipe)) : undefined;
   return recipeScan(recipe, unknownCommands(histories), alsoHere);
@@ -201,6 +208,12 @@ export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = Q
     onHistory: h => {
       histories.push(h);
       io.note(historyLine(h));
+    },
+    // The rows a folder asked for are in the table under their own group; the names the catalog has no row for are
+    // nowhere else, so they are said here rather than dropped.
+    onProject: scan => {
+      const line = candidatesLine(scan);
+      if (line !== undefined) io.note(`${scan.dir}: ${line}`);
     },
   });
   const base = saved !== undefined && !namesRule(input) ? withSavedTicks(computed, saved) : computed;

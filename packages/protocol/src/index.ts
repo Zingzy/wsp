@@ -737,6 +737,10 @@ export type GoldenLogin = z.infer<typeof GoldenLogin>;
  * record of what did not install is kept by. */
 export const GoldenMissingTool = z.object({ id: z.string(), name: z.string(), outcome: z.enum(["skipped", "failed"]), note: z.string() });
 export type GoldenMissingTool = z.infer<typeof GoldenMissingTool>;
+/** A path the pack left off the image, by the recipe row it belongs to and why: a hook whose script is not a plain
+ * file under home. Forks of the version run without it. */
+export const GoldenLeftBehind = z.object({ id: z.string(), path: z.string(), note: z.string() });
+export type GoldenLeftBehind = z.infer<typeof GoldenLeftBehind>;
 /** One base tool's command with the version read on the builder after the base stage. */
 export const GoldenBaseTool = z.object({ name: z.string(), version: z.string() });
 export type GoldenBaseTool = z.infer<typeof GoldenBaseTool>;
@@ -766,6 +770,9 @@ export const GoldenVersion = z.object({
   /** Every tool the import skipped or failed to install, by name with the cause and reason, so a workspace can say why
    * one is missing; absent when every tool installed or the version was sealed before this was recorded. */
   missingTools: z.array(GoldenMissingTool).optional(),
+  /** What the pack left off the image and why, by row and path; absent when everything ticked travelled or the version
+   * was sealed before this was recorded. */
+  leftBehind: z.array(GoldenLeftBehind).optional(),
   /** The snapshot the builder that sealed this version descends from: an update's head. Absent on a version built
    * from a fresh machine, and on versions sealed before this was recorded. */
   parentSnapshotId: z.string().optional(),
@@ -807,10 +814,12 @@ export const RecipeDigest = z.object({
 });
 export type RecipeDigest = z.infer<typeof RecipeDigest>;
 
-/** Where a recipe row's tick comes from: the entry is on this computer (what was found: its config paths and
- * whether its command is on PATH), the agents' session histories on this computer used it (in how many sessions,
- * how many calls), or nothing local says anything and the catalog's own evidence decides. */
+/** Where a recipe row's tick comes from: the project the recipe was written for names it in its own manifests (with
+ * the line saying which file said so), the entry is on this computer (what was found: its config paths and whether
+ * its command is on PATH), the agents' session histories on this computer used it (in how many sessions, how many
+ * calls), or nothing local says anything and the catalog's own evidence decides. */
 export const RecipeSource = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("project"), why: z.string().min(1) }),
   z.object({ kind: z.literal("installed"), paths: z.array(z.string()), bin: z.boolean() }),
   z.object({ kind: z.literal("used"), sessions: z.number().int().nonnegative(), calls: z.number().int().nonnegative() }),
   z.object({ kind: z.literal("popular"), sessions: z.number().int().nonnegative(), images: z.number().int().nonnegative() }),

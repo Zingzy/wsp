@@ -4,7 +4,7 @@
 // and the size its install downloads. wsp recipe prints it as text; wsp init's
 // agents and tools screens are the same rows as a list.
 import { CATALOG, CATALOG_AGENTS, type CatalogEntry, sizeBytes } from "@wsp/catalog";
-import { HEAVY_USED_FLOOR, USED_FLOOR, floorApplies, isHeavy, meetsUsedFloor } from "@wsp/collect";
+import { HEAVY_USED_FLOOR, USED_FLOOR, type ProjectScan, floorApplies, isHeavy, meetsUsedFloor } from "@wsp/collect";
 import { customRows, fmtBytes, plural, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { GREY, GUTTER, accent, grey } from "./init-layout.js";
 import { THREAD_AGENTS } from "./thread-agents.js";
@@ -13,14 +13,17 @@ import type { Cell } from "./init-select.js";
 /** The groups a row falls in, in reading order: what always comes, what this computer's agents ran, what is here
  * and unused, what an agent added outside the catalog, and the rest of the catalog. */
 export const BASE_GROUP = "Always on the image";
+export const PROJECT_GROUP = "Your project needs";
 export const USED_GROUP = "You use these";
 export const HERE_GROUP = "Installed here, never used";
 export const ADDED_GROUP = "Added by your agent";
 export const CATALOG_GROUP = "Also in the catalog";
-export type Group = typeof BASE_GROUP | typeof USED_GROUP | typeof HERE_GROUP | typeof ADDED_GROUP | typeof CATALOG_GROUP;
-export const GROUP_ORDER: readonly Group[] = [BASE_GROUP, USED_GROUP, HERE_GROUP, ADDED_GROUP, CATALOG_GROUP];
+export type Group = typeof BASE_GROUP | typeof PROJECT_GROUP | typeof USED_GROUP | typeof HERE_GROUP | typeof ADDED_GROUP | typeof CATALOG_GROUP;
+/** The project's own needs come first after the base: a repo that will not build without a tool outranks anything
+ * this computer happens to have. */
+export const GROUP_ORDER = [BASE_GROUP, PROJECT_GROUP, USED_GROUP, HERE_GROUP, ADDED_GROUP, CATALOG_GROUP] as const;
 /** The one word that stands for a group where colour cannot say it. */
-export const GROUP_LABEL: Record<Group, string> = { [BASE_GROUP]: "base", [USED_GROUP]: "used", [HERE_GROUP]: "installed", [ADDED_GROUP]: "added", [CATALOG_GROUP]: "catalog" };
+export const GROUP_LABEL: Record<Group, string> = { [BASE_GROUP]: "base", [PROJECT_GROUP]: "project", [USED_GROUP]: "used", [HERE_GROUP]: "installed", [ADDED_GROUP]: "added", [CATALOG_GROUP]: "catalog" };
 /** The one line under the table that says when use ticks a row, so a row reading "below the floor" can be placed. */
 export const FLOOR_LINE = `on when used in ${plural(USED_FLOOR.sessions, "session")} and ${plural(USED_FLOOR.calls, "command")}; heavy rows ${HEAVY_USED_FLOOR.sessions} and ${HEAVY_USED_FLOOR.calls}`;
 /** What a row reads where the catalog has measured no size. */
@@ -55,6 +58,8 @@ export function groupOf(e: CatalogEntry, r: RecipeRow | undefined, sessions: num
   if (e.kind === "tool" && e.floor) return BASE_GROUP;
   if (e.kind === "agent") return r?.source.kind === "installed" ? (sessions > 0 ? USED_GROUP : HERE_GROUP) : CATALOG_GROUP;
   switch (r?.source.kind) {
+    case "project":
+      return PROJECT_GROUP;
     case "used":
       return USED_GROUP;
     case "installed":
@@ -69,6 +74,7 @@ export function groupOf(e: CatalogEntry, r: RecipeRow | undefined, sessions: num
 function whyLine(e: CatalogEntry, r: RecipeRow | undefined, sessions: number, size: number | undefined, tick: Recipe["tick"]): string {
   const group = groupOf(e, r, sessions);
   if (group === BASE_GROUP) return "always on the image";
+  if (r?.source.kind === "project") return r.source.why;
   if (e.kind === "agent") return group === USED_GROUP ? `used here, ${plural(sessions, "session")}` : group === HERE_GROUP ? "installed here, never used" : "not installed here";
   if (r?.source.kind === "used") {
     const counts = `${plural(r.source.calls, "command")} in ${plural(r.source.sessions, "session")}`;
@@ -119,6 +125,12 @@ export function agentRows(recipe: Recipe): TableRow[] {
   return recipeTable(recipe, CATALOG_AGENTS).sort((a, b) => Number(b.on) - Number(a.on) || sessionsOf(recipe, b.id) - sessionsOf(recipe, a.id));
 }
 
+/** The names a project asked for that the catalog carries no row for, each with the file that asked; nothing when it
+ * named none. One sentence, drawn by the recipe verb and by the wizard's card alike. */
+export function candidatesLine(scan: ProjectScan): string | undefined {
+  return scan.candidates.length === 0 ? undefined : `Not in the catalog: ${scan.candidates.map(n => `${n.name} (${n.why})`).join(", ")}`;
+}
+
 /** A row's size, or that the catalog has none for it. */
 export const sizeText = (r: TableRow): string => (r.size === undefined ? UNKNOWN_SIZE : fmtBytes(r.size));
 
@@ -126,6 +138,7 @@ export const sizeText = (r: TableRow): string => (r.size === undefined ? UNKNOWN
  * the ramp. */
 const PAINT: Record<Group, (s: string) => string> = {
   [BASE_GROUP]: s => grey(GREY.dim, s),
+  [PROJECT_GROUP]: accent,
   [USED_GROUP]: accent,
   [HERE_GROUP]: s => grey(GREY.bright, s),
   [ADDED_GROUP]: accent,

@@ -20,6 +20,7 @@ import { GOLDEN_SETUP, catalogEntry } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
+import { PROJECT_QUESTION, noFolderNote } from "../src/init-pick.js";
 import { reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import { FIRST_QUESTION, FOLDER_QUESTION } from "../src/init-first.js";
 import type { HostHandle } from "../src/server.js";
@@ -30,7 +31,7 @@ import { importResultPath } from "../src/init-import.js";
 import { noteOutcomes } from "../src/init-signin.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
-import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
+import { guestAnswer, mcpEditPlan, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
@@ -188,8 +189,11 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const { tty: _tty, env: _env, columns: _columns, signedIn: _signedIn, hold: _hold, missing: _missing, json: _json, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
+    // The folder was named on the command line, so the first screen's question is not asked; the run that answers it deletes this.
+    project: NAMED_PROJECT,
     collect: async () => FIXTURE,
     recipe: async () => RECIPE,
+    scanProject: async folder => ({ dir: folder, rows: [], candidates: [] }),
     keys: { solari: SOLARI },
     pricing: PRICING,
     statePath: join(dir, "state.json"),
@@ -326,6 +330,9 @@ const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
+
+/** The project folder a run names on the command line. */
+const NAMED_PROJECT = "/Users/dev/proj";
 
 /** The gh login answered copy in the recipe the run starts from. */
 function withGhCopy(f: Fake): void {
@@ -613,6 +620,90 @@ describe("wsp init, interactive", () => {
   });
 });
 
+describe("wsp init, the project the run is for", () => {
+  it("with no folder named the first screen asks for one, and what it answers is read, carded and grouped on the tools screen", async () => {
+    const f = fake();
+    delete f.opts.project;
+    const asked: string[] = [];
+    f.opts.scanProject = async folder => {
+      asked.push(folder);
+      return { dir: folder, rows: [{ id: "go", name: "Go", why: "go.mod needs Go" }, { id: "docker", name: "Docker engine and compose", why: "compose.yaml needs Docker" }], candidates: [{ id: "ruby", name: "Ruby", why: "Gemfile needs Ruby" }] };
+    };
+    const run = runInit(f.opts, f.io);
+    await f.until(PROJECT_QUESTION);
+    expect(f.text()).toContain("optional; a folder on this Mac, read for what its own files say it needs");
+    await f.press(..."~/proj".split(""), KEY.enter);
+    await f.until("Your project needs");
+    expect(asked).toEqual(["~/proj"]);
+    const card = f.text().slice(f.text().lastIndexOf("Your project needs"));
+    expect(card).toContain("go.mod needs Go");
+    expect(card).toContain("Not in the catalog: Ruby (Gemfile needs Ruby)");
+    await f.until("Agents");
+    await f.press(KEY.enter);
+    await f.until("Tools  2/6");
+    // Go is off in the catalog and never used here; the folder's own go.mod put it on the machine, in its own group.
+    expect(f.text()).toMatch(/▾ Your project needs\s+1 of 1\s+239\.1 MB/);
+    expect(f.text()).toMatch(/● +Go +project +go\.mod needs… +239\.1 MB/);
+    await f.press(KEY.enter);
+    await throughScreens(f, ["Also on this Mac", "Sign-ins", "wsp for your agents"]);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("an empty answer asks nothing more: the folder is optional and the ticks stand as this computer left them", async () => {
+    const f = fake();
+    delete f.opts.project;
+    const asked: string[] = [];
+    f.opts.scanProject = async folder => {
+      asked.push(folder);
+      return { dir: folder, rows: [], candidates: [] };
+    };
+    const run = runInit(f.opts, f.io);
+    await f.until(PROJECT_QUESTION);
+    await f.press(KEY.enter);
+    await f.until("Agents");
+    expect(asked).toEqual([]);
+    expect(f.text()).not.toContain("Your project needs");
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("an answer that names no folder is said so, not read as a project that needs nothing", async () => {
+    const f = fake();
+    delete f.opts.project;
+    f.opts.scanProject = async () => undefined;
+    const run = runInit(f.opts, f.io);
+    await f.until(PROJECT_QUESTION);
+    await f.press(..."~/prj".split(""), KEY.enter);
+    await f.until(noFolderNote("~/prj"));
+    expect(f.text()).not.toContain("named a tool the catalog carries");
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("a folder named on the command line is not asked for again, and cards what it asked for the way the question does", async () => {
+    const f = fake();
+    f.opts.recipe = async (_onHistory, onProject) => {
+      onProject({ dir: NAMED_PROJECT, rows: [{ id: "go", name: "Go", why: "go.mod needs Go" }], candidates: [] });
+      return RECIPE;
+    };
+    const run = runInit(f.opts, f.io);
+    await f.until("Your project needs");
+    expect(f.text().slice(f.text().lastIndexOf("Your project needs"))).toContain("go.mod needs Go");
+    await f.until("Agents");
+    expect(f.text()).not.toContain(PROJECT_QUESTION);
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+});
+
 describe("wsp init, the summary-first screens", () => {
   const hermesKeys: ManifestEntry = { rung: "logins", id: "logins/hermes-keys", label: "Hermes Agent API keys", group: "Agent logins", paths: ["~/.hermes/.env"], bytes: 25_000, default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy; no sign-in produces them" };
   const hermesLogin: ManifestEntry = { rung: "logins", id: "logins/hermes", label: "Hermes Agent login", group: "Agent logins", paths: ["~/.hermes/auth.json"], bytes: 400, default: "skip" };
@@ -700,6 +791,11 @@ describe("wsp init, the summary-first screens", () => {
     await f.until(/Hermes Agent API keys\s+[^\n]*skip/);
     await f.press(KEY.left);
     await f.until(/Hermes Agent API keys\s+[^\n]*copy from this Mac/);
+    // Down past the CLIs, headers included, onto the server with a token: copy keeps it in the machine's config with its secret.
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.down, KEY.down);
+    await f.until("its token is in the agent's own config");
+    await f.press(KEY.left);
+    await f.until(/▾ MCP servers from your agents' configs\s+1 copy\s+0 skip\n┃ ❯\s+github\s+in Claude Code's config\s+copy from this Mac\n/);
     await f.press(KEY.enter);
 
     await f.until("wsp for your agents on this Mac  5/6");
@@ -707,14 +803,14 @@ describe("wsp init, the summary-first screens", () => {
 
     await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
-    // The four agents and the one MCP server without a secret; the one with a token, unticked, is out and unlisted.
+    // The four agents and both MCP servers, the one with a token by the copy it was given on the screen.
     // Gemini's row is the catalog's, added after what the collector found, so it installs last.
-    expect(summary).toMatch(/Agents\s+5 of 8/);
+    expect(summary).toMatch(/Agents\s+6 of 8/);
     expect(summary).toMatch(/Sign-ins\s+1 copy, 5 sign in\s+24\.4 KB\n/);
     expect(summary).toMatch(/Hermes Agent API keys\s+copy\n/);
     expect(summary).toMatch(/kubectl config\s+skip\n/);
-    expect(summary).not.toContain("github");
-    expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, Gemini CLI, 2 tools plus Homebrew's toolchain, 1 MCP server/);
+    expect(summary).toMatch(/github\s+copy\n/);
+    expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, Gemini CLI, 2 tools plus Homebrew's toolchain, 2 MCP servers/);
     expect(f.text()).toMatch(/Recipe saved to .*golden-recipe\.json and .*recipe\.json/);
     await f.press("y");
     await sealIt(f);
@@ -744,10 +840,14 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("logins/hermes")).toMatchObject({ bring: false, choice: "machine" });
     expect(saved.get("logins/gemini")).toMatchObject({ bring: false, choice: "machine" });
     expect(saved.get("logins/kube")).toMatchObject({ bring: false, choice: "skip" });
-    expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
+    expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: true, choice: "copy" });
     expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
-    // The server with the token was never ticked, so the build left it off the machine's config and says why.
-    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).mcp).toEqual(expect.arrayContaining([expect.objectContaining({ name: "github", outcome: "skipped", note: "unticked" })]));
+    // The server with the token was answered copy on the screen, so the edit the machine ran kept it in the config
+    // beside the one without a secret, and the build says both are there.
+    const edits = log.flatMap(c => mcpEditPlan(c) ?? []);
+    expect(edits.map(e => e.write)).toEqual([false, true]);
+    expect(edits[1]!.agents[0]!.scopes[0]).toMatchObject({ keep: ["github", "notes"], drop: [] });
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).mcp).toEqual(expect.arrayContaining([expect.objectContaining({ name: "github", outcome: "installed" }), expect.objectContaining({ name: "notes", outcome: "installed" })]));
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
     const rows = new Map(small.rows.map(r => [r.id, r]));
     expect(rows.get("gemini")).toMatchObject({ on: true, signIn: "machine" });
