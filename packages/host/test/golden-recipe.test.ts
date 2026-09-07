@@ -19,6 +19,18 @@ describe("host golden recipe", () => {
     expect(without.smoke).toBe(GOLDEN_SMOKE);
   });
 
+  it("names no size, so the builder is minted at whatever size the backend calls default", async () => {
+    const backend = stubBackend();
+    backend.pricing.defaultSize = { cpu: 4, memMb: 8192 };
+    const recipe = goldenRecipe({ anthropic: ANTHROPIC }, { deployDaemon: async () => {} });
+    expect([recipe.cpu, recipe.memMb]).toEqual([undefined, undefined]);
+
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    const view = await rt.golden.prepare();
+    expect(backend.machines[0]!.spec).toMatchObject({ cpu: 4, memMb: 8192 });
+    expect(view.size).toEqual({ cpu: 4, memMb: 8192 });
+  });
+
   it("reaches the runtime: prepare runs the daemon hook and the setup on a kill-on-idle builder, then seal smokes a fork", async () => {
     const backend = stubBackend();
     const deployed: string[] = [];

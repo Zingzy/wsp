@@ -424,8 +424,6 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     const { version } = await rt.golden.build({
       setup: GOLDEN_SETUP,
       smoke: GOLDEN_SMOKE,
-      cpu: 2,
-      memMb: 4096,
       envs: opts.envs,
       labels: { wsp: "1", "wsp-doctor": "1", createdAt: new Date().toISOString() },
     });
