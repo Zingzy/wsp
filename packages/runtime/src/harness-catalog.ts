@@ -39,6 +39,9 @@ const levels = (values: readonly string[]): HarnessOption[] => values.map(value 
 
 const CLAUDE_CONTEXT_WINDOWS: HarnessOption[] = [option("200k", "200k"), { ...option("1m", "1M"), isDefault: true }];
 
+// The handshake lists each model's levels and names no default; the CLI documents high on every model that takes one (code.claude.com/docs/en/model-config, Adjust effort level).
+const CLAUDE_EFFORTS: HarnessOption[] = levels(["low", "medium", "high", "xhigh", "max"]).map(o => (o.value === "high" ? { ...o, isDefault: true } : o));
+
 // The table alone cannot say whether a harness steers: only its adapter, on a machine, knows.
 const fromTable = (catalog: Omit<HarnessCatalog, "source" | "version" | "contextWindows" | "steers"> & { contextWindows?: HarnessOption[] }): HarnessCatalog => ({
   source: "table",
@@ -57,7 +60,7 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
       { ...option("claude-opus-5", "Opus 5"), isDefault: true, contextWindows: ["200k", "1m"] },
       { ...option("claude-sonnet-5", "Sonnet 5"), contextWindows: [] },
     ],
-    efforts: levels(["low", "medium", "high", "xhigh", "max"]),
+    efforts: CLAUDE_EFFORTS,
     contextWindows: CLAUDE_CONTEXT_WINDOWS,
     permissionModes: [
       option("default", "Default", "Tools that need permission are refused; nobody is here to answer a prompt"),
