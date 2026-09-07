@@ -181,6 +181,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, workspace: await rt.workspaces.upgrade(msg.workspaceId, spec) });
               return;
             }
+            case "workspaces.updateImage":
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.updateImage(msg.workspaceId) });
+              return;
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId);
               send({ id: msg.id, ok: true });

@@ -1263,17 +1263,16 @@ export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO,
 function installsTally(landed: ImportResult, resultsPath: string): string[] {
   const all = [...landed.tools.map(t => ({ ...t, name: t.label })), ...landed.agents];
   const n = (o: string) => all.filter(x => x.outcome === o).length;
-  // The header counts tools, editors, agents and a machine context that was not written; an update's file removals
-  // are in the stream and the saved list.
-  const removed = (landed.removed ?? []).filter(x => x.what !== "file");
-  const notRemoved = removed.filter(x => x.outcome !== "removed");
+  // The header counts tools, editors, agents, a machine context that was not written, and the rows this run took
+  // out of the recipe, whatever their rung: a retired dotfile is counted here too.
+  const retired = landed.retired ?? [];
   const failed = n("failed") + (landed.contextFailure === undefined ? 0 : 1);
   return [
-    `Tools, agents and machine context: ${n("installed")} installed, ${landed.removed !== undefined ? `${removed.length - notRemoved.length} removed, ` : ""}${failed} failed${notRemoved.length > 0 ? `, ${notRemoved.length} not removed` : ""}, ${n("skipped")} skipped; the list is in ${resultsPath}`,
+    `Tools, agents and machine context: ${n("installed")} installed, ${retired.length > 0 ? `${retired.length} retired, ` : ""}${failed} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`,
     ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
     ...(landed.contextFailure === undefined ? [] : [dim(`machine context failed: ${landed.contextFailure}`)]),
     ...all.filter(x => x.outcome === "skipped").map(x => dim(`${x.name} skipped: ${x.note ?? "no reason given"}`)),
-    ...notRemoved.map(x => dim(`${x.label} not removed: ${x.note ?? "no reason given"}`)),
+    ...retired.map(x => dim(`${x.name} retired: out of the recipe, left on the image`)),
   ];
 }
 

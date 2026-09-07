@@ -2,8 +2,9 @@
 // Golden update end to end against the real account, from a fresh WSP_HOME:
 // golden v1 from a small recipe, v2 by the fork road after the builder is
 // gone (one dotfile and one tool added), v3 on the kept builder during its
-// window (one dotfile added, one removed). Forks of each version are checked
-// for exactly what their recipe says. Only machines and snapshots this test
+// window (one dotfile added, one dropped from the recipe). Forks of each
+// version are checked for what their recipe says, and for the dropped row
+// still being on the disk: an update retires a row, it never uninstalls it. Only machines and snapshots this test
 // created are ever touched, each by its recorded id.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -156,7 +157,7 @@ describe.runIf(LIVE)("golden update (live: v1, v2 by fork, v3 on the kept builde
     const diffAB = diffRecipes(currentA!, b.imp.recipe!);
     expect(diffAB.files.map(f => [f.dest, f.change])).toEqual([[".zshrc", "added"]]);
     expect(diffAB.tools.map(t => [t.id, t.change])).toEqual([["tools/npm/cowsay", "added"]]);
-    const up2 = await b.rt.golden.upgrade({ delta: deltaFor(diffAB, currentA!, b.imp, RECIPE_B, importOf) });
+    const up2 = await b.rt.golden.upgrade({ delta: deltaFor(diffAB, b.imp, RECIPE_B, importOf) });
     const v2Ms = Date.now() - t2;
     snapshots.add(up2.version.snapshotId);
     const b2 = (await b.rt.golden.builders()).find(x => x.sealed?.version === 2);
@@ -169,7 +170,7 @@ describe.runIf(LIVE)("golden update (live: v1, v2 by fork, v3 on the kept builde
     expect(f2[0]).toMatchObject({ stage: "creating", detail: "fork of golden v1" });
     await b.rt.close();
 
-    // v3: recipe C adds a dotfile and removes one, during the kept builder's window: a re-snapshot of the same machine.
+    // v3: recipe C adds a dotfile and drops one, during the kept builder's window: a re-snapshot of the same machine.
     const t3 = Date.now();
     const f3: Frame[] = [];
     const c = runtimeFor(RECIPE_C, f3, t3);
@@ -177,7 +178,7 @@ describe.runIf(LIVE)("golden update (live: v1, v2 by fork, v3 on the kept builde
     const currentB = await c.rt.golden.recipe();
     const diffBC = diffRecipes(currentB!, c.imp.recipe!);
     expect(diffBC.files.map(f => [f.dest, f.change]).sort()).toEqual([[".config/starship.toml", "added"], [".zshrc", "removed"]]);
-    const up3 = await c.rt.golden.upgrade({ delta: deltaFor(diffBC, currentB!, c.imp, RECIPE_C, importOf) });
+    const up3 = await c.rt.golden.upgrade({ delta: deltaFor(diffBC, c.imp, RECIPE_C, importOf) });
     const v3Ms = Date.now() - t3;
     snapshots.add(up3.version.snapshotId);
     const snapMs = stageMs(f3, "snapshotting");
@@ -185,7 +186,7 @@ describe.runIf(LIVE)("golden update (live: v1, v2 by fork, v3 on the kept builde
     expect(deltaMs(f3)).toBeLessThan(60_000);
     expect(up3.road).toBe("builder");
     expect(f3[0]).toMatchObject({ stage: "creating", detail: "your builder from v2, kept since the save" });
-    expect(f3.some(f => f.stage === "applying-setup" && f.detail === "removed ~/.zshrc")).toBe(true);
+    expect(f3.some(f => f.stage === "applying-setup" && f.detail === "1 row left on the image, retired: ~/.zshrc")).toBe(true);
     expect(up3.manifest).toMatchObject({ head: 3, versions: [{ version: 1 }, { version: 2 }, { version: 3 }] });
     expect(snapMs).toBeDefined();
     // The same machine, still running, now saved as v3.
@@ -199,7 +200,9 @@ describe.runIf(LIVE)("golden update (live: v1, v2 by fork, v3 on the kept builde
 
     const proof3 = await forkAndProve(up3.version.snapshotId, "v3");
     expect(proof3).toMatch(/GITCONFIG=yes/);
-    expect(proof3).toMatch(/ZSHRC=no/);
+    // The row left the recipe at v3 and is retired on that version; the bytes v2 put there stay.
+    expect(proof3).toMatch(/ZSHRC=yes/);
+    expect(up3.version.retired).toEqual([{ id: "shell/zshrc", name: "~/.zshrc" }]);
     expect(proof3).toMatch(/STARSHIP=yes/);
     expect(proof3).toMatch(/COWSAY=yes/);
     expect(proof3).toMatch(/CODEX=codex/);
