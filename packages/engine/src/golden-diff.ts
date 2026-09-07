@@ -2,7 +2,7 @@
 // The recipe diff: what a golden was built from (the digest its seal wrote)
 // against the recipe now, as rows to apply on top and rows the recipe stopped
 // asking for. Pure; golden.ts runs the result on a fork or on the kept builder.
-import { MCP_ID_PREFIX, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
+import { MCP_ID_PREFIX, listedName, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
 
 type Tick = RecipeDigest["ticks"][number];
 type DigestFile = RecipeDigest["files"][number];
@@ -165,7 +165,7 @@ export function describeDiff(d: RecipeDiff): string[] {
   for (const change of ["added", "changed", "removed"] as const) {
     group(change, d.files.filter(f => f.change === change).map(f => `~/${f.dest}`), "file");
     if (change === "changed") for (const f of d.files.filter(x => x.change === "missing")) lines.push(`kept on the golden, no longer on this computer: ~/${f.dest}`);
-    group(change, d.tools.filter(t => t.change === change).map(t => (change === "changed" ? `${t.label} (${t.from ?? "unpinned"} to ${t.to ?? "unpinned"})` : t.label)), "tool");
+    group(change, d.tools.filter(t => t.change === change).map(t => (change === "changed" ? `${listedName(t.label)} (${t.from ?? "unpinned"} to ${t.to ?? "unpinned"})` : listedName(t.label))), "tool");
     if (change !== "changed") {
       const agents = d.agents.filter(a => a.change === change);
       group(change, agents.filter(a => !a.id.startsWith(MCP_ID_PREFIX)).map(a => a.label), "agent");

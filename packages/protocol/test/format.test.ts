@@ -29,10 +29,12 @@ import {
   goldenBuildLine,
   harnessExitLine,
   isCodeSearchTool,
+  listedName,
   machineCapRefusal,
   machineUnreachedLine,
   mcpServerCommandLine,
   moveTimedOutLine,
+  nameList,
   nextInsideAgentLine,
   notifyLine,
   offeredSize,
@@ -296,6 +298,25 @@ describe("plural, fmtThreads, forgetNotice and deleteNotice", () => {
     expect([0, 1, 2].map(fmtThreads)).toEqual(["0 threads", "1 thread", "2 threads"]);
     expect(forgetNotice(1)).toBe("Its record and 1 thread leave this computer; the machine is already gone.");
     expect(deleteNotice(2)).toBe("Its machine is deleted at the provider; its record and 2 threads leave this computer.");
+  });
+});
+
+describe("listedName and nameList", () => {
+  it("leaves a name that carries no comma alone and joins a list with the separator", () => {
+    expect(listedName("ripgrep")).toBe("ripgrep");
+    expect(nameList(["ripgrep", "just", "GitHub CLI"])).toBe("ripgrep, just, GitHub CLI");
+    expect(nameList([])).toBe("");
+  });
+
+  it("quotes a name that carries the separator, so a free-text label reads as one entry and not as two", () => {
+    expect(listedName("swift-format, swiftlint")).toBe('"swift-format, swiftlint"');
+    expect(nameList(["swift-format, swiftlint", "just"])).toBe('"swift-format, swiftlint", just');
+    // A plain join leaves the label's own comma reading as a third entry; that is what the quotes take away.
+    expect(["swift-format, swiftlint", "just"].join(", ").split(", ")).toHaveLength(3);
+  });
+
+  it("escapes a quote the name itself carries, so the quoting cannot be read as the end of the name", () => {
+    expect(listedName('the "fast", grep')).toBe('"the \\"fast\\", grep"');
   });
 });
 
