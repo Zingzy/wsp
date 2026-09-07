@@ -104,7 +104,7 @@ beforeEach(() => {
   useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
-  useWorkspacePreviews.setState({ lines: {}, images: {} });
+  useWorkspacePreviews.setState({ images: {} });
   useWorkspaceSwitcher.getState().close();
 });
 
@@ -318,14 +318,13 @@ describe("the workspace switcher overlay", () => {
     expect(useStore.getState().selectedId).toBe("ws_a");
   });
 
-  it("carries the workspace name and the open thread's title in muted mono, and no cost, state word, open word or last line", async () => {
+  it("carries the workspace name and the open thread's title in muted mono, and no cost, state word or open word", async () => {
     await mountShell();
     const restore = asDesktopShell();
     try {
-      // A cost and a recorded last line are both held while the overlay is up, and neither reaches a card.
+      // A cost is ticking for this workspace while the overlay is up, and it reaches no card.
       act(() => {
         useStore.setState({ costs: { ws_b: { rateUsdPerHour: 0.35, accruedUsd: 1.2345, at: "2026-09-07T10:00:00Z" } } });
-        useWorkspacePreviews.setState({ lines: { ws_b: { threadKey: "s1", text: "All 12 tests green." } } });
       });
       tab();
       await waitFor(() => expect(overlay()).not.toBeNull());
@@ -391,7 +390,7 @@ describe("the workspace switcher overlay", () => {
 
 describe("loadPagePreviews", () => {
   it("keeps what the shell still answers for and drops what it has let go at its own cap", async () => {
-    useWorkspacePreviews.setState({ lines: {}, images: { ws_a: "data:image/png;base64,OLD" } });
+    useWorkspacePreviews.setState({ images: { ws_a: "data:image/png;base64,OLD" } });
     const restore = asDesktopShell({ workspacePreview: async id => (id === "ws_b" ? "data:image/png;base64,NEW" : undefined) });
     try {
       await loadPagePreviews(["ws_a", "ws_b"]);
@@ -402,23 +401,9 @@ describe("loadPagePreviews", () => {
   });
 
   it("touches nothing where the shell cannot answer at all", async () => {
-    useWorkspacePreviews.setState({ lines: {}, images: { ws_a: "data:image/png;base64,OLD" } });
+    useWorkspacePreviews.setState({ images: { ws_a: "data:image/png;base64,OLD" } });
     await loadPagePreviews(["ws_a", "ws_b"]);
     expect(useWorkspacePreviews.getState().images).toEqual({ ws_a: "data:image/png;base64,OLD" });
-  });
-});
-
-describe("useWorkspacePreviews.noteLine", () => {
-  it("hands the same record back for a line that says what the one held already says", () => {
-    const { noteLine } = useWorkspacePreviews.getState();
-    noteLine("ws_a", { threadKey: "thr_1", text: "All 12 tests green." });
-    const held = useWorkspacePreviews.getState().lines;
-    noteLine("ws_a", { threadKey: "thr_1", text: "All 12 tests green." });
-    expect(useWorkspacePreviews.getState().lines).toBe(held);
-    noteLine("ws_a", { threadKey: "thr_1", text: "Bumped the lockfile." });
-    expect(useWorkspacePreviews.getState().lines).not.toBe(held);
-    noteLine("ws_a", { threadKey: "thr_2", text: "Bumped the lockfile." });
-    expect(useWorkspacePreviews.getState().lines["ws_a"]?.threadKey).toBe("thr_2");
   });
 });
 
