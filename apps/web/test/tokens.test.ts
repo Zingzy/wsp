@@ -60,7 +60,7 @@ describe("index.css", () => {
         --header-frame-inset: calc(69px + var(--header-gap) - var(--workspace-titlebar-control-size) / 2);
       }
 
-      /* The chord and the counts in the top rows: the muted text at part opacity.
+      /* The counts in the top rows: the muted text at part opacity.
          Declared where the contrast tokens are, so the sidebar's own step-ups
          reach it. */
       :root,
@@ -69,7 +69,7 @@ describe("index.css", () => {
       }
 
       /* Over the glass the sidebar's quiet text and glyphs have no solid card
-         behind them: one step up, and the chord and counts nearly opaque, keep
+         behind them: one step up, and the counts nearly opaque, keep
          them at AA over a white desktop, where the glass reads as mid grey. */
       .desktop-mac [data-app-sidebar] {
         @variant dark {

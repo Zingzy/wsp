@@ -7,7 +7,10 @@ import { ChevronDownIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { cn } from "../lib/utils.js";
-import { TOP_ROW_CLASS, TOP_ROW_META_CLASS } from "./SearchRow.js";
+import { TOP_ROW_CLASS } from "./SearchRow.js";
+
+/** The muted mono meta at the row's right: the count of what it hides while it is shut. */
+const TOP_ROW_META_CLASS = "font-mono text-[11px] text-[var(--top-row-meta)]";
 
 export function SectionRow({ label, count, collapsed, onToggle, action }: { label: string; count: number; collapsed: boolean; onToggle: () => void; action?: ReactNode }) {
   return (
