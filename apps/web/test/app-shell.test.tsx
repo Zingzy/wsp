@@ -84,17 +84,6 @@ describe("app shell", () => {
     expect(screen.getByText("Open a surface")).toBeTruthy();
   });
 
-  it("the header's new-thread button raises the request for the selected workspace", async () => {
-    await mountShell();
-    const seen: string[] = [];
-    const off = onNewThreadRequest(d => seen.push(d.workspaceId));
-    fireEvent.click(screen.getByRole("button", { name: "New thread" }));
-    expect(seen).toEqual(["ws_a"]);
-    off();
-    act(() => useStore.getState().select(null));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "New thread" })).toBeNull());
-  });
-
   it("toggles the right panel from the layout control", async () => {
     await mountShell();
     fireEvent.click(screen.getByRole("button", { name: "Toggle right panel" }));
@@ -240,5 +229,89 @@ describe("disconnected banner", () => {
     act(() => useStore.setState({ conn: "closed" }));
     expect(screen.getByText("wsp is not running.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
+  });
+});
+
+const toggleIn = (root: Element) => root.querySelector('[data-slot="sidebar-trigger"]');
+const sidebarHeader = () => document.querySelector('[data-slot="sidebar-header"]')!;
+const banner = () => screen.getByRole("banner");
+const collapse = async () => {
+  fireEvent.click(toggleIn(sidebarHeader())!);
+  await waitFor(() => expect(document.querySelector("[data-sidebar-state=collapsed]")).not.toBeNull());
+};
+
+describe("the header row", () => {
+  it("open: the sidebar's row carries the toggle then the wordmark, the page's row the workspace's breadcrumb with no toggle and no wordmark", async () => {
+    await mountShell();
+    expect(toggleIn(sidebarHeader())).not.toBeNull();
+    expect(sidebarHeader().querySelector("[role=img][aria-label=wsp]")).not.toBeNull();
+    expect(sidebarHeader().getAttribute("data-header-row")).toBe("frame");
+    expect(toggleIn(banner())).toBeNull();
+    expect(banner().querySelector("[role=img][aria-label=wsp]")).toBeNull();
+    expect(banner().textContent).toContain("api");
+    expect(banner().textContent).not.toContain("/");
+  });
+
+  it("collapsed: the page's row takes the toggle in front of the breadcrumb, folder glyph, workspace, slash, the open thread's title", async () => {
+    await mountShell();
+    act(() => useStore.setState({ sessions: { ws_a: [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "make me a simple server", threadId: "thr_1" }, { id: "s2", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "add a health route", threadId: "thr_2" }] } }));
+    await collapse();
+    expect(toggleIn(banner())).not.toBeNull();
+    expect(banner().querySelector("[data-header-row]")!.getAttribute("data-header-row")).toBe("frame");
+    const crumb = banner().querySelector("[data-thread-breadcrumb]")!;
+    expect(crumb.querySelector("svg")).not.toBeNull();
+    expect(crumb.textContent).toBe("api/add a health route");
+    act(() => useStore.getState().select("ws_a", "thr_1"));
+    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("api/make me a simple server");
+    act(() => useStore.getState().select(null));
+    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("No workspace selected");
+  });
+
+  it("the compose glyph sits in the search row, raises the request for the selected workspace, and leaves with it", async () => {
+    await mountShell();
+    const seen: string[] = [];
+    const off = onNewThreadRequest(d => seen.push(d.workspaceId));
+    const compose = screen.getByRole("button", { name: "New thread" });
+    expect(compose.closest("[data-sidebar-search]")).not.toBeNull();
+    expect(banner().contains(compose)).toBe(false);
+    fireEvent.click(compose);
+    expect(seen).toEqual(["ws_a"]);
+    off();
+    act(() => useStore.getState().select(null));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "New thread" })).toBeNull());
+  });
+});
+
+describe("the macOS desktop window", () => {
+  const noDrag = (root: Element) => Array.from(root.querySelectorAll("button")).map(b => b.className.includes("[-webkit-app-region:no-drag]"));
+  afterEach(() => document.documentElement.classList.remove("desktop-mac"));
+
+  it("with the desktop-mac class on html: both header rows drag the window, their buttons do not, the sidebar shows the window's glass", async () => {
+    document.documentElement.classList.add("desktop-mac");
+    await mountShell();
+    const pageRow = () => banner().querySelector("[data-header-row]")!;
+    expect(sidebarHeader().className).toContain("drag-region");
+    expect(sidebarHeader().className).toContain("pl-[var(--header-frame-inset)]");
+    expect(pageRow().className).toContain("drag-region");
+    expect(pageRow().className).not.toContain("pl-[var(--header-frame-inset)]");
+    expect(noDrag(sidebarHeader()).length).toBeGreaterThan(0);
+    expect(noDrag(sidebarHeader()).every(Boolean)).toBe(true);
+    await collapse();
+    expect(pageRow().className).toContain("drag-region");
+    expect(pageRow().className).toContain("pl-[var(--header-frame-inset)]");
+    expect(noDrag(banner()).length).toBeGreaterThan(0);
+    expect(noDrag(banner()).every(Boolean)).toBe(true);
+    const container = document.querySelector('[data-slot="sidebar-container"]')!;
+    expect(container.className).toContain("sidebar-vibrancy");
+    expect(container.className).not.toContain("sidebar-glass");
+  });
+
+  it("without the class, a browser tab or another platform: nothing drags and the sidebar paints its own glass", async () => {
+    await mountShell();
+    expect(sidebarHeader().className).not.toContain("drag-region");
+    expect(banner().querySelector("[data-header-row]")!.className).not.toContain("drag-region");
+    const container = document.querySelector('[data-slot="sidebar-container"]')!;
+    expect(container.className).toContain("sidebar-glass");
+    expect(container.className).not.toContain("sidebar-vibrancy");
   });
 });

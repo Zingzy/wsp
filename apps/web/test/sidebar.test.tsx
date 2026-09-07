@@ -106,7 +106,7 @@ describe("header", () => {
     expect(screen.getByRole("img", { name: "wsp" })).toBeTruthy();
   });
 
-  it("the lockup starts at the sidebar content inset, where the search row does", async () => {
+  it("the header row starts at the frame inset with the toggle, the lockup follows it, and the search row shares the content inset", async () => {
     useStore.getState().bind(fakeApi([], []));
     await act(async () => {
       render(
@@ -115,10 +115,13 @@ describe("header", () => {
         </SidebarProvider>,
       );
     });
-    const lockup = screen.getByRole("img", { name: "wsp" }).parentElement!;
-    expect(lockup.className).toContain("ml-[var(--sidebar-content-inset)]");
-    expect(lockup.className).not.toContain("titlebar");
-    expect(screen.getByRole("button", { name: "Search" }).parentElement!.className).toContain("px-[var(--sidebar-content-inset)]");
+    const lockup = screen.getByRole("img", { name: "wsp" });
+    const row = lockup.parentElement!;
+    expect(row.getAttribute("data-slot")).toBe("sidebar-header");
+    expect(row.className).toContain("pl-[var(--header-frame-inset)]");
+    expect(row.className).toContain("gap-[calc(var(--header-gap)-var(--workspace-titlebar-control-size)/2)]");
+    expect(lockup.previousElementSibling!.getAttribute("data-slot")).toBe("sidebar-trigger");
+    expect(screen.getByRole("button", { name: "Search" }).closest("[data-sidebar-search]")!.className).toContain("px-[var(--sidebar-content-inset)]");
   });
 });
 
@@ -164,7 +167,7 @@ describe("rows from the fixture wire", () => {
     expect(rowIds()).toEqual(["creating:1", "ws:ws_run", "ws:ws_nap", "ws:ws_gone"]);
   });
 
-  it("every thread row carries the agent's mark and who opened it, in muted mono, with the agent named on hover", async () => {
+  it("every thread row carries the agent's own mark in its colour and who opened it in muted mono, with the agent named on hover", async () => {
     await mount(
       fakeApi(
         [API],
@@ -180,11 +183,19 @@ describe("rows from the fixture wire", () => {
     );
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
     const provenance = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-provenance]")!;
-    const reads = (title: string) => ({ label: provenance(title).getAttribute("aria-label"), text: provenance(title).textContent, mark: provenance(title).querySelector("[data-harness-mark]")?.getAttribute("data-harness-mark") });
-    expect(reads("fix the port list")).toEqual({ label: "Claude Code · cli", text: "cli", mark: "claude" });
-    expect(reads("upgrade node")).toEqual({ label: "Codex · you", text: "COyou", mark: "codex" });
-    expect(reads("before provenance")).toEqual({ label: "Claude Code · you", text: "you", mark: "claude" });
-    expect(reads("from the director")).toEqual({ label: "Claude Code · agent", text: "agent", mark: "claude" });
+    const reads = (title: string) => {
+      const mark = provenance(title).querySelector("[data-harness-mark]")!;
+      // The brand hue is a token of its own; a monochrome mark inherits the row's foreground from the span it sits in,
+      // while the opener word beside it stays the meta line's muted grey.
+      const tone = [...mark.classList].find(c => c.startsWith("text-"));
+      expect(provenance(title).className).toContain("text-sidebar-foreground");
+      expect(mark.nextElementSibling?.className).toContain("text-muted-foreground/55");
+      return { label: provenance(title).getAttribute("aria-label"), text: provenance(title).textContent, mark: mark.getAttribute("data-harness-mark"), svg: mark.tagName, tone, size: [...mark.classList].find(c => c.startsWith("size-")) };
+    };
+    expect(reads("fix the port list")).toEqual({ label: "Claude Code · cli", text: "cli", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
+    expect(reads("upgrade node")).toEqual({ label: "Codex · you", text: "you", mark: "codex", svg: "svg", tone: undefined, size: "size-[13px]" });
+    expect(reads("before provenance")).toEqual({ label: "Claude Code · you", text: "you", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
+    expect(reads("from the director")).toEqual({ label: "Claude Code · agent", text: "agent", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
     const line = provenance("fix the port list").closest<HTMLElement>("[data-thread-meta]")!;
     expect(line.className).toContain("font-mono");
     expect(line.className).toContain("text-muted-foreground");
@@ -472,7 +483,7 @@ describe("search", () => {
     expect(kbd.textContent).toBe(chord);
     expect(kbd.className).toContain("font-mono");
     expect(kbd.className).toContain("ms-auto");
-    expect(kbd.className).toContain("text-muted-foreground");
+    expect(kbd.className).toContain("text-[var(--top-row-meta)]");
     // The row is the kit's row: no border, no fill at rest, the hover tint every other row has.
     expect(row.className).not.toMatch(/\bborder\b|ring-1|bg-background|bg-sidebar-control-surface/);
     expect(row.className).toContain("hover:bg-sidebar-row-hover");

@@ -8,8 +8,10 @@
 // uncut and without growing the row, collapsing the sidebar leaves the
 // page header's left padding alone, a send refusal above the composer is
 // one muted mono line in a slot the composer keeps at one height whether or
-// not a line is in it, and the switch chord held down puts the workspace
-// switcher up without moving the shell under it. Vite
+// not a line is in it, a right-click on a workspace row opens the in-app menu
+// at the pointer in the tooltip skin, inside the viewport, and the switch
+// chord held down puts the workspace switcher up without moving the shell
+// under it. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -65,19 +67,21 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     await page!.goto(`${base}?theme=${theme}`);
     await page!.waitForSelector("[data-sidebar-row]");
   }
+  const rowGap = (selector: string): Promise<number> => page!.locator(selector).first().evaluate(el => parseFloat(getComputedStyle(el).columnGap));
   const box = async (selector: string): Promise<Box> => {
     const b = await page!.locator(selector).first().boundingBox();
     if (!b) throw new Error(`${selector} has no box`);
     return b;
   };
-  const paddingLeft = (selector: string): Promise<string> => page!.locator(selector).first().evaluate(el => getComputedStyle(el).paddingLeft);
 
-  it("the brand lockup starts where the search row does, in both themes", async () => {
+  it("the sidebar toggle starts where the search row does and the brand lockup one gap after it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
+      const toggle = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
       const lockup = await box("[data-slot=sidebar-header] [role=img][aria-label=wsp]");
       const search = await box("button[aria-label='Search']");
-      expect(Math.abs(lockup.x - search.x)).toBeLessThan(1);
+      expect(Math.abs(toggle.x - search.x)).toBeLessThan(1);
+      expect(Math.abs(lockup.x - (toggle.x + toggle.width + (await rowGap("[data-slot=sidebar-header]"))))).toBeLessThan(1);
       const path = join(SHOTS_DIR, `sidebar-header-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar header screenshot: ${path}`);
@@ -183,23 +187,35 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
-  it("a thread row keeps twelve characters of a long title at the default width, the agent and opener whole under it, rows one height", async () => {
+  it("a thread row keeps twelve characters of a long title at the default width, the agent's bare mark and opener whole under it, rows one height", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const rows = await page!.locator("[data-row-id^='thread:']").evaluateAll(els =>
         els.map(el => {
           const title = el.querySelector<HTMLElement>("[data-thread-title]");
           const meta = el.querySelector<HTMLElement>("[data-thread-meta]");
-          if (!title || !meta) return null;
+          const mark = el.querySelector<HTMLElement>("[data-harness-mark]");
+          const opener = mark?.nextElementSibling;
+          if (!title || !meta || !mark || !opener) return null;
           const font = getComputedStyle(title);
           const ctx = document.createElement("canvas").getContext("2d")!;
           ctx.font = `${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
+          const markBox = mark.getBoundingClientRect();
+          const openerBox = opener.getBoundingClientRect();
+          const paint = getComputedStyle(mark);
           return {
             height: el.getBoundingClientRect().height,
             titleWidth: title.clientWidth,
             twelveChars: ctx.measureText((title.textContent ?? "").slice(0, 12)).width,
             metaClipped: [meta, ...meta.querySelectorAll("*")].some(e => e.scrollWidth > e.clientWidth),
             meta: `${meta.textContent ?? ""} (${meta.querySelector("[data-thread-provenance]")?.getAttribute("aria-label")})`,
+            mark: mark.getAttribute("data-harness-mark"),
+            markSize: [markBox.width, markBox.height],
+            // The mark's centre against the opener word's centre: optically on the line, not hanging above it.
+            markOffset: markBox.y + markBox.height / 2 - (openerBox.y + openerBox.height / 2),
+            markColor: paint.color,
+            openerColor: getComputedStyle(opener).color,
+            bare: paint.backgroundColor === "rgba(0, 0, 0, 0)" && paint.borderTopWidth === "0px" && paint.boxShadow === "none",
           };
         }),
       );
@@ -207,13 +223,25 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(rows.map(r => r?.meta)).toEqual([
         "Working·you (Claude Code · you)",
         "cli (Claude Code · cli)",
-        "cli (Claude Code · cli)",
+        "cli (Codex · cli)",
         "you (Claude Code · you)",
       ]);
       for (const row of rows) {
         expect(row!.titleWidth).toBeGreaterThanOrEqual(row!.twelveChars);
         expect(row!.metaClipped).toBe(false);
+        // Bare marks of 13 to 16 px, centred on the words beside them, in a colour of their own, on nothing.
+        for (const side of row!.markSize) {
+          expect(side).toBeGreaterThanOrEqual(13);
+          expect(side).toBeLessThanOrEqual(16);
+        }
+        expect(Math.abs(row!.markOffset)).toBeLessThan(1.5);
+        expect(row!.markColor).not.toBe(row!.openerColor);
+        expect(row!.bare).toBe(true);
       }
+      // Claude's mark is its terracotta; OpenAI's is monochrome by design, so it takes the row's foreground.
+      const colours = new Map(rows.map(r => [r!.mark, r!.markColor]));
+      expect(colours.size).toBe(2);
+      expect(colours.get("claude")).not.toBe(colours.get("codex"));
       expect(new Set(rows.map(r => r!.height)).size).toBe(1);
       const path = join(SHOTS_DIR, `sidebar-threads-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -387,13 +415,135 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
-  it("collapsing the sidebar leaves the page header's left padding alone", async () => {
+  it("the composer's model picker carries the agent's bare mark on its button and one per agent on its rail, in both themes", async () => {
+    interface MarkRead {
+      harness: string | null;
+      size: number[];
+      /** The mark's centre against its neighbour's centre. */
+      offset: number;
+      color: string;
+      bare: boolean;
+    }
+    const readMarks = (selector: string): Promise<MarkRead[]> =>
+      page!.locator(selector).evaluateAll(els =>
+        els.map(el => {
+          const box = el.getBoundingClientRect();
+          const beside = (el.nextElementSibling ?? el.parentElement!).getBoundingClientRect();
+          const s = getComputedStyle(el);
+          return {
+            harness: el.getAttribute("data-harness-mark"),
+            size: [box.width, box.height],
+            offset: box.y + box.height / 2 - (beside.y + beside.height / 2),
+            color: s.color,
+            bare: s.backgroundColor === "rgba(0, 0, 0, 0)" && s.borderTopWidth === "0px" && s.boxShadow === "none",
+          };
+        }),
+      );
+    const expectBare = (marks: MarkRead[]) => {
+      for (const mark of marks) {
+        for (const side of mark.size) {
+          expect(side).toBeGreaterThanOrEqual(13);
+          expect(side).toBeLessThanOrEqual(16);
+        }
+        expect(Math.abs(mark.offset)).toBeLessThan(1.5);
+        expect(mark.bare).toBe(true);
+      }
+    };
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
+      await page!.waitForSelector("[data-composer-picker='model'] svg[data-harness-mark]");
+      const [trigger] = await readMarks("[data-composer-picker='model'] svg[data-harness-mark]");
+      expect(trigger!.harness).toBe("claude");
+      expectBare([trigger!]);
+      expect(trigger!.color).not.toBe(await page!.locator("[data-composer-picker='model']").evaluate(el => getComputedStyle(el).color));
+      await page!.locator("[data-composer-picker='model']").click();
+      await page!.waitForSelector("[data-composer-model-menu]");
+      // The popup fades and scales in; the shot waits for it to be drawn whole and on the page.
+      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-slot=popover-popup]")!).opacity === "1");
+      await page!.waitForTimeout(300);
+      const popup = await box("[data-slot=popover-popup]");
+      expect(popup.width).toBeGreaterThan(200);
+      expect(popup.y).toBeGreaterThanOrEqual(0);
+      const rail = await readMarks("[data-composer-harness] svg[data-harness-mark]");
+      console.info(`picker marks at ${theme}: ${JSON.stringify({ trigger, rail })}`);
+      expect(rail.map(m => m.harness)).toEqual(["claude", "codex"]);
+      expectBare(rail);
+      expect(rail[0]!.color).toBe(trigger!.color);
+      expect(rail[1]!.color).not.toBe(rail[0]!.color);
+      const path = join(SHOTS_DIR, `composer-picker-${theme}.png`);
+      await page!.screenshot({ path });
+      console.info(`composer picker screenshot: ${path}`);
+      await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[data-composer-model-menu]", { state: "detached" });
+    }
+  }, 60_000);
+
+  it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it", async () => {
     await open("dark");
-    const before = await paddingLeft("header");
-    await page!.locator("header button[aria-label='Toggle main sidebar']").click();
+    const before = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
+    expect(await page!.locator("header [data-slot=sidebar-trigger]").count()).toBe(0);
+    await page!.locator("[data-slot=sidebar-header] [data-slot=sidebar-trigger]").click();
     await page!.waitForSelector("[data-sidebar-state=collapsed]");
-    // The header animates padding-left; let a 200 ms transition run out.
-    await page!.waitForTimeout(400);
-    expect(await paddingLeft("header")).toBe(before);
+    // The row animates padding-left over 200 ms; the read waits for the toggle to land.
+    await page!.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().x - x) < 1, before.x);
+    const after = await box("header [data-slot=sidebar-trigger]");
+    expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+    const crumb = await box("header [data-thread-breadcrumb]");
+    expect(Math.abs(crumb.x - (after.x + after.width + (await rowGap("header [data-header-row]"))))).toBeLessThan(1);
+    expect(await page!.locator("header [data-thread-breadcrumb]").evaluate(el => el.textContent)).toBe("api/Reply with exactly the word hi.");
+    const path = join(SHOTS_DIR, "header-collapsed-dark.png");
+    await page!.screenshot({ path, clip: { x: 0, y: 0, width: 600, height: 120 } });
+    console.info(`collapsed header screenshot: ${path}`);
   }, 30_000);
+  it("a right-click on a workspace row opens the in-app menu at the pointer in the tooltip skin, kept inside the viewport, and Escape closes it, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      const row = await box("[data-row-id='ws:ws_a']");
+      // On the row's hover buttons too: the whole row is the workspace's.
+      const at = { x: row.x + row.width - 12, y: row.y + row.height / 2 };
+      await page!.mouse.click(at.x, at.y, { button: "right" });
+      await page!.waitForSelector("[data-context-menu]");
+      const menu = await box("[data-context-menu]");
+      expect(Math.abs(menu.x - at.x)).toBeLessThan(1);
+      expect(Math.abs(menu.y - at.y)).toBeLessThan(1);
+      const viewport = page!.viewportSize()!;
+      expect(menu.x + menu.width).toBeLessThanOrEqual(viewport.width - 8);
+      expect(menu.y + menu.height).toBeLessThanOrEqual(viewport.height - 8);
+      const skin = await page!.locator("[data-context-menu]").evaluate(el => {
+        const s = getComputedStyle(el);
+        return { border: s.borderTopWidth, background: s.backgroundColor, radius: s.borderTopLeftRadius, z: s.zIndex, arrows: el.querySelectorAll("[data-arrow], svg").length };
+      });
+      expect(skin.border).toBe("1px");
+      expect(skin.background).not.toBe("rgba(0, 0, 0, 0)");
+      expect(skin.z).toBe("130");
+      expect(skin.arrows).toBe(0);
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(10);
+      expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(4);
+      // The first row that can run holds focus, so the keyboard is already in the menu.
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").first().evaluate(el => document.activeElement === el)).toBe(true);
+      const path = join(SHOTS_DIR, `sidebar-context-menu-${theme}.png`);
+      await page!.screenshot({ path, clip: { x: 0, y: 0, width: 520, height: 520 } });
+      console.info(`sidebar context menu screenshot: ${path}`);
+      // The refusal rides the tooltip skin: hovering a dimmed row shows it.
+      await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").first().hover();
+      await page!.waitForSelector("[data-slot=tooltip-popup]");
+      expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe("Rebuild replaces a gone or zombie machine; this one answers");
+      const tipPath = join(SHOTS_DIR, `sidebar-context-menu-refusal-${theme}.png`);
+      await page!.screenshot({ path: tipPath, clip: { x: 0, y: 0, width: 640, height: 520 } });
+      console.info(`sidebar context menu refusal screenshot: ${tipPath}`);
+      await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[data-context-menu]", { state: "detached" });
+      // Focus goes back where it was: the row's own button under the pointer, which Chromium focused on the press.
+      expect(await page!.evaluate(() => document.activeElement?.closest("[data-sidebar='menu-item']")?.querySelector("[data-row-id='ws:ws_a']") !== null)).toBe(true);
+      const thread = await box("[data-row-id^='thread:']");
+      await page!.mouse.click(thread.x + 20, thread.y + thread.height / 2, { button: "right" });
+      await page!.waitForSelector("[data-context-menu]");
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(4);
+      await page!.screenshot({ path: join(SHOTS_DIR, `thread-context-menu-${theme}.png`), clip: { x: 0, y: 0, width: 520, height: 520 } });
+      console.info(`thread context menu screenshot: ${join(SHOTS_DIR, `thread-context-menu-${theme}.png`)}`);
+      await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[data-context-menu]", { state: "detached" });
+    }
+  }, 60_000);
 });

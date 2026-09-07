@@ -52,15 +52,15 @@ describe("terminal font setting", () => {
     const config = renderHook(() => useTerminalViewportConfig());
     expect(font.result.current).toMatchObject({ family: "", detected: "Hack" });
     const first = config.result.current;
-    expect(first).toEqual({ font: { family: "Hack" } });
+    expect(first).toEqual({ font: { family: "Hack" }, chosenFont: false });
     config.rerender();
     expect(config.result.current).toBe(first);
     act(() => font.result.current.setFamily("Iosevka"));
     expect(font.result.current.family).toBe("Iosevka");
-    expect(config.result.current).toEqual({ font: { family: "Iosevka" } });
+    expect(config.result.current).toEqual({ font: { family: "Iosevka" }, chosenFont: true });
     act(() => window.dispatchEvent(new StorageEvent("storage", { key: TERMINAL_FONT_KEY, newValue: null })));
     window.localStorage.removeItem(TERMINAL_FONT_KEY);
     act(() => window.dispatchEvent(new StorageEvent("storage", { key: TERMINAL_FONT_KEY, newValue: null })));
-    expect(config.result.current).toEqual({ font: { family: "Hack" } });
+    expect(config.result.current).toEqual({ font: { family: "Hack" }, chosenFont: false });
   });
 });

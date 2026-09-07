@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The verbs the registries call, bound to the stores once: every surface that
+// resolves a registry takes these, and a surface with its own confirmation
+// (the sidebar's forget dialog, the Machine tab's rebuild dialog) puts its
+// opener in place of the default.
+import { useMemo } from "react";
+import { useStore } from "../protocol/store.js";
+import { useRightPanelStore } from "../rightPanelStore.js";
+import { showTerminal } from "../shell/shellCommands.js";
+import { requestForgetWorkspace, requestNewThread } from "../shell/shellRequests.js";
+import { copyText } from "./clipboard.js";
+import type { ThreadVerbs } from "./threadActions.js";
+import type { WorkspaceVerbs } from "./workspaceActions.js";
+
+export function useWorkspaceVerbs(): WorkspaceVerbs {
+  const api = useStore(s => s.api);
+  const select = useStore(s => s.select);
+  const togglePhase = useStore(s => s.toggle);
+  const openSurface = useRightPanelStore(s => s.open);
+  const rebuild = api?.rebuild;
+  const forget = api?.forget;
+  return useMemo<WorkspaceVerbs>(
+    () => ({
+      togglePhase,
+      openTerminal: showTerminal,
+      openBrowser: workspaceId => openSurface(workspaceId, "preview"),
+      openMachine: workspaceId => openSurface(workspaceId, "machine"),
+      newThread: workspaceId => {
+        select(workspaceId);
+        requestNewThread({ workspaceId });
+      },
+      copyText,
+      rebuild:
+        rebuild === undefined
+          ? undefined
+          : async workspaceId => {
+              await rebuild(workspaceId);
+            },
+      forget: forget === undefined ? undefined : requestForgetWorkspace,
+    }),
+    [forget, openSurface, rebuild, select, togglePhase],
+  );
+}
+
+export function useThreadVerbs(): ThreadVerbs {
+  const api = useStore(s => s.api);
+  const stop = api?.interruptSession;
+  return useMemo<ThreadVerbs>(
+    () => ({
+      stop:
+        stop === undefined
+          ? undefined
+          : async sessionId => {
+              await stop(sessionId);
+            },
+      copyText,
+    }),
+    [stop],
+  );
+}

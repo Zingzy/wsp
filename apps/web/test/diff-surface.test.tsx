@@ -28,6 +28,7 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
 }));
 
 import { DiffSurface } from "../src/diffs/DiffSurface.js";
+import { useDiffRevealStore } from "../src/diffs/reveal.js";
 import { useDiffStore } from "../src/diffs/store.js";
 import { useRootStore } from "../src/files/root.js";
 import { provideDaemonWire } from "../src/files/wire.js";
@@ -56,6 +57,19 @@ const items = (container: HTMLElement) => Array.from(container.querySelectorAll<
 const diffCalls = (wire: { calls: [string, Record<string, unknown>][] }) => wire.calls.filter(([op]) => op === "git.diff").map(([, p]) => p);
 
 describe("diff surface", () => {
+  it("a file another pane asked to show is revealed when the diff has it, and named in one muted line when it does not", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
+    provideDaemonWire(WS, wire);
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    act(() => useDiffRevealStore.getState().request(WS, "/root/docs/notes.md"));
+    await waitFor(() => expect(container.querySelector("[data-diff-reveal-note]")?.textContent).toBe("notes.md has no diff in working tree"));
+    expect(useDiffRevealStore.getState().pendingByWorkspaceId[WS]).toBeUndefined();
+    act(() => useDiffRevealStore.getState().request(WS, "/root/src/a.ts"));
+    await waitFor(() => expect(container.querySelector("[data-diff-reveal-note]")).toBeNull());
+    expect(useDiffRevealStore.getState().pendingByWorkspaceId[WS]).toBeUndefined();
+  });
+
   it("diffs the working tree at the root first and lists the changed files with a stat", async () => {
     const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
     provideDaemonWire(WS, wire);

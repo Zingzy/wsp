@@ -2,14 +2,15 @@
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { currentHome, type CliIO } from "@wsp/host";
-import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell } from "electron";
+import { chooseFrom, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
 import { fromAppPage } from "./origin.js";
 import type { Retry } from "./preload.js";
 import { pagePreviews } from "./previews.js";
 import { checkSetup } from "./setup.js";
-import { appWindowOptions } from "./window.js";
+import { windowOptions } from "./window.js";
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
 const WEB_DIR = here("../web");
@@ -24,9 +25,7 @@ function envPort(name: string, fallback: number): number {
   return raw === undefined || raw === "" ? fallback : Number(raw);
 }
 
-function newWindow(preload?: string): BrowserWindow {
-  return new BrowserWindow(appWindowOptions(preload));
-}
+const newWindow = (preload?: string): BrowserWindow => new BrowserWindow(windowOptions(process.platform, preload));
 
 let session: HostSession | undefined;
 
@@ -57,6 +56,13 @@ ipcMain.handle("folder:pick", async event => {
   const options = { properties: ["openDirectory" as const], title: "Import a project" };
   const picked = await (win === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(win, options));
   return picked.canceled ? undefined : picked.filePaths[0];
+});
+
+// The menu runs actions on the page's own registries, so only the host's page may ask for one.
+ipcMain.handle("menu:context", (event, raw: unknown) => {
+  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("menu:context: not the app's page");
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return chooseFrom(parseContextMenuItems(raw), (template, onClose) => Menu.buildFromTemplate(template).popup({ ...(win === null ? {} : { window: win }), callback: onClose }));
 });
 
 function locate(): Promise<Located> {
@@ -142,6 +148,8 @@ app.on("window-all-closed", () => app.quit());
 app
   .whenReady()
   .then(async () => {
+    // The window's chrome and the frosted sidebar follow the page's one theme, dark, not the system; a light theme moves this pin with it.
+    nativeTheme.themeSource = "dark";
     const located = await locate();
     if (!(await showApp(located))) await showSetup(located);
   })

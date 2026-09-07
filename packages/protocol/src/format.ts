@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -935,4 +935,36 @@ export function exportProgress(events: readonly Pick<ProjectExportEvent, "stage"
     }
   }
   return events.length === 0 ? null : { line, fraction };
+}
+
+/** A color as a Ghostty file writes it. */
+export function hexColor({ r, g, b }: TerminalRgb): string {
+  return `#${[r, g, b].map(c => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
+export const NO_TERMINAL_CONFIG_LINE = "No Ghostty config on this computer; the terminal pane keeps its defaults.";
+
+/** The person's terminal config as wsp terminal config prints it: the files read, then each key the pane honours as
+ * the file would write it, so a line here can be pasted back into the config. */
+export function terminalConfigLines(config: TerminalConfig): string[] {
+  if (config.files.length === 0) return [NO_TERMINAL_CONFIG_LINE];
+  const set = config.palette.filter(c => c !== null).length;
+  const pair = (a: number, b: number): string => (a === b ? `${a}` : `${a},${b}`);
+  const rows: [string, string | undefined][] = [
+    ["font-family", config.fontFamily.length === 0 ? undefined : config.fontFamily.join(", ")],
+    ["font-size", config.fontSize?.toString()],
+    ["theme", config.theme],
+    ["background", config.background && hexColor(config.background)],
+    ["foreground", config.foreground && hexColor(config.foreground)],
+    ["palette", set === 0 ? undefined : `${set} of 16 colors`],
+    ["selection-background", config.selectionBackground && hexColor(config.selectionBackground)],
+    ["cursor-color", config.cursorColor && hexColor(config.cursorColor)],
+    ["cursor-style", config.cursorStyle],
+    ["cursor-style-blink", config.cursorStyleBlink?.toString()],
+    ["window-padding-x", config.windowPaddingX && pair(config.windowPaddingX.left, config.windowPaddingX.right)],
+    ["window-padding-y", config.windowPaddingY && pair(config.windowPaddingY.top, config.windowPaddingY.bottom)],
+    ["background-opacity", config.backgroundOpacity?.toString()],
+    ["background-blur", config.backgroundBlur?.toString()],
+  ];
+  return [`Read ${config.files.join(", ")}`, ...rows.filter(([, value]) => value !== undefined).map(([key, value]) => `${key} = ${value}`)];
 }

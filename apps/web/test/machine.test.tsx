@@ -224,14 +224,30 @@ describe("machine facts", () => {
     expect(writeText).toHaveBeenCalledWith("m_ws_a_0123456789abcdef");
   });
 
+  it("the footer's phase button reads one entry: a record still saying running while the machine is paused reads and labels Wake, and one whose machine is starting reads Waking and refuses", async () => {
+    const w = view("ws_a", "api");
+    const api = await mount([w]);
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), machineState: "paused", reach: { state: "napping" } } }));
+    const wake = (await screen.findByRole("button", { name: "Wake api" })) as HTMLButtonElement;
+    expect(wake.textContent).toBe("Wake");
+    expect(wake.disabled).toBe(false);
+    expect(wake.title).toBe("Boot the VM from its disk");
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), machineState: "starting" } }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Wake api" }) as HTMLButtonElement).textContent).toBe("Waking…"));
+    const waking = screen.getByRole("button", { name: "Wake api" }) as HTMLButtonElement;
+    expect(waking.disabled).toBe(true);
+    expect(waking.title).toBe("Workspace is waking");
+  });
+
   it("renders napping as Paused and waking as Waking with the wake control held", async () => {
     await mount([view("ws_a", "api", "napping")]);
     expect(fact("state")).toBe("Paused");
-    expect(screen.getByRole("button", { name: "wake api" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Wake api" })).toBeDefined();
     act(() => useStore.getState().applyEvent({ type: "workspace.woken", workspaceId: "ws_a", machineId: "m2", resurrected: false }));
-    act(() => useStore.setState(s => ({ workspaces: s.workspaces.map(w => ({ ...w, phase: "waking" as const })) })));
+    // The store moves the record and its status together on every phase change, so the test moves both.
+    act(() => useStore.setState(s => ({ workspaces: s.workspaces.map(w => ({ ...w, phase: "waking" as const })), statuses: { ...s.statuses, ws_a: { ...s.statuses["ws_a"]!, phase: "waking" as const } } })));
     expect(fact("state")).toBe("Waking");
-    expect((screen.getByRole("button", { name: "wake api" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Wake api" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("shows machine-state divergence next to the phase", async () => {
@@ -733,8 +749,8 @@ describe("gone machines", () => {
     const api = await mount([gone()]);
     const forget = vi.fn(async (_id: string) => {});
     api.forget = forget;
-    const forgetButton = await screen.findByRole("button", { name: "forget api" });
-    expect(screen.queryByRole("button", { name: "pause api" })).toBeNull();
+    const forgetButton = await screen.findByRole("button", { name: "Forget api" });
+    expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
     expect((screen.getByRole("button", { name: "upgrade api" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(forgetButton);
     const dialog = await screen.findByRole("alertdialog");
@@ -762,7 +778,7 @@ describe("gone machines", () => {
     api.forget = vi.fn(async (_id: string) => {
       throw new Error(reason);
     });
-    fireEvent.click(await screen.findByRole("button", { name: "forget api" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Forget api" }));
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Forget" }));
     await waitFor(() => expect(fact("forget-refusal")).toBe(reason));
     expect(screen.getByRole("alertdialog")).toBeDefined();
@@ -772,10 +788,10 @@ describe("gone machines", () => {
 describe("pause and wake", () => {
   it("pause paints the phase immediately and calls the api once", async () => {
     const api = await mount([view("ws_a", "api")]);
-    fireEvent.click(screen.getByRole("button", { name: "pause api" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause api" }));
     expect(useStore.getState().workspaces[0]!.phase).toBe("pausing");
     expect(fact("state")).toBe("Pausing");
-    const held = screen.getByRole("button", { name: "wake api" }) as HTMLButtonElement;
+    const held = screen.getByRole("button", { name: "Wake api" }) as HTMLButtonElement;
     expect(held.textContent).toBe("Pausing…");
     expect(held.disabled).toBe(true);
     await waitFor(() => expect(api.nap).toHaveBeenCalledTimes(1));
@@ -784,7 +800,7 @@ describe("pause and wake", () => {
 
   it("wake calls the api once and paints waking", async () => {
     const api = await mount([view("ws_a", "api", "napping")]);
-    fireEvent.click(screen.getByRole("button", { name: "wake api" }));
+    fireEvent.click(screen.getByRole("button", { name: "Wake api" }));
     expect(useStore.getState().workspaces[0]!.phase).toBe("waking");
     expect(fact("state")).toBe("Waking");
     await waitFor(() => expect(api.wake).toHaveBeenCalledTimes(1));
@@ -794,9 +810,9 @@ describe("pause and wake", () => {
   it("reverts on failure", async () => {
     const api = await mount([view("ws_a", "api")]);
     api.nap.mockRejectedValueOnce(new Error("backend said no"));
-    fireEvent.click(screen.getByRole("button", { name: "pause api" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause api" }));
     await waitFor(() => expect(useStore.getState().workspaces[0]!.phase).toBe("running"));
-    expect(screen.getByRole("button", { name: "pause api" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Pause api" })).toBeDefined();
   });
 });
 
@@ -874,12 +890,12 @@ describe("zombie", () => {
   it("renders the zombie reach distinctly with the runtime's reason and a rebuild control", async () => {
     const w = view("ws_a", "api");
     const api = await mount([w]);
-    expect(screen.queryByRole("button", { name: "rebuild api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rebuild api" })).toBeNull();
     act(() => api.emit({ type: "workspace.status", status: zombie(w) }));
     await waitFor(() => expect(fact("reach")).toBe("zombie"));
     expect(document.querySelector('[data-reach="zombie"]')).not.toBeNull();
     expect(fact("reason")).toBe("m_ws_a answered nothing for 92s after slow at 14:02:11");
-    expect(screen.getByRole("button", { name: "rebuild api" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Rebuild api" })).toBeDefined();
   });
 
   it("asks before rebuilding; confirming calls the api once", async () => {
@@ -888,7 +904,7 @@ describe("zombie", () => {
     const rebuild = vi.fn(async (id: string) => ({ ...view(id, "api"), machineId: "m_fresh" }));
     api.rebuild = rebuild;
     act(() => api.emit({ type: "workspace.status", status: zombie(w) }));
-    fireEvent.click(await screen.findByRole("button", { name: "rebuild api" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Rebuild api" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("Rebuild api?");
     expect(rebuild).not.toHaveBeenCalled();
@@ -916,9 +932,9 @@ describe("zombie", () => {
     await waitFor(() => expect(fact("out-of-memory")).toBe("Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the machine last answered; the work on it took the memory, not a fault of the machine"));
     expect(fact("bigger-size")).toBe("A workspace on 4 vCPU · 8 GB ($0.22/hr) fits more; pick it when you make the next one");
     // Not a zombie yet: no rebuild on offer for a machine the runtime is still waiting on.
-    expect(screen.queryByRole("button", { name: "rebuild api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rebuild api" })).toBeNull();
     act(() => api.emit({ type: "workspace.status", status: zombie(w) }));
-    const rebuild = await screen.findByRole("button", { name: "rebuild api" });
+    const rebuild = await screen.findByRole("button", { name: "Rebuild api" });
     const bigger = document.querySelector('[data-k="bigger-size"]')!;
     expect(bigger.compareDocumentPosition(rebuild) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     act(() => getLive("ws_a").feedStatus("live"));
@@ -931,7 +947,7 @@ describe("zombie", () => {
     const rebuild = vi.fn(async (id: string) => view(id, "api"));
     api.rebuild = rebuild;
     act(() => api.emit({ type: "workspace.status", status: zombie(w) }));
-    fireEvent.click(await screen.findByRole("button", { name: "rebuild api" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Rebuild api" }));
     await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
@@ -950,9 +966,9 @@ describe("gone machine", () => {
     expect(fact("reason")).toBe(WORDS);
     expect(fact("idle")).toBe("not scheduled");
     expect(fact("rate")).toBe("$0.000/hr");
-    expect(screen.getByRole("button", { name: "rebuild api" })).toBeDefined();
-    expect(screen.queryByRole("button", { name: "pause api" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "wake api" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Rebuild api" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Wake api" })).toBeNull();
     expect((screen.getByRole("button", { name: "upgrade api" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -960,7 +976,7 @@ describe("gone machine", () => {
     const api = await mount([gone()]);
     const rebuild = vi.fn(async (id: string) => ({ ...view(id, "api"), machineId: "m_fresh" }));
     api.rebuild = rebuild;
-    fireEvent.click(screen.getByRole("button", { name: "rebuild api" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rebuild api" }));
     await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Rebuild" }));
     await waitFor(() => expect(rebuild).toHaveBeenCalledTimes(1));

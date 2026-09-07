@@ -108,9 +108,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --workspace-topbar-height: 52px;
   --workspace-controls-top: 0px;
   --workspace-controls-right: calc(env(safe-area-inset-right) + 0.75rem);
-  --workspace-native-controls-inset: 0px;
   --workspace-titlebar-control-size: 1.75rem;
   --workspace-titlebar-scroll-fade-height: 1.5rem;
+  --header-frame-inset: var(--sidebar-content-inset);
+  --header-gap: 1.875rem;
+  --top-row-meta-alpha: 55%;
 
   @variant dark {
     --appearance-contrast-target: white;
@@ -125,9 +127,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --workspace-topbar-height: env(titlebar-area-height, 52px);
   --workspace-controls-top: env(titlebar-area-y, 0px);
   --workspace-controls-right: calc(
-    100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px) + 0.75rem
-  );
-  --workspace-native-controls-inset: calc(
     100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px) + 0.75rem
   );
 }
@@ -200,6 +199,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --color-sidebar-row-active: var(--sidebar-row-active);
   --color-sidebar-row-selected: var(--sidebar-row-selected);
   --color-sidebar-border: var(--contrast-sidebar-border);
+  --color-agent-claude: var(--agent-claude);
+  --color-agent-gemini: var(--agent-gemini);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -977,6 +978,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --sidebar-row-selected: var(--color-white);
   --sidebar-border: var(--border);
   --sidebar-stage-fade: var(--sidebar);
+  /* Each agent's brand hue, the one colour a row carries besides its state dot, as simple-icons publishes it
+     (Claude #d97757, Gemini #8e75b2). The terracotta measures 2.99:1 on zinc-50, so the light theme takes it one
+     step darker for the 3:1 graphics floor (3.84 on zinc-50); Gemini's clears it as published (3.77). */
+  --agent-claude: #c4643f;
+  --agent-gemini: #8e75b2;
   --code-background: color-mix(in srgb, var(--card) 90%, var(--background));
   --code-foreground: var(--foreground);
   --terminal-background: var(--background);
@@ -1020,6 +1026,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --sidebar-row-active: var(--accent);
     --sidebar-row-selected: var(--muted);
     --sidebar-stage-fade: var(--card);
+    --agent-claude: #d97757;
+    --agent-gemini: #8e75b2;
     --terminal-cursor: rgb(180 203 255);
     --terminal-selection-background: rgb(180 203 255 / 25%);
   }
@@ -1977,4 +1985,71 @@ code {
   @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
     background: var(--sidebar) !important;
   }
+}
+
+/* On macOS the desktop window frosts the sidebar's column with the system's
+   own glass, so nothing in the sidebar paints a background over it. The main
+   column keeps its solid background, so text never sits on the desktop. */
+@utility sidebar-vibrancy {
+  background: transparent;
+  border-color: var(--sidebar-border);
+
+  & > [data-slot="sidebar-inner"] {
+    background: transparent;
+  }
+}
+
+/* The window paints the glass behind the page, so the page's own canvas is
+   clear and only the main column paints a background. The frame row's toggle
+   sits one header gap after the third traffic light, centre to centre: with
+   the lights at x 16 the third light's centre measures 69px at 1x. */
+.desktop-mac,
+.desktop-mac body {
+  background: transparent;
+}
+
+.desktop-mac {
+  --header-frame-inset: calc(69px + var(--header-gap) - var(--workspace-titlebar-control-size) / 2);
+}
+
+/* The chord and the counts in the top rows: the muted text at part opacity.
+   Declared where the contrast tokens are, so the sidebar's own step-ups
+   reach it. */
+:root,
+[data-app-sidebar] {
+  --top-row-meta: color-mix(in srgb, var(--contrast-muted-foreground) var(--top-row-meta-alpha), transparent);
+}
+
+/* Over the glass the sidebar's quiet text and glyphs have no solid card
+   behind them: one step up, and the chord and counts nearly opaque, keep
+   them at AA over a white desktop, where the glass reads as mid grey. */
+.desktop-mac [data-app-sidebar] {
+  @variant dark {
+    --muted-foreground: var(--color-neutral-300);
+    --sidebar-muted-foreground: var(--color-neutral-300);
+    --sidebar-icon-color: var(--color-neutral-300);
+    --top-row-meta-alpha: 90%;
+  }
+}
+
+/* A Ghostty config with background-opacity under 1: the viewport marks itself
+   translucent, and the pane around it stops painting so the canvas sits on the
+   app background in a browser tab. In the macOS desktop window, whose html
+   carries the class the desktop preload sets, every element between the window
+   and the pane stops painting too, so the window's own material shows through
+   the terminal; the header row, the thread beside the pane and the column that
+   does not hold it paint the app background themselves, so text never sits on
+   the desktop. */
+.thread-terminal-drawer:has([data-terminal-translucent]),
+.thread-terminal-drawer :has([data-terminal-translucent]) {
+  background: transparent;
+}
+
+html.desktop-mac:has([data-terminal-translucent]),
+html.desktop-mac :has([data-terminal-translucent]) {
+  background: transparent;
+}
+
+html.desktop-mac:has([data-terminal-translucent]) :is([data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
+  background: var(--background);
 }

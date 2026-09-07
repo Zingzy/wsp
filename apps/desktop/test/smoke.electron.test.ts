@@ -11,6 +11,7 @@ import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
+import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
@@ -246,6 +247,51 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     rmSync(user, { recursive: true, force: true });
   });
 
+  it("a right-click on a workspace row builds the native menu from the workspace registry through the bridge", async () => {
+    // A host over the stub backend with one workspace, serving the built web app, so the sidebar has a row to right-click.
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    const first = await existing.createWorkspace("first");
+    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    const win = await launched.app.firstWindow();
+    const row = `[data-row-id='ws:${first.id}']`;
+    await win.waitForSelector(row);
+    // A native menu blocks until it is dismissed, so the main process keeps the template it would have shown and closes on nothing.
+    await launched.app.evaluate(({ Menu }) => {
+      type Kept = { type?: string; label?: string; enabled?: boolean; toolTip?: string; accelerator?: string | null };
+      const kept: Kept[][] = [];
+      (globalThis as { __menus?: Kept[][] }).__menus = kept;
+      const build = Menu.buildFromTemplate.bind(Menu);
+      Menu.buildFromTemplate = template => {
+        kept.push(template.map(({ type, label, enabled, toolTip, accelerator }) => ({ type, label, enabled, toolTip, accelerator })));
+        const menu = build(template);
+        menu.popup = options => options?.callback?.();
+        return menu;
+      };
+    });
+    await win.click(row, { button: "right" });
+    await win.waitForFunction(() => true);
+    const menus = await launched.app.evaluate(() => (globalThis as { __menus?: { type?: string; label?: string; enabled?: boolean; toolTip?: string; accelerator?: string | null }[][] }).__menus ?? []);
+    expect(menus).toHaveLength(1);
+    const rows = menus[0]!;
+    expect(rows.filter(r => r.type !== "separator").map(r => r.label)).toEqual([
+      WORKSPACE_WORDS.pause,
+      WORKSPACE_WORDS.rebuild,
+      WORKSPACE_WORDS.newThread,
+      WORKSPACE_WORDS.openTerminal,
+      WORKSPACE_WORDS.openBrowser,
+      WORKSPACE_WORDS.openMachine,
+      WORKSPACE_WORDS.rename,
+      WORKSPACE_WORDS.fork,
+      WORKSPACE_WORDS.copyId,
+      WORKSPACE_WORDS.forget,
+    ]);
+    expect(rows.filter(r => r.type === "separator")).toHaveLength(4);
+    expect(rows.find(r => r.label === WORKSPACE_WORDS.rename)).toMatchObject({ enabled: false, toolTip: "Renaming is not in the runtime yet" });
+    expect(rows.find(r => r.label === WORKSPACE_WORDS.openTerminal)).toMatchObject({ enabled: true, accelerator: "CommandOrControl+J" });
+    // The shell's page got the native menu, not the in-app one.
+    expect(await win.locator("[data-context-menu]").count()).toBe(0);
+  });
+
   it("shows the setup screen naming ~/.wsp and the pointer whose host is gone", async () => {
     launched = await launch({ WSP_HOME: undefined }, home => {
       const custom = join(home, "old-home");
@@ -261,4 +307,281 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(text).toContain(`Looked for keys and a golden in ${join(launched.home, ".wsp")}.`);
     expect(text).toContain(`~/.wsp/current-home names ${join(launched.home, "old-home")}, but no host is serving it.`);
   });
+
+  it.runIf(process.platform === "darwin")(
+    "on macOS the header row is the frame: the lights sit inside it, the sidebar shows the window's glass and its text keeps AA contrast over a light and a dark desktop",
+    async () => {
+      launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
+      const win = await launched.app.firstWindow();
+      await win.waitForSelector("[data-slot=sidebar-container]");
+      const app = launched.app;
+
+      const frame = await app.evaluate(({ BrowserWindow }) => {
+        const w = BrowserWindow.getAllWindows()[0]!;
+        return { id: w.id, buttons: w.getWindowButtonPosition(), bounds: w.getBounds(), content: w.getContentBounds(), title: w.getTitle() };
+      });
+      expect(frame.buttons).toEqual({ x: 16, y: 20 });
+      expect(frame.content.height).toBe(frame.bounds.height);
+      expect(frame.title).toBe("wsp");
+
+      const page = await win.evaluate(() => {
+        const style = (selector: string) => getComputedStyle(document.querySelector(selector)!);
+        const region = (selector: string) => (style(selector) as unknown as { webkitAppRegion: string }).webkitAppRegion;
+        const buttons = (selector: string) => Array.from(document.querySelector(selector)!.querySelectorAll("button")).map(b => (getComputedStyle(b) as unknown as { webkitAppRegion: string }).webkitAppRegion);
+        // Chromium reports mixed colours as color(srgb ...); a canvas pixel reads any of them as 8-bit rgb.
+        const ctx = Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d")!;
+        // rgba, the alpha as a fraction: the chord and the counts paint at part opacity and read as what they composite to.
+        const rgb = (color: string): number[] => {
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillStyle = color;
+          ctx.fillRect(0, 0, 1, 1);
+          const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+          return [r!, g!, b!, a! / 255];
+        };
+        const text = (cls: string): number[] => {
+          const span = document.createElement("span");
+          span.className = cls;
+          document.querySelector("[data-slot=sidebar-inner]")!.append(span);
+          const color = rgb(getComputedStyle(span).color);
+          span.remove();
+          return color;
+        };
+        const colorOf = (selector: string): number[] => rgb(style(selector).color);
+        const lockup = document.querySelector("[data-slot=sidebar-header] [role=img][aria-label=wsp]")!.getBoundingClientRect();
+        const toggle = document.querySelector("[data-slot=sidebar-header] [data-slot=sidebar-trigger]")!.getBoundingClientRect();
+        return {
+          toggleLeft: toggle.left,
+          toggleRight: toggle.right,
+          toggleCentre: { x: toggle.left + toggle.width / 2, y: toggle.top + toggle.height / 2 },
+          pageToggles: document.querySelectorAll("header [data-slot=sidebar-trigger]").length,
+          htmlClass: document.documentElement.className,
+          container: style("[data-slot=sidebar-container]").backgroundColor,
+          inner: style("[data-slot=sidebar-inner]").backgroundColor,
+          main: style("[data-slot=sidebar-inset]").backgroundColor,
+          mainRgb: rgb(style("[data-slot=sidebar-inset]").backgroundColor),
+          headerHeight: document.querySelector("[data-slot=sidebar-header]")!.getBoundingClientRect().height,
+          lockupLeft: lockup.left,
+          sidebarHeader: region("[data-slot=sidebar-header]"),
+          pageHeader: region("header [data-header-row]"),
+          sidebarButtons: buttons("[data-slot=sidebar-header]"),
+          pageButtons: buttons("header"),
+          foreground: text("text-sidebar-foreground"),
+          muted: text("text-sidebar-muted-foreground"),
+          quiet: text("text-muted-foreground"),
+          icon: colorOf("[data-sidebar-search] button svg"),
+          meta: colorOf("[data-sidebar-search] kbd"),
+          chevron: colorOf("button[aria-label='Workspaces'] svg"),
+          sidebarWidth: document.querySelector("[data-slot=sidebar-container]")!.getBoundingClientRect().width,
+        };
+      });
+      expect(page.htmlClass.split(" ")).toContain("desktop-mac");
+      expect(page.container).toBe("rgba(0, 0, 0, 0)");
+      expect(page.inner).toBe("rgba(0, 0, 0, 0)");
+      expect(page.main).not.toBe("rgba(0, 0, 0, 0)");
+      expect(page.headerHeight).toBe(52);
+      expect(page.pageToggles).toBe(0);
+      expect(page.sidebarHeader).toBe("drag");
+      expect(page.pageHeader).toBe("drag");
+      expect(page.pageButtons.length).toBeGreaterThan(1);
+      expect([...page.sidebarButtons, ...page.pageButtons].every(r => r === "no-drag")).toBe(true);
+
+      const captured = await app.evaluate(async ({ BrowserWindow }, args) => {
+        const image = await BrowserWindow.fromId(args.id)!.webContents.capturePage();
+        const { width, height } = image.getSize();
+        const bitmap = image.toBitmap();
+        const alphaAt = (x: number, y: number) => bitmap[(y * width + x) * 4 + 3]!;
+        const scale = width / args.bounds.width;
+        return { sidebar: alphaAt(Math.round(args.sidebarWidth * scale) >> 1, Math.round(height * 0.7)), main: alphaAt(Math.round((args.sidebarWidth + 200) * scale), Math.round(height * 0.7)) };
+      }, { id: frame.id, bounds: frame.bounds, sidebarWidth: page.sidebarWidth });
+      expect(captured.sidebar).toBe(0);
+      expect(captured.main).toBe(255);
+
+      // The desktop behind the window is a full-screen window of one colour, so the glass is measured over a known backdrop.
+      const shots = join(tmpdir(), "wsp-render");
+      mkdirSync(shots, { recursive: true });
+      const contrast = (text: number[], glass: number[]): number => {
+        const alpha = text[3] ?? 1;
+        const painted = [0, 1, 2].map(i => text[i]! * alpha + glass[i]! * (1 - alpha));
+        const lum = (c: number[]) => {
+          const [r, g, b] = c.map(v => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4));
+          return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+        };
+        const [hi, lo] = [lum(painted), lum(glass)].sort((x, y) => y - x) as [number, number];
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      const staged = await app.evaluate(async ({ BrowserWindow, app: electronApp, screen }, id) => {
+        const w = BrowserWindow.fromId(id)!;
+        const backdrop = new BrowserWindow({ ...screen.getPrimaryDisplay().bounds, frame: false, show: false, focusable: false, backgroundColor: "#ffffff" });
+        backdrop.showInactive();
+        // The app under test is not the active application: it takes activation so the window is key (coloured lights,
+        // active glass); the backdrop floats over every other window and the app one step above it, so nothing else sits
+        // between them, and both follow whichever Space the screen shows.
+        electronApp.focus({ steal: true });
+        backdrop.setAlwaysOnTop(true, "floating", 0);
+        w.setAlwaysOnTop(true, "floating", 1);
+        w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        backdrop.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        w.focus();
+        await new Promise(r => setTimeout(r, 800));
+        return { b: w.getBounds(), backdropId: backdrop.id };
+      }, frame.id);
+      const { b } = staged;
+      const capture = (file: string) => expect(spawnSync("screencapture", ["-R", `${b.x},${b.y},${b.width},${b.height}`, "-x", file]).status).toBe(0);
+      const lights = async (file: string) => {
+        capture(file);
+        return app.evaluate(({ nativeImage }, args) => {
+          const image = nativeImage.createFromPath(args.file);
+          const { width, height } = image.getSize();
+          const bitmap = image.toBitmap();
+          const scale = width / args.width;
+          const at = (x: number, y: number): number[] => {
+            const i = (y * width + x) * 4;
+            return [bitmap[i + 2]!, bitmap[i + 1]!, bitmap[i]!];
+          };
+          // The red light is the leftmost and the green the rightmost; each centre is the mean of its hue's pixels in the
+          // top-left corner. Hue, not absolute values: the display's tone mapping shifts every pixel while a video plays.
+          const reds: number[][] = [];
+          const greens: number[][] = [];
+          for (let y = 0; y < 80 * scale; y++)
+            for (let x = 0; x < 80 * scale; x++) {
+              const [r, g, bl] = at(x, y);
+              if (r! > 150 && r! - g! > 60 && r! - bl! > 60) reds.push([x, y]);
+              if (g! > 120 && g! - r! > 50 && g! - bl! > 50) greens.push([x, y]);
+            }
+          const centre = (pts: number[][]) => ({ x: pts.reduce((sum, p) => sum + p[0]!, 0) / pts.length / scale, y: pts.reduce((sum, p) => sum + p[1]!, 0) / pts.length / scale });
+          return {
+            scale,
+            height: height / scale,
+            reds: reds.length,
+            greens: greens.length,
+            red: centre(reds),
+            green: centre(greens),
+            glass: at(Math.round(30 * scale), Math.round(height * 0.7)),
+            main: at(Math.round(width * 0.75), Math.round(height * 0.7)),
+            probe: at(Math.round(args.probeX * scale), Math.round(8 * scale)),
+          };
+        }, { file, width: b.width, probeX: page.lockupLeft + 2 });
+      };
+      const mainColour = (px: number[]) => px.every((v, i) => Math.abs(v - page.mainRgb[i]!) <= 6);
+      // The window is in the frame when the main column shows its own opaque background and the lights are coloured (key);
+      // the header pixel at the wordmark's x tells the two states apart, so a frame saved mid-slide is retaken.
+      type Shot = Awaited<ReturnType<typeof lights>>;
+      const inFrame = (shot: Shot, state: "open" | "collapsed") =>
+        mainColour(shot.main) && shot.reds > 20 && shot.greens > 20 && (state === "collapsed" ? mainColour(shot.probe) : !mainColour(shot.probe));
+      const retake = async (file: string, state: "open" | "collapsed"): Promise<Shot> => {
+        let shot = await lights(file);
+        for (let attempt = 0; !inFrame(shot, state) && attempt < 12; attempt++) {
+          // A click elsewhere on this Mac takes the key status back; the window asks for it again before each retake.
+          await app.evaluate(({ BrowserWindow, app: electronApp }, id) => {
+            electronApp.focus({ steal: true });
+            BrowserWindow.fromId(id)!.focus();
+          }, frame.id);
+          await win.waitForTimeout(500);
+          shot = await lights(file);
+        }
+        return shot;
+      };
+      // The sidebar slides for 200 ms; its container's left edge holding still across two frames, at rest for the state, is the end.
+      const slid = (state: "open" | "collapsed") =>
+        win.waitForFunction(
+          (want: string) =>
+            new Promise<boolean>(resolve => {
+              const el = document.querySelector("[data-slot=sidebar-container]")!;
+              const before = el.getBoundingClientRect().left;
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => {
+                  const { left, width } = el.getBoundingClientRect();
+                  resolve(left === before && (want === "open" ? left === 0 : left <= 1 - width));
+                }),
+              );
+            }),
+          state,
+          { timeout: 5_000 },
+        );
+      // One gap: the third light's centre to the toggle's centre, and the toggle's centre to the first glyph after it, on one vertical centre.
+      const gaps = (shot: Shot, toggleCentre: { x: number; y: number }, contentLeft: number) => ({
+        lightsToToggle: toggleCentre.x - shot.green.x,
+        toggleToContent: contentLeft - toggleCentre.x,
+        drop: toggleCentre.y - shot.green.y,
+      });
+      const expectOneGap = (g: ReturnType<typeof gaps>) => {
+        expect(Math.abs(g.lightsToToggle - g.toggleToContent)).toBeLessThan(2);
+        expect(g.lightsToToggle).toBeGreaterThanOrEqual(28);
+        expect(g.lightsToToggle).toBeLessThanOrEqual(32);
+        expect(Math.abs(g.drop)).toBeLessThan(2);
+      };
+      const glass: Record<string, number[]> = {};
+      for (const [desktop, color] of [["light", "#ffffff"], ["dark", "#101010"]] as const) {
+        const file = join(shots, `desktop-mac-${desktop}.png`);
+        await app.evaluate(async ({ BrowserWindow }, args) => {
+          BrowserWindow.fromId(args.backdropId)!.setBackgroundColor(args.color);
+          await new Promise(r => setTimeout(r, 600));
+        }, { backdropId: staged.backdropId, color });
+        const shot = await retake(file, "open");
+        console.info(`desktop-mac over a ${desktop} desktop: ${file} ${JSON.stringify(shot)}`);
+        expect(shot.reds).toBeGreaterThan(20);
+        expect(shot.red.y).toBeGreaterThan(20);
+        expect(shot.red.y).toBeLessThan(32);
+        expect(shot.red.x).toBeGreaterThan(18);
+        expect(shot.red.x).toBeLessThan(26);
+        const openGaps = gaps(shot, page.toggleCentre, page.lockupLeft);
+        console.info(`open header gaps at 1x: ${JSON.stringify(openGaps)}`);
+        glass[desktop] = shot.glass;
+        const ratios = {
+          foreground: contrast(page.foreground, shot.glass),
+          muted: contrast(page.muted, shot.glass),
+          quiet: contrast(page.quiet, shot.glass),
+          icon: contrast(page.icon, shot.glass),
+          chevron: contrast(page.chevron, shot.glass),
+          meta: contrast(page.meta, shot.glass),
+        };
+        console.info(`over a ${desktop} desktop the glass is rgb(${shot.glass.join(", ")}): ${Object.entries(ratios).map(([k, v]) => `${k} ${v.toFixed(2)}:1`).join(", ")}`);
+        expectOneGap(openGaps);
+        for (const ratio of Object.values(ratios)) expect(ratio).toBeGreaterThanOrEqual(4.5);
+
+        // Collapsed, the page header is the frame row: the toggle lands where the sidebar's was, the breadcrumb after it, the row still drags.
+        await win.click("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
+        await win.waitForSelector("[data-sidebar-state=collapsed]");
+        await win.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().left - x) < 0.01, page.toggleLeft, { timeout: 5_000 });
+        await slid("collapsed");
+        const collapsed = await win.evaluate(() => {
+          const row = document.querySelector("header [data-header-row]")!;
+          const toggle = row.querySelector("[data-slot=sidebar-trigger]")!.getBoundingClientRect();
+          const crumb = row.querySelector("[data-thread-breadcrumb]")!;
+          return {
+            toggleLeft: toggle.left,
+            toggleCentre: { x: toggle.left + toggle.width / 2, y: toggle.top + toggle.height / 2 },
+            crumbLeft: crumb.getBoundingClientRect().left,
+            crumb: crumb.textContent,
+            region: (getComputedStyle(row) as unknown as { webkitAppRegion: string }).webkitAppRegion,
+            lockups: document.querySelectorAll("header [role=img][aria-label=wsp]").length,
+          };
+        });
+        expect(collapsed.toggleLeft).toBeCloseTo(page.toggleLeft, 1);
+        expect(collapsed.crumbLeft).toBeCloseTo(page.lockupLeft, 1);
+        expect(collapsed.crumb).toBe("No workspace selected");
+        expect(collapsed.region).toBe("drag");
+        expect(collapsed.lockups).toBe(0);
+        const collapsedFile = join(shots, `desktop-mac-collapsed-${desktop}.png`);
+        const collapsedShot = await retake(collapsedFile, "collapsed");
+        expect(collapsedShot.reds).toBeGreaterThan(20);
+        expect(collapsedShot.red.y).toBeCloseTo(shot.red.y, 0);
+        expect(collapsedShot.red.x).toBeCloseTo(shot.red.x, 0);
+        const collapsedGaps = gaps(collapsedShot, collapsed.toggleCentre, collapsed.crumbLeft);
+        console.info(`desktop-mac collapsed over a ${desktop} desktop: ${collapsedFile}; header gaps at 1x: ${JSON.stringify(collapsedGaps)}`);
+        expectOneGap(collapsedGaps);
+        await win.click("header [data-slot=sidebar-trigger]");
+        await win.waitForSelector("[data-sidebar-state=expanded]");
+        await win.waitForFunction(x => Math.abs(document.querySelector("[data-slot=sidebar-header] [data-slot=sidebar-trigger]")!.getBoundingClientRect().left - x) < 0.01, page.toggleLeft, { timeout: 5_000 });
+        await slid("open");
+      }
+      // The glass shows what is behind it: the two desktops leave two different tints.
+      expect(glass["light"]).not.toEqual(glass["dark"]);
+      await app.evaluate(({ BrowserWindow }, args) => {
+        BrowserWindow.fromId(args.backdropId)!.close();
+        BrowserWindow.fromId(args.id)!.setAlwaysOnTop(false);
+      }, { id: frame.id, backdropId: staged.backdropId });
+    },
+    90_000,
+  );
 });

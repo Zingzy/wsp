@@ -71,7 +71,22 @@ export interface GhosttyTheme {
   readonly cursor: GhosttyColor;
   /** CSS color the renderer overlays on selected cells; not sent to Ghostty. */
   readonly selectionBackground?: string;
+  /** Palette slots 0 to 15; a null slot keeps libghostty's own color. */
+  readonly palette?: readonly (GhosttyColor | null)[];
 }
+
+/** Ghostty's cursor-style words, the protocol's TerminalCursorStyle vocabulary, in libghostty's enum order for option 22. */
+export const GHOSTTY_CURSOR_STYLES = ["bar", "block", "underline", "block_hollow"] as const;
+export type GhosttyCursorStyle = (typeof GHOSTTY_CURSOR_STYLES)[number];
+
+/** The cursor a session starts with and returns to on DECSCUSR reset; a field left out keeps the embedder default. */
+export interface GhosttyCursorDefaults {
+  readonly style?: GhosttyCursorStyle;
+  readonly blink?: boolean;
+}
+
+/** libghostty's 256-color palette as ghostty_terminal_get and ghostty_terminal_set carry it: 256 RGB triples. */
+const PALETTE_BYTES = 256 * 3;
 
 export interface GhosttyCell {
   readonly text: string;
@@ -207,6 +222,7 @@ export class GhosttyTerminalCore {
   private ptyWriterId = 0;
   private ptyWriter: ((data: string) => void) | null = null;
   private scratch = 0;
+  private cursorDefaults: GhosttyCursorDefaults = {};
   private style = 0;
   private scrollbar = 0;
   private rows: GhosttyRow[] = [];
@@ -227,8 +243,10 @@ export class GhosttyTerminalCore {
     cellHeight: number,
     theme: GhosttyTheme,
     onPtyData: (data: string) => void,
+    cursor: GhosttyCursorDefaults = {},
   ): Promise<GhosttyTerminalCore> {
     const core = new GhosttyTerminalCore(await loadGhosttyRuntime());
+    core.cursorDefaults = cursor;
     try {
       core.initialize(cols, rows, cellWidth, cellHeight, theme, onPtyData);
       return core;
@@ -256,7 +274,7 @@ export class GhosttyTerminalCore {
     this.runtime.free(options, optionsSize);
     this.assertSuccess("ghostty_terminal_new", terminalResult);
     this.terminal = this.runtime.readPointer(this.terminalSlot);
-    this.applyDefaultCursorBlink();
+    this.applyCursorDefaults();
     this.ptyWriter = onPtyData;
     this.ptyWriterId = this.runtime.attachPtyWriter(this.terminal, onPtyData);
 
@@ -328,7 +346,7 @@ export class GhosttyTerminalCore {
     this.runtime.call("ghostty_terminal_reset", this.terminal);
     // RIS returns the cursor to Ghostty's built-in steady default, so the
     // embedder default has to be applied again before the replay runs.
-    this.applyDefaultCursorBlink();
+    this.applyCursorDefaults();
     this.rows = [];
     if (data.length === 0) return;
     const writer = this.ptyWriter;
@@ -362,16 +380,22 @@ export class GhosttyTerminalCore {
 
   /**
    * Ghostty's built-in default cursor is steady, while the xterm.js renderer
-   * this replaced ran with `cursorBlink: true`. Option 23 is the embedder's
-   * default blink, which is the state a session starts in and returns to on
-   * DECSCUSR reset (CSI 0 q), so programs that ask for a specific cursor
-   * through DECSCUSR or DEC mode 12 still win.
+   * this replaced ran with `cursorBlink: true`. Options 22 and 23 are the
+   * embedder's default style and blink, which is the state a session starts in
+   * and returns to on DECSCUSR reset (CSI 0 q), so programs that ask for a
+   * specific cursor through DECSCUSR or DEC mode 12 still win. The person's
+   * Ghostty config supplies both when it sets them; blink is on otherwise.
    */
-  private applyDefaultCursorBlink(): void {
+  private applyCursorDefaults(): void {
     const blink = this.runtime.alloc(1);
-    this.runtime.bytes(blink, 1)[0] = 1;
+    this.runtime.bytes(blink, 1)[0] = this.cursorDefaults.blink === false ? 0 : 1;
     this.runtime.call("ghostty_terminal_set", this.terminal, 23, blink);
     this.runtime.free(blink, 1);
+    if (this.cursorDefaults.style === undefined) return;
+    const style = this.runtime.alloc(4);
+    this.runtime.view(style, 4).setUint32(0, GHOSTTY_CURSOR_STYLES.indexOf(this.cursorDefaults.style), true);
+    this.runtime.call("ghostty_terminal_set", this.terminal, 22, style);
+    this.runtime.free(style, 4);
   }
 
   setTheme(theme: GhosttyTheme): void {
@@ -386,6 +410,19 @@ export class GhosttyTerminalCore {
       this.runtime.call("ghostty_terminal_set", this.terminal, option, color);
     }
     this.runtime.free(color, 3);
+    if (theme.palette !== undefined) this.setPalette(theme.palette);
+  }
+
+  /** The theme's slots over libghostty's default palette; the set keeps any slot a program changed through OSC 4. */
+  private setPalette(palette: readonly (GhosttyColor | null)[]): void {
+    const bytes = this.runtime.alloc(PALETTE_BYTES);
+    this.assertSuccess("ghostty_terminal_get", this.runtime.call("ghostty_terminal_get", this.terminal, 25, bytes));
+    const view = this.runtime.bytes(bytes, PALETTE_BYTES);
+    palette.forEach((slot, index) => {
+      if (slot !== null && index < 256) view.set([slot.r, slot.g, slot.b], index * 3);
+    });
+    this.runtime.call("ghostty_terminal_set", this.terminal, 14, bytes);
+    this.runtime.free(bytes, PALETTE_BYTES);
   }
 
   scroll(deltaRows: number): void {

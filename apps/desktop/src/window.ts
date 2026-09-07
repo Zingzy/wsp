@@ -1,21 +1,46 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The one window's constructor options. No tabbingIdentifier: macOS native
-// tabs bind ctrl+tab and the digit chords at the window level, and the page
-// needs them for the workspace switch. This shell is the only one where those
-// chords reach a page at all, since a browser tab keeps them.
+import { DESKTOP_MAC_CLASS } from "@wsp/protocol";
 import type { BrowserWindowConstructorOptions } from "electron";
+import { htmlClassArg } from "./html-class.js";
 
-export function appWindowOptions(preload?: string): BrowserWindowConstructorOptions {
+/** How one platform frames the app window: the BrowserWindow options beyond the size and title every
+ * platform shares, and the class the page carries so the web lays itself out for that frame. */
+interface WindowFrame {
+  readonly options: BrowserWindowConstructorOptions;
+  readonly htmlClass?: string;
+}
+
+const STOCK: WindowFrame = { options: { backgroundColor: "#09090b" } };
+
+// The lights are 12px tall and the header row 52px; y 20 centres them in it, x 16 is where Finder puts them. No
+// tabbingIdentifier: native tabs would take ctrl+tab and the digit chords at the window level, and the page switches
+// workspaces with them.
+const MAC: WindowFrame = {
+  options: {
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 16, y: 20 },
+    vibrancy: "sidebar",
+    visualEffectState: "followWindow",
+    backgroundColor: "#00000000",
+  },
+  htmlClass: DESKTOP_MAC_CLASS,
+};
+
+const FRAMES: Partial<Record<NodeJS.Platform, WindowFrame>> = { darwin: MAC };
+
+export function windowOptions(platform: NodeJS.Platform, preload?: string): BrowserWindowConstructorOptions {
+  const frame = FRAMES[platform] ?? STOCK;
   return {
     width: 1280,
     height: 800,
     title: "wsp",
-    backgroundColor: "#09090b",
+    ...frame.options,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
       ...(preload !== undefined ? { preload } : {}),
+      ...(frame.htmlClass !== undefined ? { additionalArguments: [htmlClassArg(frame.htmlClass)] } : {}),
     },
   };
 }
