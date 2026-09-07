@@ -18,8 +18,8 @@ const WORD = /^[A-Za-z_][\w.+-]*$/;
  * image with the shell, never a call to guard. */
 const RC_BUILTIN = new Set([
   "autoload", "bg", "bindkey", "bye", "chdir", "compadd", "compdef", "compdescribe", "compinit", "complete", "compgen", "compopt", "coproc", "dirs", "disable", "disown", "echotc", "echoti", "emulate", "enable", "fc", "fg",
-  "functions", "getln", "getopts", "hash", "history", "in", "integer", "jobs", "kill", "let", "limit", "logout", "mapfile", "popd", "print", "pushd", "pushln", "pwd", "r", "readarray", "rehash", "sched", "select", "setopt", "shopt",
-  "suspend", "times", "ttyctl", "type", "ulimit", "umask", "unalias", "unfunction", "unhash", "unlimit", "unsetopt", "vared", "whence", "where", "zcompile", "zformat", "zle", "zmodload", "zparseopts", "zprof", "zstyle",
+  "functions", "getln", "getopts", "hash", "history", "in", "integer", "jobs", "let", "limit", "logout", "mapfile", "popd", "print", "pushd", "pushln", "r", "readarray", "rehash", "sched", "select", "setopt", "shopt",
+  "suspend", "times", "ttyctl", "umask", "unalias", "unfunction", "unhash", "unlimit", "unsetopt", "vared", "whence", "where", "zcompile", "zformat", "zle", "zmodload", "zparseopts", "zprof", "zstyle",
   "add-zsh-hook", "add-zle-hook-widget", "bashcompinit", "colors", "compaudit", "is-at-least", "promptinit", "prompt", "run-help", "select-word-style", "vcs_info", "zargs", "zcalc", "zed", "zmv", "zrecompile",
   "bracketed-paste-magic", "url-quote-magic", "edit-command-line", "up-line-or-beginning-search", "down-line-or-beginning-search", "history-search-end",
 ]);
@@ -162,8 +162,12 @@ function notes(missing: readonly string[], dropped: readonly string[]): string[]
   ];
 }
 
-/** A command that is on the machine after all (installed by hand, by an agent, or unknown to the planner) always wins: the no-op is defined only when the name resolves to nothing. */
-const guardLine = (name: string): string => `command -v ${name} >/dev/null 2>&1 || ${name}() { return 127; }`;
+/** A command that is on the machine after all (installed by hand, by an agent, unknown to the planner, or on a directory the rc
+ * itself adds to PATH below the block) always wins: the guard looks the name up at every call and hands over to the command
+ * once there is one. `command -v` would find the guard itself, so the lookup runs in a subshell with the guard unset; a
+ * function that unsets and redefines itself while it runs crashes zsh 5.9 (exit 139, measured), so the guard is only ever
+ * unset on the way to the real command. */
+const guardLine = (name: string): string => `${name}() { if (unset -f ${name}; command -v ${name}) >/dev/null 2>&1; then unset -f ${name}; ${name} "$@"; else return 127; fi; }`;
 
 /** The text with the guard block prepended: a conditional silent no-op for each `missing` command and the notes for
  * those and for the plugins `dropped`. Any guard block an earlier pack wrote is taken out first, so a re-run

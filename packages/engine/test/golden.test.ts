@@ -780,15 +780,21 @@ describe("golden import stages", () => {
   });
 
   it("after the tools and the agents are on, the login shell is started once interactively under the guard; what it prints to stderr is the version's shell noise, first line and count, and the golden still seals; a quiet shell records none", async () => {
-    const noisy = backendFor([["zsh -ic true", { exitCode: 0, stdout: "", stderr: "zsh: command not found: starship\nzsh eza plugin: eza not found.\n" }]]);
+    const noisy = backendFor([["zsh -lic true", { exitCode: 0, stdout: "", stderr: "zsh: command not found: starship\nzsh eza plugin: eza not found.\n" }]]);
     const { stages, onStage } = stageRecorder();
     const shell = { shell: "zsh" as const, frameworks: [], cmd: "install-zsh" };
     const builder = await prepareBuilder({ backend: noisy.backend, setup: "true", fetch: noisy.fetch, onStage, import: importOf({ shell }) });
-    const check = noisy.cmds.find(c => c.includes("zsh -ic true"))!;
-    expect(check).toContain('TERM=xterm-256color zsh -ic true </dev/null');
+    const at = (needle: string): number => {
+      const i = noisy.cmds.findIndex(c => c.includes(needle));
+      expect(i, needle).toBeGreaterThanOrEqual(0);
+      return i;
+    };
+    const check = noisy.cmds[at("zsh -lic true")]!;
+    // A login shell like the app's terminal: profile.d puts the tools on PATH before the rc files are read.
+    expect(check).toContain('TERM=xterm-256color zsh -lic true </dev/null');
     expect(check).toMatch(/\nsetsid bash -c '/);
     // A tool or an agent the rc calls is on the machine by then: the check runs after the last install of each stage.
-    for (const before of ["tar xzf", "claude-install", "codex-install", "brew install gh", "bun@1.4.0", "autoremove"]) expect(noisy.cmds.indexOf(check), before).toBeGreaterThan(noisy.cmds.indexOf(noisy.cmds.find(c => c.includes(before))!));
+    for (const before of ["tar xzf", "claude-install", "codex-install", "brew install gh", "bun@1.4.0", "autoremove"]) expect(at("zsh -lic true"), before).toBeGreaterThan(at(before));
     expect(stages.some(l => l.startsWith("installing-mcp:shell noise: zsh: command not found: starship, 2 lines; machine context:"))).toBe(true);
     expect(builder.import?.shellNoise).toBe("zsh: command not found: starship, 2 lines");
     expect((await sealGolden(builder, { backend: noisy.backend, smoke: "true" })).version.shellNoise).toBe("zsh: command not found: starship, 2 lines");
@@ -797,14 +803,14 @@ describe("golden import stages", () => {
     const q = stageRecorder();
     const b = await prepareBuilder({ backend: quiet.backend, setup: "true", fetch: quiet.fetch, onStage: q.onStage, import: importOf({ shell }) });
     expect(q.stages.some(l => l.startsWith("installing-mcp:zsh starts quiet; machine context:"))).toBe(true);
-    const hung = backendFor([["zsh -ic true", { exitCode: 124, stdout: "", stderr: "" }]]);
+    const hung = backendFor([["zsh -lic true", { exitCode: 124, stdout: "", stderr: "" }]]);
     const h = await prepareBuilder({ backend: hung.backend, setup: "true", fetch: hung.fetch, import: importOf({ shell }) });
     expect(h.import?.shellNoise).toBe("timed out after 60s");
     expect(b.import).not.toHaveProperty("shellNoise");
     expect((await sealGolden(b, { backend: quiet.backend, smoke: "true" })).version).not.toHaveProperty("shellNoise");
     const none = backendFor();
     await prepareBuilder({ backend: none.backend, setup: "true", fetch: none.fetch, import: importOf() });
-    expect(none.cmds.some(c => c.includes("-ic true"))).toBe(false);
+    expect(none.cmds.some(c => c.includes("-lic true"))).toBe(false);
   });
 
   it("a builder that already carries the files does not run the shell step again", async () => {

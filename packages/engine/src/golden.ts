@@ -260,9 +260,10 @@ const AGENT_TIMEOUT_S = 900;
 const SHELL_TIMEOUT_S = 300;
 const SHELL_CHECK_S = 60;
 
-/** One interactive start of the login shell, reading the rc files the way the app's terminal will: what it prints
- * to stderr is what the person sees before the first prompt. The guest exec has no HOME, so the prelude sets it. */
-const shellCheck = (shell: LoginShell): string => `${PRELUDE}\nTERM=xterm-256color ${shell} -ic true </dev/null || true`;
+/** One start of the login shell the way the app's pty runs it, a login shell (profile.d puts the tools on PATH before
+ * the rc files) and interactive (the rc files are read): what it prints to stderr is what the person sees before the
+ * first prompt. The guest exec has no HOME, so the prelude sets it. */
+const shellCheck = (shell: LoginShell): string => `${PRELUDE}\nTERM=xterm-256color ${shell} -lic true </dev/null || true`;
 
 /** Runs the import stages and the harness on a builder, skipping what the
  * ledger says is already there for the same recipe. Files and upload fail the

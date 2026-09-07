@@ -61,14 +61,15 @@ describe("calledCommands", () => {
 });
 
 describe("guardCommands", () => {
-  it("prepends one block that defines a silent no-op for each name the machine does not have, a command that is there winning, with a one-line note naming them, and leaves the file's own bytes as they were", () => {
+  const guard = (name: string): string => `${name}() { if (unset -f ${name}; command -v ${name}) >/dev/null 2>&1; then unset -f ${name}; ${name} "$@"; else return 127; fi; }`;
+  it("prepends one block that defines a guard for each name that runs the command when it is there at call time and is a silent no-op when it is not, with a one-line note naming them, and leaves the file's own bytes as they were", () => {
     const text = 'eval "$(starship init zsh)"\nalias ls=\'eza -la\'\ndiskbloom\n';
     expect(guardCommands(text, ["starship", "eza", "diskbloom"])).toBe(
       [
         GUARD_BEGIN,
-        "command -v starship >/dev/null 2>&1 || starship() { return 127; }",
-        "command -v eza >/dev/null 2>&1 || eza() { return 127; }",
-        "command -v diskbloom >/dev/null 2>&1 || diskbloom() { return 127; }",
+        guard("starship"),
+        guard("eza"),
+        guard("diskbloom"),
         "# Guarded above: a call to one of these that is not on this machine is silent instead of an error: starship, eza, diskbloom. Tick them in wsp init to install them.",
         GUARD_END,
         "",
@@ -93,12 +94,12 @@ describe("guardCommands", () => {
   it("names each plugin left out on its own note line, after the no-ops and before the silenced line; plugins alone still get a block", () => {
     expect(guardCommands("plugins=(git)\n", [], ["eza"])).toBe([GUARD_BEGIN, "# plugin eza left out: eza is not on the image", GUARD_END, "", "plugins=(git)", ""].join("\n"));
     expect(guardCommands("plugins=(git)\ndiskbloom\n", ["diskbloom"], ["eza", "gcloud"])).toBe(
-      [GUARD_BEGIN, "command -v diskbloom >/dev/null 2>&1 || diskbloom() { return 127; }", "# plugin eza left out: eza is not on the image", "# plugin gcloud left out: gcloud is not on the image", "# Guarded above: a call to one of these that is not on this machine is silent instead of an error: diskbloom. Tick them in wsp init to install them.", GUARD_END, "", "plugins=(git)", "diskbloom", ""].join("\n"),
+      [GUARD_BEGIN, guard("diskbloom"), "# plugin eza left out: eza is not on the image", "# plugin gcloud left out: gcloud is not on the image", "# Guarded above: a call to one of these that is not on this machine is silent instead of an error: diskbloom. Tick them in wsp init to install them.", GUARD_END, "", "plugins=(git)", "diskbloom", ""].join("\n"),
     );
   });
 
   it("keeps the file's line endings", () => {
-    expect(guardCommands("diskbloom\r\n", ["diskbloom"])).toBe(`${GUARD_BEGIN}\r\ncommand -v diskbloom >/dev/null 2>&1 || diskbloom() { return 127; }\r\n# Guarded above: a call to one of these that is not on this machine is silent instead of an error: diskbloom. Tick them in wsp init to install them.\r\n${GUARD_END}\r\n\r\ndiskbloom\r\n`);
+    expect(guardCommands("diskbloom\r\n", ["diskbloom"])).toBe(`${GUARD_BEGIN}\r\ndiskbloom() { if (unset -f diskbloom; command -v diskbloom) >/dev/null 2>&1; then unset -f diskbloom; diskbloom "$@"; else return 127; fi; }\r\n# Guarded above: a call to one of these that is not on this machine is silent instead of an error: diskbloom. Tick them in wsp init to install them.\r\n${GUARD_END}\r\n\r\ndiskbloom\r\n`);
   });
 });
 
