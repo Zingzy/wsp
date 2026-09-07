@@ -643,6 +643,12 @@ export function goneWords(machineId: string, seen?: GoneSighting): string {
   return `${base}: the ${seen.by} found it gone at ${at}${answer}`;
 }
 
+/** The answer a sighting quotes when the host's metrics read came back missing while the state read still said
+ * running: the host lost the VM before the gateway's record followed, so a pause or snapshot would have failed next. */
+export function hostLostAnswer(said: string): string {
+  return `metrics ${said}; the state read still said running`;
+}
+
 /** The machine row's line when a record that said paused met a machine the provider was running all along (a nap
  * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
 export const ALREADY_RUNNING = "already running at the provider";

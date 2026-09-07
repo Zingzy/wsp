@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellQuote, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, GUEST_HOME, HOMEBREW, HOMEBREW_STEP, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -584,6 +584,9 @@ const PNPM_HOME = "/root/.local/share/pnpm";
  * it does not depend on the machine's own environment, and login shells get it from profile.d. */
 export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:/root/go/bin:/root/.cargo/bin:${PNPM_HOME}:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
 export const PATH_LINE = `export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`;
+/** The guest runs as root, and its exec environment names no user (measured 2026-09-05): what every road that
+ * hands the guest an environment says about who is logged in. */
+export const GUEST_USER_ENV: Readonly<Record<string, string>> = { HOME: GUEST_HOME, USER: "root" };
 const withPath = (cmd: string): string => `${PATH_LINE}\n${cmd}`;
 
 /** Where a login shell reads the tools PATH: a thread's terminal is one, and it inherits nothing from the stages. */

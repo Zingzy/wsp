@@ -83,6 +83,10 @@ export interface Machine {
   previewUrl?(port: number): Promise<PreviewReach>;
   /** Optional: backends that expose size and creation time per machine. */
   describe?(): Promise<MachineShape>;
+  /** Optional: backends whose host reports live usage per machine. Answers when the host still knows the VM; a
+   * missing answer while state() still says running is the host having lost it, ahead of the gateway's own record.
+   * The numbers themselves are read nowhere yet, so none are typed. */
+  metrics?(): Promise<void>;
 }
 
 /** One snapshot as the provider lists it; sizeBytes is what storage is billed on. */

@@ -81,6 +81,7 @@ import {
   rollback as rollbackGolden,
   snapshotStorage,
   applyMachineContext,
+  GUEST_USER_ENV,
   TOOLS_PATH,
 } from "@wsp/engine";
 import type {
@@ -149,8 +150,9 @@ export interface HarnessAdapterContext {
   env: Readonly<Record<string, string>>;
 }
 
-/** What every adapter is handed as the machine's login environment: the PATH the golden's login shells get. */
-export const GUEST_LOGIN_ENV: Readonly<Record<string, string>> = { PATH: TOOLS_PATH };
+/** The machine's login environment: who the guest runs as and the PATH the golden's login shells get. Every fork
+ * carries it in its envs at create and every adapter exports it under the harness's own. */
+export const GUEST_LOGIN_ENV: Readonly<Record<string, string>> = { ...GUEST_USER_ENV, PATH: TOOLS_PATH };
 
 export interface HarnessStartOptions {
   prompt: string;
@@ -1547,9 +1549,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     kind,
     cpu: override?.cpu ?? r.size.cpu,
     memMb: override?.memMb ?? r.size.memMb,
-    ...(r.spec.envs !== undefined || override?.envs !== undefined
-      ? { envs: { ...r.spec.envs, ...override?.envs } }
-      : {}),
+    envs: { ...GUEST_LOGIN_ENV, ...r.spec.envs, ...override?.envs },
     labels: { ...r.spec.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [WORKSPACE_LABEL]: r.id, [NAME_LABEL]: r.name, [GOLDEN_LABEL]: r.golden, [CREATED_AT_LABEL]: new Date().toISOString() },
     onIdle: "pause",
     idleTimeoutMs: backstopMs(idleWindowOf(r)),
@@ -3710,6 +3710,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(e.machine.previewUrl ? { daemonReach: () => e.ws.daemonReach() } : {}),
         providerState: () => e.machine.state(),
+        ...(e.machine.metrics !== undefined ? { metrics: e.machine.metrics.bind(e.machine) } : {}),
         exec: (cmd, o) => e.machine.exec(cmd, o),
       }));
     },
