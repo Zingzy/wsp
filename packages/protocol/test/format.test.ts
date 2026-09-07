@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, TURN_IDLE_MS, TURN_WALL_MS, backgroundTasksLine, behindGoldenLine, builderStaysLine, deleteNotice, execFolderLine, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, machineUnreachedLine, notifyLine, plural, providerAnswerLine, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, stepRetryLine, timedOutLine, titleLine, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine } from "../src/index.js";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, TURN_IDLE_MS, TURN_WALL_MS, backgroundTasksLine, behindGoldenLine, builderStaysLine, deleteNotice, execFolderLine, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, machineUnreachedLine, moveTimedOutLine, notifyLine, plural, providerAnswerLine, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, stepRetryLine, timedOutLine, titleLine, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -178,6 +178,16 @@ describe("machineUnreachedLine", () => {
   it("says the machine could not be reached from this computer, with the attempts counted and the time they took", () => {
     expect(machineUnreachedLine(6, 23_400)).toBe("the machine could not be reached from this computer after 6 attempts over 23s");
     expect(machineUnreachedLine(1, 800)).toBe("the machine could not be reached from this computer after 1 attempt over 800ms");
+  });
+});
+
+describe("a pause or a wake the provider never answered", () => {
+  it("names the move, how long it was given in all, and what the provider reads about the machine after it", () => {
+    expect(moveTimedOutLine("wake", 361_000, "paused")).toBe("wake did not complete in 6m 1s; the provider did not answer and reads the machine paused; try again");
+    expect(moveTimedOutLine("pause", 480_000, "running")).toBe("pause did not complete in 8m; the provider did not answer and reads the machine running; try again");
+  });
+  it("says when the provider could not be read about the machine either", () => {
+    expect(moveTimedOutLine("pause", 240_000, undefined)).toBe("pause did not complete in 4m; the provider did not answer and could not be read about the machine; try again");
   });
 });
 

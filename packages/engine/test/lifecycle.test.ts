@@ -14,6 +14,17 @@ function stubMachine(overrides: Partial<Machine> = {}): Machine {
   };
 }
 
+function counting(overrides: Partial<Machine> = {}) {
+  const calls = { pause: 0, resume: 0, kill: 0 };
+  const machine = stubMachine({
+    pause: async () => { calls.pause++; },
+    resume: async () => { calls.resume++; },
+    kill: async () => { calls.kill++; },
+    ...overrides,
+  });
+  return { machine, calls };
+}
+
 describe("Workspace lifecycle", () => {
   it("refuses direct snapshot after any resume (snapshot-fresh rule)", async () => {
     const ws = new Workspace(stubMachine(), { goldenSnapshot: "snap_g" });
@@ -40,17 +51,6 @@ describe("Workspace lifecycle", () => {
 });
 
 describe("Workspace verified wake", () => {
-  function counting(overrides: Partial<Machine> = {}) {
-    const calls = { pause: 0, resume: 0, kill: 0 };
-    const machine = stubMachine({
-      pause: async () => { calls.pause++; },
-      resume: async () => { calls.resume++; },
-      kill: async () => { calls.kill++; },
-      ...overrides,
-    });
-    return { machine, calls };
-  }
-
   it("holds the phase at waking until the check passes, then stays on the same machine", async () => {
     const { machine, calls } = counting();
     const seen: string[] = [];
@@ -146,6 +146,44 @@ describe("Workspace verified wake", () => {
     await ws.nap();
     await expect(ws.wake()).rejects.toThrow(/no daemon/);
     expect(ws.currentPhase).toBe("napping");
+  });
+});
+
+describe("Workspace provider moves", () => {
+  it("nap and wake run their pause and resume through the move hook with the machine, so the caller can bound them", async () => {
+    const { machine, calls } = counting();
+    const moves: string[] = [];
+    const ws = new Workspace(machine, {
+      goldenSnapshot: "snap_g",
+      move: async (m, move) => { moves.push(`${move}@${m.id}`); await m[move](); },
+    });
+    await ws.nap();
+    await ws.wake();
+    expect(moves).toEqual(["pause@m1", "resume@m1"]);
+    expect(calls).toMatchObject({ pause: 1, resume: 1 });
+  });
+
+  it("a wake's re-pause after a failed check goes through the hook too, and a move the hook gives up on leaves the phase where it was", async () => {
+    const { machine } = counting();
+    const moves: string[] = [];
+    let checks = 0;
+    const ws = new Workspace(machine, {
+      goldenSnapshot: "snap_g",
+      resurrect: async () => stubMachine({ id: "m2" }),
+      wakeCheck: async () => (++checks === 1 ? "no daemon" : undefined),
+      move: async (m, move) => {
+        moves.push(move);
+        if (moves.length === 1) throw new Error("pause did not complete");
+        await m[move]();
+      },
+    });
+    await expect(ws.nap()).rejects.toThrow("pause did not complete");
+    expect(ws.currentPhase).toBe("running");
+    await ws.nap();
+    expect(ws.currentPhase).toBe("napping");
+    await ws.wake();
+    expect(moves).toEqual(["pause", "pause", "resume", "pause", "resume"]);
+    expect(ws.machineId).toBe("m1");
   });
 });
 
