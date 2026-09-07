@@ -694,8 +694,10 @@ export interface Runtime {
     prepare(opts?: { name?: string; kind?: MachineKind; signal?: AbortSignal }): Promise<GoldenBuilderView>;
     /** Snapshot, smoke-fork, append a version. A builder built from a recipe is kept running for GRACE_MS after a
      * successful seal so one more change re-snapshots it; any other builder, and every failed or refused seal, consumes it.
-     * logins: what each sign-in asked of the builder came to, stamped on the version. */
-    seal(builderId: string, opts?: { logins?: GoldenLogin[] }): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
+     * keepBuilder false ends it with the seal instead: a caller with no process left to end the window would otherwise
+     * leave it billing until the next host sweeps it. logins: what each sign-in asked of the builder came to, stamped
+     * on the version. */
+    seal(builderId: string, opts?: { logins?: GoldenLogin[]; keepBuilder?: boolean }): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
     /** The recipe the golden's head was built from, or nothing when it was not built from one. */
     recipe(name?: string): Promise<RecipeDigest | undefined>;
     /** The next version from the recipe delta: on the builder kept since the save when there is one, else on a
@@ -2198,7 +2200,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const adapterFor = (entry: LiveWorkspace, named?: string): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
-    if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
+    if (!factory) throw new Error(`no adapter registered for harness "${harness}"; agents on this host: ${Object.keys(adapters).join(", ") || "none"}`);
     return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, env: GUEST_LOGIN_ENV }) };
   };
 
@@ -2881,7 +2883,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!entry) throw new Error(`no such builder: ${builderId}`);
       refuseUntouchable(entry);
       // A builder built from a recipe is what an update can land on; a bare one has no recipe to diff.
-      return sealEntry(entry, entry.record.import?.recipe !== undefined, o?.logins);
+      return sealEntry(entry, o?.keepBuilder !== false && entry.record.import?.recipe !== undefined, o?.logins);
     },
 
     async recipe(name) {

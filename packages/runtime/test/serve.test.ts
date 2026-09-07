@@ -696,7 +696,7 @@ describe("serveRuntime workspaces.exec", () => {
     const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     const refused = await c.request("workspaces.exec", { workspaceId, argv: ["true"] });
-    expect(refused).toMatchObject({ ok: false, error: 'no adapter registered for harness "claude"' });
+    expect(refused).toMatchObject({ ok: false, error: 'no adapter registered for harness "claude"; agents on this host: none' });
     expect(backend.machines[0]!.execLog.some(cmd => cmd.includes("base64 -d"))).toBe(false);
   });
 

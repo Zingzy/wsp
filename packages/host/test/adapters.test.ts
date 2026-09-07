@@ -10,7 +10,7 @@ import { THREAD_AGENTS } from "../src/thread-agents.js";
 describe("the agents wsp can open a thread on", () => {
   it("is one list, the adapter registry is keyed by it, and every id is a catalog agent", () => {
     expect(Object.keys(HARNESS_ADAPTERS).sort()).toEqual([...THREAD_AGENTS].sort());
-    expect(THREAD_AGENTS).toContain("claude");
+    expect([...THREAD_AGENTS]).toEqual(["claude", "codex"]);
     for (const id of THREAD_AGENTS) expect(CATALOG_AGENTS.map(a => a.id)).toContain(id);
   });
 

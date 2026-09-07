@@ -78,7 +78,8 @@ describe("the table of what travels", () => {
 
   it("an agent wsp cannot drive says so on its row, and the one it can says nothing", () => {
     expect(recipeTable(RECIPE, slice("claude"))[0]!.note).toBeUndefined();
-    expect(recipeTable(RECIPE, slice("codex"))[0]!.note).toBe("installs, but wsp cannot run its threads yet");
+    expect(recipeTable(RECIPE, slice("codex"))[0]!.note).toBeUndefined();
+    expect(recipeTable(RECIPE, slice("gemini"))[0]!.note).toBe("installs, but wsp cannot run its threads yet");
   });
 
   it("the groups come in one order and the heavy rows first inside their own", () => {

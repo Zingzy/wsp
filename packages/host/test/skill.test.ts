@@ -4,9 +4,10 @@
 // its instructions.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { MCP_AGENT_IDS } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENT_IDS } from "@wsp/catalog";
 import { SessionStartOutcome, notifyLine } from "@wsp/protocol";
-import { INSTRUCTIONS, SETUP_HEADING, SKILL_NAME, WSP_SKILL, instructionsOf } from "../src/skill.js";
+import { INSTRUCTIONS, SETUP_HEADING, SKILL_NAME, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
+import { THREAD_AGENTS } from "../src/thread-agents.js";
 import { VERBS } from "../src/verbs.js";
 
 describe("the wsp skill", () => {
@@ -118,12 +119,12 @@ describe("the wsp skill", () => {
 
   it("the MCP instructions are the skill's opening paragraph, the walkthrough's, and the line pointing back at the skill and the command line", () => {
     const skill = `---\nname: x\ndescription: y\n---\n\n# x\n\nOne.\nTwo.\n\n${SETUP_HEADING}\n\nThree.\n\n1. Not this.\n\n## Later\n\nNor this.\n`;
-    expect(instructionsOf(skill).startsWith("One. Two. Three. The steps, with the exact line to run")).toBe(true);
-    expect(instructionsOf(skill)).not.toContain("Not this.");
-    expect(() => instructionsOf("---\nname: x\n")).toThrow("never closes");
-    expect(() => instructionsOf(`# x\n\n${SETUP_HEADING}\n\nThree.\n`)).toThrow("no opening paragraph");
-    expect(() => instructionsOf("---\nname: x\n---\n\n# x\n\nOne.\n\n## Later\n")).toThrow(`the skill has no ${SETUP_HEADING} section`);
-    expect(INSTRUCTIONS).toBe(instructionsOf(WSP_SKILL));
+    expect(instructionsOf(skill, ["claude"]).startsWith("One. Two. Three. The agents this host runs threads on, the only values thread_new and fork take as agent: claude. The steps, with the exact line to run")).toBe(true);
+    expect(instructionsOf(skill, ["claude"])).not.toContain("Not this.");
+    expect(() => instructionsOf("---\nname: x\n", ["claude"])).toThrow("never closes");
+    expect(() => instructionsOf(`# x\n\n${SETUP_HEADING}\n\nThree.\n`, ["claude"])).toThrow("no opening paragraph");
+    expect(() => instructionsOf("---\nname: x\n---\n\n# x\n\nOne.\n\n## Later\n", ["claude"])).toThrow(`the skill has no ${SETUP_HEADING} section`);
+    expect(INSTRUCTIONS).toBe(instructionsOf(WSP_SKILL, THREAD_AGENTS));
     expect(INSTRUCTIONS.startsWith("wsp runs cloud machines called workspaces")).toBe(true);
     // A caller holding only the tools reads the whole sequence here or nowhere: health check, the recipe from what
     // their agents used, the question about the heavy rows, the person's init line, then the host started here.
@@ -138,5 +139,13 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).toContain("prefer the `wsp` command line");
     expect(INSTRUCTIONS).not.toContain("\n");
     expect(INSTRUCTIONS).not.toContain("## ");
+  });
+
+  it("the instructions name every agent the host has an adapter for and no other catalog agent, read from the registry", () => {
+    const named = (id: string): boolean => new RegExp(`\\b${id}\\b`).test(INSTRUCTIONS);
+    for (const id of THREAD_AGENTS) expect(named(id), id).toBe(true);
+    for (const a of CATALOG_AGENTS) if (!THREAD_AGENTS.some(id => id === a.id)) expect(named(a.id), a.id).toBe(false);
+    expect(INSTRUCTIONS).toContain(`take as agent: ${THREAD_AGENTS.join(", ")}.`);
+    expect(agentsLine(["claude", "codex"])).toBe("The agents this host runs threads on, the only values thread_new and fork take as agent: claude, codex.");
   });
 });

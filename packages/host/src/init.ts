@@ -2,9 +2,11 @@
 // wsp init: read this machine, let the person tick the agents, what they need
 // and the sign-ins on three screens, confirm once, build the golden's first
 // machine through the runtime, run the sign-ins chosen for the machine in this
-// terminal, set the secrets the pack cut, seal on Enter, fork the first
-// workspace and open the app on it. Nothing leaves the disk before the confirm,
-// and no question is ever asked on the remote machine.
+// terminal, set the secrets the pack cut, seal on Enter, and only then start
+// the app, fork the first workspace and open the app on it. A run with nobody
+// at a terminal ends with the golden recorded and says what starts the app.
+// Nothing leaves the disk before the confirm, and no question is ever asked on
+// the remote machine.
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
@@ -60,7 +62,9 @@ import type { Tone } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
 import { builderLink, flowHooks, keyAsks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import { handoffStage } from "./init-handoff.js";
-import type { HostHandle } from "./server.js";
+import { portClash } from "./ports.js";
+import type { CallbackRelay } from "./relay.js";
+import type { HostHandle, WorkspaceRoads } from "./server.js";
 
 export interface InitIO {
   input: Readable;
@@ -122,9 +126,23 @@ export interface InitOptions {
   scan?: (recipe: readonly RecipeCustomRow[]) => Promise<readonly ScanRow[]>;
   /** Builds the runtime around the recipe the ticks produced. */
   runtime(recipe: GoldenRecipe): Runtime;
-  /** Starts the app server over that runtime once the builder is ready; its callback relay links to the builder
-   * for the sign-ins, and the browser opens on it once the golden is sealed. The hooks wire the sign-in stage in. */
-  host(rt: Runtime, builder: GoldenBuilderView, hooks: HostHooks): Promise<HostHandle>;
+  /** The ports the app binds. A run on a terminal without --non-interactive ends by serving the app, so it probes them
+   * before anything is read and a clash is found before a machine bills. */
+  ports: { port: number; wsPort: number };
+  /** The command that starts the app once the golden is recorded, with the flags this run was given. */
+  upCommand: string;
+  /** The command that forks the first workspace from it, for a run with nobody at a terminal that asked for none. */
+  forkCommand: string;
+  /** Links this computer to the builder for the sign-ins: the pages the machine asks to open and the callback ports
+   * its flows listen on. It runs from Ready to the end of the sign-ins and binds no fixed port. The hooks wire the
+   * sign-in stage in. */
+  relay(rt: Runtime, builder: GoldenBuilderView, hooks: HostHooks): Promise<Pick<CallbackRelay, "close">>;
+  /** The workspace and project roads the app's own routes take, for a run that forks its first workspace with no host
+   * serving. */
+  roads(rt: Runtime): WorkspaceRoads;
+  /** Starts the app server over the runtime once the golden is sealed and recorded, on a run at a terminal without
+   * --non-interactive: a person is there to use it. */
+  host(rt: Runtime): Promise<HostHandle>;
   /** A pty link to the builder's daemon for the sign-in and secrets steps, dialled before each command; the real one dials its reach. */
   daemon?(rt: Runtime, builder: GoldenBuilderView): Promise<BuilderLink>;
   /** How long to wait when the account is at its machine cap, and how often. */
@@ -681,6 +699,17 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const handoff = !interactive && !opts.yes;
   // Which of the three reasons nothing is asked, in the words every taken-as-yes line uses.
   const takenAs = opts.yes ? "--yes" : io.isTTY ? "--non-interactive" : "no terminal";
+  // A person at a terminal gets the app served at the end, --yes or not; --non-interactive says an agent is driving,
+  // and off a terminal nobody is here, so neither serves anything. Only a run that serves needs the ports.
+  const serves = io.isTTY && opts.nonInteractive !== true;
+  if (serves) {
+    const clash = await portClash([opts.ports.port, opts.ports.wsPort]);
+    if (clash !== undefined) {
+      log.error(clash, out);
+      cancel("Nothing was booted. Stop that process, or run wsp init and wsp up with --port and --ws-port naming free ports.", out);
+      return { code: 1 };
+    }
+  }
 
   let manifest: Manifest;
   // The catalog recipe the screens start from: the file given, else read off this computer once the rows are in.
@@ -888,6 +917,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     return rt;
   };
   let rt = logged(opts.runtime({ ...recipe, onExec: runLog.exec }));
+  // A clean exit frees the builders this process holds at once; every road out that hands the runtime to no host takes it.
+  const closeRuntime = (): Promise<void> => rt.close().catch((e: unknown) => log.error(`runtime close failed: ${e instanceof Error ? e.message : String(e)}`, out));
   const logLine = (): string => dim(runLog.failed === undefined ? `The run log is ${runLog.path}` : `The run log ${runLog.path} could not be written (${runLog.failed})`);
   const describeBuilder = (b: GoldenBuilderView): string => {
     const ageMs = Math.max(0, Date.now() - Date.parse(b.createdAt));
@@ -1080,7 +1111,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         : `Stopped ${where}. Nothing was booted; nothing is billing.`;
     finalLine = line;
     cancel(line, out);
-    await rt.close().catch((e: unknown) => log.error(`runtime close failed: ${e instanceof Error ? e.message : String(e)}`, out));
+    await closeRuntime();
     const code = exitCodeOf(sig);
     io.exit(code);
     return { code };
@@ -1123,7 +1154,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (landed !== undefined) log.info(installsTally(landed, resultsPath).join("\n"), out);
 
   const flow: SignInFlow = { armed: false };
-  const handle = await opts.host(rt, builder, flowHooks(flow, builder));
+  const relay = await opts.relay(rt, builder, flowHooks(flow, builder));
   const dial = (): Promise<BuilderLink> => (opts.daemon ?? builderLink)(rt, builder);
   // Secrets first: a key cut from an rc file is on the machine before any status check looks for it.
   // Nobody is here to type: the flag that said so when there was a terminal, else the terminal that is missing.
@@ -1167,19 +1198,18 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         flow,
       });
   if (noteOutcomes(resultsPath, { logins: outcomes, secrets: secretOutcomes }).replaced) log.warn(`${resultsPath} could not be read; it was rewritten with the logins and secrets alone.`, out);
+  // The relay's work ends with the sign-ins; the host that serves the app after the seal links to the workspaces itself.
+  await relay.close().catch((e: unknown) => log.error(`relay close failed: ${e instanceof Error ? e.message : String(e)}`, out));
 
   const next = ((await rt.golden.get())?.head ?? 0) + 1;
   card(`Ready to seal golden v${next}`, sealSummary(landed, outcomes, secretOutcomes, widthOf(io.output)), io.output);
-  const result: InitResult = { code: 0, handle, logins: outcomes, secrets: secretOutcomes };
-  const leave = async (code: number): Promise<InitResult> => {
-    await handle.close().catch((e: unknown) => log.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`, out));
-    return { ...result, code, handle: undefined };
-  };
+  const result: InitResult = { code: 0, logins: outcomes, secrets: secretOutcomes };
   if (interactive) {
     const go = await confirmPrompt({ message: `Seal this machine as golden v${next}?`, hint: "Enter seals: a snapshot, then a fork to prove it. No leaves the machine up.", initialValue: true, input: io.input, output: io.output });
     if (isCancel(go) || !go) {
       cancel(`Nothing was sealed. Builder ${builder.id} stays up at about $${opts.pricing.rateUsdPerHour(builder.size).toFixed(2)}/hr; wsp init --recipe ${small.path} attaches to it again, and the sweep stops it once it is six hours old.`, out);
-      return leave(1);
+      await closeRuntime();
+      return { ...result, code: 1 };
     }
   } else {
     log.step(`Sealing golden v${next}. Taken as yes (${takenAs}).`, out);
@@ -1187,14 +1217,16 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   let sealed: Awaited<ReturnType<Runtime["golden"]["seal"]>> | undefined;
   let error: unknown;
   const logins = outcomes.map(r => ({ name: r.label, state: r.state }));
-  const view = await streamStages(rt, io, SEAL_STEPS, () => rt.golden.seal(builder.id, { logins }).then(r => (sealed = r), e => (error = e)), runLog.note);
+  // A kept builder needs a process to end its window: the host this run leaves serving. With none, the builder goes with the seal.
+  const view = await streamStages(rt, io, SEAL_STEPS, () => rt.golden.seal(builder.id, { logins, keepBuilder: serves }).then(r => (sealed = r), e => (error = e)), runLog.note);
   if (sealed === undefined) {
     const message = error instanceof Error ? error.message : String(error);
     runLog.note(`failed: ${message}`);
     if (view.failure === undefined) log.error(message, out);
     log.step(logLine(), out);
     outro("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.", out);
-    return leave(1);
+    await closeRuntime();
+    return { ...result, code: 1 };
   }
   const measured = buildTimes([prepared, view], new Date());
   if (measured !== undefined) noteOutcomes(resultsPath, { build: measured });
@@ -1210,6 +1242,21 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 
   if (version > 1) await retentionOffer({ rt, interactive, yes: opts.yes, input: io.input, output: io.output });
 
+  // The golden is on the account and in the state file by here: nothing under this line can lose it, and a run with
+  // nobody at a terminal has no app to serve, so it ends with the golden recorded and says what starts the app.
+  let handle: HostHandle | undefined;
+  if (serves) {
+    try {
+      handle = await opts.host(rt);
+    } catch (e) {
+      log.error(e instanceof Error ? e.message : String(e), out);
+      log.step(logLine(), out);
+      outro(`Golden v${version} is sealed and recorded. The app did not start; fix that and run ${opts.upCommand}, with --port and --ws-port when a port is taken.`, out);
+      await closeRuntime();
+      return { ...result, code: 1 };
+    }
+  }
+  const roads: WorkspaceRoads = handle ?? opts.roads(rt);
   // Only the first seal ever offers a workspace; a rebuild leaves the existing ones on the version they came from.
   const existing = await rt.workspaces.list();
   let first: FirstResult | undefined;
@@ -1218,6 +1265,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   } else {
     const ask = await askFirst({
       interactive,
+      unattended: !serves,
       ...(opts.firstWorkspace !== undefined ? { name: opts.firstWorkspace } : {}),
       ...(opts.importFolder !== undefined ? { folder: opts.importFolder } : {}),
       input: io.input,
@@ -1225,16 +1273,31 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     });
     // No and esc both end with nothing forked; neither unwinds the seal, which is already on the account by here.
     if (isCancel(ask) || ask === undefined) {
-      log.step(DONE_LINE, out);
+      if (handle !== undefined) log.step(DONE_LINE, out);
     } else {
-      first = await runFirst({ first: ask, handle, goldenVersion: version, output: io.output, spin: label => spin(io.output, label, io.isTTY) });
+      first = await runFirst({ first: ask, handle: roads, goldenVersion: version, output: io.output, spin: label => spin(io.output, label, io.isTTY) });
     }
+  }
+  if (handle === undefined) {
+    io.json?.({
+      event: "done",
+      golden: GOLDEN_NAME,
+      version,
+      snapshotId: sealed.version.snapshotId,
+      recipe: small.path,
+      nextCommand: opts.upCommand,
+      ...(first !== undefined ? { workspace: { id: first.workspace.id, name: first.workspace.name } } : { forkCommand: opts.forkCommand }),
+    });
+    log.step(logLine(), out);
+    outro(`Done. Golden v${version} is sealed; ${opts.upCommand} starts the app${first === undefined ? `, and ${opts.forkCommand} forks a workspace from it` : ""}.`, out);
+    await closeRuntime();
+    return result;
   }
   const url = appUrl(handle.port, first?.workspace.id);
   runLog.note(`app ${url}`);
   await openApp(url, handle, io, interactive, logLine(), out);
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
-  return result;
+  return { ...result, handle };
 }
 
 /** One stage stream around one runtime call; the frames it draws are the golden's, whatever the call. */
@@ -1297,7 +1360,7 @@ function sealSummary(landed: ImportResult | undefined, logins: readonly LoginOut
 }
 
 /** The app's address once the golden is sealed: opened here on a terminal the person is at, printed (with the ssh
- * forward when the address is remote) under --yes, off a terminal or over ssh. */
+ * forward when the address is remote) under --yes or over ssh. */
 async function openApp(url: string, handle: HostHandle, io: InitIO, interactive: boolean, logLine: string, out: { output: Writable }): Promise<void> {
   if (!interactive || overSsh(io.env)) {
     const lines = [`Open ${url}`];

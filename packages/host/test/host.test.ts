@@ -263,15 +263,6 @@ describe("host serves the app", () => {
     expect(html).not.toContain("window.__WSP__ ||");
   });
 
-  it("the builder wsp init prepared is the relay's, never the page's", async () => {
-    const { rt } = testRuntime(false);
-    const builder = { id: "m_b", name: "default", kind: "sandbox" as const, createdAt: "2026-09-03T00:00:00Z", size: { cpu: 2, memMb: 4096 } };
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), builder });
-    const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
-    expect(html).not.toContain("m_b");
-    expect(inlineScripts(html)[0]).toBe(`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}"};`);
-  });
-
   it("the handle's createWorkspace forks the golden's head the way the app's own create does, and refuses without a golden", async () => {
     const { rt, backend } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs("sk-ant-x", g) });

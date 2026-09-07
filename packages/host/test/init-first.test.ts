@@ -45,25 +45,33 @@ describe("the folder a person types", () => {
 describe("the flags in the question's place", () => {
   it("--import alone forks under the default name and imports that folder, asking nothing", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: true, folder: "/Users/me/code/proj", input, output })).toEqual({ name: "first", folder: "/Users/me/code/proj" });
+    expect(await askFirst({ interactive: true, unattended: false, folder: "/Users/me/code/proj", input, output })).toEqual({ name: "first", folder: "/Users/me/code/proj" });
     expect(output.read()).toBeNull();
   });
 
   it("--first-workspace alone forks under that name and imports nothing", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: true, name: "proj", input, output })).toEqual({ name: "proj" });
+    expect(await askFirst({ interactive: true, unattended: false, name: "proj", input, output })).toEqual({ name: "proj" });
     expect(output.read()).toBeNull();
   });
 
-  it("off a terminal with no flags the default is taken: the workspace is forked and no project imported", async () => {
+  it("--yes at a terminal with no flags takes the default: the workspace is forked and no project imported", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: false, input, output })).toEqual({ name: "first" });
+    expect(await askFirst({ interactive: false, unattended: false, input, output })).toEqual({ name: "first" });
+    expect(output.read()).toBeNull();
+  });
+
+  it("with nobody at a terminal only a flag forks: no flag, no workspace; a name or a folder, that fork", async () => {
+    const { input, output } = streams();
+    expect(await askFirst({ interactive: false, unattended: true, input, output })).toBeUndefined();
+    expect(await askFirst({ interactive: false, unattended: true, name: "proj", input, output })).toEqual({ name: "proj" });
+    expect(await askFirst({ interactive: false, unattended: true, folder: "/Users/me/code/proj", input, output })).toEqual({ name: "first", folder: "/Users/me/code/proj" });
     expect(output.read()).toBeNull();
   });
 
   it("reads a relative --import against this computer's working directory", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: false, folder: "code/proj", input, output })).toEqual({ name: "first", folder: resolve("code/proj") });
+    expect(await askFirst({ interactive: false, unattended: true, folder: "code/proj", input, output })).toEqual({ name: "first", folder: resolve("code/proj") });
   });
 });
 

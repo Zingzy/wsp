@@ -18,6 +18,7 @@ const markdownText = () => ({
 const alias = {
   "@wsp/engine": pkg("engine"),
   "@wsp/adapter-claude": pkg("adapter-claude"),
+  "@wsp/adapter-codex": pkg("adapter-codex"),
   "@wsp/daemon": pkg("daemon"),
   "@wsp/protocol": pkg("protocol"),
   "@wsp/runtime": pkg("runtime"),

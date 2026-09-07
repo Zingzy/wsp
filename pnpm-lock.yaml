@@ -181,6 +181,19 @@ importers:
         specifier: ^22.20.1
         version: 22.20.1
 
+  packages/adapter-codex:
+    dependencies:
+      '@wsp/adapter-claude':
+        specifier: workspace:*
+        version: link:../adapter-claude
+      '@wsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+
   packages/catalog:
     dependencies:
       '@wsp/protocol':
@@ -252,6 +265,9 @@ importers:
       '@wsp/adapter-claude':
         specifier: workspace:*
         version: link:../adapter-claude
+      '@wsp/adapter-codex':
+        specifier: workspace:*
+        version: link:../adapter-codex
       '@wsp/catalog':
         specifier: workspace:*
         version: link:../catalog

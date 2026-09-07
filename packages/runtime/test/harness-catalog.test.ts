@@ -34,6 +34,7 @@ describe("harness catalogs", () => {
     expect(harnessCatalog("pi")!.permissionModes).toEqual([]);
     expect(harnessCatalog("opencode")!.efforts).toEqual([]);
     expect(harnessCatalog("codex")!.models).toEqual([]);
+    expect(harnessCatalog("codex")!.permissionModes.find(o => o.isDefault)?.value).toBe("danger-full-access");
     expect(harnessCatalog("codex")!.contextWindows).toEqual([]);
     expect(harnessCatalog("aider")).toBeUndefined();
   });

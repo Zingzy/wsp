@@ -4,5 +4,5 @@
 // and a factory there without an id here does not either; the wizard, the
 // recipe verbs and the MCP server read the list because it needs no runtime.
 
-export const THREAD_AGENTS = ["claude"] as const;
+export const THREAD_AGENTS = ["claude", "codex"] as const;
 export type ThreadAgent = (typeof THREAD_AGENTS)[number];
