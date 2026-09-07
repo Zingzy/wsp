@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   backgroundTasksLine,
   stillWorkingRefusal,
+  LINEAGE_MARKS,
+  missingToolRow,
   behindGoldenLine,
   builderStaysLine,
   DAEMON_UPDATE_FAILED,
@@ -56,6 +58,7 @@ import {
   upgradeSealFailedUnreadLine,
   vaultKeptLine,
   vaultOverCapLine,
+  type GoldenMissingTool,
 } from "../src/index.js";
 import * as format from "../src/format.js";
 import * as protocol from "../src/index.js";
@@ -454,6 +457,26 @@ describe("goldenBuildLine", () => {
   it("a build with no version under it names no version to build on, and a build that changes nothing says only what it makes", () => {
     expect(goldenBuildLine(0, 1, [{ count: 4, noun: "tool", word: "added" }])).toBe("Builds version 1: 4 tools added");
     expect(goldenBuildLine(2, 3, [{ count: 0, noun: "tool", word: "added" }])).toBe("Builds version 3 on top of version 2");
+  });
+});
+
+describe("LINEAGE_MARKS", () => {
+  it("names every outcome a missing tool can carry and every state a lineage row shows, each as one short lowercase word or two", () => {
+    const outcomes: GoldenMissingTool["outcome"][] = ["skipped", "failed"];
+    for (const o of outcomes) expect(LINEAGE_MARKS[o]).toBe(o);
+    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" });
+    for (const word of Object.values(LINEAGE_MARKS)) {
+      expect(word).toMatch(/^[a-z]+( [a-z]+)?$/);
+      expect(word.length).toBeLessThanOrEqual(9);
+    }
+  });
+});
+
+describe("missingToolRow", () => {
+  it("shows a record as its name, reason and outcome, and one sealed without a name or an outcome by its id and as failed, so no row renders blank", () => {
+    expect(missingToolRow({ id: "tools/brew/gopls", name: "gopls", outcome: "skipped", note: "no Linux bottle" })).toEqual({ name: "gopls", note: "no Linux bottle", mark: "skipped" });
+    expect(missingToolRow({ id: "base/docker", note: "E: Unable to locate package docker-compose-v2" })).toEqual({ name: "base/docker", note: "E: Unable to locate package docker-compose-v2", mark: "failed" });
+    expect(missingToolRow({ id: "base/docker", name: "", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" }).name).toBe("base/docker");
   });
 });
 

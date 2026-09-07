@@ -3,7 +3,7 @@
 // runtime's import events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { MachineSizeOffer, MachineState, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, MachineSizeOffer, MachineState, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -487,6 +487,17 @@ export function goldenBuildLine(from: number, to: number, changes: readonly Gold
  * a state in words, never a badge. The move is the person's; nothing replaces a machine they are working on. */
 export function behindGoldenLine(on: number, head: number): string {
   return `on image v${on}, v${head} available`;
+}
+
+/** The states a lineage row can be in, each as the muted mono word the row's marks column shows: state is text there,
+ * never a badge, and a missing tool's outcome indexes this table as it is. */
+export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" } as const;
+export type LineageMark = keyof typeof LINEAGE_MARKS;
+
+/** A missing tool's row as the lineage shows it. A record sealed before the name and outcome were recorded still
+ * carries its id, so it reads by that and as failed rather than as a blank row. */
+export function missingToolRow(t: { id: string; name?: string; outcome?: GoldenMissingTool["outcome"]; note: string }): { name: string; note: string; mark: LineageMark } {
+  return { name: t.name === undefined || t.name === "" ? t.id : t.name, note: t.note, mark: t.outcome ?? "failed" };
 }
 
 /** What the provider answered one call with: the status, its message, the request id its reply carried when it
