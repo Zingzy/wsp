@@ -616,9 +616,10 @@ describe("goldenBuildLine", () => {
 });
 
 describe("REPO_STATE_WORDS", () => {
-  it("says nothing for a folder outside any repository or one not yet asked, and one short lowercase word or two for a read the machine refused", () => {
-    expect(REPO_STATE_WORDS.unknown).toEqual({ word: "", note: "" });
-    expect(REPO_STATE_WORDS.none).toEqual({ word: "", note: "" });
+  it("says no word for a folder outside any repository or one not yet asked, and one short lowercase word or two for a read the machine refused", () => {
+    expect(REPO_STATE_WORDS.unknown).toEqual({ word: "", note: "", pane: "" });
+    expect(REPO_STATE_WORDS.none.word).toBe("");
+    expect(REPO_STATE_WORDS.none.note).toBe("");
     expect(REPO_STATE_WORDS.refused.word).toBe("git unread");
     expect(REPO_STATE_WORDS.refused.word).toMatch(/^[a-z]+( [a-z]+)?$/);
     expect(REPO_STATE_WORDS.refused.word.length).toBeLessThanOrEqual(12);
@@ -627,6 +628,12 @@ describe("REPO_STATE_WORDS", () => {
   it("explains the word beside it in one dry sentence about the machine and this folder's git state", () => {
     expect(REPO_STATE_WORDS.refused.note).toBe("The machine could not read this folder's git state, so no branch is shown.");
     expect(REPO_STATE_WORDS.refused.note).toMatch(/^[^.]+\.$/);
+  });
+
+  it("gives an empty diff pane one dry sentence only for a folder outside any repository; a refused read shows its own cause", () => {
+    expect(REPO_STATE_WORDS.none.pane).toBe("This folder is not inside a git repository, so there is nothing to diff.");
+    expect(REPO_STATE_WORDS.none.pane).toMatch(/^[^.]+\.$/);
+    expect(REPO_STATE_WORDS.refused.pane).toBe("");
   });
 });
 
