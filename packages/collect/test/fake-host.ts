@@ -10,6 +10,8 @@ export interface FakeLaptop {
   which?: string[];
   /** Keyed by `cmd arg arg`, led by `NAME=value` for each variable the run adds; a value is stdout of a successful run. */
   exec?: Record<string, string>;
+  /** When each file was last written, milliseconds since the epoch; a file with no entry reads as MTIME. */
+  mtimes?: Record<string, number>;
   /** SHELL of the process running the collector. */
   shell?: string;
   /** TERM_PROGRAM of the process running the collector. */
@@ -17,20 +19,25 @@ export interface FakeLaptop {
 }
 
 const HOME = "/Users/dev";
+/** The modification time every file has unless the laptop names another. */
+export const MTIME = 1_000;
 
 export function fakeHost(laptop: FakeLaptop = {}): Host & { calls: string[] } {
   const files = new Map<string, number | string>();
   for (const [k, v] of Object.entries(laptop.files ?? {})) files.set(k.replace(/^~/, HOME), v);
+  const mtimes = new Map<string, number>();
+  for (const [k, v] of Object.entries(laptop.mtimes ?? {})) mtimes.set(k.replace(/^~/, HOME), v);
   const calls: string[] = [];
 
   const fileBytes = (v: number | string): number => (typeof v === "number" ? v : Buffer.byteLength(v));
+  const mtimeMs = (path: string): number => mtimes.get(path) ?? MTIME;
 
   const fs: HostFs = {
     async stat(path): Promise<Stat | undefined> {
       const dir = files.get(`${path}/`);
-      if (dir !== undefined) return { kind: "dir", bytes: fileBytes(dir) };
+      if (dir !== undefined) return { kind: "dir", bytes: fileBytes(dir), mtimeMs: mtimeMs(path) };
       const own = files.get(path);
-      if (own !== undefined) return { kind: "file", bytes: fileBytes(own) };
+      if (own !== undefined) return { kind: "file", bytes: fileBytes(own), mtimeMs: mtimeMs(path) };
       let bytes = 0;
       let found = false;
       for (const [k, v] of files) {
@@ -39,7 +46,7 @@ export function fakeHost(laptop: FakeLaptop = {}): Host & { calls: string[] } {
           bytes += fileBytes(v);
         }
       }
-      return found ? { kind: "dir", bytes } : undefined;
+      return found ? { kind: "dir", bytes, mtimeMs: mtimeMs(path) } : undefined;
     },
     async list(dir) {
       const names = new Set<string>();

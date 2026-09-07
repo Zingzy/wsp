@@ -10,7 +10,7 @@
 import { CATALOG, type CatalogEntry, type AgentEntry, catalogToolFor, sizeBytes } from "@wsp/catalog";
 import type { Recipe, RecipeRow, RecipeSource, RecipeTick } from "@wsp/protocol";
 import { presenceOf } from "./detect/presence.js";
-import { type AgentHistory, type Count, type Usage, meetsUsedFloor, readHistories } from "./history/index.js";
+import { type AgentHistory, type Count, type HistoryCache, type HistoryProgress, type Usage, meetsUsedFloor, readHistories } from "./history/index.js";
 import type { Host } from "./host.js";
 import { type ProjectScan, scanProject } from "./project/index.js";
 
@@ -94,6 +94,10 @@ export interface RecipeOptions {
   onPresent?: (e: CatalogEntry) => void;
   /** Told each agent's history as it is read, with the counts the recipe keeps. */
   onHistory?: (h: AgentHistory) => void;
+  /** Told how far through each agent's session files the read is, as each file lands. */
+  onHistoryProgress?: (p: HistoryProgress) => void;
+  /** Keeps what each session file came to between runs, so only the histories that changed are read again. */
+  cache?: HistoryCache;
   /** Told what each of those folders asked for, the candidates the catalog carries no row for among them. */
   onProject?: (scan: ProjectScan) => void;
 }
@@ -161,6 +165,8 @@ export async function computeRecipe(host: Host, opts: RecipeOptions): Promise<Re
   }
   const histories = await readHistories(host, catalog.filter((e): e is AgentEntry => e.kind === "agent"), {
     ...(opts.onHistory !== undefined ? { onAgent: opts.onHistory } : {}),
+    ...(opts.onHistoryProgress !== undefined ? { onProgress: opts.onHistoryProgress } : {}),
+    ...(opts.cache !== undefined ? { cache: opts.cache } : {}),
     ...(opts.folders !== undefined ? { folders: opts.folders } : {}),
   });
   const usedTools = merged(histories, u => u.tools);

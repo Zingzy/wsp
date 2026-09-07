@@ -10,7 +10,7 @@
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
-import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type ProjectScan, type Rung } from "@wsp/collect";
+import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type HistoryProgress, type Manifest, type ManifestEntry, type ProjectScan, type Rung } from "@wsp/collect";
 import { SnapshotFailedError, describeAge, type BackendPricing } from "@wsp/engine";
 import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
@@ -50,7 +50,7 @@ import { PROJECT_GROUP } from "./init-table.js";
 import { SIGN_IN_WORDS } from "./signin-words.js";
 import type { ScanRow } from "./scan.js";
 import { installEach, installLines, mcpServerSpec, registeredLine } from "./mcp-install.js";
-import { carriedOver, historyLine } from "./recipe-command.js";
+import { carriedOver, historyLine, historyProgressLine } from "./recipe-command.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
@@ -106,9 +106,10 @@ export interface InitOptions {
   /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
   collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   /** Reads this computer against the catalog and the agents' session histories for the recipe the screens start
-   * from, telling onHistory each agent's counts as its history is read and onProject what a named project asked
-   * for, so the flag path shows the same card the wizard's own question leaves. */
-  recipe(onHistory: (h: RecipeHistory) => void, onProject: (scan: ProjectScan) => void): Promise<Recipe>;
+   * from, telling onHistory each agent's counts as its history is read, onProject what a named project asked
+   * for, so the flag path shows the same card the wizard's own question leaves, and onProgress how far through one
+   * agent's session files the read is, since a first read of a busy computer takes a while. */
+  recipe(onHistory: (h: RecipeHistory) => void, onProject: (scan: ProjectScan) => void, onProgress: (p: HistoryProgress) => void): Promise<Recipe>;
   keys: Keys;
   /** Prices the builder the confirm names. */
   pricing: BackendPricing;
@@ -778,8 +779,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   let catalogRecipe: Recipe;
   const histories = spin(io.output, "Reading what your agents used", io.isTTY);
   let projectScan: ProjectScan | undefined;
+  const startedHistories = Date.now();
+  let sessionsRead = 0;
   try {
-    const here = await opts.recipe(h => histories.detail(historyLine(h)), scan => (projectScan = scan));
+    const here = await opts.recipe(
+      h => histories.detail(historyLine(h)),
+      scan => (projectScan = scan),
+      p => {
+        // One call per session file opened, which is what the read cost. The counts each history came to are weighed
+        // against --project's folder, so under one they say nothing about how long this took.
+        sessionsRead += 1;
+        histories.detail(historyProgressLine(p));
+      },
+    );
     // The rows outside the catalog are the file's, not this computer's: a plain run keeps what wsp recipe --add
     // wrote into the recipe beside the state, which is the same file this run ends by writing.
     catalogRecipe = given === undefined ? { ...here, ...carriedOver(smallRecipePath(opts.statePath), line => notes.push(line)) } : withTicksOf(here, given);
@@ -789,6 +801,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     return { code: 1 };
   }
   histories.stop();
+  // What the read cost, once: the cache beside the state is what makes the second run of it short, and the person
+  // sees that rather than guessing. Nothing read, nothing to say.
+  if (sessionsRead > 0) io.output.write(`${dim(S_BAR)}  ${dim(`Read ${plural(sessionsRead, "session")} in ${fmtDuration(Date.now() - startedHistories)}`)}\n`);
   // A row the pack would refuse whole is locked here with the pack's own sentence, judged on the same disk the pack reads.
   manifest = lockRefused(manifest, rel => {
     const st = statOf(join(opts.home, rel));
