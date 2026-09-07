@@ -396,6 +396,8 @@ interface LiveWorkspace {
   record: WorkspaceRecord;
   ws: Workspace;
   machine: Machine;
+  /** Moves with every write of the record; the status poll drops a row it built under an older one. */
+  generation: number;
   /** The wake in flight, so a second caller joins it instead of resuming twice. */
   waking?: Promise<WorkspaceView>;
   /** The nap in flight: a second nap joins it, a wake waits for it. */
@@ -1287,6 +1289,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
 
   const persist = async (r: WorkspaceRecord): Promise<void> => {
+    const entry = live.get(r.id);
+    if (entry !== undefined) entry.generation++;
     await store.put(WORKSPACES, r.id, r);
   };
 
@@ -1669,7 +1673,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
-    const entry: LiveWorkspace = { record, machine, ws: undefined as unknown as Workspace };
+    const entry: LiveWorkspace = { record, machine, ws: undefined as unknown as Workspace, generation: (live.get(record.id)?.generation ?? -1) + 1 };
     entry.ws = new Workspace(
       machine,
       {
@@ -3553,6 +3557,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return [...live.values()].filter(e => !e.creating).map(e => ({
         ...view(e.record),
         size: e.record.size,
+        generation: e.generation,
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(e.machine.previewUrl ? { daemonReach: () => e.ws.daemonReach() } : {}),
         providerState: () => e.machine.state(),

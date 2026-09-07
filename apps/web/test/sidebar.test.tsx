@@ -5,7 +5,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "../src/keybindingDefaults.js";
+import { shortcutLabelForCommand } from "../src/keybindings.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -115,7 +118,7 @@ describe("header", () => {
     const lockup = screen.getByRole("img", { name: "wsp" }).parentElement!;
     expect(lockup.className).toContain("ml-[var(--sidebar-content-inset)]");
     expect(lockup.className).not.toContain("titlebar");
-    expect(screen.getByRole("button", { name: "Search threads" }).parentElement!.className).toContain("px-[var(--sidebar-content-inset)]");
+    expect(screen.getByRole("button", { name: "Search" }).parentElement!.className).toContain("px-[var(--sidebar-content-inset)]");
   });
 });
 
@@ -456,84 +459,37 @@ describe("new thread", () => {
 });
 
 describe("search", () => {
-  it("narrows threads by title and keeps workspaces whose name matches", async () => {
-    await mount(
-      fakeApi(
-        [API, WEB],
-        [status(API), status(WEB)],
-        [session("s1", "ws_a", { prompt: "fix the port list" }), session("s2", "ws_a", { prompt: "upgrade node" }), session("s3", "ws_b", { prompt: "port forwarding" })],
-      ),
-      "api",
-    );
-    await waitFor(() => expect(screen.getByText("port forwarding")).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: "Search threads" }));
-    const search = screen.getByRole("searchbox");
-    fireEvent.change(search, { target: { value: "port" } });
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "ws:ws_b", "thread:s3"]);
-    fireEvent.change(search, { target: { value: "web" } });
-    expect(rowIds()).toEqual(["ws:ws_b"]);
-    fireEvent.change(search, { target: { value: "nothing here" } });
-    expect(rowIds()).toEqual([]);
-    expect(screen.getByText(/No matches/)).toBeDefined();
-    fireEvent.keyDown(search, { key: "Escape" });
-    expect(screen.queryByRole("searchbox")).toBeNull();
-    expect(rowIds().length).toBe(5);
-  });
-
-  it("at rest the search is a row, not a field: a glyph and the word Search, no shortcut hint; the field comes on click and leaves on Escape without moving the rows", async () => {
+  it("the row is the palette's door: a glyph, the word Search and the palette chord in muted mono; a click opens the palette, focus alone does not, and no field ever appears", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
-    expect(screen.queryByRole("searchbox")).toBeNull();
-    expect(document.querySelector("input")).toBeNull();
-    const row = screen.getByRole("button", { name: "Search threads" });
+    const opened: boolean[] = [];
+    const off = onOpenCommandPalette(detail => opened.push(detail.toggle === true));
+    const row = screen.getByRole("button", { name: "Search" });
+    const chord = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle");
+    expect(chord).not.toBeNull();
     expect(row.querySelector("svg.lucide-search")).not.toBeNull();
-    expect(row.textContent).toBe("Search");
-    expect(row.querySelector("kbd")).toBeNull();
+    expect(row.textContent).toBe(`Search${chord}`);
+    const kbd = row.querySelector("kbd")!;
+    expect(kbd.textContent).toBe(chord);
+    expect(kbd.className).toContain("font-mono");
+    expect(kbd.className).toContain("ms-auto");
+    expect(kbd.className).toContain("text-muted-foreground");
     // The row is the kit's row: no border, no fill at rest, the hover tint every other row has.
     expect(row.className).not.toMatch(/\bborder\b|ring-1|bg-background|bg-sidebar-control-surface/);
     expect(row.className).toContain("hover:bg-sidebar-row-hover");
     expect(row.className).toContain("h-8");
     const before = rowIds();
+    // A real button: Tab onto it only focuses it; Enter and Space are the browser's own click, so the click is what opens.
+    expect(row.tagName).toBe("BUTTON");
+    act(() => row.focus());
+    expect(document.activeElement).toBe(row);
+    fireEvent.keyDown(row, { key: "Tab" });
+    expect(opened).toEqual([]);
     fireEvent.click(row);
-    const field = screen.getByRole("searchbox");
-    expect(document.activeElement).toBe(field);
-    expect(screen.queryByRole("button", { name: "Search threads" })).toBeNull();
-    const fieldRow = field.closest<HTMLElement>("[data-sidebar-search]")!;
-    expect(fieldRow.className).toContain("h-8");
-    // The selected tint belongs to the selected workspace row alone; the open field takes the hover tint.
-    expect(fieldRow.className).not.toMatch(/(^|\s)bg-sidebar-row-selected/);
-    expect(fieldRow.className).toMatch(/(^|\s)bg-sidebar-row-hover/);
+    expect(opened).toEqual([false]);
+    expect(document.querySelector("input")).toBeNull();
+    expect(screen.getByRole("button", { name: "Search" })).toBe(row);
     expect(rowIds()).toEqual(before);
-    fireEvent.keyDown(field, { key: "Escape" });
-    expect(screen.queryByRole("searchbox")).toBeNull();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Search threads" }));
-    expect(rowIds()).toEqual(before);
-  });
-
-  it("a mousedown on the open row's glyph or padding keeps the field; one on the input places the caret", async () => {
-    await mount(fakeApi([API], [status(API)]), "api");
-    fireEvent.click(screen.getByRole("button", { name: "Search threads" }));
-    const field = screen.getByRole("searchbox");
-    const fieldRow = field.closest<HTMLElement>("[data-sidebar-search]")!;
-    // fireEvent returns false when a handler called preventDefault, which is what stops the blur.
-    expect(fireEvent.mouseDown(fieldRow.querySelector("svg")!)).toBe(false);
-    expect(fireEvent.mouseDown(fieldRow)).toBe(false);
-    expect(fireEvent.mouseDown(field)).toBe(true);
-    expect(screen.getByRole("searchbox")).toBe(field);
-  });
-
-  it("focus opens the field too; leaving an empty field brings the row back, a field with a query stays", async () => {
-    await mount(fakeApi([API], [status(API)]), "api");
-    act(() => screen.getByRole("button", { name: "Search threads" }).focus());
-    const field = screen.getByRole("searchbox") as HTMLInputElement;
-    expect(document.activeElement).toBe(field);
-    fireEvent.blur(field);
-    expect(screen.queryByRole("searchbox")).toBeNull();
-    act(() => screen.getByRole("button", { name: "Search threads" }).focus());
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "z" } });
-    expect(rowIds()).toEqual([]);
-    fireEvent.blur(screen.getByRole("searchbox"));
-    // A field with a query stays: the list is filtered and the field says why.
-    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("z");
+    off();
   });
 });
 
@@ -565,24 +521,6 @@ describe("the Workspaces section row", () => {
     expect(label.className).not.toContain("text-sm");
   });
 
-  it("search wins over the collapse, as it does for the Idle shelf, and the count follows the filter", async () => {
-    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
-    const row = screen.getByRole("button", { name: "Workspaces" });
-    fireEvent.click(row);
-    expect(rowIds()).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "Search threads" }));
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "web" } });
-    expect(rowIds()).toEqual(["ws:ws_b"]);
-    expect(row.textContent).toBe("Workspaces1");
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "nothing here" } });
-    expect(rowIds()).toEqual([]);
-    expect(screen.getByText(/No matches/)).toBeDefined();
-    expect(row.textContent).toBe("Workspaces0");
-    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
-    expect(rowIds()).toEqual([]);
-    expect(row.textContent).toBe("Workspaces2");
-  });
-
   it("the new-workspace glyph sits at the row's right edge and opens the dialog; the footer has no New workspace row", async () => {
     await mount(fakeApi([API], [status(API)]), "api");
     const buttons = screen.getAllByRole("button", { name: "New workspace" });
@@ -604,8 +542,8 @@ describe("keyboard navigation", () => {
   it("arrows walk every row in order from the search row; Enter selects", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
     await waitFor(() => expect(screen.getByText("hello")).toBeDefined());
-    act(() => screen.getByRole("button", { name: "Search threads" }).focus());
-    const search = screen.getByRole("searchbox");
+    const search = screen.getByRole("button", { name: "Search" });
+    act(() => search.focus());
     fireEvent.keyDown(search, { key: "ArrowDown" });
     expect(document.activeElement).toBe(rowOf("api"));
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
