@@ -2,10 +2,61 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { behindGoldenLine, builderStaysLine, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, providerAnswerLine, SEAL_FAILED_BUILDER_GONE_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, SEAL_FAILED_LINE, vaultKeptLine, vaultOverCapLine } from "../src/index.js";
+import {
+  backgroundTasksLine,
+  behindGoldenLine,
+  builderStaysLine,
+  DAEMON_UPDATE_FAILED,
+  DAEMON_UPDATING,
+  deleteNotice,
+  execFolderLine,
+  fmtBytes,
+  fmtCost,
+  fmtDuration,
+  fmtElapsed,
+  fmtMemGb,
+  fmtThreads,
+  forgetNotice,
+  goldenBuildLine,
+  harnessExitLine,
+  machineUnreachedLine,
+  mcpServerCommandLine,
+  notifyLine,
+  plural,
+  providerAnswerLine,
+  SEAL_FAILED_BUILDER_GONE_LINE,
+  SEAL_FAILED_LINE,
+  sealFailedBuilderStaysLine,
+  sealFailedBuilderUnreadLine,
+  snapshotAttemptLine,
+  snapshotFailedLine,
+  stepRetryLine,
+  timedOutLine,
+  titleLine,
+  TURN_IDLE_MS,
+  TURN_WALL_MS,
+  turnCutLine,
+  upgradeSealFailedGoneLine,
+  upgradeSealFailedStaysLine,
+  upgradeSealFailedUnreadLine,
+  vaultKeptLine,
+  vaultOverCapLine,
+} from "../src/index.js";
+import * as format from "../src/format.js";
+import * as protocol from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
-describe("fmtBytes", () => {
+describe("the package's index", () => {
+  it("carries every value format.ts exports, the same binding: a local declaration in index.ts would shadow a star export in silence", () => {
+    const names = Object.keys(format).sort();
+    expect(names.length).toBeGreaterThan(0);
+    expect(names.map(name => [name, (protocol as Record<string, unknown>)[name] === (format as Record<string, unknown>)[name]])).toEqual(names.map(name => [name, true]));
+  });
+});
+
+// One describe per helper family, in format.ts order, so two tickets' tests land in different hunks.
+
+describe("fmtBytes and fmtMemGb", () => {
   it("reads whole bytes under a kilobyte, then one decimal in binary units up to GB", () => {
     expect([0, 12, 1023, 1024, 2_048, 3 * 1024 * 1024, 38.2 * 1024 * 1024, 2.3 * 1024 ** 3, 32_000_000_000].map(fmtBytes)).toEqual([
       "0 B", "12 B", "1023 B", "1.0 KB", "2.0 KB", "3.0 MB", "38.2 MB", "2.3 GB", "29.8 GB",
@@ -23,7 +74,30 @@ describe("fmtBytes", () => {
   });
 });
 
-describe("a turn's duration and cost", () => {
+describe("one copy of the rule", () => {
+  const HOME = join("packages", "protocol", "src", "format.ts");
+  // Snapshot storage prints the decimal GB the provider lists and bills in; the process table's rss column has a three-digit budget.
+  const EXCEPTIONS = new Set([
+    join("packages", "host", "src", "storage.ts"),
+    join("apps", "web", "src", "components", "machine", "SnapshotStorageLine.tsx"),
+    join("apps", "web", "src", "components", "machine", "format.ts"),
+  ]);
+  // A byte count divided by a unit constant and closed with a unit suffix, or a table of unit suffixes.
+  const RULE = /\/ ?(1024|1e9|1_000_000_000|\(1024 \* 1024\)|1024 \*\* [23]|[KMGT]I?B|[KMGT]iB)\)?[^`\n]*\} ?[KMGT]?i?B`|\[("[KMGT]?i?B?",? ?){3,}\]/;
+
+  const hits = (rel: string): number => [...readFileSync(join(ROOT, rel), "utf8").matchAll(new RegExp(RULE.source, "g"))].length;
+
+  it("no other source file spells out a byte formatter", () => {
+    const copies = sourceFiles().filter(rel => rel !== HOME && !EXCEPTIONS.has(rel) && hits(rel) > 0);
+    expect(copies).toEqual([]);
+  });
+
+  it("each recorded exception holds exactly one formatter: a folded one leaves the list, a second one is a copy", () => {
+    expect([...EXCEPTIONS].map(rel => [rel, hits(rel)])).toEqual([...EXCEPTIONS].map(rel => [rel, 1]));
+  });
+});
+
+describe("fmtDuration, fmtElapsed and fmtCost", () => {
   it("fmtDuration's short style reads ms under a second, tenths under ten, whole seconds under a minute, then minutes and seconds", () => {
     expect([0, 7, 999, 1500, 9960, 10458, 59_400, 59_600, 60_000, 101_515, 492_000, 862_399, 3_665_000, -5, NaN, 4000].map(ms => fmtDuration(ms))).toEqual([
       "1ms", "7ms", "999ms", "1.5s", "10s", "10s", "59s", "60s", "1m", "1m 42s", "8m 12s", "14m 22s", "61m 5s", "0ms", "0ms", "4.0s",
@@ -46,6 +120,10 @@ describe("a turn's duration and cost", () => {
     }
   });
 
+  it("fmtElapsed is a running clock: whole seconds, then minutes and seconds, never tenths that would flicker on a redrawn row", () => {
+    expect([0, 999, 1000, 3_400, 9_999, 10_458, 59_600, 60_000, 73_000, 314_200, -5, NaN].map(fmtElapsed)).toEqual(["0s", "0s", "1s", "3s", "9s", "10s", "59s", "1m", "1m 13s", "5m 14s", "0s", "0s"]);
+  });
+
   it("fmtCost reads cents, and four places under a cent", () => {
     expect([1.94, 0.22, 0.01, 0.0042, 0].map(fmtCost)).toEqual(["$1.94", "$0.22", "$0.01", "$0.0042", "$0.0000"]);
   });
@@ -64,9 +142,20 @@ describe("notifyLine", () => {
     expect(notifyLine(THREAD, { status: "failed", error: "machine paused while the agent was working" })).toBe("thread c452d1e8 finished (failed): machine paused while the agent was working");
     expect(notifyLine(THREAD, { status: "interrupted" })).toBe("thread c452d1e8 finished (interrupted)");
   });
+
+  it("a turn that did not complete says why over its reply's last line; one that did says its last line", () => {
+    expect(notifyLine(THREAD, { status: "failed", durationMs: 12_000, costUsd: 0.02, text: "Waiting for the gate to finish.", error: "ended with 1 background task running" })).toBe("thread c452d1e8 finished (failed, 12s, $0.02): ended with 1 background task running");
+    expect(notifyLine(THREAD, { status: "completed", durationMs: 12_000, text: "All green.", error: "[ede_diagnostic] noise" })).toBe("thread c452d1e8 finished (completed, 12s): All green.");
+  });
 });
 
-describe("fmtThreads, forgetNotice and deleteNotice", () => {
+describe("plural, fmtThreads, forgetNotice and deleteNotice", () => {
+  it("is the one rule for a count and its noun, and fmtThreads reads it", () => {
+    expect([0, 1, 2].map(n => plural(n, "row"))).toEqual(["0 rows", "1 row", "2 rows"]);
+    expect(plural(1, "tool call")).toBe("1 tool call");
+    expect([1, 2].map(fmtThreads)).toEqual([plural(1, "thread"), plural(2, "thread")]);
+  });
+
   it("counts anything with its noun, plural by an s", () => {
     expect(plural(1, "file")).toBe("1 file");
     expect(plural(0, "file")).toBe("0 files");
@@ -96,40 +185,11 @@ describe("turnCutLine", () => {
   });
 });
 
-describe("the machine row's line about its helper", () => {
-  it("says what is being done and that it failed, in fixed words: no daemon named, no reason quoted, and short enough for the row", () => {
-    expect(DAEMON_UPDATING).toBe("updating the helper");
-    expect(DAEMON_UPDATE_FAILED).toBe("could not update the helper");
-    // The row's second line fits about thirty characters at the default sidebar width (measured in Chromium at
-    // 159px), and a deploy's own reason is an npm log hundreds wide that names the daemon in its own words.
-    for (const line of [DAEMON_UPDATING, DAEMON_UPDATE_FAILED]) {
-      expect(line).not.toContain("daemon");
-      expect(line.length).toBeLessThanOrEqual(30);
-    }
-  });
-});
-
-describe("the line a re-run of the wizard shows before it builds", () => {
-  it("names the version it builds and the one it builds on top of, then what it changes", () => {
-    expect(goldenBuildLine(2, 3, [{ count: 2, noun: "tool", word: "added" }])).toBe("Builds version 3 on top of version 2: 2 tools added");
-  });
-
-  it("pluralises each noun on its own count and drops what did not change", () => {
-    expect(goldenBuildLine(1, 2, [{ count: 1, noun: "tool", word: "added" }, { count: 0, noun: "agent", word: "added" }, { count: 3, noun: "row", word: "retired" }])).toBe(
-      "Builds version 2 on top of version 1: 1 tool added, 3 rows retired",
-    );
-  });
-
-  it("a build with no version under it names no version to build on, and a build that changes nothing says only what it makes", () => {
-    expect(goldenBuildLine(0, 1, [{ count: 4, noun: "tool", word: "added" }])).toBe("Builds version 1: 4 tools added");
-    expect(goldenBuildLine(2, 3, [{ count: 0, noun: "tool", word: "added" }])).toBe("Builds version 3 on top of version 2");
-  });
-});
-
-describe("the line a workspace behind the golden's head shows", () => {
-  it("names the version it is on and the one available, in words short enough for the row", () => {
-    expect(behindGoldenLine(11, 12)).toBe("on image v11, v12 available");
-    expect(behindGoldenLine(11, 12).length).toBeLessThanOrEqual(30);
+describe("timedOutLine and stepRetryLine", () => {
+  it("names the seconds, says when it happened twice, and says in words that the step is tried once more", () => {
+    expect(timedOutLine(300)).toBe("timed out after 300s");
+    expect(timedOutLine(300, 2)).toBe("timed out after 300s, twice");
+    expect(stepRetryLine(300)).toBe("timed out after 300s; trying once more");
   });
 });
 
@@ -150,11 +210,44 @@ describe("harnessExitLine", () => {
   });
 });
 
-describe("plural", () => {
-  it("is the one rule for a count and its noun, and fmtThreads reads it", () => {
-    expect([0, 1, 2].map(n => plural(n, "row"))).toEqual(["0 rows", "1 row", "2 rows"]);
-    expect(plural(1, "tool call")).toBe("1 tool call");
-    expect([1, 2].map(fmtThreads)).toEqual([plural(1, "thread"), plural(2, "thread")]);
+describe("machineUnreachedLine", () => {
+  it("says the machine could not be reached from this computer, with the attempts counted and the time they took", () => {
+    expect(machineUnreachedLine(6, 23_400)).toBe("the machine could not be reached from this computer after 6 attempts over 23s");
+    expect(machineUnreachedLine(1, 800)).toBe("the machine could not be reached from this computer after 1 attempt over 800ms");
+  });
+});
+
+describe("mcpServerCommandLine", () => {
+  it("names the command every agent's config now runs, as one shell line a person can paste", () => {
+    expect(mcpServerCommandLine("npx", ["-y", "@zingzy/wsp@0.1.2", "mcp", "--state", "/Users/p/.wsp/state.json"])).toBe("The server command is npx -y @zingzy/wsp@0.1.2 mcp --state /Users/p/.wsp/state.json");
+    expect(mcpServerCommandLine("/Users/p/.local/bin/wsp", ["mcp", "--state", "/Users/p/my wsp/state.json"])).toBe("The server command is /Users/p/.local/bin/wsp mcp --state '/Users/p/my wsp/state.json'");
+  });
+});
+
+describe("execFolderLine", () => {
+  it("names the folder a failing command ran in, or the home folder when it had none of its own", () => {
+    expect(execFolderLine("/root/work/proj")).toBe("ran in /root/work/proj");
+    expect(execFolderLine(undefined)).toBe("ran in the home folder");
+  });
+});
+
+describe("backgroundTasksLine", () => {
+  it("counts the tasks the harness still had running when its result arrived", () => {
+    expect(backgroundTasksLine(1)).toBe("ended with 1 background task running");
+    expect(backgroundTasksLine(2)).toBe("ended with 2 background tasks running");
+  });
+});
+
+describe("DAEMON_UPDATING and DAEMON_UPDATE_FAILED", () => {
+  it("says what is being done and that it failed, in fixed words: no daemon named, no reason quoted, and short enough for the row", () => {
+    expect(DAEMON_UPDATING).toBe("updating the helper");
+    expect(DAEMON_UPDATE_FAILED).toBe("could not update the helper");
+    // The row's second line fits about thirty characters at the default sidebar width (measured in Chromium at
+    // 159px), and a deploy's own reason is an npm log hundreds wide that names the daemon in its own words.
+    for (const line of [DAEMON_UPDATING, DAEMON_UPDATE_FAILED]) {
+      expect(line).not.toContain("daemon");
+      expect(line.length).toBeLessThanOrEqual(30);
+    }
   });
 });
 
@@ -170,30 +263,31 @@ describe("the nap's words when its vault was not stored", () => {
   });
 });
 
-describe("one copy of the rule", () => {
-  const HOME = join("packages", "protocol", "src", "format.ts");
-  // Snapshot storage prints the decimal GB the provider lists and bills in; the process table's rss column has a three-digit budget.
-  const EXCEPTIONS = new Set([
-    join("packages", "host", "src", "storage.ts"),
-    join("apps", "web", "src", "components", "machine", "SnapshotStorageLine.tsx"),
-    join("apps", "web", "src", "components", "machine", "format.ts"),
-  ]);
-  // A byte count divided by a unit constant and closed with a unit suffix, or a table of unit suffixes.
-  const RULE = /\/ ?(1024|1e9|1_000_000_000|\(1024 \* 1024\)|1024 \*\* [23]|[KMGT]I?B|[KMGT]iB)\)?[^`\n]*\} ?[KMGT]?i?B`|\[("[KMGT]?i?B?",? ?){3,}\]/;
-
-  const hits = (rel: string): number => [...readFileSync(join(ROOT, rel), "utf8").matchAll(new RegExp(RULE.source, "g"))].length;
-
-  it("no other source file spells out a byte formatter", () => {
-    const copies = sourceFiles().filter(rel => rel !== HOME && !EXCEPTIONS.has(rel) && hits(rel) > 0);
-    expect(copies).toEqual([]);
+describe("goldenBuildLine", () => {
+  it("names the version it builds and the one it builds on top of, then what it changes", () => {
+    expect(goldenBuildLine(2, 3, [{ count: 2, noun: "tool", word: "added" }])).toBe("Builds version 3 on top of version 2: 2 tools added");
   });
 
-  it("each recorded exception holds exactly one formatter: a folded one leaves the list, a second one is a copy", () => {
-    expect([...EXCEPTIONS].map(rel => [rel, hits(rel)])).toEqual([...EXCEPTIONS].map(rel => [rel, 1]));
+  it("pluralises each noun on its own count and drops what did not change", () => {
+    expect(goldenBuildLine(1, 2, [{ count: 1, noun: "tool", word: "added" }, { count: 0, noun: "agent", word: "added" }, { count: 3, noun: "row", word: "retired" }])).toBe(
+      "Builds version 2 on top of version 1: 1 tool added, 3 rows retired",
+    );
+  });
+
+  it("a build with no version under it names no version to build on, and a build that changes nothing says only what it makes", () => {
+    expect(goldenBuildLine(0, 1, [{ count: 4, noun: "tool", word: "added" }])).toBe("Builds version 1: 4 tools added");
+    expect(goldenBuildLine(2, 3, [{ count: 0, noun: "tool", word: "added" }])).toBe("Builds version 3 on top of version 2");
   });
 });
 
-describe("the seal's words when the provider refuses the snapshot", () => {
+describe("behindGoldenLine", () => {
+  it("names the version it is on and the one available, in words short enough for the row", () => {
+    expect(behindGoldenLine(11, 12)).toBe("on image v11, v12 available");
+    expect(behindGoldenLine(11, 12).length).toBeLessThanOrEqual(30);
+  });
+});
+
+describe("providerAnswerLine, snapshotAttemptLine and snapshotFailedLine", () => {
   const refused = { status: 502, message: "Failed to snapshot sandbox", requestId: "req_7", at: "2026-09-07T01:19:43.352Z" };
 
   it("providerAnswerLine carries the status, the message and the request id; without one it says so and gives the UTC time of the reply instead, never an empty id", () => {
@@ -210,7 +304,9 @@ describe("the seal's words when the provider refuses the snapshot", () => {
     expect(snapshotFailedLine(1, refused, "gone")).toBe("the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_7) and no longer has the builder (404)");
     expect(snapshotFailedLine(1, refused, "unread", "upstream sad (503)")).toBe("the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_7) and could not be read about the builder (upstream sad (503))");
   });
+});
 
+describe("builderStaysLine and the seal's and the update's last lines", () => {
   it("the stays-up sentence is one rule, and the failed seal's last line wraps it", () => {
     const stays = builderStaysLine("m1", 0.11, "wsp init --recipe '/tmp/r.json'");
     expect(stays).toBe("Builder m1 stays up at about $0.11/hr; wsp init --recipe '/tmp/r.json' attaches to it again, and the sweep stops it once it is six hours old.");

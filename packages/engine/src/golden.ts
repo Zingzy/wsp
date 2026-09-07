@@ -7,12 +7,12 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, snapshotAttemptLine, snapshotFailedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, snapshotAttemptLine, snapshotFailedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { MIB, TOOL_TIMEOUT_S, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
+import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
@@ -23,7 +23,7 @@ import { importInto } from "./vault.js";
 
 export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
 
-export type StageListener = (stage: GoldenStage, detail?: string) => void;
+export type StageListener = (stage: GoldenStage, detail?: string, step?: GoldenStep) => void;
 
 /** How long to wait for the provider to report a killed machine gone before
  * killing again; two rounds, then the caller fails. Tests shrink both. */

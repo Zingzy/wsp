@@ -82,14 +82,14 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | `wsp thread new --in <workspace> [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--cwd <path>] [--notify <thread\|me>] "<task>"` | `thread_new` (workspace, task, agent, model, effort, access, cwd, notify) | opens a thread and follows its first turn to the reply |
 | `wsp send <thread> [--model <slug>] [--effort <word>] [--access <word>] "<message>"` | `send` (thread, message, model, effort, access) | a message into an existing thread; follows the turn to the reply |
 | `wsp stop <thread>` | `stop` (thread) | ends the thread's running turn, as the app's stop button does; the machine stays up |
-| `wsp exec <workspace> -- <command...>` | `exec` (workspace, argv) | runs the command on the machine, each word as given, waking it first when it is paused; output lines and the exit code |
+| `wsp exec <workspace> [--cwd <dir>] -- <command...>` | `exec` (workspace, argv, cwd) | runs the command on the machine, each word as given, in the folder named or the workspace's project folder, waking it first when it is paused; output lines, the exit code and the folder it ran in |
 | `wsp snapshot <workspace>` | `snapshot` (workspace) | a project golden: the golden plus the loaded project as it stands |
 | `wsp export <workspace> <folder> [--from <path>] [--replace] [--agents <ids>]` | `export` (workspace, folder, from, replace, agents) | the folder and the agent sessions keyed to it come home to this computer |
 | `wsp import <folder> --to <workspace> [--yes] [--keep <path>] [--cut <path>] [--agents <ids>] [--replace]` | `import` (workspace, folder, yes, keep, cut, agents, replace) | the folder lands on the machine at its path here, as the app's import does; without yes, keep or cut it answers with the plan and moves nothing (a person at a terminal is asked once instead) |
 | `wsp recipe scan [--project <folder>] [--json]` | `recipe_scan` (project) | reads this computer and prints every option, writing nothing: the agents, the tools with why and size, what else a package manager here has that the image could take, the commands the agents ran, and the sign-ins, each with what to do about it and why |
 | `wsp recipe [--tick used\|installed\|default] [--set <id>=on\|off] [--signin <id>=copy\|machine\|key\|skip] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>] [--json]` | `recipe` (tick, set, signin, add, add_check, why, project, out) | writes the recipe for a machine and prints it as a table: every catalog agent and tool with its tick, why, and its size, and the commands the agents ran that the catalog does not carry; `why` on the tool says what the added rows are for |
 
-The command line alone has `wsp up`, `wsp init`, `wsp doctor` and `wsp mcp`, since each starts or installs something on the person's computer: `wsp up [--port <n>] [--ws-port <n>] [--state <path>]` serves the host; `wsp init [--recipe <path>] [--non-interactive] [--json] [--yes]` builds the golden, `--json` printing each sign-in and its outcome as one object on stdout with everything else on stderr, `--non-interactive` doing the same in prose, and `--yes` taking every default and skipping the sign-ins, which is why `--yes` is refused beside `--json`; `wsp doctor` forks a live machine to prove the reach path; `wsp mcp` serves the tools over stdio; `wsp mcp install --agent <id>` writes the server into that agent's own MCP config and this skill into its skills folder. `--agent` repeats to do several in one call, one failing id costing the others nothing, and `--json` answers with one line holding what each agent took and a `failures` array, exit 1 when that array is not empty. An entry under `installed` with no `path` took the skill and not the server, which is the by-hand line the prose prints. Only agents the catalog knows an MCP config for get the server: claude, codex, gemini, opencode. The rest get the skill and a by-hand line.
+The command line alone has `wsp up`, `wsp init`, `wsp doctor` and `wsp mcp`, since each starts or installs something on the person's computer: `wsp up [--port <n>] [--ws-port <n>] [--state <path>]` serves the host; `wsp init [--recipe <path>] [--non-interactive] [--json] [--yes]` builds the golden, `--json` printing each sign-in and its outcome as one object on stdout with everything else on stderr, `--non-interactive` doing the same in prose, and `--yes` taking every default and skipping the sign-ins, which is why `--yes` is refused beside `--json`; `wsp doctor` forks a live machine to prove the reach path; `wsp mcp` serves the tools over stdio; `wsp mcp install --agent <id>` writes the server into that agent's own MCP config and this skill into its skills folder. `--agent` repeats to do several in one call, one failing id costing the others nothing, and `--json` answers with one line holding the `server` command every config now runs, what each agent took and a `failures` array, exit 1 when that array is not empty. An entry under `installed` with no `path` took the skill and not the server, which is the by-hand line the prose prints. Only agents the catalog knows an MCP config for get the server: claude, codex, gemini, opencode. The rest get the skill and a by-hand line.
 
 ### thread new
 
@@ -122,10 +122,11 @@ Ends the thread's running turn through the runtime, the way the app's stop butto
 ### exec
 
 ```
-wsp exec dev -- sh -c 'cd /Users/zingzy/wsp && git status --short'
+wsp exec dev -- git status --short
+wsp exec dev --cwd /root -- sh -c 'ls | wc -l'
 ```
 
-Each word after `--` reaches the machine as one argument; a shell line goes through `sh -c`. The command's exit code is the verb's. A non-zero exit is a result; the machine going away is an error. The machine runs as root with home /root and no login shell, so `bash -c`, never `bash -lc`.
+Each word after `--` reaches the machine as one argument; a shell line goes through `sh -c`. The command runs in the folder `--cwd` names (absolute, on the machine), else in the workspace's imported project folder when it has one, else in the home folder, so `git status` on a workspace with a project needs no `cd`. The command's exit code is the verb's, and a non-zero exit is followed by one stderr line naming the folder it ran in. A non-zero exit is a result; the machine going away is an error. The machine runs as root with home /root and no login shell, so `bash -c`, never `bash -lc`.
 
 ### new, fork, snapshot
 
@@ -159,7 +160,7 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 
 1. One workspace with the repo imported (`wsp import <folder> --to <workspace>` on a fresh workspace, the app's import dialog, or `new --from` a project golden taken after an import). `wsp threads --in <workspace>` shows what is on it.
 2. One thread per ticket, each in its own worktree: the brief opens with `git worktree add -b ticket/<n>-<slug> <folder> origin/main`, and `--cwd` points at the repo. Two threads writing in one checkout collide.
-3. The brief names the ticket, the files to read whole, the laws (the repo's review skill), the exact test commands and the proof required. A brief that says "fix the bug" comes back with a guess.
+3. The brief names the ticket, the files to read whole, the laws (the repo's review skill), the exact test commands and the proof required, and says to run every command in the foreground, since a turn ends when the agent replies. A brief that says "fix the bug" comes back with a guess.
 4. Start builder threads with `--notify me` when you are a person, or `--notify <your thread>` when you are an agent that wants to keep working; then do not poll `threads`, the line arrives. Both `wsp thread new` and the `thread_new` tool follow the first turn and return only when it ends, so over MCP a coordinator runs one builder at a time. On the command line a builder that should run beside you is started detached, `nohup wsp thread new ... > /tmp/<name>.log 2>&1 &` (a Mac has no `setsid`; a wsp machine does), and its id is the log's first `thread <id>` line.
 5. A review is its own thread on the same workspace with the branch name and the review skill; the builder fixes in its thread through `send`. A review runs well on a cheaper model, `--model` on thread new.
 6. Work leaves the machine by `git push` from the thread (only when the golden signed in to GitHub during wsp init) or by `export` to this computer.
@@ -208,6 +209,7 @@ wsp recipe --add ruff="uv tool install ruff"
 - A thread's end reaches its parent thread or the person only when its start said `--notify`; nothing polls (#286).
 - A thread works in `--cwd` or the workspace's project folder; a relative `--cwd` is refused before anything starts (#280).
 - A turn ends on 10 minutes of silence, not a 15 minute wall clock; long steps must print (#295).
+- A turn ends when the agent replies; a command it ran in the background is killed with the turn and nothing wakes it when the command would have finished. Briefs say run every command in the foreground and wait for it. A turn that ended with one still running reads failed with the reason `ended with 1 background task running` (#313).
 - `thread new` and `send` return when the reply is complete, not when the process is reaped minutes later (#293).
 - A turn's process group dies with the turn; a server that must outlive it starts with `setsid nohup ... &` (#275).
 - Snapshot only a running first-life machine with a project loaded; a woken machine is refused (#223).

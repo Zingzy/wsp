@@ -1090,6 +1090,63 @@ describe("runtime session index", () => {
     expect(stored.sessions.map(r => r.claudeSessionId)).toEqual([resume]);
   });
 
+  it("a start naming a thread whose harness never announced a session runs the message as a first turn on that thread; named again, the thread is resumed; an unknown thread is refused", async () => {
+    const starts: HarnessStartOptions[] = [];
+    const bornDead: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: o => {
+        starts.push(o);
+        const sessionId = o.resume ?? "33333333-3333-4333-8333-333333333333";
+        if (starts.length === 1) {
+          // The real adapter's local id for a turn that never announced a session, under which its events go.
+          const localId = "local-dead";
+          const result: TurnResult = { status: "failed", error: "the machine could not be reached from this computer after 6 attempts over 23s" };
+          const finished = Promise.resolve().then(() => {
+            o.onEvent({ type: "turn.done", sessionId: localId, result });
+            o.onEvent({ type: "session.end", sessionId: localId, exitCode: null, sawResult: false });
+            return result;
+          });
+          return { localId, finished, interrupt: async () => {} };
+        }
+        const result: TurnResult = { status: "completed", text: o.prompt };
+        const finished = Promise.resolve().then(() => {
+          o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+          o.onEvent({ type: "turn.done", sessionId, result });
+          o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return result;
+        });
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: bornDead } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const other = await rt.workspaces.create({ golden: "snap_g", name: "b" });
+    const dead = await rt.sessions.start(ws.id, { prompt: "first" });
+    expect((await dead.finished).status).toBe("failed");
+    const thread = dead.view().threadId!;
+    expect((await rt.sessions.list(ws.id)).map(r => [r.threadId, r.claudeSessionId])).toEqual([[thread, undefined]]);
+
+    const again = await rt.sessions.start(ws.id, { prompt: "again", thread });
+    expect((await again.finished).status).toBe("completed");
+    expect(starts[1]!.resume).toBeUndefined();
+    expect(again.view().threadId).toBe(thread);
+    const rows = await rt.sessions.list(ws.id);
+    expect(rows.map(r => [r.prompt, r.status, r.threadId])).toEqual([
+      ["first", "failed", thread],
+      ["again", "completed", thread],
+    ]);
+    const sessionId = rows[1]!.claudeSessionId!;
+
+    const third = await rt.sessions.start(ws.id, { prompt: "more", thread });
+    expect((await third.finished).status).toBe("completed");
+    expect(starts[2]!.resume).toBe(sessionId);
+    expect(third.view().threadId).toBe(thread);
+
+    await expect(rt.sessions.start(ws.id, { prompt: "x", thread: "no-such-thread" })).rejects.toThrow("no thread no-such-thread on this workspace");
+    await expect(rt.sessions.start(other.id, { prompt: "x", thread })).rejects.toThrow(`no thread ${thread} on this workspace`);
+    expect(starts).toHaveLength(3);
+  });
+
   it("a resume after a restart joins the persisted thread and hands the harness the session id and folder", async () => {
     const backend = stubBackend();
     const store = memoryStore();

@@ -34,7 +34,7 @@ import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
 import { FIRST_WORKSPACE } from "./init-first.js";
 import { recipePath } from "./init-recipe.js";
-import { smallRecipePath } from "./recipe-file.js";
+import { historyCache, smallRecipePath } from "./recipe-file.js";
 import { isRecipeTick, runRecipe, runScan } from "./recipe-command.js";
 import { recipeAnswer, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { scanTools } from "./scan.js";
@@ -44,7 +44,7 @@ import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
-import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
+import { installEach, installLines, mcpServerSpec, registeredLine } from "./mcp-install.js";
 import { COMMON, VERBS, findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
 import { VERSION } from "./version.js";
 
@@ -137,9 +137,11 @@ options:
                      opens it, then waits for you (this is what a run off a
                      terminal does anyway). The run ends with the golden
                      recorded and never serves the app; wsp up does that
-  --json             init: print each sign-in hand-off and its outcome as one
-                     JSON object on stdout, then one last object naming the
-                     golden, the recipe, the wsp up to run next and, unless
+  --json             init: print each build stage frame (with the install step
+                     it belongs to, the command that step runs and its seconds
+                     so far), each sign-in hand-off and its outcome as one JSON
+                     object on stdout, then one last object naming the golden,
+                     the recipe, the wsp up to run next and, unless
                      --first-workspace or --import asked for one, the wsp new
                      that forks a workspace; everything else on stderr. Implies
                      --non-interactive, and is refused beside --yes, which skips
@@ -459,7 +461,8 @@ async function init(
       ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
       ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
       collect: collectThisComputer,
-      recipe: (onHistory, onProject) => computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, ...(project !== undefined ? { folders: [project] } : {}) }),
+      recipe: (onHistory, onProject, onHistoryProgress) =>
+        computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, onHistoryProgress, cache: historyCache(opts.statePath), ...(project !== undefined ? { folders: [project] } : {}) }),
       scanProject: async folder => {
         const { path, exists } = projectFolder(folder);
         return exists ? scanProject(nodeHost(), path) : undefined;
@@ -707,7 +710,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
   const out = resolve(values.out ?? smallRecipePath(statePath));
   try {
     if (scanning) {
-      const scan = await runScan(nodeHost(), { ...projects, alsoHere: recipe => scanTools(nodeHost(), recipe) }, streams);
+      const scan = await runScan(nodeHost(), { ...projects, cache: historyCache(statePath), alsoHere: recipe => scanTools(nodeHost(), recipe) }, streams);
       if (values.json === true) io.log(JSON.stringify(scan));
       else {
         for (const line of scanPrintout(scan, depth)) io.log(line);
@@ -719,6 +722,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
       nodeHost(),
       {
         out,
+        cache: historyCache(statePath),
         ...(values.tick !== undefined ? { tick: values.tick } : {}),
         ...(values.set !== undefined ? { set: values.set } : {}),
         ...(values.signin !== undefined ? { signin: values.signin } : {}),
@@ -801,6 +805,8 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   if (json) io.log(JSON.stringify(report));
   else {
     for (const placed of report.installed) for (const line of installLines(placed)) io.log(line);
+    const registered = registeredLine(report);
+    if (registered !== undefined) io.log(registered);
     for (const failed of report.failures) io.error(`wsp mcp install: ${failed.error}`);
   }
   return report.failures.length > 0 ? 1 : 0;

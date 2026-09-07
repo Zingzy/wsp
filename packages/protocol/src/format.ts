@@ -4,6 +4,7 @@
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
 import type { MachineState, TurnResult } from "./index.js";
+import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
 const GIB = MIB * 1024;
@@ -50,18 +51,25 @@ export function fmtDuration(ms: number, style: DurationStyle = "short"): string 
   return hours === 0 ? `${minutes}m ${pad2(seconds)}s` : `${hours}h ${pad2(minutes)}m ${pad2(seconds)}s`;
 }
 
+/** A running clock on a row redrawn every tick: whole seconds, then the short style's minutes and seconds; tenths
+ * would flicker. */
+export function fmtElapsed(ms: number): string {
+  const seconds = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1_000) : 0;
+  return seconds < 60 ? `${seconds}s` : fmtDuration(seconds * 1_000);
+}
+
 /** A turn's cost in dollars: cents, or four places under a cent so a short turn does not read as free. */
 export function fmtCost(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
 /** The one line a thread's end sends to whoever its start named: the thread's first eight characters, the outcome
- * word with the duration and cost the harness reported, and the last non-empty line of the reply, or the error when
- * there is no reply. */
+ * word with the duration and cost the harness reported, then the last non-empty line of the reply, or the error when
+ * there is no reply. A turn that did not complete says its error first, since that is what whoever waits needs. */
 export function notifyLine(threadId: string, result: TurnResult): string {
   const facts = [result.status, ...(result.durationMs !== undefined ? [fmtDuration(result.durationMs)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
   const lines = (result.text ?? "").split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-  const tail = lines.at(-1) ?? result.error;
+  const tail = result.status === "completed" ? lines.at(-1) ?? result.error : result.error ?? lines.at(-1);
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
@@ -110,6 +118,17 @@ export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: numbe
     : `stopped after ${fmtDuration(elapsedMs, "clock")} at the ${fmtLimit(limitMs)} cap on one turn`;
 }
 
+/** An install step the guard ended at its road's limit: the seconds, and that it was the second time when it was. */
+export function timedOutLine(limitS: number, times = 1): string {
+  return `timed out after ${limitS}s${times === 2 ? ", twice" : ""}`;
+}
+
+/** The step's line when its road's limit ended it and the step is run once more: a download that ran the clock out
+ * was a dead read, and the words say so before the second run starts. */
+export function stepRetryLine(limitS: number): string {
+  return `${timedOutLine(limitS)}; trying once more`;
+}
+
 /** The turn's error when the harness process ended before any result. Exit 127 is the shell saying the binary was
  * not on PATH, so the line names the binary and the PATH the launch exported (or that it exported none) instead of a
  * bare code; every other code reads as the code. */
@@ -117,6 +136,31 @@ export function harnessExitLine(bin: string, exitCode: number | null, path: stri
   if (exitCode !== 127) return `${bin} exited with code ${String(exitCode)} before emitting a result`;
   const searched = path === undefined ? "the launch exported no PATH, the machine's own was searched" : `PATH searched: ${path}`;
   return `${bin} was not found on PATH (exit 127); ${searched}`;
+}
+
+/** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
+ * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,
+ * neither of which a person can act on. */
+export function machineUnreachedLine(attempts: number, elapsedMs: number): string {
+  return `the machine could not be reached from this computer after ${plural(attempts, "attempt")} over ${fmtDuration(elapsedMs)}`;
+}
+
+/** The line an MCP install ends on: the command every agent's config now runs, as one shell line. */
+export function mcpServerCommandLine(command: string, args: readonly string[]): string {
+  return `The server command is ${shellLine([command, ...args])}`;
+}
+
+/** The one stderr line the command line shows under a command that exited non-zero, naming the folder it ran in:
+ * the host chose it when none was named, so the person did not see it go by; absent, the runtime ran it in ~. */
+export function execFolderLine(cwd: string | undefined): string {
+  return `ran in ${cwd ?? "the home folder"}`;
+}
+
+/** The turn's error when the harness's result arrived while the agent's own background tasks were still running: the
+ * harness kills them with the turn and nothing wakes the thread when they would have finished, so the turn ended
+ * before the work it started did. */
+export function backgroundTasksLine(running: number): string {
+  return `ended with ${plural(running, "background task")} running`;
 }
 
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { MIB, catalogToolFor } from "@wsp/catalog";
 import { underProject } from "@wsp/protocol";
-import { commandNames, installNames } from "./commands.js";
+import { commandNames, installNames, type Install } from "./commands.js";
 import type { Call } from "./reader.js";
 
 export interface Count {
@@ -29,7 +29,7 @@ export interface Usage {
   sessions: number;
   calls: number;
   commands: Map<string, Count>;
-  /** Keyed `via name` (`brew gh`, `npm agent-browser`). */
+  /** Keyed by installKey (`brew gh`, `npm agent-browser`). */
   installs: Map<string, Count>;
   /** The catalog tools the commands and installs stand for, by id; a session counts once per tool however often it ran it. */
   tools: Map<string, Count>;
@@ -43,14 +43,14 @@ interface Seen {
 class Tally {
   private readonly seen = new Map<string, Seen>();
 
-  add(name: string, session: string): void {
+  add(name: string, session: string, calls: number): void {
     let s = this.seen.get(name);
     if (s === undefined) {
       s = { sessions: new Set(), calls: 0 };
       this.seen.set(name, s);
     }
     s.sessions.add(session);
-    s.calls += 1;
+    s.calls += calls;
   }
 
   /** Most sessions first, then most calls, then by name. */
@@ -61,38 +61,51 @@ class Tally {
   }
 }
 
-/** Whether a call counts when the recipe is weighed against named folders: its session ran at one of them or
- * inside it. A call whose store records no folder counts for nothing, since nothing says it is this project's. */
-export function inFolders(call: Call, folders: readonly string[]): boolean {
-  const folder = call.folder;
+/** How an install is keyed in a Usage and in a cached bucket, and the package name back out of that key: written
+ * once here, since a bucket read from the cache is the same key and the tool it stands for is looked up from it. */
+export const installKey = (i: Install): string => `${i.via} ${i.name}`;
+export const installedName = (key: string): string => key.slice(key.indexOf(" ") + 1);
+
+/** What one session came to in one file: the counts the recipe keeps of it, and all a cache stores. Names and
+ * counts only, as everything downstream of a reader is. */
+export interface HistoryBucket {
+  session: string;
+  /** The folder the session ran in, when its store records one; the recipe weighs the bucket by it. */
+  folder?: string;
+  /** Every tool call of that session in that file, the ones no name came out of included. */
+  calls: number;
+  /** Command name to how often it ran. */
+  commands: Record<string, number>;
+  /** installKey to how often an installer was asked for it. */
+  installs: Record<string, number>;
+}
+
+/** Whether a bucket counts when the recipe is weighed against named folders: its session ran at one of them or
+ * inside it. A bucket whose store records no folder counts for nothing, since nothing says it is this project's. */
+export function inFolders(where: { folder?: string }, folders: readonly string[]): boolean {
+  const folder = where.folder;
   return folder !== undefined && folders.some(f => underProject(folder, f));
 }
 
-/** Reduces a reader's calls to names and counts; shell lines are read for their command words here and dropped.
- * With `folders`, only the calls whose session ran at one of them or inside it are counted. */
-export async function tally(calls: AsyncIterable<Call>, folders?: readonly string[]): Promise<Usage> {
-  const sessions = new Set<string>();
-  let total = 0;
-  const commands = new Tally();
-  const installs = new Tally();
-  const tools = new Tally();
-  const tool = (name: string, session: string): void => {
-    const t = catalogToolFor(name);
-    if (t !== undefined) tools.add(t.id, session);
-  };
+/** Reduces one file's calls to names and counts, one bucket per session and folder in it; shell lines are read for
+ * their command words here and dropped. The catalog tools the names stand for are not decided here: they are looked
+ * up when the buckets are merged, so a catalog that grew since a bucket was cached still decides its tools. */
+export async function reduceCalls(calls: AsyncIterable<Call>): Promise<HistoryBucket[]> {
+  const buckets = new Map<string, HistoryBucket>();
   for await (const c of calls) {
-    if (folders !== undefined && !inFolders(c, folders)) continue;
-    sessions.add(c.session);
-    total += 1;
+    const key = `${c.session}\u0000${c.folder ?? ""}`;
+    let b = buckets.get(key);
+    if (b === undefined) {
+      b = { session: c.session, ...(c.folder !== undefined ? { folder: c.folder } : {}), calls: 0, commands: {}, installs: {} };
+      buckets.set(key, b);
+    }
+    b.calls += 1;
     switch (c.kind) {
       case "shell":
-        for (const name of commandNames(c.line)) {
-          commands.add(name, c.session);
-          tool(name, c.session);
-        }
+        for (const name of commandNames(c.line)) b.commands[name] = (b.commands[name] ?? 0) + 1;
         for (const i of installNames(c.line)) {
-          installs.add(`${i.via} ${i.name}`, c.session);
-          tool(i.name, c.session);
+          const k = installKey(i);
+          b.installs[k] = (b.installs[k] ?? 0) + 1;
         }
         break;
       case "other":
@@ -101,6 +114,34 @@ export async function tally(calls: AsyncIterable<Call>, folders?: readonly strin
         const _exhaustive: never = c;
         return _exhaustive;
       }
+    }
+  }
+  return [...buckets.values()];
+}
+
+/** Every bucket of one agent's store added up. With `folders`, only the buckets whose session ran at one of them or
+ * inside it are counted. */
+export function usageOf(buckets: readonly HistoryBucket[], folders?: readonly string[]): Usage {
+  const sessions = new Set<string>();
+  let total = 0;
+  const commands = new Tally();
+  const installs = new Tally();
+  const tools = new Tally();
+  const tool = (name: string, session: string, calls: number): void => {
+    const t = catalogToolFor(name);
+    if (t !== undefined) tools.add(t.id, session, calls);
+  };
+  for (const b of buckets) {
+    if (folders !== undefined && !inFolders(b, folders)) continue;
+    sessions.add(b.session);
+    total += b.calls;
+    for (const [name, calls] of Object.entries(b.commands)) {
+      commands.add(name, b.session, calls);
+      tool(name, b.session, calls);
+    }
+    for (const [key, calls] of Object.entries(b.installs)) {
+      installs.add(key, b.session, calls);
+      tool(installedName(key), b.session, calls);
     }
   }
   return { sessions: sessions.size, calls: total, commands: commands.counts(), installs: installs.counts(), tools: tools.counts() };

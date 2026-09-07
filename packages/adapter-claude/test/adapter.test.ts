@@ -596,6 +596,55 @@ describe("result classification", () => {
     expect(withUsage.result.error).toBeUndefined();
   });
 
+  it("a result that arrives while the agent's own background tasks still run fails the turn with the count and keeps the reply", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const lines = [
+      init,
+      `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b4nj5kk38","task_type":"local_bash","description":"sleep 25; echo done"}],"session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"system","subtype":"task_started","task_id":"b4nj5kk38","tool_use_id":"toolu_01","description":"sleep 25; echo done","is_backgrounded":true,"task_type":"local_bash","session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"result","subtype":"success","is_error":false,"duration_ms":3925,"total_cost_usd":0.0186,"result":"Waiting for the background command to finish.","session_id":"${FIXTURE_SESSION_ID}","usage":{"input_tokens":18,"output_tokens":230}}`,
+      `{"type":"system","subtype":"background_tasks_changed","tasks":[],"session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"system","subtype":"task_notification","task_id":"b4nj5kk38","tool_use_id":"toolu_01","status":"stopped","summary":"sleep 25; echo done","session_id":"${FIXTURE_SESSION_ID}"}`,
+    ];
+    const exec = scriptedExec(lines);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+
+    const session = adapter.start({ prompt: "x", onEvent });
+    const result = await session.finished;
+
+    expect(result).toMatchObject({ status: "failed", error: "ended with 1 background task running", text: "Waiting for the background command to finish.", durationMs: 3925, costUsd: 0.0186 });
+    const done = events.filter((e) => e.type === "turn.done");
+    expect(done).toHaveLength(1);
+    expect(done[0]).toMatchObject({ type: "turn.done", result: { status: "failed", error: "ended with 1 background task running" } });
+    const end = events.at(-1);
+    if (end?.type !== "session.end") throw new Error("expected session.end");
+    expect(end.sawResult).toBe(true);
+  });
+
+  it("a background task that ended before the result leaves the turn completed; two still running are counted; an interrupted result keeps its status", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const one = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","task_type":"local_bash","description":"sleep 5"}],"session_id":"${FIXTURE_SESSION_ID}"}`;
+    const two = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","task_type":"local_bash","description":"sleep 5"},{"task_id":"b","task_type":"local_agent","description":"review"}],"session_id":"${FIXTURE_SESSION_ID}"}`;
+    const none = `{"type":"system","subtype":"background_tasks_changed","tasks":[],"session_id":"${FIXTURE_SESSION_ID}"}`;
+    const success = `{"type":"result","subtype":"success","is_error":false,"duration_ms":30,"result":"done","session_id":"${FIXTURE_SESSION_ID}","usage":{"input_tokens":1,"output_tokens":1}}`;
+    const aborted = `{"type":"result","subtype":"error_during_execution","is_error":true,"terminal_reason":"aborted_streaming","duration_ms":812,"session_id":"${FIXTURE_SESSION_ID}"}`;
+    const run = async (lines: string[]) => {
+      const exec = scriptedExec(lines);
+      const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+      return adapter.start({ prompt: "x", onEvent: () => {} }).finished;
+    };
+
+    const finishedFirst = await run([init, one, none, success]);
+    expect(finishedFirst).toMatchObject({ status: "completed", text: "done" });
+    expect(finishedFirst.error).toBeUndefined();
+    const twoRunning = await run([init, one, two, success]);
+    expect(twoRunning).toMatchObject({ status: "failed", error: "ended with 2 background tasks running", text: "done" });
+    const interrupted = await run([init, one, aborted]);
+    expect(interrupted.status).toBe("interrupted");
+    expect(interrupted.error).toBeUndefined();
+  });
+
   it("skips lines that are not stream-json events", async () => {
     const lines = [
       "not json at all",

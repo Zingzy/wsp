@@ -27,7 +27,7 @@ describe("the wsp skill", () => {
     expect(WSP_SKILL).toContain(`get the server: ${MCP_AGENT_IDS}.`);
     // The install's flags are stated where the reader is sent to find them, not only in the walkthrough and the help.
     expect(WSP_SKILL).toContain("`--agent` repeats to do several in one call");
-    expect(WSP_SKILL).toContain("`--json` answers with one line holding what each agent took and a `failures` array");
+    expect(WSP_SKILL).toContain("`--json` answers with one line holding the `server` command every config now runs, what each agent took and a `failures` array");
     expect(WSP_SKILL).toContain("An entry under `installed` with no `path` took the skill and not the server");
   });
 

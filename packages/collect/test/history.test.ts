@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The session readers over fixtures shaped like each agent's own store, and
 // the command parser that turns a shell line into the names of what it ran.
-import { describe, expect, it } from "vitest";
-import { HISTORY_READERS, claudeSession, codexReader, commandNames, hermesReader, installNames, readHistories, splitCommands, tally, withoutHeredocs } from "../src/history/index.js";
+import { createHash } from "node:crypto";
+import { linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { HISTORY_READERS, PARSE_VERSION, claudeSession, codexReader, commandNames, fileHistoryCache, hermesReader, installNames, readHistories, readStore, splitCommands, withoutHeredocs } from "../src/history/index.js";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { fakeHost } from "./fake-host.js";
+import { MTIME, fakeHost } from "./fake-host.js";
 
 const line = (o: unknown): string => JSON.stringify(o);
 const claudeLine = (sessionId: string, tools: { name: string; input: unknown }[]): string =>
@@ -103,7 +107,7 @@ describe("Claude Code reader", () => {
         "~/.claude/projects/-Users-dev-other/memory/MEMORY.md": "# notes",
       },
     });
-    const usage = await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"));
+    const usage = await readStore(host, HISTORY_READERS["claude-jsonl"], "/Users/dev/.claude/projects");
     expect(usage.sessions).toBe(2);
     expect(usage.calls).toBe(6);
     expect([...usage.commands]).toEqual([
@@ -135,7 +139,7 @@ describe("Codex reader", () => {
       line({ type: "event_msg", payload: { type: "token_count" } }),
     ].join("\n");
     const host = fakeHost({ files: { "~/.codex/sessions/2026/06/01/rollout-2026-06-01T10-00-00-t1.jsonl": rollout } });
-    const usage = await tally(codexReader.read(host, "/Users/dev/.codex/sessions"));
+    const usage = await readStore(host, codexReader, "/Users/dev/.codex/sessions");
     expect(usage).toMatchObject({ sessions: 1, calls: 3 });
     expect([...usage.commands]).toEqual([
       ["cargo", { sessions: 1, calls: 2 }],
@@ -158,7 +162,7 @@ describe("Hermes reader", () => {
 
   it("asks sqlite3 read-only for its columns and the folder each session ran in, and reads the terminal calls out of the JSON", async () => {
     const host = fakeHost({ files: { "~/.hermes/state.db": 4096 }, exec: { [`sqlite3 -readonly -json ${db} ${joined}`]: rows } });
-    const usage = await tally(hermesReader.read(host, db));
+    const usage = await readStore(host, hermesReader, db);
     expect(usage).toMatchObject({ sessions: 2, calls: 4 });
     expect([...usage.commands]).toEqual([["docker", { sessions: 2, calls: 2 }]]);
     expect(host.calls).toEqual([`run sqlite3 -readonly -json ${db} ${joined}`]);
@@ -166,15 +170,15 @@ describe("Hermes reader", () => {
 
   it("falls back to the columns alone on a database with no sessions table, and counts nothing for a project then", async () => {
     const host = fakeHost({ files: { "~/.hermes/state.db": 4096 }, exec: { [`sqlite3 -readonly -json ${db} ${query}`]: rows } });
-    expect(await tally(hermesReader.read(host, db))).toMatchObject({ sessions: 2, calls: 4 });
+    expect(await readStore(host, hermesReader, db)).toMatchObject({ sessions: 2, calls: 4 });
     expect(host.calls).toEqual([`run sqlite3 -readonly -json ${db} ${joined}`, `run sqlite3 -readonly -json ${db} ${query}`]);
     const known = fakeHost({ files: { "~/.hermes/state.db": 4096 }, exec: { [`sqlite3 -readonly -json ${db} ${joined}`]: JSON.stringify([{ ...call("h1", "docker ps"), cwd: "/Users/dev/proj" }, { ...call("h2", "go build"), cwd: "/Users/dev/other" }]) } });
-    expect([...(await tally(hermesReader.read(known, db), ["/Users/dev/proj"])).commands]).toEqual([["docker", { sessions: 1, calls: 1 }]]);
+    expect([...(await readStore(known, hermesReader, db, { folders: ["/Users/dev/proj"] })).commands]).toEqual([["docker", { sessions: 1, calls: 1 }]]);
   });
 
   it("reads nothing when there is no database, and throws when the database is there but sqlite3 does not answer", async () => {
-    expect(await tally(hermesReader.read(fakeHost(), db))).toMatchObject({ sessions: 0, calls: 0 });
-    await expect(tally(hermesReader.read(fakeHost({ files: { "~/.hermes/state.db": 4096 } }), db))).rejects.toThrow("could not be read");
+    expect(await readStore(fakeHost(), hermesReader, db)).toMatchObject({ sessions: 0, calls: 0 });
+    await expect(readStore(fakeHost({ files: { "~/.hermes/state.db": 4096 } }), hermesReader, db)).rejects.toThrow("could not be read");
   });
 });
 
@@ -187,13 +191,13 @@ describe("weighing by project", () => {
         "~/.claude/projects/-Users-dev-other/s3.jsonl": line({ type: "assistant", cwd: "/Users/dev/other", sessionId: "s3", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "go build" } }] } }),
       },
     });
-    const all = await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"));
+    const all = await readStore(host, HISTORY_READERS["claude-jsonl"], "/Users/dev/.claude/projects");
     expect([...all.commands].map(([name]) => name).sort()).toEqual(["gh", "go", "pnpm"]);
-    const one = await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"), ["/Users/dev/proj"]);
+    const one = await readStore(host, HISTORY_READERS["claude-jsonl"], "/Users/dev/.claude/projects", { folders: ["/Users/dev/proj"] });
     expect([...one.commands].map(([name]) => name).sort()).toEqual(["gh", "pnpm"]);
     expect(one.sessions).toBe(2);
     // A sibling folder that shares the prefix is not inside it.
-    expect((await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"), ["/Users/dev/pro"])).sessions).toBe(0);
+    expect((await readStore(host, HISTORY_READERS["claude-jsonl"], "/Users/dev/.claude/projects", { folders: ["/Users/dev/pro"] })).sessions).toBe(0);
   });
 
   it("takes a codex session's folder from the session_meta the rollout opens with", async () => {
@@ -205,13 +209,13 @@ describe("weighing by project", () => {
         "~/.codex/sessions/2026/06/01/rollout-b-t2.jsonl": rollout("t2", "/Users/dev/other", "go build"),
       },
     });
-    expect([...(await tally(codexReader.read(host, "/Users/dev/.codex/sessions"), ["/Users/dev/proj"])).commands]).toEqual([["cargo", { sessions: 1, calls: 1 }]]);
+    expect([...(await readStore(host, codexReader, "/Users/dev/.codex/sessions", { folders: ["/Users/dev/proj"] })).commands]).toEqual([["cargo", { sessions: 1, calls: 1 }]]);
   });
 
   it("counts nothing from a session whose store never recorded a folder", async () => {
     const host = fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLineNoCwd("s1", "pnpm test") } });
-    expect((await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"), ["/Users/dev/proj"])).sessions).toBe(0);
-    expect((await tally(HISTORY_READERS["claude-jsonl"].read(host, "/Users/dev/.claude/projects"))).sessions).toBe(1);
+    expect((await readStore(host, HISTORY_READERS["claude-jsonl"], "/Users/dev/.claude/projects", { folders: ["/Users/dev/proj"] })).sessions).toBe(0);
+    expect((await readStore(host, HISTORY_READERS["claude-jsonl"], "/Users/dev/.claude/projects")).sessions).toBe(1);
   });
 });
 
@@ -232,5 +236,121 @@ describe("readHistories", () => {
       ["pi", "no-reader", 0, 0],
       ["hermes", "unreadable", 0, 0],
     ]);
+  });
+});
+
+describe("the session cache", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+  const cachePath = (): string => {
+    const d = mkdtempSync(join(tmpdir(), "wsp-history-"));
+    dirs.push(d);
+    return join(d, "history-cache.json");
+  };
+
+  const CLAUDE = CATALOG_AGENTS.filter(a => a.id === "claude");
+  /** PARSE_VERSION and what the files that fill a bucket hashed to when it was last bumped. */
+  const FINGERPRINT = "1:085b795c96d6ef04";
+  const S1 = "~/.claude/projects/-Users-dev-proj/s1.jsonl";
+  const S2 = "~/.claude/projects/-Users-dev-proj/s2.jsonl";
+  const FIRST = [claudeLine("s1", [{ name: "Bash", input: { command: "gh pr view" } }]), claudeLine("s1", [{ name: "Read", input: { file_path: "/x" } }])].join("\n");
+  const SECOND = claudeLine("s2", [{ name: "Bash", input: { command: "pnpm test && npm install -g agent-browser" } }]);
+  const LAPTOP = { files: { [S1]: FIRST, [S2]: SECOND } };
+  const sessionPath = (name: string): string => `/Users/dev/.claude/projects/-Users-dev-proj/${name}.jsonl`;
+  /** The session files a run opened, in order; the fake host records every read of a transcript. */
+  const opened = (host: { calls: string[] }): string[] => host.calls.filter(c => c.startsWith("lines ")).map(c => c.slice("lines ".length));
+
+  it("a second run over an unchanged history opens no session file and comes to the same counts", async () => {
+    const cache = cachePath();
+    const first = fakeHost(LAPTOP);
+    const one = await readHistories(first, CLAUDE, { cache: fileHistoryCache(cache) });
+    expect(opened(first)).toEqual([sessionPath("s1"), sessionPath("s2")]);
+    expect(one[0]).toMatchObject({ state: "read", sessions: 2, calls: 3 });
+
+    const again = fakeHost(LAPTOP);
+    const two = await readHistories(again, CLAUDE, { cache: fileHistoryCache(cache) });
+    expect(opened(again)).toEqual([]);
+    expect(two).toEqual(one);
+  });
+
+  it("re-reads the one file whose stamp moved, whether its time or its size changed, and leaves the rest cached", async () => {
+    const cache = cachePath();
+    await readHistories(fakeHost(LAPTOP), CLAUDE, { cache: fileHistoryCache(cache) });
+
+    // Same bytes, later mtime: the file is read again and the counts stand.
+    const touched = fakeHost({ ...LAPTOP, mtimes: { [S2]: MTIME + 1 } });
+    const after = await readHistories(touched, CLAUDE, { cache: fileHistoryCache(cache) });
+    expect(opened(touched)).toEqual([sessionPath("s2")]);
+    expect(after[0]).toMatchObject({ sessions: 2, calls: 3 });
+
+    // Same mtime, more lines: the size says it moved, and the new command is counted.
+    const grown = fakeHost({ files: { [S1]: FIRST, [S2]: `${SECOND}\n${claudeLine("s2", [{ name: "Bash", input: { command: "cargo build" } }])}` } });
+    const last = await readHistories(grown, CLAUDE, { cache: fileHistoryCache(cache) });
+    expect(opened(grown)).toEqual([sessionPath("s2")]);
+    expect(last[0]).toMatchObject({ sessions: 2, calls: 4 });
+    expect([...last[0]!.usage.commands]).toEqual([
+      ["cargo", { sessions: 1, calls: 1 }],
+      ["gh", { sessions: 1, calls: 1 }],
+      ["npm", { sessions: 1, calls: 1 }],
+      ["pnpm", { sessions: 1, calls: 1 }],
+    ]);
+  });
+
+  it("counts every session file off as it lands, so a first run can be counted out loud", async () => {
+    const progress: string[] = [];
+    await readHistories(fakeHost(LAPTOP), CLAUDE, { onProgress: p => progress.push(`${p.agent} ${p.read}/${p.files}`) });
+    expect(progress).toEqual(["claude 1/2", "claude 2/2"]);
+  });
+
+  it("drops a session file that is gone from the cache, and reads everything again when the cache itself cannot be read", async () => {
+    const cache = cachePath();
+    await readHistories(fakeHost(LAPTOP), CLAUDE, { cache: fileHistoryCache(cache) });
+    const cleared = { files: { [S1]: FIRST } };
+    await readHistories(fakeHost(cleared), CLAUDE, { cache: fileHistoryCache(cache) });
+    expect(Object.keys((JSON.parse(readFileSync(cache, "utf8")) as { files: Record<string, unknown> }).files)).toEqual([sessionPath("s1")]);
+
+    writeFileSync(cache, "{ half a file");
+    const cold = fakeHost(LAPTOP);
+    const out = await readHistories(cold, CLAUDE, { cache: fileHistoryCache(cache) });
+    expect(opened(cold).length).toBe(2);
+    expect(out[0]).toMatchObject({ sessions: 2, calls: 3 });
+  });
+
+  it("reads everything again when another parse version filled the file, so no run hands back an older parser's counts", async () => {
+    const cache = cachePath();
+    await readHistories(fakeHost(LAPTOP), CLAUDE, { cache: fileHistoryCache(cache) });
+    const written = JSON.parse(readFileSync(cache, "utf8")) as Record<string, unknown>;
+    expect(written["parse"]).toBe(PARSE_VERSION);
+
+    // The same stamps, the same shape, one parse version on: the stamps say nothing moved and the file is still refused whole.
+    writeFileSync(cache, JSON.stringify({ ...written, parse: PARSE_VERSION + 1 }));
+    const cold = fakeHost(LAPTOP);
+    const out = await readHistories(cold, CLAUDE, { cache: fileHistoryCache(cache) });
+    expect(opened(cold)).toEqual([sessionPath("s1"), sessionPath("s2")]);
+    expect(out[0]).toMatchObject({ sessions: 2, calls: 3 });
+  });
+
+  it("puts the new cache in place with a rename, so a second wsp over one state folder never reads a half-written file", async () => {
+    const cache = cachePath();
+    await readHistories(fakeHost(LAPTOP), CLAUDE, { cache: fileHistoryCache(cache) });
+    const before = readFileSync(cache, "utf8");
+    // What another process holding the old file sees: an in-place write moves under it, a rename leaves it whole.
+    const held = `${cache}.held`;
+    linkSync(cache, held);
+
+    const grown = { files: { [S1]: FIRST, [S2]: `${SECOND}\n${claudeLine("s2", [{ name: "Bash", input: { command: "cargo build" } }])}` } };
+    await readHistories(fakeHost(grown), CLAUDE, { cache: fileHistoryCache(cache) });
+    expect(readFileSync(cache, "utf8")).not.toBe(before);
+    expect(readFileSync(held, "utf8")).toBe(before);
+  });
+
+  it("bumps PARSE_VERSION when the code that fills a bucket changes", () => {
+    const h = createHash("sha256");
+    for (const f of ["claude.ts", "codex.ts", "commands.ts", "hermes.ts", "reader.ts", "tally.ts"]) h.update(readFileSync(new URL(`../src/history/${f}`, import.meta.url)));
+    // Bump PARSE_VERSION in reader.ts and put the digest this prints here: every cache filled by the old code is then re-read.
+    expect(`${PARSE_VERSION}:${h.digest("hex").slice(0, 16)}`).toBe(FINGERPRINT);
   });
 });
