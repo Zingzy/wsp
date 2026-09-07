@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the export dialog for a running workspace
 // over a fake api, in either theme (?theme=light), the thread's folder already
-// known, three agents with threads, as the desktop shell shows it. Export
-// plays the runtime's events a beat apart and then resolves; with ?exists=1
+// known, three agents with threads (?threads=0 for none), as the desktop shell
+// shows it. Export plays the runtime's events a beat apart, the folder's
+// download and then the agents' state as the runtime does it, and then
+// resolves; with ?exists=1
 // the first request is refused because the destination is already here, so a
 // test can lay out and photograph the refusal, then Replace and export; with
 // ?long=1 the folder sits at a 120-character path with no space in it, so the
@@ -64,7 +66,7 @@ const api: Api = {
   listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
   snapshotStorage: async () => null,
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
-  listSessions: async () => [session("s1", "claude"), session("s2", "codex"), session("s3", "claude"), session("s4", "gemini")],
+  listSessions: async () => (params.get("threads") === "0" ? [] : [session("s1", "claude"), session("s2", "codex"), session("s3", "claude"), session("s4", "gemini")]),
   getGolden: async () => undefined,
   hostFolders: fakeHostFolders(),
   exportProject: async o => {
@@ -76,11 +78,15 @@ const api: Api = {
     await beat(150);
     emit({ stage: "downloading", message: "The folder: 0 B of 31.0 MB.", elapsedMs: 2_400, bytes: 0, total: 32_505_856 });
     await beat(150);
+    emit({ stage: "downloading", message: "The folder: 15.5 MB of 31.0 MB.", elapsedMs: 4_600, bytes: 16_252_928, total: 32_505_856 });
+    await beat(150);
     emit({ stage: "downloading", message: "The folder: 31.0 MB of 31.0 MB.", elapsedMs: 6_900, bytes: 32_505_856, total: 32_505_856 });
     await beat(150);
     emit({ stage: "packing", message: "Packing the agents' state for it on the machine.", elapsedMs: 7_000 });
     await beat(150);
-    emit({ stage: "downloading", message: "Agent state: 1.3 MB of 1.3 MB.", elapsedMs: 7_400, bytes: 1_292_000, total: 1_292_000 });
+    emit({ stage: "downloading", message: "Agent state: 0 B of 1.2 MB.", elapsedMs: 7_100, bytes: 0, total: 1_292_000 });
+    await beat(150);
+    emit({ stage: "downloading", message: "Agent state: 1.2 MB of 1.2 MB.", elapsedMs: 7_400, bytes: 1_292_000, total: 1_292_000 });
     await beat(150);
     emit({ stage: "landing", message: `Landing at ${o.dest}.`, elapsedMs: 7_500 });
     await beat(150);

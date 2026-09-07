@@ -9,23 +9,19 @@
 // the field above still works for a path pasted from somewhere else.
 import { FolderGitIcon, FolderIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { folderRefusalLine, type HostFolderListing } from "@wsp/protocol";
+import { folderLevelLine, folderRefusalLine, type HostFolderListing } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { baseName } from "../files/entries.js";
 import { FolderCrumbRow } from "../files/FolderBreadcrumbs.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
-import { count } from "./projectTrip.js";
 
 const ROW = "flex h-7 w-full min-w-0 items-center gap-2 rounded-sm px-1 text-left text-xs outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
 
-/** What the list has to say about itself, in the same words the command line prints: the level's folders, how many of
- * it are dot-named, or why there is nothing to show. */
+/** What the list has to say about itself: the level in the protocol's own words, or why there is nothing to show. */
 function stateWords(listing: HostFolderListing | null, error: string | null): string {
   if (error !== null) return folderRefusalLine(error);
-  if (listing === null) return "Reading the folders on this Mac.";
-  const held = listing.hidden === 0 ? "" : `, ${listing.hidden} hidden`;
-  return listing.folders.length === 0 ? `No folders in ${listing.dir}${held}.` : `${count(listing.folders.length, "folder")} in ${listing.dir}${held}.`;
+  return listing === null ? "Reading the folders on this Mac." : folderLevelLine(listing);
 }
 
 export function FolderBrowser({ disabled, start, onPick }: { disabled: boolean; start?: string; onPick: (dir: string) => void }) {
@@ -70,7 +66,7 @@ export function FolderBrowser({ disabled, start, onPick }: { disabled: boolean; 
   const folders = listing?.folders ?? [];
 
   return (
-    <section data-k="browse" className="flex flex-col gap-1 rounded-md border border-border/60 px-2.5 py-2">
+    <div data-k="browse" className="flex flex-col gap-1">
       <div className="flex h-7 min-w-0 items-center gap-2">
         <FolderCrumbRow roots={listing?.roots ?? []} folder={listing?.dir ?? null} onPick={goTo} />
         <Button type="button" variant="outline" size="sm" className="shrink-0" disabled={disabled || listing === null} onClick={() => listing !== null && onPick(listing.dir)} data-k="browse-pick">
@@ -98,6 +94,6 @@ export function FolderBrowser({ disabled, start, onPick }: { disabled: boolean; 
           </button>
         ) : null}
       </p>
-    </section>
+    </div>
   );
 }

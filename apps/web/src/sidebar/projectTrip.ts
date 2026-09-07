@@ -1,43 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What both project trips, the import and the export, compute from the wire:
-// one step row per stage folded from the runtime's events, a folder's own
-// name, a counted word, an agent's catalog name, each agent's outcome in the
-// one set of words the web has for it, and the refusal a caught error becomes
-// with the tone the status line gives it. No React here.
+// a folder's own name, a counted word, an agent's catalog name, each agent's
+// outcome in the one set of words the web has for it, the refusal a caught
+// error becomes with the tone the status line gives it, and what the one slot
+// says out of what the trip has. No React here.
 import { agentName } from "@wsp/catalog";
-import { plural, type ProjectAgentOutcome, type ProjectAgentResult } from "@wsp/protocol";
+import { plural, type ProjectAgentOutcome, type ProjectAgentResult, type TripProgress } from "@wsp/protocol";
 import { errorText } from "../lib/utils.js";
 import { RequestError } from "../protocol/client.js";
-
-/** The shape every trip's progress event shares; `failed` is never a step, it is the error line. */
-export interface TripEvent {
-  readonly stage: string;
-  readonly message: string;
-  readonly elapsedMs: number;
-  readonly bytes?: number;
-  readonly total?: number;
-}
-
-export interface StepRow<S extends string = string> {
-  readonly stage: S;
-  /** The runtime's sentence for the step, or nothing before it was reached. */
-  readonly message: string | null;
-  readonly elapsedMs: number | null;
-  /** Bytes moved of the archive's total on the transfer step, 0 to 1. */
-  readonly fraction: number | null;
-}
-
-/** One row per step in the given order, each holding the last event the runtime sent for it. */
-export function stepRows<S extends string>(steps: readonly S[], events: readonly TripEvent[]): StepRow<S>[] {
-  const last = new Map<string, TripEvent>();
-  for (const e of events) if ((steps as readonly string[]).includes(e.stage)) last.set(e.stage, e);
-  return steps.map(stage => {
-    const e = last.get(stage);
-    if (e === undefined) return { stage, message: null, elapsedMs: null, fraction: null };
-    const fraction = e.bytes !== undefined && e.total !== undefined && e.total > 0 ? e.bytes / e.total : null;
-    return { stage, message: e.message, elapsedMs: e.elapsedMs, fraction };
-  });
-}
 
 /** The protocol's rule under the name this folder's files already call it by; there is one implementation. */
 export const count = plural;
@@ -72,10 +42,20 @@ export interface Refusal {
   readonly exists: boolean;
 }
 
-export type StatusTone = "quiet" | "caution" | "error";
+/** The slot's voice: a step under way in muted mono, a quiet sentence, a caution that asks for a replace, an error. */
+export type StatusTone = "step" | "quiet" | "caution" | "error";
 
 /** A caught error as the trip's refusal: the runtime's `exists` kind is the one with a follow-up. */
 export const refusalOf = (e: unknown): Refusal => ({ message: errorText(e), exists: e instanceof RequestError && e.kind === "exists" });
 
 /** A refusal that asks for a replace is a caution, any other an error; none is quiet. */
 export const refusalTone = (refusal: Refusal | null): StatusTone => (refusal === null ? "quiet" : refusal.exists ? "caution" : "error");
+
+/** What the slot says: a refusal in its tone before anything, then the landed line, then the step under way, else the
+ * trip's idle words. */
+export function slotWords({ refusal, landed, progress, idle }: { refusal: Refusal | null; landed: string | null; progress: TripProgress | null; idle: string }): { words: string; tone: StatusTone } {
+  if (refusal !== null) return { words: refusal.message, tone: refusalTone(refusal) };
+  if (landed !== null) return { words: landed, tone: "quiet" };
+  if (progress !== null) return { words: progress.line, tone: "step" };
+  return { words: idle, tone: "quiet" };
+}

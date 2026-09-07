@@ -3,14 +3,14 @@
 // and the MCP recipe tool read them and how they join a recipe; the table
 // draws them under their own group. The install line runs as given, so nothing
 // here rewrites one; a row outside the catalog is never offered a sign-in.
-import { ADDED_BY_AGENT, commandCheck, customRows, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
+import { ADDED_BY_AGENT, commandCheck, customRows, usageRefusal, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
 
 /** `<id>=<value>`, split at the first equals; both sides have to be there. */
 export function parsePair(flag: string, spec: string): { id: string; value: string } {
   const at = spec.indexOf("=");
   const id = at < 0 ? "" : spec.slice(0, at).trim();
   const value = at < 0 ? "" : spec.slice(at + 1).trim();
-  if (id === "" || value === "") throw new Error(`${flag} takes <id>=<command>, not ${JSON.stringify(spec)}`);
+  if (id === "" || value === "") throw usageRefusal(`${flag} takes <id>=<command>, not ${JSON.stringify(spec)}`);
   return { id, value };
 }
 
@@ -35,7 +35,7 @@ export function customFromFlags(flags: AddFlags): RecipeCustomRow[] {
     const { id, value } = parsePair("--add", spec);
     rows.set(id, { kind: "custom", id, name: id, install: [value], check: checks.get(id) ?? commandCheck(id), why: flags.why ?? ADDED_BY_AGENT });
   }
-  for (const id of checks.keys()) if (!rows.has(id)) throw new Error(`--add-check ${id}: nothing was added under that id`);
+  for (const id of checks.keys()) if (!rows.has(id)) throw usageRefusal(`--add-check ${id}: nothing was added under that id`);
   return [...rows.values()];
 }
 
@@ -45,4 +45,11 @@ export function withCustom(recipe: Recipe, rows: readonly RecipeCustomRow[]): Re
   const kept = customRows(recipe).map(r => added.get(r.id) ?? r);
   const known = new Set(kept.map(r => r.id));
   return { ...recipe, custom: [...kept, ...rows.filter(r => !known.has(r.id))] };
+}
+
+/** The recipe with the added rows under these ids gone. What both hands that tick a package by its own row do to a
+ * custom row for the same package: two rows for one package are two installs, and the row's own road is the one the
+ * plan resolves. */
+export function withoutCustom(recipe: Recipe, ids: ReadonlySet<string>): Recipe {
+  return { ...recipe, custom: customRows(recipe).filter(r => !ids.has(r.id)) };
 }

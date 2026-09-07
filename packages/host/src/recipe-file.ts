@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { catalogEntry, loginIdOf } from "@wsp/catalog";
 import { type HistoryCache, fileHistoryCache } from "@wsp/collect";
-import { Recipe, type RecipeRow, type ToolPin } from "@wsp/protocol";
+import { Recipe, toolRowId, type RecipeRow, type ToolPin } from "@wsp/protocol";
 
 /** Where the small recipe lives, beside the saved manifest: what wsp recipe writes and wsp init --recipe reads. */
 export function smallRecipePath(statePath: string): string {
@@ -51,6 +51,19 @@ export const outsideCatalog = (r: Pick<RecipeRow, "id">): boolean => catalogEntr
 
 /** The rows of a recipe outside the catalog, in the recipe's order; none of a recipe that is not there. */
 export const outsideRowsOf = (recipe: Pick<Recipe, "rows"> | undefined): RecipeRow[] => (recipe?.rows ?? []).filter(outsideCatalog);
+
+/** A tools row the catalog does not carry as a row of the small recipe: under the collector's own id, off until
+ * something ticks it, found here as its source. Both hands that write one, the wizard's screens and the recipe
+ * verb, make it here, so a row's shape does not depend on which of them wrote it. */
+export const outsideRow = (id: string, paths: readonly string[] = []): RecipeRow => ({ id, kind: "tool", on: false, source: { kind: "installed", paths: [...paths], bin: true } });
+
+/** The row id a package a manager on this Mac lists has in a recipe: the collector's id for that manager and
+ * package. The one rule the third screen and the recipe verb both tick such a package by. */
+export const ownRowIdOf = (pkg: { manager: string; name: string }): string => toolRowId(pkg.manager, pkg.name);
+
+/** The recipe's own row for such a package, when it carries one. */
+export const ownRowOf = (recipe: Pick<Recipe, "rows"> | undefined, pkg: { manager: string; name: string }): RecipeRow | undefined =>
+  outsideRowsOf(recipe).find(r => r.id === ownRowIdOf(pkg));
 
 /** The recipe with these pins written on the rows they name; every other row keeps what it had. */
 export function withPins(recipe: Recipe, pins: ReadonlyMap<string, ToolPin>): Recipe {

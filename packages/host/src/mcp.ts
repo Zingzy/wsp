@@ -8,7 +8,7 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { INSTRUCTIONS } from "./skill.js";
-import { VERBS, dialHost, toolName, type HostClient, type VerbDeps } from "./verbs.js";
+import { VERBS, dialHost, toolFailure, toolName, type HostClient, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 export interface Dialer {
@@ -45,7 +45,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: V
   const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: INSTRUCTIONS });
   const deps: VerbDeps = { statePath, client: opts.dial ?? dialer(statePath), ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}) };
   for (const verb of VERBS) {
-    server.registerTool(toolName(verb.name), { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output }, args => verb.tool.call(args, deps));
+    server.registerTool(toolName(verb.name), { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output }, args => verb.tool.call(args, deps).catch(toolFailure));
   }
   return server;
 }

@@ -11,9 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GUARD_BEGIN, GUARD_END, type ManifestEntry } from "@wsp/collect";
 import { NODE_RELEASES, planFiles } from "@wsp/engine";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_SERVERS_JSON } from "@wsp/catalog";
+import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
+
+vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -573,7 +576,7 @@ describe("packPlan", () => {
     dirs.push(shim);
     const record = join(shim, "modes");
     const real = execFileSync("sh", ["-c", "command -v tar"], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } }).trim();
-    writeFileSync(join(shim, "tar"), `#!/bin/sh\nfor a in "$@"; do case "$a" in *.tgz) stat -f '%Lp' "$a" >> "${record}" ;; esac; done\nexec "${real}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(shim, "tar"), `#!/bin/sh\nfor a in "$@"; do case "$a" in *.tgz) "${process.execPath}" -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8) + "\\n")' "$a" >> "${record}" ;; esac; done\nexec "${real}" "$@"\n`, { mode: 0o755 });
     const home = laptop();
     const plan = planFiles([row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" })], { home, stat: statOf, platform: "darwin" });
     const path = process.env["PATH"];
@@ -865,7 +868,7 @@ describe("keychainReader", () => {
 });
 
 describe("digestOf", () => {
-  it("reads the names, modes and bytes under a path, leaves excludes out, and never reads stat times", () => {
+  it("reads the names, modes and bytes under a path, leaves excludes out, and never reads stat times", async () => {
     const home = laptop();
     const demo = join(home, ".config", "demo");
     mkdirSync(join(demo, "cache"), { recursive: true });
@@ -892,10 +895,10 @@ describe("digestOf", () => {
     const d3 = digestOf(demo, excludes, home);
     expect(d3).not.toBe(d2);
     // A file that cannot be read digests by its error and is left for the pack to fail on.
-    chmodSync(join(demo, "settings.json"), 0o000);
-    expect(digestOf(demo, excludes, home)).toMatch(/^[0-9a-f]{64}$/);
-    expect(digestOf(demo, excludes, home)).not.toBe(d3);
-    chmodSync(join(demo, "settings.json"), 0o600);
+    await withRefused(join(demo, "settings.json"), () => {
+      expect(digestOf(demo, excludes, home)).toMatch(/^[0-9a-f]{64}$/);
+      expect(digestOf(demo, excludes, home)).not.toBe(d3);
+    });
     expect(digestOf(demo, excludes, home)).toBe(d3);
   });
 

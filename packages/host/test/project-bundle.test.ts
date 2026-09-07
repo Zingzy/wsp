@@ -7,8 +7,11 @@ import { basename, dirname, join, relative } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { CACHE_DIRS } from "@wsp/collect";
 import { PROJECT_STATE_RESOLVERS, agentHomes, folderExportScript } from "@wsp/engine";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { CACHE_RULE, isCacheDir, packProject, planProject, projectBundler } from "../src/project-bundle.js";
+
+vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
@@ -348,20 +351,16 @@ describe("planProject", () => {
   });
 
   it("a directory the process cannot read is named in skipped and the rest travels", async () => {
-    const root = mkdtempSync(join(tmpdir(), "wsp-locked-"));
+    // The plan walks the folder's real path, so the refusal has to name that one.
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "wsp-locked-")));
     dirs.push(root);
     put(root, "a.txt", "a\n");
     put(root, "locked/hidden.txt", "hidden\n");
     put(root, "z.txt", "z\n");
-    chmodSync(join(root, "locked"), 0o000);
-    try {
-      const { plan, files } = await planProject(root, {});
-      expect(files.map(f => f.rel)).toEqual(["a.txt", "locked", "z.txt"]);
-      expect(plan.skipped).toEqual([{ path: "locked", note: "cannot be read (EACCES); what it holds does not travel" }]);
-      expect(plan.files).toBe(2);
-    } finally {
-      chmodSync(join(root, "locked"), 0o755);
-    }
+    const { plan, files } = await withRefused(join(root, "locked"), () => planProject(root, {}));
+    expect(files.map(f => f.rel)).toEqual(["a.txt", "locked", "z.txt"]);
+    expect(plan.skipped).toEqual([{ path: "locked", note: "cannot be read (EACCES); what it holds does not travel" }]);
+    expect(plan.files).toBe(2);
   });
 });
 

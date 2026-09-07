@@ -32,6 +32,10 @@ import { importResultPath } from "../src/init-import.js";
 import { noteOutcomes } from "../src/init-signin.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
+import { runRecipe } from "../src/recipe-command.js";
+import { saveSmallRecipe } from "../src/recipe-file.js";
+import { fakeHost } from "./recipe-fixture.js";
+import type { ScanRow } from "../src/scan.js";
 import { guestAnswer, mcpEditPlan, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
@@ -3305,6 +3309,42 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(off.text()).toContain("retire 1 tool: zingzy/tap/diskbloom, left on the image");
     expect(small().rows.find(r => r.id === tap.id)).toMatchObject({ on: false });
     expect(roadRuns()).toHaveLength(2);
+  });
+
+  it("a recipe file wsp recipe --set wrote for a tap formula this Mac has installs it from its GitHub release, the road the third screen takes, and the same file read again builds nothing", async () => {
+    const sha = "c".repeat(64);
+    const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "unknown" };
+    const table = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+    const answer = (cmd: string): ExecResult => {
+      const tag = /repos\/Zingzy\/diskbloom\/releases\/(?:tags\/(\S+?)'|latest)/.exec(cmd);
+      return tag === null ? guestAnswer(cmd) : { exitCode: 0, stdout: `WSP_ROAD release diskbloom_linux_amd64.tar.gz ${sha} ${tag[1] ?? "v0.1.0"}\n`, stderr: "" };
+    };
+    const collect = async () => ({ entries: [...FIXTURE.entries, tap] });
+    const brew = async () => table;
+    const given = mkdtempSync(join(tmpdir(), "wsp-init-set-"));
+    dirs.push(given);
+    const file = join(given, "recipe.json");
+    // The agent's own door: the recipe verb ticks the package by the id wsp recipe scan gives it, nothing else.
+    const scanned: ScanRow = { id: "brew/zingzy/tap/diskbloom", name: "zingzy/tap/diskbloom", manager: "brew", group: "Homebrew formulae", install: "brew install zingzy/tap/diskbloom", check: "brew list --versions zingzy/tap/diskbloom", size: 4 * 1024 * 1024, version: "0.1.0" };
+    saveSmallRecipe(file, RECIPE);
+    await runRecipe(fakeHost({ which: ["claude"], files: { "~/.claude/settings.json": "{}" } }), { out: file, set: ["brew/zingzy/tap/diskbloom=on"], alsoHere: async () => [scanned] }, undefined, () => new Date("2026-09-06T03:00:00Z"));
+    expect(Recipe.parse(JSON.parse(readFileSync(file, "utf8"))).rows.find(r => r.id === tap.id)).toEqual({ id: tap.id, kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } });
+
+    const { shared, first, next } = await sealed({ collect, brew, recipeFile: file }, answer);
+    const roadRuns = () => shared.machines.flatMap(m => m.execLog.filter(c => c.includes("repos/Zingzy/diskbloom/releases/")));
+    expect(roadRuns()).toHaveLength(1);
+    expect(roadRuns()[0]).toContain("releases/tags/v0.1.0");
+    expect(first.text()).not.toContain("has no row that installs it");
+    // Nothing runs the manager's own line for it: the row's road is the release, and no second row was written.
+    expect(shared.machines.some(m => m.execLog.some(c => c.includes("brew install zingzy/tap/diskbloom")))).toBe(false);
+    const small = () => Recipe.parse(JSON.parse(readFileSync(join(dirname(first.opts.statePath), "recipe.json"), "utf8")));
+    expect(small().rows.find(r => r.id === tap.id)?.pin).toEqual({ tag: "v0.1.0", sha256: sha });
+    expect(small().custom ?? []).toEqual([]);
+    // The same file again: the pin folds away, nothing is built and nothing is fetched a second time.
+    const same = next({ tty: false, collect, brew, recipeFile: file });
+    expect((await runInit(same.opts, same.io)).code).toBe(0);
+    expect(same.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(roadRuns()).toHaveLength(1);
   });
 
   it("--yes with a small change: the changes since v1 are listed, the update runs on the kept builder with the one sentence, v2 is current, and no machine boots", async () => {

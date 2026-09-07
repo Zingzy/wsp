@@ -132,7 +132,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
 
         if (!authed) {
           if (msg.op !== "auth" || !safeEqual(msg.token, opts.authToken)) {
-            send({ id: msg.id, ok: false, error: "unauthorized" });
+            send({ id: msg.id, ok: false, error: "unauthorized", kind: "auth" });
             ws.close(4401, "unauthorized");
             return;
           }

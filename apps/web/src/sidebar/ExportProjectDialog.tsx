@@ -1,32 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Exporting a folder from a workspace's machine to this Mac, the reverse of
-// the import: the folder on the machine opens as the thread's own, the
-// destination here mirrors it until the person edits, browses to or picks one,
-// the folder landing inside a browsed one as it would inside a picked one, the
-// agents with threads on the workspace are ticked rows, named as the catalog
-// names them, whose sessions come home, one action starts the export, and the
-// runtime's events fill a fixed set of step rows. Nothing is read from the
-// machine before the destination is checked, so an existing folder comes back
-// as the runtime's refusal naming it and its file count, the one loud line,
-// and the action becomes Replace and export.
+// the import: one container of quiet sections, the folder on the machine,
+// which opens as the thread's own, the folder here, which mirrors it until the
+// person edits or picks one, the agents with threads on the workspace as
+// ticked rows named as the catalog names them, and what came home, a muted
+// word until it did; one action starts the export and the runtime's events
+// read in the one slot above the footer. Nothing is read from the machine
+// before the destination is checked, so an existing folder comes back as the
+// runtime's refusal naming it and its file count, the one loud line, and the
+// action becomes Replace and export. The desktop shell gives the folder here
+// as a picker row; a browser tab browses this Mac's own folders under the
+// path input, and the folder lands inside a browsed one as it would inside a
+// picked one.
 import { useCallback, useMemo, useRef, useState } from "react";
 import { agentName } from "@wsp/catalog";
-import { fmtBytes, type ProjectAgentResult, type ProjectExportEvent, type ProjectExportResult, type WorkspaceView } from "@wsp/protocol";
+import { EXPORT_SESSIONS_NOTE, NO_THREADS_NOTE, NOT_LANDED_WORD, exportFromLine, fmtBytes, type ProjectAgentResult, type ProjectExportEvent, type ProjectExportResult, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
-import { Checkbox } from "../components/ui/checkbox.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { useThreadFolder } from "../files/root.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
-import { agentRows, agentsRequest, exportLandedLine, exportStepRows, isExportOf, pickedDest } from "./exportProject.js";
+import { agentRows, agentsRequest, exportLandedLine, exportProgress, isExportOf, pickedDest } from "./exportProject.js";
 import { FolderBrowser } from "./FolderBrowser.js";
 import { useLastFolderParent } from "./lastFolderStore.js";
-import { agentOutcome, count, refusalOf, refusalTone, type Refusal } from "./projectTrip.js";
-import { FactRow, FolderField, StatusLine, StepRows } from "./ProjectTripRows.js";
+import { agentOutcome, count, refusalOf, slotWords, type Refusal } from "./projectTrip.js";
+import { CachesRow, ConsentRow, FactRow, FolderField, FolderPickerRow, TripSection, TripStatus } from "./ProjectTripRows.js";
 
 type Phase = "idle" | "exporting" | "done";
 
-const EXPORTING = "Exporting. This stays open until it lands; closing it would not stop the export.";
+const DEST_PLACEHOLDER = "/Users/you/code/project";
 
 export function ExportProjectDialog({ workspace, onClose }: { workspace: WorkspaceView; onClose: () => void }) {
   const api = useStore(s => s.api);
@@ -94,9 +96,11 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
   };
 
   const busy = phase === "exporting";
+  const settled = busy || phase === "done";
   const ready = source.trim() !== "" && dest.trim() !== "";
   const primary = phase === "done" ? "Done" : refusal?.exists ? "Replace and export" : "Export";
-  const status = refusal !== null ? refusal.message : result !== null ? exportLandedLine(result, sent.current.source) : busy ? EXPORTING : "";
+  const progress = phase === "idle" ? null : exportProgress(events);
+  const said = slotWords({ refusal, landed: result === null ? null : exportLandedLine(result, sent.current.source), progress, idle: "" });
   const outcomeOf = (agent: string): ProjectAgentResult | undefined => result?.agents.find(a => a.agent === agent);
 
   return (
@@ -105,45 +109,55 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
         <div className="flex min-h-0 flex-col">
           <DialogHeader>
             <DialogTitle>Export a project</DialogTitle>
-            <DialogDescription>From {workspace.name}. The folder lands on this Mac with the sessions keyed to it; caches stay behind on the machine.</DialogDescription>
+            <DialogDescription>{exportFromLine(workspace.name)}</DialogDescription>
           </DialogHeader>
-          <DialogPanel className="flex flex-col gap-3">
-            <FolderField
-              id="export-source"
-              label="Folder on the machine"
-              placeholder="/root/project"
-              value={source}
-              disabled={busy || phase === "done"}
-              autoFocus={folder === null}
-              onChange={next => {
-                setSource(next);
-                setRefusal(null);
-              }}
-            />
-            <FolderField
-              id="export-dest"
-              label="Folder on this Mac"
-              placeholder="/Users/you/code/project"
-              value={dest}
-              disabled={busy || phase === "done"}
-              onChange={next => {
-                setChosen(next);
-                setRefusal(null);
-              }}
-              {...(bridge === undefined ? {} : { onPick: () => void pickNative() })}
-            />
-            {bridge === undefined ? <FolderBrowser disabled={busy || phase === "done"} start={lastFolder} onPick={pick} /> : null}
-            <Agents rows={rows} ticked={ticked} disabled={phase !== "idle"} outcomeOf={outcomeOf} onToggle={toggle} />
-            <div data-k="summary" className="divide-y divide-border/40 rounded-md border border-border/60 px-2.5">
-              <FactRow label="Files" k="files">
-                {result === null ? "" : `${count(result.files, "file")} · ${fmtBytes(result.bytes)}`}
-              </FactRow>
-              <FactRow label="Caches left behind" k="caches">
-                {result === null ? "" : result.excluded.length === 0 ? "none" : result.excluded.join(", ")}
-              </FactRow>
-            </div>
-            <StepRows label="Export steps" transfer="Download" rows={exportStepRows(events)} />
-            <StatusLine tone={refusalTone(refusal)}>{status}</StatusLine>
+          <DialogPanel className="flex flex-col">
+            <TripSection k="source" label="Folder on the machine" htmlFor="export-source">
+              <FolderField
+                id="export-source"
+                placeholder="/root/project"
+                value={source}
+                disabled={settled}
+                autoFocus={folder === null}
+                onChange={next => {
+                  setSource(next);
+                  setRefusal(null);
+                }}
+              />
+            </TripSection>
+            <TripSection k="dest" label="Folder on this Mac" {...(bridge === undefined ? { htmlFor: "export-dest" } : {})}>
+              {bridge === undefined ? (
+                <>
+                  <FolderField
+                    id="export-dest"
+                    placeholder={DEST_PLACEHOLDER}
+                    value={dest}
+                    disabled={settled}
+                    onChange={next => {
+                      setChosen(next);
+                      setRefusal(null);
+                    }}
+                  />
+                  <FolderBrowser disabled={settled} start={lastFolder} onPick={pick} />
+                </>
+              ) : (
+                <FolderPickerRow path={dest} placeholder={DEST_PLACEHOLDER} disabled={settled} onPick={() => void pickNative()} />
+              )}
+            </TripSection>
+            <TripSection k="agents" label="Sessions">
+              <Agents rows={rows} ticked={ticked} disabled={phase !== "idle"} outcomeOf={outcomeOf} onToggle={toggle} />
+            </TripSection>
+            <TripSection k="summary" label="What comes home">
+              <div className="flex flex-col">
+                <FactRow label="Files" k="files" muted={result === null}>
+                  {result === null ? NOT_LANDED_WORD : `${count(result.files, "file")} · ${fmtBytes(result.bytes)}`}
+                </FactRow>
+                <CachesRow excluded={result?.excluded ?? null} idle={NOT_LANDED_WORD} />
+              </div>
+            </TripSection>
+            <TripStatus tone={said.tone} fraction={progress?.fraction ?? null}>
+              {said.words}
+            </TripStatus>
           </DialogPanel>
           <DialogFooter>
             {phase === "done" ? null : (
@@ -175,27 +189,23 @@ function Agents({
   onToggle: (agent: string, on: boolean) => void;
 }) {
   return (
-    <section data-k="agents" className="flex flex-col gap-1 rounded-md border border-border/60 px-2.5 py-2">
-      <p className="font-mono text-[11px] text-muted-foreground">{rows.length === 0 ? "No threads here; every agent with sessions for the folder comes along." : `${count(rows.length, "agent")} with threads here`}</p>
+    <>
       {rows.length === 0 ? null : (
         <ul className="flex flex-col">
           {rows.map(agent => {
             const landed = outcomeOf(agent);
-            const name = agentName(agent);
             return (
-              <li key={agent} className="flex h-7 items-center gap-2 text-xs">
-                <Checkbox checked={ticked.has(agent)} disabled={disabled} aria-label={name} onCheckedChange={next => onToggle(agent, next)} />
-                <span className="shrink-0 text-foreground">{name}</span>
+              <ConsentRow key={agent} label={agentName(agent)} mono={false} checked={ticked.has(agent)} disabled={disabled} onToggle={next => onToggle(agent, next)}>
                 {landed?.sessions === undefined ? null : <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{count(landed.sessions, "session")}</span>}
-                <span data-k="outcome" className="ml-auto min-w-0 truncate text-[11px] text-muted-foreground">
+                <span data-k="outcome" className="ml-auto min-w-0 truncate text-[11px] text-muted-foreground" {...(landed === undefined ? {} : { title: agentOutcome(landed) })}>
                   {landed === undefined ? "" : agentOutcome(landed)}
                 </span>
-              </li>
+              </ConsentRow>
             );
           })}
         </ul>
       )}
-      {rows.length === 0 ? null : <p className="text-[11px] text-muted-foreground">Ticked agents' sessions come home keyed to the new path; the rest stay on the machine.</p>}
-    </section>
+      <p className="text-[11px] leading-4 text-muted-foreground">{rows.length === 0 ? NO_THREADS_NOTE : EXPORT_SESSIONS_NOTE}</p>
+    </>
   );
 }

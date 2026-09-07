@@ -4,7 +4,7 @@
 // traversal; the new-workspace dialog; the zombie rebuild and the gone forget.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
@@ -103,7 +103,7 @@ describe("header", () => {
     expect(screen.getByRole("img", { name: "wsp" })).toBeTruthy();
   });
 
-  it("the lockup starts at the sidebar content inset, where the search box does", async () => {
+  it("the lockup starts at the sidebar content inset, where the search row does", async () => {
     useStore.getState().bind(fakeApi([], []));
     await act(async () => {
       render(
@@ -115,7 +115,7 @@ describe("header", () => {
     const lockup = screen.getByRole("img", { name: "wsp" }).parentElement!;
     expect(lockup.className).toContain("ml-[var(--sidebar-content-inset)]");
     expect(lockup.className).not.toContain("titlebar");
-    expect(screen.getByLabelText("Search threads").closest("[data-slot=input-control]")!.parentElement!.className).toContain("px-[var(--sidebar-content-inset)]");
+    expect(screen.getByRole("button", { name: "Search threads" }).parentElement!.className).toContain("px-[var(--sidebar-content-inset)]");
   });
 });
 
@@ -425,7 +425,7 @@ describe("new thread", () => {
     await mount(api, "api");
     fireEvent.click(screen.getByRole("button", { name: "Import a project into web" }));
     const dialog = await screen.findByRole("dialog", { name: "Import a project" });
-    expect(within(dialog).getByText(/Into web\./)).toBeDefined();
+    expect(within(dialog).getByText(importIntoLine("web"))).toBeDefined();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
@@ -443,7 +443,7 @@ describe("new thread", () => {
     await mount(api, "api");
     fireEvent.click(screen.getByRole("button", { name: "Export a project from web" }));
     const dialog = await screen.findByRole("dialog", { name: "Export a project" });
-    expect(within(dialog).getByText(/From web\./)).toBeDefined();
+    expect(within(dialog).getByText(exportFromLine("web"))).toBeDefined();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
@@ -466,6 +466,7 @@ describe("search", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByText("port forwarding")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Search threads" }));
     const search = screen.getByRole("searchbox");
     fireEvent.change(search, { target: { value: "port" } });
     expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "ws:ws_b", "thread:s3"]);
@@ -475,17 +476,136 @@ describe("search", () => {
     expect(rowIds()).toEqual([]);
     expect(screen.getByText(/No matches/)).toBeDefined();
     fireEvent.keyDown(search, { key: "Escape" });
-    expect((search as HTMLInputElement).value).toBe("");
+    expect(screen.queryByRole("searchbox")).toBeNull();
     expect(rowIds().length).toBe(5);
+  });
+
+  it("at rest the search is a row, not a field: a glyph and the word Search, no shortcut hint; the field comes on click and leaves on Escape without moving the rows", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(document.querySelector("input")).toBeNull();
+    const row = screen.getByRole("button", { name: "Search threads" });
+    expect(row.querySelector("svg.lucide-search")).not.toBeNull();
+    expect(row.textContent).toBe("Search");
+    expect(row.querySelector("kbd")).toBeNull();
+    // The row is the kit's row: no border, no fill at rest, the hover tint every other row has.
+    expect(row.className).not.toMatch(/\bborder\b|ring-1|bg-background|bg-sidebar-control-surface/);
+    expect(row.className).toContain("hover:bg-sidebar-row-hover");
+    expect(row.className).toContain("h-8");
+    const before = rowIds();
+    fireEvent.click(row);
+    const field = screen.getByRole("searchbox");
+    expect(document.activeElement).toBe(field);
+    expect(screen.queryByRole("button", { name: "Search threads" })).toBeNull();
+    const fieldRow = field.closest<HTMLElement>("[data-sidebar-search]")!;
+    expect(fieldRow.className).toContain("h-8");
+    // The selected tint belongs to the selected workspace row alone; the open field takes the hover tint.
+    expect(fieldRow.className).not.toMatch(/(^|\s)bg-sidebar-row-selected/);
+    expect(fieldRow.className).toMatch(/(^|\s)bg-sidebar-row-hover/);
+    expect(rowIds()).toEqual(before);
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Search threads" }));
+    expect(rowIds()).toEqual(before);
+  });
+
+  it("a mousedown on the open row's glyph or padding keeps the field; one on the input places the caret", async () => {
+    await mount(fakeApi([API], [status(API)]), "api");
+    fireEvent.click(screen.getByRole("button", { name: "Search threads" }));
+    const field = screen.getByRole("searchbox");
+    const fieldRow = field.closest<HTMLElement>("[data-sidebar-search]")!;
+    // fireEvent returns false when a handler called preventDefault, which is what stops the blur.
+    expect(fireEvent.mouseDown(fieldRow.querySelector("svg")!)).toBe(false);
+    expect(fireEvent.mouseDown(fieldRow)).toBe(false);
+    expect(fireEvent.mouseDown(field)).toBe(true);
+    expect(screen.getByRole("searchbox")).toBe(field);
+  });
+
+  it("focus opens the field too; leaving an empty field brings the row back, a field with a query stays", async () => {
+    await mount(fakeApi([API], [status(API)]), "api");
+    act(() => screen.getByRole("button", { name: "Search threads" }).focus());
+    const field = screen.getByRole("searchbox") as HTMLInputElement;
+    expect(document.activeElement).toBe(field);
+    fireEvent.blur(field);
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    act(() => screen.getByRole("button", { name: "Search threads" }).focus());
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "z" } });
+    expect(rowIds()).toEqual([]);
+    fireEvent.blur(screen.getByRole("searchbox"));
+    // A field with a query stays: the list is filtered and the field says why.
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("z");
+  });
+});
+
+describe("the Workspaces section row", () => {
+  it("collapses every workspace behind its chevron and shows how many it hides", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
+    const row = screen.getByRole("button", { name: "Workspaces" });
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+    expect(row.querySelector("svg.lucide-chevron-down")).not.toBeNull();
+    expect(row.className).toContain("h-8");
+    expect(row.className).toContain("hover:bg-sidebar-row-hover");
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "ws:ws_b"]);
+    fireEvent.click(row);
+    expect(rowIds()).toEqual([]);
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    expect(row.textContent).toBe("Workspaces2");
+    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+    fireEvent.click(row);
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "ws:ws_b"]);
+    expect(row.textContent).toBe("Workspaces");
+  });
+
+  it("the label is a caps mono zone label, not row type", async () => {
+    await mount(fakeApi([API], [status(API)]), "api");
+    const label = screen.getByText("Workspaces");
+    expect(label.className).toContain("font-mono");
+    expect(label.className).toContain("uppercase");
+    expect(label.className).toMatch(/tracking-/);
+    expect(label.className).not.toContain("text-sm");
+  });
+
+  it("search wins over the collapse, as it does for the Idle shelf, and the count follows the filter", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
+    const row = screen.getByRole("button", { name: "Workspaces" });
+    fireEvent.click(row);
+    expect(rowIds()).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Search threads" }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "web" } });
+    expect(rowIds()).toEqual(["ws:ws_b"]);
+    expect(row.textContent).toBe("Workspaces1");
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "nothing here" } });
+    expect(rowIds()).toEqual([]);
+    expect(screen.getByText(/No matches/)).toBeDefined();
+    expect(row.textContent).toBe("Workspaces0");
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
+    expect(rowIds()).toEqual([]);
+    expect(row.textContent).toBe("Workspaces2");
+  });
+
+  it("the new-workspace glyph sits at the row's right edge and opens the dialog; the footer has no New workspace row", async () => {
+    await mount(fakeApi([API], [status(API)]), "api");
+    const buttons = screen.getAllByRole("button", { name: "New workspace" });
+    expect(buttons).toHaveLength(1);
+    const glyph = buttons[0]!;
+    expect(glyph.closest("[data-slot=sidebar-footer]")).toBeNull();
+    expect(glyph.closest("[data-slot=sidebar-group]")).not.toBeNull();
+    expect(glyph.querySelector("svg.lucide-plus")).not.toBeNull();
+    expect(glyph.textContent).toBe("");
+    // Quiet at rest like the rows' own glyphs; the hover brings it up.
+    expect(glyph.className).toContain("text-sidebar-muted-foreground");
+    expect(document.querySelector("[data-slot=sidebar-footer]")!.textContent).toBe("");
+    fireEvent.click(glyph);
+    expect(await screen.findByRole("dialog", { name: "New workspace" })).toBeDefined();
   });
 });
 
 describe("keyboard navigation", () => {
-  it("arrows walk every row in order from the search box; Enter selects", async () => {
+  it("arrows walk every row in order from the search row; Enter selects", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
     await waitFor(() => expect(screen.getByText("hello")).toBeDefined());
+    act(() => screen.getByRole("button", { name: "Search threads" }).focus());
     const search = screen.getByRole("searchbox");
-    search.focus();
     fireEvent.keyDown(search, { key: "ArrowDown" });
     expect(document.activeElement).toBe(rowOf("api"));
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
@@ -611,7 +731,7 @@ describe("new workspace dialog", () => {
     fireEvent.click(within(dialog).getByRole("radio", { name: /^Import a project/ }));
     fireEvent.keyDown(input, { key: "Enter" });
     const importDialog = await screen.findByRole("dialog", { name: "Import a project" });
-    expect(within(importDialog).getByText(/Into beta\./)).toBeDefined();
+    expect(within(importDialog).getByText(importIntoLine("beta"))).toBeDefined();
     expect(useStore.getState().selectedId).toBe("ws_beta");
     vi.unstubAllGlobals();
   });

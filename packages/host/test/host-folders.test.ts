@@ -8,8 +8,12 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorkspaceView } from "@wsp/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { hostFolderRoots, hostFolders, importedProjectFolders, listHostFolders } from "../src/host-folders.js";
+
+// A folder the process may not read is refused here and not by chmod: these tests run as root, which reads anything.
+vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -55,6 +59,16 @@ describe("this computer's folder listing", () => {
     expect(listing.folders.map(f => f.repo)).toEqual([false, true]);
     expect(listing.folders.map(f => f.path)).toEqual([join(home, "code", "notes"), join(home, "code", "spoo")]);
     expect(listing.hidden).toBe(2);
+  });
+
+  it("raises for a folder inside the roots this Mac will not let it read, so the picker reads the refusal instead of an empty level", async () => {
+    const { home } = tree();
+    const shut = join(home, "code");
+    await withRefused(shut, () => {
+      expect(() => listHostFolders({ dir: shut }, { home })).toThrow(`EACCES: permission denied, scandir '${shut}'`);
+    });
+    // Nothing is wrong with the folder above it, so the level the picker was on still lists.
+    expect(names(listHostFolders({ dir: home }, { home }).folders)).toEqual(["Applications", "code"]);
   });
 
   it("lists the dot-named folders too when they are asked for, and still says how many of the level they are", () => {

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Binary units with one decimal for the wizard, the engine's stage lines, the
-// runtime's import events and the app; a turn's duration as the chat's footer,
+// runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, MachineSizeOffer, MachineState, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -412,6 +412,13 @@ export function nextInsideAgentLine(open: string, first: string): string {
   return `Next: run ${shellLine([open])} in this folder and say: ${first}`;
 }
 
+/** One level of this computer's own folders in words, the same on the command line and in the app's folder browser:
+ * how many folders the level holds, where it sits, and how many of it are dot-named, whether or not those are listed. */
+export function folderLevelLine(listing: { dir: string; folders: readonly unknown[]; hidden: number }): string {
+  const held = listing.hidden === 0 ? "" : `, ${listing.hidden} hidden`;
+  return listing.folders.length === 0 ? `No folders in ${listing.dir}${held}.` : `${plural(listing.folders.length, "folder")} in ${listing.dir}${held}.`;
+}
+
 /** What the folder browser's state slot says for a level this computer would not let the host read, and the words the
  * command line's own refusal line carries: the host's reason, which names the folder itself, on one line whatever the
  * host said. A refused level leaves the list on the level it was already on, so this slot is where it is read. */
@@ -455,6 +462,11 @@ export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 export function foreignFlagLine(flag: string, readers: readonly string[], here: string): string {
   const owners = readers.length > 1 ? `${readers.slice(0, -1).join(", ")} and ${readers.at(-1)}` : readers[0];
   return `${flag} belongs to ${owners}; ${here} does not read it`;
+}
+
+/** An agent id no catalog entry carries, named beside the ids the catalog does know. */
+export function unknownAgentLine(id: string, known: readonly string[]): string {
+  return `no agent called ${id}; the catalog knows ${known.join(", ")}`;
 }
 
 /** The refusal of a start naming an agent the host has no adapter for, listing the ones it has. */
@@ -669,6 +681,13 @@ export function leftOutLine(note: string): string {
   return `left out of the build: ${note}`;
 }
 
+/** Why `wsp recipe --add` refuses a package a manager on this Mac already has: that package is a row of its own,
+ * which the build installs by the road the plan resolves for it (a tap formula from its GitHub release, pinned),
+ * and a second row would install it twice by a line the image can refuse. The word that ticks the row instead. */
+export function addAlreadyHereLine(id: string, scanId: string): string {
+  return `--add ${id}: a package manager on this Mac already has ${id}, so it is a row of its own; tick it with --set ${scanId}=on, which installs it by its own road, rather than adding a second row that installs it again`;
+}
+
 /** A recipe file's tick on a tool outside the catalog that this Mac has no row for: nothing here says how to install
  * it, so the tick is said and left out rather than dropped in silence. */
 export function notHereLine(name: string, file: string): string {
@@ -774,4 +793,123 @@ export function upgradeSealFailedUnreadLine(version: number, builderId: string):
 /** The update's last line when the snapshot failed and the provider answers 404 for the machine it ran on. */
 export function upgradeSealFailedGoneLine(version: number): string {
   return `Golden v${version} is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.`;
+}
+
+/** The line under the import dialog's title: which workspace, and that the folder lands at the path it has here. */
+export function importIntoLine(workspaceName: string): string {
+  return `Into ${workspaceName}, at the same path.`;
+}
+
+/** The repository row of a plan, in words a stranger reads: the history travels with a .git, or there is none. */
+export function repoLine(repo: boolean): string {
+  return repo ? "Git repository, history travels" : "No repository";
+}
+
+/** What the ticks on the secret-shaped rows do, under how many rows there are. */
+export function secretsNote(n: number): string {
+  return `${plural(n, "file")} ${n === 1 ? "looks like a secret" : "look like secrets"}. Ticked files are copied as they are. Unticked files are left out and listed.`;
+}
+
+/** What the ticks on the agent rows do. */
+export const SESSIONS_NOTE = "Ticked agents' sessions go with the folder. The rest stay here.";
+
+/** Why a secret-shaped file was flagged and its size, as the CLI's plan column and the dialog's hover both print it. */
+export function secretSignalsLine(s: ProjectSecret): string {
+  return `${s.signals.join(", ")}, ${fmtBytes(s.bytes)}`;
+}
+
+/** The line under the export dialog's title: which workspace the folder leaves, and where it lands. */
+export function exportFromLine(workspaceName: string): string {
+  return `From ${workspaceName}, to this Mac.`;
+}
+
+/** What the ticks on the export dialog's agent rows do. */
+export const EXPORT_SESSIONS_NOTE = "Ticked agents' sessions come home with the folder. The rest stay on the machine.";
+
+/** The export dialog's agent section when the workspace has no threads to make rows of. */
+export const NO_THREADS_NOTE = "No threads here. Every agent's sessions for the folder come home with it.";
+
+/** What a row of the export's summary says before the folder has landed, since nothing is read from the machine first. */
+export const NOT_LANDED_WORD = "when it lands";
+
+/** A trip's events folded into the one progress line and its bar. */
+export interface TripProgress {
+  readonly line: string;
+  /** How far the bar is, 0 to 1; it never goes back. */
+  readonly fraction: number;
+}
+
+/** An import's events folded into the one progress line and its bar. The words are the last event's step: the two
+ * steps before packing pass in a blink and read as starting, packing keeps the runtime's count, an upload is named
+ * by its total so the words hold still while the bar moves, a landing by the workspace it lands on. The runtime lands
+ * the project and then uploads and lands the sessions tar in a second pass, so that pass is named and the bar holds
+ * its high-water mark instead of dropping to nought. A failure has no step; the status line carries it. */
+export function importProgress(events: readonly Pick<ProjectImportEvent, "stage" | "message" | "bytes" | "total">[], workspaceName: string): TripProgress | null {
+  let line = "";
+  let fraction = 0;
+  let landings = 0;
+  for (const e of events) {
+    switch (e.stage) {
+      case "planned":
+      case "consented":
+        line = "Starting";
+        break;
+      case "packing":
+        line = e.message.replace(/\.$/, "");
+        break;
+      case "uploading": {
+        const what = landings > 0 ? " sessions" : "";
+        const size = e.total === undefined ? "" : `${what === "" ? "" : ","} ${fmtBytes(e.total)}`;
+        line = `Uploading${what}${size}`;
+        if (e.bytes !== undefined && e.total !== undefined && e.total > 0) fraction = Math.max(fraction, e.bytes / e.total);
+        break;
+      }
+      case "landing":
+        landings += 1;
+        line = `Landing on ${workspaceName}`;
+        fraction = 1;
+        break;
+      case "done":
+        line = "Done";
+        fraction = 1;
+        break;
+      case "failed":
+        return null;
+    }
+  }
+  return events.length === 0 ? null : { line, fraction };
+}
+
+/** An export's events folded into the one progress line and its bar. The runtime packs and downloads the folder,
+ * then packs and downloads the sessions as a second pass whose bytes start again at nought, so the pass is named by
+ * counting the packings and the bar holds its high-water mark; a download is named by its total so the words hold
+ * still while the bar moves. A failure has no step; the status line carries it. */
+export function exportProgress(events: readonly Pick<ProjectExportEvent, "stage" | "bytes" | "total">[]): TripProgress | null {
+  let line = "";
+  let fraction = 0;
+  let packings = 0;
+  const pass = (): string => (packings > 1 ? "sessions" : "the folder");
+  for (const e of events) {
+    switch (e.stage) {
+      case "packing":
+        packings += 1;
+        line = `Packing ${pass()}`;
+        break;
+      case "downloading":
+        line = `Downloading ${pass()}${e.total === undefined ? "" : `, ${fmtBytes(e.total)}`}`;
+        if (e.bytes !== undefined && e.total !== undefined && e.total > 0) fraction = Math.max(fraction, e.bytes / e.total);
+        break;
+      case "landing":
+        line = "Landing on this Mac";
+        fraction = 1;
+        break;
+      case "done":
+        line = "Done";
+        fraction = 1;
+        break;
+      case "failed":
+        return null;
+    }
+  }
+  return events.length === 0 ? null : { line, fraction };
 }

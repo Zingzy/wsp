@@ -11,11 +11,12 @@ import { styleText } from "node:util";
 import { ROAD_MODULES } from "@wsp/catalog";
 import type { Manifest } from "@wsp/collect";
 import { toolInstallsFor, type BrewTable } from "@wsp/engine";
-import { fmtBytes, customRows, installedOnMacLine, installsByLine, leftOutLine, toolRowId, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
+import { fmtBytes, customRows, installedOnMacLine, installsByLine, leftOutLine, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
 import { GUTTER } from "./init-layout.js";
 import type { RungAnswer, SelectItem } from "./init-select.js";
 import { sizeTone } from "./init-weight.js";
-import { outsideRowsOf } from "./recipe-file.js";
+import { ownRowIdOf, ownRowOf } from "./recipe-file.js";
+import { withCustom, withoutCustom } from "./recipe-custom.js";
 import { customFromScan, type ScanRow } from "./scan.js";
 
 export const ALSO_TITLE = "Also on this Mac";
@@ -24,15 +25,11 @@ export const ALSO_TOP = "We found these installed on this Mac. Tick the ones you
 export const ALSO_EMPTY_TOP = "What this Mac has installed that a package manager could put on the image too.";
 export const ALSO_EMPTY = "nothing found here yet";
 
-/** The recipe's own row for a scanned package, when this computer's collector listed it as a tools row: the same
- * manager and package under the collector's id. Such a row is ticked in place; a package with none gets a custom row. */
-export const ownRowOf = (recipe: Recipe, row: ScanRow) => outsideRowsOf(recipe).find(r => r.id === toolRowId(row.manager, row.name));
-
 /** What the build does with a scanned package that has a row of its own: the road in its words with the line the
  * step runs, or the plan's reason for setting it aside; nothing for a package with no such row, whose custom row runs
  * the manager's line as given. */
 export function buildLine(manifest: Manifest, row: ScanRow, brew: BrewTable): string | undefined {
-  const id = toolRowId(row.manager, row.name);
+  const id = ownRowIdOf(row);
   const e = manifest.entries.find(x => x.id === id);
   if (e === undefined) return undefined;
   const plan = toolInstallsFor([{ ...e, bring: true }], brew);
@@ -76,14 +73,12 @@ export function alsoGroupLine(rows: readonly ScanRow[]): (items: readonly Select
  * left alone. */
 export function withScanned(recipe: Recipe, rows: readonly ScanRow[], ticks: ReadonlySet<string>): Recipe {
   const own = new Map(rows.flatMap(r => { const o = ownRowOf(recipe, r); return o === undefined ? [] : [[o.id, ticks.has(r.id)] as const]; }));
-  const scanned = new Set(rows.map(r => customFromScan(r).id));
-  const kept = customRows(recipe).filter(c => !scanned.has(c.id));
-  const added = rows.filter(r => ticks.has(r.id) && !own.has(toolRowId(r.manager, r.name))).map((r): RecipeCustomRow => customFromScan(r));
+  const added = rows.filter(r => ticks.has(r.id) && !own.has(ownRowIdOf(r))).map((r): RecipeCustomRow => customFromScan(r));
   const rowsOn = recipe.rows.map(r => {
     const on = own.get(r.id);
     return on === undefined ? r : { ...r, on };
   });
-  return { ...recipe, rows: rowsOn, custom: [...kept, ...added] };
+  return withCustom(withoutCustom({ ...recipe, rows: rowsOn }, new Set(rows.map(r => customFromScan(r).id))), added);
 }
 
 /** The scan rows the recipe already ticks, by their row id: what the screen starts ticked. A package with a row of its

@@ -1026,14 +1026,17 @@ export type GoldenStageEvent = z.infer<typeof GoldenStageEvent>;
 export const ALREADY_APPLIED = "already applied";
 /** Recipe rows under the agents rung that are MCP servers, not agents: `agents/mcp/<agent>/<name>`. The collector writes them, the engine's import reads them. */
 export const MCP_ID_PREFIX = "agents/mcp/";
-/** Recipe rows under the tools rung that name a Homebrew formula. It lives here, not beside the engine's other row prefixes, because the collector writes these ids and cannot import the engine. */
-export const BREW_ID_PREFIX = "tools/brew/";
+/** Where a manager's rows sit under the tools rung: what every id of its packages starts with. It lives here, not
+ * beside the engine's other row prefixes, because the collector writes these ids and cannot import the engine. */
+export const toolRowPrefix = (manager: string): string => `tools/${manager}/`;
+/** The id of a tools row a manager lists, the one spelling of it: what the collector writes for one, and what a scan
+ * row of the same manager and package stands for. */
+export const toolRowId = (manager: string, pkg: string): string => `${toolRowPrefix(manager)}${pkg}`;
+/** Recipe rows under the tools rung that name a Homebrew formula. */
+export const BREW_ID_PREFIX = toolRowPrefix("brew");
 /** The package a tools row names: what follows its manager in the id (a tap formula keeps its slashes). Beside the
  * prefix above for the same reason: the collector writes these ids and cannot import the engine. */
 export const packageOf = (e: { id: string }): string => e.id.split("/").slice(2).join("/");
-/** The id of a tools row a manager lists, the one spelling of it: what the collector writes for one, and what a scan
- * row of the same manager and package stands for. */
-export const toolRowId = (manager: string, pkg: string): string => `tools/${manager}/${pkg}`;
 
 /** Where the event sits in its runtime's stream: one counter per runtime process, monotonic from 1, so a client that
  * lost its socket can ask events.subscribe for everything after the last one it saw. Absent on events from an older
@@ -1724,6 +1727,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { actionRefusal, goneRefusal, imageMoveRefusal, isBilling, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export * from "./exit.js";
 export * from "./format.js";
 export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";

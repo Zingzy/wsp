@@ -11,6 +11,7 @@ import {
   outOfMemoryRowLine,
   stillWorkingRefusal,
   foreignFlagLine,
+  unknownAgentLine,
   LINEAGE_MARKS,
   REPO_STATE_WORDS,
   missingToolRow,
@@ -85,6 +86,17 @@ import {
   upgradeSealFailedUnreadLine,
   vaultKeptLine,
   vaultOverCapLine,
+  importIntoLine,
+  importProgress,
+  exportProgress,
+  exportFromLine,
+  EXPORT_SESSIONS_NOTE,
+  NO_THREADS_NOTE,
+  NOT_LANDED_WORD,
+  repoLine,
+  secretsNote,
+  secretSignalsLine,
+  SESSIONS_NOTE,
   type GoldenMissingTool,
 } from "../src/index.js";
 import * as format from "../src/format.js";
@@ -712,5 +724,125 @@ describe("a tools row outside the catalog", () => {
     expect(installsByLine("from its release", "the v0.1.0 release of github.com/Zingzy/diskbloom")).toBe("installs from its release: the v0.1.0 release of github.com/Zingzy/diskbloom");
     expect(leftOutLine("no Linux bottle known")).toBe("left out of the build: no Linux bottle known");
     expect(notHereLine("zingzy/tap/diskbloom", "/tmp/given.json")).toBe("zingzy/tap/diskbloom is ticked in /tmp/given.json, but this Mac has no row that installs it; it is left out.");
+  });
+});
+
+describe("the import dialog's words", () => {
+  it("names the workspace the folder goes into and that it lands at the same path", () => {
+    expect(importIntoLine("dev2")).toBe("Into dev2, at the same path.");
+  });
+
+  it("says a repository's history travels in plain words, and when there is none", () => {
+    expect(repoLine(true)).toBe("Git repository, history travels");
+    expect(repoLine(false)).toBe("No repository");
+  });
+
+  it("tells a stranger what the ticks on the secret-shaped rows do, and how many rows there are", () => {
+    expect(secretsNote(2)).toBe("2 files look like secrets. Ticked files are copied as they are. Unticked files are left out and listed.");
+    expect(secretsNote(1)).toBe("1 file looks like a secret. Ticked files are copied as they are. Unticked files are left out and listed.");
+    expect(SESSIONS_NOTE).toBe("Ticked agents' sessions go with the folder. The rest stay here.");
+  });
+
+  it("names why a file looks like a secret and its size, the one spelling the CLI's plan column and the dialog's hover share", () => {
+    expect(secretSignalsLine({ path: ".env", bytes: 120, signals: ["name", "keys"] })).toBe("name, keys, 120 B");
+  });
+
+  const ev = (over: { stage: string; message?: string; bytes?: number; total?: number }) => ({ message: "", ...over }) as Parameters<typeof importProgress>[0][number];
+  const dest = "/Users/me/code/proj";
+  /** The events one import with travelling sessions makes, in the runtime's order: the project upload lands, then the sessions tar uploads and lands. */
+  const TRIP = [
+    ev({ stage: "planned", message: "1204 files, 38.2 MB and the repository; 3 secret-shaped files; 4 caches left behind." }),
+    ev({ stage: "consented", message: "Rewriting .git/config to https://github.com/o/r; cut .env. Sessions travel for Claude Code (46 sessions)." }),
+    ev({ stage: "packing", message: "Packing 1857 files." }),
+    ev({ stage: "uploading", message: "Uploading 31.9 MB.", bytes: 0, total: 33_449_574 }),
+    ev({ stage: "uploading", message: "Part 1 of 2, 16.0 MB of 31.9 MB.", bytes: 16_724_787, total: 33_449_574 }),
+    ev({ stage: "uploading", message: "Part 2 of 2, 31.9 MB of 31.9 MB.", bytes: 33_449_574, total: 33_449_574 }),
+    ev({ stage: "landing", message: `Landing at ${dest}.` }),
+    ev({ stage: "uploading", message: "Uploading 3 session files and the rows to merge, 1.2 MB.", bytes: 0, total: 1_258_291 }),
+    ev({ stage: "uploading", message: "Part 1 of 1, 1.2 MB of 1.2 MB.", bytes: 1_258_291, total: 1_258_291 }),
+    ev({ stage: "landing", message: "Merging rows into Codex." }),
+    ev({ stage: "landing", message: "Landing sessions: Claude Code moved, Codex transcripts landed." }),
+    ev({ stage: "done", message: `1855 files, 38.0 MB, landed at ${dest}; sessions: Claude Code moved.` }),
+  ];
+
+  it("reads the trip's current step in plain words and holds the bar: starting, the runtime's packing count, the upload by its total, the landing by the workspace, the sessions pass named, done", () => {
+    expect(importProgress([], "dev2")).toBeNull();
+    const seen = TRIP.map((_, i) => importProgress(TRIP.slice(0, i + 1), "dev2"));
+    expect(seen.map(p => p?.line)).toEqual([
+      "Starting",
+      "Starting",
+      "Packing 1857 files",
+      "Uploading 31.9 MB",
+      "Uploading 31.9 MB",
+      "Uploading 31.9 MB",
+      "Landing on dev2",
+      "Uploading sessions, 1.2 MB",
+      "Uploading sessions, 1.2 MB",
+      "Landing on dev2",
+      "Landing on dev2",
+      "Done",
+    ]);
+    expect(seen.map(p => p?.fraction)).toEqual([0, 0, 0, 0, 0.5, 1, 1, 1, 1, 1, 1, 1]);
+    for (let i = 1; i < seen.length; i++) expect(seen[i]!.fraction, `step ${i}`).toBeGreaterThanOrEqual(seen[i - 1]!.fraction);
+  });
+
+  it("an upload without a total still reads, and a failure has no step since the status line carries it", () => {
+    expect(importProgress([ev({ stage: "uploading", message: "Uploading." })], "dev2")).toEqual({ line: "Uploading", fraction: 0 });
+    expect(importProgress([ev({ stage: "packing", message: "Packing 2 files." }), ev({ stage: "failed", message: "the machine went away" })], "dev2")).toBeNull();
+  });
+});
+
+describe("the export dialog's words", () => {
+  it("names the workspace the folder comes from and that it lands on this Mac", () => {
+    expect(exportFromLine("dev2")).toBe("From dev2, to this Mac.");
+  });
+
+  it("tells a stranger what the ticks on the agent rows do, what happens when the workspace has no threads, and why a row is empty before the export", () => {
+    expect(EXPORT_SESSIONS_NOTE).toBe("Ticked agents' sessions come home with the folder. The rest stay on the machine.");
+    expect(NO_THREADS_NOTE).toBe("No threads here. Every agent's sessions for the folder come home with it.");
+    expect(NOT_LANDED_WORD).toBe("when it lands");
+  });
+
+  const ev = (over: { stage: string; message?: string; bytes?: number; total?: number }) => ({ message: "", ...over }) as Parameters<typeof exportProgress>[0][number];
+  /** The events one export with agent state makes, in the runtime's order: the folder packs and downloads, then the agents' state does, then one landing. */
+  const TRIP = [
+    ev({ stage: "packing", message: "Packing /root/spoo on the machine." }),
+    ev({ stage: "downloading", message: "The folder: 0 B of 31.0 MB.", bytes: 0, total: 32_505_856 }),
+    ev({ stage: "downloading", message: "The folder: 15.5 MB of 31.0 MB.", bytes: 16_252_928, total: 32_505_856 }),
+    ev({ stage: "downloading", message: "The folder: 31.0 MB of 31.0 MB.", bytes: 32_505_856, total: 32_505_856 }),
+    ev({ stage: "packing", message: "Packing the agents' state for it on the machine." }),
+    ev({ stage: "downloading", message: "Agent state: 0 B of 1.2 MB.", bytes: 0, total: 1_292_000 }),
+    ev({ stage: "downloading", message: "Agent state: 1.2 MB of 1.2 MB.", bytes: 1_292_000, total: 1_292_000 }),
+    ev({ stage: "landing", message: "Landing at /Users/me/code/spoo." }),
+    ev({ stage: "done", message: "1202 files, 38.0 MB, landed at /Users/me/code/spoo; 4 caches left behind; sessions: Claude Code (6 sessions) moved." }),
+  ];
+
+  it("reads the trip's current step in plain words and holds the bar: the folder packs and downloads by its total, the sessions are their own named pass, the landing, done", () => {
+    expect(exportProgress([])).toBeNull();
+    const seen = TRIP.map((_, i) => exportProgress(TRIP.slice(0, i + 1)));
+    expect(seen.map(p => p?.line)).toEqual([
+      "Packing the folder",
+      "Downloading the folder, 31.0 MB",
+      "Downloading the folder, 31.0 MB",
+      "Downloading the folder, 31.0 MB",
+      "Packing sessions",
+      "Downloading sessions, 1.2 MB",
+      "Downloading sessions, 1.2 MB",
+      "Landing on this Mac",
+      "Done",
+    ]);
+    expect(seen.map(p => p?.fraction)).toEqual([0, 0, 0.5, 1, 1, 1, 1, 1, 1]);
+    for (let i = 1; i < seen.length; i++) expect(seen[i]!.fraction, `step ${i}`).toBeGreaterThanOrEqual(seen[i - 1]!.fraction);
+  });
+
+  it("a download without a total still reads, and a failure has no step since the status line carries it", () => {
+    expect(exportProgress([ev({ stage: "packing" }), ev({ stage: "downloading", message: "The folder." })])).toEqual({ line: "Downloading the folder", fraction: 0 });
+    expect(exportProgress([ev({ stage: "packing" }), ev({ stage: "failed", message: "the machine went away" })])).toBeNull();
+  });
+});
+
+describe("unknownAgentLine", () => {
+  it("names the id nobody knows and the ids the catalog does, so a typo is a sentence", () => {
+    expect(unknownAgentLine("codx", ["claude", "codex"])).toBe("no agent called codx; the catalog knows claude, codex");
   });
 });

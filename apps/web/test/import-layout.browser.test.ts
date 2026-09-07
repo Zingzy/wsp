@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The import dialog in a real Chromium, both themes: every summary row, agent
-// row, secret row and step row keeps one height, the secrets box is the one
-// element with a colour of its own, every offer is whole in its row, the step labels read
-// at AA before and after they are reached, nothing above the steps moves
-// while the import runs to done, and a landed line that needs three lines
-// grows its box instead of being cut. Photographed after the folder is read
-// and after it landed.
+// The import dialog in a real Chromium, both themes: one container whose
+// sections are told apart by a hairline and a small label alone, no section
+// with a fill or a border colour of its own, every summary, agent and secret
+// row one height, the ticks on the neutral ramp, every offer and state whole
+// in its row, the progress line empty at rest and reading at AA once it fills,
+// and nothing moving from the folder read through the upload to done, with the
+// one slot above the footer reading the step, then the landed line. Also at a
+// phone's width. Photographed after the folder is read, mid-upload and after
+// it landed.
 // Runs only when asked for (WSP_RENDER=1) and skips without Playwright's
 // Chromium.
 import { existsSync, mkdirSync } from "node:fs";
@@ -38,9 +40,10 @@ interface Box {
 }
 
 const LONG = "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo";
-const LONG_LANDED = `spoo is at ${LONG} on api; cut 2 files, listed above; sessions: Claude Code moved, Codex transcripts landed, not yet listed, 1 rollout skipped, Gemini CLI nothing to bring, OpenCode failed: state.db is locked by another process on the machine.`;
+const LONG_LANDED = `spoo is at ${LONG} on api; 2 files left out, listed above; sessions: Claude Code moved, Codex transcripts landed, not yet listed, 1 rollout skipped, Gemini CLI nothing to bring, OpenCode failed: state.db is locked by another process on the machine.`;
 /** Two lines of the status line's text, its floor; a third line grows it past this. */
 const ROW = 28;
+const SECTIONS = ["[data-k=folder]", "[data-k=summary]", "[data-k=agents]", "[data-k=secrets]"] as const;
 
 describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium", () => {
   let vite: ViteChild | undefined;
@@ -68,97 +71,116 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
     }
     return out;
   };
+  const box = async (selector: string): Promise<Box> => (await boxes(selector))[0]!;
   const heights = (b: Box[]): number[] => b.map(x => Math.round(x.height));
-  const color = (selector: string): Promise<string> => page!.locator(selector).first().evaluate(el => getComputedStyle(el).borderTopColor);
+  const style = (selector: string, prop: string): Promise<string[]> => page!.locator(selector).evaluateAll((els, p) => els.map(el => getComputedStyle(el).getPropertyValue(p)), prop);
   const contrast = (selector: string): Promise<number[]> => textContrast(page!, selector);
   const whole = (selector: string): Promise<boolean[]> => page!.locator(selector).evaluateAll(els => els.map(el => el.scrollWidth <= el.clientWidth));
   /** The element's text fits its box in both directions: nothing cut by an ellipsis, no line pushed past its height. */
   const uncut = (selector: string): Promise<boolean> => page!.locator(selector).first().evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight);
-
-  it.each(["dark", "light"] as const)("in the %s theme the rows share one height, the secrets box is the one loud element, and nothing moves through the import", async theme => {
-    await page!.goto(`${base}?theme=${theme}`);
+  const read = async (query: string): Promise<void> => {
+    await page!.goto(`${base}?${query}`);
     await page!.waitForFunction(() => document.querySelector("[data-k=files]")?.textContent === "1204 files · 38.2 MB");
+  };
+  /** Where everything that must hold still sits: the container, a summary row, both consent sections, the progress line and the action key. */
+  const frame = async (): Promise<Record<string, Box>> => ({
+    dialog: await box("[role=dialog]"),
+    files: await box("[data-k=files]"),
+    agents: await box("[data-k=agents]"),
+    secrets: await box("[data-k=secrets]"),
+    progress: await box("[data-k=progress]"),
+    button: await box("[data-slot=dialog-footer] button:last-child"),
+  });
+
+  it.each(["dark", "light"] as const)("in the %s theme one container of quiet sections, rows of one height, neutral ticks, and nothing moves from rest through the upload to done", async theme => {
+    await read(`theme=${theme}&beat=600`);
     const dialog = page!.locator("[role=dialog]");
 
-    const summary = await boxes("[data-k=files], [data-k=repository], [data-k=caches], [data-k=skipped], [data-k=dest]");
-    expect(new Set(heights(summary)).size).toBe(1);
+    const summary = await boxes("[data-k=repository], [data-k=files], [data-k=caches], [data-k=skipped], [data-k=dest]");
+    expect(summary).toHaveLength(5);
     const agentRows = await boxes("[data-k=agents] li");
     expect(agentRows).toHaveLength(3);
-    expect(new Set(heights(agentRows)).size).toBe(1);
     const secretRows = await boxes("[data-k=secrets] li");
     expect(secretRows).toHaveLength(3);
-    expect(new Set(heights(secretRows)).size).toBe(1);
-    const steps = await boxes("[data-step]");
-    expect(steps).toHaveLength(6);
-    expect(new Set(heights(steps)).size).toBe(1);
-    expect(heights(steps)[0]).toBe(heights(secretRows)[0]);
-    expect(heights(steps)[0]).toBe(heights(agentRows)[0]);
+    expect(new Set([...heights(agentRows), ...heights(secretRows)]).size).toBe(1);
+    expect(await page!.locator("[data-step]").count()).toBe(0);
+
+    // One container: every section is dressed alike, a hairline above and no fill or border colour of its own.
+    for (const prop of ["background-color", "border-top-color", "border-left-width", "border-radius"]) {
+      const values = await Promise.all(SECTIONS.map(s => style(s, prop)));
+      expect(new Set(values.flat()).size, prop).toBe(1);
+    }
+    expect((await style("[data-k=secrets]", "background-color"))[0]).toBe("rgba(0, 0, 0, 0)");
+    expect((await style("[data-k=secrets]", "border-left-width"))[0]).toBe("0px");
+    expect((await style("[data-k=summary]", "border-top-width"))[0]).toBe("1px");
+
+    // The ticks fill from the neutral ramp: a checked one is the text colour, not the accent the Import key carries.
+    const foreground = (await style("[data-k=files]", "color"))[0];
+    const fills = await style("[role=checkbox][data-checked] [data-slot=checkbox-indicator]", "background-color");
+    expect(fills.length).toBeGreaterThan(0);
+    expect(new Set(fills)).toEqual(new Set([foreground]));
+    const importFill = (await style("[data-slot=dialog-footer] button:last-child", "background-color"))[0];
+    expect(importFill).not.toBe(foreground);
+    expect((await style("[data-slot=dialog-footer] button:first-child", "background-color"))[0]).not.toBe(importFill);
+
     expect(await page!.locator("[data-k=agents] [role=checkbox]").evaluateAll(els => els.map(el => el.getAttribute("aria-checked")))).toEqual(["true", "true", "false"]);
     expect(await whole("[data-k=state]")).toEqual([true, true, true]);
-
-    // One loud element: the secrets box's border is its own colour; the summary, the agents and the steps share theirs.
-    const summaryBox = await color("[data-k=summary]");
-    const stepsBox = await color("[aria-label='Import steps']");
-    const agentsBox = await color("[data-k=agents]");
-    const secretsBox = await color("[data-k=secrets]");
-    expect(stepsBox).toBe(summaryBox);
-    expect(agentsBox).toBe(summaryBox);
-    expect(secretsBox).not.toBe(summaryBox);
     expect(await page!.locator("[data-k=secrets] [role=checkbox]").evaluateAll(els => els.map(el => el.getAttribute("aria-checked")))).toEqual(["false", "false", "true"]);
-    expect(await page!.locator("[data-k=offer]").allTextContents()).toEqual(["cut", "cut", "lands bare at github.com without http.extraheader"]);
+    expect(await page!.locator("[data-k=offer]").allTextContents()).toEqual(["left out", "left out", "rewritten without keys"]);
     expect(await whole("[data-k=offer]")).toEqual([true, true, true]);
-    const unreached = await contrast("[data-k=step-label]");
-    console.info(`${theme}: unreached step labels read at ${unreached.join(", ")} to 1`);
-    for (const ratio of unreached) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    expect(await page!.locator("[data-k=caches]").textContent()).toBe("4 folders");
+    expect(await page!.locator("[data-k=progress-line]").textContent()).toBe("");
+    expect(await page!.locator("[role=progressbar]").count()).toBe(0);
 
     await dialog.screenshot({ path: join(SHOTS, `import-summary-${theme}.png`) });
+    const before = await frame();
 
-    const before = {
-      files: (await boxes("[data-k=files]"))[0]!,
-      agents: (await boxes("[data-k=agents]"))[0]!,
-      secrets: (await boxes("[data-k=secrets]"))[0]!,
-      steps: await boxes("[data-step]"),
-      button: (await boxes("button:has-text('Import')"))[0]!,
-    };
     await page!.locator("button:has-text('Import')").click();
-    await page!.waitForFunction(() => document.querySelector("[data-step=done]")?.textContent?.includes("landed at"));
-    expect(await page!.locator("[data-step=consented]").textContent()).toContain("Sessions travel for Claude Code (46 sessions), Codex (2 sessions).");
-    await page!.waitForFunction(() => document.querySelector("[role=status]")?.textContent === "spoo is at /Users/me/code/spoo on api; cut 2 files, listed above.");
-    expect(await uncut("[role=status]")).toBe(true);
-    const after = {
-      files: (await boxes("[data-k=files]"))[0]!,
-      agents: (await boxes("[data-k=agents]"))[0]!,
-      secrets: (await boxes("[data-k=secrets]"))[0]!,
-      steps: await boxes("[data-step]"),
-      button: (await boxes("button:has-text('Done')"))[0]!,
-    };
-    expect(after.files).toEqual(before.files);
-    expect(after.agents).toEqual(before.agents);
-    expect(after.secrets).toEqual(before.secrets);
-    expect(after.steps).toEqual(before.steps);
-    expect(after.button.y).toBe(before.button.y);
-    expect(after.button.height).toBe(before.button.height);
-    expect(await page!.locator("[data-step=uploading] [role=progressbar]").getAttribute("aria-valuenow")).toBe("100");
-    const reached = await contrast("[data-k=step-label]");
-    console.info(`${theme}: reached step labels read at ${reached.join(", ")} to 1`);
-    for (const ratio of reached) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    await page!.waitForFunction(() => document.querySelector("[data-k=progress-line]")?.textContent === "Uploading 31.0 MB" && document.querySelector("[role=progressbar]")?.getAttribute("aria-valuenow") === "50");
+    expect(await page!.locator("[role=progressbar]").getAttribute("aria-label")).toBe("Uploading 31.0 MB");
+    const during = await frame();
+    expect(during).toEqual(before);
+    const words = await contrast("[data-k=progress-line]");
+    console.info(`${theme}: the progress line reads at ${words.join(", ")} to 1`);
+    for (const ratio of words) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    await dialog.screenshot({ path: join(SHOTS, `import-during-${theme}.png`) });
 
+    await page!.waitForFunction(() => document.querySelector("[role=status]")?.textContent === "spoo is at /Users/me/code/spoo on api; 2 files left out, listed above.");
+    expect(await uncut("[role=status]")).toBe(true);
+    expect(await page!.locator("[data-k=progress-line]").textContent()).not.toContain("Done");
+    expect(await page!.locator("[role=progressbar]").getAttribute("aria-valuenow")).toBe("100");
+    expect(await page!.locator("[role=progressbar]").getAttribute("aria-label")).toBe("spoo is at /Users/me/code/spoo on api; 2 files left out, listed above.");
+    const after = await frame();
+    expect(after).toEqual({ ...before, button: after["button"] });
+    expect(after["button"]!.y).toBe(before["button"]!.y);
+    expect(after["button"]!.height).toBe(before["button"]!.height);
     await dialog.screenshot({ path: join(SHOTS, `import-done-${theme}.png`) });
     expect(existsSync(join(SHOTS, `import-done-${theme}.png`))).toBe(true);
-  }, 40_000);
+  }, 60_000);
 
-  it("with nothing secret-shaped and no agent sessions both boxes are absent and the steps sit right under the summary", async () => {
-    await page!.goto(`${base}?theme=dark&secrets=0&agents=0`);
-    await page!.waitForFunction(() => document.querySelector("[data-k=files]")?.textContent === "1204 files · 38.2 MB");
+  it("the cache list opens under its count and wraps whole", async () => {
+    await read("theme=dark");
+    expect(await page!.locator("[data-k=cache-list]").count()).toBe(0);
+    const dest = await box("[data-k=dest]");
+    await page!.locator("[data-k=caches] button").click();
+    await page!.waitForSelector("[data-k=cache-list]");
+    expect(await page!.locator("[data-k=cache-list]").textContent()).toBe("node_modules, dist, .venv, coverage");
+    await page!.waitForFunction(y => (document.querySelector("[data-k=dest]")?.getBoundingClientRect().y ?? 0) > y, dest.y);
+    expect(await uncut("[data-k=cache-list]")).toBe(true);
+    await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, "import-caches-open-dark.png") });
+  }, 30_000);
+
+  it("with nothing secret-shaped and no agent sessions both sections are absent and the progress line sits right under the summary", async () => {
+    await read("theme=dark&secrets=0&agents=0");
     expect(await page!.locator("[data-k=secrets]").count()).toBe(0);
     expect(await page!.locator("[data-k=agents]").count()).toBe(0);
-    const dest = (await boxes("[data-k=dest]"))[0]!;
-    const firstStep = (await boxes("[data-step=planned]"))[0]!;
-    expect(firstStep.y - (dest.y + dest.height)).toBeLessThan(40);
+    const dest = await box("[data-k=dest]");
+    const progress = await box("[data-k=progress]");
+    expect(progress.y - (dest.y + dest.height)).toBeLessThan(40);
     await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, "import-plain-dark.png") });
   }, 30_000);
 
-  it.each(["dark", "light"] as const)("in the %s theme the browser a tab gets is one quiet list on the step rows' height, keeps that height across a level, and reads at AA", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme the browser a tab gets is one quiet list on the consent rows' height, keeps that height across a level, and reads at AA", async theme => {
     await page!.goto(`${base}?theme=${theme}&tab=1`);
     // The imports above remembered their folder in this origin's local storage, which is what opens the browser there
     // on a later visit; this case is about the layout, so it starts from a first visit.
@@ -170,19 +192,23 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
 
     const rows = await boxes("[data-k=browse-folder]");
     expect(new Set(heights(rows)).size).toBe(1);
-    expect(heights(rows)[0]).toBe(heights(await boxes("[data-step]"))[0]);
-    // Nothing loud: the browser's box reads like the summary's, and the crumbs name the root once.
-    expect(await color("[data-k=browse]")).toBe(await color("[data-k=summary]"));
+    // The rows stand on the height the consent rows the sections hold already stand on.
+    expect(heights(rows)[0]).toBe(heights(await boxes("[data-k=agents] li"))[0]);
+    // Nothing loud: inside the section that holds it the list carries no fill, border or corner of its own.
+    for (const prop of ["background-color", "border-top-width", "border-left-width", "border-radius"]) {
+      expect((await style("[data-k=browse]", prop))[0], prop).toBe(prop === "background-color" ? "rgba(0, 0, 0, 0)" : "0px");
+    }
     expect(await page!.locator("[data-folder-crumbs]").textContent()).toBe("/Users/me");
     // The system picker belongs to the desktop shell, which a tab is not.
     expect(await page!.locator("button:has-text('Choose folder')").count()).toBe(0);
     const list = size((await boxes("[data-k=browse] ul"))[0]!);
-    const stepRows = heights(await boxes("[data-step]"));
+    const slot = await box("[data-k=progress]");
 
     await page!.locator("[data-folder='/Users/me/code']").click();
     await page!.waitForFunction(() => document.querySelector("[data-k=browse-state]")?.textContent === "4 folders in /Users/me/code, 2 hidden.");
     expect(size((await boxes("[data-k=browse] ul"))[0]!)).toEqual(list);
-    expect(heights(await boxes("[data-step]"))).toEqual(stepRows);
+    // The one slot above the footer has not moved, so nothing around the list did either.
+    expect(await box("[data-k=progress]")).toEqual(slot);
     expect(await whole("[data-k=browse-state]")).toEqual([true]);
     // A folder name too long for its row is cut there and whole under the pointer.
     expect(await page!.locator("[data-folder='/Users/me/code/billing-reconciliation-nightly-settlements-batch']").getAttribute("title")).toBe("/Users/me/code/billing-reconciliation-nightly-settlements-batch");
@@ -196,15 +222,30 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
   }, 40_000);
 
   it.each(["dark", "light"] as const)("in the %s theme a landed line that needs three lines is whole and grows its box", async theme => {
-    await page!.goto(`${base}?theme=${theme}&long=1`);
-    await page!.waitForFunction(() => document.querySelector("[data-k=files]")?.textContent === "1204 files · 38.2 MB");
-    const before = (await boxes("[role=status]"))[0]!;
+    await read(`theme=${theme}&long=1`);
+    const before = await box("[role=status]");
     expect(Math.round(before.height)).toBe(ROW);
     await page!.locator("button:has-text('Import')").click();
     await page!.waitForFunction(line => document.querySelector("[role=status]")?.textContent === line, LONG_LANDED);
     expect(await uncut("[role=status]")).toBe(true);
-    const after = (await boxes("[role=status]"))[0]!;
+    const after = await box("[role=status]");
     expect(Math.round(after.height)).toBeGreaterThan(ROW);
     await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `import-done-long-${theme}.png`) });
   }, 40_000);
+
+  it.each(["dark", "light"] as const)("at a phone's width in the %s theme the dialog fits, the rows keep one height and every offer and state is whole", async theme => {
+    await page!.setViewportSize({ width: 390, height: 844 });
+    try {
+      await read(`theme=${theme}`);
+      const dialog = await box("[role=dialog]");
+      expect(dialog.width).toBeLessThanOrEqual(390);
+      const rows = await boxes("[data-k=agents] li, [data-k=secrets] li");
+      expect(new Set(heights(rows)).size).toBe(1);
+      expect(await whole("[data-k=offer]")).toEqual([true, true, true]);
+      expect(await whole("[data-k=state]")).toEqual([true, true, true]);
+      await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `import-summary-390-${theme}.png`) });
+    } finally {
+      await page!.setViewportSize({ width: 1200, height: 900 });
+    }
+  }, 30_000);
 });

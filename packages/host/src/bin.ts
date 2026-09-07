@@ -3,6 +3,7 @@
 // Executable entry only, nothing importable: index.ts re-exports from cli.ts,
 // and sharing THIS module would send it into a tsup chunk whose top-level
 // code never runs under `node bin.js`.
+import { verbFailure } from "@wsp/protocol";
 import { cli } from "./cli.js";
 
 // A warning listener cannot veto node's own printer, so the printer is wrapped; a --disable-warning
@@ -20,7 +21,8 @@ cli(process.argv.slice(2)).then(
     process.exitCode = code;
   },
   (e: unknown) => {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exitCode = 1;
+    const failure = verbFailure(e);
+    console.error(failure.error);
+    process.exitCode = failure.exit;
   },
 );
