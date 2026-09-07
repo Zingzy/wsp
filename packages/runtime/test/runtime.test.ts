@@ -11,7 +11,7 @@ import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, SessionEvent, fo
 import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
-import { TABLE_PIN } from "../src/harness-catalog.js";
+import { harnessCatalog } from "../src/harness-catalog.js";
 import { CATALOG_TTL_MS, GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
@@ -21,6 +21,9 @@ import { wsRequest } from "./ws-client.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { WebSocketServer } from "ws";
+
+/** What a catalog served from the table carries as its version: that harness's own pin, never another's. */
+const CLAUDE_PIN = harnessCatalog("claude")!.version;
 
 /** The recipes here set up with "true", which the harness stage runs under its guard like every installer. */
 const setupRan = (cmd: string): boolean => cmd.includes("\ntrue' &");
@@ -607,7 +610,7 @@ describe("runtime session history", () => {
     const claude = catalogs[0]!;
     expect(claude.efforts.length).toBeGreaterThan(0);
     // Marked as the one an unnamed start runs, so a client without the catalog package can pick its list.
-    expect(claude).toMatchObject({ source: "table", version: TABLE_PIN, isDefault: true });
+    expect(claude).toMatchObject({ source: "table", version: CLAUDE_PIN, isDefault: true });
     expect((await createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} }).harnesses.list()).length).toBe(0);
   });
 
@@ -651,7 +654,7 @@ describe("runtime session history", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: threaded() } });
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
       const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
-      expect(claude).toMatchObject({ source: "table", version: TABLE_PIN });
+      expect(claude).toMatchObject({ source: "table", version: CLAUDE_PIN });
       expect(probes(backend)).toHaveLength(0);
       await rt.close();
     });
@@ -694,11 +697,24 @@ describe("runtime session history", () => {
       const rt2 = createRuntime({ backend: quiet, store: memoryStore(), adapters: { claude: threaded(), codex: codexProbing } });
       const ws2 = await rt2.workspaces.create({ golden: "snap_g", name: "b" });
       const later = await rt2.harnesses.list(ws2.id);
-      expect(later.find(c => c.harness === "claude")).toMatchObject({ source: "table", version: TABLE_PIN });
+      expect(later.find(c => c.harness === "claude")).toMatchObject({ source: "table", version: CLAUDE_PIN });
       expect(later.find(c => c.harness === "codex")).toMatchObject({ source: "harness", version: "0.9.0" });
       expect(probes(quiet)).toHaveLength(0);
       expect(codexProbes(quiet)).toHaveLength(1);
       await rt2.close();
+    });
+
+    it("a binary that named why it described nothing keeps that harness's table and lends the footer its words", async () => {
+      const backend = stubBackend();
+      backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
+      const refusing: HarnessAdapterFactory = ctx => ({ ...threaded()(ctx), probeCatalog: exec => exec("codex --describe").then(() => ({ refused: "Codex is not signed in on this machine; run codex login there" })) });
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { codex: refusing } });
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const codex = (await rt.harnesses.list(ws.id)).find(c => c.harness === "codex")!;
+      expect(codex).toMatchObject({ source: "table", version: harnessCatalog("codex")!.version, refusal: "Codex is not signed in on this machine; run codex login there" });
+      expect(codex.models.map(m => m.value)).toEqual(harnessCatalog("codex")!.models.map(m => m.value));
+      expect(codex.models.length).toBeGreaterThan(0);
+      await rt.close();
     });
 
     it("a session start asks the binary of the harness that starts, when its adapter probes, and no other", async () => {
@@ -748,7 +764,7 @@ describe("runtime session history", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter }, clock: fc.clock });
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
       const first = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
-      expect(first).toMatchObject({ source: "table", version: TABLE_PIN });
+      expect(first).toMatchObject({ source: "table", version: CLAUDE_PIN });
       expect(first.models.map(m => m.value)).toEqual(["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"]);
       backend.execImpl = (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("claude --help") ? "garbage\n" : "", stderr: "" });
       await rt.harnesses.list(ws.id);

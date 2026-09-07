@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { HarnessCatalog, startPicks } from "@wsp/protocol";
-import { HARNESS_CATALOGS, TABLE_PIN, catalogFromProbe, harnessCatalog, type HarnessCatalogProbe } from "../src/harness-catalog.js";
+import { THREAD_AGENTS } from "@wsp/catalog";
+import { HarnessCatalog, catalogSourceLine, effortsFor, markedDefault, noModelsLine, startPicks, type HarnessCatalogProbe } from "@wsp/protocol";
+import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog } from "../src/harness-catalog.js";
 
 describe("harness catalogs", () => {
   it("names every harness the recipe collects, each parsing as the wire type with at most one default per picker", () => {
@@ -9,12 +10,58 @@ describe("harness catalogs", () => {
     for (const catalog of HARNESS_CATALOGS) {
       expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
       expect(catalog.source).toBe("table");
-      expect(catalog.version).toBe(TABLE_PIN);
+      expect(catalog.refusal).toBeUndefined();
       for (const list of [catalog.models, catalog.efforts, catalog.contextWindows, catalog.permissionModes]) {
         expect(list.filter(o => o.isDefault).length).toBeLessThanOrEqual(1);
         expect(new Set(list.map(o => o.value)).size).toBe(list.length);
       }
     }
+  });
+
+  it("every agent wsp can run stands in with its own models, its own pin and its own binary in the footer, never another agent's", () => {
+    for (const id of THREAD_AGENTS) {
+      const table = harnessCatalog(id)!;
+      // The bug this walks: a tab whose binary never answered showed no model and another agent's pin.
+      expect(table.models.length).toBeGreaterThan(0);
+      expect(table.version).toMatch(/^\S+ \d+\.\d+\.\d+, \d{4}-\d{2}-\d{2}$/);
+      const line = catalogSourceLine(table);
+      expect(line).toBe(`${id} table · ${table.version!}`);
+      // One line at the popup's width: 48 characters of the 10px mono the footer draws in (measured in Chromium).
+      expect(line.length).toBeLessThanOrEqual(48);
+      for (const other of THREAD_AGENTS.filter(a => a !== id)) {
+        expect(line).not.toContain(other);
+        expect(noModelsLine(table)).not.toContain(other);
+      }
+    }
+  });
+
+  it("the pin is what was run on the row's own binary, and a row written from a CLI's docs claims none", () => {
+    expect(harnessCatalog("claude")!.version).toBe("--help 2.1.257, 2026-09-05");
+    expect(harnessCatalog("codex")!.version).toBe("app-server 0.153.0, 2026-09-07");
+    expect(catalogSourceLine(harnessCatalog("codex")!)).toBe("codex table · app-server 0.153.0, 2026-09-07");
+    for (const id of ["gemini", "opencode", "pi", "hermes"]) {
+      expect(harnessCatalog(id)!.version, id).toBeNull();
+      expect(catalogSourceLine(harnessCatalog(id)!)).toBe(`${id} table`);
+    }
+  });
+
+  it("Codex offers the models and reasoning efforts its app-server reports, and no context window", () => {
+    const codex = harnessCatalog("codex")!;
+    expect(codex.models.map(o => o.value)).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.2"]);
+    expect(codex.models.find(o => o.isDefault)?.value).toBe("gpt-5.6-sol");
+    expect(codex.models.map(o => o.efforts)).toEqual([
+      ["low", "medium", "high", "xhigh", "max", "ultra"],
+      ["low", "medium", "high", "xhigh", "max", "ultra"],
+      ["low", "medium", "high", "xhigh", "max"],
+      ["low", "medium", "high", "xhigh"],
+      ["low", "medium", "high", "xhigh"],
+    ]);
+    expect(codex.efforts.map(o => o.value)).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    // The effort the app-server reports for the default model, so the tab shows a default with no probe at all.
+    expect(codex.efforts.find(o => o.isDefault)?.value).toBe("low");
+    expect(codex.contextWindows).toEqual([]);
+    expect(codex.permissionModes.map(o => o.value)).toEqual(["read-only", "workspace-write", "danger-full-access"]);
+    expect(codex.permissionModes.find(o => o.isDefault)?.value).toBe("danger-full-access");
   });
 
   it("Claude Code offers the models, effort levels, context windows and permission modes its CLI takes, bypass being what runs today", () => {
@@ -33,9 +80,6 @@ describe("harness catalogs", () => {
     expect(harnessCatalog("gemini")!.efforts).toEqual([]);
     expect(harnessCatalog("pi")!.permissionModes).toEqual([]);
     expect(harnessCatalog("opencode")!.efforts).toEqual([]);
-    expect(harnessCatalog("codex")!.models).toEqual([]);
-    expect(harnessCatalog("codex")!.permissionModes.find(o => o.isDefault)?.value).toBe("danger-full-access");
-    expect(harnessCatalog("codex")!.contextWindows).toEqual([]);
     expect(harnessCatalog("aider")).toBeUndefined();
   });
 });
@@ -70,12 +114,20 @@ describe("startPicks", () => {
   });
 
   it("a list the CLI leaves empty takes any value, since the values are open or the flag does not exist", () => {
-    const codex = harnessCatalog("codex")!;
-    expect(startPicks(codex, { model: "gpt-5-codex" }, true)).toEqual({ model: "gpt-5-codex" });
-    expect(startPicks(codex, {}, true)).toEqual({});
-    expect(() => startPicks(codex, { effort: "ultra" }, true)).toThrow('effort "ultra" is not one codex takes');
+    const gemini = harnessCatalog("gemini")!;
+    expect(startPicks(gemini, { model: "gemini-3-pro" }, true)).toEqual({ model: "gemini-3-pro" });
+    expect(startPicks(gemini, { effort: "anything" }, true)).toEqual({ effort: "anything" });
     const pi = harnessCatalog("pi")!;
     expect(startPicks(pi, { permissionMode: "anything" }, true)).toEqual({ permissionMode: "anything" });
+  });
+
+  it("a start on the Codex table runs its default model and refuses a model or effort that table does not carry", () => {
+    const codex = harnessCatalog("codex")!;
+    expect(startPicks(codex, {}, true)).toEqual({ model: "gpt-5.6-sol" });
+    expect(markedDefault(effortsFor(codex, markedDefault(codex.models) ?? null))?.value).toBe("low");
+    expect(startPicks(codex, { model: "gpt-5.5", effort: "high", permissionMode: "read-only" }, true)).toEqual({ model: "gpt-5.5", effort: "high", permissionMode: "read-only" });
+    expect(() => startPicks(codex, { model: "gpt-4" }, true)).toThrow('model "gpt-4" is not one codex takes');
+    expect(() => startPicks(codex, { model: "gpt-5.5", effort: "ultra" }, true)).toThrow('effort "ultra" is not one GPT-5.5 takes');
   });
 
   it("a harness without a catalog takes any value and fills no default; only the three picks come out, whatever else the request carries", () => {
@@ -118,6 +170,33 @@ describe("catalogFromProbe", () => {
 
   it("a probe without a version says so instead of pretending to the table's pin", () => {
     expect(catalogFromProbe(harnessCatalog("claude")!, { ...probe, version: null }).version).toBeNull();
+    expect(catalogSourceLine(catalogFromProbe(harnessCatalog("claude")!, { ...probe, version: null }))).toBe("Claude Code on this machine");
+    expect(catalogSourceLine(catalogFromProbe(harnessCatalog("claude")!, probe))).toBe("Claude Code 2.1.257 on this machine");
+  });
+
+  it("a model whose efforts the binary did not name keeps none of its own, so every effort the catalog lists stays open to it", () => {
+    const routed = { ...probe, models: [{ slug: "anthropic/claude-sonnet-4.5", label: "anthropic/claude-sonnet-4.5", contextWindows: [], isDefault: true }, ...probe.models.map(m => ({ ...m, isDefault: false }))] };
+    const catalog = catalogFromProbe(harnessCatalog("codex")!, routed);
+    expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
+    expect(catalog.models[0]).toEqual({ value: "anthropic/claude-sonnet-4.5", label: "anthropic/claude-sonnet-4.5", isDefault: true, contextWindows: [] });
+    expect("efforts" in catalog.models[0]!).toBe(false);
+    // Absent, not empty: empty would mean the model takes no effort at all and refuse every one.
+    expect(effortsFor(catalog, catalog.models[0]!).map(o => o.value)).toEqual(["low", "high", "turbo"]);
+    expect(startPicks(catalog, { effort: "turbo" }, true)).toEqual({ model: "anthropic/claude-sonnet-4.5", effort: "turbo" });
+    expect(() => startPicks(catalog, { effort: "off" }, true)).toThrow('effort "off" is not one codex takes');
+    // A model that named an empty list still takes none.
+    expect(effortsFor(catalog, catalog.models.find(m => m.value === "claude-haiku-4-5-20251001")!)).toEqual([]);
+  });
+
+  it("marks the effort the binary reports for the model it would run, and keeps the table's mark where it reports none", () => {
+    const withDefault = { ...probe, models: probe.models.map(m => (m.isDefault ? { ...m, defaultEffort: "turbo" } : m)) };
+    expect(catalogFromProbe(harnessCatalog("codex")!, withDefault).efforts.find(o => o.isDefault)?.value).toBe("turbo");
+    // The table's own mark is dropped, not kept beside the binary's.
+    expect(catalogFromProbe(harnessCatalog("codex")!, withDefault).efforts.filter(o => o.isDefault)).toHaveLength(1);
+    expect(catalogFromProbe(harnessCatalog("codex")!, probe).efforts.find(o => o.isDefault)?.value).toBe("low");
+    // An effort the binary names as its default that its own list does not carry marks nothing.
+    const odd = { ...probe, models: probe.models.map(m => (m.isDefault ? { ...m, defaultEffort: "nope" } : m)) };
+    expect(catalogFromProbe(harnessCatalog("codex")!, odd).efforts.some(o => o.isDefault)).toBe(false);
   });
 
   it("keeps the harness-level flags the runtime set on the table: the default harness stays marked when its binary answered", () => {

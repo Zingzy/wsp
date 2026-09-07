@@ -7,8 +7,8 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, ThreadView, markedDefault, unknownAgentLine } from "@wsp/protocol";
-import { createRuntime, harnessCatalog, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { EMPTY_TASK_LINE, ThreadView, markedDefault, unknownAgentLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, cli, serve } from "../src/cli.js";
@@ -17,11 +17,21 @@ import type { HostHandle } from "../src/server.js";
 import { PLAN_ONLY, dialHost, messageTo } from "../src/verbs.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
 import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
 
 // A path the process may not read is refused here and not by chmod: these tests run as root, which reads anything.
 vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
+
+/** What the codex here asks its machine; the stub guest answers nothing to it unless a test puts a catalog there. */
+const PROBE_CMD = "codex --describe";
+
+/** An agent whose binary can be made to answer: its probe reads the machine's stdout as the answer itself, so a test
+ * can put a machine's own catalog in front of the verbs. Nothing on the guest answers by default, which leaves the
+ * runtime's table standing, exactly as an adapter with no probe at all does. */
+const probing =
+  (factory: HarnessAdapterFactory): HarnessAdapterFactory =>
+  ctx => ({ ...factory(ctx), probeCatalog: exec => exec(PROBE_CMD).then(out => (out.trim() === "" ? null : (JSON.parse(out) as HarnessCatalogAnswer))) });
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -49,7 +59,7 @@ describe("wsp verbs over the host", () => {
     await store.put("goldens", "default", SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter } });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) } });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     // The host has its keys; the verbs never read any.
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -659,9 +669,11 @@ describe("wsp verbs over the host", () => {
     expect(access.code).toBe(3);
     expect(access.io.errors[0]).toMatch(/^wsp fork: access mode "yolo" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), /);
     // Checked against the table before the fork is minted, for the named agent or the default one.
-    const other = await run("fork", "alpha", "--send", "build it", "--agent", "codex", "--effort", "ultra");
+    const other = await run("fork", "alpha", "--send", "build it", "--agent", "codex", "--effort", "minimal");
     expect(other.code).toBe(3);
-    expect(other.io.errors).toEqual(['wsp fork: effort "ultra" is not one codex takes; one of: Minimal (minimal), Low (low), Medium (medium), High (high), Extra high (xhigh)']);
+    expect(other.io.errors).toEqual([
+      'wsp fork: effort "minimal" is not one GPT-5.6-Sol takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max), Ultra (ultra)',
+    ]);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
     expect(claude.starts).toEqual([]);
     expect(codex.starts).toEqual([]);
@@ -669,6 +681,28 @@ describe("wsp verbs over the host", () => {
     const dangling = await run("fork", "alpha", "--model", "claude-sonnet-5");
     expect(dangling.code).toBe(3);
     expect(dangling.io.errors).toEqual(["wsp fork: --model needs --send"]);
+  });
+
+  it("checks a pick against the workspace's own machine, so a model only that machine knows is taken here as the app takes it", async () => {
+    await run("new", "alpha");
+    // A machine routed to another model provider: its codex names a model no table carries, and the app's composer
+    // takes it because sessions.start checks the probed catalog. The command line has to agree with the app.
+    const routed = {
+      version: "0.153.0",
+      models: [{ slug: "anthropic/claude-sonnet-4.5", label: "anthropic/claude-sonnet-4.5", contextWindows: [], isDefault: true }],
+      efforts: ["low", "high"],
+      permissionModes: ["read-only"],
+    };
+    backend.execImpl = (_m, cmd) => (cmd === PROBE_CMD ? { exitCode: 0, stdout: JSON.stringify(routed), stderr: "" } : guestAnswer(cmd));
+    const opened = await run("thread", "new", "--in", "alpha", "--agent", "codex", "--model", "anthropic/claude-sonnet-4.5", "--effort", "high", "go");
+    expect(opened.code).toBe(0);
+    expect(codex.starts.at(-1)).toMatchObject({ model: "anthropic/claude-sonnet-4.5", effort: "high" });
+    // The same list refuses a table model that machine does not have, naming the machine's own, and a fork checks
+    // the workspace it forks from, whose golden the new machine comes from.
+    const forked = await run("fork", "alpha", "--send", "go", "--agent", "codex", "--model", "gpt-5.5");
+    expect(forked.code).toBe(3);
+    expect(forked.io.errors).toEqual(['wsp fork: model "gpt-5.5" is not one codex takes; one of: anthropic/claude-sonnet-4.5 (anthropic/claude-sonnet-4.5)']);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
   });
 
   it("a --cwd that is not absolute is refused with the usage line before anything is created, started or dialled; fork's --cwd needs --send", async () => {

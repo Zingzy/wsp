@@ -5,7 +5,8 @@
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
 import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, TurnResult } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, TurnResult } from "@wsp/protocol";
+import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
 
 export interface CodexStartOptions {
@@ -47,6 +48,8 @@ export interface CodexAdapter {
   readonly sessions: ReadonlyMap<string, CodexSession>;
   /** `codex exec` reads its prompt and closes stdin; nothing reaches a running turn. */
   readonly steers: false;
+  /** Makes the binary describe itself under the same home as a session, without running a turn. */
+  probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   readonly env: Readonly<Record<string, string>>;
 }
 
@@ -298,5 +301,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     return session;
   };
 
-  return { start, sessions, steers: false, env };
+  const probeCatalog = (exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer> =>
+    exec(catalogProbeCommand({ home: deps.home, baseEnv: deps.baseEnv })).then(stdout => parseCatalogProbe(stdout, deps.login));
+
+  return { start, sessions, steers: false, probeCatalog, env };
 }

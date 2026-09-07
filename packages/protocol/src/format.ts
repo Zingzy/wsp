@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -507,6 +507,23 @@ export function codexNotSignedInLine(login: string): string {
 /** The line when codex's provider reads its key from an environment variable the machine does not set. */
 export function codexMissingEnvLine(name: string): string {
   return `Codex's model provider reads its key from the environment variable ${name}, which is not set on this machine`;
+}
+
+/** The one line under the composer's model lists: the binary that filled them, else whose table stood in and what it
+ * was pinned from, or the adapter's own words for why the binary gave nothing. Every word comes from the catalog being
+ * shown, so a tab never borrows another agent's binary, reason or pin. The slot is one line at the popup's width, 290px
+ * of the 10px mono it draws in, so the agent is named once and the pin's own words carry the rest. */
+export function catalogSourceLine(catalog: HarnessCatalog): string {
+  const version = catalog.version;
+  if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on this machine`;
+  const why = catalog.refusal ?? `${catalog.harness} table`;
+  return version === null ? why : `${why} · ${version}`;
+}
+
+/** The one line in place of the model rows: what the binary reported, or what the table holds, and never a count the
+ * source did not give. */
+export function noModelsLine(catalog: HarnessCatalog): string {
+  return catalog.source === "harness" ? `${catalog.label} reported no models` : `No model in the ${catalog.label} table`;
 }
 
 /** The line when codex kept reconnecting to its provider and nothing ever answered: the CLI itself never gives up. */

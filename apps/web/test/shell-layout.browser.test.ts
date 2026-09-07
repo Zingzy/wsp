@@ -475,6 +475,65 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
+  it("each tab's footer is one muted mono line naming that agent's own binary and pin, at the popup's width, in both themes", async () => {
+    interface Footer {
+      text: string;
+      title: string;
+      mono: boolean;
+      bare: boolean;
+      muted: boolean;
+      height: number;
+      /** Wider than the box it draws in, which is what a line the slot had to cut looks like. */
+      cut: boolean;
+    }
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
+      await page!.waitForSelector("[data-composer-picker='model']");
+      await page!.locator("[data-composer-picker='model']").click();
+      await page!.waitForSelector("[data-composer-model-menu]");
+      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-slot=popover-popup]")!).opacity === "1");
+      const read = async (): Promise<Footer> =>
+        page!.locator("[data-composer-catalog-source]").evaluate(el => {
+          const s = getComputedStyle(el);
+          return {
+            text: el.textContent ?? "",
+            title: el.getAttribute("title") ?? "",
+            mono: s.fontFamily.toLowerCase().includes("mono"),
+            bare: s.backgroundColor === "rgba(0, 0, 0, 0)" && s.borderRadius === "0px" && s.boxShadow === "none",
+            muted: s.color !== getComputedStyle(el.closest("[data-composer-model-menu]")!.querySelector("[role=option]")!).color,
+            height: el.getBoundingClientRect().height,
+            cut: el.scrollWidth > el.clientWidth,
+          };
+        });
+      // The composer remembers the last agent picked for the workspace, so the tab to read from is chosen, not assumed.
+      await page!.locator("[data-composer-harness='claude']").click();
+      await page!.waitForFunction(() => document.querySelector("[data-composer-catalog-source]")?.textContent?.endsWith("on this machine") === true);
+      const claude = await read();
+      expect(claude.text).toBe("Claude Code 2.1.257 on this machine");
+      await page!.locator("[data-composer-harness='codex']").click();
+      await page!.waitForFunction(() => document.querySelector("[data-composer-catalog-source]")?.textContent?.includes(" table · ") === true);
+      const codex = await read();
+      expect(codex.text).toBe("codex table · app-server 0.153.0, 2026-09-07");
+      // The words are the pinned table's own; a badge or a fill behind them would make a state out of a caption.
+      for (const line of [claude, codex]) {
+        expect([line.mono, line.bare, line.muted]).toEqual([true, true, true]);
+        // One line at this width, uncut, and the same height on either tab: switching tabs must not move the popup.
+        expect(line.cut).toBe(false);
+        expect(line.title).toBe(line.text);
+      }
+      expect(codex.height).toBe(claude.height);
+      const popup = await box("[data-slot=popover-popup]");
+      const footer = await box("[data-composer-catalog-source]");
+      expect(footer.width).toBeLessThanOrEqual(popup.width);
+      expect(footer.y + footer.height).toBeLessThanOrEqual(popup.y + popup.height + 1);
+      const path = join(SHOTS_DIR, `composer-catalog-source-${theme}.png`);
+      await page!.locator("[data-slot=popover-popup]").screenshot({ path });
+      console.info(`composer catalog source screenshot: ${path} (${JSON.stringify({ claude, codex })})`);
+      await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[data-composer-model-menu]", { state: "detached" });
+    }
+  }, 60_000);
+
   it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it", async () => {
     await open("dark");
     const before = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
