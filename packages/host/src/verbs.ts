@@ -623,11 +623,14 @@ export function pickFlags(flags: Flags): Picks {
 }
 
 /** Refuses, in the runtime's own words and before a machine is minted or woken for it, what the runtime would refuse
- * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's table
- * does not list. The tables are what the runtime knows without a machine; the start on the machine checks the rest. */
-export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks): Promise<void> {
+ * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's
+ * catalog does not list. Named a workspace, this asks that workspace's own machine, the same lists the app's composer
+ * shows and the start itself will check against, so a model only that machine's config knows (a provider the agent is
+ * routed to) is not refused here for being absent from a table. Without one, or on a workspace that is not running,
+ * the table answers, and the start on the machine checks the rest. */
+export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks, workspaceId?: string): Promise<void> {
   if (task.trim() === "") throw usageRefusal(EMPTY_TASK_LINE);
-  const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list");
+  const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list", workspaceId === undefined ? undefined : { workspaceId });
   const table = harnesses.find(c => (harness === undefined ? c.isDefault === true : c.harness === harness));
   if (table === undefined && harness !== undefined) throw usageRefusal(noAdapterLine(harness, harnesses.map(c => c.harness)));
   try {
@@ -1240,11 +1243,12 @@ export const VERBS: readonly Verb[] = [
       const client = await ctx.client();
       const source = await workspaceOf(client, ref);
       if (workspaceState({ phase: source.phase }) === "gone") throw new Error(goneRefusal("fork", source.gone));
-      // Resolved and checked before the machine is minted, so a bad reference or pick costs nothing.
+      // Resolved and checked before the machine is minted, so a bad reference or pick costs nothing. The picks are
+      // checked against the source's machine, since the fork's own comes from the golden that machine runs.
       const notify = await notifyOf(client, flag(ctx.flags, "notify"));
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
-      if (task !== undefined) await checkedStart(client, task, harness, picks);
+      if (task !== undefined) await checkedStart(client, task, harness, picks, source.id);
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`, flag(ctx.flags, "size"));
       if (task === undefined) return 0;
       ctx.out.emit({ turn: turnView(await followVerb(ctx, client, openingOf(created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true)) });
@@ -1259,7 +1263,7 @@ export const VERBS: readonly Verb[] = [
         absoluteFolder(folder);
         const client = await deps.client();
         const source = await workspaceOf(client, ref);
-        if (task !== undefined) await checkedStart(client, task, harness, input);
+        if (task !== undefined) await checkedStart(client, task, harness, input, source.id);
         const created = await create(client, QUIET, source.golden, name ?? `${source.name}-fork`, word);
         if (task === undefined) return asJson(created);
         let failure: string;
@@ -1394,7 +1398,7 @@ export const VERBS: readonly Verb[] = [
       const found = await workspaceOf(client, within);
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
-      await checkedStart(client, task, harness, picks);
+      await checkedStart(client, task, harness, picks, found.id);
       const workspace = await awake(client, found, "send", line => ctx.io.error(line));
       ctx.out.emit(turnView(await followVerb(ctx, client, openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true)));
       return 0;
@@ -1406,7 +1410,7 @@ export const VERBS: readonly Verb[] = [
       call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, ...input }, deps) => {
         const client = await deps.client();
         const found = await workspaceOf(client, ref);
-        await checkedStart(client, task, harness, input);
+        await checkedStart(client, task, harness, input, found.id);
         const target = await awake(client, found, "send", QUIET_LINE);
         const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN));
         return asText(turnText(out), out);
@@ -1452,7 +1456,7 @@ export const VERBS: readonly Verb[] = [
       const client = await ctx.client();
       const picks = pickFlags(ctx.flags);
       const thread = await threadOf(client, ref);
-      await checkedStart(client, message, thread.harness, picks);
+      await checkedStart(client, message, thread.harness, picks, thread.workspaceId);
       await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
       ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks), false, picks)));
       return 0;
@@ -1464,7 +1468,7 @@ export const VERBS: readonly Verb[] = [
       call: async ({ thread: ref, message, ...input }, deps) => {
         const client = await deps.client();
         const thread = await threadOf(client, ref);
-        await checkedStart(client, message, thread.harness, input);
+        await checkedStart(client, message, thread.harness, input, thread.workspaceId);
         await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
         const out = turnOut(await follow(client, messageTo(thread, message, input), "agent", QUIET_TURN));
         return asText(turnText(out), out);

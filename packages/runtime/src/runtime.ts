@@ -92,6 +92,7 @@ import type {
   GoldenStage,
   GoldenStep,
   HarnessCatalog,
+  HarnessCatalogAnswer,
   HostFolderListing,
   RecipeDigest,
   TerminalConfig,
@@ -125,7 +126,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, NOTIFY_ME, RECORD_RESTORED, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -134,7 +135,7 @@ import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, providerSaid, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
-import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, type HarnessCatalogProbe } from "./harness-catalog.js";
+import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog } from "./harness-catalog.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -175,8 +176,9 @@ export interface HarnessAdapter {
   start(options: HarnessStartOptions): HarnessSession;
   /** Whether this adapter's sessions carry steer; the catalog tells the composer before a turn runs. */
   readonly steers: boolean;
-  /** Asks the binary on the workspace's machine what it takes, null when it does not answer; absent, the table alone answers and nothing runs. */
-  probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
+  /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
+   * when it does not answer at all; absent, the table alone answers and nothing runs. */
+  probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** Reads the harness's own title for a session out of its store on the machine; absent on a harness that keeps none. */
   sessionTitle?: SessionTitleReader;
   /** Writes a person's name for a session into that same store; absent on a harness that keeps no name of a person's. */
@@ -2493,7 +2495,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog;
     const catalog = adapter
       .probeCatalog(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout))
-      .then(parsed => (parsed === null ? known : catalogFromProbe(known, parsed)), () => known);
+      // A binary that named why it described nothing keeps the table's lists and lends the footer its words.
+      .then(answer => (answer === null ? known : catalogRefused(answer) ? { ...known, refusal: answer.refused } : catalogFromProbe(known, answer)), () => known);
     catalogs.set(key, { at: now, catalog });
     return catalog;
   };

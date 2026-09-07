@@ -63,7 +63,7 @@ const sessions: SessionView[] = [
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one.
 const catalogs: HarnessCatalog[] = [
   { harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }], efforts: [], contextWindows: [], permissionModes: [], steers: true },
-  { harness: "codex", label: "Codex", source: "table", version: null, models: [{ value: "gpt-6-astra", label: "GPT-6 Astra" }], efforts: [], contextWindows: [], permissionModes: [], steers: false },
+  { harness: "codex", label: "Codex", source: "table", version: "app-server 0.153.0, 2026-09-07", models: [{ value: "gpt-5.6-sol", label: "GPT-5.6-Sol", isDefault: true }], efforts: [], contextWindows: [], permissionModes: [], steers: false },
 ];
 
 const linger = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_linger" };

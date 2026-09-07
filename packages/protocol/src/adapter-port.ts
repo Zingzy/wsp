@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The port every harness adapter is written against: the process a turn runs
-// in (ExecStream, whatever launched it) and the events an adapter normalizes
-// its CLI's output into (AdapterEvent). It sits here, beside the wire types,
+// in (ExecStream, whatever launched it), the events an adapter normalizes its
+// CLI's output into (AdapterEvent), what it reads off its binary when the
+// runtime asks what that binary takes (HarnessCatalogAnswer), and what it
+// reads out of the harness's own store when the runtime asks what that harness
+// calls a session (SessionTitleReader). It sits here, beside the wire types,
 // so no adapter owns the interface its siblings implement. The runtime folds
 // these into the SessionEvent shapes in index.ts that clients read, which is
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
@@ -53,6 +56,44 @@ export type ExecStreamFactory = (
     input?: readonly string[];
   },
 ) => ExecStream;
+
+/** One model as an adapter reads it off its binary: the values the CLI takes, without the words the runtime's table
+ * lends them. contextWindows carries both windows where the CLI offers the model at two, else none. */
+export interface HarnessCatalogModelProbe {
+  slug: string;
+  label: string;
+  description?: string;
+  /** The effort values this model takes: absent where the binary does not say and every effort stays open, empty
+   * where it says the model takes none. The two are different answers and the composer draws them differently. */
+  efforts?: readonly string[];
+  /** The effort this model runs at when a turn names none, where the binary reports one. */
+  defaultEffort?: string;
+  contextWindows: readonly string[];
+  isDefault: boolean;
+}
+
+/** What an adapter reads off its binary on the workspace's machine: the lists the CLI itself reports. */
+export interface HarnessCatalogProbe {
+  version: string | null;
+  models: readonly HarnessCatalogModelProbe[];
+  efforts: readonly string[];
+  permissionModes: readonly string[];
+}
+
+/** What an adapter answers when its binary ran and described no models for a reason it can name (no sign-in): the
+ * runtime's table stands, and the composer's footer says these words in place of naming the binary as silent. */
+export interface HarnessCatalogRefusal {
+  refused: string;
+}
+
+/** The three things asking a binary about itself can come back with: its lists, its named reason for having none,
+ * or nothing at all. */
+export type HarnessCatalogAnswer = HarnessCatalogProbe | HarnessCatalogRefusal | null;
+
+/** A refusal, not lists: an answer that named why the binary described nothing. */
+export function catalogRefused(answer: HarnessCatalogAnswer): answer is HarnessCatalogRefusal {
+  return answer !== null && "refused" in answer;
+}
 
 /**
  * Reads what the harness itself calls one of its sessions, from the harness's own store on the machine: the title

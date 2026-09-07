@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 import {
   backgroundTasksLine,
   biggerSizeLine,
+  catalogSourceLine,
+  noModelsLine,
+  type HarnessCatalog,
   MEMORY_NEAR_FULL,
   memoryNearFull,
   outOfMemoryLine,
@@ -202,6 +205,56 @@ describe("one registry for the tools a harness reports", () => {
   it("no other source file names a tool of a harness or the input field a client shows for it", () => {
     const copies = sourceFiles().filter(rel => rel !== HOME && RULE.test(readFileSync(join(ROOT, rel), "utf8")));
     expect(copies).toEqual([]);
+  });
+});
+
+describe("where the composer's model lists came from, in one line", () => {
+  const TABLE: HarnessCatalog = {
+    harness: "codex",
+    label: "Codex",
+    source: "table",
+    version: "app-server 0.153.0, 2026-09-07",
+    models: [{ value: "gpt-5.6-sol", label: "GPT-5.6-Sol" }],
+    efforts: [],
+    contextWindows: [],
+    permissionModes: [],
+    steers: false,
+  };
+
+  it("names the agent's own binary and its own pin when its table stood in, never another agent's", () => {
+    expect(catalogSourceLine(TABLE)).toBe("codex table · app-server 0.153.0, 2026-09-07");
+    expect(catalogSourceLine({ ...TABLE, harness: "claude", label: "Claude Code", version: "--help 2.1.257, 2026-09-05" })).toBe("claude table · --help 2.1.257, 2026-09-05");
+    // One line at the popup's width: 48 characters of the 10px mono the footer draws in, measured in Chromium.
+    expect(catalogSourceLine(TABLE).length).toBeLessThanOrEqual(48);
+  });
+
+  it("says the adapter's own reason where the binary answered and named one, in place of naming the table", () => {
+    expect(catalogSourceLine({ ...TABLE, refusal: "Codex is not signed in on this machine; run codex login there" })).toBe(
+      "Codex is not signed in on this machine; run codex login there · app-server 0.153.0, 2026-09-07",
+    );
+  });
+
+  it("a table with no pin of its own claims none, and the binary that answered carries its version", () => {
+    expect(catalogSourceLine({ ...TABLE, harness: "gemini", label: "Gemini CLI", version: null })).toBe("gemini table");
+    expect(catalogSourceLine({ ...TABLE, source: "harness", version: "0.153.0" })).toBe("Codex 0.153.0 on this machine");
+    expect(catalogSourceLine({ ...TABLE, source: "harness", version: null })).toBe("Codex on this machine");
+    // The reason belongs to the fallback: a binary that filled the lists has nothing to explain.
+    expect(catalogSourceLine({ ...TABLE, source: "harness", version: "0.153.0", refusal: "not signed in" })).toBe("Codex 0.153.0 on this machine");
+  });
+
+  it("an empty model list reads as the source that gave it: what the binary reported, or what the table holds", () => {
+    expect(noModelsLine({ ...TABLE, source: "harness", models: [] })).toBe("Codex reported no models");
+    expect(noModelsLine({ ...TABLE, models: [] })).toBe("No model in the Codex table");
+  });
+});
+
+describe("one home for the words under the composer's model lists", () => {
+  const HOME = join("packages", "protocol", "src", "format.ts");
+  // A footer assembled anywhere else took its binary word from whichever agent's catalog it was written against.
+  const RULE = /\} table`|reported no models|no model in the/;
+
+  it("no other source file spells the footer's words", () => {
+    expect(sourceFiles().filter(rel => rel !== HOME && RULE.test(readFileSync(join(ROOT, rel), "utf8")))).toEqual([]);
   });
 });
 

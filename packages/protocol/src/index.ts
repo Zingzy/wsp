@@ -309,7 +309,7 @@ export type HarnessCatalogSource = z.infer<typeof HarnessCatalogSource>;
 /** What one harness's CLI takes at launch. A list is empty when the CLI has no such flag or its values are open,
  * and the composer hides that picker; sessions.start refuses a value a non-empty list does not carry and passes any
  * value through where the list is empty. source says whether the binary on the workspace's machine answered or the
- * runtime's table stood in, and version is the binary's, else the table's pin. */
+ * runtime's table stood in, and version is the binary's, else that harness's own table pin. */
 export const HarnessCatalog = z.object({
   harness: z.string(),
   label: z.string(),
@@ -324,6 +324,9 @@ export const HarnessCatalog = z.object({
   steers: z.boolean(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
+  /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
+   * (no sign-in); absent when it simply did not answer, and on a catalog the binary filled. */
+  refusal: z.string().optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
 
@@ -1829,4 +1832,5 @@ export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
-export type { AdapterEvent, ExecStream, ExecStreamFactory, SessionRenamer, SessionTitleReader } from "./adapter-port.js";
+export { catalogRefused } from "./adapter-port.js";
+export type { AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionRenamer, SessionTitleReader } from "./adapter-port.js";
