@@ -329,6 +329,9 @@ export interface StartSessionOptions {
   requestId?: string;
   harness?: string;
   resume?: string;
+  /** The thread the message goes to, by its runtime id, when the view has no session to resume: the runtime resumes
+   * the thread's latest session or, after a launch that failed, runs the message as the thread's first turn. */
+  thread?: string;
   cwd?: string;
   /** Values from the harness catalog; absent leaves the CLI's own default for that flag. */
   model?: string;
