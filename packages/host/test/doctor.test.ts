@@ -10,6 +10,7 @@ import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { TOOLS_PATH } from "@wsp/engine";
+import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ } from "@wsp/protocol";
 import { rotateDaemonTokenScript, writeDaemonTokenScript } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -23,6 +24,7 @@ import {
   GUEST_NODE,
   claudeEnvs,
   OPEN_SHIM_SCRIPT,
+  START_MJS,
   isReserved,
   packBundle,
   stageDaemonBundle,
@@ -95,10 +97,24 @@ describe("stageDaemonBundle", () => {
     const stage = join(dir, "stage");
     await stageDaemonBundle(stage, daemonDir);
 
-    const { stdout } = await promisify(execFile)(process.execPath, [join(stage, "start.mjs")], { env: { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" } });
+    const { stdout, stderr } = await promisify(execFile)(process.execPath, [join(stage, "start.mjs")], { env: { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" } });
     const started = JSON.parse(stdout.split("\n")[0]!) as { path: string; host: string; openSocketPath: string };
     expect(started).toEqual({ path: TOOLS_PATH, host: "0.0.0.0", openSocketPath: "/root/.wsp/open.sock" });
     expect(stdout).toContain("wsp-daemon listening on 0.0.0.0:7070");
+    // This computer has no Linux /proc and the test is not root: neither the score nor the priority can be written,
+    // the log says so once each, and the daemon starts anyway.
+    expect(stderr.split("\n").filter(l => l.length > 0)).toEqual([expect.stringMatching(/^oom_score_adj not set: /), expect.stringMatching(/^priority not set: /)]);
+  });
+
+  it("start.mjs writes the daemon's own memory-killer score and nice value before the daemon loads, so every relaunch road gives them", () => {
+    const write = START_MJS.indexOf(`writeFileSync("/proc/self/oom_score_adj", "${DAEMON_OOM_SCORE_ADJ}")`);
+    const nice = START_MJS.indexOf(`setPriority(${DAEMON_NICE})`);
+    const load = START_MJS.indexOf('await import("./dist/index.js")');
+    expect(write).toBeGreaterThan(-1);
+    expect(nice).toBeGreaterThan(-1);
+    expect(Math.max(write, nice)).toBeLessThan(load);
+    expect(DAEMON_OOM_SCORE_ADJ).toBe(-999);
+    expect(DAEMON_NICE).toBe(-10);
   });
 });
 

@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   backgroundTasksLine,
+  biggerSizeLine,
+  MEMORY_NEAR_FULL,
+  memoryNearFull,
+  outOfMemoryLine,
+  outOfMemoryRowLine,
   stillWorkingRefusal,
   behindGoldenLine,
   builderStaysLine,
@@ -87,6 +92,42 @@ describe("fmtBytes and fmtMemGb", () => {
     expect(fmtBytes(3000 * 1024 * 1024)).toBe("2.9 GB");
     expect(fmtBytes(2048 * 1024 * 1024)).toBe("2.0 GB");
     expect(fmtBytes(250 * 1024 * 1024)).toBe("250.0 MB");
+  });
+});
+
+describe("a machine that stopped answering with its memory near full", () => {
+  const GiB = 1024 ** 3;
+  const offers = [
+    { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
+    { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
+    { cpu: 4, memMb: 16384, rateUsdPerHour: 0.3 },
+  ];
+
+  it("near full is the measured share, on the number only", () => {
+    expect(MEMORY_NEAR_FULL).toBe(0.9);
+    expect(memoryNearFull({ used: 3.59 * GiB, total: 3.94 * GiB })).toBe(true);
+    expect(memoryNearFull({ used: 90, total: 100 })).toBe(true);
+    expect(memoryNearFull({ used: 89, total: 100 })).toBe(false);
+    expect(memoryNearFull({ used: 0, total: 0 })).toBe(false);
+  });
+
+  it("the line carries the last figures and says the work took the memory, never that the machine failed", () => {
+    expect(outOfMemoryLine({ used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.42 })).toBe(
+      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the machine last answered; the work on it took the memory, not a fault of the machine",
+    );
+  });
+
+  it("the row form says the unit once when both sides share it, so the sidebar's second line holds it whole", () => {
+    expect(outOfMemoryRowLine({ used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.42 })).toBe("out of memory, 3.6 of 3.9 GB");
+    expect(outOfMemoryRowLine({ used: 900 * 1024 ** 2, total: 3.94 * GiB, load1: 1 })).toBe("out of memory, 900.0 MB of 3.9 GB");
+  });
+
+  it("the size line names the smallest offer with more memory and its rate, or that there is none", () => {
+    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one");
+    expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A workspace on 4 vCPU · 16 GB ($0.30/hr) fits more; pick it when you make the next one");
+    expect(biggerSizeLine({ cpu: 4, memMb: 16384 }, offers)).toBe("No size with more memory is offered; run less on the machine at once");
+    // Order in the table does not pick the offer; memory does.
+    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, [...offers].reverse())).toContain("2 vCPU · 8 GB");
   });
 });
 

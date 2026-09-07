@@ -4,9 +4,9 @@
 // workspace's machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { behindGoldenLine, fmtRate, fmtSize, foldThreads, imageMoveRefusal, needsRebuild, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, imageMoveRefusal, needsRebuild, outOfMemoryLine, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
-import { LIVE_WINDOW, useWorkspaceLive } from "../../machine/live.js";
+import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
 import { useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
 import {
@@ -152,6 +152,7 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
   const diverged = status ? divergentMachineState(workspace.phase, status.machineState) : null;
   const zombie = status?.reach.state === "zombie";
   const rebuild = needsRebuild({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
+  const outOfMemory = useOutOfMemoryReading(workspace.id, workspace.phase);
   return (
     <Section label="Machine">
       <div className="mt-1 divide-y divide-border/40">
@@ -190,6 +191,16 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
       {status?.reason && (
         <p className={cn("mt-1.5 text-[11px] leading-relaxed", zombie ? "text-destructive-foreground" : "text-muted-foreground")} data-k="reason">
           {status.reason}
+        </p>
+      )}
+      {outOfMemory && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="out-of-memory">
+          {outOfMemoryLine(outOfMemory)}
+        </p>
+      )}
+      {outOfMemory && status && capabilities && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="bigger-size">
+          {biggerSizeLine(status.size, capabilities.sizes)}
         </p>
       )}
       {rebuild && <Rebuild workspace={workspace} />}

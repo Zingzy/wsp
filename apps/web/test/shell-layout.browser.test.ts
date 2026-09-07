@@ -215,6 +215,17 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       const path = join(SHOTS_DIR, `sidebar-helper-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar helper line screenshot: ${path}`);
+
+      // The same slot when the link dropped after a near-full sample: the row form of the words, whole.
+      await page!.goto(`${base}?theme=${theme}&oom=1`);
+      await page!.waitForSelector("[data-sidebar-row]");
+      const oom = await metaOf();
+      expect(oom[0]!.text).toBe("out of memory, 3.6 of 3.9 GB");
+      expect(oom[0]!.clipped).toBe(false);
+      expect(oom[0]!.height).toBe(plain[0]!.height);
+      const oomPath = join(SHOTS_DIR, `sidebar-oom-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path: oomPath });
+      console.info(`sidebar out-of-memory line screenshot: ${oomPath}`);
     }
   }, 30_000);
 

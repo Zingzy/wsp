@@ -8,8 +8,9 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { workspaceState, type DaemonLinkStatus } from "@wsp/protocol";
-import { terminalPaneState, type TerminalPaneState } from "../adapt/index.js";
-import { useStatus, useStore, useWorkspace } from "../protocol/store.js";
+import { terminalPaneHints, terminalPaneState, type TerminalPaneState } from "../adapt/index.js";
+import { useOutOfMemoryReading } from "../machine/live.js";
+import { useCapabilities, useStatus, useStore, useWorkspace } from "../protocol/store.js";
 import { selectPanelTerminalIds, useRightPanelStore } from "../rightPanelStore.js";
 import { openDrawerTerminal, reportTerminalFailure, splitDrawerTerminal, type SplitDirection } from "../shell/shellCommands.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
@@ -42,20 +43,26 @@ export function lostTerminals(tabs: readonly PtyTabView[]): ReadonlySet<string> 
   return new Set(tabs.filter(t => t.lost).map(t => t.ptyId));
 }
 
-/** The pane's state from the workspace's one vocabulary plus this link's socket, and the wake every pane offers. */
-export function useTerminalPane(workspaceId: string, socket: DaemonLinkStatus): { pane: TerminalPaneState; onWake: () => void } {
+/** The pane's state from the workspace's one vocabulary plus this link's socket and its last memory reading, the
+ * lines under it, and the wake every pane offers. */
+export function useTerminalPane(workspaceId: string, socket: DaemonLinkStatus): { pane: TerminalPaneState; hints: string[]; onWake: () => void } {
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
+  const capabilities = useCapabilities();
   const wake = useStore(s => s.wake);
   const phase = status?.phase ?? workspace?.phase ?? "running";
   const machineState = status?.machineState ?? null;
   const reach = status?.reach.state ?? null;
+  const outOfMemory = useOutOfMemoryReading(workspaceId, phase);
   const pane = useMemo(
-    () => terminalPaneState({ state: workspaceState({ phase, machineState, reach }), reach, socket }),
-    [phase, machineState, reach, socket],
+    () => terminalPaneState({ state: workspaceState({ phase, machineState, reach }), reach, socket, outOfMemory }),
+    [phase, machineState, reach, socket, outOfMemory],
   );
+  const size = status?.size ?? null;
+  const sizes = capabilities?.sizes ?? null;
+  const hints = useMemo(() => terminalPaneHints(pane, size, sizes), [pane, size, sizes]);
   const onWake = useCallback(() => void wake(workspaceId), [wake, workspaceId]);
-  return { pane, onWake };
+  return { pane, hints, onWake };
 }
 
 export function WorkspaceTerminalDrawer({ workspaceId }: { workspaceId: string }) {
@@ -72,7 +79,7 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
   const ids = useMemo(() => tabs.map(t => t.ptyId).filter(id => !panelIds.includes(id)), [tabs, panelIds]);
   const labels = useMemo(() => terminalLabels(tabs), [tabs]);
   const lost = useMemo(() => lostTerminals(tabs), [tabs]);
-  const { pane, onWake } = useTerminalPane(workspaceId, status);
+  const { pane, hints, onWake } = useTerminalPane(workspaceId, status);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
   const terminalConfig = useTerminalViewportConfig();
   const store = useTerminalDrawerStore;
@@ -101,6 +108,7 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
       activeTerminalGroupId={shown.activeTerminalGroupId}
       focusRequestId={0}
       pane={pane}
+      paneHints={hints}
       onWake={onWake}
       lostTerminalIds={lost}
       onSplitTerminal={() => split("horizontal")}

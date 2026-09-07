@@ -856,6 +856,33 @@ describe("zombie", () => {
     await waitFor(() => expect(screen.getByText("Machine rebuilt from the golden.")).toBeDefined());
   });
 
+  it("a machine that stopped answering with memory near full says so, names the next size up, and offers the rebuild only after them", async () => {
+    const GiB = 1024 ** 3;
+    resetLive();
+    const w = view("ws_a", "api");
+    const api = await mount([w]);
+    act(() => {
+      getLive("ws_a").feedStatus("live");
+      getLive("ws_a").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
+    });
+    // Answering, whatever the figures: nothing to say in the Machine section.
+    expect(fact("out-of-memory")).toBe("");
+    act(() => {
+      getLive("ws_a").feedStatus("connecting");
+      api.emit({ type: "workspace.status", status: { ...status(w), reach: { state: "unreachable" } } });
+    });
+    await waitFor(() => expect(fact("out-of-memory")).toBe("Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the machine last answered; the work on it took the memory, not a fault of the machine"));
+    expect(fact("bigger-size")).toBe("A workspace on 4 vCPU · 8 GB ($0.22/hr) fits more; pick it when you make the next one");
+    // Not a zombie yet: no rebuild on offer for a machine the runtime is still waiting on.
+    expect(screen.queryByRole("button", { name: "rebuild api" })).toBeNull();
+    act(() => api.emit({ type: "workspace.status", status: zombie(w) }));
+    const rebuild = await screen.findByRole("button", { name: "rebuild api" });
+    const bigger = document.querySelector('[data-k="bigger-size"]')!;
+    expect(bigger.compareDocumentPosition(rebuild) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    act(() => getLive("ws_a").feedStatus("live"));
+    await waitFor(() => expect(fact("out-of-memory")).toBe(""));
+  });
+
   it("cancel leaves the zombie alone", async () => {
     const w = view("ws_a", "api");
     const api = await mount([w]);

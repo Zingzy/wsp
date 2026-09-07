@@ -2,13 +2,15 @@
 // Served by Vite to a real browser: the app shell over a fake api with three
 // workspaces (running, paused, gone) and two threads, in either theme
 // (?theme=light), with a status toast in the footer (?toast=...) and with the
-// runtime replacing the first machine's helper (?helper=1), so a test can
-// measure the chrome's geometry, which jsdom cannot lay out.
+// runtime replacing the first machine's helper (?helper=1) or the first
+// machine's link dropped after a near-full memory sample (?oom=1), so a test
+// can measure the chrome's geometry, which jsdom cannot lay out.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
+import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
 import { AppShell } from "../../src/shell/AppShell";
 import "../../src/index.css";
@@ -39,7 +41,10 @@ const api: Api = {
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
   createWorkspace: async () => workspaces[0]!,
   createFromGoldenHead: async () => workspaces[0]!,
-  watchStatuses: async () => workspaces.map(w => statusOf(w, params.get("helper") === "1" && w.id === "ws_a" ? { daemonNote: DAEMON_UPDATING } : {})),
+  watchStatuses: async () =>
+    workspaces.map(w =>
+      statusOf(w, w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : {}),
+    ),
   forget: async () => {},
   nap: async id => workspaces.find(w => w.id === id)!,
   wake: async id => workspaces.find(w => w.id === id)!,
@@ -60,6 +65,12 @@ const api: Api = {
 const toast = params.get("toast");
 useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}) });
 useStore.getState().bind(api);
+if (params.get("oom") === "1") {
+  const GiB = 1024 ** 3;
+  getLive("ws_a").feedStatus("live");
+  getLive("ws_a").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
+  getLive("ws_a").feedStatus("connecting");
+}
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
     <AppShell>

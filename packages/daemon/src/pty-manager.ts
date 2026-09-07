@@ -1,5 +1,6 @@
 import { homedir, userInfo } from "node:os";
 import { spawn, type IPty } from "node-pty";
+import { workArgv } from "@wsp/protocol";
 import { OPEN_SHIM_PATH } from "./relay.js";
 
 const SCROLLBACK_CAP_BYTES = 256 * 1024;
@@ -143,13 +144,17 @@ export interface PtyLaunch {
  * terminal: it runs the passwd row's shell as a login shell, so profile.d applies, and
  * SHELL names that shell for what it spawns, as login(1) would set it. The daemon's own
  * SHELL never decides: a guest daemon is started without one so a chsh on the machine
- * is what the next terminal runs. A row without a shell, or no row, gets bash. */
+ * is what the next terminal runs. A row without a shell, or no row, gets bash. The
+ * shell starts behind the work-score line, off the daemon's own memory-killer score
+ * and priority, which a child inherits (measured), and is exec'd into, so the pid the
+ * pty reports is the shell's own. */
 export function ptyLaunch(opts: PtyCreateOpts, me: PasswdRow | undefined = passwdRow()): PtyLaunch {
   const env = ptyEnv(opts.env, me);
-  if (opts.shell !== undefined) return { file: opts.shell, args: [], env };
+  const wrap = (file: string, args: string[]): PtyLaunch => ({ ...workArgv(file, args), env });
+  if (opts.shell !== undefined) return wrap(opts.shell, []);
   const shell = me?.shell ? me.shell : undefined;
   if (shell !== undefined && opts.env?.["SHELL"] === undefined) env["SHELL"] = shell;
-  return { file: shell ?? "bash", args: ["-l"], env };
+  return wrap(shell ?? "bash", ["-l"]);
 }
 
 export class PtyManager {
