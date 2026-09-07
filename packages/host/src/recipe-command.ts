@@ -8,7 +8,7 @@ import { agentName, catalogEntry } from "@wsp/catalog";
 import { type AgentHistory, type HistoryCache, type HistoryProgress, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
 import { LOGIN_CHOICES, RECIPE_TICKS, customRows, plural, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick, type ToolPin } from "@wsp/protocol";
 import { THREAD_AGENTS } from "./thread-agents.js";
-import { loadRecipe, pinsOf, saveSmallRecipe, withPins } from "./recipe-file.js";
+import { loadRecipe, outsideRowsOf, pinsOf, saveSmallRecipe, withPins } from "./recipe-file.js";
 import { customFromFlags, withCustom } from "./recipe-custom.js";
 import { recipeAnswer, recipeScan, type RecipeAnswer, type RecipeScan } from "./recipe-answer.js";
 import { candidatesLine } from "./init-table.js";
@@ -145,12 +145,13 @@ export function readSaved(out: string, note: (line: string) => void): Recipe | u
   }
 }
 
-/** What a recipe already at this path carries that no rule on this computer decides: the rows outside the catalog,
- * and the pins the builds that ran from it recorded. Both writers of that file, the recipe verb and the wizard, read
- * it through readSaved, so neither writes over what the other put there. */
-export function carriedOver(out: string, log: (line: string) => void): { custom?: RecipeCustomRow[]; pins: Map<string, ToolPin> } {
+/** What a recipe already at this path carries that no rule on this computer decides: the rows an agent added, the
+ * ticks on this computer's tools rows the catalog does not carry, and the pins the builds that ran from it recorded.
+ * Both writers of that file, the recipe verb and the wizard, read it through readSaved, so neither writes over what
+ * the other put there. */
+export function carriedOver(out: string, log: (line: string) => void): { custom?: RecipeCustomRow[]; ticks: Map<string, boolean>; pins: Map<string, ToolPin> } {
   const saved = readSaved(out, log);
-  return { ...(saved?.custom === undefined ? {} : { custom: saved.custom }), pins: pinsOf(saved?.rows) };
+  return { ...(saved?.custom === undefined ? {} : { custom: saved.custom }), ticks: new Map(outsideRowsOf(saved).map(r => [r.id, r.on])), pins: pinsOf(saved?.rows) };
 }
 
 /** Whether the run named something the rule reads, so the rule decides every row again rather than the file standing. */
@@ -231,9 +232,11 @@ export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = Q
     },
   });
   const base = saved !== undefined && !namesRule(input) ? withSavedTicks(computed, saved) : computed;
-  // The rows outside the catalog are the file's, not this computer's: an earlier run's stand, so --add adds up.
+  // The rows outside the catalog are the file's, not this computer's: an earlier run's stand, so --add adds up, and
+  // the wizard's ticks on this computer's own formulae and globals are kept, since no rule here reads those rows.
   // The pins the builds recorded are facts about the golden, not ticks: they stand through every rule.
-  const recipe = withPins(withCustom({ ...applySignIns(applySets(base, sets), signIns), ...(saved !== undefined ? { custom: [...customRows(saved)] } : {}) }, added), pinsOf(saved?.rows));
+  const decided = applySignIns(applySets(base, sets), signIns);
+  const recipe = withPins(withCustom({ ...decided, rows: [...decided.rows, ...outsideRowsOf(saved)], ...(saved !== undefined ? { custom: [...customRows(saved)] } : {}) }, added), pinsOf(saved?.rows));
   saveSmallRecipe(input.out, recipe);
   return recipeAnswer(recipe, input.out, unknownCommands(histories));
 }

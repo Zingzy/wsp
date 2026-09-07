@@ -437,6 +437,64 @@ describe("wsp init, interactive", () => {
     ]);
   });
 
+  it("a scanned tap formula this Mac's collector listed is its own row: ticked on the third screen it installs from its GitHub release, its pin is recorded under the row's id and no custom row is written; a --yes re-run reads as no change", async () => {
+    const sha = "a".repeat(64);
+    const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "unknown" };
+    const table = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+    const scanned = { id: "brew/zingzy/tap/diskbloom", name: "zingzy/tap/diskbloom", manager: "brew" as const, group: "Homebrew formulae", install: "brew install zingzy/tap/diskbloom", check: "brew list --versions zingzy/tap/diskbloom", size: 4 * 1024 * 1024, version: "0.1.0" };
+    const collect = async () => ({ entries: [...FIXTURE.entries, tap] });
+    const brew = async () => table;
+    const store = memoryStore();
+    const shared = stubBackend();
+    shared.execImpl = (_m, cmd) => {
+      const tag = /repos\/Zingzy\/diskbloom\/releases\/(?:tags\/(\S+?)'|latest)/.exec(cmd);
+      return tag === null ? guestAnswer(cmd) : { exitCode: 0, stdout: `WSP_ROAD release diskbloom_linux_amd64.tar.gz ${sha} ${tag[1] ?? "v0.1.0"}\n`, stderr: "" };
+    };
+    const onShared = (f: Fake): void => {
+      f.opts.runtime = recipe => {
+        f.backends.push(shared);
+        const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+        f.runtimes.push(rt);
+        return rt;
+      };
+    };
+    const f = fake({ collect, brew, scan: async () => [scanned] });
+    onShared(f);
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f, ["Agents", "Tools"]);
+    await f.until("Also on this Mac");
+    // The Tools screen is the catalog's: the formula is not there. Down onto it here, and the detail says the road the build takes.
+    expect(f.text().slice(f.text().lastIndexOf("◆  Tools"), f.text().lastIndexOf("◆  Also on this Mac"))).not.toContain("diskbloom");
+    await f.press(KEY.down);
+    await f.until("installs from its release: the v0.1.0 release of github.com/Zingzy/diskbloom");
+    expect(f.text()).toContain("installed on this Mac, 0.1.0");
+    await f.press(" ");
+    await f.until(/● zingzy\/tap\/diskbloom/);
+    await f.press(KEY.enter);
+    await throughScreens(f, ["Sign-ins", "wsp for your agents on this Mac"]);
+    await f.until(BOOT);
+    expect(f.text().replace(/\n│\s+/g, " ")).toMatch(/3 tools plus Homebrew's toolchain, 1 from its GitHub release \(checksum recorded on first install\)/);
+    await f.press("y");
+    await sealIt(f);
+    await firstWorkspace(f, false);
+    expect((await run).code).toBe(0);
+    const roadRuns = () => shared.machines.flatMap(m => m.execLog.filter(c => c.includes("repos/Zingzy/diskbloom/releases/")));
+    expect(roadRuns()).toHaveLength(1);
+    expect(roadRuns()[0]).toContain("releases/tags/v0.1.0");
+    expect(shared.machines.some(m => m.execLog.some(c => c.includes("brew install zingzy/tap/diskbloom")))).toBe(false);
+    const pin = { tag: "v0.1.0", sha256: sha };
+    const small = () => Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
+    expect(small().rows.find(r => r.id === tap.id)).toEqual({ id: tap.id, kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true }, pin });
+    expect(small().custom).toEqual([]);
+    expect(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === tap.id)).toEqual({ ...tap, bring: true, pin });
+    // The next run, taking the defaults: the tick and the pin come from the recipe beside the state, and nothing is built.
+    const again = fake({ yes: true, tty: false, home: f.opts.home, statePath: f.opts.statePath, collect, brew });
+    onShared(again);
+    expect((await runInit(again.opts, again.io)).code).toBe(0);
+    expect(again.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(roadRuns()).toHaveLength(1);
+  });
+
   it("keeps the rows wsp recipe --add wrote into the recipe beside the state, which a plain run rewrites", async () => {
     const f = fake({ yes: true });
     const saved = join(dirname(f.opts.statePath), "recipe.json");
@@ -931,7 +989,9 @@ describe("wsp init, the summary-first screens", () => {
     expect(two).toMatch(/^◆  Tools  2\/6\n┃ {2}What installs on the image, from what you use\.\n┃ {2}You can change this later\.\n┃ {2}search/);
     expect(two).toMatch(/▾ Always on the image\s+16\s+1\.5 GB\n┃\s+• Docker engine and compose\s+base\s+always on the image\s+516\.7 MB\n/);
     expect(two).toMatch(/▾ You use these\s+1 of 2\s+239\.4 MB\n┃\s+○ Go\s+used\s+below the floor, 2 commands in 1[^\n]*?239\.1 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+239\.4 MB\n/);
+    // This Mac's npm global the catalog does not carry is no row here: the catalog is the Tools screen, the third screen is its.
     expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+53\.8 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40\.2 MB\n┃\s+● yq\s+installed\s+installed here, never used\s+13\.5 MB\n/);
+    expect(two).not.toContain("tsx");
     expect(two).toMatch(/On: 19 tools, 1\.8 GB\n┃ {2}on when used in 2 sessions and 5 commands; heavy rows 3 and 20\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
     expect(two).not.toContain("adjust");
     expect(two).not.toContain("every row on this screen that can be ticked");
@@ -3175,6 +3235,78 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(roadRuns()).toHaveLength(3);
   });
 
+  it("a tap formula this Mac has, ticked by the recipe file, installs from its GitHub release and records its pin under the row's own id in both recipe files; the same file and a plain re-run read as no change, and a file whose recorded sum differs plans the recorded release with the check", async () => {
+    const sha = "a".repeat(64);
+    const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "unknown" };
+    const table = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+    // The fake guest serves whatever tag the road asks for and hashes every asset the same.
+    const answer = (cmd: string): ExecResult => {
+      const tag = /repos\/Zingzy\/diskbloom\/releases\/(?:tags\/(\S+?)'|latest)/.exec(cmd);
+      return tag === null ? guestAnswer(cmd) : { exitCode: 0, stdout: `WSP_ROAD release diskbloom_linux_amd64.tar.gz ${sha} ${tag[1] ?? "v0.1.0"}\n`, stderr: "" };
+    };
+    const collect = async () => ({ entries: [...FIXTURE.entries, tap] });
+    const brew = async () => table;
+    const given = mkdtempSync(join(tmpdir(), "wsp-init-given-"));
+    dirs.push(given);
+    const file = join(given, "recipe.json");
+    const outside = { id: tap.id, kind: "tool" as const, on: true, source: { kind: "installed" as const, paths: [], bin: true } };
+    writeFileSync(file, JSON.stringify({ ...RECIPE, rows: [...RECIPE.rows, outside] }));
+    const { store, shared, first, next } = await sealed({ collect, brew, recipeFile: file }, answer);
+    const roadRuns = () => shared.machines.flatMap(m => m.execLog.filter(c => c.includes("repos/Zingzy/diskbloom/releases/")));
+    // v1 fetched the release this Mac runs, with nothing to check: no pin was recorded before. The card counted the road.
+    expect(roadRuns()).toHaveLength(1);
+    expect(roadRuns()[0]).toContain("releases/tags/v0.1.0");
+    expect(roadRuns()[0]).not.toContain('[ "$sum" =');
+    expect(first.text().replace(/\n│\s+/g, " ")).toMatch(/Installs\s+Claude Code, 3 tools plus Homebrew's toolchain, 1 from its GitHub release \(checksum recorded on first install\)/);
+    expect(first.text()).not.toContain("has no row that installs it");
+    // The pin is recorded under the row's own id: in the small recipe beside the state and in the saved manifest.
+    const pin = { tag: "v0.1.0", sha256: sha };
+    const small = () => Recipe.parse(JSON.parse(readFileSync(join(dirname(first.opts.statePath), "recipe.json"), "utf8")));
+    expect(small().rows.find(r => r.id === tap.id)).toEqual({ ...outside, pin });
+    expect(small().rows.filter(r => r.pin !== undefined).map(r => r.id)).toEqual([tap.id]);
+    expect(loadManifest(recipePath(first.opts.statePath)).entries.find(e => e.id === tap.id)).toEqual({ ...tap, bring: true, pin });
+    // The sealed digest says the row installed by the release road at this Mac's tag, the pin stamped by the build.
+    const sealedDigest = (v: number) => (store.get("golden-recipes", `default@v${v}`) as Promise<{ ticks: { id: string; road?: string; version?: string; pin?: unknown }[] }>);
+    expect((await sealedDigest(1)).ticks.find(t => t.id === tap.id)).toMatchObject({ road: "release", version: "v0.1.0", pin });
+    const tools = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")).tools as { id: string; outcome: string; road?: unknown }[];
+    expect(tools.find(t => t.id === tap.id)).toMatchObject({ outcome: "installed", road: { kind: "release", sha256: sha, tag: "v0.1.0" } });
+
+    // The same file again: the pin folds away and nothing is built.
+    const same = next({ tty: false, collect, brew, recipeFile: file });
+    expect((await runInit(same.opts, same.io)).code).toBe(0);
+    expect(same.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(roadRuns()).toHaveLength(1);
+
+    // A plain run: the tick and the pin come from the recipe beside the state, so the row stands and nothing is built.
+    const plain = next({ tty: false, collect, brew });
+    expect((await runInit(plain.opts, plain.io)).code).toBe(0);
+    expect(plain.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(roadRuns()).toHaveLength(1);
+    expect(small().rows.find(r => r.id === tap.id)).toEqual({ ...outside, pin });
+
+    // A file whose recorded sum is another, as one from another setup would carry: the row is updated at the recorded release and the sum checked.
+    const other = "b".repeat(64);
+    writeFileSync(file, JSON.stringify({ ...small(), rows: small().rows.map(r => (r.id === tap.id ? { ...r, pin: { tag: "v0.1.0", sha256: other } } : r)) }));
+    const moved = next({ tty: false, collect, brew, recipeFile: file });
+    expect((await runInit(moved.opts, moved.io)).code).toBe(0);
+    expect(moved.text()).toContain("Builds version 2 on top of version 1: 1 tool updated");
+    expect(moved.text().replace(/\s*│\n│\s+/g, " ")).toContain("update 1 tool: zingzy/tap/diskbloom (the checksum recorded for v0.1.0 changed)");
+    expect(roadRuns()).toHaveLength(2);
+    expect(roadRuns()[1]).toContain("releases/tags/v0.1.0");
+    expect(roadRuns()[1]).toContain('[ "$sum" = ');
+    expect(roadRuns()[1]).toContain(other);
+    expect((await store.get("goldens", "default") as GoldenManifest).head).toBe(2);
+
+    // The file with the row unticked: the row is retired on the next version, and the state's recipe says off.
+    writeFileSync(file, JSON.stringify({ ...small(), rows: small().rows.map(r => (r.id === tap.id ? { ...r, on: false } : r)) }));
+    const off = next({ tty: false, collect, brew, recipeFile: file });
+    expect((await runInit(off.opts, off.io)).code).toBe(0);
+    expect(off.text()).toContain("Builds version 3 on top of version 2: 1 row retired");
+    expect(off.text()).toContain("retire 1 tool: zingzy/tap/diskbloom, left on the image");
+    expect(small().rows.find(r => r.id === tap.id)).toMatchObject({ on: false });
+    expect(roadRuns()).toHaveLength(2);
+  });
+
   it("--yes with a small change: the changes since v1 are listed, the update runs on the kept builder with the one sentence, v2 is current, and no machine boots", async () => {
     const { store, shared, first, next } = await sealed();
     const before = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")) as { recipeHash: string; build: unknown };
@@ -3770,6 +3902,17 @@ describe("wsp init --recipe", () => {
     expect(saved.rows.find(r => r.id === "codex")).toMatchObject({ on: true, source: { kind: "popular" } });
     expect(saved.rows.find(r => r.id === "claude")).toMatchObject({ on: false, source: { kind: "installed" } });
     expect(saved.rows.find(r => r.id === "gemini")).toMatchObject({ on: false, source: { kind: "installed" } });
+  });
+
+  it("a recipe file's tick on a tool outside the catalog that this Mac has no row for is said and left out, never installed by guesswork, and the recipe saved beside the state does not carry it", async () => {
+    const f = fake({ yes: true });
+    const path = join(dirname(f.opts.statePath), "given.json");
+    writeFileSync(path, JSON.stringify({ ...RECIPE, rows: [...RECIPE.rows, { id: "tools/brew/zingzy/tap/diskbloom", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } }] }));
+    f.opts.recipeFile = path;
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(f.text().replace(/\n[│▲]\s+/g, " ")).toContain(`zingzy/tap/diskbloom is ticked in ${path}, but this Mac has no row that installs it; it is left out.`);
+    expect(f.backends[0]!.machines[0]!.execLog.some(c => c.includes("diskbloom"))).toBe(false);
+    expect(Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8"))).rows.some(r => r.id === "tools/brew/zingzy/tap/diskbloom")).toBe(false);
   });
 
   it("a recipe that does not parse ends the run before anything is read or booted", async () => {
