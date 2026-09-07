@@ -20,6 +20,7 @@ import { GOLDEN_SETUP, catalogEntry } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
+import { PROJECT_QUESTION, noFolderNote } from "../src/init-pick.js";
 import { reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import { FIRST_QUESTION, FOLDER_QUESTION } from "../src/init-first.js";
 import type { HostHandle } from "../src/server.js";
@@ -188,8 +189,11 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const { tty: _tty, env: _env, columns: _columns, signedIn: _signedIn, hold: _hold, missing: _missing, json: _json, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
+    // The folder was named on the command line, so the first screen's question is not asked; the run that answers it deletes this.
+    project: NAMED_PROJECT,
     collect: async () => FIXTURE,
     recipe: async () => RECIPE,
+    scanProject: async folder => ({ dir: folder, rows: [], candidates: [] }),
     keys: { solari: SOLARI },
     pricing: PRICING,
     statePath: join(dir, "state.json"),
@@ -326,6 +330,9 @@ const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
+
+/** The project folder a run names on the command line. */
+const NAMED_PROJECT = "/Users/dev/proj";
 
 /** The gh login answered copy in the recipe the run starts from. */
 function withGhCopy(f: Fake): void {
@@ -607,6 +614,90 @@ describe("wsp init, interactive", () => {
     await f.press(KEY.enter);
     await f.until("wsp for your agents on this Mac");
     await f.press(KEY.enter);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+});
+
+describe("wsp init, the project the run is for", () => {
+  it("with no folder named the first screen asks for one, and what it answers is read, carded and grouped on the tools screen", async () => {
+    const f = fake();
+    delete f.opts.project;
+    const asked: string[] = [];
+    f.opts.scanProject = async folder => {
+      asked.push(folder);
+      return { dir: folder, rows: [{ id: "go", name: "Go", why: "go.mod needs Go" }, { id: "docker", name: "Docker engine and compose", why: "compose.yaml needs Docker" }], candidates: [{ id: "ruby", name: "Ruby", why: "Gemfile needs Ruby" }] };
+    };
+    const run = runInit(f.opts, f.io);
+    await f.until(PROJECT_QUESTION);
+    expect(f.text()).toContain("optional; a folder on this Mac, read for what its own files say it needs");
+    await f.press(..."~/proj".split(""), KEY.enter);
+    await f.until("Your project needs");
+    expect(asked).toEqual(["~/proj"]);
+    const card = f.text().slice(f.text().lastIndexOf("Your project needs"));
+    expect(card).toContain("go.mod needs Go");
+    expect(card).toContain("Not in the catalog: Ruby (Gemfile needs Ruby)");
+    await f.until("Agents");
+    await f.press(KEY.enter);
+    await f.until("Tools  2/6");
+    // Go is off in the catalog and never used here; the folder's own go.mod put it on the machine, in its own group.
+    expect(f.text()).toMatch(/▾ Your project needs\s+1 of 1\s+239\.1 MB/);
+    expect(f.text()).toMatch(/● +Go +project +go\.mod needs… +239\.1 MB/);
+    await f.press(KEY.enter);
+    await throughScreens(f, ["Also on this Mac", "Sign-ins", "wsp for your agents"]);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("an empty answer asks nothing more: the folder is optional and the ticks stand as this computer left them", async () => {
+    const f = fake();
+    delete f.opts.project;
+    const asked: string[] = [];
+    f.opts.scanProject = async folder => {
+      asked.push(folder);
+      return { dir: folder, rows: [], candidates: [] };
+    };
+    const run = runInit(f.opts, f.io);
+    await f.until(PROJECT_QUESTION);
+    await f.press(KEY.enter);
+    await f.until("Agents");
+    expect(asked).toEqual([]);
+    expect(f.text()).not.toContain("Your project needs");
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("an answer that names no folder is said so, not read as a project that needs nothing", async () => {
+    const f = fake();
+    delete f.opts.project;
+    f.opts.scanProject = async () => undefined;
+    const run = runInit(f.opts, f.io);
+    await f.until(PROJECT_QUESTION);
+    await f.press(..."~/prj".split(""), KEY.enter);
+    await f.until(noFolderNote("~/prj"));
+    expect(f.text()).not.toContain("named a tool the catalog carries");
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("a folder named on the command line is not asked for again, and cards what it asked for the way the question does", async () => {
+    const f = fake();
+    f.opts.recipe = async (_onHistory, onProject) => {
+      onProject({ dir: NAMED_PROJECT, rows: [{ id: "go", name: "Go", why: "go.mod needs Go" }], candidates: [] });
+      return RECIPE;
+    };
+    const run = runInit(f.opts, f.io);
+    await f.until("Your project needs");
+    expect(f.text().slice(f.text().lastIndexOf("Your project needs"))).toContain("go.mod needs Go");
+    await f.until("Agents");
+    expect(f.text()).not.toContain(PROJECT_QUESTION);
+    await throughScreens(f);
     await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);

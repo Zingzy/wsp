@@ -183,20 +183,6 @@ export async function confirmPrompt(o: PromptOptions & { initialValue?: boolean 
   return (await prompt.prompt()) as boolean | symbol;
 }
 
-/** A line typed in the frame, echoed as it is typed; Enter on an untouched prompt is the empty string. */
-export async function textPrompt(o: PromptOptions): Promise<string | symbol> {
-  const prompt = new TextPrompt({
-    ...streamsOf(o),
-    render() {
-      const typed = String(this.value ?? "");
-      const body = this.state === "submit" ? [dim(typed)] : this.state === "cancel" ? [styleText(["strikethrough", "dim"], typed)] : [this.userInputWithCursor];
-      return promptFrame(this.state, o, body, ENTER_KEYS);
-    },
-  });
-  // An untouched prompt settles to "" before it resolves; the undefined in clack's type never comes back.
-  return (await prompt.prompt()) as string | symbol;
-}
-
 /** A secret typed in the frame: every character drawn as the mask, the text itself never written to the output. */
 export async function passwordPrompt(o: PromptOptions): Promise<string | symbol> {
   const prompt = new PasswordPrompt({
@@ -205,6 +191,22 @@ export async function passwordPrompt(o: PromptOptions): Promise<string | symbol>
     render() {
       const body = this.state === "submit" || this.state === "cancel" ? (this.masked === "" ? [] : [styleText(this.state === "submit" ? "dim" : ["strikethrough", "dim"], this.masked)]) : [this.userInputWithCursor];
       return promptFrame(this.state, o, body, ENTER_KEYS);
+    },
+  });
+  // An untouched prompt settles to "" before it resolves; the undefined in clack's type never comes back.
+  return (await prompt.prompt()) as string | symbol;
+}
+
+/** A line typed in the frame; an empty answer is the answer, so a question nothing has to answer takes one keypress. */
+export async function textPrompt(o: PromptOptions & { placeholder?: string }): Promise<string | symbol> {
+  const prompt = new TextPrompt({
+    ...streamsOf(o),
+    ...(o.placeholder !== undefined ? { placeholder: o.placeholder } : {}),
+    render() {
+      const typed = this.value === undefined ? "" : String(this.value);
+      if (this.state === "submit") return promptFrame(this.state, o, typed === "" ? [] : [dim(typed)], ENTER_KEYS);
+      if (this.state === "cancel") return promptFrame(this.state, o, typed === "" ? [] : [styleText(["strikethrough", "dim"], typed)], ENTER_KEYS);
+      return promptFrame(this.state, o, [typed === "" && o.placeholder !== undefined ? dim(o.placeholder) : this.userInputWithCursor], ENTER_KEYS);
     },
   });
   // An untouched prompt settles to "" before it resolves; the undefined in clack's type never comes back.

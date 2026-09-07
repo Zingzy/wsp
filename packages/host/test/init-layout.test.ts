@@ -321,39 +321,6 @@ describe("confirm prompt", () => {
     ));
 });
 
-describe("text prompt", () => {
-  it("draws the question and hint in the frame, echoes what is typed, and returns it on enter", async () => {
-    const { input, output, text } = streams();
-    const p = textPrompt({ message: "Which folder on this Mac?", hint: "Enter with nothing imports no project.", input, output });
-    await settle();
-    expect(text()).toBe(`◆  Which folder on this Mac?\n┃  Enter with nothing imports no project.\n┃  █\n┗  ${PASSWORD_HELP}`);
-    await press(input, "/Users/me/code/proj");
-    expect(text().slice(text().lastIndexOf("◆"))).toContain("┃  /Users/me/code/proj█");
-    await press(input, KEY.enter);
-    expect(await p).toBe("/Users/me/code/proj");
-    expect(text().slice(text().lastIndexOf("◇"))).toBe("◇  Which folder on this Mac?\n│  Enter with nothing imports no project.\n│  /Users/me/code/proj\n");
-  });
-
-  it("enter on nothing is the empty string, and esc and ctrl-c cancel", async () => {
-    const a = streams();
-    const pa = textPrompt({ message: "Which folder?", input: a.input, output: a.output });
-    await settle();
-    await press(a.input, KEY.enter);
-    expect(await pa).toBe("");
-    const b = streams();
-    const pb = textPrompt({ message: "Which folder?", input: b.input, output: b.output });
-    await settle();
-    await press(b.input, "/tmp", KEY.esc);
-    await until(b.text, "■");
-    expect(isCancel(await pb)).toBe(true);
-    const c = streams();
-    const pc = textPrompt({ message: "Which folder?", input: c.input, output: c.output });
-    await settle();
-    await press(c.input, KEY.ctrlC);
-    expect(isCancel(await pc)).toBe(true);
-  });
-});
-
 describe("password prompt", () => {
   it("masks every character, never echoes the text, and returns it on enter; the finished screen shows the mask on the thin bar", async () => {
     const { input, output, text, raw } = streams();
@@ -434,4 +401,67 @@ describe("password prompt", () => {
         await p;
       }),
     ));
+});
+
+describe("text prompt", () => {
+  it("draws the question and hint in the frame, echoes what is typed, and returns it on enter", async () => {
+    const { input, output, text } = streams();
+    const p = textPrompt({ message: "Which folder on this Mac?", hint: "Enter with nothing imports no project.", input, output });
+    await settle();
+    expect(text()).toBe(`◆  Which folder on this Mac?\n┃  Enter with nothing imports no project.\n┃  █\n┗  ${PASSWORD_HELP}`);
+    await press(input, "/Users/me/code/proj");
+    expect(text().slice(text().lastIndexOf("◆"))).toContain("┃  /Users/me/code/proj█");
+    await press(input, KEY.enter);
+    expect(await p).toBe("/Users/me/code/proj");
+    expect(text().slice(text().lastIndexOf("◇"))).toBe("◇  Which folder on this Mac?\n│  Enter with nothing imports no project.\n│  /Users/me/code/proj\n");
+  });
+
+  it("enter on nothing is the empty string, and esc and ctrl-c cancel", async () => {
+    const a = streams();
+    const pa = textPrompt({ message: "Which folder?", input: a.input, output: a.output });
+    await settle();
+    await press(a.input, KEY.enter);
+    expect(await pa).toBe("");
+    const b = streams();
+    const pb = textPrompt({ message: "Which folder?", input: b.input, output: b.output });
+    await settle();
+    await press(b.input, "/tmp", KEY.esc);
+    await until(b.text, "■");
+    expect(isCancel(await pb)).toBe(true);
+    const c = streams();
+    const pc = textPrompt({ message: "Which folder?", input: c.input, output: c.output });
+    await settle();
+    await press(c.input, KEY.ctrlC);
+    expect(isCancel(await pc)).toBe(true);
+  });
+  it("draws the question and the hint down the thick bar, the placeholder until something is typed, and gives back what was typed on enter", async () => {
+    const { input, output, text } = streams();
+    const p = textPrompt({ message: "Which project are you bringing first?", hint: "optional; a folder on this Mac", placeholder: "~/code/app", input, output });
+    await settle();
+    expect(text()).toBe(`◆  Which project are you bringing first?\n┃  optional; a folder on this Mac\n┃  ~/code/app\n┗  ${PASSWORD_HELP}`);
+    await press(input, "~/proj");
+    expect(text().slice(text().lastIndexOf("◆"))).toContain("┃  ~/proj");
+    await press(input, KEY.enter);
+    expect(await p).toBe("~/proj");
+    expect(text().slice(text().lastIndexOf("◇"))).toBe("◇  Which project are you bringing first?\n│  optional; a folder on this Mac\n│  ~/proj\n");
+  });
+
+  it("enter on an empty line answers with nothing and leaves no line behind, so an optional question costs one keypress", async () => {
+    const { input, output, text } = streams();
+    const p = textPrompt({ message: "Which project are you bringing first?", input, output });
+    await settle();
+    await press(input, KEY.enter);
+    expect(await p).toBe("");
+    expect(text().slice(text().lastIndexOf("◇"))).toBe("◇  Which project are you bringing first?\n");
+  });
+
+  it("esc cancels: the typed line is struck through and the answer is clack's cancel", async () => {
+    const { input, output, text } = streams();
+    const p = textPrompt({ message: "Which project are you bringing first?", input, output });
+    await settle();
+    await press(input, "~/proj");
+    await press(input, KEY.esc);
+    expect(isCancel(await p)).toBe(true);
+    expect(text()).toContain("~/proj");
+  });
 });

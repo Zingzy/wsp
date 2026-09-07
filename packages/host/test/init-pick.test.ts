@@ -22,6 +22,9 @@ import {
   pickEstimate,
   pickScreens,
   signInGroupLine,
+  PROJECT_QUESTION,
+  noFolderNote,
+  projectNote,
   signInItems,
   tableItems,
   tableScreen,
@@ -32,7 +35,7 @@ import {
 } from "../src/init-pick.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { LATER_LINE, answerOf } from "../src/init-select.js";
-import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, HERE_GROUP, USED_GROUP, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
+import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, HERE_GROUP, PROJECT_GROUP, USED_GROUP, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 
 const KEY = { up: "\x1b[A", down: "\x1b[B", left: "\x1b[D", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
@@ -77,6 +80,19 @@ describe("the tools screen", () => {
     expect(by("node").detail).toEqual(["ships in 5 lab images; on by default in the catalog; on every machine", "part of the base on every machine"]);
     expect(by("go").detail).toEqual(["your agents used it in 1 session (2 calls)", "about 239.1 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
     expect(by("java").detail[0]).toBe("ships in 4 lab images; on request");
+  });
+
+  it("a row the project asked for says so in its detail pane too, not only in its group and its why column", () => {
+    const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "go", source: { kind: "project", why: "go.mod needs Go" } })] };
+    const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true);
+    const go = items.find(i => i.id === "go")!;
+    expect(go.group).toBe(PROJECT_GROUP);
+    expect(text(go.why)).toBe("project    go.mod needs Go");
+    expect(go.detail).toEqual(["go.mod needs Go", "about 239.1 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
+    // A floor row the project also named says so under the cursor, even though the base is what puts it on the machine.
+    const based = { ...RECIPE, rows: [...RECIPE.rows.filter(r => r.id !== "pnpm"), row({ id: "pnpm", source: { kind: "project", why: "pnpm-lock.yaml needs pnpm" } })] };
+    const pnpm = tableItems(recipeTable(based, CATALOG_TOOLS), based, FIXTURE, 4, true).find(i => i.id === "pnpm")!;
+    expect(pnpm.detail[0]).toBe("pnpm-lock.yaml needs pnpm; on every machine");
   });
 
   it("ticks go back onto the recipe: a floor row stays on however the list left it, and an entry the recipe never named gets a row on the catalog's evidence", () => {
@@ -308,8 +324,10 @@ describe("the tools screen drawn", () => {
 
 describe("the whole flow", () => {
   const laptop = { entries: FIXTURE.entries };
-  const flow = (o: ReturnType<typeof streams>) =>
-    pickScreens({ manifest: withCatalogAgents(laptop), recipe: RECIPE, brew: new Map(), from: "agents", home: tmpdir(), input: o.input, output: o.output });
+  const NAMED_PROJECT = "/Users/dev/proj";
+  const flow = (o: ReturnType<typeof streams>, over: Partial<Parameters<typeof pickScreens>[0]> = {}) =>
+    // The folder is named on the command line, so the run does not ask for one; the tests that answer the question drop it.
+    pickScreens({ manifest: withCatalogAgents(laptop), recipe: RECIPE, brew: new Map(), from: "agents", home: tmpdir(), project: NAMED_PROJECT, scanProject: async () => undefined, input: o.input, output: o.output, ...over });
 
   it("five screens in order, each numbered against the six a run has, the scan screen holding its slot until it lands", async () => {
     const o = streams(100, 30);
@@ -411,5 +429,96 @@ describe("the whole flow", () => {
     const picked = await p;
     if (picked === "cancel") throw new Error("cancelled");
     expect(picked.logins.get("logins/claude")).toBe("machine");
+  });
+});
+
+describe("the project the run is for", () => {
+  it("with no folder named the run asks before the first screen, reads what it answers and cards it", async () => {
+    const o = streams(100, 30);
+    const asked: string[] = [];
+    const p = pickScreens({
+      manifest: withCatalogAgents({ entries: FIXTURE.entries }),
+      recipe: RECIPE,
+      brew: new Map(),
+      from: "agents",
+      home: tmpdir(),
+      scanProject: async folder => {
+        asked.push(folder);
+        return { dir: folder, rows: [{ id: "go", name: "Go", why: "go.mod needs Go" }], candidates: [{ id: "ruby", name: "Ruby", why: "Gemfile needs Ruby" }] };
+      },
+      input: o.input,
+      output: o.output,
+    });
+    await settle(20);
+    expect(o.text()).toContain(PROJECT_QUESTION);
+    o.input.write("~/proj");
+    await settle(20);
+    o.input.write(KEY.enter);
+    await settle(20);
+    expect(asked).toEqual(["~/proj"]);
+    const card = o.text().slice(o.text().lastIndexOf("Your project needs"));
+    expect(card).toContain("go.mod needs Go");
+    expect(card).toContain("Not in the catalog: Ruby (Gemfile needs Ruby)");
+    expect(o.text()).toContain("◆  Agents  1/6");
+    o.input.write(KEY.ctrlC);
+    expect(await p).toBe("cancel");
+  });
+
+  it("an answer that names no folder is said so, not read as a project that needs nothing", async () => {
+    const o = streams(100, 30);
+    const p = pickScreens({
+      manifest: withCatalogAgents({ entries: FIXTURE.entries }),
+      recipe: RECIPE,
+      brew: new Map(),
+      from: "agents",
+      home: tmpdir(),
+      scanProject: async () => undefined,
+      input: o.input,
+      output: o.output,
+    });
+    await settle(20);
+    o.input.write("~/prj");
+    await settle(20);
+    o.input.write(KEY.enter);
+    await settle(20);
+    expect(o.text()).toContain(noFolderNote("~/prj"));
+    expect(o.text()).not.toContain("named a tool the catalog carries");
+    o.input.write(KEY.ctrlC);
+    expect(await p).toBe("cancel");
+  });
+
+  it("an empty answer asks for nothing and reads nothing: the folder is optional", async () => {
+    const o = streams(100, 30);
+    const asked: string[] = [];
+    const p = pickScreens({
+      manifest: withCatalogAgents({ entries: FIXTURE.entries }),
+      recipe: RECIPE,
+      brew: new Map(),
+      from: "agents",
+      home: tmpdir(),
+      scanProject: async folder => {
+        asked.push(folder);
+        return undefined;
+      },
+      input: o.input,
+      output: o.output,
+    });
+    await settle(20);
+    o.input.write(KEY.enter);
+    await settle(20);
+    expect(asked).toEqual([]);
+    expect(o.text()).toContain("◆  Agents  1/6");
+    o.input.write(KEY.ctrlC);
+    expect(await p).toBe("cancel");
+  });
+
+  it("the card names every row with the file that asked, and says plainly when a folder held nothing", () => {
+    expect(projectNote({ dir: "/Users/dev/proj", rows: [{ id: "go", name: "Go", why: "go.mod needs Go" }, { id: "docker", name: "Docker engine and compose", why: "compose.yaml needs Docker" }], candidates: [{ id: "ruby", name: "Ruby", why: "Gemfile needs Ruby" }] })).toEqual([
+      "Go                         go.mod needs Go",
+      "Docker engine and compose  compose.yaml needs Docker",
+      "Not in the catalog: Ruby (Gemfile needs Ruby)",
+    ]);
+    expect(projectNote({ dir: "/Users/dev/proj", rows: [], candidates: [] })).toEqual(["Nothing in /Users/dev/proj named a tool the catalog carries."]);
+    expect(noFolderNote("~/prj")).toBe("There is no folder at ~/prj; nothing was read.");
   });
 });
