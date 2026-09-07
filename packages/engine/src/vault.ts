@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createWriteStream } from "node:fs";
 import { rm, stat } from "node:fs/promises";
+import { relative } from "node:path";
 import { Writable } from "node:stream";
 import { finished } from "node:stream/promises";
 import { gzipSync } from "node:zlib";
@@ -18,7 +19,7 @@ export interface VaultOptions {
   timeoutMs?: number;
   /** Export only: an archive over this many bytes is removed and refused with kind vaultTooLarge. */
   maxBytes?: number;
-  /** Export only: what the archive leaves behind under each path, judged before the size is read. */
+  /** exportPaths only: what the archive leaves behind under each path, judged before the size is read. */
   exclude?: CacheRule;
   /** Import only: merge into what the destination already holds instead of replacing its directories. */
   overlay?: boolean;
@@ -130,6 +131,25 @@ export function folderExportScript(dir: string, rule: CacheRule, out: string): s
   return excludingArchiveScript(dir, ["."], rule, out);
 }
 
+/** A path on the guest for one trip's own file or directory, named so two trips never write the same one. */
+export const guestTmpPath = (what: string): string => `/tmp/${what}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** Paths to archive from one root on the guest: the directory tar runs in and absolute paths under it, which travel
+ * at their path relative to it. A filtered copy written under a scratch root that mirrors the homes travels at the
+ * path it mirrors, so the archive holds it where the store it replaces would have been. */
+export interface ArchiveGroup {
+  root: string;
+  paths: readonly string[];
+}
+
+/** A path as tar names it from its group's root; the root group keeps its own spelling, since exportPaths is handed
+ * paths relative to it as well as absolute ones and relative() would resolve those against this computer's cwd. */
+const tarPath = (root: string, path: string): string => (root === "/" ? path.replace(/^\//, "") : relative(root, path));
+
+/** The one tar that archives every group into `out`, each group from its own root. */
+const groupArchiveScript = (groups: readonly ArchiveGroup[], out: string): string =>
+  `tar czf ${shellQuote(out)} ${groups.map(g => `-C ${shellQuote(g.root)} ${g.paths.map(p => shellQuote(tarPath(g.root, p))).join(" ")}`).join(" ")}`;
+
 /** The byte size of a file on the guest, read the one way both GNU and BSD spell it. */
 async function guestFileSize(machine: Machine, path: string): Promise<number> {
   const size = await machine.exec(`wc -c < ${shellQuote(path)}`, { timeoutMs: INLINE_EXEC_MS });
@@ -138,13 +158,11 @@ async function guestFileSize(machine: Machine, path: string): Promise<number> {
   return bytes;
 }
 
-/** Archives the paths on the guest under the options' cache rule, refuses one over the cap, hands the archive's
- * guest path to `bring`, and removes it from the guest whatever happens. */
-async function archiveOf<T>(machine: Machine, paths: string[], opts: VaultOptions, bring: (tmp: string) => Promise<T>): Promise<T> {
-  const tmp = `/tmp/wsp-vault-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
-  const rel = paths.map(p => p.replace(/^\//, ""));
-  const script = opts.exclude === undefined ? `tar czf ${shellQuote(tmp)} -C / ${rel.map(shellQuote).join(" ")}` : excludingArchiveScript("/", rel, opts.exclude, tmp);
-  const tar = await machine.run(script, { deadlineMs: opts.timeoutMs ?? 120_000 });
+/** Archives what `script` names into a temp file on the guest, refuses one over the cap, hands the archive's guest
+ * path to `bring`, and removes it from the guest whatever happens. */
+async function archiveOf<T>(machine: Machine, script: (out: string) => string, opts: VaultOptions, bring: (tmp: string) => Promise<T>): Promise<T> {
+  const tmp = `${guestTmpPath("wsp-vault")}.tgz`;
+  const tar = await machine.run(script(tmp), { deadlineMs: opts.timeoutMs ?? 120_000 });
   if (tar.exitCode !== 0) {
     throw new Error(`vault export tar failed (exit ${tar.exitCode}): ${tar.stderr.slice(-500)}`);
   }
@@ -161,12 +179,17 @@ async function archiveOf<T>(machine: Machine, paths: string[], opts: VaultOption
 
 // Signed-URL transport on both directions: exec stdout could carry base64 for small exports but hits response-size limits.
 export const exportPaths = (machine: Machine, paths: string[], opts: VaultOptions = {}): Promise<Buffer> =>
-  archiveOf(machine, paths, opts, tmp => downloadBuffer(machine, tmp, opts));
+  archiveOf(
+    machine,
+    out => (opts.exclude === undefined ? groupArchiveScript([{ root: "/", paths }], out) : excludingArchiveScript("/", paths.map(p => p.replace(/^\//, "")), opts.exclude, out)),
+    opts,
+    tmp => downloadBuffer(machine, tmp, opts),
+  );
 
-/** The same paths into a file on this computer instead of into memory, for a caller that hands the archive on as a
- * path: the export road, where the agents' state can be a whole history. Returns the bytes written. */
-export const exportPathsInto = (machine: Machine, paths: string[], into: string, opts: VaultOptions = {}): Promise<number> =>
-  archiveOf(machine, paths, opts, tmp => downloadFile(machine, tmp, into, opts));
+/** The groups into a file on this computer instead of into memory, for a caller that hands the archive on as a path:
+ * the export road, where the agents' state can be a whole history. Returns the bytes written. */
+export const exportPathsInto = (machine: Machine, groups: readonly ArchiveGroup[], into: string, opts: VaultOptions = {}): Promise<number> =>
+  archiveOf(machine, out => groupArchiveScript(groups, out), opts, tmp => downloadFile(machine, tmp, into, opts));
 
 /** The refusal an export gives for a destination on this computer that already holds something; kind "exists" is
  * what a caller reads to offer replace. */
@@ -178,7 +201,7 @@ export const destExists = (dest: string, files: number): Error => Object.assign(
 export async function exportFolder(machine: Machine, dir: string, rule: CacheRule, into: string, opts: VaultOptions = {}): Promise<{ bytes: number; excluded: string[] }> {
   const probe = await machine.exec(`test -d ${shellQuote(dir)} && echo yes || echo no`, { timeoutMs: INLINE_EXEC_MS });
   if (probe.exitCode !== 0 || probe.stdout.trim() !== "yes") throw new Error(`${dir} is not a folder on the machine`);
-  const tmp = `/tmp/wsp-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
+  const tmp = `${guestTmpPath("wsp-out")}.tgz`;
   try {
     const packed = await machine.run(folderExportScript(dir, rule, tmp), { deadlineMs: opts.timeoutMs ?? 600_000 });
     if (packed.exitCode !== 0) throw new Error(`packing ${dir} on the machine failed (exit ${packed.exitCode}): ${packed.stderr.slice(-500)}`);
@@ -327,7 +350,7 @@ const HASH_MISMATCH_EXIT = 65;
 export async function importInto(machine: Machine, tar: Buffer, destDir: string, opts: VaultOptions = {}): Promise<{ parts: number }> {
   const doFetch = opts.fetch ?? globalThis.fetch;
   if (tar.length === 0) throw new Error("vault import: empty archive, nothing to import");
-  const tmp = `/tmp/wsp-vault-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
+  const tmp = `${guestTmpPath("wsp-vault-in")}.tgz`;
   const parts = Math.ceil(tar.length / UPLOAD_PART_BYTES);
   const partPaths = parts === 1 ? [tmp] : Array.from({ length: parts }, (_, i) => `${tmp}.part${i}`);
   try {

@@ -523,6 +523,12 @@ export function vaultOverCapLine(bytes: number, capBytes: number): string {
   return `the export was ${fmtBytes(bytes)}, over the ${fmtBytes(capBytes)} cap`;
 }
 
+/** A store an agent keeps for every project that an export could not read on the machine: nothing from it travelled,
+ * so the project's rows in it stayed there rather than every other project's leaving with them. */
+export function storeUnreadLine(store: string, why: string): string {
+  return `could not read ${store} on the machine, so nothing from it travelled: ${why}`;
+}
+
 /** The napping status's line when the nap could not store a fresh vault and the previous one stands: a wake that has
  * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
 export function vaultKeptLine(why: string): string {

@@ -61,6 +61,75 @@ export const selectRows = (db: string, sql: string, params: Readonly<Record<stri
  * as a group. */
 export type MergeMode = { key: readonly string[]; set: readonly string[] } | { by: string; drop: readonly string[] };
 export type MergeTable = { table: string; rows: readonly Record<string, SQLOutputValue>[] } & MergeMode;
+export type Row = MergeTable["rows"][number];
+
+/** One table of a store an agent keeps for every project: its name and the SQL naming the rows keyed to $from. */
+export interface ProjectTable {
+  table: string;
+  where: string;
+}
+
+/** Such a table as both roads read it: which rows the project owns, how they meet the machine's own, and how a path
+ * column of one moves to the new path. The filtered copy an export makes and the merge an import runs both come off
+ * this one list, so the rule for which rows are the project's is written once. */
+export type SharedTable = ProjectTable & MergeMode & { move: (row: Row, from: string, to: string) => Row };
+
+/** The project's rows of one table, by its first two columns so a second run builds the same script. */
+export const projectRows = (db: string, t: ProjectTable, from: string): Record<string, SQLOutputValue>[] =>
+  selectRows(db, `select * from ${t.table} where ${t.where} order by 1, 2`, { $from: from }) ?? [];
+
+/** Each table's rows for the project moved to the new path, or nothing when this home holds no row for it. */
+export function sharedTables(db: string, tables: readonly SharedTable[], from: string, to: string): MergeTable[] | undefined {
+  const out = tables.map(({ where, move, ...mode }) => ({ ...mode, rows: projectRows(db, { table: mode.table, where }, from).map(r => move(r, from, to)) }));
+  return out.every(t => t.rows.length === 0) ? undefined : out;
+}
+
+/** Rows the filter fetches at a time. It streams so the project's slice of a store never sits in the guest's memory
+ * whole: on the three-project Hermes store the cold review measured, a 246 MB slice peaked at 278 MB of resident
+ * memory read with fetchall and at 21 MB read in these batches, and an export runs beside a live thread on a 4 GB
+ * machine. */
+const FILTER_BATCH = 500;
+
+/**
+ * The listing lines that write the project's rows of each table into a copy of the store: the store's own schema
+ * first, then the rows each table's `where` names, a batch at a time. Every other table in the store lands empty, so
+ * no row of another project travels even from a table no module reads. STORE and COPY are the paths the listing
+ * bound, and FILTERED counts what was written, so a store with nothing for the project is never named.
+ */
+export function sqliteFilter(tables: readonly ProjectTable[]): readonly string[] {
+  return [
+    `TABLES = ${pyData(tables.map(t => ({ table: t.table, where: t.where })))}`,
+    'src = sqlite3.connect("file:" + urllib.parse.quote(STORE) + "?mode=ro", uri=True)',
+    "try:",
+    "    dst = sqlite3.connect(COPY)",
+    "    try:",
+    "        with dst:",
+    `            for (sql,) in src.execute(${pyData("select sql from sqlite_master where sql is not null and name not like 'sqlite@_%' escape '@' order by rowid")}).fetchall():`,
+    "                try:",
+    "                    dst.execute(sql)",
+    // A virtual table's own create makes its shadow tables, whose creates stand in the store after it and are done by then.
+    "                except sqlite3.OperationalError:",
+    "                    pass",
+    `            held = {r[0] for r in src.execute(${pyData("select name from sqlite_master where type = 'table'")})}`,
+    "            for t in TABLES:",
+    '                if t["table"] not in held:',
+    "                    continue",
+    // python's sqlite3 binds a named parameter by its name without the sigil, so $from reads "from" off the dict.
+    '                cur = src.execute("select * from " + q(t["table"]) + " where " + t["where"], {"from": PATH})',
+    "                cols = [d[0] for d in cur.description]",
+    '                ins = "insert into " + q(t["table"]) + " (" + ", ".join(q(c) for c in cols) + ") values (" + ", ".join("?" for c in cols) + ")"',
+    "                while True:",
+    `                    got = cur.fetchmany(${FILTER_BATCH})`,
+    "                    if not got:",
+    "                        break",
+    "                    dst.executemany(ins, got)",
+    "                    FILTERED += len(got)",
+    "    finally:",
+    "        dst.close()",
+    "finally:",
+    "    src.close()",
+  ];
+}
 
 /** A blob as the script carries it; every other value is JSON already. */
 const portable = (row: Record<string, SQLOutputValue>): Record<string, unknown> => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, v instanceof Uint8Array ? { $blob: Buffer.from(v).toString("base64") } : v]));
@@ -82,8 +151,6 @@ export function sqliteMergeStep(db: string, tables: readonly MergeTable[]): stri
     "for t in TABLES:",
     '    if t["table"] not in names:',
     '        out({"waiting": "no table " + t["table"] + " in " + DB})',
-    "def q(name):",
-    "    return '\"' + name.replace('\"', '\"\"') + '\"'",
     "def value(v):",
     '    return base64.b64decode(v["$blob"]) if isinstance(v, dict) else v',
     "def insert(t, row, cols, on_conflict):",
