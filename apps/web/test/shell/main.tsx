@@ -8,7 +8,8 @@
 // ?ws=<id> the centre holds that workspace's thread and composer, so the
 // refusal line above the box can be measured for the running, paused and gone
 // workspaces; ?ws=ws_a&linger=1 replays a turn that replied but whose process
-// has not exited.
+// has not exited; ?shell=desktop puts an empty desktop bridge on the page so
+// the workspace switch chord reaches it.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -22,6 +23,12 @@ import "../../src/index.css";
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
+// The bridge alone tells the page which shell holds it; with ?shell=desktop the chords a browser tab keeps for its
+// own tabs reach the page, which is what the switcher's chord needs. It carries the two picture calls, which is what
+// the switcher's well reads, and neither answers with a picture, so the wells draw empty.
+if (params.get("shell") === "desktop") {
+  window.wsp = { capturePreview: async () => undefined, workspacePreview: async () => undefined };
+}
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,

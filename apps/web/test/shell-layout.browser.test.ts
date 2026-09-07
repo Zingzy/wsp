@@ -6,9 +6,10 @@
 // default width, a status toast holds a long token inside its box, the line
 // the runtime puts on a machine's row takes that row's second line whole,
 // uncut and without growing the row, collapsing the sidebar leaves the
-// page header's left padding alone, and a send refusal above the composer is
+// page header's left padding alone, a send refusal above the composer is
 // one muted mono line in a slot the composer keeps at one height whether or
-// not a line is in it. Vite
+// not a line is in it, and the switch chord held down puts the workspace
+// switcher up without moving the shell under it. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -155,6 +156,30 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       await shot("collapsed", theme);
       await page!.locator("button[aria-label='Workspaces']").click();
       await page!.waitForSelector("[data-sidebar-row]");
+    }
+  }, 60_000);
+
+  it("holding the switch chord puts the switcher up over the shell, one card per workspace, and the highlight moves nothing", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&shell=desktop`);
+      await page!.waitForSelector("[data-sidebar-row]");
+      const sidebar = await box("[data-slot=sidebar]");
+      await page!.keyboard.down("Control");
+      await page!.keyboard.press("Tab");
+      await page!.waitForSelector("[data-workspace-switcher]");
+      const cards = page!.locator("[data-workspace-card]");
+      expect(await cards.count()).toBe(3);
+      const boxes = await cards.evaluateAll(els => els.map(el => JSON.stringify(el.getBoundingClientRect().toJSON())));
+      expect(new Set(await cards.evaluateAll(els => els.map(el => el.getBoundingClientRect().height))).size).toBe(1);
+      expect(await page!.locator("[data-workspace-card][aria-selected=true]").getAttribute("data-workspace-card")).toBe("ws_b");
+      await page!.screenshot({ path: join(SHOTS_DIR, `workspace-switcher-${theme}.png`) });
+      console.info(`workspace switcher screenshot: ${join(SHOTS_DIR, `workspace-switcher-${theme}.png`)}`);
+      await page!.keyboard.press("Tab");
+      await page!.waitForFunction(() => document.querySelector("[data-workspace-card][aria-selected=true]")?.getAttribute("data-workspace-card") === "ws_c");
+      expect(await cards.evaluateAll(els => els.map(el => JSON.stringify(el.getBoundingClientRect().toJSON())))).toEqual(boxes);
+      expect(await box("[data-slot=sidebar]")).toEqual(sidebar);
+      await page!.keyboard.up("Control");
+      await page!.waitForSelector("[data-workspace-switcher]", { state: "detached" });
     }
   }, 60_000);
 

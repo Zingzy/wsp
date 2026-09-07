@@ -6,7 +6,8 @@
 // panel's terminal while one of its terminals has focus; the panel surface
 // itself opens only from its own tab strip. Every pty comes from the link.
 // The workspace switch walks the sidebar's own order and lands in the new
-// workspace's composer.
+// workspace's composer; the chord's walk stays inside the switcher overlay
+// until the hold is let go.
 import { deriveSidebarProjects } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
 import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, type WorkspaceSelectSlot } from "../keybindingTypes.js";
@@ -16,6 +17,7 @@ import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPane
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import { requestComposerFocus, requestNewThread } from "./shellRequests.js";
+import { highlightedWorkspaceId, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
 
 export interface ShellCommandTarget {
   readonly workspaceId: string | null;
@@ -110,6 +112,35 @@ export function goToAdjacentWorkspace(step: 1 | -1): void {
   if (next !== null) goToWorkspace(next);
 }
 
+/** The switch chord's step. The first one puts the overlay up over the workspace it would land on and the rest walk
+ * it; nothing is selected until the hold is let go, so a walk past a workspace never mounts its threads and a tap,
+ * which is a step and a release, still switches at once. */
+export function cycleWorkspaceSwitcher(step: 1 | -1): void {
+  const switcher = useWorkspaceSwitcher.getState();
+  if (switcher.open) {
+    switcher.step(step);
+    return;
+  }
+  const ids = orderedWorkspaceIds();
+  const selectedId = useStore.getState().selectedId;
+  const next = stepWorkspaceId(ids, selectedId, step);
+  if (next === null) return;
+  switcher.openAt(ids, ids.indexOf(next), selectedId);
+}
+
+/** The hold let go: the highlighted workspace becomes the open one. */
+export function commitWorkspaceSwitch(): void {
+  const state = useWorkspaceSwitcher.getState();
+  const target = highlightedWorkspaceId(state);
+  state.close();
+  if (target !== null) goToWorkspace(target);
+}
+
+/** Escape, or the window losing focus mid-walk: the overlay leaves and the person stays where they were. */
+export function cancelWorkspaceSwitch(): void {
+  useWorkspaceSwitcher.getState().close();
+}
+
 /** Nothing happens while the sidebar has no row in that slot. */
 export function goToWorkspaceInSlot(slot: WorkspaceSelectSlot): void {
   const target = orderedWorkspaceIds()[slot - 1];
@@ -150,10 +181,10 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       if (workspaceId) requestNewThread({ workspaceId });
       return;
     case "workspace.next":
-      goToAdjacentWorkspace(1);
+      cycleWorkspaceSwitcher(1);
       return;
     case "workspace.previous":
-      goToAdjacentWorkspace(-1);
+      cycleWorkspaceSwitcher(-1);
       return;
     default: {
       const _exhaustive: never = command;

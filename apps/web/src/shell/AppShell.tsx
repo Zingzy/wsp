@@ -5,6 +5,7 @@
 import { MessageSquarePlusIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
+import { WorkspaceSwitcher } from "../components/switcher/WorkspaceSwitcher.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
 import { Button } from "../components/ui/button.js";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, SidebarTrigger } from "../components/ui/sidebar.js";
@@ -66,6 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
       <KeybindingDispatcher />
       <CommandPalette />
+      <WorkspaceSwitcher />
       <Sidebar
         side="left"
         collapsible="offcanvas"

@@ -120,8 +120,8 @@ export function fmtCost(usd: number): string {
  * there is no reply. A turn that did not complete says its error first, since that is what whoever waits needs. */
 export function notifyLine(threadId: string, result: TurnResult): string {
   const facts = [result.status, ...(result.durationMs !== undefined ? [fmtDuration(result.durationMs)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
-  const lines = (result.text ?? "").split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-  const tail = result.status === "completed" ? lines.at(-1) ?? result.error : result.error ?? lines.at(-1);
+  const reply = lastLine(result.text ?? "");
+  const tail = result.status === "completed" ? reply ?? result.error : result.error ?? reply;
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
@@ -357,6 +357,14 @@ export function deleteNotice(threads: number): string {
 export function titleLine(text: string): string {
   const first = text.split(/\r?\n/).find(l => l.trim().length > 0) ?? "";
   return first.replace(/\s+/g, " ").trim();
+}
+
+/** Text cut to its last line: the last non-empty line with the whitespace collapsed, or nothing when the text has
+ * none. The notify line ends with it and a switcher card shows it under the thread's title, so both read one rule. */
+export function lastLine(text: string): string | undefined {
+  const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+  const last = lines[lines.length - 1];
+  return last === undefined ? undefined : last.replace(/\s+/g, " ").trim();
 }
 
 /** A limit as one unit: whole hours when it is hours, else whole minutes. */

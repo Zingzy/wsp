@@ -744,6 +744,11 @@ export interface DesktopBridge {
   localFonts(family: string): Promise<LocalFontFace[]>;
   /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
   pickFolder(): Promise<string | undefined>;
+  /** Photographs the page as it is now and keeps it under this workspace, replacing what that workspace held. Asked
+   * for as the person leaves a workspace, while the page still shows it. */
+  capturePreview(workspaceId: string): Promise<void>;
+  /** The last photograph taken of this workspace, as a data url, or nothing when none was taken. */
+  workspacePreview(workspaceId: string): Promise<string | undefined>;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------

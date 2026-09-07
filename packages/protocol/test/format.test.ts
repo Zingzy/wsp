@@ -75,6 +75,7 @@ import {
   snapshotFailedLine,
   stepRetryLine,
   timedOutLine,
+  lastLine,
   titleLine,
   toolActivityLine,
   toolCallFacts,
@@ -397,6 +398,16 @@ describe("titleLine", () => {
     expect(titleLine("\r\n  \n\tReply  with\texactly   the word pong.  \r\n")).toBe("Reply with exactly the word pong.");
     expect(titleLine("one line")).toBe("one line");
     expect(titleLine("\n \n")).toBe("");
+  });
+});
+
+describe("lastLine", () => {
+  it("is the text's last non-empty line with its whitespace collapsed, which is what a notify line ends with", () => {
+    expect(lastLine("Ran the gate.\n\nAll 12 tests green.\n")).toBe("All 12 tests green.");
+    expect(lastLine("  Server  is\tlive at :3000.  \r\n\n")).toBe("Server is live at :3000.");
+    expect(lastLine("one line")).toBe("one line");
+    expect(lastLine("\n \n")).toBeUndefined();
+    expect(lastLine("")).toBeUndefined();
   });
 });
 
