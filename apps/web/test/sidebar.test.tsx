@@ -642,6 +642,19 @@ describe("gone machines", () => {
     expect(screen.queryByRole("button", { name: "New thread in old" })).toBeNull();
   });
 
+  it("a record still saying running whose status found the machine gone reads Gone with no rate and no countdown, even while the status carries both", async () => {
+    const gone = status(API, { machineState: "gone", reach: { state: "gone" }, idleAt: NOW + 17 * 60_000, rateUsdPerHour: 0.11, reason: "machine m_ws_a is gone at the provider: the status poll found it gone at 2026-09-06T10:21:04Z" });
+    await mount(fakeApi([API], [gone]), "api");
+    act(() => useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 60_000, accruedUsd: 0.0018, at: new Date(NOW).toISOString() }));
+    const row = rowOf("api");
+    await waitFor(() => expect(row.textContent).toContain("Gone"));
+    expect(row.textContent).not.toContain("/hr");
+    expect(row.textContent).not.toContain("naps");
+    expect(row.textContent).not.toContain("active");
+    expect(row.textContent).toContain("$0.0018 today");
+    expect(screen.getByRole("button", { name: "Rebuild api" }).getAttribute("title")).toBe(gone.reason!);
+  });
+
   it("a gone row offers forget beside the rebuild; confirming names what goes, calls the api once, and the row leaves on workspace.deleted", async () => {
     const api = await mount(fakeApi([OLD], [status(OLD)], [session("s1", "ws_c", { prompt: "fix the port list", status: "completed" })]), "old");
     await waitFor(() => expect(rowOf("old").textContent).toContain("Gone"));

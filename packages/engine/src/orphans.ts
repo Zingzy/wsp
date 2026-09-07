@@ -1,4 +1,5 @@
 import { BUILDER_IDLE_MS } from "./golden.js";
+import { isMissing } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, OWNER_LABEL, SMOKE_LABEL, WSP_LABEL, isReserved } from "./labels.js";
 import type { MachineBackend } from "./machine.js";
 
@@ -134,7 +135,7 @@ export async function reap(opts: ReapOptions): Promise<ReapResult> {
       await (await opts.backend.get(m.id)).kill();
     } catch (e) {
       // The listing lags a kill (measured): a row that is gone by the time it is fetched is no failure.
-      if ((e as { kind?: string }).kind === "missing") continue;
+      if (isMissing(e)) continue;
       failed.push({ id: m.id, message: `could not stop: ${e instanceof Error ? e.message : String(e)}` });
       continue;
     }

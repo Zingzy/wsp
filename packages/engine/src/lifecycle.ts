@@ -1,5 +1,5 @@
 import type { Machine, MachineSpec, PreviewReach } from "./machine.js";
-import type { WspError } from "./errors.js";
+import { isMissing } from "./errors.js";
 import { DAEMON_PORT, refreshPreviewToken } from "./preview.js";
 
 export interface WorkspaceHooks {
@@ -51,10 +51,6 @@ export class NotFirstLifeError extends Error {
 /** The snapshot-fresh rule as one check: every snapshot in the engine goes through it. */
 export function assertFirstLife(machineId: string, firstLife: boolean, action: string): void {
   if (!firstLife) throw new NotFirstLifeError(machineId, action);
-}
-
-function isMissing(e: unknown): boolean {
-  return (e as WspError).kind === "missing";
 }
 
 export class Workspace {

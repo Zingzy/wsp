@@ -22,6 +22,11 @@ export function classify(status: number, body: { code?: string; error?: string }
   return { kind: "unknown", ...rest };
 }
 
+/** The provider answered 404 for the machine: it no longer knows it. */
+export function isMissing(e: unknown): boolean {
+  return (e as WspError | undefined)?.kind === "missing";
+}
+
 export function shouldRetry(e: WspError, attempt: number): boolean {
   return e.kind === "transient" && attempt < 3;
 }

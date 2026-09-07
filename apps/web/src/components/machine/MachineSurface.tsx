@@ -4,7 +4,7 @@
 // workspace's machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { behindGoldenLine, fmtRate, fmtSize, foldThreads, imageMoveRefusal, needsRebuild, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { behindGoldenLine, fmtRate, fmtSize, foldThreads, imageMoveRefusal, isBilling, needsRebuild, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -152,6 +152,7 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
   const diverged = status ? divergentMachineState(workspace.phase, status.machineState) : null;
   const zombie = status?.reach.state === "zombie";
   const rebuild = needsRebuild({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
+  const billing = isBilling(workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state }));
   return (
     <Section label="Machine">
       <div className="mt-1 divide-y divide-border/40">
@@ -184,7 +185,7 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
           {awakeMs === null ? "pending" : durationLabel(awakeMs)}
         </Row>
         <Row label="Auto-nap" k="idle">
-          {idleLabel(status?.idleAt, now)}
+          {idleLabel(billing ? status?.idleAt : undefined, now)}
         </Row>
       </div>
       {status?.reason && (
@@ -381,7 +382,8 @@ function LiveRow({ label, k, samples, y, text, tier, stale, unavailable }: LiveR
 function Usage({ workspace, status, series }: { workspace: WorkspaceView; status: WorkspaceStatus | null; series: WorkspaceCostEvent[] }) {
   const cost = useCost(workspace.id);
   const [range, setRange] = useState<UsageRange>("all");
-  const rate = cost?.rateUsdPerHour ?? (workspace.phase === "running" ? status?.rateUsdPerHour ?? 0 : 0);
+  const billing = isBilling(workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state }));
+  const rate = billing ? cost?.rateUsdPerHour ?? status?.rateUsdPerHour ?? 0 : 0;
   return (
     <Section label="Usage" aside={<UsageRangeToggle range={range} onChange={setRange} />}>
       <UsageChart series={series} range={range} />

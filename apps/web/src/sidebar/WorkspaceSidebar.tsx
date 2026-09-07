@@ -280,7 +280,7 @@ export function WorkspaceSidebar() {
                   const cost = costs[project.id] ?? null;
                   const meta = workspaceMetaLine(project.status !== null ? project.status.daemonNote : project.workspace.daemonNote, [
                     costLabel({
-                      phase: project.phase,
+                      state: project.state,
                       rateUsdPerHour: cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null,
                       accruedUsd: cost?.accruedUsd ?? null,
                     }),

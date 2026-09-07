@@ -714,6 +714,15 @@ describe("gone machines", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
+  it("a record still saying running whose status found the machine gone reads no rate and no nap countdown, whatever the status and the last cost event carry", async () => {
+    const w = view("ws_a", "api");
+    const api = await mount([w], CAPS, EMPTY_LINEAGE, [costEvent("ws_a", 0.11, 60_000, new Date().toISOString())]);
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), machineState: "gone", reach: { state: "gone" }, idleAt: Date.now() + 17 * 60_000, rateUsdPerHour: 0.11, reason: "machine m_ws_a is gone at the provider: the status poll found it gone at 2026-09-06T10:21:04Z" } }));
+    await waitFor(() => expect(fact("reason")).toContain("the status poll found it gone"));
+    expect(fact("idle")).toBe("not scheduled");
+    expect(fact("rate")).toBe("$0.000/hr");
+  });
+
   it("the host's refusal shows in the dialog, which stays open", async () => {
     const api = await mount([gone()]);
     const reason = "api's machine m_ws_a is still running; pause it or delete it at the provider first";
