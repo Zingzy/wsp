@@ -114,11 +114,14 @@ import type {
   ReachState,
   SessionEvent,
   SessionInterruptResult,
+  SessionRenamer,
   SessionStartOutcome,
   SessionSteerResult,
   SessionOrigin,
+  SessionTitleMaker,
   SessionTitleReader,
   SessionView,
+  TitleSource,
   SnapshotStorage,
   TurnResult,
   TurnStatus,
@@ -128,7 +131,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -138,7 +141,7 @@ import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, providerSaid, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
-import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog } from "./harness-catalog.js";
+import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -163,6 +166,9 @@ export interface HarnessStartOptions {
   effort?: string;
   permissionMode?: string;
   contextWindow?: string;
+  /** The name the thread is opened under, for a CLI that takes one at launch; every harness is told it again through
+   * renameSession once its session is announced, so an adapter whose CLI cannot take it here need not. */
+  title?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -185,6 +191,11 @@ export interface HarnessAdapter {
   probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** Reads the harness's own title for a session out of its store on the machine; absent on a harness that keeps none. */
   sessionTitle?: SessionTitleReader;
+  /** Writes a person's name for a session into that same store; absent on a harness that keeps no name of a person's. */
+  renameSession?: SessionRenamer;
+  /** Asks the harness itself for a name for a thread it has just replied in; absent on a harness that cannot answer a
+   * question of its own. */
+  titleFor?: SessionTitleMaker;
   /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
    * means nothing is exported and both run with the machine's own environment only. */
   readonly env?: Readonly<Record<string, string>>;
@@ -224,6 +235,9 @@ const SESSION_TITLE_TIMEOUT_MS = 15_000;
 /** How many of a workspace's harness sessions one refresh asks about, newest first: a store read is an exec on the
  * machine, and an index at SESSION_INDEX_CAP must not cost one per row. */
 export const SESSION_TITLE_REFRESH_MAX = 20;
+/** How long the harness has to answer the one title question a thread costs. A claude-sonnet-5 answer measured 1.4 s
+ * of model time on 2026-09-07; this is the wedged case, and a thread that hits it keeps its opening words. */
+export const TITLE_MAKE_TIMEOUT_MS = 30_000;
 
 function eventBus(): EventBus & { emit(event: EventUnion): void } {
   const listeners = new Map<string, Set<EventListener>>();
@@ -801,6 +815,9 @@ export interface Runtime {
          * line (notifyLine) into that thread through this same start, or, for me, records it for the person. A start
          * that resumes a thread keeps what the thread had. Rejects when no thread has that id. */
         notify?: string;
+        /** The name the thread takes as a person's: it stands from the first second, the harness is told it too, and
+         * no generated title ever replaces it. Rejects on a blank one. */
+        title?: string;
       },
     ): Promise<SessionHandle>;
     /** Every turn this state file knows, the ones before a restart as they were last written; one that was still
@@ -898,6 +915,14 @@ const goneLogLine = (workspaceId: string, words: string): string => `workspace $
  * per session rather than one per refresh. */
 const noTitleLogLine = (sessionId: string, workspaceId: string, words: string): string =>
   `no title for session ${sessionId.slice(0, 8)} on ${workspaceId}: ${words}`;
+/** The host log's one line for a thread its harness would not name; the thread keeps its opening turn's words and
+ * nothing asks again, so this is said once per thread. */
+const noMadeTitleLogLine = (threadId: string, workspaceId: string, words: string): string =>
+  `thread ${threadId.slice(0, 8)} on ${workspaceId} keeps its opening words: ${words}`;
+/** The host log's one line for a name the harness's own store would not take: the thread carries the name here
+ * whatever its harness did with it, so only the harness's own UI is out of step. */
+const noNameWriteLogLine = (sessionId: string, workspaceId: string, words: string): string =>
+  `the harness did not take the name for session ${sessionId.slice(0, 8)} on ${workspaceId}: ${words}`;
 /** What a cut turn's parent hears: the row's own span, since no harness result reports one. */
 const restartCutLine = (elapsedMs: number): string => `cut by a host restart after ${fmtDuration(elapsedMs, "clock")}`;
 /** A guest with no daemon is asked again after this long (one may be deployed later). */
@@ -2544,8 +2569,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       .then(
         async title => {
           if (title === null) return;
+          // A title in the harness's own store is either the person's rename inside it or the one the harness itself
+          // generated for them; both outrank anything we would generate, so the row reads as a person's from here.
           for (const s of sessions.values()) {
-            if (s.view.workspaceId === entry.record.id && s.view.claudeSessionId === sessionId) s.view.harnessTitle = title;
+            if (s.view.workspaceId === entry.record.id && s.view.claudeSessionId === sessionId) {
+              s.view.harnessTitle = title;
+              s.view.titleSource = "person";
+            }
           }
           await persistSessions(entry.record.id);
         },
@@ -2557,6 +2587,92 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       });
     titleReads.set(key, pending);
     return pending.done;
+  };
+
+  /** Where a row's title came from; a row written before provenance was recorded, and one with no title at all,
+   * read as the words its opening turn seeded the thread with. */
+  const sourceOf = (view: SessionView): TitleSource => view.titleSource ?? "seed";
+  /** Every turn of one thread, whatever harness session each of them ran under. */
+  const rowsOn = (threadId: string): SessionView[] => [...sessions.values()].filter(s => s.view.threadId === threadId).map(s => s.view);
+  /** Where the thread's title came from, over all its turns: a person's name on any of them is the thread's, since
+   * the fold reads the latest turn's title and a resume writes a row of its own. */
+  const threadSource = (threadId: string): TitleSource => {
+    let source: TitleSource = "seed";
+    for (const view of rowsOn(threadId)) {
+      if (sourceOf(view) === "person") return "person";
+      if (sourceOf(view) === "auto") source = "auto";
+    }
+    return source;
+  };
+  /** The title a new turn of an existing thread carries in: the newest turn that has one. A resume writes a fresh
+   * row, and the fold titles the thread by the latest, so a thread that is not seeded again here loses its name. */
+  const carriedTitle = (threadId: string): Pick<SessionView, "harnessTitle" | "titleSource"> => {
+    const titled = rowsOn(threadId)
+      .filter(v => v.harnessTitle !== undefined)
+      .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
+    if (titled?.harnessTitle === undefined) return {};
+    return { harnessTitle: titled.harnessTitle, titleSource: sourceOf(titled) };
+  };
+
+  /** Writes a thread's name into the harness's own store, so `claude --resume` and codex's own list say what the app
+   * says. The name stands here whatever the store answers: a harness that keeps no name of a person's does nothing,
+   * and a store that refused says so in the log once. */
+  const nameInHarness = (view: SessionView, title: string): Promise<void> => {
+    const sessionId = view.claudeSessionId;
+    const entry = live.get(view.workspaceId);
+    if (sessionId === undefined || entry === undefined) return Promise.resolve();
+    if (workspaceState({ phase: entry.record.phase }) !== "running" || adapters[view.harness] === undefined) return Promise.resolve();
+    const write = adapterFor(entry, view.harness).adapter.renameSession;
+    if (write === undefined) return Promise.resolve();
+    // Started inside a promise and never on this stack, as the store read is: an adapter that refuses the id throws
+    // where it builds its command, and naming a thread may never cost the turn that asked for it.
+    return Promise.resolve()
+      .then(() => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
+      .then(
+        wrote => {
+          if (wrote.kind === "failed") console.warn(noNameWriteLogLine(sessionId, entry.record.id, wrote.error));
+        },
+        (e: unknown) => console.warn(noNameWriteLogLine(sessionId, entry.record.id, e instanceof Error ? e.message : String(e))),
+      );
+  };
+
+  /** The threads whose one title question has been asked, so a harness that answered nothing is not asked again at
+   * the next turn's end. In memory only: a host that started again asks once more, which is not a loop. */
+  const titlesAsked = new Set<string>();
+  /** Asks the harness for a name for the thread whose first turn just replied, once per thread and only while the
+   * thread still carries the words its opening turn seeded it with. A person's name, given here or found in the
+   * harness's own store, is never replaced: it is read before the question goes out and again when the answer lands,
+   * since a rename can happen while the harness is thinking. The answer is written back into the harness's store, so
+   * its own UI shows the same name.
+   */
+  const makeTitle = async (view: SessionView, reply: string): Promise<void> => {
+    const threadId = view.threadId;
+    const entry = live.get(view.workspaceId);
+    if (threadId === undefined || entry === undefined || titlesAsked.has(threadId)) return;
+    if (view.prompt === undefined || reply.trim() === "" || threadSource(threadId) !== "seed") return;
+    if (workspaceState({ phase: entry.record.phase }) !== "running" || adapters[view.harness] === undefined) return;
+    const { harness, adapter } = adapterFor(entry, view.harness);
+    if (adapter.titleFor === undefined) return;
+    titlesAsked.add(threadId);
+    const table = harnessCatalog(harness);
+    const model = smallestModel(table === undefined ? undefined : await catalogOn(table, entry.machine, adapter));
+    const title = await adapter.titleFor(
+      { opening: view.prompt, reply, ...(model !== undefined ? { model } : {}) },
+      command => entry.machine.exec(command, { timeoutMs: TITLE_MAKE_TIMEOUT_MS }).then(res => res.stdout),
+    );
+    if (title === null) {
+      console.warn(noMadeTitleLogLine(threadId, entry.record.id, "the harness answered with no title"));
+      return;
+    }
+    if (threadSource(threadId) === "person") return;
+    for (const row of sessions.values()) {
+      if (row.view.threadId === threadId) {
+        row.view.harnessTitle = title;
+        row.view.titleSource = "auto";
+      }
+    }
+    await persistSessions(entry.record.id);
+    await nameInHarness(view, title);
   };
 
   /** Which rows a refresh asks about: the newest turn of each harness session, newest first and no more than the cap. */
@@ -2679,6 +2795,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (refusal !== null) throw new Error(refusal);
       };
       refuse();
+      const title = o.title === undefined ? undefined : titleLine(o.title);
+      if (title === "") throw new Error(EMPTY_TITLE_LINE);
       const { harness, adapter } = adapterFor(entry, o.harness);
       const named = o.thread === undefined ? undefined : latestOn(o.thread);
       if (o.thread !== undefined && named?.workspaceId !== workspaceId) throw new Error(`no thread ${o.thread} on this workspace`);
@@ -2729,6 +2847,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         threadId,
         prompt: o.prompt,
         startedAt: Date.now(),
+        ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : carriedTitle(threadId)),
         ...(resume !== undefined ? { claudeSessionId: resume } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
         ...picks,
@@ -2752,6 +2871,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             entry.record.claudeSessionId = sessionId;
             void persist(entry.record);
             void persistSessions(workspaceId);
+            // The harness keys its store by the id it just announced, so a name given at the start is written now;
+            // a CLI that already took it at launch is told the same name twice, which is what keeps this one road.
+            if (title !== undefined && !startRecorded) void nameInHarness(sessionView, title);
             // One turn is one start row however often the harness announces itself.
             if (startRecorded) return;
             startRecorded = true;
@@ -2822,6 +2944,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(cwd !== undefined ? { cwd } : {}),
           ...picks,
           ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
+          ...(title !== undefined ? { title } : {}),
           onEvent: forward,
         });
       } catch (e) {
@@ -2868,7 +2991,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if (!ended) sessionView.status = result.status;
           sessionView.endedAt ??= Date.now();
           void persistSessions(workspaceId);
-          void refreshTitle(sessionView, true);
+          // The store is read first and the question asked after: what the harness already calls the session is a
+          // person's, and a thread that has one is never asked for another.
+          void refreshTitle(sessionView, true)
+            .then(() => makeTitle(sessionView, result.text ?? ""))
+            .catch((e: unknown) => console.warn(noMadeTitleLogLine(threadId, workspaceId, e instanceof Error ? e.message : String(e))));
         })
         .catch(() => {
           if (!ended) sessionView.status = "failed";

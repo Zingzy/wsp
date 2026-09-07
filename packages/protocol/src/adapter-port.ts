@@ -4,7 +4,9 @@
 // CLI's output into (AdapterEvent), what it reads off its binary when the
 // runtime asks what that binary takes (HarnessCatalogAnswer), and what it
 // reads out of the harness's own store when the runtime asks what that harness
-// calls a session (SessionTitleReader). It sits here, beside the wire types,
+// calls a session (SessionTitleReader), what it writes back into that store
+// when a thread is named (SessionRenamer), and what it answers when the runtime
+// asks the harness itself to name a thread (SessionTitleMaker). It sits here, beside the wire types,
 // so no adapter owns the interface its siblings implement. The runtime folds
 // these into the SessionEvent shapes in index.ts that clients read, which is
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
@@ -103,3 +105,36 @@ export function catalogRefused(answer: HarnessCatalogAnswer): answer is HarnessC
  * it holds no such session at all; absent on an adapter whose harness keeps no title.
  */
 export type SessionTitleReader = (harnessSessionId: string, exec: (command: string) => Promise<string>) => Promise<string | null>;
+
+/**
+ * What a rename came to in the harness's own store. written: the store took the name. no-session: the store answered
+ * and holds no such session, so there was nothing to name. failed: the store was there and the write did not land,
+ * and `error` is the line the machine gave for it (the store's own message, a lock that never came free, no store on
+ * the machine at all); nothing may be told about a session from it.
+ */
+export type SessionRenameWrite = { kind: "written" } | { kind: "no-session" } | { kind: "failed"; error: string };
+
+/**
+ * Writes the name a person gave one of the harness's sessions into the harness's own store on the machine, the same
+ * field the harness writes when the person renames the session inside it, so the harness itself shows the new name
+ * too. The id is the session as that harness keys it, as SessionTitleReader takes it, and one shell line goes to
+ * `exec`, whose stdout says which of the three answers it is. Absent on an adapter whose harness keeps no name of a
+ * person's.
+ */
+export type SessionRenamer = (harnessSessionId: string, title: string, exec: (command: string) => Promise<string>) => Promise<SessionRenameWrite>;
+
+/** What a thread's title is asked for from: its opening turn's words and the reply that ended its first turn, and the
+ * model the question runs on, the cheapest the harness's catalog lists; absent leaves the CLI's own. */
+export interface TitleTurn {
+  opening: string;
+  reply: string;
+  model?: string;
+}
+
+/**
+ * Asks the harness itself, on the machine, for a name for a thread it has just replied in: one shell line to `exec`
+ * running the harness's own CLI on the question protocol's titlePrompt asks, and its stdout parsed back to a title.
+ * Null when the CLI refused, answered nothing or answered something that is not a title, and the thread keeps the
+ * words its opening turn seeded it with. Absent on an adapter whose CLI cannot answer a question without a thread.
+ */
+export type SessionTitleMaker = (turn: TitleTurn, exec: (command: string) => Promise<string>) => Promise<string | null>;

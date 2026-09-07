@@ -3,10 +3,10 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { backgroundTasksLine, fmtDuration, harnessExitLine } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
+import { backgroundTasksLine, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionTitleMaker, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
-import { parseSessionTitle, sessionTitleCommand } from "./session-title.js";
+import { parseSessionTitle, parseTitleFor, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
@@ -20,6 +20,8 @@ export interface StartOptions {
   effort?: string;
   permissionMode?: string;
   contextWindow?: string;
+  /** The name the session is opened under; the CLI records it as the person's own, so nothing generated replaces it. */
+  title?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -55,6 +57,8 @@ export interface ClaudeAdapter {
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
   /** What the CLI's own session file calls a session: its generated title, or the person's rename inside the CLI. */
   sessionTitle: SessionTitleReader;
+  /** Asks the CLI itself, in one print-mode turn, for a name for a thread it has just replied in. */
+  titleFor: SessionTitleMaker;
   /** What every session's command is exported with; the one environment a turn on the machine gets. */
   readonly env: Readonly<Record<string, string>>;
 }
@@ -269,6 +273,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       effort: options.effort,
       permissionMode: options.permissionMode,
       contextWindow: options.contextWindow,
+      ...(options.title !== undefined ? { name: options.title } : {}),
     });
     const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(options.prompt, localId)] });
 
@@ -391,6 +396,15 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     steers: true,
     probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir, baseEnv: deps.baseEnv })).then(parseCatalogProbe),
     sessionTitle: (sessionId, exec) => exec(sessionTitleCommand({ configDir: deps.configDir, sessionId })).then(parseSessionTitle),
+    titleFor: (turn, exec) =>
+      exec(
+        titleForCommand({
+          configDir: deps.configDir,
+          prompt: titlePrompt(turn.opening, turn.reply),
+          ...(turn.model !== undefined ? { model: turn.model } : {}),
+          ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
+        }),
+      ).then(parseTitleFor),
     env,
   };
 }

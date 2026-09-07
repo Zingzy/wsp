@@ -4,12 +4,12 @@
 // NULL and carries the thread's opening words, name is null until the person
 // names the thread.
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
-import { parseSessionTitle, sessionTitleCommand } from "../src/session-title.js";
+import { parseSessionTitle, parseTitleFor, sessionTitleCommand, titleForCommand } from "../src/session-title.js";
 
 const THREAD = "01a079b6-6f04-7f73-84d6-40e9e6885ffd";
 const SCHEMA = "create table threads (id text primary key, rollout_path text not null, cwd text not null, title text not null, name text);";
@@ -70,5 +70,47 @@ describe("the title Codex keeps for a thread", () => {
   it("refuses a thread id that is not a plain slug, so nothing rides into the query unquoted", () => {
     expect(() => sessionTitleCommand({ home: "/root/.codex", threadId: "x' or '1'='1" })).toThrow(/plain slug/);
     expect(sessionTitleCommand({ home: "/root/it's here", threadId: THREAD })).toContain(String.raw`cd '/root/it'\''s here'`);
+  });
+});
+
+/** A folder holding a `codex` that answers whatever the test wants, first on PATH: what is under test is a shell
+ * line, so the binary it runs has to be a real one. */
+function fakeCodex(script: string): string {
+  const root = mkdtempSync(join(tmpdir(), "wsp-codex-bin-"));
+  homes.push(root);
+  const bin = join(root, "codex");
+  writeFileSync(bin, `#!/bin/sh\n${script}\n`);
+  chmodSync(bin, 0o755);
+  return root;
+}
+
+describe("the title Codex makes for a thread", () => {
+  it("runs the question as a read-only turn with the prompt on stdin, and reads the answer off the last agent message", async () => {
+    const seen = join(mkdtempSync(join(tmpdir(), "wsp-codex-seen-")), "seen");
+    const bin = fakeCodex(
+      `{ printf '%s\\n' "$*"; cat; } > ${seen}\n` +
+        `printf '%s\\n' '{"type":"item.completed","item":{"id":"i1","type":"reasoning","text":"thinking"}}' '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"Seed thread titles here"}}'`,
+    );
+    const prompt = "Name it. It's a thread's own \"words\"; nothing else.";
+    const command = titleForCommand({ home: "/root/.codex", prompt, model: "gpt-5.2" });
+    const { stdout } = await run("bash", ["-c", command], { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}`, HOME: tmpdir() } });
+    expect(parseTitleFor(stdout)).toBe("Seed thread titles here");
+    const [argv, ...rest] = readFileSync(seen, "utf8").split("\n");
+    expect(argv).toContain(`sandbox_mode="read-only"`);
+    expect(argv).toContain(`approval_policy="never"`);
+    expect(argv).toContain("-m gpt-5.2");
+    expect(argv).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(rest.join("\n").trim()).toBe(prompt);
+  });
+
+  it("runs under the session's own CODEX_HOME, which a guest exec would not carry", () => {
+    expect(titleForCommand({ home: "/root/it's here", prompt: "name it" })).toContain(String.raw`CODEX_HOME='/root/it'\''s here'`);
+  });
+
+  it("reads no title out of a turn that failed, said nothing, or explained itself over several lines", () => {
+    expect(parseTitleFor('{"type":"turn.failed","error":{"message":"401 Unauthorized"}}')).toBeNull();
+    expect(parseTitleFor("")).toBeNull();
+    expect(parseTitleFor('{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"Here it is:\\nA title"}}')).toBeNull();
+    expect(parseTitleFor('{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"Seed thread titles here"}}')).toBe("Seed thread titles here");
   });
 });

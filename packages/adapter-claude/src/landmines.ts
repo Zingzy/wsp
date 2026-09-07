@@ -83,6 +83,9 @@ export interface BuildCommandOptions {
   permissionMode?: string;
   /** "1m" or "200k" from the catalog; the CLI takes 1M as a "[1m]" suffix on the model, so it needs one. */
   contextWindow?: string;
+  /** The display name the session is opened under, whatever characters it holds; the CLI writes it into the session's
+   * own store as the person's, which is where its resume list and this adapter's title read both take it from. */
+  name?: string;
 }
 
 // Model names carry a context suffix like "claude-opus-5[1m]"; nothing else a catalog value needs is outside this set.
@@ -116,7 +119,7 @@ function permissionFlags(mode: string | undefined): string[] {
  * on that channel, and EOF ends the process after its current turn.
  */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow } = options;
+  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow, name } = options;
   if ((sessionId === undefined) === (resume === undefined)) {
     throw new Error("buildCommand needs exactly one of sessionId or resume");
   }
@@ -133,6 +136,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     ...permissionFlags(permissionMode),
     ...slugFlag("--model", "model", modelWithContext(model, contextWindow)),
     ...slugFlag("--effort", "effort", effort),
+    ...(name === undefined ? [] : [`--name ${shellQuote(name)}`]),
     idFlag,
   ].join(" ");
   return inFolder(cwd, claude);

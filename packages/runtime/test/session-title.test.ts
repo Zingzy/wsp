@@ -4,10 +4,11 @@
 // is the runtime's side of it, which asks at a turn's end and on a refresh and
 // keeps the answer on the rows a thread is folded from.
 import { randomUUID } from "node:crypto";
+import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { createCodexAdapter } from "@wsp/adapter-codex";
-import { foldThreads, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { EMPTY_TITLE_LINE, foldThreads, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { SESSION_TITLE_REFRESH_MAX, SESSION_TITLE_TTL_MS, createRuntime, type HarnessAdapter, type HarnessAdapterFactory } from "../src/runtime.js";
+import { SESSION_TITLE_REFRESH_MAX, SESSION_TITLE_TTL_MS, createRuntime, type HarnessAdapter, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend } from "./stub-backend.js";
@@ -21,26 +22,62 @@ const TITLE_COMMAND = "wsp-title-read";
  * resumed start announces the id it was given, as both real adapters do; `rekeys` mints its own local id beside it,
  * the way the codex adapter does, so two rows can share one harness session.
  */
-function titledAdapter(options: { keepsTitles?: boolean; rekeys?: boolean; reader?: HarnessAdapter["sessionTitle"] } = {}): HarnessAdapterFactory {
+function titledAdapter(
+  options: {
+    keepsTitles?: boolean;
+    rekeys?: boolean;
+    reader?: HarnessAdapter["sessionTitle"];
+    /** What the harness answers when asked to name a thread; absent means a harness that cannot be asked at all. */
+    maker?: HarnessAdapter["titleFor"];
+    /** Present, the harness keeps a name of a person's, and every write lands here. */
+    written?: { sessionId: string; title: string }[];
+    /** What the turn replies; the title question is asked of it. */
+    reply?: string;
+    /** Held open, the turn runs until the test lets it end. */
+    hold?: () => Promise<void>;
+    /** Every start's options, so a test can read what the launch carried. */
+    starts?: HarnessStartOptions[];
+  } = {},
+): HarnessAdapterFactory {
   const reader: HarnessAdapter["sessionTitle"] =
     options.reader ??
     ((sessionId, exec) => exec(`${TITLE_COMMAND} ${sessionId}`).then(stdout => (stdout.trim() === "" ? null : stdout.trim())));
   return () => ({
     steers: false,
     ...(options.keepsTitles === false ? {} : { sessionTitle: reader }),
+    ...(options.maker !== undefined ? { titleFor: options.maker } : {}),
+    ...(options.written === undefined
+      ? {}
+      : {
+          renameSession: async (sessionId, title) => {
+            options.written!.push({ sessionId, title });
+            return { kind: "written" as const };
+          },
+        }),
     start: o => {
+      options.starts?.push(o);
       const sessionId = o.resume ?? SESSION;
-      const result: TurnResult = { status: "completed", text: "ok" };
+      const result: TurnResult = { status: "completed", text: options.reply ?? "ok" };
       const emit = (e: AdapterEvent): void => o.onEvent(e);
-      const finished = Promise.resolve().then(() => {
+      const finished = (async () => {
         emit({ type: "session.start", sessionId });
+        await options.hold?.();
         emit({ type: "turn.done", sessionId, result });
         emit({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
         return result;
-      });
+      })();
       return { localId: options.rekeys === true ? randomUUID() : sessionId, finished, interrupt: async () => {} };
     },
   });
+}
+
+/** A promise the test opens when it likes: a turn held open, or a title question the harness has not answered yet. */
+function gate<T>(): { open: (value: T) => void; wait: Promise<T> } {
+  let open!: (value: T) => void;
+  const wait = new Promise<T>(resolve => {
+    open = resolve;
+  });
+  return { open, wait };
 }
 
 /** A backend whose guest answers the title command with `titled()` and nothing else, counting the reads. */
@@ -222,5 +259,168 @@ describe("the harness's own title on a thread", () => {
     named = "Building the server";
     advance(SESSION_TITLE_TTL_MS + 1);
     expect(await titleOf(rt, ws.id)).toBe("Building the server");
+  });
+});
+
+describe("the title the harness makes for a thread", () => {
+  const OPENING = "make a server, and its tests";
+
+  it("leaves the opening turn's words in place until the reply lands, then asks the harness once, on the cheapest model its catalog lists", async () => {
+    const turn = gate<void>();
+    const asked: { opening: string; reply: string; model?: string }[] = [];
+    const { backend } = titledBackend(() => null);
+    const rt = createRuntime({
+      backend,
+      store: memoryStore(),
+      adapters: {
+        claude: titledAdapter({
+          reply: "the server is up on 3000",
+          hold: () => turn.wait,
+          maker: async t => {
+            asked.push(t);
+            return "Seed thread titles here";
+          },
+        }),
+      },
+    });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: OPENING });
+    // The turn is still running: the thread is titled by its opening words and nothing has been asked of the harness.
+    expect(await titleOf(rt, ws.id)).toBe(OPENING);
+    expect(asked).toEqual([]);
+
+    turn.open();
+    await handle.finished;
+    await until(async () => (await rt.sessions.list(ws.id))[0]?.titleSource === "auto");
+    expect(asked).toEqual([{ opening: OPENING, reply: "the server is up on 3000", model: "claude-sonnet-5" }]);
+    expect(await titleOf(rt, ws.id)).toBe("Seed thread titles here");
+  });
+
+  it("writes the name it made into the harness's own store, so the harness's own list says the same", async () => {
+    const written: { sessionId: string; title: string }[] = [];
+    const { backend } = titledBackend(() => null);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ written, maker: async () => "Seed thread titles here" }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
+    await until(async () => written.length === 1);
+    expect(written).toEqual([{ sessionId: SESSION, title: "Seed thread titles here" }]);
+  });
+
+  it("never replaces what the harness itself calls the session, which is the person's, and does not ask for a title at all", async () => {
+    const asked: unknown[] = [];
+    const { backend } = titledBackend(() => "the sidebar's own name");
+    const rt = createRuntime({
+      backend,
+      store: memoryStore(),
+      adapters: { claude: titledAdapter({ maker: async t => (asked.push(t), "Seed thread titles here") }) },
+    });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
+    await until(async () => (await rt.sessions.list(ws.id))[0]?.harnessTitle !== undefined);
+    expect(await titleOf(rt, ws.id)).toBe("the sidebar's own name");
+    // What the harness's own store calls a session is the person's, whether they typed it or the harness made it.
+    expect((await rt.sessions.list(ws.id))[0]?.titleSource).toBe("person");
+    expect(asked).toEqual([]);
+  });
+
+  it("throws away an answer that lands after a rename: the person's name stands", async () => {
+    const answer = gate<string | null>();
+    let named: string | null = null;
+    const { backend } = titledBackend(() => named);
+    const { clock, advance } = fakeClock();
+    let asks = 0;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ maker: () => (asks += 1, answer.wait) }) }, clock });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
+    await until(async () => asks === 1);
+    // The harness is thinking about a title; meanwhile the person renames the session inside the harness itself.
+    named = "the sidebar's own name";
+    advance(SESSION_TITLE_TTL_MS + 1);
+    await until(async () => (await rt.sessions.list(ws.id))[0]?.harnessTitle === "the sidebar's own name");
+
+    answer.open("Seed thread titles here");
+    await until(async () => (await rt.sessions.list(ws.id)).length === 1);
+    expect(await titleOf(rt, ws.id)).toBe("the sidebar's own name");
+    expect((await rt.sessions.list(ws.id))[0]?.titleSource).toBe("person");
+  });
+
+  it("keeps the opening words when the harness answers with something that is not a title, and asks nothing more", async () => {
+    // The real claude reader parses the answer, so what is under test is the whole road: an answer over the cap is
+    // refused where it is read and the thread is left as it was.
+    const claude = createClaudeAdapter({
+      exec: () => {
+        throw new Error("no turns here");
+      },
+      configDir: "/root/.claude-cfg",
+    });
+    const backend = stubBackend();
+    const inner = backend.execImpl;
+    const answers: string[] = [];
+    backend.execImpl = (m, cmd) => {
+      if (!cmd.includes("claude -p")) return inner(m, cmd);
+      answers.push(cmd);
+      return { exitCode: 0, stdout: `{"type":"result","is_error":false,"result":"${"a".repeat(41)}"}`, stderr: "" };
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsTitles: false, maker: claude.titleFor }) } });
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
+      await until(async () => answers.length === 1);
+      expect(await titleOf(rt, ws.id)).toBe(OPENING);
+      expect((await rt.sessions.list(ws.id))[0]).not.toHaveProperty("titleSource");
+      expect(warn.mock.calls.filter(([line]) => String(line).includes("keeps its opening words"))).toHaveLength(1);
+
+      // A second turn on the same thread does not ask again: nothing retries in a loop.
+      await (await rt.sessions.start(ws.id, { prompt: "and now the tests", resume: SESSION })).finished;
+      await new Promise(r => setTimeout(r, 5));
+      expect(answers).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("keeps the name it made through the thread's later turns, which the fold titles by", async () => {
+    const { backend } = titledBackend(() => null);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ rekeys: true, maker: async () => "Seed thread titles here" }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
+    await until(async () => (await rt.sessions.list(ws.id))[0]?.titleSource === "auto");
+    await (await rt.sessions.start(ws.id, { prompt: "and now the tests", resume: SESSION })).finished;
+    expect(await titleOf(rt, ws.id)).toBe("Seed thread titles here");
+  });
+
+  it("names a thread the start named, at the launch and in the harness's store, and asks for no title of its own", async () => {
+    const starts: HarnessStartOptions[] = [];
+    const written: { sessionId: string; title: string }[] = [];
+    const asked: unknown[] = [];
+    const turn = gate<void>();
+    const { backend } = titledBackend(() => null);
+    const rt = createRuntime({
+      backend,
+      store: memoryStore(),
+      adapters: { claude: titledAdapter({ starts, written, hold: () => turn.wait, maker: async t => (asked.push(t), "Seed thread titles here") }) },
+    });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: OPENING, title: " Ticket 411 review\nand its branch " });
+    // The name stands from the first second, before any turn has ended.
+    expect(await titleOf(rt, ws.id)).toBe("Ticket 411 review");
+    expect((await rt.sessions.list(ws.id))[0]?.titleSource).toBe("person");
+    expect(starts[0]?.title).toBe("Ticket 411 review");
+    await until(async () => written.length === 1);
+    expect(written).toEqual([{ sessionId: SESSION, title: "Ticket 411 review" }]);
+
+    turn.open();
+    await handle.finished;
+    await new Promise(r => setTimeout(r, 5));
+    expect(asked).toEqual([]);
+    expect(await titleOf(rt, ws.id)).toBe("Ticket 411 review");
+  });
+
+  it("refuses a start named with nothing at all", async () => {
+    const { backend } = titledBackend(() => null);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await expect(rt.sessions.start(ws.id, { prompt: OPENING, title: "  \n " })).rejects.toThrow(EMPTY_TITLE_LINE);
   });
 });

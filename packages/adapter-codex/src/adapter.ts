@@ -4,11 +4,11 @@
 // thread.started names the thread a resume takes, items start and complete
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
-import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, SessionTitleReader, TurnResult } from "@wsp/protocol";
+import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, titlePrompt } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, SessionTitleMaker, SessionTitleReader, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
-import { parseSessionTitle, sessionTitleCommand } from "./session-title.js";
+import { parseSessionTitle, parseTitleFor, sessionTitleCommand, titleForCommand } from "./session-title.js";
 
 export interface CodexStartOptions {
   prompt: string;
@@ -53,6 +53,8 @@ export interface CodexAdapter {
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
   sessionTitle: SessionTitleReader;
+  /** Asks the CLI itself, in one read-only turn, for a name for a thread it has just replied in. */
+  titleFor: SessionTitleMaker;
   readonly env: Readonly<Record<string, string>>;
 }
 
@@ -313,6 +315,15 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     steers: false,
     probeCatalog,
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
+    titleFor: (turn, exec) =>
+      exec(
+        titleForCommand({
+          home: deps.home,
+          prompt: titlePrompt(turn.opening, turn.reply),
+          ...(turn.model !== undefined ? { model: turn.model } : {}),
+          ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
+        }),
+      ).then(parseTitleFor),
     env,
   };
 }

@@ -58,6 +58,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     harness: "claude",
     label: "Claude Code",
     pin: { read: "--help", version: "2.1.257", date: "2026-09-05" },
+    // The cheapest of the three at $2/$10 per Mtok, as the CLI's own handshake prices them (read 2026-09-07).
+    smallModel: "claude-sonnet-5",
     models: [
       { ...option("claude-fable-5-1", "Fable 5.1"), contextWindows: ["200k", "1m"] },
       { ...option("claude-opus-5", "Opus 5"), isDefault: true, contextWindows: ["200k", "1m"] },
@@ -82,6 +84,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     // for the default model; the sandbox modes are the choices `codex --help` prints for -s. No codex model runs at
     // two context windows, so it takes no window at all.
     pin: { read: "app-server", version: "0.153.0", date: "2026-09-07" },
+    // The oldest generation model/list still offers, and the cheapest of them.
+    smallModel: "gpt-5.2",
     models: [
       { ...option("gpt-5.6-sol", "GPT-5.6-Sol"), isDefault: true, efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] },
       { ...option("gpt-5.6-terra", "GPT-5.6-Terra"), efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] },
@@ -132,6 +136,14 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
 
 export function harnessCatalog(harness: string): HarnessCatalog | undefined {
   return HARNESS_CATALOGS.find(c => c.harness === harness);
+}
+
+/** The model a thread's title question runs on: the harness row's own smallest, where the catalog in front of us
+ * still lists it. Nothing where the harness names none and where the binary no longer offers the one it named, and
+ * the question then runs on whatever that CLI runs without a model. */
+export function smallestModel(catalog: HarnessCatalog | undefined): string | undefined {
+  if (catalog?.smallModel === undefined) return undefined;
+  return catalog.models.some(m => m.value === catalog.smallModel) ? catalog.smallModel : undefined;
 }
 
 /** The binary's lists in the wire shape: its values and defaults win, the table lends labels and descriptions it knows.

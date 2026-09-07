@@ -614,7 +614,7 @@ export async function checkedStart(client: HostClient, task: string, harness: st
 /** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the named
  * folder or the workspace's own; cwd is the field the app's composer sends. notify is the thread its every turn's end
  * is told to, or NOTIFY_ME. */
-export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: string } = {}): Record<string, unknown> {
+export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: string; title?: string } = {}): Record<string, unknown> {
   const cwd = workFolder(workspace, opts.cwd);
   return {
     workspaceId: workspace.id,
@@ -622,6 +622,7 @@ export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks 
     ...(cwd !== undefined ? { cwd } : {}),
     ...(opts.harness !== undefined ? { harness: opts.harness } : {}),
     ...(opts.notify !== undefined ? { notify: opts.notify } : {}),
+    ...(opts.title !== undefined ? { title: opts.title } : {}),
     ...picksOf(opts),
   };
 }
@@ -974,6 +975,7 @@ const WorkspaceIn = z.string().describe("the workspace's name, or its id when tw
 const AgentIn = z.string().optional().describe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
 const NotifyIn = z.string().optional().describe("a thread (by id, or a prefix of it) told in one line each time a turn of the new thread ends, as a message into it; or me, for the person's app");
 const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute; absent means the workspace's project folder, else the home folder");
+const TitleIn = z.string().optional().describe("the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host would generate after the first reply never replaces it; absent lets the thread be named from its opening words and then from its first reply");
 const ConfirmIn = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");
 /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
 const PICK_INPUTS = {
@@ -1357,9 +1359,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "thread new",
-    usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"',
+    usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title] "<task>"',
     about: "opens a thread with the agent, model, effort and access the app offers; follows its first turn",
-    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" } },
+    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" }, title: { type: "string" } },
     run: async ctx => {
       const [task] = ctx.args;
       const within = flag(ctx.flags, "in");
@@ -1371,19 +1373,19 @@ export const VERBS: readonly Verb[] = [
       const picks = pickFlags(ctx.flags);
       await checkedStart(client, task, harness, picks, found.id);
       const workspace = await awake(client, found, "send", line => ctx.io.error(line));
-      ctx.out.emit(turnView(await followVerb(ctx, client, openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true)));
+      ctx.out.emit(turnView(await followVerb(ctx, client, openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")), title: flag(ctx.flags, "title") }), true)));
       return 0;
     },
     tool: tool({
       description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll. ${NOTIFY_WORDS}.`,
-      input: { workspace: WorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn },
+      input: { workspace: WorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, title: TitleIn },
       output: TurnOut.shape,
-      call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, ...input }, deps) => {
+      call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, ...input }, deps) => {
         const client = await deps.client();
         const found = await workspaceOf(client, ref);
         await checkedStart(client, task, harness, input, found.id);
         const target = await awake(client, found, "send", QUIET_LINE);
-        const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN));
+        const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell), title }), "agent", QUIET_TURN));
         return asText(turnText(out), out);
       },
     }),

@@ -197,6 +197,12 @@ export type SessionStatus = z.infer<typeof SessionStatus>;
 export const SessionOrigin = z.enum(["person", "cli", "agent"]);
 export type SessionOrigin = z.infer<typeof SessionOrigin>;
 
+/** Where a thread's title came from, the one rule that decides whether a new one may replace it: seed is the opening
+ * turn's own words, auto the one title the harness was asked for after the first reply, person a name the person gave
+ * the thread here or inside the harness. Auto replaces a seed and nothing else; a person's name is never replaced. */
+export const TitleSource = z.enum(["seed", "auto", "person"]);
+export type TitleSource = z.infer<typeof TitleSource>;
+
 export const SessionView = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -214,6 +220,9 @@ export const SessionView = z.object({
   /** What the harness itself calls this row's session, read from the harness's own store on the machine: the title
    * it generated, or the person's rename inside it. Absent on a harness that keeps none, and until one is read. */
   harnessTitle: z.string().optional(),
+  /** Where harnessTitle came from; absent on a row written before provenance was recorded and on one with no title
+   * at all, both of which read as seed. */
+  titleSource: TitleSource.optional(),
   /** Ms epoch, runtime clock; endedAt is unset while the session runs. */
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
@@ -330,6 +339,10 @@ export const HarnessCatalog = z.object({
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
    * (no sign-in); absent when it simply did not answer, and on a catalog the binary filled. */
   refusal: z.string().optional(),
+  /** The slug of the cheapest model this harness offers, the one a thread's title is asked of; it rides the row so a
+   * harness added to the table names its own. Absent where the harness offers no model of its own, and the title
+   * question runs on whatever the CLI would run without one. */
+  smallModel: z.string().optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
 
@@ -1601,6 +1614,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     /** A thread id, or NOTIFY_ME: registered on the thread this start opens, so every turn's end on it sends one line
      * there (a session.notify event in this thread's transcript). Refused when no thread has that id. */
     notify: z.string().optional(),
+    /** The name the thread is opened under, as a person's: it stands in every client at once, the harness is told it
+     * too so its own UI says the same, and no generated title ever replaces it. Refused when it is blank. */
+    title: z.string().optional(),
   }),
   /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
    * from the binaries on its machine where they answer; without one, from the runtime's table. */
@@ -1835,4 +1851,4 @@ export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export { catalogRefused } from "./adapter-port.js";
-export type { AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionTitleReader } from "./adapter-port.js";
+export type { AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn } from "./adapter-port.js";
