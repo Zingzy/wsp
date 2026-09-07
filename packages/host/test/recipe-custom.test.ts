@@ -116,7 +116,7 @@ describe("the recipe verb's flags", () => {
     dirs.push(dir);
     const lines: string[] = [];
     const errors: string[] = [];
-    expect(await cli(["recipe", "--out", join(dir, "recipe.json"), "--add", "just"], io(lines, errors))).toBe(1);
+    expect(await cli(["recipe", "--out", join(dir, "recipe.json"), "--add", "just"], io(lines, errors))).toBe(3);
     expect(errors[0]).toBe('wsp recipe: --add takes <id>=<command>, not "just"');
     expect(lines).toEqual([]);
   });
@@ -145,8 +145,14 @@ describe("the recipe verb's flags", () => {
     expect(file().rows.find(r => r.id === TAP_ROW)).toMatchObject({ kind: "tool", on: true });
     expect(file().custom ?? []).toEqual([]);
     const refusal: string[] = [];
-    expect(await onCli(["--out", out, "--add", `${DISKBLOOM.id}=${DISKBLOOM.install}`], [], refusal, dir, [DISKBLOOM])).toBe(1);
+    expect(await onCli(["--out", out, "--add", `${DISKBLOOM.id}=${DISKBLOOM.install}`], [], refusal, dir, [DISKBLOOM])).toBe(3);
     expect(refusal[0]).toBe(`wsp recipe: ${addAlreadyHereLine(DISKBLOOM.id, DISKBLOOM.id)}`);
     expect(file().custom ?? []).toEqual([]);
+    // An id that is no catalog row, no row of the file and no scanned package is a usage refusal, in the words of the
+    // one place that resolves a --set target; the scanned id above is not one, so no check ahead of it may refuse it.
+    const unknown: string[] = [];
+    expect(await onCli(["--out", out, "--set", "nope=on"], [], unknown, dir, [DISKBLOOM])).toBe(3);
+    expect(unknown[0]).toBe(`wsp recipe: --set nope=on: "nope" is no catalog row and no row of ${out} outside the catalog, and no package a manager on this Mac has that id`);
+    expect(file().rows.find(r => r.id === TAP_ROW)).toMatchObject({ on: true });
   });
 });

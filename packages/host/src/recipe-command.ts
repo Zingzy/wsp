@@ -6,7 +6,7 @@
 import { existsSync } from "node:fs";
 import { THREAD_AGENTS, agentName, catalogEntry } from "@wsp/catalog";
 import { type AgentHistory, type HistoryCache, type HistoryProgress, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
-import { LOGIN_CHOICES, RECIPE_TICKS, addAlreadyHereLine, customRows, plural, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick, type ToolPin } from "@wsp/protocol";
+import { LOGIN_CHOICES, RECIPE_TICKS, addAlreadyHereLine, customRows, plural, usageRefusal, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick, type ToolPin } from "@wsp/protocol";
 import { loadRecipe, outsideRow, outsideRowsOf, ownRowIdOf, ownRowOf, pinsOf, saveSmallRecipe, withPins } from "./recipe-file.js";
 import { customFromFlags, withCustom, withoutCustom } from "./recipe-custom.js";
 import { recipeAnswer, recipeScan, type RecipeAnswer, type RecipeScan } from "./recipe-answer.js";
@@ -45,7 +45,7 @@ export function parseSet(word: string): { id: string; on: boolean } {
   const eq = word.indexOf("=");
   const id = eq < 0 ? word : word.slice(0, eq);
   const value = eq < 0 ? "" : word.slice(eq + 1);
-  if (value !== "on" && value !== "off") throw new Error(`--set takes <id>=on or <id>=off, not ${JSON.stringify(word)}`);
+  if (value !== "on" && value !== "off") throw usageRefusal(`--set takes <id>=on or <id>=off, not ${JSON.stringify(word)}`);
   return { id, on: value === "on" };
 }
 
@@ -70,8 +70,8 @@ export function parseSignIn(word: string): { id: string; choice: LoginChoice } {
   const eq = word.indexOf("=");
   const id = eq < 0 ? word : word.slice(0, eq);
   const choice = eq < 0 ? "" : word.slice(eq + 1);
-  if (!(LOGIN_CHOICES as readonly string[]).includes(choice)) throw new Error(`--signin takes <id>=${LOGIN_CHOICES.join("|")}, not ${JSON.stringify(word)}`);
-  if (catalogEntry(id) === undefined) throw new Error(`--signin ${word}: the catalog has no row called ${JSON.stringify(id)}`);
+  if (!(LOGIN_CHOICES as readonly string[]).includes(choice)) throw usageRefusal(`--signin takes <id>=${LOGIN_CHOICES.join("|")}, not ${JSON.stringify(word)}`);
+  if (catalogEntry(id) === undefined) throw usageRefusal(`--signin ${word}: the catalog has no row called ${JSON.stringify(id)}`);
   return { id, choice: choice as LoginChoice };
 }
 
@@ -240,12 +240,12 @@ export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = Q
   const here = needsScan && input.alsoHere !== undefined ? await input.alsoHere(saved === undefined ? [] : customRows(saved)) : [];
   for (const row of added) {
     const already = scannedFor(row, here);
-    if (already !== undefined) throw new Error(addAlreadyHereLine(row.id, already.id));
+    if (already !== undefined) throw usageRefusal(addAlreadyHereLine(row.id, already.id));
   }
   const looked = input.alsoHere !== undefined ? ", and no package a manager on this Mac has that id" : "";
   const targets = [...sets].map(([id, on]) => {
     const target = setTarget(id, saved, here);
-    if (target === undefined) throw new Error(`--set ${id}=${on ? "on" : "off"}: ${JSON.stringify(id)} is no catalog row and no row of ${input.out} outside the catalog${looked}`);
+    if (target === undefined) throw usageRefusal(`--set ${id}=${on ? "on" : "off"}: ${JSON.stringify(id)} is no catalog row and no row of ${input.out} outside the catalog${looked}`);
     return { ...target, on };
   });
   const ticks = new Map(targets.map(t => [t.id, t.on]));

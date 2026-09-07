@@ -11,6 +11,7 @@ import {
   outOfMemoryRowLine,
   stillWorkingRefusal,
   foreignFlagLine,
+  unknownAgentLine,
   LINEAGE_MARKS,
   REPO_STATE_WORDS,
   missingToolRow,
@@ -700,5 +701,11 @@ describe("a tools row outside the catalog", () => {
     expect(installsByLine("from its release", "the v0.1.0 release of github.com/Zingzy/diskbloom")).toBe("installs from its release: the v0.1.0 release of github.com/Zingzy/diskbloom");
     expect(leftOutLine("no Linux bottle known")).toBe("left out of the build: no Linux bottle known");
     expect(notHereLine("zingzy/tap/diskbloom", "/tmp/given.json")).toBe("zingzy/tap/diskbloom is ticked in /tmp/given.json, but this Mac has no row that installs it; it is left out.");
+  });
+});
+
+describe("unknownAgentLine", () => {
+  it("names the id nobody knows and the ids the catalog does, so a typo is a sentence", () => {
+    expect(unknownAgentLine("codx", ["claude", "codex"])).toBe("no agent called codx; the catalog knows claude, codex");
   });
 });

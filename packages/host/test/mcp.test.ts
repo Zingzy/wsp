@@ -12,7 +12,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, ProjectGolden, Recipe, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, EXIT_CODES, ProjectGolden, Recipe, ThreadView, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
@@ -30,6 +30,9 @@ interface Called {
   structured: Record<string, unknown> | undefined;
   isError: boolean;
 }
+
+/** A failure as the contract shapes it on the tool door: the line as text, and the failure object with its class beside it. */
+const failedWith = (text: string, cls: Exclude<ExitClass, "ok"> = "provider"): Called => ({ text, structured: { error: text, class: cls, exit: EXIT_CODES[cls] }, isError: true });
 
 /** The client side of a stdio pair over two streams: what an agent's process does to `wsp mcp`, in-process. */
 function streamTransport(toServer: PassThrough, fromServer: PassThrough): Transport {
@@ -161,7 +164,7 @@ describe("the MCP server over the host", () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
     const bare = await call("snapshot", { workspace: "alpha" });
-    expect(bare).toEqual({ text: "alpha has no project loaded; import one before snapshotting it", structured: undefined, isError: true });
+    expect(bare).toEqual(failedWith("alpha has no project loaded; import one before snapshotting it"));
     expect(await rt.golden.projects()).toEqual([]);
 
     await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
@@ -183,7 +186,7 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: golden!.snapshotId, project: golden!.project });
 
     const missing = await call("new", { name: "task-c", from: "nope" });
-    expect(missing).toEqual({ text: "no project golden named nope; wsp snapshot <workspace> takes one", structured: undefined, isError: true });
+    expect(missing).toEqual(failedWith("no project golden named nope; wsp snapshot <workspace> takes one"));
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
   });
 
@@ -255,11 +258,11 @@ describe("the MCP server over the host", () => {
   it("fork and thread_new under an agent the host has no adapter for are refused naming the agents it has; no machine is minted or woken", async () => {
     await call("new", { name: "alpha" });
     const refused = await call("fork", { workspace: "alpha", name: "worker", task: "hi", agent: "gpt9" });
-    expect(refused).toEqual({ text: 'no adapter registered for harness "gpt9"; agents on this host: claude, codex', structured: undefined, isError: true });
+    expect(refused).toEqual(failedWith('no adapter registered for harness "gpt9"; agents on this host: claude, codex', "usage"));
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
     await call("pause", { workspace: "alpha" });
     const opened = await call("thread_new", { workspace: "alpha", task: "hi", agent: "gpt9" });
-    expect(opened).toEqual({ text: 'no adapter registered for harness "gpt9"; agents on this host: claude, codex', structured: undefined, isError: true });
+    expect(opened).toEqual(failedWith('no adapter registered for harness "gpt9"; agents on this host: claude, codex', "usage"));
     expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
     expect(await rt.sessions.list()).toEqual([]);
   });
@@ -270,9 +273,9 @@ describe("the MCP server over the host", () => {
     const threadId = (first.structured as { threadId: string }).threadId;
     await call("pause", { workspace: "alpha" });
     for (const task of ["", " \n\t "]) {
-      expect(await call("thread_new", { workspace: "alpha", task })).toEqual({ text: EMPTY_TASK_LINE, structured: undefined, isError: true });
-      expect(await call("fork", { workspace: "alpha", name: "worker", task })).toEqual({ text: EMPTY_TASK_LINE, structured: undefined, isError: true });
-      expect(await call("send", { thread: threadId, message: task })).toEqual({ text: EMPTY_TASK_LINE, structured: undefined, isError: true });
+      expect(await call("thread_new", { workspace: "alpha", task })).toEqual(failedWith(EMPTY_TASK_LINE, "usage"));
+      expect(await call("fork", { workspace: "alpha", name: "worker", task })).toEqual(failedWith(EMPTY_TASK_LINE, "usage"));
+      expect(await call("send", { thread: threadId, message: task })).toEqual(failedWith(EMPTY_TASK_LINE, "usage"));
     }
     expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
     expect(claude.starts).toHaveLength(1);
@@ -286,7 +289,7 @@ describe("the MCP server over the host", () => {
     expect(paused.structured).toEqual({ workspace: expect.objectContaining({ name: "alpha", phase: "napping" }) });
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
     const missing = await call("pause", { workspace: "nope" });
-    expect(missing).toEqual({ text: "no workspace nope", structured: undefined, isError: true });
+    expect(missing).toEqual(failedWith("no workspace nope"));
   });
 
   it("wake wakes a paused workspace and returns it running; on a running one it is a no-op that returns it as it is", async () => {
@@ -300,7 +303,7 @@ describe("the MCP server over the host", () => {
     const again = await call("wake", { workspace: "alpha" });
     expect(again.structured).toEqual({ workspace: expect.objectContaining({ name: "alpha", phase: "running" }) });
     const missing = await call("wake", { workspace: "nope" });
-    expect(missing).toEqual({ text: "no workspace nope", structured: undefined, isError: true });
+    expect(missing).toEqual(failedWith("no workspace nope"));
   });
 
   it("exec, thread_new and send on a paused workspace wake it first and then run", async () => {
@@ -326,7 +329,7 @@ describe("the MCP server over the host", () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
     const refused = await call("forget", { workspace: "alpha" });
-    expect(refused).toEqual({ text: "alpha's machine m1 is still running; pause it or delete it at the provider first", structured: undefined, isError: true });
+    expect(refused).toEqual(failedWith("alpha's machine m1 is still running; pause it or delete it at the provider first"));
     expect(await rt.workspaces.list()).toHaveLength(1);
 
     backend.machines[0]!.killed = true;
@@ -362,7 +365,7 @@ describe("the MCP server over the host", () => {
     expect(await rt.workspaces.list()).toEqual([]);
     expect(await store.get("workspaces", alpha!.id)).toBeUndefined();
     const missing = await call("delete", { workspace: "nope", confirm: true });
-    expect(missing).toEqual({ text: "no workspace nope", structured: undefined, isError: true });
+    expect(missing).toEqual(failedWith("no workspace nope"));
   });
 
   it("thread_new opens a thread under the named agent, started by the local agent, and returns the reply as the result", async () => {
@@ -493,7 +496,7 @@ describe("the MCP server over the host", () => {
       ["claude", "person", "from the app", 1],
     ]);
     const missing = await call("send", { thread: "nope", message: "x" });
-    expect(missing).toEqual({ text: "no thread nope", structured: undefined, isError: true });
+    expect(missing).toEqual(failedWith("no thread nope"));
   });
 
   it("send into a thread whose last turn was cut puts the cut line first in the result text and flags it; the send after that is plain", async () => {
@@ -539,13 +542,13 @@ describe("the MCP server over the host", () => {
     const stopped = await call("stop", { thread: row!.threadId!.slice(0, 8) });
     expect(stopped).toEqual({ text: `thread ${row!.threadId} stopped`, structured: { threadId: row!.threadId, outcome: "accepted" }, isError: false });
     expect(held.interrupted).toEqual([row!.id]);
-    expect(await first).toEqual({ text: "turn interrupted", structured: undefined, isError: true });
+    expect(await first).toEqual(failedWith("turn interrupted"));
     expect((await rt.workspaces.list())[0]!.phase).toBe("running");
     const idle = await call("stop", { thread: row!.threadId! });
     expect(idle).toEqual({ text: `thread ${row!.threadId} not running`, structured: { threadId: row!.threadId, outcome: "not-running" }, isError: false });
     expect(held.interrupted).toHaveLength(1);
     const missing = await call("stop", { thread: "nope" });
-    expect(missing).toEqual({ text: "no thread nope", structured: undefined, isError: true });
+    expect(missing).toEqual(failedWith("no thread nope"));
   });
 
   it("thread_new with notify tells that thread when the new one ends, through the same start the CLI makes: the running parent is steered the line and the child's transcript names the parent", async () => {
@@ -570,7 +573,7 @@ describe("the MCP server over the host", () => {
     expect(held.starts).toHaveLength(2);
 
     const missing = await call("thread_new", { workspace: "alpha", task: "x", notify: "nope" });
-    expect(missing).toEqual({ text: "no thread nope", structured: undefined, isError: true });
+    expect(missing).toEqual(failedWith("no thread nope"));
   });
 
   it("fork with a task and notify me records the first turn's end in the new thread for the person", async () => {
@@ -600,7 +603,7 @@ describe("the MCP server over the host", () => {
   it("a failed turn is a tool error carrying the harness's reason", async () => {
     await call("new", { name: "alpha" });
     const failed = await call("thread_new", { workspace: "alpha", task: "die" });
-    expect(failed).toEqual({ text: "the harness died", structured: undefined, isError: true });
+    expect(failed).toEqual(failedWith("the harness died"));
     expect((await rt.sessions.list())[0]).toMatchObject({ startedBy: "agent", status: "failed" });
   });
 
@@ -684,7 +687,7 @@ describe("the MCP server over the host", () => {
     await call("pause", { workspace: "alpha" });
     const launches = launchedScripts(backend).length;
     const relative = await call("exec", { workspace: "alpha", argv: ["git", "status"], cwd: "packages/host" });
-    expect(relative).toEqual({ text: '--cwd is a path on the machine, absolute: got "packages/host"', structured: undefined, isError: true });
+    expect(relative).toEqual(failedWith('--cwd is a path on the machine, absolute: got "packages/host"', "usage"));
     expect(launchedScripts(backend)).toHaveLength(launches);
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
   });
@@ -696,7 +699,7 @@ describe("the MCP server over the host", () => {
     await new Promise(r => setTimeout(r, 300));
     const [alpha] = await rt.workspaces.list();
     await rt.workspaces.delete(alpha!.id);
-    expect(await running).toEqual({ text: "machine deleted while the agent was working", structured: undefined, isError: true });
+    expect(await running).toEqual(failedWith("machine deleted while the agent was working"));
   });
 
   it("a dead host is a tool error, not a hang: no host serving, then the host going away mid-turn, then a host that came back", async () => {
@@ -705,14 +708,14 @@ describe("the MCP server over the host", () => {
     handle = undefined;
     await socket!.closed;
     const gone = await call("workspaces");
-    expect(gone).toEqual({ text: `no wsp host is serving ${statePath}; run wsp up first`, structured: undefined, isError: true });
+    expect(gone).toEqual(failedWith(`no wsp host is serving ${statePath}; run wsp up first`));
 
     await restartHost({ claude: stuckAgent() });
     const turn = call("thread_new", { workspace: "alpha", task: "hang" });
     await new Promise(r => setTimeout(r, 300));
     await handle!.close();
     handle = undefined;
-    expect(await turn).toEqual({ text: "the host closed the connection", structured: undefined, isError: true });
+    expect(await turn).toEqual(failedWith("the host closed the connection"));
 
     await restartHost({ claude: claude.adapter });
     const back = await call("threads");

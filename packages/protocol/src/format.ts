@@ -450,6 +450,11 @@ export function foreignFlagLine(flag: string, readers: readonly string[], here: 
   return `${flag} belongs to ${owners}; ${here} does not read it`;
 }
 
+/** An agent id no catalog entry carries, named beside the ids the catalog does know. */
+export function unknownAgentLine(id: string, known: readonly string[]): string {
+  return `no agent called ${id}; the catalog knows ${known.join(", ")}`;
+}
+
 /** The refusal of a start naming an agent the host has no adapter for, listing the ones it has. */
 export function noAdapterLine(harness: string, agents: readonly string[]): string {
   return `no adapter registered for harness "${harness}"; agents on this host: ${agents.join(", ") || "none"}`;
