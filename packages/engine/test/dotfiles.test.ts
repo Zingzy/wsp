@@ -11,6 +11,7 @@ import {
   resolveDotfilesSource,
   type RepoEntry,
 } from "../src/dotfiles.js";
+import { CURL_NET } from "@wsp/catalog";
 import { DOTFILES_PRESETS } from "../src/dotfiles-presets.js";
 
 const URL = "https://github.com/someone/dotfiles";
@@ -161,6 +162,14 @@ describe("presets", () => {
     expect(s).toMatch(/starship\/releases\/download\/v\d+\.\d+\.\d+\//);
     expect(s).toContain("sha256sum -c");
     expect(s).not.toContain("oh-my-zsh");
+  });
+
+  it("a pinned binary's download goes through the catalog's one curl function, defined ahead of it, and types no flags of its own", () => {
+    for (const s of [DOTFILES_PRESETS.zsh, applyScript("chezmoi", URL)]) {
+      expect(s.indexOf(CURL_NET)).toBeGreaterThan(0);
+      expect(s.indexOf(CURL_NET)).toBeLessThan(s.indexOf("curl -o"));
+      expect(s).not.toMatch(/\bcurl +-[A-Za-z]*[fsSL]\b/);
+    }
   });
 });
 

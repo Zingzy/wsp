@@ -9,7 +9,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
+import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { DAEMON_PORT, TOOLS_PATH, type Machine } from "@wsp/engine";
 import { goldenHead, writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
@@ -69,6 +69,7 @@ export const GUEST_NODE = NODE_RELEASES[22];
 function nodeBootstrap(): string {
   const v = GUEST_NODE.version;
   return [
+    CURL_NET,
     "if ! command -v node >/dev/null 2>&1; then",
     '  arch="$(uname -m)"',
     '  case "$arch" in',
@@ -76,7 +77,7 @@ function nodeBootstrap(): string {
     `    aarch64) pkg=node-v${v}-linux-arm64.tar.gz sha=${GUEST_NODE.sha256.aarch64} ;;`,
     '    *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
     "  esac",
-    `  curl -fsSL -o "/tmp/$pkg" "https://nodejs.org/dist/v${v}/$pkg"`,
+    `  curl -o "/tmp/$pkg" "https://nodejs.org/dist/v${v}/$pkg"`,
     '  echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
     '  tar -xzf "/tmp/$pkg" -C /usr/local --strip-components=1',
     '  rm -f "/tmp/$pkg"',
