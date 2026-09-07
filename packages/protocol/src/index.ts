@@ -1252,7 +1252,7 @@ export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
  * can tell what a machine's daemon answers before asking. A hello without one is version 1: every daemon deployed
  * before the field existed, which has the pty, ports, manifest, inbox, fs, git and tunnel ops and no sys or
  * proc ops. Version 3 browses the imported project folders named in DAEMON_ROOTS_PATH beside its home. */
-export const DAEMON_VERSION = 3;
+export const DAEMON_VERSION = 4;
 
 /** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it
  * when a project lands, the daemon reads it on every files and diff op and browses those folders beside its home. */
@@ -1621,7 +1621,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { actionRefusal, goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, behindGoldenLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, notifyLine, plural, titleLine, turnCutLine, type DurationStyle, type GoldenChange, type TurnCutRule } from "./format.js";
+export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, behindGoldenLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, titleLine, turnCutLine, type DurationStyle, type GoldenChange, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";

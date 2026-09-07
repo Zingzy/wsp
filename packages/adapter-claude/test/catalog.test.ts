@@ -18,6 +18,14 @@ describe("catalogProbeCommand", () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
+  it("exports the base env a session gets, PATH included, so a probe served by a bare-PATH exec still finds the binary", () => {
+    const cmd = catalogProbeCommand({ configDir: "/root/.claude-cfg", baseEnv: { PATH: "/root/.local/bin:/usr/bin", CLAUDECODE: "1" } });
+    expect(cmd).toContain("export ");
+    expect(cmd).toContain("PATH='/root/.local/bin:/usr/bin'");
+    expect(cmd).not.toContain("CLAUDECODE=1");
+    expect(catalogProbeCommand({ configDir: "/root/.claude-cfg" })).not.toContain("PATH=");
+  });
+
   it("asks for the version, the help and one initialize handshake, and never a prompt", () => {
     const cmd = catalogProbeCommand({ configDir: "/root/.claude-cfg" });
     expect(cmd).toContain("claude --version");

@@ -12,6 +12,7 @@ export * from "./harness-catalog.js";
 export {
   BROWSER_SHIM_PATH,
   SolariBackend,
+  TOOLS_PATH,
   applyDotfiles,
   describeAge,
   goldenHead,

@@ -45,8 +45,8 @@ export interface ClaudeCatalogProbe {
  * runs under the session's CLAUDE_CONFIG_DIR, never HOME, and drops every inherited
  * CLAUDE_CODE_* mark the way the session env does (the exec shell is bash).
  */
-export function catalogProbeCommand(options: { configDir: string }): string {
-  const env = buildEnv({ configDir: options.configDir });
+export function catalogProbeCommand(options: { configDir: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+  const env = buildEnv({ base: options.baseEnv, configDir: options.configDir });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
   const handshake = `printf '%s\\n' "${INIT_REQUEST.replaceAll('"', '\\"')}" | claude -p --bare --output-format stream-json --input-format stream-json --verbose`;
