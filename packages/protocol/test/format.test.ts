@@ -19,6 +19,7 @@ import {
   NO_TEMPLATES_LINE,
   templateFailedLine,
   templateRecordedLine,
+  templateSkippedLine,
   templateStatusLine,
   templateWaitedLine,
   REPO_STATE_WORDS,
@@ -671,7 +672,7 @@ describe("LINEAGE_MARKS", () => {
   it("names every outcome a missing tool can carry and every state a lineage row shows, each as one short lowercase word or two", () => {
     const outcomes: GoldenMissingTool["outcome"][] = ["skipped", "failed"];
     for (const o of outcomes) expect(LINEAGE_MARKS[o]).toBe(o);
-    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", durable: "durable", volatile: "volatile" });
+    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", volatile: "volatile" });
     for (const word of Object.values(LINEAGE_MARKS)) {
       expect(word).toMatch(/^[a-z]+( [a-z]+)?$/);
       expect(word.length).toBeLessThanOrEqual(9);
@@ -694,6 +695,7 @@ describe("template words", () => {
   it("the doctor's line per version says whether the template was found under the version's name or promoted now", () => {
     expect(templateRecordedLine("default", 1, "tpl_e6f2", true)).toBe("golden default v1: template tpl_e6f2 found by name and recorded");
     expect(templateRecordedLine("default", 2, "tpl_0f1e", false)).toBe("golden default v2: template tpl_0f1e promoted and recorded");
+    expect(templateSkippedLine("default", 1, "its snapshot is gone at the provider")).toBe("golden default v1: no template recorded, its snapshot is gone at the provider");
     expect(NO_TEMPLATES_LINE).toBe("this backend has no templates; goldens stay as snapshots");
   });
 });

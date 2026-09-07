@@ -676,9 +676,9 @@ describe("golden version logins", () => {
 });
 
 describe("goldenImage", () => {
-  it("boots a version from its template once one is recorded and calls it durable; a version with none boots from its snapshot and is volatile", () => {
-    expect(goldenImage({ snapshotId: "snap_a", templateId: "tpl_a" })).toEqual({ spec: { template: "tpl_a" }, mark: "durable" });
-    expect(goldenImage({ snapshotId: "snap_a" })).toEqual({ spec: { fromSnapshot: "snap_a" }, mark: "volatile" });
+  it("boots a version from its template once one is recorded and gives it no word; a version with none boots from its snapshot and is volatile", () => {
+    expect(goldenImage({ snapshotId: "snap_a", templateId: "tpl_a" })).toEqual({ spec: { template: "tpl_a" }, marks: [] });
+    expect(goldenImage({ snapshotId: "snap_a" })).toEqual({ spec: { fromSnapshot: "snap_a" }, marks: ["volatile"] });
   });
 
   it("a version record takes an optional templateId and parses without one, as every version sealed before templates did", () => {

@@ -126,7 +126,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, SNAPSHOT_GONE_REASON, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -683,6 +683,10 @@ export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" |
   name?: string;
 }
 
+/** One version the promote road visited: recorded with its template (found under its name or promoted now), or left
+ * as it was with the reason, a lost snapshot in the row's own words. */
+export type GoldenPromotion = { golden: string; version: number } & ({ templateId: string; found: boolean } | { error: string });
+
 export interface GoldenUpgradeResult {
   manifest: GoldenManifest;
   version: GoldenVersion;
@@ -842,7 +846,7 @@ export interface Runtime {
     /** Makes every version of the golden durable: one with no template is recorded with the template the provider
      * holds under its name, or with a fresh promotion of its snapshot, and forks boot from it from then on.
      * Undefined on a backend without templates; empty when every version already has one. */
-    promote(name?: string): Promise<{ version: number; templateId: string; found: boolean }[] | undefined>;
+    promote(name?: string): Promise<GoldenPromotion[] | undefined>;
     /** Every project golden this runtime took, oldest first. */
     projects(): Promise<ProjectGolden[]>;
     /** Every snapshot on the account by count, size and monthly cost past the free GB, sized from the provider's
@@ -1653,9 +1657,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * versions sealed before it was recorded were all sandbox. */
   const fork = (record: WorkspaceRecord, bind: (machine: Machine) => void, override?: WorkspaceSpec, report?: StageReport): Promise<Machine> =>
     claiming(`workspace/${record.id}`, async b => {
-      const golden = (await imageOf(record.golden)).version;
+      const image = await imageOf(record.golden);
+      const golden = image.version;
       // A project golden's snapshot is the image; only a version's own snapshot may stand behind a template.
-      const spec = forkSpec(record, golden?.kind ?? "sandbox", goldenImage((await goldenVersionOf(record.golden)) ?? { snapshotId: record.golden }).spec, override);
+      const spec = forkSpec(record, golden?.kind ?? "sandbox", goldenImage(image.project === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, override);
       const machine = await b.create(spec);
       // Named by its record before the claim is released, so no sweep sees it unclaimed.
       bind(machine);
@@ -3402,25 +3407,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A version with workspaces still on it stays for them: a rebuild boots them from its image, which the provider
       // would delete under a template's forks (they hold no dependency on it).
       const standing = forkedFrom(head.snapshotId);
-      if (o.keepPrevious === false && standing.length > 0) console.warn(`golden ${name} v${head.version} kept: ${standing.join(", ")} still on it`);
-      if (o.keepPrevious === false && standing.length === 0) {
+      if (o.keepPrevious === false) {
+        if (standing.length > 0) console.warn(`golden ${name} v${head.version} kept: ${standing.join(", ")} still on it`);
         // A snapshot with live forks under it cannot be deleted (409 on Solari): the builder forked from it goes
         // first, window or not.
-        if (road === "fork" && builderKept) {
+        else if (road === "fork" && builderKept) {
           graceTimers.get(entry.record.id)?.();
           graceTimers.delete(entry.record.id);
           await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
           await forgetBuilder(entry.record.id);
           builderKept = false;
         }
-        try {
-          await dropImage(head);
-          manifest = { ...manifest, versions: manifest.versions.filter(v => v.version !== head.version) };
-          await store.put(GOLDENS, name, manifest);
-          await store.delete(GOLDEN_RECIPES, recipeKey(name, head.version));
-          previousDropped = true;
-        } catch (e) {
-          console.warn(`golden ${name} v${head.version} kept: its snapshot was not deleted (${e instanceof Error ? e.message : String(e)})`);
+        if (standing.length === 0) {
+          try {
+            await dropImage(head);
+            manifest = { ...manifest, versions: manifest.versions.filter(v => v.version !== head.version) };
+            await store.put(GOLDENS, name, manifest);
+            await store.delete(GOLDEN_RECIPES, recipeKey(name, head.version));
+            previousDropped = true;
+          } catch (e) {
+            console.warn(`golden ${name} v${head.version} kept: its snapshot was not deleted (${e instanceof Error ? e.message : String(e)})`);
+          }
         }
       }
       return { manifest, version: sealed.version, road, previousDropped, builderKept };
@@ -3512,15 +3519,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (templates === undefined) return undefined;
       const key = name ?? "default";
       const manifest = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
-      const recorded: { version: number; templateId: string; found: boolean }[] = [];
+      const rows: GoldenPromotion[] = [];
       for (const v of manifest?.versions ?? []) {
         if (v.templateId !== undefined) continue;
-        const { templateId, found } = await adoptOrPromote(templates, v.snapshotId, templateName(key, v.version));
-        const current = (await store.get(GOLDENS, key)) as GoldenManifest;
-        await store.put(GOLDENS, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });
-        recorded.push({ version: v.version, templateId, found });
+        try {
+          const { templateId, found } = await adoptOrPromote(templates, v.snapshotId, templateName(key, v.version));
+          const current = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
+          if (current === undefined) throw new Error(`golden ${key} was dropped while its versions were being promoted`);
+          await store.put(GOLDENS, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });
+          rows.push({ golden: key, version: v.version, templateId, found });
+        } catch (e) {
+          // The provider's 404 on the promote is its word that the snapshot is gone; every other failure keeps its own words.
+          rows.push({ golden: key, version: v.version, error: isMissing(e) ? SNAPSHOT_GONE_REASON : e instanceof Error ? e.message : String(e) });
+        }
       }
-      return recorded;
+      return rows;
     },
 
     async projects() {

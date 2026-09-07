@@ -77,13 +77,23 @@ describe("golden templates", () => {
     backend.templates.set("tpl_e6f26b64338f4eba", { id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready", snapshotId: "snap_golden-v1" });
     backend.templates.set("tpl_three", { id: "tpl_three", name: "wsp-default-v3", status: "ready", snapshotId: "snap_golden-v3" });
     expect(await rt.golden.promote()).toEqual([
-      { version: 1, templateId: "tpl_e6f26b64338f4eba", found: true },
-      { version: 2, templateId: "tpl_wsp-default-v2", found: false },
+      { golden: "default", version: 1, templateId: "tpl_e6f26b64338f4eba", found: true },
+      { golden: "default", version: 2, templateId: "tpl_wsp-default-v2", found: false },
     ]);
     expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v2", name: "wsp-default-v2" }]);
     expect((await rt.golden.get())!.versions.map(v => v.templateId)).toEqual(["tpl_e6f26b64338f4eba", "tpl_wsp-default-v2", "tpl_three"]);
     expect(await rt.golden.promote()).toEqual([]);
     expect(backend.promoted).toHaveLength(1);
+  });
+
+  it("a version the provider cannot promote is a row with the reason, gone when its snapshot is missing, and the other versions are still recorded", async () => {
+    const { backend, rt } = await seeded([version(1), version(2)]);
+    backend.snapshots.splice(0, 1);
+    expect(await rt.golden.promote()).toEqual([
+      { golden: "default", version: 1, error: "its snapshot is gone at the provider" },
+      { golden: "default", version: 2, templateId: "tpl_wsp-default-v2", found: false },
+    ]);
+    expect((await rt.golden.get())!.versions.map(v => v.templateId)).toEqual([undefined, "tpl_wsp-default-v2"]);
   });
 
   it("promote is undefined on a backend without templates, and a golden that does not exist has nothing to promote", async () => {

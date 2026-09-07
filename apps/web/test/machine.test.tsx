@@ -441,11 +441,11 @@ describe("lineage", () => {
     expect(screen.queryByRole("button", { name: "roll back to v12" })).toBeNull();
   });
 
-  it("every version says whether it is durable in the marks column: durable once a template is recorded, volatile while only the snapshot holds it", async () => {
+  it("a version only its snapshot holds says volatile in the marks column; one with a template recorded wears no word for it", async () => {
     await mount([onV12()], CAPS, { ...twoVersions, versions: [gv(11), { ...gv(12), templateId: "tpl_wsp-default-v12" }] });
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this fork", "durable"]));
+    await waitFor(() => expect(marks("v12")).toEqual(["head", "this fork"]));
     expect(marks("v11")).toEqual(["volatile"]);
-    const word = document.querySelector("[data-mark='durable']")!;
+    const word = document.querySelector("[data-mark='volatile']")!;
     expect(word.className).toContain("font-mono");
     expect(word.className).toContain("text-muted-foreground");
     expect(document.querySelector("[data-slot='badge']")).toBeNull();

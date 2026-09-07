@@ -564,7 +564,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                   </span>
                 }
                 detail={`built ${v.createdAt.slice(0, 10)}${fork && behind !== null ? ` · ${behindGoldenLine(v.version, behind)}` : ""}`}
-                marks={[...(head ? ["head" as const] : []), ...(fork ? ["fork" as const] : []), goldenImage(v).mark]}
+                marks={[...(head ? ["head" as const] : []), ...(fork ? ["fork" as const] : []), ...goldenImage(v).marks]}
                 below={
                   <>
                     {fork && v.missingTools !== undefined && v.missingTools.length > 0 && <MissingTools tools={v.missingTools} />}

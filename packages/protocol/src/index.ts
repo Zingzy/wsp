@@ -907,9 +907,10 @@ export function goldenHead(manifest: GoldenManifest | undefined): GoldenVersion 
 
 /** What a fork of a version boots from and the lineage's word for it: the durable template once one is recorded,
  * the snapshot until then. The one rule for every road that creates from a version and every row that says whether
- * the version survives the provider losing its snapshot store. */
-export function goldenImage(v: Pick<GoldenVersion, "snapshotId" | "templateId">): { spec: { template: string } | { fromSnapshot: string }; mark: "durable" | "volatile" } {
-  return v.templateId !== undefined ? { spec: { template: v.templateId }, mark: "durable" } : { spec: { fromSnapshot: v.snapshotId }, mark: "volatile" };
+ * the version survives the provider losing its snapshot store; a durable version gets no word, since a word every
+ * row wears says nothing. */
+export function goldenImage(v: Pick<GoldenVersion, "snapshotId" | "templateId">): { spec: { template: string } | { fromSnapshot: string }; marks: readonly "volatile"[] } {
+  return v.templateId !== undefined ? { spec: { template: v.templateId }, marks: [] } : { spec: { fromSnapshot: v.snapshotId }, marks: ["volatile"] };
 }
 
 /** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an

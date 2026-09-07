@@ -723,7 +723,7 @@ export function behindGoldenLine(on: number, head: number): string {
 
 /** The states a lineage row can be in, each as the muted mono word the row's marks column shows: state is text there,
  * never a badge, and a missing tool's outcome indexes this table as it is. */
-export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", durable: "durable", volatile: "volatile" } as const;
+export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", volatile: "volatile" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
 
 /** What is said for each folder git named no branch for, by door: the word the composer's branch slot and the diff
@@ -798,6 +798,15 @@ export function templateWaitedLine(templateId: string, status: string, waitedMs:
 export function templateRecordedLine(golden: string, version: number, templateId: string, found: boolean): string {
   return `golden ${golden} v${version}: template ${templateId} ${found ? "found by name" : "promoted"} and recorded`;
 }
+
+/** The doctor's line per version it could not make durable and why: a lost snapshot in the provider's own words is
+ * left to the doctor's rebuild road below it. */
+export function templateSkippedLine(golden: string, version: number, reason: string): string {
+  return `golden ${golden} v${version}: no template recorded, ${reason}`;
+}
+
+/** What a version's row says when the provider answers 404 for its snapshot: the vanish the templates exist to outlive. */
+export const SNAPSHOT_GONE_REASON = "its snapshot is gone at the provider";
 
 /** The doctor's line on a backend whose capabilities lack templates: nothing to promote, nothing wrong. */
 export const NO_TEMPLATES_LINE = "this backend has no templates; goldens stay as snapshots";
