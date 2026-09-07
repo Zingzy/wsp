@@ -37,7 +37,7 @@ const MACHINE_BINS = ["/bin/", "/usr/bin/", "/usr/local/bin/", "/usr/sbin/"];
 export const onMachine = (abs: string): boolean => MACHINE_BINS.some(d => abs.startsWith(d) && abs.length > d.length);
 
 /** A command word's path on this computer, `~` and `$HOME` expanded; nothing for a word that is not a path. */
-function pathOf(word: string, home: string): string | undefined {
+export function pathOf(word: string, home: string): string | undefined {
   if (word.startsWith("/")) return word;
   const prefix = HOME_PREFIXES.find(p => word.startsWith(p));
   return prefix === undefined ? undefined : `${home}/${word.slice(prefix.length)}`;
@@ -76,6 +76,22 @@ const OPERATORS = new Set(["&&", "||", "|", ";"]);
 const INTERPRETERS = new Set(["env", "bash", "sh", "zsh", "dash", "node", "bun", "deno", "python", "python3", "ruby", "perl"]);
 const ENV_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
+/** Whether a command word runs another file, so the first word after its flags is the file, not this one. */
+export function runsAFile(word: string, home: string): boolean {
+  return INTERPRETERS.has(pathOf(word, home) === undefined ? word : word.slice(word.lastIndexOf("/") + 1));
+}
+
+/** Where a command word lands on the guest: the word as the machine reads it, with the file carried to get it there,
+ * or the path the placer refused. A word that names no path, or one the machine already has, is unchanged. */
+export type PlacedWord = { word: string; carried?: { from: string; to: string } } | { left: string };
+
+export function placeWord(word: string, home: string, place: HookPlacer): PlacedWord {
+  const path = pathOf(word, home);
+  if (path === undefined || onMachine(path)) return { word };
+  const to = place(path);
+  return to === undefined ? { left: word } : { word: to, carried: { from: path, to } };
+}
+
 type Rewritten = { command: string; carried: { from: string; to: string }[] } | { left: string };
 
 /** The command with the first word of each simple command, and the script an interpreter runs, rewritten to its
@@ -94,14 +110,11 @@ function rewriteCommand(command: string, home: string, place: HookPlacer): Rewri
     const quote = token.length >= 2 && (token[0] === '"' || token[0] === "'") && token.at(-1) === token[0] ? token[0] : "";
     const word = quote === "" ? token : token.slice(1, -1);
     if (ENV_ASSIGN.test(word) || (expect === "script" && word.startsWith("-"))) return token;
-    const path = pathOf(word, home);
-    const name = path === undefined ? word : word.slice(word.lastIndexOf("/") + 1);
-    expect = INTERPRETERS.has(name) ? "script" : "args";
-    if (path === undefined || onMachine(path)) return token;
-    const to = place(path);
-    if (to === undefined) return { left: word };
-    carried.push({ from: path, to });
-    return `${quote}${to}${quote}`;
+    expect = runsAFile(word, home) ? "script" : "args";
+    const placed = placeWord(word, home, place);
+    if ("left" in placed) return placed;
+    if (placed.carried !== undefined) carried.push(placed.carried);
+    return placed.word === word ? token : `${quote}${placed.word}${quote}`;
   });
   const refused = words.find((w): w is { left: string } => typeof w !== "string");
   return refused ?? { command: words.join(""), carried };

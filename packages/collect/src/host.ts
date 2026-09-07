@@ -7,6 +7,9 @@ export interface Stat {
   kind: "file" | "dir";
   /** Size of the file, or of every regular file under the dir. */
   bytes: number;
+  /** When it was last written, milliseconds since the epoch: with the size, what says a file a reader already read
+   * has changed since. */
+  mtimeMs: number;
 }
 
 export interface HostFs {

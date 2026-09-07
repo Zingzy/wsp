@@ -69,6 +69,39 @@ export function scriptedAgent(reply: (prompt: string) => string) {
   return { adapter, starts };
 }
 
+/** A harness whose first start never reaches the machine: the turn fails with the runtime's unreached line and no
+ * session.start, as a launch the network dropped does; every later start answers like scriptedAgent. */
+export const UNREACHED_LINE = "the machine could not be reached from this computer after 6 attempts over 23s";
+export function bornDeadAgent(reply: (prompt: string) => string) {
+  const starts: HarnessStartOptions[] = [];
+  const adapter: HarnessAdapterFactory = () => ({
+    steers: false,
+    start: o => {
+      starts.push(o);
+      const sessionId = o.resume ?? randomUUID();
+      if (starts.length === 1) {
+        const result: TurnResult = { status: "failed", error: UNREACHED_LINE };
+        const finished = Promise.resolve().then(() => {
+          o.onEvent({ type: "turn.done", sessionId, result });
+          o.onEvent({ type: "session.end", sessionId, exitCode: null, sawResult: false });
+          return result;
+        });
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      }
+      const result: TurnResult = { status: "completed", text: reply(o.prompt) };
+      const finished = Promise.resolve().then(() => {
+        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: result.text ?? "" });
+        o.onEvent({ type: "turn.done", sessionId, result });
+        o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        return result;
+      });
+      return { localId: sessionId, finished, interrupt: async () => {} };
+    },
+  });
+  return { adapter, starts };
+}
+
 /** A harness that answers every prompt with reply(prompt) and then never says its session ended: the done lands, the
  * end does not. What a real turn looks like from the client between the reply and the runtime's late exit read. */
 export function doneOnlyAgent(reply: (prompt: string) => string) {
