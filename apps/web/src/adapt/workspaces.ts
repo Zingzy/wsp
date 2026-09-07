@@ -107,6 +107,7 @@ function deriveThread(thread: ThreadView): SidebarThreadSnapshot {
   return {
     id: thread.id,
     threadId: thread.threadId ?? null,
+    sessionId: thread.sessionId,
     workspaceId: thread.workspaceId,
     title: thread.title,
     status: thread.status,

@@ -332,3 +332,22 @@ export function shortcutLabelForCommand(
   const shortcut = findEffectiveShortcutForCommand(keybindings, command, resolvedOptions);
   return shortcut ? formatShortcutLabel(shortcut, platform) : null;
 }
+
+const ACCELERATOR_KEYS: Readonly<Record<string, string>> = { " ": "Space", escape: "Escape", arrowup: "Up", arrowdown: "Down", arrowleft: "Left", arrowright: "Right" };
+
+/** The same chord in Electron's spelling, for a native menu row; mod reads CommandOrControl on every platform. */
+export function formatAccelerator(shortcut: KeybindingShortcut): string {
+  const parts: string[] = [];
+  if (shortcut.modKey) parts.push("CommandOrControl");
+  if (shortcut.ctrlKey) parts.push("Control");
+  if (shortcut.altKey) parts.push("Alt");
+  if (shortcut.shiftKey) parts.push("Shift");
+  if (shortcut.metaKey) parts.push("Meta");
+  parts.push(ACCELERATOR_KEYS[shortcut.key] ?? (shortcut.key.length === 1 ? shortcut.key.toUpperCase() : shortcut.key));
+  return parts.join("+");
+}
+
+export function acceleratorForCommand(keybindings: ResolvedKeybindingsConfig, command: KeybindingCommand, options?: ShortcutMatchOptions): string | null {
+  const shortcut = findEffectiveShortcutForCommand(keybindings, command, options);
+  return shortcut ? formatAccelerator(shortcut) : null;
+}

@@ -35,6 +35,51 @@ describe("index.css", () => {
         }
       }
 
+      /* On macOS the desktop window frosts the sidebar's column with the system's
+         own glass, so nothing in the sidebar paints a background over it. The main
+         column keeps its solid background, so text never sits on the desktop. */
+      @utility sidebar-vibrancy {
+        background: transparent;
+        border-color: var(--sidebar-border);
+
+        & > [data-slot="sidebar-inner"] {
+          background: transparent;
+        }
+      }
+
+      /* The window paints the glass behind the page, so the page's own canvas is
+         clear and only the main column paints a background. The frame row's toggle
+         sits one header gap after the third traffic light, centre to centre: with
+         the lights at x 16 the third light's centre measures 69px at 1x. */
+      .desktop-mac,
+      .desktop-mac body {
+        background: transparent;
+      }
+
+      .desktop-mac {
+        --header-frame-inset: calc(69px + var(--header-gap) - var(--workspace-titlebar-control-size) / 2);
+      }
+
+      /* The chord and the counts in the top rows: the muted text at part opacity.
+         Declared where the contrast tokens are, so the sidebar's own step-ups
+         reach it. */
+      :root,
+      [data-app-sidebar] {
+        --top-row-meta: color-mix(in srgb, var(--contrast-muted-foreground) var(--top-row-meta-alpha), transparent);
+      }
+
+      /* Over the glass the sidebar's quiet text and glyphs have no solid card
+         behind them: one step up, and the chord and counts nearly opaque, keep
+         them at AA over a white desktop, where the glass reads as mid grey. */
+      .desktop-mac [data-app-sidebar] {
+        @variant dark {
+          --muted-foreground: var(--color-neutral-300);
+          --sidebar-muted-foreground: var(--color-neutral-300);
+          --sidebar-icon-color: var(--color-neutral-300);
+          --top-row-meta-alpha: 90%;
+        }
+      }
+
       /* A Ghostty config with background-opacity under 1: the viewport marks itself
          translucent, and the pane around it stops painting so the canvas sits on the
          app background in a browser tab. In the macOS desktop window, whose html

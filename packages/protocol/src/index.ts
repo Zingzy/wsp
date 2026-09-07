@@ -777,12 +777,32 @@ export interface BootPayload {
   terminalFont?: string;
 }
 
+/** One row of a context menu as the page hands it to the desktop shell, which builds the native menu from it. An item
+ * that cannot run right now is shown dimmed with its refusal as the hover text; rows of different groups are parted by
+ * a separator. shortcut is the label the page shows, accelerator the same chord in Electron's spelling. */
+export interface ContextMenuItem {
+  id: string;
+  label: string;
+  group: string;
+  enabled: boolean;
+  refusal?: string;
+  shortcut?: string;
+  accelerator?: string;
+  destructive?: boolean;
+}
+
+/** The class the desktop preload puts on the html element when the window has no title bar of its own: the app's
+ * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
+export const DESKTOP_MAC_CLASS = "desktop-mac";
+
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
   localFonts(family: string): Promise<LocalFontFace[]>;
   /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
   pickFolder(): Promise<string | undefined>;
+  /** The native context menu at the pointer, built from the items; resolves with the chosen item's id, or null when it was dismissed. */
+  contextMenu(items: ContextMenuItem[]): Promise<string | null>;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------
@@ -1777,5 +1797,5 @@ export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
-export { workspaceFromHash, workspaceHash } from "./app-address.js";
+export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export type { AdapterEvent, ExecStream, ExecStreamFactory } from "./adapter-port.js";

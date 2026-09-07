@@ -4,12 +4,19 @@
 // Workspaces section row that shuts them all and opens the new-workspace
 // dialog, the settled shelf, keyboard traversal, the rebuild of a zombie or
 // gone machine and the forget of a gone one live here; rows and logic come
-// from the copied t3code files beside this one. The surface itself is the
-// shell's sidebar-glass: nothing here paints a background.
-import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+// from the copied t3code files beside this one. Every action a row carries,
+// as a button or in its right-click menu, comes from the workspace and thread
+// registries. The surface itself is the shell's sidebar-glass: nothing here
+// paints a background.
+import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, MessageSquarePlusIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { agentName } from "@wsp/catalog";
 import { goldenHead, needsRebuild, outOfMemoryRowLine, type WorkspaceSize } from "@wsp/protocol";
+import { openContextMenu, runAction } from "../actions/contextMenu.js";
+import { actionById, resolveActions, rowLabelOf } from "../actions/registry.js";
+import { threadActions } from "../actions/threadActions.js";
+import { useThreadVerbs, useWorkspaceVerbs } from "../actions/verbs.js";
+import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { useOutOfMemoryReadings } from "../machine/live.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
@@ -35,8 +42,8 @@ import { useNowMinute } from "../hooks/useNowMinute.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { cn } from "../lib/utils.js";
-import { useCapabilities, useSelectedId, useSelectedThreadId, useStore, type Creation } from "../protocol/store.js";
-import { onNewWorkspaceRequest, requestNewThread } from "../shell/shellRequests.js";
+import { useCapabilities, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { onForgetWorkspaceRequest, onNewWorkspaceRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
@@ -133,6 +140,7 @@ export function WorkspaceSidebar() {
   const capabilities = useCapabilities();
   const selectedId = useSelectedId();
   const selectedThreadId = useSelectedThreadId();
+  const selectedWorkspace = useWorkspace(useSelectedWorkspaceId());
   const nowMinute = useNowMinute();
   // One clock sample per minute tick so every idle countdown reads the same now.
   const nowMs = useMemo(() => Date.now(), [nowMinute]);
@@ -149,6 +157,8 @@ export function WorkspaceSidebar() {
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
   const [forgetting, setForgetting] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const threadVerbs = useThreadVerbs();
+  const defaultVerbs = useWorkspaceVerbs();
 
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
   const visible = useMemo(() => visibleProjects(projects), [projects]);
@@ -168,6 +178,7 @@ export function WorkspaceSidebar() {
   const openDialogRef = useRef(openDialog);
   openDialogRef.current = openDialog;
   useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current()), []);
+  useEffect(() => onForgetWorkspaceRequest(({ workspaceId }) => setForgetting(workspaceId)), []);
 
   const create = async (name: string, start: WorkspaceStart, size?: WorkspaceSize): Promise<void> => {
     setDialog(null);
@@ -175,10 +186,11 @@ export function WorkspaceSidebar() {
     if (start === "import" && id !== null) setImporting({ key: Date.now(), workspaceId: id });
   };
 
-  const rebuild = async (project: SidebarProjectSnapshot): Promise<void> => {
-    const machineId = project.status?.machineId ?? project.workspace.machineId;
-    if (!api?.rebuild) return;
-    setRebuilding(r => ({ ...r, [project.id]: machineId }));
+  // The row's rebuild spins until the status names a new machine, so it stands in for the registry's plain call.
+  const rebuild = async (workspaceId: string): Promise<void> => {
+    const project = projects.find(p => p.id === workspaceId);
+    if (!api?.rebuild || !project) return;
+    setRebuilding(r => ({ ...r, [project.id]: project.status?.machineId ?? project.workspace.machineId }));
     try {
       await api.rebuild(project.id);
     } catch (e) {
@@ -186,11 +198,7 @@ export function WorkspaceSidebar() {
       useStore.setState({ toast: `${project.displayName}: ${e instanceof Error ? e.message : String(e)}` });
     }
   };
-
-  const newThread = (id: string): void => {
-    requestNewThread({ workspaceId: id });
-    select(id);
-  };
+  const verbs = { ...defaultVerbs, rebuild: api?.rebuild ? rebuild : undefined };
 
   const toggleCollapsed = (id: string): void => {
     setCollapsed(prev => {
@@ -236,8 +244,29 @@ export function WorkspaceSidebar() {
   };
 
   const search = (
-    <div className="px-[var(--sidebar-content-inset)] pb-1">
-      <SearchRow />
+    <div className="px-[var(--sidebar-content-inset)] pt-3 pb-1" data-sidebar-search>
+      <div className="relative">
+        <SearchRow
+          action={
+            selectedWorkspace !== null ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <SidebarGroupAction
+                      className="top-1.5 text-sidebar-muted-foreground transition-colors duration-150"
+                      aria-label="New thread"
+                      onClick={() => verbs.newThread(selectedWorkspace.id)}
+                    />
+                  }
+                >
+                  <MessageSquarePlusIcon />
+                </TooltipTrigger>
+                <TooltipPopup side="bottom">{NEW_THREAD_TITLE}</TooltipPopup>
+              </Tooltip>
+            ) : undefined
+          }
+        />
+      </div>
     </div>
   );
 
@@ -303,8 +332,12 @@ export function WorkspaceSidebar() {
                     const collapseSlot = collapsible ? slotOf() : "";
                     const importSlot = canImport ? slotOf() : "";
                     const exportSlot = canExport ? slotOf() : "";
+                    const actionsOf = resolveActions(workspaceActions, workspaceTarget(project.workspace, project.status), verbs);
+                    const forgetAction = actionById(actionsOf, "forget");
+                    const rebuildAction = actionById(actionsOf, "rebuild");
+                    const newThreadAction = actionById(actionsOf, "new-thread");
                     return (
-                      <SidebarMenuItem key={project.id}>
+                      <SidebarMenuItem key={project.id} onContextMenu={event => void openContextMenu(event, actionsOf, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") })}>
                         <SidebarMenuButton
                           size="lg"
                           isActive={selectedId === project.id && selectedThreadId === null}
@@ -334,19 +367,19 @@ export function WorkspaceSidebar() {
                             {gone ? (
                               <SidebarMenuAction
                                 className={ACTION_SLOTS[0]}
-                                aria-label={`Forget ${project.displayName}`}
-                                title="The machine is gone; forget the workspace to drop it from this computer"
-                                disabled={!api?.forget}
-                                onClick={() => setForgetting(project.id)}
+                                aria-label={rowLabelOf(forgetAction)}
+                                title={forgetAction.refusal ?? forgetAction.hint ?? undefined}
+                                disabled={forgetAction.refusal !== null}
+                                onClick={() => void runAction(forgetAction)}
                               >
                                 <Trash2Icon />
                               </SidebarMenuAction>
                             ) : null}
                             <SidebarMenuAction
-                              aria-label={`Rebuild ${project.displayName}`}
-                              title={project.status?.reason ?? project.workspace.gone ?? "The machine answers nothing; rebuild it from the golden image"}
-                              disabled={rebuildAsked || !api?.rebuild}
-                              onClick={() => void rebuild(project)}
+                              aria-label={rowLabelOf(rebuildAction)}
+                              title={rebuildAction.refusal ?? rebuildAction.hint ?? undefined}
+                              disabled={rebuildAsked || rebuildAction.refusal !== null}
+                              onClick={() => void runAction(rebuildAction)}
                             >
                               <RefreshCwIcon className={cn(rebuildAsked && "animate-spin")} />
                             </SidebarMenuAction>
@@ -399,7 +432,7 @@ export function WorkspaceSidebar() {
                             ) : null}
                             <Tooltip>
                               <TooltipTrigger
-                                render={<SidebarMenuAction showOnHover aria-label={`New thread in ${project.displayName}`} onClick={() => newThread(project.id)} />}
+                                render={<SidebarMenuAction showOnHover aria-label={rowLabelOf(newThreadAction)} onClick={() => void runAction(newThreadAction)} />}
                               >
                                 <PlusIcon />
                               </TooltipTrigger>
@@ -414,7 +447,7 @@ export function WorkspaceSidebar() {
                                 No threads yet.{" "}
                                 <button
                                   type="button"
-                                  onClick={() => newThread(project.id)}
+                                  onClick={() => void runAction(newThreadAction)}
                                   className="cursor-pointer rounded-sm outline-hidden ring-ring hover:text-sidebar-foreground focus-visible:ring-2"
                                 >
                                   New thread {NEW_THREAD_SHORTCUT}
@@ -432,6 +465,7 @@ export function WorkspaceSidebar() {
                                 time={compactTimeLabel(thread.startedAt)}
                                 active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
                                 onSelect={() => select(thread.workspaceId, thread.threadId)}
+                                onContextMenu={event => void openContextMenu(event, resolveActions(threadActions, thread, threadVerbs))}
                               />
                             ))}
                             {settled.length > 0 ? (
@@ -460,6 +494,7 @@ export function WorkspaceSidebar() {
                                     time={compactTimeLabel(resolveSettledTimestamp(thread))}
                                     active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
                                     onSelect={() => select(thread.workspaceId, thread.threadId)}
+                                    onContextMenu={event => void openContextMenu(event, resolveActions(threadActions, thread, threadVerbs))}
                                   />
                                 ))
                               : null}
@@ -555,7 +590,7 @@ function CreationRow({ creation, active, onSelect }: { creation: Creation; activ
 }
 
 /** The metadata sits under the title so it never takes the title's room; every row is one height. */
-function ThreadRow({ thread, time, active, onSelect }: { thread: SidebarThreadSnapshot; time: string; active: boolean; onSelect: () => void }) {
+function ThreadRow({ thread, time, active, onSelect, onContextMenu }: { thread: SidebarThreadSnapshot; time: string; active: boolean; onSelect: () => void; onContextMenu: (event: MouseEvent<HTMLElement>) => void }) {
   const pill = threadPill(thread);
   // The Idle header can be shut, so the row carries the difference itself, in the title's colour.
   const idle = !isThreadWorking(thread);
@@ -567,6 +602,7 @@ function ThreadRow({ thread, time, active, onSelect }: { thread: SidebarThreadSn
         data-sidebar-row
         data-row-id={`thread:${thread.id}`}
         onClick={onSelect}
+        onContextMenu={onContextMenu}
         className="h-11 w-full items-start py-1.5"
       >
         <ProjectFavicon src={null} className="mt-0.5 size-3.5 opacity-60" fallbackIcon={MessageSquareIcon} />
