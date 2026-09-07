@@ -12,6 +12,7 @@ import { WebSocketServer } from "ws";
 import { TOOLS_PATH } from "@wsp/engine";
 import { rotateDaemonTokenScript, writeDaemonTokenScript } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
+import { isReserved } from "@wsp/engine";
 import {
   connectDaemonSocket,
   deployDaemon,
@@ -23,7 +24,6 @@ import {
   GUEST_NODE,
   claudeEnvs,
   OPEN_SHIM_SCRIPT,
-  isReserved,
   packBundle,
   stageDaemonBundle,
   tarPackCommand,
