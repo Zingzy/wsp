@@ -66,10 +66,12 @@ describe("catalogProbeCommand", () => {
     expect(cmd).not.toMatch(/codex exec|codex login|--dangerously/);
     // No fixed wait anywhere: this line is awaited at a session start. The only wait is the reader's, per line.
     expect(cmd).not.toMatch(/\bsleep\b/);
-    expect(cmd).toContain(`-t ${String(LINE_WAIT_MS / 1000)} -u 3`);
-    // The only pid killed is the one bash recorded for its own coprocess, and never a bare 0, which is the group.
+    expect(cmd).toContain(`-t ${String(LINE_WAIT_MS / 1000)} -u 4`);
+    // The only pid killed is the one the shell recorded for the server, and never a bare 0, which is the group.
     expect(cmd).toContain('kill "$WSP_APP_SERVER_PID"');
     expect(cmd).not.toMatch(/pkill|killall|kill -|kill "?0/);
+    // Nothing from bash 4 or later: the Mac's own bash is 3.2 and this line has to prove itself there too.
+    expect(cmd).not.toMatch(/\bcoproc\b/);
   });
 
   it("holds the app-server's stdin open until its answers are in, and lets go on the last one", () => {

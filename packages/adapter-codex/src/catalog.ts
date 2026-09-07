@@ -10,7 +10,7 @@
 // no model is called.
 //
 // The app-server exits the moment its stdin closes, before it has answered, so
-// the probe holds its stdin open from a coprocess and closes it on the last
+// the probe holds its stdin open through a named pipe and closes it on the last
 // answer: this line is awaited at a session start, and a fixed wait would be a
 // wait the person sits through. The answers arrive in no fixed order (measured
 // twice, id 3 and id 4 either way round), so the reader counts answers rather
@@ -50,18 +50,22 @@ export function catalogProbeCommand(options: { home: string; baseEnv?: Readonly<
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const lines = REQUESTS.map(line => shellQuote(line)).join(" ");
   const server = [
-    "coproc WSP_APP_SERVER { codex app-server; }",
-    // On its own descriptor, because bash drops the coprocess's the moment it exits, and with it whatever the server
-    // had already written: read from a copy and an early exit reads as the end of the answers instead of an error.
-    'exec 3<&"${WSP_APP_SERVER[0]}"',
-    `printf '%s\\n' ${lines} >&"\${WSP_APP_SERVER[1]}"`,
+    // Two named pipes rather than a coprocess: the Mac's own bash is 3.2, which has none, and the test proves this
+    // line on whatever bash runs it.
+    'WSP_PROBE_DIR=$(mktemp -d) && mkfifo "$WSP_PROBE_DIR/in" "$WSP_PROBE_DIR/out"',
+    'codex app-server <"$WSP_PROBE_DIR/in" >"$WSP_PROBE_DIR/out" &',
+    "WSP_APP_SERVER_PID=$!",
+    'exec 3>"$WSP_PROBE_DIR/in" 4<"$WSP_PROBE_DIR/out"',
+    `printf '%s\\n' ${lines} >&3`,
     "answers=0",
-    `while [ "$answers" -lt ${String(REQUESTS.length)} ] && IFS= read -r -t ${String(LINE_WAIT_S)} -u 3 line; do`,
+    `while [ "$answers" -lt ${String(REQUESTS.length)} ] && IFS= read -r -t ${String(LINE_WAIT_S)} -u 4 line; do`,
     `  printf '%s\\n' "$line"`,
     `  case $line in '{"id":'*) answers=$((answers + 1)) ;; esac`,
     "done",
-    // Only ever the pid bash recorded, and only while it is still set: bare `kill 0` would signal the whole group.
-    'if [ -n "${WSP_APP_SERVER_PID:-}" ]; then kill "$WSP_APP_SERVER_PID" 2>/dev/null || :; fi',
+    "exec 3>&- 4<&-",
+    // Only ever the pid the shell recorded: bare `kill 0` would signal the whole group.
+    'kill "$WSP_APP_SERVER_PID" 2>/dev/null || :',
+    'rm -rf "$WSP_PROBE_DIR"',
   ].join("\n");
   return `cd ~ && export ${exports}; codex --version; echo ${SEP}; codex --help; echo ${SEP}\n${server}`;
 }
