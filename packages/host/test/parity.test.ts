@@ -7,9 +7,11 @@ import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
-import { COMMAND_LINES, type CommandLine } from "../src/cli.js";
+import { NOTIFY_WORDS, SessionStartOutcome, TURN_END_WORDS, stillWorkingRefusal } from "@wsp/protocol";
+import { COMMAND_LINES, HELP, type CommandLine } from "../src/cli.js";
 import { mcpServer } from "../src/mcp.js";
 import { INSTRUCTIONS, WSP_SKILL } from "../src/skill.js";
+import { COMMON, VERBS } from "../src/verbs.js";
 
 /** Tools with no command line, each with why: a caller with a shell has the verb named instead. */
 const TOOL_ONLY: Readonly<Record<string, string>> = {
@@ -31,6 +33,7 @@ const toolNameOf = (words: string): string => words.replace(/ /g, "_");
 
 interface Tool {
   name: string;
+  description?: string;
   inputs: string[];
 }
 
@@ -42,7 +45,7 @@ async function listTools(): Promise<Tool[]> {
   await client.connect(toClient);
   try {
     const { tools } = await client.listTools();
-    return tools.map(t => ({ name: t.name, inputs: Object.keys((t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}).sort() }));
+    return tools.map(t => ({ name: t.name, description: t.description, inputs: Object.keys((t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}).sort() }));
   } finally {
     await client.close();
     await server.close();
@@ -51,10 +54,16 @@ async function listTools(): Promise<Tool[]> {
 
 interface SkillRow {
   words: string;
+  /** The `--flag` names the command cell shows, each once, sorted. */
+  flags: string[];
   tools: Tool[];
 }
 
-/** The rows of the skill's verbs table: the command's words, and each tool it names with the inputs in its parentheses. */
+/** The `--flag` names a line of usage shows, each once, sorted; a bare `--` is not one. */
+const flagsOf = (text: string): string[] => [...new Set([...text.matchAll(/--([a-z][a-z-]*)/g)].map(m => m[1]!))].sort();
+
+/** The rows of the skill's verbs table: the command's words, its flags, and each tool it names with the inputs in its
+ * parentheses. */
 export function skillRows(skill: string): SkillRow[] {
   return skill
     .split("\n")
@@ -68,8 +77,26 @@ export function skillRows(skill: string): SkillRow[] {
       }
       const named: Tool[] = [];
       for (const m of tools!.matchAll(/`(\w+)`(?: \(([^)]*)\))?/g)) named.push({ name: m[1]!, inputs: m[2] === undefined ? [] : m[2].split(",").map(s => s.trim()).sort() });
-      return { words: words.join(" "), tools: named };
+      return { words: words.join(" "), flags: flagsOf(command!), tools: named };
     });
+}
+
+/** The flags a command reads beside the ones every command takes. */
+const ownFlags = (options: CommandLine["options"]): string[] => Object.keys(options).filter(name => !(name in COMMON)).sort();
+
+/** Where the skill's verbs table and the flag tables disagree, one line each: a flag the command reads that its row
+ * does not show, or one the row shows that the command refuses. Nothing when every row matches. */
+export function flagDrift(skill: string, lines: readonly CommandLine[]): string[] {
+  const rowOf = new Map(skillRows(skill).map(r => [r.words, r]));
+  const drift: string[] = [];
+  for (const { words, options } of lines) {
+    const row = rowOf.get(words);
+    if (row === undefined) continue;
+    const shown = row.flags.filter(name => !(name in COMMON));
+    for (const name of ownFlags(options)) if (!shown.includes(name)) drift.push(`wsp ${words} reads --${name}, which its row does not show`);
+    for (const name of shown) if (!(name in options)) drift.push(`the row for wsp ${words} shows --${name}, which it does not read`);
+  }
+  return drift;
 }
 
 /** The words of a shell line: quotes and `<...>` placeholders group, `[` and `]` are dropped, and a redirect, a
@@ -208,6 +235,49 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     for (const { words } of COMMAND_LINES) expect(commands.some(argv => argv.slice(1, 1 + words.split(" ").length).join(" ") === words), `no example of wsp ${words}`).toBe(true);
   });
 
+  it("every flag a command reads is in its row of the skill's verbs table and the row shows no other; every verb's usage names only flags it reads", () => {
+    expect(flagDrift(WSP_SKILL, COMMAND_LINES)).toEqual([]);
+    for (const verb of VERBS) for (const name of flagsOf(verb.usage)) expect(name in verb.options, `wsp ${verb.name}'s usage names --${name}`).toBe(true);
+    // The rows the skill carried while thread new and send already read the three picks: each missing pick is named.
+    const stale = WSP_SKILL.split("\n")
+      .map(line => {
+        if (line.startsWith("| `wsp thread new ")) return '| `wsp thread new --in <workspace> [--agent <id>] [--cwd <path>] [--notify <thread\\|me>] "<task>"` | `thread_new` (workspace, task, agent, cwd, notify) | opens |';
+        if (line.startsWith("| `wsp send ")) return '| `wsp send <thread> "<message>"` | `send` (thread, message) | a message |';
+        return line;
+      })
+      .join("\n");
+    expect(flagDrift(stale, COMMAND_LINES)).toEqual([
+      "wsp thread new reads --access, which its row does not show",
+      "wsp thread new reads --effort, which its row does not show",
+      "wsp thread new reads --model, which its row does not show",
+      "wsp send reads --access, which its row does not show",
+      "wsp send reads --effort, which its row does not show",
+      "wsp send reads --model, which its row does not show",
+    ]);
+    expect(flagDrift(stale.replace("| `wsp stop <thread>`", "| `wsp stop <thread> [--now]`"), COMMAND_LINES)).toContain("the row for wsp stop shows --now, which it does not read");
+  });
+
+  it("what a send meets on a running or a replied thread is said in the runtime's words, the same in the skill's send section and the send tool", async () => {
+    const tool = (await listTools()).find(t => t.name === "send")!.description!;
+    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### send"), WSP_SKILL.indexOf("### stop"));
+    for (const text of [tool, section]) {
+      for (const outcome of SessionStartOutcome.options) expect(text, outcome).toContain(`(outcome \`${outcome}\`)`);
+      expect(text).toContain(`\`${stillWorkingRefusal("1a2b3c4d-0000")}\``);
+    }
+  });
+
+  it("when a turn ends and when the notify line goes are the runtime's words in every door: the skill, the thread_new tool and the help", async () => {
+    const tool = (await listTools()).find(t => t.name === "thread_new")!.description!;
+    for (const text of [tool, WSP_SKILL]) {
+      expect(text).toContain(TURN_END_WORDS);
+      expect(text).toContain(NOTIFY_WORDS);
+    }
+    // The help wraps the sentence at 80 columns, so it is read with its line breaks folded.
+    const help = HELP.replace(/\s+/g, " ");
+    expect(help).toContain(TURN_END_WORDS);
+    for (const text of [tool, WSP_SKILL, help]) expect(text).not.toMatch(/when the (first )?turn ends/);
+  });
+
   it("a stale flag, a renamed verb and a dropped flag value fail; an output line, an error line and an illustrative line are skipped", () => {
     const planted = [
       "```",
@@ -233,7 +303,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
 
   it("reads a usage row as its words and each tool with its inputs", () => {
     const [row] = skillRows("| `wsp thread new --in <workspace> [--agent <id>] \"<task>\"` | `thread_new` (workspace, task, agent), `threads` | opens |");
-    expect(row).toEqual({ words: "thread new", tools: [{ name: "thread_new", inputs: ["agent", "task", "workspace"] }, { name: "threads", inputs: [] }] });
+    expect(row).toEqual({ words: "thread new", flags: ["agent", "in"], tools: [{ name: "thread_new", inputs: ["agent", "task", "workspace"] }, { name: "threads", inputs: [] }] });
     expect(shellWords('wsp recipe --add just="brew install just" [--set <id>=on|off] --notify <thread|me> "<the task>" # a note')).toEqual({
       words: ["wsp", "recipe", "--add", 'just="brew install just"', "--set", "<id>=on|off", "--notify", "<thread|me>", '"<the task>"'],
       comment: "a note",

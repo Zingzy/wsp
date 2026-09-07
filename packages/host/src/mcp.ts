@@ -8,7 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { nodeHost } from "@wsp/collect";
-import { AFTER_CUT_LINE, LOGIN_CHOICES, ProjectExportResult, ProjectGolden, ProjectImportResult, ProjectPlan, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, actionRefusal, deleteNotice, importConsented, importRequest, workspaceState } from "@wsp/protocol";
+import { AFTER_CUT_LINE, LOGIN_CHOICES, ProjectExportResult, ProjectGolden, ProjectImportResult, ProjectPlan, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, actionRefusal, deleteNotice, importConsented, importRequest, NOTIFY_WORDS, TURN_END_WORDS, stillWorkingRefusal, workspaceState } from "@wsp/protocol";
 import { historyCache, smallRecipePath } from "./recipe-file.js";
 import { runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
@@ -53,6 +53,12 @@ export function dialer(statePath: string): Dialer {
 }
 
 const Created = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
+
+/** What a send meets on its thread, in the runtime's own words: the outcome it answers with on a free or a running
+ * turn, and the line it refuses with when the last turn replied but its agent process has not exited. */
+const { started, steered, queued } = SessionStartOutcome.enum;
+const SEND_MEETS = `On a thread whose turn is not running the message starts a new turn (outcome \`${started}\`); when the turn is still running the message joins it (outcome \`${steered}\`) or waits for it and then runs (outcome \`${queued}\`), and the reply is that turn's. When the thread's turn has replied but its agent process is still running, nothing starts and the send is refused with \`${stillWorkingRefusal("1a2b3c4d")}\`; wait for the thread to leave running, then send again.`;
+
 /** outcome says how the message landed: its own turn, steered into the thread's running one, or queued behind it;
  * afterCut is set when the thread's previous turn ended without a result, so the reply may be missing context. */
 const TurnOut = z.object({ threadId: z.string(), workspaceId: z.string(), harness: z.string(), text: z.string(), outcome: SessionStartOutcome, afterCut: z.literal(true).optional() });
@@ -278,7 +284,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
   server.registerTool(
     "thread_new",
     {
-      description: "Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text when the turn ends, with the thread id for send. With notify, every turn of the thread that ends later sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll.",
+      description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll. ${NOTIFY_WORDS}.`,
       inputSchema: { workspace, task: z.string(), agent, ...picks, cwd, notify },
       outputSchema: TurnOut.shape,
     },
@@ -294,7 +300,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
   server.registerTool(
     "send",
     {
-      description: "Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when the turn ends; a person's message on the same thread lands in order with yours. A model, effort or access named here is the turn's; a turn that joins a running one keeps that one's. When the thread's turn is still running the message joins it (outcome steered) or waits for it and then runs (outcome queued); the reply is that turn's.",
+      description: `Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. A model, effort or access named here is the turn's; a turn that joins a running one keeps that one's. ${SEND_MEETS}`,
       inputSchema: { thread: z.string(), message: z.string(), ...picks },
       outputSchema: TurnOut.shape,
     },

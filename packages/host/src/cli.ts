@@ -22,7 +22,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS } from "@wsp/catalog";
-import { LOGIN_CHOICES, RECIPE_TICKS, fmtDuration, shellQuote } from "@wsp/protocol";
+import { LOGIN_CHOICES, RECIPE_TICKS, TURN_END_WORDS, fmtDuration, shellQuote } from "@wsp/protocol";
 import { agentHomes } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { HARNESS_ADAPTERS } from "./adapters.js";
@@ -38,7 +38,7 @@ import { historyCache, smallRecipePath } from "./recipe-file.js";
 import { isRecipeTick, runRecipe, runScan } from "./recipe-command.js";
 import { recipeAnswer, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { scanTools } from "./scan.js";
-import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, type PromptOptions } from "./init-layout.js";
+import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, wrap, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { addressLines, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
@@ -125,9 +125,10 @@ protocol values:
 ${verbHelp()}
 
   wsp send streams the reply to stderr as it arrives and prints the last message
-  on stdout when the turn ends; wsp exec streams the command's output and exits
-  with its code. thread new, send and exec wake a paused workspace first, with
-  one line on stderr saying so.
+  on stdout when the reply is complete.
+${wrap(`  ${TURN_END_WORDS}.`, 80).join("\n")}
+  wsp exec streams the command's output and exits with its code. thread new,
+  send and exec wake a paused workspace first, with one line on stderr saying so.
 
 options:
   --port N           app port (default 4400)
