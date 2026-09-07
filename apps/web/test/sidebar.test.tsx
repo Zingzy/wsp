@@ -103,7 +103,7 @@ describe("header", () => {
     expect(screen.getByRole("img", { name: "wsp" })).toBeTruthy();
   });
 
-  it("the lockup starts at the sidebar content inset, where the search row does", async () => {
+  it("the header row starts at the frame inset with the toggle, the lockup follows it, and the search row shares the content inset", async () => {
     useStore.getState().bind(fakeApi([], []));
     await act(async () => {
       render(
@@ -112,10 +112,13 @@ describe("header", () => {
         </SidebarProvider>,
       );
     });
-    const lockup = screen.getByRole("img", { name: "wsp" }).parentElement!;
-    expect(lockup.className).toContain("ml-[var(--sidebar-content-inset)]");
-    expect(lockup.className).not.toContain("titlebar");
-    expect(screen.getByRole("button", { name: "Search threads" }).parentElement!.className).toContain("px-[var(--sidebar-content-inset)]");
+    const lockup = screen.getByRole("img", { name: "wsp" });
+    const row = lockup.parentElement!;
+    expect(row.getAttribute("data-slot")).toBe("sidebar-header");
+    expect(row.className).toContain("pl-[var(--header-frame-inset)]");
+    expect(row.className).toContain("gap-[calc(var(--header-gap)-var(--workspace-titlebar-control-size)/2)]");
+    expect(lockup.previousElementSibling!.getAttribute("data-slot")).toBe("sidebar-trigger");
+    expect(screen.getByRole("button", { name: "Search threads" }).closest("[data-sidebar-search]")!.className).toContain("px-[var(--sidebar-content-inset)]");
   });
 });
 

@@ -738,6 +738,10 @@ export interface BootPayload {
   terminalFont?: string;
 }
 
+/** The class the desktop preload puts on the html element when the window has no title bar of its own: the app's
+ * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
+export const DESKTOP_MAC_CLASS = "desktop-mac";
+
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */

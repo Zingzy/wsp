@@ -2,18 +2,17 @@
 // The three regions: a resizable sidebar on the left, the selected
 // workspace's panes in the center, the surface panel on the right. State
 // drives every switch here; there is no router.
-import { MessageSquarePlusIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
-import { Button } from "../components/ui/button.js";
-import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, SidebarTrigger } from "../components/ui/sidebar.js";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "../components/ui/sidebar.js";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
-import { useCreation, useSelectedId, useSelectedWorkspaceId, useStore, useWorkspace } from "../protocol/store.js";
+import { isDesktopMac } from "../lib/desktopMac.js";
+import { cn } from "../lib/utils.js";
+import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
@@ -21,20 +20,17 @@ import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawe
 import { DisconnectedBanner } from "./DisconnectedBanner.js";
 import { KeybindingDispatcher } from "./KeybindingDispatcher.js";
 import { RightPanel } from "./RightPanel.js";
-import { requestNewThread } from "./shellRequests.js";
 import { SignInBanner } from "./SignInBanner.js";
+import { ThreadBreadcrumb } from "./ThreadBreadcrumb.js";
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "wsp:sidebar-width";
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 480;
 const RIGHT_PANEL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "rightPanel.toggle");
 const TERMINAL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "terminal.toggle");
-const NEW_THREAD_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const creation = useCreation(useSelectedId());
   const workspaceId = useSelectedWorkspaceId();
-  const workspace = useWorkspace(workspaceId);
   const conn = useStore(s => s.conn);
   const panel = useRightPanelStore(s => selectWorkspaceRightPanelState(s.byWorkspaceId, workspaceId));
   const toggleVisibility = useRightPanelStore(s => s.toggleVisibility);
@@ -70,7 +66,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         side="left"
         collapsible="offcanvas"
         data-app-sidebar=""
-        className="sidebar-glass border-r border-sidebar-border text-sidebar-foreground"
+        className={cn(isDesktopMac() ? "sidebar-vibrancy" : "sidebar-glass", "border-r border-sidebar-border text-sidebar-foreground")}
         resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: SIDEBAR_MAX_WIDTH, storageKey: SIDEBAR_WIDTH_STORAGE_KEY }}
       >
         <WorkspaceSidebar />
@@ -82,26 +78,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex min-h-0 flex-1 flex-row">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-shell-center>
             <WorkspacePageHeader className="border-b border-border">
-              <SidebarTrigger aria-label="Toggle main sidebar" />
-              <span className="min-w-0 truncate text-sm font-medium text-foreground">
-                {workspace?.name ?? creation?.name ?? "No workspace selected"}
-              </span>
-              {workspace ? (
-                <Tooltip>
-                  <TooltipTrigger render={<span className="flex shrink-0" />}>
-                    <Button
-                      variant="ghost-muted"
-                      size="icon-xs"
-                      aria-label="New thread"
-                      className="[-webkit-app-region:no-drag]"
-                      onClick={() => requestNewThread({ workspaceId: workspace.id })}
-                    >
-                      <MessageSquarePlusIcon />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipPopup side="bottom">{`New thread${NEW_THREAD_SHORTCUT_LABEL ? ` (${NEW_THREAD_SHORTCUT_LABEL})` : ""}`}</TooltipPopup>
-                </Tooltip>
-              ) : null}
+              <ThreadBreadcrumb />
               {rightPanelOpen && !useSheet ? null : <div className="ml-auto mr-px">{layoutControls}</div>}
             </WorkspacePageHeader>
             <div className="flex min-h-0 flex-1 flex-col">{children}</div>
