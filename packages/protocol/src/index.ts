@@ -775,6 +775,8 @@ export interface BootPayload {
   token: string;
   /** The family the person's terminal draws with, when the saved recipe ticks its row; the terminal pane defaults to it. */
   terminalFont?: string;
+  /** The state file this host serves; the page keeps what it remembers (the workspace open last) under it. */
+  statePath?: string;
 }
 
 /** One row of a context menu as the page hands it to the desktop shell, which builds the native menu from it. An item

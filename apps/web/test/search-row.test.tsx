@@ -33,6 +33,15 @@ describe("the search row", () => {
     expect(row.querySelector("kbd")).toBeNull();
   });
 
+  it("wears the surface tint the section rows do not, so over the glass it reads as a field", () => {
+    render(
+      <SidebarProvider defaultOpen>
+        <SearchRow />
+      </SidebarProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Search" }).hasAttribute("data-search-row")).toBe(true);
+  });
+
   it("is still the palette's door with the tooltip around it", () => {
     render(
       <SidebarProvider defaultOpen>

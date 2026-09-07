@@ -1069,7 +1069,7 @@ export default function ThreadTerminalDrawer({
           </div>
 
           {hasTerminalSidebar && (
-            <aside className="relative flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10">
+            <aside className="relative flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10" data-terminal-tabs>
               {fontOpen ? <TerminalFontCard className="absolute right-0 top-[22px] z-30" onClose={closeFont} /> : null}
               <div className="flex h-[22px] items-stretch justify-end border-b border-border/70">
                 <div className="inline-flex h-full items-stretch">

@@ -12,13 +12,13 @@ interface WindowFrame {
 
 const STOCK: WindowFrame = { options: { backgroundColor: "#09090b" } };
 
-// The lights are 12px tall and the header row 52px; y 20 centres them in it, x 16 is where Finder puts them. No
-// tabbingIdentifier: native tabs would take ctrl+tab and the digit chords at the window level, and the page switches
-// workspaces with them.
+// The lights' ink measures 14px tall on screen and the header row is 52px; y 19 puts their centre on the row's, at 26,
+// and x 16 is where Finder puts them. No tabbingIdentifier: native tabs would take ctrl+tab and the digit chords at the
+// window level, and the page switches workspaces with them.
 const MAC: WindowFrame = {
   options: {
     titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 20 },
+    trafficLightPosition: { x: 16, y: 19 },
     vibrancy: "sidebar",
     visualEffectState: "followWindow",
     backgroundColor: "#00000000",

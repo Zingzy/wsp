@@ -1778,7 +1778,7 @@ function buildToolCallExpandedBody(
 }
 
 const toolCallExpandedBodyClassName =
-  "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,0.6875rem)] leading-relaxed select-text";
+  "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,var(--font-size-mono))] leading-relaxed select-text";
 
 function workEntryGlyph(workEntry: TimelineWorkEntry): LucideIcon {
   const kind = isToolLike(workEntry) ? workEntryKind(workEntry) : null;
