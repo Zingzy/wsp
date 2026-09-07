@@ -975,7 +975,7 @@ const ConfirmIn = z.boolean().optional().describe("true deletes the machine; abs
 /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
 const PICK_INPUTS = {
   model: z.string().optional().describe("the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"),
-  effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high); absent means the agent's default"),
+  effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"),
   access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means the agent's default"),
 };
 /** The same word on new and fork; the refusal for a size the provider does not offer names the ones it does. */
