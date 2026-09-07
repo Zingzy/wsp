@@ -34,6 +34,9 @@ describe("catalog", () => {
     expect(catalogToolFor("npm")?.id).toBe("node");
     expect(catalogToolFor("openjdk@21")?.id).toBe("java");
     expect(catalogToolFor("cargo")?.id).toBe("rust");
+    // Homebrew's own name for the same toolchain, and the installer's: both are the rust row, so neither plans a second install.
+    expect(catalogToolFor("rustup")?.id).toBe("rust");
+    expect(catalogToolFor("rustup-init")?.id).toBe("rust");
     expect(baseEntryFor("cargo")).toBeUndefined();
     expect(baseEntryFor("npm")?.id).toBe("node");
     expect(catalogToolFor("claude")).toBeUndefined();
@@ -165,6 +168,23 @@ describe("catalog", () => {
         "rm -f /tmp/docker-compose",
       ].join("\n"),
     );
+    // Rust comes by rustup, whose installer is pinned to the sha256 rust-lang publishes beside the archived release.
+    // The script road runs every one of these under set -e, so no script carries the line itself.
+    expect(installLine(catalogEntry("rust")!)).toBe(
+      [
+        'arch="$(uname -m)"',
+        'case "$arch" in',
+        "  x86_64) sha=dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71 ;;",
+        "  aarch64) sha=15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433 ;;",
+        '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+        "esac",
+        'curl -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/1.29.1/$arch-unknown-linux-gnu/rustup-init"',
+        'echo "$sha  /tmp/rustup-init" | sha256sum -c - >/dev/null',
+        "chmod +x /tmp/rustup-init",
+        "/tmp/rustup-init -y --no-modify-path --profile default --default-toolchain stable",
+        "rm -f /tmp/rustup-init",
+      ].join("\n"),
+    );
     expect(installLine(catalogEntry("pnpm")!)).toBe("npm install -g pnpm@11.9.0");
     expect(installLine(catalogEntry("wrangler")!)).toBe("npm install -g wrangler");
     expect(installLine(catalogEntry("go")!)).toMatch(/^su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install go'$/);
@@ -285,7 +305,10 @@ describe("catalog", () => {
     expect(env("release")).toBe(CURL_NET);
     expect(env("vendor")).toBe(CURL_NET);
     // A script may run any of them, so it gets every line; Homebrew takes its retry count from its own environment.
-    expect(ROAD_STEPS.script.env).toEqual([...ROAD_STEPS.npm.env, ...ROAD_STEPS.pipx.env, ...ROAD_STEPS.uv.env, ...ROAD_STEPS.cargo.env, CURL_NET]);
+    // A script road's step is a whole script whose last line may be a cleanup, so the road runs it under set -e: a
+    // failed download must not read as an install on a machine that already carries the tool.
+    expect(ROAD_STEPS.script.env).toEqual(["set -euo pipefail", ...ROAD_STEPS.npm.env, ...ROAD_STEPS.pipx.env, ...ROAD_STEPS.uv.env, ...ROAD_STEPS.cargo.env, CURL_NET]);
+    for (const road of ROADS) expect(ROAD_STEPS[road].env.includes("set -euo pipefail"), road).toBe(road === "script");
     expect(BREW_ENV).toContain("HOMEBREW_CURL_RETRIES=1");
     for (const road of ["brew", "bun", "go", "apt"] as const) expect(ROAD_STEPS[road].env, road).toEqual([]);
     // Package managers and downloads get a shorter step than anything that may compile; a download that ran the clock out is tried once more, a compile is not.
@@ -460,9 +483,13 @@ describe("catalog", () => {
     // The one row nobody could measure: its package sits in a repository the road does not add yet.
     expect(CATALOG.filter(e => !("bytes" in e.size)).map(e => e.id)).toEqual(["op"]);
     for (const text of Object.values(SIZE_METHODS)) expect(text).not.toMatch(/\u2014/);
+    // The du rows were read on a Debian bookworm host, the node:22-bookworm image among them; the label says the host, not one image.
+    expect(SIZE_METHODS.du).toBe("du over what the install wrote, before and after, on a Debian bookworm host");
     for (const e of CATALOG) expect(`${e.name} ${e.source.note ?? ""}`, e.id).not.toMatch(/\u2014/);
-    // Every brew row counts its Linux runtime dependencies, so Rust carries the LLVM its bottle links against.
-    expect(sizeBytes(catalogEntry("rust")!.size)).toBeGreaterThan(3e9);
+    // Every brew row counts its Linux runtime dependencies, so Java carries the ones its bottle links against.
+    expect(sizeBytes(catalogEntry("java")!.size)).toBe(613280230);
+    // Rust comes by rustup instead of the formula whose Linux bottle pulled llvm@22 in: half the bytes, measured on the machine.
+    expect(catalogEntry("rust")!.size).toEqual({ bytes: 1595346944, on: "2026-09-07", method: "du" });
     expect(sizeBytes(catalogEntry("git")!.size)).toBe(123789312);
     expect(catalogEntry("claude")!.size).toEqual({ bytes: 208 * 1024 * 1024, on: "2026-09-05", method: "df" });
   });
@@ -496,6 +523,10 @@ describe("catalog", () => {
     expect(catalogEntry("typescript")!.bin).toBe("tsc");
     expect(catalogToolFor("tsc")?.id).toBe("typescript");
     expect(catalogToolFor("bunx")?.id).toBe("bun");
+  });
+
+  it("pipes a download into a shell on no road: the harness vendor's own installer is saved to a file first", () => {
+    expect(CATALOG.filter(e => /curl[^\n]*\|\s*(ba)?sh/.test(installLine(e))).map(e => e.id)).toEqual([]);
   });
 
   it("carries no token-looking value", () => {

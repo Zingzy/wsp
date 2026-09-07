@@ -350,13 +350,14 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
   const viaUv = rows.filter(r => r.command !== undefined && ["uv", "uvx"].includes(basename(r.command)) && missing.has(asRun(r.command)));
   if (viaUv.length > 0) {
     stage("installing-mcp", `uv for ${viaUv.map(r => r.name).join(", ")}`);
-    const install = await machine.run(guardedRoad("release", `set -euo pipefail\n${UV_INSTALL}`), { deadlineMs: guardDeadlineMs(roadLimitS("release")), onLine: line => stage("installing-mcp", `uv: ${line}`) }).catch(refused);
+    // uv's catalog row walks the script road, so the road carries the strict shell line and uv's own limit; the stage writes neither.
+    const install = await machine.run(guardedRoad("script", UV_INSTALL), { deadlineMs: guardDeadlineMs(roadLimitS("script")), onLine: line => stage("installing-mcp", `uv: ${line}`) }).catch(refused);
     for (const r of viaUv) {
       if (install.exitCode === 0) {
         r.notes.unshift("uv installed for it");
         r.shorts.unshift("uv installed");
       } else {
-        const short = `uv did not install (${reasonOf(install, roadLimitS("release"))})`;
+        const short = `uv did not install (${reasonOf(install, roadLimitS("script"))})`;
         r.shorts.unshift(short);
         r.notes.unshift(`${short}; the server starts once it is installed there`);
       }

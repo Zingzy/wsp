@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, TOOLS_PATH, WSP_LABEL, isReserved, type Machine } from "@wsp/engine";
+import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, type Machine } from "@wsp/engine";
 import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
@@ -467,7 +467,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
         try {
           return await rt.workspaces.create(spec);
         } catch (e) {
-          if ((e as { kind?: string }).kind !== "missing") throw e;
+          if (!isMissing(e)) throw e;
           io.log("golden snapshot is gone; rebuilding");
           const rebuilt = await buildGolden();
           return rt.workspaces.create({ ...spec, golden: rebuilt });

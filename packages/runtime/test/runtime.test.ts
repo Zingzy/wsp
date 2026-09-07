@@ -3014,8 +3014,8 @@ describe("runtime golden import", () => {
     expect(frames.filter(f => !f.startsWith("uploading-files:"))).toEqual([
       "creating:sandbox from base",
       "deploying-daemon",
-      ...["Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"].map((label, i) => `deploying-daemon:${label} (${i + 1}/17)`),
-      "deploying-daemon:17 installed; caches swept; 2.9 GB free",
+      ...["login shell PATH", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"].map((label, i) => `deploying-daemon:${label} (${i + 1}/18)`),
+      "deploying-daemon:18 installed; caches swept; 2.9 GB free",
       // The stub answers the versions read with nothing, so the stage closes on the disk alone.
       "deploying-daemon:2.9 GB free",
       "applying-setup:1 file: shell 1",
@@ -5389,23 +5389,26 @@ describe("gone machines", () => {
   it("a stored workspace whose machine the provider no longer knows hydrates as gone with the provider's words, whatever phase it was left at", async () => {
     const { store, rt, a, b } = await hydratedGone();
     const listed = await rt.workspaces.list();
+    // The words name the load that met the 404 and quote the provider's answer to it.
+    const loadSaw = (id: string) => new RegExp(`^machine ${id} is gone at the provider: the record load found it gone at \\S+Z \\(404 gone\\)$`);
     expect(listed.map(w => [w.name, w.phase, w.gone])).toEqual([
-      ["a", "gone", "machine m1 is gone at the provider: gone"],
-      ["b", "gone", "machine m2 is gone at the provider: gone"],
+      ["a", "gone", expect.stringMatching(loadSaw("m1"))],
+      ["b", "gone", expect.stringMatching(loadSaw("m2"))],
     ]);
     // Written back before anything lists it: a second host over the store reads gone without asking the provider.
-    expect(await store.get("workspaces", a.id)).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider: gone" });
+    expect(await store.get("workspaces", a.id)).toMatchObject({ phase: "gone", gone: expect.stringMatching(loadSaw("m1")) });
     expect(await store.get("workspaces", b.id)).toMatchObject({ phase: "gone" });
     const statuses = await rt.status.list();
     const sa = statuses.find(s => s.id === a.id)!;
-    expect(sa).toMatchObject({ phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: "machine m1 is gone at the provider: gone" });
+    expect(sa).toMatchObject({ phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: expect.stringMatching(loadSaw("m1")) });
     expect(sa.idleAt).toBeUndefined();
     await rt.close();
   });
 
   it("a gone workspace refuses wake and sends with the provider's words; nap is a no-op; rebuild is the road out", async () => {
     const { backend, store, rt, a } = await hydratedGone();
-    const words = "machine m1 is gone at the provider: gone";
+    const words = (await rt.workspaces.get(a.id)).gone!;
+    expect(words).toMatch(/^machine m1 is gone at the provider: the record load found it gone at /);
     await expect(rt.workspaces.wake(a.id)).rejects.toThrow(`Workspace machine is gone; rebuild it to wake (${words})`);
     await expect(rt.sessions.start(a.id, { prompt: "hi" })).rejects.toThrow(`Workspace machine is gone; rebuild it to send (${words})`);
     expect(await rt.workspaces.nap(a.id)).toMatchObject({ phase: "gone" });
@@ -5444,9 +5447,10 @@ describe("gone machines", () => {
 
       backend.machines[0]!.killed = true; // deleted through the provider's API under a running host
       await until(() => events.some(e => e.type === "workspace.gone"));
-      expect(events.find(e => e.type === "workspace.gone")).toMatchObject({ workspaceId: ws.id, machineId: "m1", reason: "machine m1 is gone at the provider" });
-      expect(await rt.workspaces.get(ws.id)).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider" });
-      expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider" });
+      const pollSaw = /^machine m1 is gone at the provider: the status poll found it gone at \S+Z$/;
+      expect(events.find(e => e.type === "workspace.gone")).toMatchObject({ workspaceId: ws.id, machineId: "m1", reason: expect.stringMatching(pollSaw) });
+      expect(await rt.workspaces.get(ws.id)).toMatchObject({ phase: "gone", gone: expect.stringMatching(pollSaw) });
+      expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "gone", gone: expect.stringMatching(pollSaw) });
       expect(events.find(e => e.type === "session.end")).toMatchObject({ workspaceId: ws.id, reason: "machine gone at the provider while the agent was working" });
       expect((await rt.sessions.list(ws.id)).map(s => s.status)).toEqual(["failed"]);
 
@@ -5456,7 +5460,7 @@ describe("gone machines", () => {
       expect(ticks[0]).toMatchObject({ rateUsdPerHour: 0 });
       expect(ticks[1]!.awakeMs).toBe(ticks[0]!.awakeMs);
       const last = events.filter((e): e is EventUnion & { type: "workspace.status" } => e.type === "workspace.status").at(-1)!;
-      expect(last.status).toMatchObject({ phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: "machine m1 is gone at the provider" });
+      expect(last.status).toMatchObject({ phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: expect.stringMatching(pollSaw) });
       expect(last.status.idleAt).toBeUndefined();
     } finally {
       stop();

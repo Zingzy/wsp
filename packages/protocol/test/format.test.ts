@@ -32,12 +32,15 @@ import {
   fmtThreads,
   forgetNotice,
   goldenBuildLine,
+  goneWords,
   harnessExitLine,
   isCodeSearchTool,
+  listedName,
   machineCapRefusal,
   machineUnreachedLine,
   mcpServerCommandLine,
   moveTimedOutLine,
+  nameList,
   nextInsideAgentLine,
   notifyLine,
   offeredSize,
@@ -340,6 +343,25 @@ describe("plural, fmtThreads, forgetNotice and deleteNotice", () => {
   });
 });
 
+describe("listedName and nameList", () => {
+  it("leaves a name that carries no comma alone and joins a list with the separator", () => {
+    expect(listedName("ripgrep")).toBe("ripgrep");
+    expect(nameList(["ripgrep", "just", "GitHub CLI"])).toBe("ripgrep, just, GitHub CLI");
+    expect(nameList([])).toBe("");
+  });
+
+  it("quotes a name that carries the separator, so a free-text label reads as one entry and not as two", () => {
+    expect(listedName("swift-format, swiftlint")).toBe('"swift-format, swiftlint"');
+    expect(nameList(["swift-format, swiftlint", "just"])).toBe('"swift-format, swiftlint", just');
+    // A plain join leaves the label's own comma reading as a third entry; that is what the quotes take away.
+    expect(["swift-format, swiftlint", "just"].join(", ").split(", ")).toHaveLength(3);
+  });
+
+  it("escapes a quote the name itself carries, so the quoting cannot be read as the end of the name", () => {
+    expect(listedName('the "fast", grep')).toBe('"the \\"fast\\", grep"');
+  });
+});
+
 describe("titleLine", () => {
   it("is the prompt's first non-empty line with its whitespace collapsed, so a multi-paragraph brief is one line everywhere", () => {
     expect(titleLine("You are a builder for the wsp repo.\n\nTicket: Zingzy/wsp-map#292.\nBuild: the fix.")).toBe("You are a builder for the wsp repo.");
@@ -433,6 +455,19 @@ describe("machineCapRefusal", () => {
 
   it("says so plainly when nothing of this computer holds a slot, instead of naming an empty list", () => {
     expect(machineCapRefusal([])).toBe("the provider is at its machine cap and no machine of this computer holds a slot; free one at the provider and try again");
+  });
+});
+
+describe("goneWords", () => {
+  it("names the machine alone when nobody saw the provider lose it", () => {
+    expect(goneWords("m1")).toBe("machine m1 is gone at the provider");
+  });
+
+  it("names the call that found it gone and the second it did, quoting the provider's answer when the call had one", () => {
+    const at = Date.parse("2026-09-07T01:21:10.500Z");
+    expect(goneWords("sb_1", { by: "pause", at, answer: "404 Not found" })).toBe("machine sb_1 is gone at the provider: the pause found it gone at 2026-09-07T01:21:10Z (404 Not found)");
+    expect(goneWords("sb_1", { by: "status poll", at })).toBe("machine sb_1 is gone at the provider: the status poll found it gone at 2026-09-07T01:21:10Z");
+    expect(goneWords("sb_1", { by: "sweep", at, answer: "" })).toBe("machine sb_1 is gone at the provider: the sweep found it gone at 2026-09-07T01:21:10Z");
   });
 });
 

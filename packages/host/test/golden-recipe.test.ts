@@ -52,7 +52,7 @@ describe("host golden recipe", () => {
     expect(builder.runLog.some(s => s.includes("nodejs.org/dist"))).toBe(true);
     expect(builder.execLog.at(-2)).toBe("df -Pk /root | awk 'NR==2{print $4}'");
     // The setup runs under the harness guard with the road lines, the installer's text quoted whole inside it.
-    expect(builder.execLog.at(-1)).toContain(`setsid bash -c ${shellQuote(["set -euo pipefail", ...ROAD_STEPS.script.env, GOLDEN_SETUP].join("\n"))} &`);
+    expect(builder.execLog.at(-1)).toContain(`setsid bash -c ${shellQuote([...ROAD_STEPS.script.env, GOLDEN_SETUP].join("\n"))} &`);
     expect(builder.spec).toMatchObject({ kind: "sandbox", onIdle: "kill", envs: { ANTHROPIC_API_KEY: ANTHROPIC } });
     expect(builder.spec.idleTimeoutMs).toBeGreaterThan(0);
 
