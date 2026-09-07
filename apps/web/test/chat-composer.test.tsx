@@ -4,15 +4,15 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { sendRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { sendRefusal, stillWorkingRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
-import type { Api, ConnStatus, ProtocolEvent } from "../src/protocol/client.js";
+import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
-import { requestComposerFocus } from "../src/shell/shellRequests.js";
+import { requestComposerFocus, requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
@@ -34,7 +34,7 @@ const workspace: WorkspaceView = {
 
 function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}, statuses: WorkspaceStatus[] = []) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
-  const started: Array<{ workspaceId: string; prompt: string; resume?: string }> = [];
+  const started: StartSessionOptions[] = [];
   const interrupted: string[] = [];
   const api: Api = {
     interruptSession: async id => { interrupted.push(id); return "accepted"; },
@@ -334,8 +334,59 @@ describe("composer while the workspace is not live", () => {
   });
 });
 
+describe("a new thread while another thread of the workspace works", () => {
+  const a = { workspaceId: WS, sessionId: "sess_a", turnId: "turn_a", threadId: "thr_a" };
+  const WORKING: SessionEvent[] = [
+    { type: "session.start", ...a, prompt: "build it", cwd: "/root" },
+    { type: "session.delta", ...a, kind: "text", text: "On it." },
+  ];
+
+  it("the new-thread composer has no turn: sendable, no line, and its send opens a second thread while the first keeps working", async () => {
+    const { api, emit, started } = fixtureApi([workspace], { [WS]: WORKING });
+    await setup(api);
+    await screen.findByText("On it.");
+    expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
+    const editor = composerEditor();
+    expect(isEditable(editor)).toBe(true);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull();
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+    await typeInto(editor, "second thread");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "second thread", cwd: "/root" });
+    expect(screen.getByText("second thread")).toBeDefined();
+    // The first thread runs on: its next words are its own and never reach the new thread.
+    emit({ type: "session.delta", ...a, kind: "text", text: " Still on it." });
+    expect(screen.queryByText(/Still on it/)).toBeNull();
+    const b = { workspaceId: WS, sessionId: "sess_b", turnId: "turn_b", threadId: "thr_b" };
+    emit({ type: "session.start", ...b, prompt: "second thread", requestId: started[0]!.requestId });
+    emit({ type: "session.delta", ...b, kind: "text", text: "Second thread here." });
+    await screen.findByText("Second thread here.");
+    expect(screen.queryByText("On it.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
+  });
+
+  it("the working thread's own composer still says so: its turn replied and runs on, and the line names that thread", async () => {
+    const { api, emit } = fixtureApi([workspace], { [WS]: WORKING });
+    await setup(api);
+    await screen.findByText("On it.");
+    expect(screen.queryByRole("status")).toBeNull();
+    emit({ type: "session.done", ...a, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
+    expectPlainLine(stillWorkingRefusal("thr_a"));
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+    // A new thread asked for now owes that turn nothing.
+    act(() => requestNewThread({ workspaceId: WS }));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(isEditable(composerEditor())).toBe(true);
+    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+  });
+});
+
 describe("composerSendBlock", () => {
-  const live = { conn: "live" as const, hasApi: true, phase: "running" as const, machineState: "running" as const, reach: "reachable" as const, hydrated: true, finishing: false };
+  const live = { conn: "live" as const, hasApi: true, phase: "running" as const, machineState: "running" as const, reach: "reachable" as const, hydrated: true };
   it("names the first thing in the way, socket first, as the kind the refusal table gives words for", () => {
     expect(composerSendBlock(live)).toBeNull();
     expect(composerSendBlock({ ...live, hasApi: false })).toBe("connecting");
@@ -351,8 +402,6 @@ describe("composerSendBlock", () => {
     expect(composerSendBlock({ ...live, reach: "unreachable" })).toBe("unreachable");
     expect(composerSendBlock({ ...live, reach: "slow" })).toBeNull();
     expect(composerSendBlock({ ...live, hydrated: false })).toBe("loading");
-    expect(composerSendBlock({ ...live, finishing: true })).toBe("finishing");
-    expect(composerSendBlock({ ...live, hydrated: false, finishing: true })).toBe("loading");
     expect(composerSendBlock({ ...live, machineState: null, reach: null })).toBeNull();
   });
 });

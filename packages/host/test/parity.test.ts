@@ -9,7 +9,9 @@ import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
-import { EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_WORDS, SessionStartOutcome, TURN_END_WORDS, stillWorkingRefusal } from "@wsp/protocol";
+import { DEFAULT_AGENT } from "@wsp/catalog";
+import { EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_WORDS, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingRefusal } from "@wsp/protocol";
+import { harnessCatalog } from "@wsp/runtime";
 import { COMMAND_LINES, HELP, JSON_COMMANDS, PROSE_COMMANDS, type CommandLine } from "../src/cli.js";
 import { mcpServer } from "../src/mcp.js";
 import { INSTRUCTIONS, WSP_SKILL } from "../src/skill.js";
@@ -294,6 +296,18 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "wsp send reads --model, which its row does not show",
     ]);
     expect(flagDrift(stale.replace("| `wsp stop <thread>`", "| `wsp stop <thread> [--now]`"), COMMAND_LINES)).toContain("the row for wsp stop shows --now, which it does not read");
+  });
+
+  it("the --effort words the thread_new tool and the skill name are the picker's options for the default agent, and the default they say runs is the one the picker marks", () => {
+    const claude = harnessCatalog(DEFAULT_AGENT.id)!;
+    const options = effortsFor(claude, markedDefault(claude.models) ?? null);
+    const words = options.map(o => o.value);
+    const fallback = markedDefault(options)!.value;
+    const effort = VERBS.find(v => v.name === "thread new")!.tool.input.effort!.description!;
+    expect(/\(([^)]*)\)/.exec(effort)![1]!.split(", ")).toEqual(words);
+    expect(effort).toContain(`absent means the agent's default, ${fallback} for ${claude.harness}`);
+    expect(WSP_SKILL).toContain(words.map(w => `\`${w}\``).join(", "));
+    expect(WSP_SKILL).toContain(`(\`${fallback}\` for ${claude.harness})`);
   });
 
   it("what a send meets on a running or a replied thread is said in the runtime's words, the same in the skill's send section and the send tool", async () => {

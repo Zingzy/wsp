@@ -23,6 +23,8 @@ describe("harness catalogs", () => {
     expect(claude.models.find(o => o.isDefault)?.value).toBe("claude-opus-5");
     expect(claude.models.map(o => o.contextWindows)).toEqual([["200k", "1m"], ["200k", "1m"], []]);
     expect(claude.efforts.map(o => o.value)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    // The handshake names no default effort; the CLI documents high on every model that takes one.
+    expect(claude.efforts.find(o => o.isDefault)?.value).toBe("high");
     expect(claude.contextWindows).toEqual([{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }]);
     expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "plan", "bypassPermissions", "auto", "manual", "dontAsk"]);
     expect(claude.permissionModes.find(o => o.isDefault)?.value).toBe("bypassPermissions");
@@ -106,7 +108,9 @@ describe("catalogFromProbe", () => {
       { value: "claude-haiku-4-5-20251001", label: "Haiku", efforts: [], contextWindows: [] },
       { value: "claude-next-6", label: "Next", efforts: ["low", "turbo"], contextWindows: [] },
     ]);
-    expect(catalog.efforts).toEqual([{ value: "low", label: "Low" }, { value: "high", label: "High" }, { value: "turbo", label: "Turbo" }]);
+    expect(catalog.efforts).toEqual([{ value: "low", label: "Low" }, { value: "high", label: "High", isDefault: true }, { value: "turbo", label: "Turbo" }]);
+    // A binary that no longer lists the table's default effort leaves none marked.
+    expect(catalogFromProbe(harnessCatalog("claude")!, { ...probe, efforts: ["low", "turbo"] }).efforts.some(o => o.isDefault)).toBe(false);
     expect(catalog.contextWindows).toEqual(harnessCatalog("claude")!.contextWindows);
     expect(catalog.permissionModes.map(o => o.value)).toEqual(["default", "plan", "yolo"]);
     expect(catalog.permissionModes[1]?.description).toBe("Read and plan only; no changes");
