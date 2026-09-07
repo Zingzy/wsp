@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, BASE_FLOOR, BASE_IMAGE_COMMANDS, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, BASE_FLOOR, BASE_IMAGE_COMMANDS, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, ROADS, ROAD_MODULES, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installAfter, installLine, nodeInstallScript, pinStateOf, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -708,7 +708,8 @@ export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
       ...(known.source.road === "unmeasured" ? [UNMEASURED_ROAD] : []),
       ...(e.version !== undefined && mod.at === undefined ? [`${e.version} asked, installed ${mod.words} at its current version`] : []),
     ];
-    return { road: { ...road, ...pinOf(e) }, bin: known.bin, ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };
+    const after = installAfter(known);
+    return { road: { ...road, ...pinOf(e) }, bin: known.bin, ...(after !== undefined ? { after } : {}), ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };
   }
   if (e.id.startsWith(CATALOG_PREFIX)) return undefined;
   const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
@@ -721,6 +722,8 @@ export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
 export interface PlannedRow {
   road: InstallRoad;
   bin?: string;
+  /** What the catalog says the row runs on top of; a row outside the catalog takes its road's word. */
+  after?: string;
   note?: string;
 }
 
@@ -861,8 +864,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   }
   // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, the manager's step; a floor row is there already.
   const APT_STEP = `tools/${APT_INDEX}`;
-  const afterRoad = (road: RoadName): string | undefined => {
-    const dep = ROAD_MODULES[road].after;
+  const afterDep = (dep: string | undefined, road: RoadName): string | undefined => {
     if (dep === APT_INDEX) {
       if (!installs.some(t => t.id === APT_STEP)) installs.push(aptIndexStep(APT_STEP, withPath(APT_UPDATE)));
       return APT_STEP;
@@ -870,14 +872,14 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     if (dep === HOMEBREW_STEP) return toolchain.last;
     return managers.get(road)?.after;
   };
-  const afterFor = (road: InstallRoad): string | undefined => afterRoad(road.road);
+  const afterRoad = (road: RoadName): string | undefined => afterDep(ROAD_MODULES[road].after, road);
   const plan = (e: RecipeEntry, planned: PlannedRow): void => {
     const step = viaRoad(planned.road, planned.bin ?? packageOf(e));
     if (!("cmd" in step)) {
       skipped.push({ id: e.id, note: step.note });
       return;
     }
-    const after = afterFor(planned.road);
+    const after = afterDep(planned.after ?? ROAD_MODULES[planned.road.road].after, planned.road.road);
     installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}) });
   };
   // A catalog row that is a manager's own toolchain is planned with that manager, not again with the road it takes.

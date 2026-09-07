@@ -3,7 +3,7 @@
 // person used anywhere; a repo's manifests say what this repo takes to build.
 // Every reader hands back words; naming the catalog row a word lands on
 // happens once, here, so a reader never learns the catalog.
-import { catalogToolFor } from "@wsp/catalog";
+import { catalogToolFor, catalogToolForDependency } from "@wsp/catalog";
 import type { Host } from "../host.js";
 import type { ProjectFile, ProjectReader } from "./reader.js";
 import { markerReader } from "./readers/marker.js";
@@ -34,13 +34,22 @@ export interface ProjectScan {
   candidates: ProjectNeed[];
 }
 
+/** The paths one entry of a reader's list stands for: every file directly under a folder named with a trailing
+ * slash, the same file in every folder under a `*` segment, else the entry itself. */
+async function pathsOf(host: Host, dir: string, entry: string): Promise<string[]> {
+  if (entry.endsWith("/")) return (await host.fs.list(`${dir}/${entry.slice(0, -1)}`)).map(name => `${entry}${name}`);
+  const star = entry.indexOf("/*/");
+  if (star < 0) return [entry];
+  const head = entry.slice(0, star);
+  return (await host.fs.list(`${dir}/${head}`)).map(name => `${head}/${name}${entry.slice(star + 2)}`);
+}
+
 /** The files under `dir` a reader asked for that are there, in the order it asked; a reader that reads nothing out
  * of them is told they are there and handed no bytes. */
 async function filesFor(host: Host, dir: string, reader: ProjectReader): Promise<ProjectFile[]> {
   const out: ProjectFile[] = [];
   for (const entry of reader.files) {
-    const paths = entry.endsWith("/") ? (await host.fs.list(`${dir}/${entry.slice(0, -1)}`)).map(name => `${entry}${name}`) : [entry];
-    for (const path of paths) {
+    for (const path of await pathsOf(host, dir, entry)) {
       const at = `${dir}/${path}`;
       if (reader.reads === "presence") {
         if ((await host.fs.stat(at))?.kind === "file") out.push({ path, text: "" });
@@ -64,16 +73,13 @@ export async function scanProject(host: Host, folder: string): Promise<ProjectSc
   for (const reader of PROJECT_READERS) {
     for (const file of await filesFor(host, dir, reader)) {
       for (const finding of reader.read(file)) {
-        const entry = catalogToolFor(finding.name);
+        const entry = finding.installs !== undefined ? catalogToolForDependency(finding.installs, finding.name) : catalogToolFor(finding.name);
         if (entry !== undefined) {
           if (!rows.has(entry.id)) rows.set(entry.id, { id: entry.id, name: entry.name, why: finding.why });
           continue;
         }
         if (finding.catalogOnly === true) continue;
-        const was = candidates.get(finding.name);
-        if (was === undefined) candidates.set(finding.name, { id: finding.name, name: finding.label, why: finding.why });
-        // A reader that only saw the bare word wrote it as it found it; one whose file spells the ecosystem's own name wins the display.
-        else if (was.name === was.id && finding.label !== finding.name) candidates.set(finding.name, { ...was, name: finding.label });
+        if (!candidates.has(finding.name)) candidates.set(finding.name, { id: finding.name, name: finding.label, why: finding.why });
       }
     }
   }

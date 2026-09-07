@@ -32,7 +32,7 @@ const laptop = () =>
       // The project's own manifests, which say what it takes to build whatever the histories ran.
       [`${PROJ}/compose.yaml`]: "services:\n  db:\n    image: postgres\n",
       [`${PROJ}/Cargo.toml`]: '[package]\nname = "x"\n',
-      [`${PROJ}/Gemfile`]: 'source "https://rubygems.org"\n',
+      [`${PROJ}/.github/workflows/ci.yml`]: "jobs:\n  build:\n    steps:\n      - uses: actions/setup-dotnet@v4\n",
     },
   });
 
@@ -129,7 +129,7 @@ describe("wsp recipe", () => {
     const io = collect();
     const answer = await runRecipe(laptop(), { out, projects: [PROJ], tick: "used" }, io, at);
     // The names the catalog has no row for are in no table, so the run says them.
-    expect(io.notes).toContain(`${PROJ}: Not in the catalog: Ruby (Gemfile needs Ruby)`);
+    expect(io.notes).toContain(`${PROJ}: Not in the catalog: dotnet (.github/workflows/ci.yml sets up dotnet)`);
     const saved = Recipe.parse(JSON.parse(readFileSync(out, "utf8")));
     // Nothing here ever ran docker and the used rule leaves it off; the folder's compose file puts it on and says which file asked.
     expect(rowOf(saved, "docker")).toMatchObject({ on: true, source: { kind: "project", why: "compose.yaml needs Docker" } });
