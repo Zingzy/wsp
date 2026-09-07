@@ -3611,7 +3611,7 @@ describe("wsp init --recipe", () => {
     expect(f.backends[0]!.machines[0]!.execLog.some(c => c.includes("npm install -g agent-browser@0.31.1"))).toBe(true);
     const tools = JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).tools as { id: string; outcome: string; note?: string }[];
     expect(tools.find(t => t.id === "tools/catalog/agent-browser")).toMatchObject({ outcome: "installed", note: "by an unmeasured road" });
-    expect(f.text()).toMatch(/Installing tools\s+\d+ installed \(agent-browser by an un/);
+    expect(f.text()).toMatch(/Installing tools\s+\d+ installed \(agent-browser \(by an u/);
   });
 
   it("a row the catalog does not carry installs after the catalog's own, is recorded by name, and is offered no sign-in", async () => {

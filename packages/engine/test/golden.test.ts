@@ -956,7 +956,7 @@ describe("golden import stages", () => {
       { id: "tools/npm/wrangler", label: "wrangler", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.86.0" }, ms: expect.any(Number), bytes: 0 },
     ]);
-    expect(stages).toContain(`installing-tools:2 installed (GitHub CLI from its release, ${UNMEASURED_ROAD}); caches swept; 2.9 GB free`);
+    expect(stages).toContain(`installing-tools:2 installed (GitHub CLI from its release (${UNMEASURED_ROAD})); caches swept; 2.9 GB free`);
   });
 
   it("a catalog go row beside a go row on the guest: Homebrew installs go once, the go row runs after it, and the tally counts each install once", async () => {
@@ -992,7 +992,24 @@ describe("golden import stages", () => {
       { id: "tools/apt-index", label: "apt index", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       { id: "tools/catalog/tmux", label: "tmux", outcome: "installed", note: tmuxNote, ms: expect.any(Number), bytes: 0 },
     ]);
-    expect(stages).toContain(`installing-tools:3 installed (Cloudflare Wrangler ${UNMEASURED_ROAD}, tmux ${tmuxNote}); caches swept; 2.9 GB free`);
+    expect(stages).toContain(`installing-tools:3 installed (Cloudflare Wrangler (${UNMEASURED_ROAD}), tmux (${tmuxNote})); caches swept; 2.9 GB free`);
+  });
+
+  it("the tally names every install once: a tool carrying both a road and a note keeps its notes inside its own brackets, so no note reads as a nameless tool", async () => {
+    const { backend, fetch } = backendFor([
+      ["repos/cli/cli/releases/latest", { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${"c".repeat(64)} v2.86.0\n`, stderr: "" }],
+    ]);
+    const plan = toolInstallsFor([
+      { rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" },
+      { rung: "tools", id: "tools/catalog/tmux", label: "tmux", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes", version: "3.5a" },
+    ]);
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs }) });
+    const tmuxNote = `${UNMEASURED_ROAD}; 3.5a asked, installed by apt at its current version`;
+    const tally = stages.find(s => s.startsWith("installing-tools:3 installed"))!;
+    expect(tally).toBe(`installing-tools:3 installed (GitHub CLI from its release (${UNMEASURED_ROAD}), tmux (${tmuxNote})); caches swept; 2.9 GB free`);
+    // With the bracketed notes off, every comma left separates two named tools: the list names two, not four.
+    expect(tally.replace(/ \([^()]*\)/g, "")).toBe("installing-tools:3 installed (GitHub CLI from its release, tmux); caches swept; 2.9 GB free");
   });
 
   it("after the loop every install that names its command is checked with command -v on the tools PATH: one not there is failed with the reason, in the result and the summary", async () => {
