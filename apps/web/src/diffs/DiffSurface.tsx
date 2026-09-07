@@ -36,7 +36,8 @@ import { getDiffCollapseIconClassName, resolveDiffThemeName, resolveFileDiffPath
 import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting.js";
 import { cn } from "../lib/utils.js";
 import type { ReviewCommentContext } from "../reviewCommentContext.js";
-import { DaemonOpError, gitDiff, gitStatus } from "../terminal/daemon-fs.js";
+import { repoAbsence } from "../adapt/git.js";
+import { gitDiff, gitStatus } from "../terminal/daemon-fs.js";
 import { SCOPE_LABELS, SCOPES, toDiffModel } from "./model.js";
 import { DEFAULT_SCOPE, useDiffStore } from "./store.js";
 
@@ -96,7 +97,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
         if (!gone) setRepo({ cwd, state: repoOf(status) });
       },
       (e: unknown) => {
-        if (!gone) setRepo({ cwd, state: e instanceof DaemonOpError && e.code === "not-a-git-repo" ? { kind: "none" } : { kind: "unknown" } });
+        if (!gone) setRepo({ cwd, state: { kind: repoAbsence(e) } });
       },
     );
     return () => {
