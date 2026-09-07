@@ -19,7 +19,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, BUILDER_DISK_GB, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote } from "@wsp/protocol";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, notHereLine, packageOf, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -38,6 +38,7 @@ import {
   recipeWithAnswers,
   pinsOf,
   withPins,
+  withOutsideRows,
   withSavedPins,
   readSavedManifest,
   catalogIdOf,
@@ -55,7 +56,8 @@ import { PROJECT_GROUP } from "./init-table.js";
 import { SIGN_IN_WORDS } from "./signin-words.js";
 import type { ScanRow } from "./scan.js";
 import { installEach, installLines, mcpServerSpec, registeredLine } from "./mcp-install.js";
-import { carriedOver, historyLine, historyProgressLine } from "./recipe-command.js";
+import { applySets, carriedOver, historyLine, historyProgressLine } from "./recipe-command.js";
+import { outsideRowsOf } from "./recipe-file.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
@@ -779,6 +781,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   spinner.stop();
   const source = given === undefined ? "found on this computer" : "found on this computer, ticked by the recipe";
+  manifest = { ...manifest, entries: withoutAgentTools(manifest.entries) };
+  // The Mac's Homebrew sizes the formulae on the Tools screen and says which tap formula has a release to take; a
+  // brew that fails leaves the measured table.
+  let brew: BrewTable = new Map();
+  if (opts.brew !== undefined && manifest.entries.some(e => e.id.startsWith(BREW_ID_PREFIX))) {
+    const sizes = spin(io.output, "Reading Homebrew for sizes", io.isTTY);
+    try {
+      brew = await opts.brew();
+    } catch (e) {
+      notes.push(`Homebrew could not be read for sizes (${e instanceof Error ? e.message : String(e)}); formula sizes come from the measured table alone.`);
+    }
+    sizes.stop();
+  }
   // This computer's own recipe is read even under a recipe file: the file's ticks and answers stand, the rows and
   // their sources are what is here, so a row about this Mac (an agent's config to write) never follows another's.
   let catalogRecipe: Recipe;
@@ -787,7 +802,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const startedHistories = Date.now();
   let sessionsRead = 0;
   try {
-    const here = await opts.recipe(
+    const read = await opts.recipe(
       h => histories.detail(historyLine(h)),
       scan => (projectScan = scan),
       p => {
@@ -797,10 +812,15 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         histories.detail(historyProgressLine(p));
       },
     );
+    // This Mac's tools rows the catalog does not carry join the recipe under their own ids, off, so a tick on one
+    // (from the file or the Also on this Mac screen) has a row to land on.
+    const here = withOutsideRows(read, manifest, brew);
     // The rows outside the catalog are the file's, not this computer's: a plain run keeps what wsp recipe --add
-    // wrote into the recipe beside the state, which is the same file this run ends by writing.
+    // wrote into the recipe beside the state, and the ticks on this Mac's own rows, from the same file this run ends
+    // by writing. A file's tick on such a row that this Mac has no row for is said, since nothing here installs it.
     const carried = carriedOver(smallRecipePath(opts.statePath), line => notes.push(line));
-    const base = given === undefined ? { ...here, ...(carried.custom === undefined ? {} : { custom: carried.custom }) } : withTicksOf(here, given);
+    const base = given === undefined ? applySets({ ...here, ...(carried.custom === undefined ? {} : { custom: carried.custom }) }, carried.ticks) : withTicksOf(here, given);
+    if (opts.recipeFile !== undefined) for (const r of outsideRowsOf(given)) if (r.on && !here.rows.some(h => h.id === r.id)) notes.push(notHereLine(packageOf(r), opts.recipeFile));
     // The pins this setup's builds recorded stand under the file's own: the file says what to install, the state what was installed.
     catalogRecipe = withPins(base, new Map([...carried.pins, ...pinsOf(given?.rows)]));
   } catch (e) {
@@ -817,17 +837,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const st = statOf(join(opts.home, rel));
     return st === undefined || st.kind === "dangling" ? undefined : st.kind === "dir";
   });
-  // The Mac's Homebrew sizes the formulae on the Tools screen; a brew that fails leaves the measured table.
-  let brew: BrewTable = new Map();
-  if (opts.brew !== undefined && manifest.entries.some(e => e.id.startsWith(BREW_ID_PREFIX))) {
-    const sizes = spin(io.output, "Reading Homebrew for sizes", io.isTTY);
-    try {
-      brew = await opts.brew();
-    } catch (e) {
-      notes.push(`Homebrew could not be read for sizes (${e instanceof Error ? e.message : String(e)}); formula sizes come from the measured table alone.`);
-    }
-    sizes.stop();
-  }
   // What else this Mac could put on the image; only its own screen uses it, so nothing runs when that screen is not shown.
   let scanned: readonly ScanRow[] = [];
   if (opts.scan !== undefined && interactive && opts.recipeFile === undefined) {
@@ -840,7 +849,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     }
     spinner.stop();
   }
-  manifest = { ...manifest, entries: withoutAgentTools(manifest.entries) };
   // The card counts what the collector found; the catalog's bare rows join the manifest after it.
   const found = manifest;
   manifest = applyRecipe(withCatalogAgents(withSavedPins(manifest, readSavedManifest(recipePath(opts.statePath)))), catalogRecipe);
@@ -917,7 +925,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const path = recipePath(opts.statePath);
   // The small recipe beside it: the catalog ids with the ticks and answers as the screens left them, the form wsp init --recipe reads.
   const small = { path: smallRecipePath(opts.statePath), recipe: catalogRecipe };
-  // The pins this run's installs record, by catalog id; written on the small recipe with each result, so the next run installs the same release.
+  // The pins this run's installs record, by the recipe row's id; written on the small recipe with each result, so the next run installs the same release.
   const pins = new Map<string, ToolPin>();
   const smallRecipeNow = (): Recipe => withPins(recipeWithAnswers(small.recipe, choices), pins);
   let landed: ImportResult | undefined;
@@ -936,10 +944,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         const recorded = recordedPins(r.tools);
         const stale = (e: ManifestEntry): boolean => recorded.has(e.id) && e.pin?.tag !== recorded.get(e.id)!.tag;
         if (manifest.entries.some(stale)) {
-          for (const e of manifest.entries.filter(stale)) {
-            const id = catalogIdOf(e);
-            if (id !== undefined) pins.set(id, recorded.get(e.id)!);
-          }
+          for (const e of manifest.entries.filter(stale)) pins.set(catalogIdOf(e) ?? e.id, recorded.get(e.id)!);
           manifest = { ...manifest, entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: recorded.get(e.id)! } : e)) };
           saveRecipe(path, manifest, ticks, choices);
           saveSmallRecipe(small.path, smallRecipeNow());

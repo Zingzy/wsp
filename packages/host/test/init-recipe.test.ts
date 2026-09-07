@@ -28,8 +28,11 @@ import {
   withoutAgentTools,
   withCatalogAgents,
   recipeWithAnswers,
+  withOutsideRows,
   withTicksOf,
 } from "../src/init-recipe.js";
+import { MIB } from "@wsp/catalog";
+import type { BrewTable } from "@wsp/engine";
 import { FIXTURE, byId } from "./init-fixture.js";
 
 const ANTHROPIC = "sk-ant-x-fake-anthropic-key";
@@ -502,5 +505,51 @@ describe("the small recipe", () => {
     expect(out.at).toBe(here.at);
     expect(out.histories).toEqual([]);
     expect(Recipe.parse(out)).toEqual(out);
+  });
+
+  const TAP: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "unknown" };
+  const TABLE: BrewTable = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * MIB, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+  const here = { kind: "installed" as const, paths: [], bin: true };
+
+  it("withOutsideRows adds a row per tools row the catalog does not carry, off and found here; a catalog row, a tap, a locked row and a row no road installs get none", () => {
+    const tapItself: ManifestEntry = { rung: "tools", id: "tools/brew-tap/zingzy/tap", label: "zingzy/tap", group: "Homebrew taps", paths: [], bytes: 0, default: "bring", linux: "yes" };
+    const nix: ManifestEntry = { rung: "tools", id: "tools/nix-home-manager", label: "Nix home-manager config", paths: ["~/.config/home-manager"], bytes: 10, default: "bring", linux: "yes" };
+    const manifest: Manifest = { entries: [...FIXTURE.entries, TAP, tapItself, nix] };
+    const out = withOutsideRows(RECIPE, manifest, TABLE);
+    // gh and yq are the catalog's rows, rectangle is locked off with its reason, the tap and the nix row install nothing.
+    expect(out.rows.slice(RECIPE.rows.length)).toEqual([
+      { id: "tools/npm/tsx", kind: "tool", on: false, source: here },
+      { id: TAP.id, kind: "tool", on: false, source: here },
+    ]);
+    expect(Recipe.parse(out)).toEqual(out);
+    // A row the recipe already carries is left as it is; nothing to add gives the recipe back.
+    expect(withOutsideRows(out, manifest, TABLE)).toEqual(out);
+    expect(withOutsideRows(RECIPE, { entries: [] }, TABLE)).toBe(RECIPE);
+    // Without the table the tap formula still has a row: the brew road plans it, and the plan says what it does with it.
+    expect(withOutsideRows(RECIPE, { entries: [TAP] }, new Map()).rows.at(-1)).toEqual({ id: TAP.id, kind: "tool", on: false, source: here });
+  });
+
+  it("applyRecipe ticks such a row from the recipe's row under its own id and puts that row's pin on it; a recipe without the row leaves it off and unpinned", () => {
+    const pin = { tag: "v0.1.0", sha256: "a".repeat(64) };
+    const manifest: Manifest = { entries: [...FIXTURE.entries, TAP] };
+    const on: Recipe = { ...RECIPE, rows: [...RECIPE.rows, { id: TAP.id, kind: "tool", on: true, source: here, pin }, { id: "tools/npm/tsx", kind: "tool", on: true, source: here }] };
+    const applied = applyRecipe(manifest, on);
+    expect(applied.entries.find(e => e.id === TAP.id)).toEqual({ ...TAP, bring: true, pin });
+    expect(applied.entries.find(e => e.id === "tools/npm/tsx")).toMatchObject({ bring: true });
+    expect(applied.entries.filter(e => e.rung === "tools" && initialTicks(e)).map(e => e.id)).toEqual(["tools/brew/gh", "tools/npm/tsx", TAP.id, "tools/catalog/agent-browser"]);
+    expect(parseManifest(applied)).toEqual(applied);
+    const off = applyRecipe(manifest, RECIPE);
+    expect(off.entries.find(e => e.id === TAP.id)).toEqual({ ...TAP, bring: false });
+    expect(off.entries.find(e => e.id === "tools/npm/tsx")).toMatchObject({ bring: false });
+    // A row the recipe ticks off stays off, whatever its default says.
+    expect(applyRecipe(manifest, { ...on, rows: on.rows.map(r => (r.id === TAP.id ? { ...r, on: false } : r)) }).entries.find(e => e.id === TAP.id)).toEqual({ ...TAP, bring: false, pin });
+  });
+
+  it("withTicksOf writes a saved tick and pin onto this computer's row outside the catalog, and drops a saved row outside the catalog this computer has no row for, where a catalog row is kept", () => {
+    const pin = { tag: "v0.1.0", sha256: "a".repeat(64) };
+    const mine: Recipe = { ...RECIPE, rows: [{ id: TAP.id, kind: "tool", on: false, source: here }] };
+    const saved: Recipe = { ...RECIPE, rows: [{ id: TAP.id, kind: "tool", on: true, source: here, pin }, { id: "tools/brew/elsewhere", kind: "tool", on: true, source: here }, { id: "gh", kind: "tool", on: true, source: here }] };
+    const out = withTicksOf(mine, saved);
+    expect(out.rows).toEqual([{ id: TAP.id, kind: "tool", on: true, source: here, pin }, { id: "gh", kind: "tool", on: true, source: here }]);
   });
 });

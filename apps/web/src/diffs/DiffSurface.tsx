@@ -151,6 +151,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const scopeLabel = SCOPE_LABELS[scope];
   const shown = repo.cwd === cwd ? repo.state : { kind: "unknown" as const };
   const folderLabel = shown.kind === "repo" ? shown.root : cwd;
+  const said = shown.kind !== "repo" && REPO_STATE_WORDS[shown.kind].word !== "" ? REPO_STATE_WORDS[shown.kind] : null;
 
   return (
     <div
@@ -191,21 +192,22 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           {shown.kind === "unknown" ? null : (
             <span
               className="inline-flex h-6 shrink-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground"
-              title={
-                shown.kind === "repo"
-                  ? `git: ${shown.root}`
-                  : shown.kind === "none"
-                    ? `no repository at or above ${cwd}`
-                    : REPO_STATE_WORDS.refused.note
-              }
-              data-diff-git={shown.kind}
+              title={said !== null ? undefined : shown.kind === "repo" ? `git: ${shown.root}` : `no repository at or above ${cwd}`}
               data-diff-repo={shown.kind === "repo" ? shown.root : undefined}
+              data-diff-repo-state={shown.kind}
             >
               <FolderGitIcon className={cn("size-3.5 shrink-0", shown.kind === "repo" ? "opacity-70" : "opacity-40")} />
               {shown.kind === "repo" ? (
                 <span className="max-w-40 truncate">{shown.branch}</span>
+              ) : said === null ? (
+                <span>no git</span>
               ) : (
-                <span>{shown.kind === "none" ? "no git" : REPO_STATE_WORDS.refused.word}</span>
+                <Tooltip>
+                  <TooltipTrigger render={<span className="max-w-40 truncate" tabIndex={0} />}>{said.word}</TooltipTrigger>
+                  <TooltipPopup side="top" className="max-w-72">
+                    {said.note}
+                  </TooltipPopup>
+                </Tooltip>
               )}
             </span>
           )}

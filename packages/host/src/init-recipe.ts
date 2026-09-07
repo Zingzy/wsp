@@ -7,14 +7,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { LOGIN_CHOICES, parseManifest, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { CATALOG_AGENTS, catalogEntry, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow } from "@wsp/catalog";
-import { CATALOG_PREFIX, agentOwning, diffRecipes, isMcpRow, neverCopied, packageOf, parseMcpId, rowRoad, type BrewTable, type RecipeDigest } from "@wsp/engine";
-import { Recipe, type LoginChoice } from "@wsp/protocol";
+import { CATALOG_PREFIX, agentOwning, diffRecipes, isMcpRow, isTap, neverCopied, packageOf, parseMcpId, rowRoad, type BrewTable, type RecipeDigest } from "@wsp/engine";
+import { Recipe, type LoginChoice, type RecipeRow } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
 import { SIGN_IN_WORDS } from "./signin-words.js";
 import { pinsOf } from "./recipe-file.js";
-export { loadRecipe, pinsOf, saveSmallRecipe, smallRecipePath, withPins, withTicksOf } from "./recipe-file.js";
+export { loadRecipe, outsideCatalog, outsideRowsOf, pinsOf, saveSmallRecipe, smallRecipePath, withPins, withTicksOf } from "./recipe-file.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
@@ -195,12 +195,26 @@ export function catalogIdOf(e: ManifestEntry): string | undefined {
   return undefined;
 }
 
+/** This computer's tools rows the catalog does not carry, as rows of the small recipe under the collector's own id,
+ * so the file and the Also on this Mac screen tick them like any other row and the build installs each by the road
+ * the plan resolves for it: off until one ticks it, found here as its source. A tap itself, a row locked off with a
+ * reason and a row no road installs get none: nothing installs the first, nobody can tick the second, and a tick on
+ * the third would do nothing. A row the recipe already carries is left as it is. */
+export function withOutsideRows(recipe: Recipe, manifest: Manifest, brew: BrewTable): Recipe {
+  const named = new Set(recipe.rows.map(r => r.id));
+  const rows = manifest.entries.flatMap((e): RecipeRow[] => {
+    if (e.rung !== "tools" || named.has(e.id) || catalogIdOf(e) !== undefined || isTap(e) || !isTickable(e) || rowRoad(e, brew) === undefined) return [];
+    return [{ id: e.id, kind: "tool", on: false, source: { kind: "installed", paths: e.paths, bin: true } }];
+  });
+  return rows.length === 0 ? recipe : { ...recipe, rows: [...recipe.rows, ...rows] };
+}
+
 /** The collector's rows with the recipe's ticks written on: an agents or tools row is on when its catalog row is,
- * off when it is not or when no catalog row stands for it; an MCP row follows its agent; a saved sign-in answer
- * lands on the login row it names; a recorded pin lands on the tools row of the catalog id it names, so the road
- * installs that release and checks its sum. Every other row keeps its default. A ticked catalog tool this computer
- * has no row for gets a bare row, the floor's aside, so the build installs it by its catalog road; the bare rows of
- * an earlier pass are made anew, so an untick takes its row away. */
+ * a tools row the catalog does not carry when the recipe's row under its own id is, off when the recipe has no such
+ * row; an MCP row follows its agent; a saved sign-in answer lands on the login row it names; a recorded pin lands on
+ * the tools row of the id it names, so the road installs that release and checks its sum. Every other row keeps its
+ * default. A ticked catalog tool this computer has no row for gets a bare row, the floor's aside, so the build
+ * installs it by its catalog road; the bare rows of an earlier pass are made anew, so an untick takes its row away. */
 export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
   const on = new Set(recipe.rows.filter(r => r.on).map(r => r.id));
   const answers = new Map<string, LoginChoice>(recipe.rows.flatMap(r => (r.signIn === undefined ? [] : [[`logins/${loginIdOf(r.id)}`, r.signIn]])));
@@ -222,7 +236,10 @@ export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
           return { ...e, bring: initialTicks(e) && (agent === undefined || catalogEntry(agent)?.kind !== "agent" || on.has(agent)) };
         }
         const id = catalogIdOf(e);
-        if (id !== undefined || e.rung === "tools") return { ...e, bring: id !== undefined && on.has(id), ...pinOf(id) };
+        if (id !== undefined || e.rung === "tools") {
+          const key = id ?? e.id;
+          return { ...e, bring: on.has(key), ...pinOf(key) };
+        }
         const answer = e.rung === "logins" ? answers.get(e.id) : undefined;
         return answer === undefined ? e : { ...e, choice: answer };
       }),

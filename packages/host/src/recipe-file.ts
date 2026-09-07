@@ -5,9 +5,9 @@
 // can write a recipe without the runtime or the engine coming with it.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { loginIdOf } from "@wsp/catalog";
+import { catalogEntry, loginIdOf } from "@wsp/catalog";
 import { type HistoryCache, fileHistoryCache } from "@wsp/collect";
-import { Recipe, type ToolPin } from "@wsp/protocol";
+import { Recipe, type RecipeRow, type ToolPin } from "@wsp/protocol";
 
 /** Where the small recipe lives, beside the saved manifest: what wsp recipe writes and wsp init --recipe reads. */
 export function smallRecipePath(statePath: string): string {
@@ -45,6 +45,13 @@ export function pinsOf(rows: readonly { id: string; pin?: ToolPin }[] | undefine
   return new Map((rows ?? []).flatMap((r): [string, ToolPin][] => (r.pin === undefined ? [] : [[r.id, r.pin]])));
 }
 
+/** Whether a recipe row is a tools row the catalog does not carry, filed under the collector's own id: this
+ * computer's formula or global, ticked by the file or the person and by no rule. */
+export const outsideCatalog = (r: Pick<RecipeRow, "id">): boolean => catalogEntry(r.id) === undefined;
+
+/** The rows of a recipe outside the catalog, in the recipe's order; none of a recipe that is not there. */
+export const outsideRowsOf = (recipe: Pick<Recipe, "rows"> | undefined): RecipeRow[] => (recipe?.rows ?? []).filter(outsideCatalog);
+
 /** The recipe with these pins written on the rows they name; every other row keeps what it had. */
 export function withPins(recipe: Recipe, pins: ReadonlyMap<string, ToolPin>): Recipe {
   if (pins.size === 0) return recipe;
@@ -52,8 +59,10 @@ export function withPins(recipe: Recipe, pins: ReadonlyMap<string, ToolPin>): Re
 }
 
 /** This computer's recipe with a saved one's ticks, answers and pins written on, by id: a row the saved one lacks is
- * off and unanswered, and a saved row this computer's recipe does not carry follows them as it was saved. The rows
- * outside the catalog are the saved recipe's own: nothing on this computer decides them. */
+ * off and unanswered, and a saved catalog row this computer's recipe does not carry follows them as it was saved,
+ * since its catalog road installs it anywhere. A saved row outside the catalog that this computer has no row of its
+ * own for does not: only the computer that has the tool knows how it installs, so the caller says it was left out.
+ * The added rows (`custom`) are the saved recipe's own: nothing on this computer decides them. */
 export function withTicksOf(here: Recipe, saved: Recipe): Recipe {
   const rows = new Map(saved.rows.map(r => [r.id, r]));
   const ids = new Set(here.rows.map(r => r.id));
@@ -67,7 +76,7 @@ export function withTicksOf(here: Recipe, saved: Recipe): Recipe {
           const s = rows.get(r.id);
           return { ...rest, on: s?.on === true, ...(s?.signIn === undefined ? {} : { signIn: s.signIn }) };
         }),
-        ...saved.rows.filter(r => !ids.has(r.id)),
+        ...saved.rows.filter(r => !ids.has(r.id) && !outsideCatalog(r)),
       ],
     },
     pinsOf(saved.rows),

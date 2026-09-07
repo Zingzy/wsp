@@ -4,9 +4,13 @@
 // the Files pane uses and the branch git resolved there beside it, the
 // changed-files tree and stat follow the reply, files collapse, the branch
 // base is named, and the byte budget cut is announced. The Pierre code view
-// is stubbed to a list of item ids and their collapse.
+// is stubbed to a list of item ids and their collapse, the tooltip skin to
+// its text.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { REPO_STATE_WORDS } from "@wsp/protocol";
+import type { TerminalWire } from "../src/terminal/link.js";
 
 vi.mock("@pierre/diffs/react", () => ({
   CodeView: (props: { items: { id: string; collapsed?: boolean }[] }) => (
@@ -16,6 +20,11 @@ vi.mock("@pierre/diffs/react", () => ({
       ))}
     </ul>
   ),
+}));
+vi.mock("../src/components/ui/tooltip.js", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render: element, children }: { render: ReactElement<{ children?: ReactNode }>; children?: ReactNode }) => cloneElement(element, {}, children),
+  TooltipPopup: ({ children }: { children: ReactNode }) => <div role="tooltip">{children}</div>,
 }));
 
 import { DiffSurface } from "../src/diffs/DiffSurface.js";
@@ -31,6 +40,9 @@ const patch = (path: string, from: string, to: string) =>
 const DIFF = { base: null, files: [{ path: "src/a.ts", patch: patch("src/a.ts", "one", "two") }, { path: "README.md", patch: patch("README.md", "old", "new") }], truncated: false };
 const STATUS = { branch: { oid: "abc", head: "main", ahead: 0, behind: 0 }, entries: [], root: "/root/app" };
 const NOT_A_REPO = () => Object.assign(new Error("not inside a git repository"), { code: "not-a-git-repo" });
+const OUTSIDE_ROOT = () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" });
+/** The git mark's classes: the same box whether it names a branch, no git, or a read the machine refused. */
+const LABEL_CLASSES = ["inline-flex", "h-6", "shrink-0", "items-center", "gap-1", "px-1", "font-mono", "text-[11px]", "text-muted-foreground"];
 
 beforeEach(() => {
   resetSurfaces();
@@ -47,13 +59,13 @@ describe("diff surface", () => {
     provideDaemonWire(WS, wire);
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     // Before git answers there is no mark at all, rather than an icon with nothing beside it.
-    expect(container.querySelector("[data-diff-git]")).toBeNull();
+    expect(container.querySelector("[data-diff-repo-state]")).toBeNull();
     await waitFor(() => expect(items(container)).toHaveLength(2));
     expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "unstaged" }]);
     expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("unstaged");
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root/app"));
     expect(container.querySelector("[data-diff-repo]")?.textContent).toBe("main");
-    expect(container.querySelector("[data-diff-git]")?.textContent).toBe("main");
+    expect(container.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("repo");
     expect(screen.getByRole("group", { name: "2 additions, 2 deletions" })).toBeTruthy();
     const tree = container.querySelector("[data-changed-files]")!;
     expect(tree.textContent).toContain("2 changed files");
@@ -128,12 +140,42 @@ describe("diff surface", () => {
   });
 
   it("says git went unread when the machine refused the read, not that there is no repository", async () => {
-    const refuses = () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" });
-    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": refuses }));
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": OUTSIDE_ROOT }));
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
-    await waitFor(() => expect(container.querySelector("[data-diff-git]")?.getAttribute("data-diff-git")).toBe("refused"));
-    expect(container.querySelector("[data-diff-git]")?.textContent).toBe("git unread");
+    await waitFor(() => expect(container.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("refused"));
+    expect(container.querySelector("[data-diff-repo-state] [tabindex]")?.textContent).toBe(REPO_STATE_WORDS.refused.word);
     expect(container.querySelector("[data-diff-repo]")).toBeNull();
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+  });
+
+  it("says the machine could not read the folder's git state, with its note, and nothing shifts", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": OUTSIDE_ROOT, "git.status": OUTSIDE_ROOT }));
+    act(() => useRootStore.getState().follow(WS, "/root/scratch"));
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(container.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("refused"));
+    const label = container.querySelector<HTMLElement>("[data-diff-repo-state]")!;
+    expect(label.querySelector("[tabindex]")?.textContent).toBe(REPO_STATE_WORDS.refused.word);
+    expect(label.textContent).not.toContain("/root/scratch");
+    expect(label.className.split(" ")).toEqual(LABEL_CLASSES);
+    expect(label.getAttribute("title")).toBeNull();
+    expect(container.querySelector("[data-diff-repo]")).toBeNull();
+    expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
+    expect(screen.getByRole("alert").textContent).toBe("outside the browsable roots");
+  });
+
+  it("names the folder in the crumb row and draws no mark, no word and no note, while the read is still out", async () => {
+    const inner = fakeWire({ "fs.list": LISTING, "git.diff": DIFF });
+    const wire: TerminalWire = { request: (op, params) => (op === "git.status" ? new Promise(() => {}) : inner.request(op, params)) };
+    provideDaemonWire(WS, wire);
+    act(() => useRootStore.getState().follow(WS, "/root/scratch"));
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    expect(folderCrumbRow(container)).toEqual([["/root", "/root"], ["scratch", "/root/scratch"]]);
+    expect(shownFolder(container)).toBe("/root/scratch");
+    expect(container.querySelector("[data-diff-repo-state]")).toBeNull();
+    expect(container.querySelector("[data-diff-repo]")).toBeNull();
+    expect(screen.queryByText(REPO_STATE_WORDS.refused.word)).toBeNull();
+    expect(screen.queryByText(REPO_STATE_WORDS.refused.note)).toBeNull();
   });
 
   it("keeps the repository label through a refresh of the same folder", async () => {
