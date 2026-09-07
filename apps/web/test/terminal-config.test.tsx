@@ -98,7 +98,7 @@ describe("the viewport with the person's Ghostty config", () => {
     await vi.waitFor(() => expect(setTheme).toHaveBeenLastCalledWith(expect.objectContaining({ background: { r: 250, g: 250, b: 250 } })));
   });
 
-  it("a pane mounted while the socket is down draws the defaults and says so once; when the socket comes up it takes the file's size and colours without a remount", async () => {
+  it("a pane mounted while the socket is down draws the defaults and says so once; when the socket comes up it takes the file's size, colours, padding and opacity without a remount", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     let up = false;
     const read = async (): Promise<TerminalConfig> => {
@@ -106,17 +106,27 @@ describe("the viewport with the person's Ghostty config", () => {
       return { ...FILE, fontFamily: [], fontSize: 16 };
     };
     useStore.setState({ conn: "connecting" });
-    const { options, surface, create } = await open(read);
+    const { options, surface, mount, create } = await open(read);
     expect(options.font).toBeUndefined();
     expect(options.theme.palette).toBeUndefined();
+    expect(options.backgroundOpacity).toBe(1);
+    expect(mount.hasAttribute("data-terminal-translucent")).toBe(false);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]![0])).toContain("lost");
     const setFont = vi.spyOn(surface, "setFont");
     const setTheme = vi.spyOn(surface, "setTheme");
+    const setPadding = vi.spyOn(surface, "setPadding");
+    const setOpacity = vi.spyOn(surface, "setBackgroundOpacity");
     up = true;
     useStore.setState({ conn: "live" });
     await vi.waitFor(() => expect(setFont).toHaveBeenCalledWith({ size: 16 }));
     expect(setTheme).toHaveBeenLastCalledWith(expect.objectContaining({ background: { r: 30, g: 30, b: 46 }, palette: FILE.palette }));
+    expect(setPadding).toHaveBeenCalledWith({ left: 2, right: 4, top: 4, bottom: 4 });
+    expect(setOpacity).toHaveBeenCalledWith(0.85);
+    expect(surface.textSize).toBe(16);
+    expect(surface.translucent).toBe(true);
+    await vi.waitFor(() => expect(mount.hasAttribute("data-terminal-translucent")).toBe(true));
+    expect(mount.className).not.toContain("bg-[var(--terminal-background)]");
     expect(create).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledTimes(1);
   });

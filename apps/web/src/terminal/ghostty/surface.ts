@@ -584,8 +584,6 @@ export class GhosttyTerminalSurface {
   readonly canvas: HTMLCanvasElement;
   readonly input: HTMLTextAreaElement;
   readonly scrollbar: HTMLDivElement;
-  /** Whether the background paints under full opacity, so the pane around the canvas knows to stop painting its own. */
-  readonly translucent: boolean;
   cols = 1;
   rows = 1;
 
@@ -598,8 +596,8 @@ export class GhosttyTerminalSurface {
   private requestedFontFamily: string | undefined;
   private requestedFallbacks: readonly string[] = [];
   private fontSize: number;
-  private readonly padding: TerminalPadding;
-  private readonly backgroundOpacity: number;
+  private padding: TerminalPadding;
+  private backgroundOpacity: number;
   private fontEpoch = 0;
   private pendingFontEpoch: number | null = null;
   private readonly resizeObserver: ResizeObserver;
@@ -691,7 +689,6 @@ export class GhosttyTerminalSurface {
     this.padding = terminalPaddingOf(options.padding);
     this.originY = this.padding.top;
     this.backgroundOpacity = terminalBackgroundOpacity(options.backgroundOpacity);
-    this.translucent = this.backgroundOpacity < 1;
     this.resizeObserver = new ResizeObserver(() => this.fit());
     this.installEvents();
     this.watchDevicePixelRatio();
@@ -733,12 +730,13 @@ export class GhosttyTerminalSurface {
 
     const backgroundOpacity = terminalBackgroundOpacity(options.backgroundOpacity);
     const padding = terminalPaddingOf(options.padding);
-    // A translucent background needs the alpha channel an opaque backing store lacks; the choice is made once here.
-    const context = canvas.getContext("2d", { alpha: backgroundOpacity < 1 });
+    // The backing store keeps an alpha channel whatever the opacity at open, since a config read after the first draw
+    // may ask for a translucent background; an opaque paint over it composites the same as an opaque store.
+    const context = canvas.getContext("2d", { alpha: true });
     if (!context) throw new Error("Canvas 2D is unavailable");
-    // An opaque canvas backing store initializes to solid black, and the font
-    // and WASM loads below leave it on screen for the whole setup window; paint
-    // the theme background first so the mount never flashes a black box.
+    // The font and WASM loads below leave the canvas on screen for the whole
+    // setup window; paint the theme background first so the mount never
+    // flashes an empty box.
     const { r, g, b } = options.theme.background;
     context.fillStyle = backgroundOpacity < 1 ? `rgba(${r}, ${g}, ${b}, ${backgroundOpacity})` : `rgb(${r}, ${g}, ${b})`;
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -810,6 +808,31 @@ export class GhosttyTerminalSurface {
 
   get cellHeight(): number {
     return this.metrics.height;
+  }
+
+  /** Whether the background paints under full opacity, so the pane around the canvas knows to stop painting its own. */
+  get translucent(): boolean {
+    return this.backgroundOpacity < 1;
+  }
+
+  setPadding(padding: TerminalPadding): void {
+    if (this.disposed) return;
+    this.padding = terminalPaddingOf(padding);
+    this.originY = this.padding.top;
+    // Cached IME textarea coordinates are stale in the new geometry.
+    this.inputLeft = -1;
+    this.inputTop = -1;
+    this.forceFullRender = true;
+    this.scrollbarDirty = true;
+    this.fit();
+    this.requestRender();
+  }
+
+  setBackgroundOpacity(opacity: number): void {
+    if (this.disposed) return;
+    this.backgroundOpacity = terminalBackgroundOpacity(opacity);
+    this.forceFullRender = true;
+    this.requestRender();
   }
 
   setTheme(theme: GhosttyTheme): void {
