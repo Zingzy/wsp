@@ -7,6 +7,7 @@ import {
   measureGhosttyCell,
   renderGhosttySnapshot,
   terminalGridSize,
+  uniformPadding,
 } from "./renderer";
 
 const cell = (text: string, wide = 0): GhosttyCell => ({
@@ -25,14 +26,21 @@ const cell = (text: string, wide = 0): GhosttyCell => ({
 
 describe("terminalGridSize", () => {
   it("matches the mobile renderer's cell-and-padding sizing model", () => {
-    expect(terminalGridSize(808, 408, { width: 10, height: 20, baseline: 15 }, 4)).toEqual({
+    expect(terminalGridSize(808, 408, { width: 10, height: 20, baseline: 15 }, uniformPadding(4))).toEqual({
+      cols: 80,
+      rows: 20,
+    });
+  });
+
+  it("takes each side of the padding on its own, as window-padding-x = 2,4 asks", () => {
+    expect(terminalGridSize(806, 418, { width: 10, height: 20, baseline: 15 }, { left: 2, right: 4, top: 8, bottom: 10 })).toEqual({
       cols: 80,
       rows: 20,
     });
   });
 
   it("never sends an invalid zero-sized terminal to libghostty", () => {
-    expect(terminalGridSize(0, 0, { width: 10, height: 20, baseline: 15 }, 4)).toEqual({
+    expect(terminalGridSize(0, 0, { width: 10, height: 20, baseline: 15 }, uniformPadding(4))).toEqual({
       cols: 1,
       rows: 1,
     });
@@ -282,5 +290,63 @@ describe("renderGhosttySnapshot", () => {
     });
 
     expect(clearedRows).toEqual([4, 36, 36]);
+  });
+});
+
+describe("renderGhosttySnapshot with a translucent background", () => {
+  function paintedContext() {
+    const calls: string[] = [];
+    let fillStyle = "";
+    const context = {
+      canvas: { width: 200, height: 80 },
+      beginPath: () => {},
+      clip: () => {},
+      clearRect: (...args: number[]) => calls.push(`clear ${args.join(",")}`),
+      fillRect: (...args: number[]) => calls.push(`fill ${fillStyle} ${args.join(",")}`),
+      fillText: () => {},
+      rect: () => {},
+      resetTransform: () => {},
+      restore: () => {},
+      save: () => {},
+      set fillStyle(value: string) {
+        fillStyle = value;
+      },
+      set font(_value: string) {},
+      set textBaseline(_value: string) {},
+    } as unknown as CanvasRenderingContext2D;
+    return { context, calls };
+  }
+  const red = { r: 200, g: 0, b: 0 };
+  const snapshot: GhosttySnapshot = {
+    cols: 2,
+    rows: 1,
+    foreground: { r: 255, g: 255, b: 255 },
+    background: { r: 30, g: 30, b: 46 },
+    cursor: { r: 255, g: 255, b: 255 },
+    cursorX: -1,
+    cursorY: -1,
+    cursorVisible: false,
+    cursorBlinking: false,
+    cursorStyle: 1,
+    dirtyRows: new Set([0]),
+    rowData: [{ cells: [cell("a"), { ...cell("b"), background: red }], text: "ab", isWrapContinuation: false, wrapsToNext: false }],
+  };
+  const render = (context: CanvasRenderingContext2D, backgroundOpacity: number | undefined) =>
+    renderGhosttySnapshot({ context, snapshot, metrics: { width: 10, height: 20, baseline: 15 }, fontSize: 12, fontFamily: "monospace", padding: 4, forceFull: true, cursorOn: false, ...(backgroundOpacity !== undefined ? { backgroundOpacity } : {}) });
+
+  it("clears the canvas and each row before painting the window background at the file's opacity; a cell's own background stays opaque", () => {
+    const { context, calls } = paintedContext();
+    render(context, 0.85);
+    expect(calls.slice(0, 4)).toEqual(["clear 0,0,200,80", "fill rgba(30, 30, 46, 0.85) 0,0,200,80", "clear 4,4,20,20", "fill rgba(30, 30, 46, 0.85) 4,4,20,20"]);
+    expect(calls).toContain("fill rgb(200, 0, 0) 14,4,10,20");
+  });
+
+  it("at full opacity, or with none given, paints as before without clearing", () => {
+    for (const opacity of [1, undefined]) {
+      const { context, calls } = paintedContext();
+      render(context, opacity);
+      expect(calls.filter(c => c.startsWith("clear"))).toEqual([]);
+      expect(calls[0]).toBe("fill rgb(30, 30, 46) 0,0,200,80");
+    }
   });
 });

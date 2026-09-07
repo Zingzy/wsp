@@ -16,6 +16,8 @@ export interface FakeLaptop {
   shell?: string;
   /** TERM_PROGRAM of the process running the collector. */
   terminal?: string;
+  /** XDG_CONFIG_HOME of the process running the collector. */
+  xdgConfigHome?: string;
 }
 
 const HOME = "/Users/dev";
@@ -86,5 +88,5 @@ export function fakeHost(laptop: FakeLaptop = {}): Host & { calls: string[] } {
     },
   };
 
-  return { platform: laptop.platform ?? "darwin", home: HOME, ...(laptop.shell !== undefined ? { shell: laptop.shell } : {}), ...(laptop.terminal !== undefined ? { terminal: laptop.terminal } : {}), fs, exec, calls };
+  return { platform: laptop.platform ?? "darwin", home: HOME, ...(laptop.shell !== undefined ? { shell: laptop.shell } : {}), ...(laptop.terminal !== undefined ? { terminal: laptop.terminal } : {}), ...(laptop.xdgConfigHome !== undefined ? { xdgConfigHome: laptop.xdgConfigHome } : {}), fs, exec, calls };
 }

@@ -459,7 +459,7 @@ describe("terminal font resolution", () => {
       }),
     ).resolves.toBe(DEFAULT_TERMINAL_FONT_FAMILY);
     expect(load).toHaveBeenCalledTimes(4);
-    expect(resolve).toHaveBeenCalledWith("Proportional Test");
+    expect(resolve).toHaveBeenCalledWith("Proportional Test", []);
   });
 
   it("keeps the bundled symbols face behind a custom text face and names no other Nerd Font", () => {
@@ -516,17 +516,24 @@ describe("terminal font resolution", () => {
 });
 
 describe("terminalContentOriginY", () => {
+  const even = { top: 4, bottom: 4 };
   it("stays top-anchored like a fresh terminal until scrollback exists", () => {
-    expect(terminalContentOriginY(100, 4, 5, 16, false)).toBe(4);
+    expect(terminalContentOriginY(100, even, 5, 16, false)).toBe(4);
   });
 
   it("pins the grid to the bottom by moving the sub-row slack above row 0", () => {
     // 100px mount, 4px padding, 5 rows of 16px: 92 - 80 = 12px slack on top.
-    expect(terminalContentOriginY(100, 4, 5, 16, true)).toBe(16);
+    expect(terminalContentOriginY(100, even, 5, 16, true)).toBe(16);
     // Exact fit keeps the origin at the padding.
-    expect(terminalContentOriginY(88, 4, 5, 16, true)).toBe(4);
+    expect(terminalContentOriginY(88, even, 5, 16, true)).toBe(4);
     // A mount smaller than the grid never pushes the origin above the padding.
-    expect(terminalContentOriginY(80, 4, 5, 16, true)).toBe(4);
+    expect(terminalContentOriginY(80, even, 5, 16, true)).toBe(4);
+  });
+
+  it("keeps the file's top padding as the resting origin and its bottom padding out of the slack", () => {
+    expect(terminalContentOriginY(100, { top: 2, bottom: 10 }, 5, 16, false)).toBe(2);
+    // 100 - 2 - 10 - 80 = 8px slack above row 0.
+    expect(terminalContentOriginY(100, { top: 2, bottom: 10 }, 5, 16, true)).toBe(10);
   });
 
   it("keeps the prompt stationary while a drag crosses row boundaries", () => {
@@ -534,7 +541,7 @@ describe("terminalContentOriginY", () => {
     // tracks the mount bottom exactly until a new row fits.
     for (let height = 88; height < 104; height += 1) {
       const rows = Math.max(1, Math.floor((height - 8) / 16));
-      const origin = terminalContentOriginY(height, 4, rows, 16, true);
+      const origin = terminalContentOriginY(height, even, rows, 16, true);
       expect(origin + rows * 16).toBe(height - 4);
     }
   });

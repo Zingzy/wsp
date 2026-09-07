@@ -94,6 +94,8 @@ import type {
   HarnessCatalog,
   HostFolderListing,
   RecipeDigest,
+  TerminalConfig,
+  TerminalScheme,
   PortProbeView,
   PortReachView,
   ProjectAgentOutcome,
@@ -317,6 +319,12 @@ export interface LandRequest {
  * the disk itself, the host that owns it does. The desktop shell has the system dialog and never asks for this. */
 export interface HostFolders {
   list(req: { dir?: string; hidden?: boolean }): Promise<HostFolderListing>;
+}
+
+/** The person's terminal config on the computer running the host, read again on every ask; the runtime never reads
+ * the disk itself, the host that owns it does. */
+export interface HostTerminalConfig {
+  read(scheme?: TerminalScheme): Promise<TerminalConfig>;
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */

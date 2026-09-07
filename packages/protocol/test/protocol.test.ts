@@ -934,3 +934,32 @@ describe("packageOf", () => {
     expect(wire.toolRowId("uv", "ruff").startsWith(wire.toolRowPrefix("uv"))).toBe(true);
   });
 });
+
+describe("the person's terminal config", () => {
+  it("takes an ask with or without a scheme, and vouches only for the keys the pane honours in their shapes", () => {
+    for (const req of [{ id: "r1", op: "host.terminalConfig" }, { id: "r1", op: "host.terminalConfig", scheme: "light" }]) {
+      expect(wire.RuntimeRequest.parse(req)).toEqual(req);
+    }
+    expect(wire.RuntimeRequest.safeParse({ id: "r1", op: "host.terminalConfig", scheme: "sepia" }).success).toBe(false);
+    const none = { files: [], fontFamily: [], palette: Array<null>(16).fill(null) };
+    expect(wire.TerminalConfig.parse(none)).toEqual(none);
+    const full = {
+      ...none,
+      files: ["/Users/dev/.config/ghostty/config"],
+      fontFamily: ["Berkeley Mono", "Symbols Nerd Font Mono"],
+      fontSize: 13,
+      theme: "Catppuccin Mocha",
+      background: { r: 30, g: 30, b: 46 },
+      cursorStyle: "underline",
+      cursorStyleBlink: false,
+      windowPaddingX: { left: 2, right: 4 },
+      backgroundOpacity: 0.85,
+      backgroundBlur: 20,
+    };
+    expect(wire.TerminalConfig.parse(full)).toEqual(full);
+    expect(wire.TerminalConfig.safeParse({ ...none, palette: [] }).success).toBe(false);
+    expect(wire.TerminalConfig.safeParse({ ...none, background: { r: 256, g: 0, b: 0 } }).success).toBe(false);
+    expect(wire.TerminalConfig.safeParse({ ...none, backgroundOpacity: 1.5 }).success).toBe(false);
+    expect(wire.TerminalConfig.safeParse({ ...none, cursorStyle: "beam" }).success).toBe(false);
+  });
+});

@@ -101,6 +101,7 @@ describe("the agent contract on the command line and the tool door", () => {
     // One level of this computer's own folders: the home folder this test stubbed, with a folder inside it to list.
     mkdirSync(join(dir, "user", "code"), { recursive: true });
     await last("folders", "folders");
+    await last("terminal config", "terminal", "config");
     // The streaming verbs: the frames carry a field of the tool's object and the result leaves it out. A plan nobody
     // consented to is the plan frame alone, since nothing is left of the result once the plan is dropped.
     const planned = await run("import", proj, "--to", "alpha", "--json");

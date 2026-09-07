@@ -48,6 +48,18 @@ describe("makeApi wrappers", () => {
     await expect(interrupt("s1")).rejects.toThrow();
   });
 
+  it("hostTerminalConfig sends host.terminalConfig with the scheme and unwraps the config the wire type vouches for", async () => {
+    const { api, lastSent } = await connect();
+    const read = api.hostTerminalConfig!;
+    const config = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: ["Berkeley Mono"], fontSize: 13, palette: Array<null>(16).fill(null), backgroundOpacity: 0.85 };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, config });
+    expect(await read("light")).toEqual(config);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "host.terminalConfig", scheme: "light" });
+    // A config the wire type does not vouch for is not applied: the pane would paint with a value it never checked.
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, config: { ...config, backgroundOpacity: 2 } });
+    await expect(read("dark")).rejects.toThrow();
+  });
+
   it("hostFolders sends host.folders with only the fields it was given and unwraps the level the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
     const browse = api.hostFolders!;
