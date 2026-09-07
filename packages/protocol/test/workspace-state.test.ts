@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, goneRefusal, isBilling, needsRebuild, sendRefusal, stillWorkingRefusal, workspaceState, workspaceWord, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, computerOffline, goneRefusal, isBilling, needsRebuild, reachShown, sendRefusal, stillWorkingRefusal, workspaceState, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -93,5 +93,33 @@ describe("isBilling", () => {
     for (const state of ["pausing", "paused", "waking", "gone"] as const) expect(isBilling(state)).toBe(false);
     // The provider's gone word wins over a record that still says running.
     expect(isBilling(workspaceState({ phase: "running", machineState: "gone", reach: "gone" }))).toBe(false);
+  });
+});
+
+describe("reachShown", () => {
+  it("one silence after an answer keeps the answer's word; two in a row read unreachable; an answer clears at once", () => {
+    expect(reachShown("reachable", "unreachable")).toBe("reachable");
+    expect(reachShown("slow", "unreachable")).toBe("slow");
+    expect(reachShown("unreachable", "unreachable")).toBe("unreachable");
+    expect(reachShown("unreachable", "reachable")).toBe("reachable");
+    expect(reachShown("unreachable", "slow")).toBe("slow");
+  });
+
+  it("a machine never heard from, or one already failing, reads its silence at once", () => {
+    expect(reachShown(undefined, "unreachable")).toBe("unreachable");
+    for (const previous of ["no-daemon", "zombie", "napping", "gone", "unsupported"] as const) expect(reachShown(previous, "unreachable")).toBe("unreachable");
+  });
+
+  it("every answer is shown as it came, whatever went before", () => {
+    const answers: ReachState[] = ["reachable", "slow", "no-daemon", "napping", "unsupported", "gone", "zombie"];
+    for (const probed of answers) for (const previous of [undefined, ...answers, "unreachable" as const]) expect(reachShown(previous, probed)).toBe(probed);
+  });
+});
+
+describe("computerOffline", () => {
+  it("one row whose probe never left this computer is the computer's road, not its machine", () => {
+    expect(computerOffline([{ reach: { state: "reachable" } }, { reach: { state: "unreachable" } }])).toBe(false);
+    expect(computerOffline([{ reach: { state: "reachable" } }, { reach: { state: "unreachable", offline: true } }])).toBe(true);
+    expect(computerOffline([])).toBe(false);
   });
 });

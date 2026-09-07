@@ -149,12 +149,14 @@ describe("a workspace row's menu", () => {
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
       WORKSPACE_WORDS.openMachine,
+      WORKSPACE_WORDS.importProject,
+      WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
       WORKSPACE_WORDS.forget,
     ]);
-    expect(within(opened).getAllByRole("separator")).toHaveLength(4);
+    expect(within(opened).getAllByRole("separator")).toHaveLength(5);
     expect(item(WORKSPACE_WORDS.pause).getAttribute("aria-disabled")).toBeNull();
     expect(item(WORKSPACE_WORDS.rename).getAttribute("aria-disabled")).toBe("true");
     expect(refusalOf(WORKSPACE_WORDS.rename)).toBe("Renaming is not in the runtime yet");
@@ -244,6 +246,8 @@ describe("a workspace row's menu", () => {
       ["open-terminal", WORKSPACE_WORDS.openTerminal, true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, true],
       ["open-machine", WORKSPACE_WORDS.openMachine, true],
+      ["import-project", WORKSPACE_WORDS.importProject, false],
+      ["export-project", WORKSPACE_WORDS.exportProject, false],
       ["rename", WORKSPACE_WORDS.rename, false],
       ["fork", WORKSPACE_WORDS.fork, false],
       ["copy-id", WORKSPACE_WORDS.copyId, true],

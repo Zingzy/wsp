@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The port every harness adapter is written against: the process a turn runs
 // in (ExecStream, whatever launched it), the events an adapter normalizes its
-// CLI's output into (AdapterEvent), and what it reads off its binary when the
-// runtime asks what that binary takes (HarnessCatalogAnswer). It sits here,
-// beside the wire types, so no adapter owns the interface its siblings
-// implement. The runtime folds these into the SessionEvent shapes in index.ts
-// that clients read, which is why the vocabulary they share (DeltaKind,
-// TurnResult, SessionHarness) is declared once there and imported back here.
+// CLI's output into (AdapterEvent), what it reads off its binary when the
+// runtime asks what that binary takes (HarnessCatalogAnswer), and what it
+// reads out of the harness's own store when the runtime asks what that harness
+// calls a session (SessionTitleReader). It sits here, beside the wire types,
+// so no adapter owns the interface its siblings implement. The runtime folds
+// these into the SessionEvent shapes in index.ts that clients read, which is
+// why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
+// declared once there and imported back here.
 import type { DeltaKind, SessionHarness, TurnResult } from "./index.js";
 
 export type AdapterEvent =
@@ -92,3 +94,12 @@ export type HarnessCatalogAnswer = HarnessCatalogProbe | HarnessCatalogRefusal |
 export function catalogRefused(answer: HarnessCatalogAnswer): answer is HarnessCatalogRefusal {
   return answer !== null && "refused" in answer;
 }
+
+/**
+ * Reads what the harness itself calls one of its sessions, from the harness's own store on the machine: the title
+ * it generated, overridden by whatever the person renamed the session to inside the harness. The id is the session
+ * as that harness keys it, in whatever word it uses for one (Claude Code's session id, Codex's thread id). One
+ * shell line goes to `exec` and its stdout is the answer. Null when the store keeps no title for that id, and when
+ * it holds no such session at all; absent on an adapter whose harness keeps no title.
+ */
+export type SessionTitleReader = (harnessSessionId: string, exec: (command: string) => Promise<string>) => Promise<string | null>;

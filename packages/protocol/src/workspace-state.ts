@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import type { MachineState, ReachState, WorkspacePhase } from "./index.js";
+import type { MachineState, ReachState, WorkspacePhase, WorkspaceStatus } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -96,6 +96,21 @@ export function sendRefusal(kind: SendRefusalKind, goneWords?: string): string |
 }
 
 const isBlock = (kind: SendRefusalKind): kind is SendBlock => kind in BLOCK_WORDS;
+
+/** The reach word a row shows after one probe. A single silence after an answer keeps the answer's word: one slow
+ * edge answer, one DNS blip or one busy second on the box is not the machine gone dark, so the word turns only on
+ * the second silence in a row. Every answer, and a silence after anything but an answer, shows as it came. */
+export function reachShown(lastProbe: ReachState | undefined, probed: ReachState): ReachState {
+  if (probed !== "unreachable") return probed;
+  return lastProbe === "reachable" || lastProbe === "slow" ? lastProbe : "unreachable";
+}
+
+/** Whether the latest poll's probes failed before leaving this computer. A road that fails here fails for every
+ * machine at once, so one row saying so is the computer's network, never that row's machine. */
+export function computerOffline(statuses: Iterable<Pick<WorkspaceStatus, "reach">>): boolean {
+  for (const s of statuses) if (s.reach.offline === true) return true;
+  return false;
+}
 
 /** Whether the machine is up and billing in this state: running, or running with its edge or daemon dark (the
  * provider bills a machine it cannot be reached on). Paused, moving and gone ones bill nothing, and only a billing

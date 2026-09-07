@@ -5,9 +5,10 @@
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
 import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, TurnResult } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, SessionTitleReader, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
+import { parseSessionTitle, sessionTitleCommand } from "./session-title.js";
 
 export interface CodexStartOptions {
   prompt: string;
@@ -50,6 +51,8 @@ export interface CodexAdapter {
   readonly steers: false;
   /** Makes the binary describe itself under the same home as a session, without running a turn. */
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
+  /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
+  sessionTitle: SessionTitleReader;
   readonly env: Readonly<Record<string, string>>;
 }
 
@@ -304,5 +307,12 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
   const probeCatalog = (exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer> =>
     exec(catalogProbeCommand({ home: deps.home, baseEnv: deps.baseEnv })).then(stdout => parseCatalogProbe(stdout, deps.login));
 
-  return { start, sessions, steers: false, probeCatalog, env };
+  return {
+    start,
+    sessions,
+    steers: false,
+    probeCatalog,
+    sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
+    env,
+  };
 }

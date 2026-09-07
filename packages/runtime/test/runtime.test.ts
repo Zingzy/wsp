@@ -133,7 +133,9 @@ describe("runtime", () => {
     const result = await session.finished;
     expect(result.status).toBe("completed");
     // The adapter is handed the golden's login PATH: a launch served by a bare-PATH exec must still find the binary.
-    expect(contexts.map(c => c.env)).toEqual([{ PATH: TOOLS_PATH }]);
+    // Every context, not the first alone: a turn is not the only road that asks a harness something on the machine.
+    expect(contexts.length).toBeGreaterThan(0);
+    for (const ctx of contexts) expect(ctx.env).toEqual({ PATH: TOOLS_PATH });
     const types = events.map(e => e.type);
     expect(types).toContain("session.start");
     expect(types).toContain("session.delta");

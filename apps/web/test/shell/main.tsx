@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the app shell over a fake api with three
-// workspaces (running, paused, gone) and two threads, in either theme
+// workspaces (running, paused, gone) and four threads, in either theme
 // (?theme=light), with a status toast in the footer (?toast=...) and with the
 // runtime replacing the first machine's helper (?helper=1) or the first
-// machine's link dropped after a near-full memory sample (?oom=1), so a test
+// machine's link dropped after a near-full memory sample (?oom=1) or every
+// probe failing before it left this computer (?offline=1), so a test
 // can measure the chrome's geometry, which jsdom cannot lay out. With
 // ?ws=<id> the centre holds that workspace's thread and composer, so the
 // refusal line above the box can be measured for the running, paused and gone
@@ -13,7 +14,9 @@
 // switch chord reaches it; ?mac=1 marks the html the way the macOS preload
 // does; ?panel=terminal opens the right panel with a Browser tab and a
 // terminal over a fake daemon wire, the host answering a translucent Ghostty
-// config, so the pane's material can be measured with each tab active.
+// config, so the pane's material can be measured with each tab active;
+// ?sidebar=<px> opens the sidebar at that remembered width so the rows can
+// be measured at several.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DESKTOP_MAC_CLASS, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -77,7 +80,7 @@ const api: Api = {
   createFromGoldenHead: async () => workspaces[0]!,
   watchStatuses: async () =>
     workspaces.map(w =>
-      statusOf(w, w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : {}),
+      statusOf(w, params.get("offline") === "1" ? { reach: { state: statusOf(w).reach.state, offline: true } } : w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
     ),
   forget: async () => {},
   nap: async id => workspaces.find(w => w.id === id)!,
@@ -121,7 +124,12 @@ function fakeWire(): TerminalWire {
 const toast = params.get("toast");
 const shown = params.get("ws");
 useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(shown !== null ? { selectedId: shown } : {}) });
+// ?sidebar=<px> is the width the shell remembers; it is written here, after a test's init script has cleared storage.
+const sidebarWidth = params.get("sidebar");
+if (sidebarWidth !== null) window.localStorage.setItem("wsp:sidebar-width", sidebarWidth);
 useStore.getState().bind(api);
+// The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
+useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
 if (params.get("panel") === "terminal" && shown !== null) {
   const terminals = new WorkspaceTerminals(fakeWire());
   terminals.feedStatus("live");

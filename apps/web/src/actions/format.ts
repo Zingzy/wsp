@@ -14,6 +14,8 @@ export const WORKSPACE_WORDS = {
   openTerminal: "Open terminal",
   openBrowser: "Open browser",
   openMachine: "Open machine",
+  importProject: "Import project",
+  exportProject: "Export project",
   rename: "Rename workspace",
   fork: "Fork workspace",
   copyId: "Copy machine id",
@@ -96,6 +98,9 @@ export const NO_REBUILD_NEEDED = "Rebuild replaces a gone or zombie machine; thi
 export const CLIENT_CANNOT_REBUILD = "This client cannot rebuild machines";
 export const CLIENT_CANNOT_FORGET = "This client cannot forget workspaces";
 export const NEW_THREAD_WAITS = "New threads wait for the rebuild";
+export const PROJECTS_WAIT = "Projects wait for the rebuild";
+export const CLIENT_CANNOT_IMPORT = "This client cannot import projects";
+export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
 export const NO_WORKSPACE_RENAME = "Renaming is not in the runtime yet";
 export const NO_WORKSPACE_FORK = "Forking a workspace is not in the runtime yet; take a project snapshot in the Machine tab and start a workspace from it";
 

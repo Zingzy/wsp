@@ -447,6 +447,9 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
+/** The one line the sidebar puts above the rows while the probes fail before leaving this computer; the rows keep their last word. */
+export const COMPUTER_OFFLINE_LINE = "This computer is offline";
+
 /** When a turn is over, in the one sentence every door the agent reads quotes whole: the skill, the tool
  * descriptions, the command line's help and the machine's own context. The reply comes back at once from a follow;
  * the row settles only at the process exit, since a harness can keep working after it answers. */

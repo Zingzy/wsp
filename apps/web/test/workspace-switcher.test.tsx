@@ -3,7 +3,8 @@
 // tab and shift+tab walk it, letting the key go opens the highlighted
 // workspace, Escape and a lost window leave everything where it was, and a
 // tap is a walk of one followed by a release, which paints nothing. The cards
-// read the sidebar's own order, words and threads.
+// read the sidebar's own order and threads, and carry three parts: the picture
+// well, the workspace name and the open thread's title.
 import { act, cleanup, configure, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView, WorkspaceView } from "@wsp/protocol";
@@ -13,6 +14,7 @@ import { buildSwitcherCards } from "../src/components/switcher/switcherCards.js"
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
+import { ROW_META_CLASS } from "../src/sidebar/rowGrammar.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onComposerFocusRequest } from "../src/shell/shellRequests.js";
 import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
@@ -83,8 +85,14 @@ const asDesktopShell = (bridge: Partial<Window["wsp"]> = {}): (() => void) => {
 const overlay = () => document.querySelector<HTMLElement>("[data-workspace-switcher]");
 const cardIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-workspace-card]")].map(el => el.dataset["workspaceCard"]!);
 const highlightedCard = (): string | null => document.querySelector<HTMLElement>("[data-workspace-card][aria-selected=true]")?.dataset["workspaceCard"] ?? null;
+const card = (workspaceId: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-workspace-card='${workspaceId}']`);
 const cardText = (workspaceId: string, part: string): string =>
   document.querySelector<HTMLElement>(`[data-workspace-card='${workspaceId}'] [data-card-${part}]`)?.textContent ?? "";
+const cardPartClass = (workspaceId: string, part: string): string =>
+  document.querySelector<HTMLElement>(`[data-workspace-card='${workspaceId}'] [data-card-${part}]`)?.className ?? "";
+/** The parts a card is built of, in the order it draws them; a child that is no named part reads as "?". */
+const cardParts = (workspaceId: string): string[] =>
+  [...(card(workspaceId)?.children ?? [])].map(el => el.getAttributeNames().find(name => name.startsWith("data-card-"))?.slice("data-card-".length) ?? "?");
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
 
 vi.setConfig({ testTimeout: 15_000 });
@@ -96,7 +104,7 @@ beforeEach(() => {
   useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
-  useWorkspacePreviews.setState({ lines: {}, images: {} });
+  useWorkspacePreviews.setState({ images: {} });
   useWorkspaceSwitcher.getState().close();
 });
 
@@ -310,31 +318,35 @@ describe("the workspace switcher overlay", () => {
     expect(useStore.getState().selectedId).toBe("ws_a");
   });
 
-  it("carries the name, the state word, the cost today in mono and the open thread's title and last line", async () => {
+  it("carries the workspace name and the open thread's title in muted mono, and no cost, state word or open word", async () => {
     await mountShell();
     const restore = asDesktopShell();
     try {
+      // A cost is ticking for this workspace while the overlay is up, and it reaches no card.
       act(() => {
         useStore.setState({ costs: { ws_b: { rateUsdPerHour: 0.35, accruedUsd: 1.2345, at: "2026-09-07T10:00:00Z" } } });
-        useWorkspacePreviews.setState({ lines: { ws_b: { threadKey: "s1", text: "All 12 tests green." } } });
       });
       tab();
       await waitFor(() => expect(overlay()).not.toBeNull());
       expect(cardText("ws_b", "name")).toBe("web");
-      expect(cardText("ws_b", "meta")).toBe("Running · $1.2345 today");
       expect(cardText("ws_b", "thread")).toBe("Bump the lockfile and run the gate.");
-      expect(cardText("ws_b", "line")).toBe("All 12 tests green.");
-      const meta = document.querySelector<HTMLElement>("[data-workspace-card='ws_b'] [data-card-meta]")!;
-      expect(meta.className).toContain("font-mono");
-      expect(cardText("ws_c", "meta")).toBe("Paused");
-      expect(cardText("ws_a", "meta")).toBe("Running · open");
       expect(cardText("ws_a", "thread")).toBe("No threads yet");
+      // The name is sans at a row's weight; the thread's title is the muted mono line under it.
+      expect(cardPartClass("ws_b", "name")).not.toContain("font-mono");
+      expect(cardPartClass("ws_b", "name")).not.toContain("font-medium");
+      expect(cardPartClass("ws_b", "thread")).toContain(ROW_META_CLASS);
+      // Two parts here and no third, since this bridge answers for no picture, and the same two on every card.
+      expect(cardParts("ws_b")).toEqual(["name", "thread"]);
+      expect(document.querySelectorAll("[data-card-meta], [data-card-line]").length).toBe(0);
+      expect(card("ws_a")?.textContent).toBe("apiNo threads yet");
+      expect(card("ws_b")?.textContent).toBe("webBump the lockfile and run the gate.");
+      expect(card("ws_c")?.textContent).toBe("oldNo threads yet");
     } finally {
       restore();
     }
   });
 
-  it("draws the picture well only where the shell can answer for one, and asks it to photograph the workspace being left", async () => {
+  it("draws the picture well above the name and the title where the shell can answer for one, and asks it to photograph the workspace being left", async () => {
     await mountShell();
     const capturePreview = vi.fn(async () => undefined);
     const workspacePreview = vi.fn(async (id: string) => (id === "ws_b" ? "data:image/png;base64,AAA" : undefined));
@@ -344,6 +356,7 @@ describe("the workspace switcher overlay", () => {
       await waitFor(() => expect(document.querySelectorAll("[data-card-preview]").length).toBe(3));
       await waitFor(() => expect(document.querySelector<HTMLImageElement>("[data-workspace-card='ws_b'] img")?.src).toBe("data:image/png;base64,AAA"));
       expect(document.querySelector("[data-workspace-card='ws_a'] [data-card-preview]")?.textContent).toBe("no capture yet");
+      expect(cardParts("ws_b")).toEqual(["preview", "name", "thread"]);
       release();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
       expect(capturePreview).toHaveBeenCalledWith("ws_a");
@@ -377,7 +390,7 @@ describe("the workspace switcher overlay", () => {
 
 describe("loadPagePreviews", () => {
   it("keeps what the shell still answers for and drops what it has let go at its own cap", async () => {
-    useWorkspacePreviews.setState({ lines: {}, images: { ws_a: "data:image/png;base64,OLD" } });
+    useWorkspacePreviews.setState({ images: { ws_a: "data:image/png;base64,OLD" } });
     const restore = asDesktopShell({ workspacePreview: async id => (id === "ws_b" ? "data:image/png;base64,NEW" : undefined) });
     try {
       await loadPagePreviews(["ws_a", "ws_b"]);
@@ -388,23 +401,9 @@ describe("loadPagePreviews", () => {
   });
 
   it("touches nothing where the shell cannot answer at all", async () => {
-    useWorkspacePreviews.setState({ lines: {}, images: { ws_a: "data:image/png;base64,OLD" } });
+    useWorkspacePreviews.setState({ images: { ws_a: "data:image/png;base64,OLD" } });
     await loadPagePreviews(["ws_a", "ws_b"]);
     expect(useWorkspacePreviews.getState().images).toEqual({ ws_a: "data:image/png;base64,OLD" });
-  });
-});
-
-describe("useWorkspacePreviews.noteLine", () => {
-  it("hands the same record back for a line that says what the one held already says", () => {
-    const { noteLine } = useWorkspacePreviews.getState();
-    noteLine("ws_a", { threadKey: "thr_1", text: "All 12 tests green." });
-    const held = useWorkspacePreviews.getState().lines;
-    noteLine("ws_a", { threadKey: "thr_1", text: "All 12 tests green." });
-    expect(useWorkspacePreviews.getState().lines).toBe(held);
-    noteLine("ws_a", { threadKey: "thr_1", text: "Bumped the lockfile." });
-    expect(useWorkspacePreviews.getState().lines).not.toBe(held);
-    noteLine("ws_a", { threadKey: "thr_2", text: "Bumped the lockfile." });
-    expect(useWorkspacePreviews.getState().lines["ws_a"]?.threadKey).toBe("thr_2");
   });
 });
 
@@ -442,17 +441,17 @@ describe("switchHoldKeys", () => {
 describe("buildSwitcherCards", () => {
   const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_b: SESSIONS } });
 
-  it("keeps the order it is given and drops an id the snapshot no longer holds", () => {
-    const cards = buildSwitcherCards({ projects, ids: ["ws_c", "ws_gone", "ws_a"], costs: {}, lines: {}, images: {}, currentId: "ws_a", pinnedThreadId: null });
+  it("keeps the order it is given, drops an id the snapshot no longer holds, and carries the three parts alone", () => {
+    const cards = buildSwitcherCards({ projects, ids: ["ws_c", "ws_gone", "ws_a"], images: {}, currentId: "ws_a", pinnedThreadId: null });
     expect(cards.map(c => c.workspaceId)).toEqual(["ws_c", "ws_a"]);
-    expect(cards.map(c => c.current)).toEqual([false, true]);
+    expect(Object.keys(cards[0]!)).toEqual(["workspaceId", "name", "threadTitle", "image"]);
   });
 
   it("names the thread the sidebar draws at the top of the workspace, not the first row the fold happens to hand back", () => {
     const older = session("s_old", "ws_a", "The oldest thread.", Date.parse("2026-09-01T01:00:00Z"));
     const working = { ...session("s_new", "ws_a", "The working thread.", Date.parse("2026-09-01T02:00:00Z")), status: "running" as const, endedAt: undefined };
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [older, working] } });
-    const cards = buildSwitcherCards({ projects: snapshot, ids: ["ws_a"], costs: {}, lines: {}, images: {}, currentId: null, pinnedThreadId: null });
+    const cards = buildSwitcherCards({ projects: snapshot, ids: ["ws_a"], images: {}, currentId: null, pinnedThreadId: null });
     expect(cards[0]?.threadTitle).toBe("The working thread.");
   });
 
@@ -460,16 +459,9 @@ describe("buildSwitcherCards", () => {
     const older = session("s_old", "ws_a", "The oldest thread.", Date.parse("2026-09-01T01:00:00Z"));
     const newer = session("s_new", "ws_a", "The newest thread.", Date.parse("2026-09-01T02:00:00Z"));
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [older, newer] } });
-    const pinned = buildSwitcherCards({ projects: snapshot, ids: ["ws_a"], costs: {}, lines: {}, images: {}, currentId: "ws_a", pinnedThreadId: "s_old" });
+    const pinned = buildSwitcherCards({ projects: snapshot, ids: ["ws_a"], images: {}, currentId: "ws_a", pinnedThreadId: "s_old" });
     expect(pinned[0]?.threadTitle).toBe("The oldest thread.");
-    const elsewhere = buildSwitcherCards({ projects: snapshot, ids: ["ws_a"], costs: {}, lines: {}, images: {}, currentId: "ws_b", pinnedThreadId: "s_old" });
+    const elsewhere = buildSwitcherCards({ projects: snapshot, ids: ["ws_a"], images: {}, currentId: "ws_b", pinnedThreadId: "s_old" });
     expect(elsewhere[0]?.threadTitle).toBe("The newest thread.");
-  });
-
-  it("shows a recorded line only under the thread it was recorded for", () => {
-    const lines = { ws_b: { threadKey: "s1", text: "All 12 tests green." } };
-    expect(buildSwitcherCards({ projects, ids: ["ws_b"], costs: {}, lines, images: {}, currentId: null, pinnedThreadId: null })[0]?.lastLine).toBe("All 12 tests green.");
-    const stale = { ws_b: { threadKey: "another-thread", text: "All 12 tests green." } };
-    expect(buildSwitcherCards({ projects, ids: ["ws_b"], costs: { }, lines: stale, images: {}, currentId: null, pinnedThreadId: null })[0]?.lastLine).toBeNull();
   });
 });
