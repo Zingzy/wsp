@@ -5,8 +5,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { act, fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LegendListRef } from "@legendapp/list/react";
+import type { SessionEvent } from "@wsp/protocol";
 import { MessagesTimeline } from "./MessagesTimeline";
-import type { TimelineEntry, TurnSummary } from "./adapt";
+import { deriveSession, type TimelineEntry, type TurnSummary } from "./adapt";
 
 globalThis.ResizeObserver = class {
   observe() {}
@@ -573,31 +574,6 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
-  it("renders context compaction entries in the normal work log", () => {
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "entry-1",
-            kind: "work",
-            createdAt: "2026-03-17T19:12:28.000Z",
-            entry: {
-              id: "work-1",
-              createdAt: "2026-03-17T19:12:28.000Z",
-              turnId: null,
-              label: "Context compacted",
-              tone: "info",
-              sourceActivityKind: "tool.completed",
-            },
-          },
-        ]}
-      />,
-    );
-
-    expect(markup).toContain("Context compacted");
-  });
-
   it("summarizes changed files in one line", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -745,7 +721,7 @@ describe("MessagesTimeline", () => {
               createdAt: "2026-03-17T19:12:29.000Z",
               turnId: null,
               label: "Status updated",
-              tone: "info",
+              tone: "notice",
               sourceActivityKind: "tool.completed",
             },
           },
@@ -968,7 +944,7 @@ describe("MessagesTimeline", () => {
               createdAt: "2026-03-17T19:12:27.000Z",
               turnId: null,
               label: "Status updated",
-              tone: "info",
+              tone: "notice",
               sourceActivityKind: "tool.completed",
             },
           },
@@ -1010,7 +986,7 @@ describe("MessagesTimeline", () => {
               createdAt: "2026-03-17T19:12:27.000Z",
               turnId: null,
               label: "Status updated",
-              tone: "info",
+              tone: "notice",
               sourceActivityKind: "tool.completed",
             },
           },
@@ -1139,5 +1115,60 @@ describe("MessagesTimeline", () => {
     expect(commandRow.getAttribute("aria-expanded")).toBe("true");
     expect(within(expandedGroup as HTMLElement).getByText("Command")).toBeTruthy();
     expect((expandedGroup as HTMLElement).querySelector("pre")?.textContent).toBe("ls");
+  });
+});
+
+describe("a notice row: the cut-turn row and the notify row", () => {
+  const scoped = { workspaceId: "ws_n", sessionId: "sess_n", turnId: "turn_n" };
+  const cutStart: SessionEvent = { type: "session.start", ...scoped, at: 1_000, prompt: "carry on", afterCut: true };
+  const settled: SessionEvent[] = [
+    cutStart,
+    { type: "session.delta", ...scoped, at: 2_000, kind: "text", text: "picking up where it stopped" },
+    { type: "session.notify", ...scoped, at: 2_500, notify: "me", text: "thread thread_c finished (completed, 1.5s): picking up" },
+    { type: "session.done", ...scoped, at: 3_000, result: { status: "completed", durationMs: 1500, text: "picking up where it stopped" } },
+    { type: "session.end", ...scoped, at: 3_100, exitCode: 0, sawResult: true },
+  ];
+  // The row's glyphs, without the disclosure chevron every row carries.
+  const glyphs = (el: Element): string[] =>
+    [...new Set([...el.querySelectorAll("svg")].flatMap(svg => [...svg.classList].filter(c => c.startsWith("lucide-") && !c.startsWith("lucide-chevron"))))];
+
+  it("on a settled turn both rows open from the fold as muted mono text under the info glyph, with no check mark, no cross and no failure", async () => {
+    const model = deriveSession(settled);
+    const { container, getByRole } = await act(async () =>
+      render(<MessagesTimeline {...buildProps()} turns={model.turns} timelineEntries={model.timeline} />),
+    );
+    expect(container.querySelector('[data-timeline-row-kind="work"]')).toBeNull();
+    await act(async () => {
+      fireEvent.click(getByRole("button", { name: "Worked for 1.5s" }));
+    });
+
+    const rows = [...container.querySelectorAll('[data-timeline-row-kind="work"]')];
+    expect(rows.map(r => r.textContent)).toEqual([
+      "Previous turn was cut; resuming",
+      "thread thread_c finished (completed, 1.5s): picking up",
+    ]);
+    for (const row of rows) {
+      expect(glyphs(row)).toEqual(["lucide-info"]);
+      const label = row.querySelector(".truncate") as HTMLElement;
+      expect(label.className).toContain("font-mono");
+      expect(label.className).toContain("text-muted-foreground");
+      expect(row.querySelector(".text-icon-muted")).not.toBeNull();
+      expect(row.innerHTML).not.toContain("text-destructive");
+      expect(row.innerHTML).not.toContain("failed");
+    }
+  });
+
+  it("on a running turn the cut row is the latest activity, drawn with the info glyph in muted mono and without the shimmer", () => {
+    const model = deriveSession([cutStart]);
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} isWorking={model.running} activeTurnStartedAt="2026-03-17T19:12:28.000Z" turns={model.turns} timelineEntries={model.timeline} />,
+    );
+    const live = markup.slice(markup.indexOf('data-timeline-row-kind="work-live"'), markup.indexOf('data-timeline-row-kind="thinking"'));
+    expect(live).toContain("Previous turn was cut; resuming");
+    expect(live).toContain("lucide-info");
+    expect(live).not.toContain("lucide-check");
+    expect(live).not.toContain("lucide-hammer");
+    expect(live).toContain("font-mono text-muted-foreground");
+    expect(live).not.toContain("Tool call failed");
   });
 });
