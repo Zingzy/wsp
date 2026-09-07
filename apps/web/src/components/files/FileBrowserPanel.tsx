@@ -4,9 +4,9 @@
 // walk; the expand-all control and the preview reveal sync are gone with it.
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
 import { RotateCw } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type MouseEvent } from "react";
 
-import { joinPath } from "../../files/entries";
+import { joinPath, type ProjectEntry } from "../../files/entries";
 import type { Levels } from "../../files/listing";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -24,6 +24,8 @@ interface FileBrowserPanelProps {
   /** A folder row was opened whose listing nobody asked for yet. */
   onExpandDirectory: (dir: string) => void;
   onOpenFile: (path: string) => void;
+  /** A right-click on a row, with the entry it names as the daemon names it. */
+  onContextMenuEntry?: (entry: ProjectEntry, event: MouseEvent<HTMLElement>) => void;
   /** Called with every folder the tree currently shows a listing for. */
   onRefresh: (dirs: string[]) => void;
   /** The machine's daemon predates this pane: what it predates, said in place of the daemon's own refusal, which
@@ -99,6 +101,7 @@ export default function FileBrowserPanel({
   levels,
   onExpandDirectory,
   onOpenFile,
+  onContextMenuEntry,
   onRefresh,
   behind,
   theme,
@@ -168,8 +171,19 @@ export default function FileBrowserPanel({
 
   const showError = rootLevel?.error !== null && rootLevel?.error !== undefined && rootLevel.entries === null;
 
+  // The rows live in the tree's shadow root, so the row under the pointer is read off the event's composed path.
+  const onContextMenu = (event: MouseEvent<HTMLElement>): void => {
+    if (onContextMenuEntry === undefined) return;
+    const row = event.nativeEvent.composedPath().find((node): node is HTMLElement => node instanceof HTMLElement && node.dataset["itemPath"] !== undefined);
+    if (row === undefined) return;
+    const rel = row.dataset["itemPath"]!.replace(/\/$/, "");
+    const kind = rows.kinds.get(rel);
+    if (kind === undefined) return;
+    onContextMenuEntry({ path: joinPath(root, rel), kind }, event);
+  };
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background" data-file-browser-panel={projectName} data-file-browser-root={root}>
+    <div className="flex min-h-0 flex-1 flex-col bg-background" data-file-browser-panel={projectName} data-file-browser-root={root} onContextMenu={onContextMenu}>
       <div
         className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader

@@ -29,6 +29,8 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js
 import { Spinner } from "../components/ui/spinner.js";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { noDiffLine } from "../actions/format.js";
+import { baseName, relativeTo } from "../files/entries.js";
 import { focusPaneOnShow, FolderBreadcrumbs, useUpAFolder } from "../files/FolderBreadcrumbs.js";
 import { NotRunning } from "../files/FilesSurface.js";
 import { usePinned, useRoot, useRootStore } from "../files/root.js";
@@ -41,6 +43,7 @@ import type { ReviewCommentContext } from "../reviewCommentContext.js";
 import { repoAbsence } from "../adapt/git.js";
 import { gitDiff, gitStatus } from "../terminal/daemon-fs.js";
 import { SCOPE_LABELS, SCOPES, toDiffModel } from "./model.js";
+import { useDiffRevealStore } from "./reveal.js";
 import { DEFAULT_SCOPE, useDiffStore } from "./store.js";
 
 /** The diff read for one folder: in flight or failed with the last reply it may keep showing, or the reply itself. */
@@ -85,6 +88,9 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const [comments, setComments] = useState<ReviewCommentContext[]>([]);
   const viewerRef = useRef<AnnotatableCodeViewHandle>(null);
   const scopeKey = `${cwd} ${scope}`;
+  const revealRequest = useDiffRevealStore(s => s.pendingByWorkspaceId[workspaceId]);
+  const takeReveal = useDiffRevealStore(s => s.take);
+  const [revealNote, setRevealNote] = useState<string | null>(null);
 
   const fetchDiff = useCallback(() => {
     if (!wire || cwd === "") return;
@@ -122,6 +128,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   useEffect(() => {
     setCollapsed(NO_KEYS);
     setComments([]);
+    setRevealNote(null);
   }, [scopeKey]);
 
   const reply = lastReply(load);
@@ -141,17 +148,28 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
       return next;
     });
   };
-  const revealFile = (filePath: string) => {
-    const file = model?.files.find(f => f.filePath === filePath);
-    if (!file) return;
-    setCollapsed(current => {
-      if (!current.has(file.fileKey)) return current;
-      const next = new Set(current);
-      next.delete(file.fileKey);
-      return next;
-    });
-    viewerRef.current?.scrollTo({ type: "item", id: file.fileKey, align: "start" });
-  };
+  const revealFile = useCallback(
+    (filePath: string): boolean => {
+      const file = model?.files.find(f => f.filePath === filePath);
+      if (!file) return false;
+      setCollapsed(current => {
+        if (!current.has(file.fileKey)) return current;
+        const next = new Set(current);
+        next.delete(file.fileKey);
+        return next;
+      });
+      viewerRef.current?.scrollTo({ type: "item", id: file.fileKey, align: "start" });
+      return true;
+    },
+    [model],
+  );
+
+  // A file another pane asked for is shown once a diff is here to look in; one the diff does not touch is named in a line.
+  useEffect(() => {
+    if (revealRequest === undefined || model === null) return;
+    takeReveal(workspaceId);
+    setRevealNote(revealFile(relativeTo(cwd, revealRequest)) ? null : noDiffLine(baseName(revealRequest), SCOPE_LABELS[scope]));
+  }, [cwd, model, revealFile, revealRequest, scope, takeReveal, workspaceId]);
 
   if (!wire || root === null) return <NotRunning />;
 
@@ -299,6 +317,11 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
         {load.kind === "error" && paneLine === "" ? (
           <p className="shrink-0 border-b border-border/70 px-3 py-2 text-[11px] text-destructive" role="alert">
             {load.message}
+          </p>
+        ) : null}
+        {revealNote !== null ? (
+          <p className="shrink-0 border-b border-border/70 px-3 py-1.5 font-mono text-[11px] text-muted-foreground" data-diff-reveal-note>
+            {revealNote}
           </p>
         ) : null}
         {model === null ? (

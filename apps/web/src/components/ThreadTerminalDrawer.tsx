@@ -1,9 +1,10 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/ThreadTerminalDrawer.tsx at 57a66608 (MIT).
 // The viewport's six runtime hook sites (attach stream, write, resize, server
 // config, preview open, local api) are props here: a TerminalIo per terminal
-// and a TerminalViewportConfig. Selection actions and the context menu left
-// with them; the surface keeps its own copy and paste and lets the Command
-// chords the app binds bubble to the window dispatcher.
+// and a TerminalViewportConfig. Selection actions left with them; the surface
+// keeps its own copy and paste and lets the Command chords the app binds
+// bubble to the window dispatcher. The toolbar's buttons and the surface's
+// right-click menu both read the terminal registry.
 import {
   Plus,
   Square,
@@ -24,6 +25,12 @@ import {
   useRef,
   useState,
 } from "react";
+import { copyText } from "../actions/clipboard";
+import { openContextMenu } from "../actions/contextMenu";
+import { actionById, resolveActions, type ResolvedAction } from "../actions/registry";
+import { terminalActions, type TerminalVerbs } from "../actions/terminalActions";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults";
+import { shortcutLabelForCommand } from "../keybindings";
 import type { TerminalConfig, TerminalScheme } from "@wsp/protocol";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Button } from "./ui/button";
@@ -47,6 +54,21 @@ import {
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
+/** Home, clear the screen, drop the scrollback: what the shell's own clear prints. */
+const CLEAR_SCREEN = "\x1b[H\x1b[2J\x1b[3J";
+
+/** The verbs that act on the pane's arrangement rather than one surface; the surface adds copy, paste and clear. */
+export type TerminalPaneVerbs = Pick<TerminalVerbs, "split" | "splitVertical" | "newTerminal" | "close">;
+
+/** The terminal's chords are the ones bound while a terminal has focus. */
+const TERMINAL_SHORTCUTS = { context: { terminalFocus: true } };
+
+/** A toolbar button's label: the title, then the chord, or the refusal when it cannot run. */
+function toolbarLabel(action: ResolvedAction): string {
+  const chord = action.shortcutCommand === undefined ? null : shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, action.shortcutCommand, TERMINAL_SHORTCUTS);
+  const suffix = action.refusal ?? chord;
+  return suffix === null ? action.title : `${action.title} (${suffix})`;
+}
 
 function maxDrawerHeight(): number {
   if (typeof window === "undefined") return DEFAULT_THREAD_TERMINAL_HEIGHT;
@@ -167,6 +189,9 @@ interface TerminalViewportProps {
   autoFocus: boolean;
   resizeEpoch: number;
   drawerHeight: number;
+  /** What the surface's right-click menu can do to the panes, and whether a split has room. */
+  paneVerbs?: TerminalPaneVerbs;
+  atSplitLimit?: boolean;
   /** Why a keystroke must not reach the pty right now, or null; read per key so the surface never rebuilds over it. */
   inputRefusal?: () => string | null;
   onInputRefused?: (reason: string) => void;
@@ -183,6 +208,8 @@ export function TerminalViewport({
   autoFocus,
   resizeEpoch,
   drawerHeight,
+  paneVerbs,
+  atSplitLimit = false,
   inputRefusal = NO_REFUSAL,
   onInputRefused = IGNORE_REFUSED,
 }: TerminalViewportProps) {
@@ -196,6 +223,19 @@ export function TerminalViewport({
   const [translucent, setTranslucent] = useState(false);
   const readHostConfig = useStore(s => s.api?.hostTerminalConfig);
   const activateLink = useEffectEvent((text: string) => (config.onLinkActivate ?? openInNewTab)(text));
+  // The surface reads its options once, so the menu reads the pane verbs of the render it opens in.
+  const contextMenu = useEffectEvent((event: MouseEvent) => {
+    const terminal = terminalRef.current;
+    if (!terminal || paneVerbs === undefined) return;
+    const clipboard = navigator.clipboard;
+    const verbs: TerminalVerbs = {
+      ...paneVerbs,
+      copy: () => copyText(terminal.getSelection()),
+      paste: clipboard !== undefined && typeof clipboard.readText === "function" ? () => terminal.pasteFromClipboard(() => clipboard.readText()) : undefined,
+      clear: () => terminal.write(CLEAR_SCREEN),
+    };
+    void openContextMenu(event, resolveActions(terminalActions, { hasSelection: terminal.hasSelection(), atSplitLimit }, verbs), { shortcuts: TERMINAL_SHORTCUTS });
+  });
 
   useEffect(() => {
     if (fontRef.current === config.font) return;
@@ -237,6 +277,7 @@ export function TerminalViewport({
         onLinkActivate: (text, event) => {
           if (isTerminalLinkActivation(event)) activateLink(text);
         },
+        onContextMenu: contextMenu,
       };
       const terminal = await GhosttyTerminalSurface.create(mount, terminalOptions);
       if (cancelled) {
@@ -387,10 +428,6 @@ export interface ThreadTerminalDrawerProps {
   onSplitTerminal: () => void;
   onSplitTerminalVertical: () => void;
   onNewTerminal: () => void;
-  splitShortcutLabel?: string | undefined;
-  splitVerticalShortcutLabel?: string | undefined;
-  newShortcutLabel?: string | undefined;
-  closeShortcutLabel?: string | undefined;
   onActiveTerminalChange: (terminalId: string) => void;
   onCloseTerminal: (terminalId: string) => void;
   onHeightChange: (height: number) => void;
@@ -536,10 +573,6 @@ export default function ThreadTerminalDrawer({
   onSplitTerminal,
   onSplitTerminalVertical,
   onNewTerminal,
-  splitShortcutLabel,
-  splitVerticalShortcutLabel,
-  newShortcutLabel,
-  closeShortcutLabel,
   onActiveTerminalChange,
   onCloseTerminal,
   onHeightChange,
@@ -726,33 +759,30 @@ export default function ThreadTerminalDrawer({
     }
     return next;
   }, [normalizedTerminalIds, terminalLabelsById]);
-  const splitTerminalActionLabel = hasReachedSplitLimit
-    ? `Split Terminal Horizontally (max ${MAX_TERMINALS_PER_GROUP} per group)`
-    : splitShortcutLabel
-      ? `Split Terminal Horizontally (${splitShortcutLabel})`
-      : "Split Terminal Horizontally";
-  const splitTerminalVerticalActionLabel = hasReachedSplitLimit
-    ? `Split Terminal Vertically (max ${MAX_TERMINALS_PER_GROUP} per group)`
-    : splitVerticalShortcutLabel
-      ? `Split Terminal Vertically (${splitVerticalShortcutLabel})`
-      : "Split Terminal Vertically";
-  const newTerminalActionLabel = newShortcutLabel
-    ? `New Terminal (${newShortcutLabel})`
-    : "New Terminal";
-  const closeTerminalActionLabel = closeShortcutLabel
-    ? `Close Terminal (${closeShortcutLabel})`
-    : "Close Terminal";
+  const paneVerbs = useMemo<TerminalPaneVerbs>(
+    () => ({ split: onSplitTerminal, splitVertical: onSplitTerminalVertical, newTerminal: onNewTerminal, close: () => onCloseTerminal(resolvedActiveTerminalId) }),
+    [onCloseTerminal, onNewTerminal, onSplitTerminal, onSplitTerminalVertical, resolvedActiveTerminalId],
+  );
+  const toolbar = resolveActions(terminalActions, { hasSelection: false, atSplitLimit: hasReachedSplitLimit }, paneVerbs);
+  const splitAction = actionById(toolbar, "split");
+  const splitVerticalAction = actionById(toolbar, "split-vertical");
+  const newAction = actionById(toolbar, "new");
+  const closeAction = actionById(toolbar, "close");
+  const splitTerminalActionLabel = toolbarLabel(splitAction);
+  const splitTerminalVerticalActionLabel = toolbarLabel(splitVerticalAction);
+  const newTerminalActionLabel = toolbarLabel(newAction);
+  const closeTerminalActionLabel = toolbarLabel(closeAction);
   const onSplitTerminalAction = useCallback(() => {
-    if (hasReachedSplitLimit) return;
-    onSplitTerminal();
-  }, [hasReachedSplitLimit, onSplitTerminal]);
+    if (splitAction.refusal !== null) return;
+    void splitAction.run();
+  }, [splitAction]);
   const onSplitTerminalVerticalAction = useCallback(() => {
-    if (hasReachedSplitLimit) return;
-    onSplitTerminalVertical();
-  }, [hasReachedSplitLimit, onSplitTerminalVertical]);
+    if (splitVerticalAction.refusal !== null) return;
+    void splitVerticalAction.run();
+  }, [splitVerticalAction]);
   const onNewTerminalAction = useCallback(() => {
-    onNewTerminal();
-  }, [onNewTerminal]);
+    void newAction.run();
+  }, [newAction]);
 
   useEffect(() => {
     onHeightChangeRef.current = onHeightChange;
@@ -907,6 +937,8 @@ export default function ThreadTerminalDrawer({
       autoFocus={autoFocus}
       resizeEpoch={resizeEpoch}
       drawerHeight={drawerHeight}
+      paneVerbs={paneVerbs}
+      atSplitLimit={hasReachedSplitLimit}
       inputRefusal={inputRefusal}
       onInputRefused={onInputRefused}
     />
@@ -971,7 +1003,7 @@ export default function ThreadTerminalDrawer({
             <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
               className="p-1 text-foreground/90 transition-colors hover:bg-accent"
-              onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
+              onClick={() => void closeAction.run()}
               label={closeTerminalActionLabel}
             >
               <Trash2 className="size-3.25" />
@@ -1073,7 +1105,7 @@ export default function ThreadTerminalDrawer({
                   <TerminalFontButton className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70" open={fontOpen} onToggle={toggleFont} />
                   <TerminalActionButton
                     className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
-                    onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
+                    onClick={() => void closeAction.run()}
                     label={closeTerminalActionLabel}
                   >
                     <Trash2 className="size-3.25" />
@@ -1125,9 +1157,7 @@ export default function ThreadTerminalDrawer({
                         {terminalGroup.terminalIds.map((terminalId) => {
                           const isActive = terminalId === resolvedActiveTerminalId;
                           const terminalLabel = terminalLabelById.get(terminalId) ?? "Terminal";
-                          const closeTerminalLabel = `Close ${terminalLabel}${
-                            isActive && closeShortcutLabel ? ` (${closeShortcutLabel})` : ""
-                          }`;
+                          const closeTerminalLabel = `Close ${terminalLabel}`;
                           return (
                             <div
                               key={terminalId}

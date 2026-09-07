@@ -6,9 +6,10 @@
 // default width, a status toast holds a long token inside its box, the line
 // the runtime puts on a machine's row takes that row's second line whole,
 // uncut and without growing the row, collapsing the sidebar leaves the
-// page header's left padding alone, and a send refusal above the composer is
+// page header's left padding alone, a send refusal above the composer is
 // one muted mono line in a slot the composer keeps at one height whether or
-// not a line is in it. Vite
+// not a line is in it, and a right-click on a workspace row opens the in-app
+// menu at the pointer in the tooltip skin, inside the viewport. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -382,4 +383,54 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     await page!.screenshot({ path, clip: { x: 0, y: 0, width: 600, height: 120 } });
     console.info(`collapsed header screenshot: ${path}`);
   }, 30_000);
+  it("a right-click on a workspace row opens the in-app menu at the pointer in the tooltip skin, kept inside the viewport, and Escape closes it, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      const row = await box("[data-row-id='ws:ws_a']");
+      // On the row's hover buttons too: the whole row is the workspace's.
+      const at = { x: row.x + row.width - 12, y: row.y + row.height / 2 };
+      await page!.mouse.click(at.x, at.y, { button: "right" });
+      await page!.waitForSelector("[data-context-menu]");
+      const menu = await box("[data-context-menu]");
+      expect(Math.abs(menu.x - at.x)).toBeLessThan(1);
+      expect(Math.abs(menu.y - at.y)).toBeLessThan(1);
+      const viewport = page!.viewportSize()!;
+      expect(menu.x + menu.width).toBeLessThanOrEqual(viewport.width - 8);
+      expect(menu.y + menu.height).toBeLessThanOrEqual(viewport.height - 8);
+      const skin = await page!.locator("[data-context-menu]").evaluate(el => {
+        const s = getComputedStyle(el);
+        return { border: s.borderTopWidth, background: s.backgroundColor, radius: s.borderTopLeftRadius, z: s.zIndex, arrows: el.querySelectorAll("[data-arrow], svg").length };
+      });
+      expect(skin.border).toBe("1px");
+      expect(skin.background).not.toBe("rgba(0, 0, 0, 0)");
+      expect(skin.z).toBe("130");
+      expect(skin.arrows).toBe(0);
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(10);
+      expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(4);
+      // The first row that can run holds focus, so the keyboard is already in the menu.
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").first().evaluate(el => document.activeElement === el)).toBe(true);
+      const path = join(SHOTS_DIR, `sidebar-context-menu-${theme}.png`);
+      await page!.screenshot({ path, clip: { x: 0, y: 0, width: 520, height: 520 } });
+      console.info(`sidebar context menu screenshot: ${path}`);
+      // The refusal rides the tooltip skin: hovering a dimmed row shows it.
+      await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").first().hover();
+      await page!.waitForSelector("[data-slot=tooltip-popup]");
+      expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe("Rebuild replaces a gone or zombie machine; this one answers");
+      const tipPath = join(SHOTS_DIR, `sidebar-context-menu-refusal-${theme}.png`);
+      await page!.screenshot({ path: tipPath, clip: { x: 0, y: 0, width: 640, height: 520 } });
+      console.info(`sidebar context menu refusal screenshot: ${tipPath}`);
+      await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[data-context-menu]", { state: "detached" });
+      // Focus goes back where it was: the row's own button under the pointer, which Chromium focused on the press.
+      expect(await page!.evaluate(() => document.activeElement?.closest("[data-sidebar='menu-item']")?.querySelector("[data-row-id='ws:ws_a']") !== null)).toBe(true);
+      const thread = await box("[data-row-id^='thread:']");
+      await page!.mouse.click(thread.x + 20, thread.y + thread.height / 2, { button: "right" });
+      await page!.waitForSelector("[data-context-menu]");
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(4);
+      await page!.screenshot({ path: join(SHOTS_DIR, `thread-context-menu-${theme}.png`), clip: { x: 0, y: 0, width: 520, height: 520 } });
+      console.info(`thread context menu screenshot: ${join(SHOTS_DIR, `thread-context-menu-${theme}.png`)}`);
+      await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[data-context-menu]", { state: "detached" });
+    }
+  }, 60_000);
 });

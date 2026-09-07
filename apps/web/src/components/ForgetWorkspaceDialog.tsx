@@ -5,6 +5,7 @@
 // workspace.deleted, which the store already applies.
 import { useState } from "react";
 import { forgetNotice, type WorkspaceView } from "@wsp/protocol";
+import { CLIENT_CANNOT_FORGET } from "../actions/format.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "./ui/alert-dialog.js";
@@ -22,7 +23,7 @@ export function ForgetWorkspaceDialog({ workspace, threads, open, onOpenChange }
 
   const forget = async (): Promise<void> => {
     if (!api?.forget) {
-      setRefusal("This client cannot forget workspaces.");
+      setRefusal(CLIENT_CANNOT_FORGET);
       return;
     }
     setBusy(true);

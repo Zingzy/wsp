@@ -3,6 +3,7 @@
 // workspace's panes in the center, the surface panel on the right. State
 // drives every switch here; there is no router.
 import type { ReactNode } from "react";
+import { ContextMenuHost } from "../actions/ContextMenuHost.js";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "../components/ui/sidebar.js";
@@ -62,6 +63,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
       <KeybindingDispatcher />
       <CommandPalette />
+      <ContextMenuHost />
       <Sidebar
         side="left"
         collapsible="offcanvas"

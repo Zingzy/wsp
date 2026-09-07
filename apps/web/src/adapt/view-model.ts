@@ -221,6 +221,8 @@ export interface SidebarThreadSnapshot {
   readonly id: string;
   /** The runtime's thread id, what a click pins; null for a row the runtime stamped none on, which selects the workspace only. */
   readonly threadId: string | null;
+  /** The latest turn's runtime session id, what a stop interrupts. */
+  readonly sessionId: string;
   readonly workspaceId: string;
   /** The user's prompt when the runtime recorded one, else the Claude session id, else the row id. */
   readonly title: string;
