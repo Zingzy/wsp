@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { SessionStartOutcome, backgroundTasksLine, notifyLine } from "@wsp/protocol";
-import { INSTRUCTIONS, SETUP_HEADING, SKILL_NAME, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
+import { INSTRUCTIONS, RULES_HEADING, SETUP_HEADING, SKILL_NAME, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
 import { CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 
 describe("the wsp skill", () => {
@@ -146,13 +146,16 @@ describe("the wsp skill", () => {
     expect(setup.trimEnd().endsWith("that thread shows in the person's sidebar.")).toBe(true);
   });
 
-  it("the MCP instructions are the skill's opening paragraph, the walkthrough's, and the line pointing back at the skill and the command line", () => {
-    const skill = `---\nname: x\ndescription: y\n---\n\n# x\n\nOne.\nTwo.\n\n${SETUP_HEADING}\n\nThree.\n\n1. Not this.\n\n## Later\n\nNor this.\n`;
+  it("the MCP instructions are the skill's opening paragraph, the walkthrough's, the line pointing back at the skill and the command line, and the rules", () => {
+    const skill = `---\nname: x\ndescription: y\n---\n\n# x\n\nOne.\nTwo.\n\n${SETUP_HEADING}\n\nThree.\n\n1. Not this.\n\n${RULES_HEADING}\n\nFour.\n\n- A rule.\n\n## Later\n\nNor this.\n`;
     expect(instructionsOf(skill, ["claude"]).startsWith("One. Two. Three. The agents this host runs threads on, the only values thread_new and fork take as agent: claude. The steps, with the exact line to run")).toBe(true);
+    expect(instructionsOf(skill, ["claude"]).endsWith("Four.\n- A rule.")).toBe(true);
     expect(instructionsOf(skill, ["claude"])).not.toContain("Not this.");
     expect(() => instructionsOf("---\nname: x\n", ["claude"])).toThrow("never closes");
     expect(() => instructionsOf(`# x\n\n${SETUP_HEADING}\n\nThree.\n`, ["claude"])).toThrow("no opening paragraph");
     expect(() => instructionsOf("---\nname: x\n---\n\n# x\n\nOne.\n\n## Later\n", ["claude"])).toThrow(`the skill has no ${SETUP_HEADING} section`);
+    expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n`, ["claude"])).toThrow(`the skill has no ${RULES_HEADING} section`);
+    expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n\n${RULES_HEADING}\n\nFour.\n`, ["claude"])).toThrow(`${RULES_HEADING} has no rules`);
     expect(INSTRUCTIONS).toBe(instructionsOf(WSP_SKILL, THREAD_AGENTS));
     expect(INSTRUCTIONS.startsWith("wsp runs cloud machines called workspaces")).toBe(true);
     // A caller holding only the tools reads the whole sequence here or nowhere: health check, the recipe from what
@@ -166,8 +169,36 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).toContain("then `wsp up`, which you run yourself when nothing serves");
     expect(INSTRUCTIONS).not.toContain("their own terminal");
     expect(INSTRUCTIONS).toContain("prefer the `wsp` command line");
-    expect(INSTRUCTIONS).not.toContain("\n");
+    // Everything but the rules is one line, so a client that shows the instructions as a paragraph shows them whole.
+    expect(INSTRUCTIONS.split("\n").filter(line => !line.startsWith("- "))).toHaveLength(1);
     expect(INSTRUCTIONS).not.toContain("## ");
+  });
+
+  it("the rules for running work on a machine are seven lines stated as facts about machines, and the instructions carry the same lines", () => {
+    const from = WSP_SKILL.indexOf(`\n${RULES_HEADING}\n`);
+    expect(from, RULES_HEADING).toBeGreaterThan(-1);
+    const section = WSP_SKILL.slice(from, WSP_SKILL.indexOf("\n## ", from + 1));
+    const rules = section.split("\n").filter(line => line.startsWith("- "));
+    expect(rules).toHaveLength(7);
+    // The one home: the instructions end on the same lines, so neither door can state a rule the other does not.
+    expect(INSTRUCTIONS.split("\n").slice(1)).toEqual(rules);
+    // Whole sentences a reader with no history can act on: no ticket number, no date, nothing that happened once.
+    for (const rule of rules) {
+      expect(rule, rule.slice(0, 40)).toMatch(/\.$/);
+      expect(rule, rule.slice(0, 40)).not.toMatch(/#\d|\bticket\b|\b20\d\d\b/);
+    }
+    // The seven, each by the fact it turns on: the golden, the count, the worktree, the send, the restart, the
+    // pause, the person reading along.
+    expect(section).toContain("`wsp snapshot <workspace>`");
+    expect(section).toContain("`wsp new <name> --from <that golden>`");
+    expect(section).toContain("on 2 vCPU and 4 GB one thread runs tests or a build at a time");
+    expect(section).toContain("its own git worktree");
+    expect(section).toContain("`pnpm install --offline`");
+    expect(section).toContain("a send into a thread whose turn is still running opens no second turn");
+    expect(section).toContain("Restarting the host cuts every turn running on every workspace");
+    expect(section).toContain("`wsp pause <workspace>`");
+    expect(section).toContain("shows in their sidebar");
+    expect(section).toContain("`--title`");
   });
 
   it("the instructions name every agent the host has an adapter for and no other catalog agent, read from the registry", () => {

@@ -15,6 +15,10 @@ export const WSP_SKILL: string = text;
  * the exact lines to watch for stay in the skill, which is too long to be a server's instructions. */
 export const SETUP_HEADING = "## Setting a person up from nothing";
 
+/** The section the instructions carry whole, its opening paragraph and every rule line: what a machine can do at
+ * once and what wastes it, which a caller holding only the tools has nowhere else to read. */
+export const RULES_HEADING = "## Running work on a workspace well";
+
 /** What a caller holding only the tools cannot read off them: where the whole procedure lives, and that the setup
  * verbs are on the command line alone, so a caller with a shell should reach for that instead. */
 const BEYOND_THE_TOOLS =
@@ -35,14 +39,25 @@ function paragraph(lines: readonly string[], from: number): string {
   return body.join(" ");
 }
 
+/** The `- ` lines of the section beginning at `from`, up to the next section. */
+function bullets(lines: readonly string[], from: number): string[] {
+  const body: string[] = [];
+  for (let i = from; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.startsWith("## ")) break;
+    if (line.startsWith("- ")) body.push(line);
+  }
+  return body;
+}
+
 /** The agents a thread runs on, from the adapter registry, so the instructions promise no agent the host refuses. */
 export function agentsLine(agents: readonly string[]): string {
   return `The agents this host runs threads on, the only values thread_new and fork take as agent: ${agents.join(", ")}.`;
 }
 
 /** The MCP server's instructions: the skill's opening paragraph, then the setup walkthrough's, the agents the host
- * has adapters for, and the line that points back at the skill and the command line. The frontmatter and the title
- * line are not part of it. */
+ * has adapters for, the line that points back at the skill and the command line, and the rules for running work on
+ * a machine, one line each as the skill writes them. The frontmatter and the title line are not part of it. */
 export function instructionsOf(skill: string, agents: readonly string[]): string {
   const lines = skill.split("\n");
   let start = 0;
@@ -57,7 +72,12 @@ export function instructionsOf(skill: string, agents: readonly string[]): string
   if (heading === -1) throw new Error(`the skill has no ${SETUP_HEADING} section`);
   const walkthrough = paragraph(lines, heading + 1);
   if (walkthrough === "") throw new Error(`${SETUP_HEADING} has no opening paragraph`);
-  return [opening, walkthrough, agentsLine(agents), BEYOND_THE_TOOLS].join(" ");
+  const rules = lines.indexOf(RULES_HEADING);
+  if (rules === -1) throw new Error(`the skill has no ${RULES_HEADING} section`);
+  const lead = paragraph(lines, rules + 1);
+  const written = bullets(lines, rules + 1);
+  if (lead === "" || written.length === 0) throw new Error(`${RULES_HEADING} has no rules`);
+  return [[opening, walkthrough, agentsLine(agents), BEYOND_THE_TOOLS, lead].join(" "), ...written].join("\n");
 }
 
 export const INSTRUCTIONS: string = instructionsOf(WSP_SKILL, THREAD_AGENTS);
