@@ -26,6 +26,7 @@ import {
   machineUnreachedLine,
   mcpServerCommandLine,
   moveTimedOutLine,
+  nextInsideAgentLine,
   notifyLine,
   offeredSize,
   plural,
@@ -372,6 +373,13 @@ describe("mcpServerCommandLine", () => {
   it("names the command every agent's config now runs, as one shell line a person can paste", () => {
     expect(mcpServerCommandLine("npx", ["-y", "@zingzy/wsp@0.1.2", "mcp", "--state", "/Users/p/.wsp/state.json"])).toBe("The server command is npx -y @zingzy/wsp@0.1.2 mcp --state /Users/p/.wsp/state.json");
     expect(mcpServerCommandLine("/Users/p/.local/bin/wsp", ["mcp", "--state", "/Users/p/my wsp/state.json"])).toBe("The server command is /Users/p/.local/bin/wsp mcp --state '/Users/p/my wsp/state.json'");
+  });
+});
+
+describe("nextInsideAgentLine", () => {
+  it("names the agent's own command and what to type at its prompt, a slash form as it stands", () => {
+    expect(nextInsideAgentLine("claude", "/wsp set up wsp for me")).toBe("Next: run claude in this folder and say: /wsp set up wsp for me");
+    expect(nextInsideAgentLine("codex", "set up wsp for me")).toBe("Next: run codex in this folder and say: set up wsp for me");
   });
 });
 
