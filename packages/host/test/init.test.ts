@@ -6,6 +6,7 @@
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -14,7 +15,7 @@ import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, parseManifest, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
 import { ALREADY_APPLIED, Recipe, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
-import { DAEMON_TOKEN_SET, createRuntime, goldenHead, memoryStore, type GoldenRecipe, type Runtime } from "@wsp/runtime";
+import { DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, memoryStore, type GoldenRecipe, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP, catalogEntry } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
@@ -23,7 +24,7 @@ import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
 import { PROJECT_QUESTION, noFolderNote } from "../src/init-pick.js";
 import { reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import { FIRST_QUESTION, FOLDER_QUESTION } from "../src/init-first.js";
-import type { HostHandle } from "../src/server.js";
+import type { HostHandle, WorkspaceRoads } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
 import { appendCommand, readCommand } from "../src/init-secrets.js";
@@ -73,11 +74,16 @@ interface Fake {
   hooks: HostHooks[];
   /** The scripted daemon link the sign-in stage talks to. */
   link: FakePtyLink;
+  /** How many relays to the builder the run opened, and how many it closed. */
+  relays: number;
+  relaysClosed: number;
+  /** How many hosts the run started once the golden was sealed, and how many it closed. */
   hosts: number;
-  /** How many host handles were closed by the run. */
   hostsClosed: number;
   /** Keychain services the fake reader was asked for. */
   reads: string[];
+  /** The one store every runtime of this fake reads and writes. */
+  store: Store;
   /** Where a test delivers Ctrl-C; the real one is process. */
   signals: EventEmitter;
   /** Exit codes the run asked for, in order; the real one ends the process. */
@@ -155,7 +161,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const runtimes: Runtime[] = [];
   const hooks: HostHooks[] = [];
   const link = scriptedLink({ signedIn: over.signedIn ?? true, hold: over.hold ?? false, missing: over.missing ?? false });
-  const counters = { hosts: 0, closed: 0 };
+  const counters = { hosts: 0, closed: 0, relays: 0, relaysClosed: 0 };
   const signals = new EventEmitter();
   const exits: number[] = [];
   const records: Record<string, unknown>[] = [];
@@ -218,11 +224,21 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       runtimes.push(rt);
       return rt;
     },
-    host: async (rt: Runtime, builder, h) => {
-      counters.hosts += 1;
+    ports: { port: 0, wsPort: 0 },
+    upCommand: "wsp up",
+    forkCommand: "wsp new first",
+    relay: async (rt: Runtime, builder, h) => {
+      counters.relays += 1;
       expect(builder.id).toBe(backends.at(-1)?.machines.find(m => !m.killed && m.spec.labels?.["wsp-builder"] === "1")?.id);
       hooks.push(h);
-      const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: name => { trail.push(`fork ${name}`); return forkHead(rt, name); }, ...fakeProjects(trail, imports), close: async () => void (counters.closed += 1) };
+      return { close: async () => void (counters.relaysClosed += 1) };
+    },
+    roads: rt => roadsOf(rt, trail, imports),
+    host: async (rt: Runtime) => {
+      counters.hosts += 1;
+      // The host starts only once the golden is on the account and in the store: a host that fails cannot lose it.
+      expect(goldenHead(await rt.golden.get())).toBeDefined();
+      const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", ...roadsOf(rt, trail, imports), close: async () => void (counters.closed += 1) };
       return handle;
     },
     daemon: async () => ({ link: link.dial(), close: () => {} }),
@@ -258,6 +274,12 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     runtimes,
     hooks,
     link,
+    get relays() {
+      return counters.relays;
+    },
+    get relaysClosed() {
+      return counters.relaysClosed;
+    },
     get hosts() {
       return counters.hosts;
     },
@@ -265,6 +287,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       return counters.closed;
     },
     reads,
+    store,
     signals,
     exits,
     trail,
@@ -285,6 +308,11 @@ function fakeProjects(trail: string[], imports: Fake["imports"]): Pick<HostHandl
       return result;
     },
   };
+}
+
+/** The workspace roads as the fake host and the hostless run both take them: the fork is recorded on the trail. */
+function roadsOf(rt: Runtime, trail: string[], imports: Fake["imports"]): WorkspaceRoads {
+  return { createWorkspace: name => { trail.push(`fork ${name}`); return forkHead(rt, name); }, ...fakeProjects(trail, imports) };
 }
 
 /** What the host's own create does: a fork of the golden's head under the given name. */
@@ -312,24 +340,38 @@ async function firstWorkspace(f: Fake, folder: string | false): Promise<void> {
   await f.press(...(folder === "" ? [] : [folder]), KEY.enter);
 }
 
-/** A run that ends the way a crash after the boot does: the host never comes up, so the builder stays
- * unsealed and first-life for the next run to find. */
+/** A run that ends the way a crash after the boot does: the relay to the builder never comes up, so the builder
+ * stays unsealed and first-life for the next run to find. */
 async function bootedOnly(f: Fake): Promise<void> {
-  const host = f.opts.host;
-  f.opts.host = async (rt, builder, hooks) => {
-    await host(rt, builder, hooks);
-    throw new Error("host down in this fixture");
+  const relay = f.opts.relay;
+  f.opts.relay = async (rt, builder, hooks) => {
+    await relay(rt, builder, hooks);
+    throw new Error("relay down in this fixture");
   };
-  await expect(runInit(f.opts, f.io)).rejects.toThrow("host down in this fixture");
+  await expect(runInit(f.opts, f.io)).rejects.toThrow("relay down in this fixture");
 }
 
-/** A host whose first-workspace fork is refused, for runs that test the roads before it. */
-const quietHost = () => async (): Promise<HostHandle> => ({ port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: async () => { throw new Error("no workspace in this fixture"); }, ...fakeProjects([], []), close: async () => {} });
+/** Workspace roads whose fork is refused, for runs that test what comes before the first workspace. */
+const quietRoads: WorkspaceRoads = { createWorkspace: async () => { throw new Error("no workspace in this fixture"); }, ...fakeProjects([], []) };
+/** A host whose first-workspace fork is refused, for the same runs on a terminal. */
+const quietHost = () => async (): Promise<HostHandle> => ({ port: 4400, wsPort: 4410, authToken: "tok", ...quietRoads, close: async () => {} });
 
 const dirs: string[] = [];
-afterEach(() => {
+const servers: Server[] = [];
+afterEach(async () => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const s of servers.splice(0)) await new Promise<void>(resolve => s.close(() => resolve()));
 });
+
+/** A loopback port this test holds until it ends, the way another host on this computer would. */
+async function heldPort(): Promise<number> {
+  const server = createServer();
+  servers.push(server);
+  await new Promise<void>(resolve => server.listen(0, LOOPBACK, resolve));
+  const addr = server.address();
+  if (typeof addr !== "object" || addr === null) throw new Error("no address");
+  return addr.port;
+}
 
 /** The project folder a run names on the command line. */
 const NAMED_PROJECT = "/Users/dev/proj";
@@ -498,7 +540,7 @@ describe("wsp init, interactive", () => {
     expect(saved.entries.filter(e => e.bring).map(e => e.id)).toContain("shell/zshrc");
   });
 
-  it("a seal whose fork fails its check is reported with the run log, exits 1 with the host closed, and the builder is gone", async () => {
+  it("a seal whose fork fails its check is reported with the run log, exits 1 with the relay closed and no host, and the builder is gone", async () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
@@ -512,8 +554,9 @@ describe("wsp init, interactive", () => {
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     expect(result.handle).toBeUndefined();
-    expect(f.hosts).toBe(1);
-    expect(f.hostsClosed).toBe(1);
+    expect(f.relays).toBe(1);
+    expect(f.relaysClosed).toBe(1);
+    expect(f.hosts).toBe(0);
     const out = f.text();
     expect(out).toContain("Sealing golden v1. Taken as yes (--yes).");
     expect(out).toContain("The fork failed its check");
@@ -523,7 +566,7 @@ describe("wsp init, interactive", () => {
     expect(f.backends[0]!.machines.every(m => m.killed)).toBe(true);
   });
 
-  it("no at the seal question leaves the builder running for a later attach, closes the host and exits 1", async () => {
+  it("no at the seal question leaves the builder running for a later attach, closes the relay, starts no host and exits 1", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
     await throughScreens(f);
@@ -535,7 +578,10 @@ describe("wsp init, interactive", () => {
     const result = await run;
     expect(result.code).toBe(1);
     expect(result.handle).toBeUndefined();
-    expect(f.hostsClosed).toBe(1);
+    expect(f.relaysClosed).toBe(1);
+    expect(f.hosts).toBe(0);
+    // The runtime is closed on the way out, so the builder left up carries no dead pid's hold for the next run to age out.
+    expect(await f.store.get("builders", "m1")).not.toHaveProperty("heldBy");
     expect(f.text()).toContain(`Nothing was sealed. Builder m1 stays up at about $0.11/hr; wsp init --recipe ${join(dirname(f.opts.statePath), "recipe.json")} attaches to it again, and the sweep stops it once it is six hours old.`);
     expect(f.backends[0]!.machines.map(m => m.killed)).toEqual([false]);
     expect(await f.runtimes.at(-1)!.golden.get()).toBeUndefined();
@@ -1400,21 +1446,27 @@ describe("wsp init, logins copied to the machine", () => {
 });
 
 describe("wsp init, flags and no terminal", () => {
-  it("without a terminal it behaves as --yes: defaults taken, nothing asked, the golden sealed, the first workspace forked, the address printed", async () => {
+  it("without a terminal it behaves as --yes: defaults taken, nothing asked, the golden sealed, no workspace forked, no host, and the wsp up and wsp new to run named", async () => {
     const f = fake({ tty: false });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
+    expect(result.handle).toBeUndefined();
     const out = f.text();
     expect(out).toContain("Taken as yes (no terminal)");
     expect(out).toContain("Sealing golden v1. Taken as yes (no terminal).");
     expect(out).toContain("Golden v1 sealed.");
-    expect(out).toMatch(/Workspace first \(ws_[0-9a-f]+\) forked from golden v1\./);
-    // Off a terminal the last question is taken as yes with no folder, and the address opens on the workspace it forked.
-    expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/#w\/ws_[0-9a-f]+$/m);
-    expect(out).not.toContain("Opened http");
-    // The builder, its smoke fork, the first workspace.
-    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v1", false]]);
-    expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => w.name)).toEqual(["first"]);
+    // Nobody is here to use the app or to pay for a machine nobody asked for: no host, no fork, the commands named instead.
+    expect(out).not.toContain("forked from golden v1");
+    expect(out).toContain("Done. Golden v1 is sealed; wsp up starts the app, and wsp new first forks a workspace from it.");
+    expect(out).not.toMatch(URL_RE);
+    expect(await f.runtimes.at(-1)!.workspaces.list()).toEqual([]);
+    expect(f.trail).toEqual([]);
+    expect(f.relays).toBe(1);
+    expect(f.hosts).toBe(0);
+    // No process stays to end a kept builder's window, so the builder goes with the seal; the smoke fork too; nothing else booted.
+    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true]]);
+    expect(out).not.toContain("The builder stays up ten minutes");
+    expect(await f.store.list("builders")).toEqual([]);
     expect(f.opened).toEqual([]);
     // The gh login has a device flow, so it starts as a sign-in on the machine: nobody is here to click macOS's
     // consent dialog, so the Keychain is never asked, and the sign-in runs on the machine with its page handed over.
@@ -1453,21 +1505,87 @@ describe("wsp init, flags and no terminal", () => {
     });
   });
 
-  it("under --non-interactive --json on a terminal: no screens, each sign-in's page and outcome as one object, and the run ends 0", async () => {
-    const f = fake({ nonInteractive: true, json: true });
+  it("under --non-interactive --json on a terminal with the app's ports taken: no screens, each sign-in's page and outcome as one object, no host, the golden recorded, and one last object naming it and the wsp up to run", async () => {
+    // Another host holds the app's port, as the coordinator's did: a run nobody is at never binds it, so it never notices.
+    const port = await heldPort();
+    const f = fake({ nonInteractive: true, json: true, ports: { port, wsPort: port }, upCommand: "wsp up --state /tmp/wsp-test/state.json", forkCommand: "wsp new first --state /tmp/wsp-test/state.json" });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
+    expect(result.handle).toBeUndefined();
+    expect(f.hosts).toBe(0);
     const out = f.text();
     expect(out).not.toMatch(/Agents  1\/6|Sign-ins  4\/6/);
+    expect(out).not.toContain("is in use on this computer");
     expect(out).toContain("Taken as yes (--non-interactive)");
     expect(out).toContain("Sealing golden v1. Taken as yes (--non-interactive).");
+    expect(out).toContain("Done. Golden v1 is sealed; wsp up --state /tmp/wsp-test/state.json starts the app, and wsp new first --state /tmp/wsp-test/state.json forks a workspace from it.");
+    const rt = f.runtimes.at(-1)!;
+    expect(goldenHead(await rt.golden.get())?.snapshotId).toBe("snap_golden-v1");
+    // An agent pays for no machine it did not ask for: nothing is forked, and the object names the command that would.
+    expect(await rt.workspaces.list()).toEqual([]);
     expect(f.records).toEqual([
       { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE_URL, nextCommand: `open '${DEVICE_URL}'`, waitSeconds: 960 },
       { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: "gh auth login exited 0" },
       { event: "sign-in", tool: "claude", label: "Claude Code login", browserUrl: CLAUDE_URL, nextCommand: `open '${CLAUDE_URL}'`, waitSeconds: 900 },
       { event: "sign-in-result", tool: "claude", label: "Claude Code login", state: "signed-in", note: "claude auth login exited 0" },
+      { event: "done", golden: "default", version: 1, snapshotId: "snap_golden-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up --state /tmp/wsp-test/state.json", forkCommand: "wsp new first --state /tmp/wsp-test/state.json" },
     ]);
     expect(result.logins?.map(l => l.state)).toEqual(["signed-in", "signed-in"]);
+    // No process stays to end a kept builder's window, so the builder goes with the seal; the smoke fork too; nothing else boots.
+    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true]]);
+    expect(await f.store.list("builders")).toEqual([]);
+  });
+
+  it("under --json with --first-workspace the last object names the workspace forked, in place of the fork command", async () => {
+    const f = fake({ nonInteractive: true, json: true, firstWorkspace: "proj" });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const workspace = (await f.runtimes.at(-1)!.workspaces.list())[0]!;
+    expect(workspace.name).toBe("proj");
+    expect(f.records.at(-1)).toEqual({ event: "done", golden: "default", version: 1, snapshotId: "snap_golden-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up", workspace: { id: workspace.id, name: "proj" } });
+    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp up starts the app.");
+    expect(f.hosts).toBe(0);
+  });
+
+  it("on a terminal with the app's ports taken the run says who holds them and offers --port before anything is read or booted", async () => {
+    const port = await heldPort();
+    const f = fake({ ports: { port: 0, wsPort: port } });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    const out = f.text();
+    // lsof names this very process when it is on the box; without it the holder is another process.
+    expect(out).toMatch(new RegExp(`Port ${port} is in use on this computer by (\\S+ \\(pid ${process.pid}\\)|another process)\\.`));
+    expect(out).toContain("Nothing was booted. Stop that process, or run wsp init and wsp up with --port and --ws-port naming free ports.");
+    expect(out).not.toContain("Found on this computer");
+    expect(f.backends).toEqual([]);
+    expect(f.relays).toBe(0);
+    expect(f.hosts).toBe(0);
+  });
+
+  it("a host that fails after the seal loses nothing: the golden is recorded, the builder is kept as saved with its hold freed, and the line names the wsp up to run", async () => {
+    const f = fake();
+    f.opts.host = async () => {
+      throw Object.assign(new Error("listen EADDRINUSE: address already in use 127.0.0.1:4410"), { code: "EADDRINUSE" });
+    };
+    const run = runInit(f.opts, f.io);
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("y");
+    await sealIt(f);
+    const result = await run;
+    expect(result.code).toBe(1);
+    expect(result.handle).toBeUndefined();
+    const out = f.text();
+    expect(out).toContain("Golden v1 sealed.");
+    expect(out).toContain("listen EADDRINUSE: address already in use 127.0.0.1:4410");
+    expect(out).toContain("Golden v1 is sealed and recorded. The app did not start; fix that and run wsp up, with --port and --ws-port when a port is taken.");
+    expect(out).not.toContain(FIRST_QUESTION);
+    expect(goldenHead(await f.runtimes.at(-1)!.golden.get())?.snapshotId).toBe("snap_golden-v1");
+    // The builder is kept ten minutes for one more change and recorded as saved; the smoke fork is gone; no workspace was forked.
+    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true]]);
+    // The runtime is closed on the way out, so the kept builder carries no dead pid's hold.
+    expect(await f.store.get("builders", "m1")).toMatchObject({ sealed: { version: 1 } });
+    expect(await f.store.get("builders", "m1")).not.toHaveProperty("heldBy");
+    expect(f.opened).toEqual([]);
   });
 
   it("under --non-interactive a recipe answering copy for a Keychain login asks nothing and still copies it", async () => {
@@ -1564,8 +1682,23 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ yes: true, env: { SSH_CONNECTION: "10.0.0.2 51000 10.0.0.9 22" } });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
+    expect(f.hosts).toBe(1);
     expect(f.opened).toEqual([]);
     expect(f.text()).toContain("ssh -L 4400:127.0.0.1:4400");
+  });
+
+  it("--yes on a terminal is a person taking the defaults: the app is served after the seal and its address printed, not opened", async () => {
+    const f = fake({ yes: true });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(result.handle).toBeDefined();
+    expect(f.hosts).toBe(1);
+    expect(f.opened).toEqual([]);
+    const out = f.text();
+    expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/#w\/ws_[0-9a-f]+$/m);
+    expect(out).toContain("wsp keeps serving the app from this terminal; Ctrl-C stops it.");
+    expect(out).not.toContain("Done. Golden v1 is sealed");
+    expect(out.indexOf("Golden v1 sealed.")).toBeLessThan(out.indexOf("Open http://"));
   });
 
   it("a refused create for the account cap waits and retries, killing nothing", async () => {
@@ -1762,7 +1895,7 @@ describe("wsp init, flags and no terminal", () => {
     mkdirSync(join(dirname(f.opts.statePath), "init.log"));
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
-    expect(f.hosts).toBe(1);
+    expect(f.relays).toBe(1);
     expect(f.text()).toMatch(/The run log .*init\.log could not be written \(EISDIR/);
     expect(f.text()).not.toContain("The run log is");
   });
@@ -1798,7 +1931,7 @@ describe("wsp init, flags and no terminal", () => {
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
     await bootedOnly(f);
-    expect(f.hosts).toBe(1);
+    expect(f.relays).toBe(1);
     const out = f.text();
     expect(out).toContain("A builder from an earlier wsp init is still running on the account:");
     // A record with no digest behind its hash can say no more than this.
@@ -2033,7 +2166,7 @@ describe("wsp init, flags and no terminal", () => {
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
     };
     await bootedOnly(f);
-    expect(f.hosts).toBe(1);
+    expect(f.relays).toBe(1);
     const out = f.text();
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; cannot be sealed after a restart$/m);
     expect(out).toContain("Stopped default (m1).");
@@ -2117,7 +2250,7 @@ describe("wsp init, flags and no terminal", () => {
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
     };
     await bootedOnly(f);
-    expect(f.hosts).toBe(1);
+    expect(f.relays).toBe(1);
     const out = f.text();
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; its setup never finished$/m);
     expect(out).toContain("Stopped default (m1).");
@@ -2144,7 +2277,7 @@ describe("wsp init, flags and no terminal", () => {
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: recipe });
     };
     await bootedOnly(f);
-    expect(f.hosts).toBe(1);
+    expect(f.relays).toBe(1);
     const out = f.text();
     expect(out).toMatch(/default \(m2\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe$/m);
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; reusable by this run once the others are stopped/);
@@ -2216,7 +2349,7 @@ describe("wsp init, flags and no terminal", () => {
       return createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
     };
     await bootedOnly(f);
-    expect(f.hosts).toBe(1);
+    expect(f.relays).toBe(1);
     const out = f.text();
     expect(out).toMatch(/Attaching to your earlier builder: default \(m1\), \d+ s old, about \$\d+\.\d\d so far\. Nothing new boots; stages already applied are skipped\./);
     expect(out).not.toMatch(BOOT);
@@ -2244,10 +2377,12 @@ describe("wsp init, flags and no terminal", () => {
       f.runtimes.push(rt);
       return rt;
     };
-    const first = fake({ yes: true, tty: false });
+    // A person at a terminal (--yes) keeps the builder for one more change; a run with nobody at one would not.
+    const first = fake({ yes: true });
     first.opts.runtime = runtimeOver(first);
     expect((await runInit(first.opts, first.io)).code).toBe(0);
     expect(first.text()).toContain("Golden v1 sealed.");
+    await first.runtimes.at(-1)!.close();
 
     // The seal kept that builder for its window; a changed recipe updates the golden on it and seals v2 there.
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
@@ -2257,7 +2392,7 @@ describe("wsp init, flags and no terminal", () => {
     await second.until("Sealed");
     expect(second.text()).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
     expect(second.text()).not.toContain("Golden v1 sealed");
-    // The kept builder and the first run's workspace.
+    // The kept builder and the first run's workspace; the update road forks none.
     expect(shared.machines.filter(m => !m.killed).map(m => m.spec.fromSnapshot)).toEqual([undefined, "snap_golden-v1"]);
   });
 });
@@ -2928,8 +3063,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(f.text()).toContain("Golden v1 sealed.");
     expect(f.text()).not.toContain("The builder stays up ten minutes");
     expect(shared.machines[0]!.killed).toBe(true);
-    // With the builder gone the first workspace fits the slot.
-    expect(f.text()).toMatch(/Workspace first \(ws_[0-9a-f]+\) forked from golden v1\./);
+    // The builder gave up its slot to the smoke fork; nothing else boots, and the fork is the person's to ask for.
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true]]);
+    expect(f.text()).toContain("wsp new first forks a workspace from it.");
   });
 
   it("a reusable builder already carrying the new recipe is attached to; the update road does not run beside it", async () => {
@@ -2951,15 +3087,15 @@ describe("wsp init with a golden already built from a recipe", () => {
     await rebuilt.runtimes.at(-1)!.close();
 
     const again = next({ recipe: async () => ticking("codex"), tty: false });
-    again.opts.host = quietHost();
+    again.opts.roads = () => quietRoads;
     expect((await runInit(again.opts, again.io)).code).toBe(0);
     const out = again.text();
     expect(out).toContain("Attaching to your earlier builder: default (m3)");
     expect(out).not.toContain("Changes since golden v1");
     expect(out).not.toMatch(BOOT);
     expect(out).toContain("Golden v2 sealed.");
-    // The attached builder, kept by its seal, and v2's smoke fork.
-    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], [undefined, false], ["snap_golden-v2", true]]);
+    // The attached builder goes with its seal, since nobody at a terminal stays to end a kept one's window; v2's smoke fork too.
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], [undefined, true], ["snap_golden-v2", true]]);
   });
 
   it("a failed update on the kept builder says that builder is gone and what a retry costs", async () => {
@@ -2991,7 +3127,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(second.text()).toMatch(/Golden v2 sealed in \d+s/);
     // A big change takes the rebuild road; its seal is v3, so v1 is the one to offer.
     const third = next({ recipe: async () => ticking("codex"), tty: false });
-    third.opts.host = quietHost();
+    third.opts.roads = () => quietRoads;
     expect((await runInit(third.opts, third.io)).code).toBe(0);
     const out = third.text();
     expect(out).toContain("Rebuilding from scratch. Taken as the default (--yes).");
@@ -2999,7 +3135,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toMatch(/Delete golden v1, [\d.]+ GB, .*\? v3 and v2 stay\..* Taken as yes \(--yes\)\./);
     expect(out).toContain("Deleted golden v1.");
     expect(out.indexOf("Golden v3 sealed.")).toBeLessThan(out.indexOf("Delete golden v1"));
-    expect(out.indexOf("Deleted golden v1.")).toBeLessThan(out.indexOf("Open http://"));
+    expect(out.indexOf("Deleted golden v1.")).toBeLessThan(out.indexOf("Done. Golden v3 is sealed; wsp up starts the app"));
     expect(shared.snapshots.map(r => r.id)).toEqual(["snap_golden-v2", "snap_golden-v3"]);
   });
 
@@ -3101,9 +3237,10 @@ describe("wsp init with a golden already built from a recipe", () => {
     noteOutcomes(importResultPath(first.opts.statePath), { build: { at: "2026-09-05T19:44:00.000Z", stages: { creating: 62_000, "deploying-daemon": 35_000, "applying-setup": 4_000, "uploading-files": 6_000, "installing-harness": 48_000, "installing-tools": 1_059_000, "installing-mcp": 3_000, snapshotting: 41_000, "smoke-forking": 82_000 } } });
     const f = next({ recipe: async () => ticking("codex") });
     const hosted: string[] = [];
-    f.opts.host = async (rt, builder) => {
+    const relay = f.opts.relay;
+    f.opts.relay = (rt, builder, hooks) => {
       hosted.push(builder.id);
-      return { port: 4400, wsPort: 4410, authToken: "tok", createWorkspace: name => forkHead(rt, name), ...fakeProjects([], []), close: async () => {} };
+      return relay(rt, builder, hooks);
     };
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
@@ -3411,8 +3548,10 @@ describe("wsp init, the first workspace and its project", () => {
     expect(out).toMatch(/Workspace proj \(ws_[0-9a-f]+\) forked from golden v1\./);
     expect(out).toContain("12 files, 3.0 KB; the repository whole; 46 sessions from Claude Code; 2 secret-shaped files read for what may travel.");
     expect(out).toContain(`${folder} on proj: 12 files, 3.0 KB; 1 file rewritten without their credentials; 1 secret-shaped file cut.`);
-    expect(out).toMatch(new RegExp(`^◇\\s+Open http://127\\.0\\.0\\.1:4400/#w/${workspaces[0]!.id}$`, "m"));
-    expect(out).not.toContain("Done. wsp up starts the app");
+    // Off a terminal no app is served: the run ends naming what serves it.
+    expect(out).toContain("Done. Golden v1 is sealed; wsp up starts the app.");
+    expect(out).not.toMatch(URL_RE);
+    expect(f.hosts).toBe(0);
   });
 
   it("No at the last question forks nothing, imports nothing, and leaves the plain address", async () => {
@@ -3511,13 +3650,13 @@ describe("wsp init, the first workspace and its project", () => {
     const folder = mkdtempSync(join(tmpdir(), "wsp-init-proj-"));
     dirs.push(folder);
     f.opts.importFolder = folder;
-    const host = f.opts.host;
-    f.opts.host = async (rt, builder, hooks) => ({ ...(await host(rt, builder, hooks)), importProject: async () => { throw new Error("the machine refused the upload"); } });
+    const roads = f.opts.roads;
+    f.opts.roads = rt => ({ ...roads(rt), importProject: async () => { throw new Error("the machine refused the upload"); } });
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const workspaces = await f.runtimes.at(-1)!.workspaces.list();
     expect(workspaces.map(w => w.name)).toEqual(["first"]);
     expect(f.text()).toContain(`${folder} was not imported: the machine refused the upload. The workspace is up; import it from the app.`);
-    // The workspace survived the failed import, so the app still opens on it.
-    expect(f.text()).toMatch(new RegExp(`Open http://127\\.0\\.0\\.1:4400/#w/${workspaces[0]!.id}`));
+    // The workspace survived the failed import, so the run still ends done, with the workspace on the account.
+    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp up starts the app.");
   });
 });

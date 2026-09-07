@@ -20,6 +20,9 @@ export interface ForwardsSource {
   on(fn: (e: ForwardEvent) => void): () => void;
 }
 
+/** The address every host socket binds: the app carries the runtime token, so nothing listens beyond this computer. */
+export const LOOPBACK = "127.0.0.1";
+
 export interface ServeOptions {
   port: number;
   authToken: string;
@@ -72,7 +75,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
   const tickets = new Map<string, Ticket>();
 
-  const wss = new WebSocketServer({ host: opts.host ?? "127.0.0.1", port: opts.port });
+  const wss = new WebSocketServer({ host: opts.host ?? LOOPBACK, port: opts.port });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url ?? "/", "ws://localhost");

@@ -6,7 +6,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { afterEach, describe, expect, it } from "vitest";
-import { HELP, cli, jsonCliIO, loadKeys, saveQuestion, terminalIO, type CliIO } from "../src/cli.js";
+import { HELP, cli, forkCommandFor, jsonCliIO, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO } from "../src/cli.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 
@@ -14,6 +14,18 @@ describe("help", () => {
   it("--yes says a browser or device login, or one held in the Keychain, signs in on the machine, so macOS has nothing to ask either", () => {
     setup();
     expect(HELP.replace(/\s+/g, " ")).toContain("--yes init: take every default and ask nothing (required off a terminal); a login with a browser or device sign-in, or one held in the Keychain, defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the sign-ins wait for the app's terminal");
+  });
+});
+
+describe("the wsp up an init names", () => {
+  it("carries the state and port flags the init was given, resolved and quoted, and none it was not", () => {
+    const opts = { port: 4500, wsPort: 4510, statePath: "/tmp/wsp test/state.json" };
+    expect(upCommandFor(opts, {})).toBe("wsp up");
+    expect(upCommandFor(opts, { state: "state.json" })).toBe("wsp up --state '/tmp/wsp test/state.json'");
+    expect(upCommandFor(opts, { port: "4500", "ws-port": "4510" })).toBe("wsp up --port 4500 --ws-port 4510");
+    // The fork runs against the host wsp up started, so it needs the state and not the ports.
+    expect(forkCommandFor(opts, {})).toBe("wsp new first");
+    expect(forkCommandFor(opts, { state: "state.json" })).toBe("wsp new first --state '/tmp/wsp test/state.json'");
   });
 });
 

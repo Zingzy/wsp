@@ -87,6 +87,16 @@ with every other line on stderr, so an agent can drive the setup and hand
 you the sign-ins. It is refused beside `--yes`: that skips the sign-ins, so
 there would be nothing left to print.
 
+A run with nobody at a terminal (`--non-interactive`, or no terminal) seals
+the golden, records it, and ends: it never serves the app, so it never fights
+a host already on the ports, and it forks no workspace unless
+`--first-workspace` or `--import` asked for one, so nobody pays for a machine
+they did not ask for. Under `--json` the last object names the golden, the
+recipe, the `wsp up` to run next and the `wsp new` that forks a workspace. On
+a terminal, `--yes` included, the app is served once the golden is recorded,
+and the ports are checked before anything is read, so a clash costs nothing
+rather than a build.
+
 ## Every day after
 
 ```sh

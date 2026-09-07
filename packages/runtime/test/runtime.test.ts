@@ -3699,6 +3699,12 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(version.version).toBe(1);
     expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true]]);
     expect(frames.at(-1)).toBe("sealed:v1; builder kept for one more change");
+    // A caller with no process left to end the window asks for no keep: the builder goes with the seal and leaves no record.
+    const again = started();
+    const b2 = await again.rt.golden.prepare();
+    await again.rt.golden.seal(b2.id, { keepBuilder: false });
+    expect(again.backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true]]);
+    expect(await again.store.list("builders")).toEqual([]);
     const sealedAt = new Date(clock.now()).toISOString();
     expect(await store.get("builders", b.id)).toMatchObject({ firstLife: true, sealed: { at: sealedAt, version: 1 }, import: { recipeHash: "h1" } });
     expect(await store.get("golden-recipes", "default@v1")).toEqual(snapshot("h1", [".zshrc"]));

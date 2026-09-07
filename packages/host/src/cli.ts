@@ -16,14 +16,14 @@ import {
   goldenHead,
   hostIdentity,
   jsonFileStore,
-  type GoldenBuilderView,
   type GoldenRecipe,
   type GoldenVersion,
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS } from "@wsp/catalog";
-import { LOGIN_CHOICES, RECIPE_TICKS } from "@wsp/protocol";
+import { LOGIN_CHOICES, RECIPE_TICKS, shellQuote } from "@wsp/protocol";
+import { agentHomes } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { HARNESS_ADAPTERS } from "./adapters.js";
 import { THREAD_AGENTS } from "./thread-agents.js";
@@ -31,6 +31,7 @@ import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
+import { FIRST_WORKSPACE } from "./init-first.js";
 import { recipePath } from "./init-recipe.js";
 import { smallRecipePath } from "./recipe-file.js";
 import { isRecipeTick, runRecipe, runScan } from "./recipe-command.js";
@@ -38,9 +39,9 @@ import { recipeAnswer, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { scanTools } from "./scan.js";
 import { colourDepth, confirmPrompt, isTTY, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
-import { systemOpener, type UrlOpener } from "./relay.js";
+import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
-import { startHost, type HostHandle } from "./server.js";
+import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
 import { COMMON, VERBS, findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
@@ -121,7 +122,9 @@ options:
                      for one before the first screen
   --first-workspace NAME
                      init: fork the first workspace under this name once the
-                     golden seals, without asking (default first)
+                     golden seals, without asking (default first). A run with
+                     nobody at a terminal forks nothing unless this or --import
+                     asks for it
   --import FOLDER    init: import this folder's project onto that first
                      workspace, with the consent the app's import starts from:
                      caches left behind, secret-shaped files cut unless a
@@ -131,9 +134,13 @@ options:
                      machine: each one prints the page to open on this computer,
                      the code when the flow shows one, and the command that
                      opens it, then waits for you (this is what a run off a
-                     terminal does anyway)
+                     terminal does anyway). The run ends with the golden
+                     recorded and never serves the app; wsp up does that
   --json             init: print each sign-in hand-off and its outcome as one
-                     JSON object on stdout, everything else on stderr; implies
+                     JSON object on stdout, then one last object naming the
+                     golden, the recipe, the wsp up to run next and, unless
+                     --first-workspace or --import asked for one, the wsp new
+                     that forks a workspace; everything else on stderr. Implies
                      --non-interactive, and is refused beside --yes, which skips
                      the sign-ins
 
@@ -386,15 +393,40 @@ function projectFlag(verb: string, folder: string | undefined): ProjectFlag {
   return exists ? { ok: true, path } : { ok: false, message: `wsp ${verb}: no folder at ${path}` };
 }
 
-/** Init ends by starting a host on this state, which the lock would refuse only after the builder is booted and billed. */
+/** Init writes the state a host serving it would also write, and may end by serving it; the lock is read first so
+ * the clash costs nothing rather than a booted builder. */
 function initRefusal(lock: HostLock, statePath: string): string {
   return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
+}
+
+/** The --state a later command needs to find what this init wrote, only when the init was given one. */
+const stateFlag = (opts: { statePath: string }, values: Pick<SharedFlags, "state">): string[] => (values.state !== undefined ? ["--state", shellQuote(opts.statePath)] : []);
+
+/** The wsp up that serves what this init records, carrying the state and port flags the init was given. */
+export function upCommandFor(opts: { port: number; wsPort: number; statePath: string }, values: Pick<SharedFlags, "state" | "port" | "ws-port">): string {
+  return [
+    "wsp up",
+    ...stateFlag(opts, values),
+    ...(values.port !== undefined ? ["--port", String(opts.port)] : []),
+    ...(values["ws-port"] !== undefined ? ["--ws-port", String(opts.wsPort)] : []),
+  ].join(" ");
+}
+
+/** The wsp new that forks the first workspace from what this init records, against the host wsp up starts. */
+export function forkCommandFor(opts: { statePath: string }, values: Pick<SharedFlags, "state">): string {
+  return ["wsp new", FIRST_WORKSPACE, ...stateFlag(opts, values)].join(" ");
+}
+
+/** The envs a new workspace forks with: the Claude key's, when there is one. */
+function workspaceEnvsFor(keys: Keys): { workspaceEnvs?: (golden: GoldenVersion) => Record<string, string> } {
+  const anthropic = keys.anthropic;
+  return anthropic !== undefined ? { workspaceEnvs: golden => claudeEnvs(anthropic, golden) } : {};
 }
 
 async function init(
   io: CliIO,
   opts: { port: number; wsPort: number; statePath: string },
-  flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string },
+  flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
   if (flags.json && flags.yes) {
     io.error("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
@@ -439,7 +471,22 @@ async function init(
       brew: () => readBrewTable(nodeHost()),
       scan: recipe => scanTools(nodeHost(), recipe),
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
-      host: (rt, builder, hooks) => hostFor(rt, keys, { ...opts, builder, ...hooks }, say),
+      ports: { port: opts.port, wsPort: opts.wsPort },
+      upCommand: flags.upCommand,
+      forkCommand: flags.forkCommand,
+      relay: async (rt, builder, hooks) =>
+        startCallbackRelay({
+          runtime: rt,
+          openUrl: systemOpener(),
+          log: line => {
+            if (!hooks.onLine(line)) say.log(line);
+          },
+          autoOpen: hooks.autoOpen,
+          openLine: hooks.openLine,
+          builder,
+        }),
+      roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
+      host: rt => hostFor(rt, keys, opts, say),
     },
     screen,
   );
@@ -480,11 +527,7 @@ async function hostFor(
     wsPort: number;
     statePath: string;
     webDir?: string;
-    builder?: GoldenBuilderView;
     openUrl?: UrlOpener;
-    autoOpen?: (targetId: string, url: string, port?: number) => boolean;
-    openLine?: (workspace: string, hostname: string, url: string) => string;
-    onLine?: (line: string) => boolean;
   },
   io: CliIO,
 ): Promise<HostHandle> {
@@ -496,14 +539,9 @@ async function hostFor(
       port: opts.port,
       wsPort: opts.wsPort,
       webDir: opts.webDir ?? assetDir("web"),
-      ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
-      ...(keys.anthropic !== undefined ? { workspaceEnvs: (golden: GoldenVersion) => claudeEnvs(keys.anthropic, golden) } : {}),
+      ...workspaceEnvsFor(keys),
       ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
-      ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),
-      ...(opts.openLine !== undefined ? { openLine: opts.openLine } : {}),
-      log: line => {
-        if (!opts.onLine?.(line)) io.log(line);
-      },
+      log: line => io.log(line),
       recipePath: recipePath(opts.statePath),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));
@@ -581,6 +619,8 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values.project !== undefined ? { project: values.project } : {}),
         ...(values["first-workspace"] !== undefined ? { firstWorkspace: values["first-workspace"] } : {}),
         ...(values.import !== undefined ? { importFolder: values.import } : {}),
+        upCommand: upCommandFor(opts, values),
+        forkCommand: forkCommandFor(opts, values),
       }),
   },
   doctor: {
