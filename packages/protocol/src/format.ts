@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -384,14 +384,30 @@ export function openingTitle(text: string): string {
   const sentence = /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
   if (sentence.length <= OPENING_TITLE_MAX) return sentence;
   const room = OPENING_TITLE_MAX - ELLIPSIS.length;
-  // One character past the room, so a word that ends exactly at the room's edge is kept whole.
-  const head = sentence.slice(0, room + 1);
-  const boundary = head.lastIndexOf(" ");
-  const kept = (boundary > 0 ? head.slice(0, boundary) : head.slice(0, room)).replace(/[\s,;:]+$/, "");
-  return `${kept}${ELLIPSIS}`;
+  return `${wordsWithin(sentence, room) ?? sentence.slice(0, room).replace(SEPARATOR_TAIL, "")}${ELLIPSIS}`;
 }
 
-/** The most characters a generated title takes; an answer longer than this is thrown away and the seed stands. */
+/** What a cut leaves dangling at its edge: the space it broke on and the punctuation that hung off the word before. */
+const SEPARATOR_TAIL = /[\s,;:]+$/;
+
+/** The whole words of a line that fit in the room, the separator they ended on taken off; nothing when the line's
+ * first word alone overruns it. A word that ends exactly at the room's edge is kept whole. */
+function wordsWithin(line: string, room: number): string | undefined {
+  const head = line.slice(0, room + 1);
+  const boundary = head.lastIndexOf(" ");
+  return boundary > 0 ? head.slice(0, boundary).replace(SEPARATOR_TAIL, "") : undefined;
+}
+
+/** Where a title read out of the harness's own store came from: one that is the thread's opening words, or their head,
+ * is the seed under the harness's roof (codex names a thread from them the moment it starts) and the thread is still
+ * asked for a name; any other is the person's rename or the harness's own made name, and stands. */
+export function storedTitleSource(stored: string, opening: string | undefined): TitleSource {
+  if (opening === undefined) return "person";
+  const title = stored.replace(/\s+/g, " ").trim();
+  return title !== "" && titleLine(opening).startsWith(title) ? "seed" : "person";
+}
+
+/** The most characters a generated title takes; a longer answer is cut to the words that fit. */
 export const GENERATED_TITLE_MAX = 40;
 /** How much of the opening turn and of the reply the title question carries: the words a title comes from are at the
  * top of both, and a whole brief would cost more to send than the answer is worth. */
@@ -403,36 +419,39 @@ const excerpt = (text: string): string => {
 };
 
 /**
- * The one question every harness is asked for a thread's title, once, after its first reply. Six words and 34
- * characters are asked for rather than the 40 the answer is measured against: claude-sonnet-5 answered 41 and 43
- * characters twice when asked for 40 (measured 2026-09-07), and an answer over the cap is thrown away.
+ * The one question every harness is asked for a thread's title, once, when its first turn starts: three to six
+ * words of what was asked need no reply, so the runtime asks from the opening turn alone and the reply rides only
+ * when a caller has one. Six words and 34 characters are asked for rather than the 40 the answer is measured
+ * against: claude-sonnet-5 overran 34 in 26 of 80 answers, by up to 11 characters (measured 2026-09-07), and an
+ * answer over the cap is cut to its first words.
  */
-export function titlePrompt(opening: string, reply: string): string {
+export function titlePrompt(opening: string, reply?: string): string {
   return [
     "Name this coding agent thread in 3 to 6 words, no more than 34 characters, sentence case, no quotes and no full stop.",
     "Do not repeat the opening words, and do not say anything is done, fixed or working.",
-    "Answer with the title alone and nothing else; a longer answer is thrown away.",
+    "Answer with the title alone and nothing else; a longer answer is cut short.",
     "",
     "The opening turn:",
     excerpt(opening),
-    "",
-    "The reply:",
-    excerpt(reply),
+    ...(reply === undefined ? [] : ["", "The reply:", excerpt(reply)]),
   ].join("\n");
 }
 
 /**
- * A harness's answer to titlePrompt as a title, or nothing when it did not answer with one: a title is one line of
- * at most GENERATED_TITLE_MAX characters, so an answer that explains itself over several lines or runs past the cap
- * is refused whole rather than cut, and the thread keeps the words its opening turn seeded it with. Wrapping quotes
- * and a trailing stop are the two shapes a model adds around an otherwise good title, so they come off first.
+ * A harness's answer to titlePrompt as a title, or nothing when it did not answer with one: a title is one line, so
+ * an answer that explains itself over several lines is refused whole and the thread keeps the words its opening
+ * turn seeded it with. One that runs past GENERATED_TITLE_MAX is cut to the whole words that fit, since a model asked
+ * for 34 characters answers up to 45 a third of the time and its first words are still the title; a single word
+ * longer than the cap has no words to keep. Wrapping quotes and a trailing stop are the two shapes a model adds
+ * around an otherwise good title, so they come off first.
  */
 export function generatedTitle(answer: string): string | null {
   const line = answer.trim();
   if (line === "" || /[\r\n]/.test(line)) return null;
   const unquoted = /^(["'\u201c\u2018])(.*)(["'\u201d\u2019])$/.exec(line)?.[2]?.trim() ?? line;
   const title = unquoted.replace(/[.]+$/, "").trim();
-  return title === "" || title.length > GENERATED_TITLE_MAX ? null : title;
+  if (title === "") return null;
+  return title.length <= GENERATED_TITLE_MAX ? title : (wordsWithin(title, GENERATED_TITLE_MAX) ?? null);
 }
 
 /** Text cut to its last line: the last non-empty line with the whitespace collapsed, or nothing when the text has
