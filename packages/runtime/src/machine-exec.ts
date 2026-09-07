@@ -23,8 +23,8 @@
 
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, MachineUnreached, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
-import type { ExecStream, ExecStreamFactory } from "@wsp/adapter-claude";
 import { EXEC_CHUNK_BYTES, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
+import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 
 export interface MachineExecOptions {
   /** Delay between log polls. */

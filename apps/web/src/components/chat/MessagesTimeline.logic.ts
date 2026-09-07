@@ -1,9 +1,6 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/MessagesTimeline.logic.ts at 57a66608 (MIT).
 // Differs from upstream: Equal.equals is a local shallow equality, codex directive rendering is removed, and the row derivation (deriveMessagesTimelineRows, deriveTurnFolds, computeMessageDurationStart, MessagesTimelineRow) lives in the adapter.
-import {
-  normalizeCompactToolLabel,
-  resolveWorkEntryToolPresentation,
-} from "../../work-log/presentation";
+import { normalizeCompactToolLabel } from "../../work-log/presentation";
 import {
   commandFirstLine,
   indicatesNeutral,
@@ -42,8 +39,6 @@ export function workEntryLabelText(label: WorkEntryLabel): string {
 
 export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string | undefined): WorkEntryLabel {
   if (entry.preview) return prose(entry.preview);
-  const toolPresentation = resolveWorkEntryToolPresentation(entry);
-  if (toolPresentation) return prose(toolPresentation.displayName);
   if (entry.description) return prose(entry.description);
   if (entry.command?.trim()) return { verb: null, text: commandFirstLine(entry.command), mono: true };
   if (entry.detail) return prose(entry.detail);
@@ -63,11 +58,6 @@ export function liveWorkEntryLabel(
   workspaceRoot: string | undefined,
   active: boolean,
 ): WorkEntryLabel {
-  const toolPresentation = resolveWorkEntryToolPresentation(
-    entry,
-    active ? "inProgress" : "completed",
-  );
-  if (toolPresentation) return prose(toolPresentation.displayName);
   const command = entry.command?.trim();
   if (command) {
     const status = entry.toolLifecycleStatus ?? (active ? "inProgress" : "completed");

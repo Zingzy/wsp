@@ -6,8 +6,8 @@ import { act, fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LegendListRef } from "@legendapp/list/react";
 import type { SessionEvent } from "@wsp/protocol";
-import { MessagesTimeline } from "./MessagesTimeline";
-import { deriveSession, type TimelineEntry, type TurnSummary } from "./adapt";
+import { MessagesTimeline, WORK_TONES } from "./MessagesTimeline";
+import { deriveSession, type TimelineEntry, type TurnSummary, type WorkLogEntry, type WorkLogTone } from "./adapt";
 
 globalThis.ResizeObserver = class {
   observe() {}
@@ -1170,5 +1170,84 @@ describe("a notice row: the cut-turn row and the notify row", () => {
     expect(live).not.toContain("lucide-hammer");
     expect(live).toContain("font-mono text-muted-foreground");
     expect(live).not.toContain("Tool call failed");
+  });
+});
+
+describe("the tone table owns every work glyph", () => {
+  const TURN = "turn_tones";
+  const workEntry = (tone: WorkLogTone, extra: Partial<WorkLogEntry> = {}): TimelineEntry => ({
+    id: `entry-${tone}`,
+    kind: "work",
+    createdAt: MESSAGE_CREATED_AT,
+    entry: { id: `work-${tone}`, createdAt: MESSAGE_CREATED_AT, turnId: TURN, label: `${tone} row`, tone, sourceActivityKind: "tool.completed", ...extra },
+  });
+  const drawn = (row: Element) => {
+    const svg = [...row.querySelectorAll("svg")].find(el => ![...el.classList].some(c => c.startsWith("lucide-chevron")))!;
+    return {
+      glyph: [...svg.classList].find(c => c.startsWith("lucide-") && c !== "lucide")!,
+      iconClass: svg.parentElement!.className,
+      labelClass: (row.querySelector(".truncate") as HTMLElement).className,
+    };
+  };
+  const renderSettled = async (entries: TimelineEntry[]) => {
+    const view = await act(async () => render(<MessagesTimeline {...buildProps()} timelineEntries={entries} />));
+    // The turn folds first and the group toggles inside it; open whatever is still closed until nothing is.
+    for (let closed = view.queryAllByRole("button", { expanded: false }); closed.length > 0; closed = view.queryAllByRole("button", { expanded: false })) {
+      await act(async () => { fireEvent.click(closed[0]!); });
+    }
+    return view.container.querySelectorAll('[data-timeline-row-kind="work"]');
+  };
+  const renderLive = async (entry: TimelineEntry) => {
+    const view = await act(async () =>
+      render(<MessagesTimeline {...buildProps()} isWorking activeTurnStartedAt={MESSAGE_CREATED_AT} turns={[buildTurn(TURN, "running", MESSAGE_CREATED_AT, null)]} timelineEntries={[entry]} />),
+    );
+    return view.container.querySelector('[data-timeline-row-kind="work-live"]')!;
+  };
+
+  const settledEntries: Record<WorkLogTone, TimelineEntry> = {
+    thinking: workEntry("thinking", { detail: "weighing the options", sourceActivityKind: "reasoning" }),
+    tool: workEntry("tool", { toolLifecycleStatus: "completed" }),
+    notice: workEntry("notice", { sourceActivityKind: "runtime.notify" }),
+    error: workEntry("error"),
+  };
+  const settledDrawing = {
+    thinking: { glyph: "lucide-brain", iconClass: "flex size-6 shrink-0 items-center justify-center text-foreground", labelClass: "min-w-0 flex-1 truncate text-secondary-label" },
+    tool: { glyph: "lucide-zap", iconClass: "flex size-6 shrink-0 items-center justify-center text-icon-muted", labelClass: "min-w-0 flex-1 truncate text-secondary-label" },
+    notice: { glyph: "lucide-info", iconClass: "flex size-6 shrink-0 items-center justify-center text-icon-muted", labelClass: "min-w-0 flex-1 truncate font-mono text-muted-foreground" },
+    error: { glyph: "lucide-circle-alert", iconClass: "flex size-6 shrink-0 items-center justify-center text-icon-muted", labelClass: "min-w-0 flex-1 truncate text-secondary-label" },
+  } satisfies Record<WorkLogTone, ReturnType<typeof drawn>>;
+
+  it.each(Object.keys(settledDrawing) as WorkLogTone[])("a settled %s row draws its glyph and colours as before", async tone => {
+    const rows = await renderSettled([settledEntries[tone]]);
+    expect(rows).toHaveLength(1);
+    expect(drawn(rows[0]!)).toEqual(settledDrawing[tone]);
+  });
+
+  const liveDrawing = {
+    thinking: { glyph: "lucide-brain", iconClass: "flex size-6 shrink-0 items-center justify-center text-foreground", labelClass: "min-w-0 flex-1 truncate" },
+    tool: { glyph: "lucide-zap", iconClass: "flex size-6 shrink-0 items-center justify-center text-icon-muted", labelClass: "min-w-0 flex-1 truncate" },
+    notice: { glyph: "lucide-info", iconClass: "flex size-6 shrink-0 items-center justify-center text-icon-muted", labelClass: "min-w-0 flex-1 truncate" },
+  } satisfies Partial<Record<WorkLogTone, ReturnType<typeof drawn>>>;
+
+  it.each(Object.keys(liveDrawing) as Array<keyof typeof liveDrawing>)("a live %s row draws its glyph and colours as before", async tone => {
+    const entry = tone === "tool" ? workEntry("tool", { toolLifecycleStatus: "inProgress", sourceActivityKind: "tool.started" }) : settledEntries[tone];
+    const live = await renderLive(entry);
+    expect(drawn(live)).toEqual(liveDrawing[tone]);
+  });
+
+  it("a failed tool row, settled or live, draws the error tone's glyph from the table", async () => {
+    const ErrorGlyph = WORK_TONES.error.Glyph;
+    const tableGlyph = [...render(<ErrorGlyph />).container.querySelector("svg")!.classList].find(c => c.startsWith("lucide-") && c !== "lucide")!;
+    expect(tableGlyph).toMatch(/^lucide-/);
+
+    const rows = await renderSettled([workEntry("tool", { toolLifecycleStatus: "failed" }), settledEntries.error]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.querySelector('[aria-label="Tool call failed"]')).not.toBeNull();
+    expect(drawn(rows[0]!).glyph).toBe(tableGlyph);
+    expect(drawn(rows[1]!).glyph).toBe(tableGlyph);
+
+    const live = await renderLive(workEntry("tool", { toolLifecycleStatus: "declined" }));
+    expect(live.querySelector('[aria-label="Tool call failed"]')).not.toBeNull();
+    expect(drawn(live).glyph).toBe(tableGlyph);
   });
 });

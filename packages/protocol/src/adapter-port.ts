@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The port every harness adapter is written against: the process a turn runs
+// in (ExecStream, whatever launched it) and the events an adapter normalizes
+// its CLI's output into (AdapterEvent). It sits here, beside the wire types,
+// so no adapter owns the interface its siblings implement. The runtime folds
+// these into the SessionEvent shapes in index.ts that clients read, which is
+// why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
+// declared once there and imported back here.
+import type { DeltaKind, SessionHarness, TurnResult } from "./index.js";
+
+export type AdapterEvent =
+  | {
+      type: "session.start";
+      sessionId: string;
+      model?: string;
+      cwd?: string;
+      tools?: string[];
+      harness?: SessionHarness;
+    }
+  | {
+      type: "turn.delta";
+      sessionId: string;
+      kind: DeltaKind;
+      text: string;
+      toolName?: string;
+      toolUseId?: string;
+      isError?: boolean;
+      /** The agent's tool shell folder after this tool_use, present only when the call moved it. */
+      cwd?: string;
+    }
+  | { type: "turn.done"; sessionId: string; result: TurnResult }
+  | { type: "session.end"; sessionId: string; exitCode: number | null; sawResult: boolean };
+
+export interface ExecStream {
+  readonly lines: AsyncIterable<string>;
+  /** Graceful stop: SIGTERM. */
+  teardown(): void;
+  /** SIGKILL. */
+  kill(): void;
+  /** Appends one line to the process's stdin channel, or answers gone when the process already ended where it runs;
+   * rejects once the stream ended or when it was started without one. */
+  write(line: string): Promise<"written" | "gone">;
+  /** Ends the stdin channel: the process reads EOF. Nothing after the stream ended. */
+  closeInput(): void;
+  readonly exited: Promise<number | null>;
+}
+
+export type ExecStreamFactory = (
+  command: string,
+  options: {
+    env: Record<string, string>;
+    /** Present, the process's stdin is a line channel seeded with these lines; absent, the process gets no channel. */
+    input?: readonly string[];
+  },
+) => ExecStream;

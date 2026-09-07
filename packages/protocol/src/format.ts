@@ -3,7 +3,7 @@
 // runtime's import events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, MachineSizeOffer, MachineState, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, MachineSizeOffer, MachineState, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -425,6 +425,14 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
+/** When a turn is over, in the one sentence every door the agent reads quotes whole: the skill, the tool
+ * descriptions, the command line's help and the machine's own context. The reply comes back at once from a follow;
+ * the row settles only at the process exit, since a harness can keep working after it answers. */
+export const TURN_END_WORDS = "A turn ends when the agent process exits, not at its reply, and the thread reads running until then";
+
+/** When the notify line goes, quoted the same way: with the reply, once, never again at the exit. */
+export const NOTIFY_WORDS = "The notify line goes once, at the reply";
+
 /** What a send meets when its thread's last turn has replied but its agent process is still running (a child it did
  * not wait for, a lingering task): the row still reads running and is not free for a new turn, so the caller is told
  * in words, by thread, instead of starting a second agent in the same worktree. */
@@ -598,6 +606,39 @@ export function goldenBuildLine(from: number, to: number, changes: readonly Gold
   return what.length === 0 ? head : `${head}: ${what.join(", ")}`;
 }
 
+/** How much of a checksum a line shows: enough to tell two apart, short enough that a reason line with both fits its cut. */
+export const SUM_SHOWN = 12;
+export const shortSum = (sha256: string): string => sha256.slice(0, SUM_SHOWN);
+
+/** The install step's failure when a download the recipe pinned does not hash to the recorded sum: what came down,
+ * at which tag, and both sums, so a moved asset reads as a moved asset and never as a broken download. */
+export function pinMismatchLine(what: string, tag: string, recorded: string, served: string): string {
+  return `${what} at ${tag} does not match the checksum recorded on its first install: recorded ${recorded}, served ${served}`;
+}
+
+/** Why a tool in the recipe installs differently now: the road it takes moved. Both sides in the roads' own words. */
+export function roadMovedLine(from: string, to: string): string {
+  return `now ${to}, was ${from}`;
+}
+
+/** Why a tool installs differently now: the version it installs at moved; a side with none reads as unpinned. */
+export function versionMovedLine(from: string | undefined, to: string | undefined): string {
+  return `${from ?? "unpinned"} to ${to ?? "unpinned"}`;
+}
+
+/** The words for a tools row no road installs, where a road's own words would stand. */
+export const NO_ROAD_WORDS = "by no road";
+
+/** Why a tool installs differently now: the release it is fixed to moved, or the sum recorded for that release did. */
+export function pinMovedLine(from: ToolPin | undefined, to: ToolPin | undefined): string {
+  if (from === undefined) return `now fixed to release ${to!.tag}`;
+  if (to === undefined) return `no longer fixed to release ${from.tag}`;
+  return from.tag === to.tag ? `the checksum recorded for ${from.tag} changed` : `release ${from.tag} to ${to.tag}`;
+}
+
+/** Why a tool installs differently now when its road and pin stand: the lines the road runs are not the golden's. */
+export const INSTALLER_MOVED_LINE = "its install lines changed";
+
 /** The app's line for a workspace still forked from an older golden version, offered the way the helper update is:
  * a state in words, never a badge. The move is the person's; nothing replaces a machine they are working on. */
 export function behindGoldenLine(on: number, head: number): string {
@@ -608,6 +649,16 @@ export function behindGoldenLine(on: number, head: number): string {
  * never a badge, and a missing tool's outcome indexes this table as it is. */
 export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
+
+/** What the composer's branch slot says for each folder git named no branch for, and what the word explains on
+ * hover: nothing for a folder outside any repository or one not yet asked, both ordinary; a word and one sentence for
+ * a read the machine refused or failed, an outside cause the person should see rather than an empty slot. */
+export const REPO_STATE_WORDS = {
+  unknown: { word: "", note: "" },
+  none: { word: "", note: "" },
+  refused: { word: "git unread", note: "The machine could not read this folder's git state, so no branch is shown." },
+} as const;
+export type RepoStateWord = keyof typeof REPO_STATE_WORDS;
 
 /** A missing tool's row as the lineage shows it. A record sealed before the name and outcome were recorded still
  * carries its id, so it reads by that and as failed rather than as a blank row. */
