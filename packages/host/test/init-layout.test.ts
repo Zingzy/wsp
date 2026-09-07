@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 import { isCancel } from "@clack/core";
 import { unicode } from "@clack/prompts";
-import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, helpLine, passwordPrompt, plainLine, rowsOf, summarize, table, textPrompt, viewport, widthOf, wrap } from "../src/init-layout.js";
+import { S_BAR_FOCUS, S_BAR_FOCUS_END, card, colourDepth, confirmPrompt, ellipsize, helpLine, muted, passwordPrompt, plainLine, rowsOf, summarize, table, textPrompt, viewport, widthOf, wrap } from "../src/init-layout.js";
 
 describe("init layout", () => {
   it("plainLine leaves what a terminal would: later carriage-return segments overprint earlier ones, escapes and controls go, a tab is a space", () => {
@@ -131,6 +131,20 @@ describe("init layout", () => {
     expect(colourDepth(false, { FORCE_COLOR: "1" })).toBe(4);
     expect(colourDepth(false, { FORCE_COLOR: "3" })).toBe(24);
     expect(colourDepth(false, { FORCE_COLOR: "0" })).toBe(1);
+  });
+
+  it("muted paints a grey from 256 colours up, dim under them, and nothing off a terminal: helpLine's quiet half and the turn stream's tool lines read the same", () => {
+    expect(muted("$ git status", 1)).toBe("$ git status");
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "1";
+    try {
+      expect(muted("$ git status", 4)).toBe("\x1b[2m$ git status\x1b[22m");
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
+    for (const depth of [8, 24]) expect(muted("$ git status", depth)).toBe("\x1b[38;5;243m$ git status\x1b[39m");
+    expect(helpLine([{ key: "esc", does: "back" }], 8)).toContain(muted("back", 8));
   });
 
   it("helpLine joins keys and what they do with dot separators: plain at depth 1, keys plain and the rest dim under 256 colours, two greys from 256 colours up", () => {

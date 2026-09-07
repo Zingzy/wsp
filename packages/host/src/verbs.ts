@@ -31,6 +31,9 @@ import {
   importRequest,
   secretOffer,
   startPicks,
+  toolActivityLine,
+  toolResultLine,
+  turnSettledLine,
   workspaceState,
   workspaceWord,
   type ExecEvent,
@@ -594,10 +597,30 @@ const JOINED: Record<Exclude<SessionStartOutcome, "started">, (picks: Picks) => 
   queued: () => "queued behind the running turn; it has ended and this turn started",
 };
 
-/** The verbs' way through a turn: text streams to stderr as it arrives, the last message is printed on stdout when
- * the reply is complete, with --json every event of the turn up to its done is printed instead; the failure is one
- * line on stderr, exit 1. */
+/** A turn's stderr as a person watching it reads it: the reply's prose as it arrives, and a quiet line of its own
+ * for each tool call, for what the call answered and for the turn's own end, so a turn that runs commands for
+ * minutes shows work rather than silence. A line that lands mid-sentence breaks the sentence first; nothing is
+ * redrawn, since the stream may be a file. */
+function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string): void } {
+  let atLineStart = true;
+  return {
+    text: t => {
+      if (t === "") return;
+      ctx.out.stream(t);
+      atLineStart = t.endsWith("\n");
+    },
+    line: l => {
+      ctx.out.stream(`${atLineStart ? "" : "\n"}${ctx.io.muted?.(l) ?? l}\n`);
+      atLineStart = true;
+    },
+  };
+}
+
+/** The verbs' way through a turn: text, the tool calls behind it and what each answered stream to stderr as they
+ * arrive, the last message is printed on stdout when the reply is complete, with --json every event of the turn up
+ * to its done is printed instead; the failure is one line on stderr, exit 1. */
 async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}): Promise<number> {
+  const stream = turnStream(ctx);
   const turn = await follow(client, start, "cli", {
     queued: () => ctx.io.error(WAITING),
     started: (t: Turn) => {
@@ -607,7 +630,13 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
     event: e => {
       ctx.out.emit(e, e.type === "session.done" ? e.result.text : undefined);
       if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
-      if (e.type === "session.delta" && e.kind === "text") ctx.out.stream(e.text);
+      if (e.type === "session.delta" && e.kind === "text") stream.text(e.text);
+      if (e.type === "session.delta" && e.kind === "tool_use") stream.line(toolActivityLine(e.toolName, e.text));
+      if (e.type === "session.delta" && e.kind === "tool_result") {
+        const answer = toolResultLine(e.text, e.isError);
+        if (answer !== undefined) stream.line(answer);
+      }
+      if (e.type === "session.done") stream.line(turnSettledLine(e.result));
       if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
     },
   });

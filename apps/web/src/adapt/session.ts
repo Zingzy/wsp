@@ -7,12 +7,10 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, NOTIFY_ME, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, NOTIFY_ME, toolCallFacts, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
-  ProviderRequestKind,
   TimelineEntry,
-  ToolLifecycleItemType,
   TurnState,
   TurnSummary,
   WorkLogEntry,
@@ -227,7 +225,8 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         const existingEntry = existing ? work(existing.entryIndex) : undefined;
         if (existing && existingEntry && existingEntry.toolLifecycleStatus === "inProgress") {
           existing.input += e.text;
-          replace(existing.entryIndex, workEntry(describeToolCall(existingEntry, e.toolName ?? existingEntry.label, existing.input), timeline[existing.entryIndex]!.createdAt));
+          const named = e.toolName ?? existingEntry.label;
+          replace(existing.entryIndex, workEntry({ ...existingEntry, label: named, toolTitle: named, ...toolCallFacts(named, existing.input) }, timeline[existing.entryIndex]!.createdAt));
           return;
         }
         const toolName = e.toolName ?? "tool";
@@ -236,7 +235,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
           toolLifecycleStatus: "inProgress", sourceActivityKind: "tool.started",
           ...(e.toolUseId !== undefined ? { toolCallId: e.toolUseId } : {}),
         };
-        const index = addWork(t, describeToolCall(base, toolName, e.text), at);
+        const index = addWork(t, { ...base, ...toolCallFacts(toolName, e.text) }, at);
         const registryKey = e.toolUseId ?? `anon:${index}`;
         t.tools.set(registryKey, { entryIndex: index, input: e.text });
         if (e.toolUseId === undefined) t.openAnonymousTool = index;
@@ -312,75 +311,6 @@ function turnState(status: TurnResult["status"]): TurnState {
       return "error";
     }
   }
-}
-
-// --- Claude Code tool inputs into work-row fields -----------------------------------
-
-const FILE_CHANGE_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-const CODE_SEARCH_TOOLS: ReadonlySet<string> = new Set(["Grep", "Glob"]);
-const WEB_TOOLS: ReadonlySet<string> = new Set(["WebSearch", "WebFetch"]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseInput(text: string): Record<string, unknown> | null {
-  if (text.trim().length === 0) return null;
-  try {
-    const value: unknown = JSON.parse(text);
-    return isRecord(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function str(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-/** Fills label, command, detail, changedFiles and the kind fields from a tool name and its (possibly partial) JSON input. */
-function describeToolCall(base: WorkLogEntry, toolName: string, inputText: string): WorkLogEntry {
-  const input = parseInput(inputText);
-  const entry: WorkLogEntry = {
-    ...base,
-    label: toolName,
-    toolTitle: toolName,
-    ...(input === null && inputText.length > 0 ? { detail: inputText } : {}),
-  };
-  const kind = toolKind(toolName);
-  const withKind: WorkLogEntry = {
-    ...entry,
-    ...(kind.itemType !== undefined ? { itemType: kind.itemType } : {}),
-    ...(kind.requestKind !== undefined ? { requestKind: kind.requestKind } : {}),
-  };
-  if (input === null) return withKind;
-  const filePath = str(input["file_path"]) ?? str(input["notebook_path"]);
-  const command = str(input["command"]);
-  const description = str(input["description"]);
-  const detail = filePath ?? str(input["pattern"]) ?? str(input["query"]) ?? str(input["url"]) ?? description ?? str(input["prompt"]);
-  const shell = toolName === "Bash"
-    ? { ...(command !== undefined ? { command } : {}), ...(description !== undefined ? { description } : {}) }
-    : {};
-  return {
-    ...withKind,
-    ...shell,
-    ...(filePath !== undefined && FILE_CHANGE_TOOLS.has(toolName) ? { changedFiles: [filePath] } : {}),
-    ...(detail !== undefined ? { detail } : {}),
-  };
-}
-
-function toolKind(toolName: string): { itemType?: ToolLifecycleItemType; requestKind?: ProviderRequestKind } {
-  if (toolName === "Bash") return { itemType: "command_execution", requestKind: "command" };
-  if (toolName === "Read") return { requestKind: "file-read" };
-  if (FILE_CHANGE_TOOLS.has(toolName)) return { itemType: "file_change", requestKind: "file-change" };
-  if (WEB_TOOLS.has(toolName)) return { itemType: "web_search" };
-  if (toolName === "Task") return { itemType: "collab_agent_tool_call" };
-  if (toolName.startsWith("mcp__")) return { itemType: "mcp_tool_call" };
-  return {};
-}
-
-export function isCodeSearchTool(toolName: string | undefined): boolean {
-  return toolName !== undefined && CODE_SEARCH_TOOLS.has(toolName);
 }
 
 function compactLines(text: string): string[] {

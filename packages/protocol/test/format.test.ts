@@ -19,6 +19,7 @@ import {
   forgetNotice,
   goldenBuildLine,
   harnessExitLine,
+  isCodeSearchTool,
   machineUnreachedLine,
   mcpServerCommandLine,
   moveTimedOutLine,
@@ -34,9 +35,14 @@ import {
   stepRetryLine,
   timedOutLine,
   titleLine,
+  toolActivityLine,
+  toolCallFacts,
+  toolResultLine,
   TURN_IDLE_MS,
   TURN_WALL_MS,
   turnCutLine,
+  turnSettledLine,
+  turnSettledParts,
   upgradeSealFailedGoneLine,
   upgradeSealFailedStaysLine,
   upgradeSealFailedUnreadLine,
@@ -96,6 +102,17 @@ describe("one copy of the rule", () => {
   });
 });
 
+describe("one registry for the tools a harness reports", () => {
+  const HOME = join("packages", "protocol", "src", "format.ts");
+  // One row per tool name there carries its line, the input field a client shows for the call and the kind of item it is.
+  const RULE = /"(file_path|notebook_path|MultiEdit|NotebookEdit|WebSearch|WebFetch)"/;
+
+  it("no other source file names a tool of a harness or the input field a client shows for it", () => {
+    const copies = sourceFiles().filter(rel => rel !== HOME && RULE.test(readFileSync(join(ROOT, rel), "utf8")));
+    expect(copies).toEqual([]);
+  });
+});
+
 describe("fmtDuration, fmtElapsed and fmtCost", () => {
   it("fmtDuration's short style reads ms under a second, tenths under ten, whole seconds under a minute, then minutes and seconds", () => {
     expect([0, 7, 999, 1500, 9960, 10458, 59_400, 59_600, 60_000, 101_515, 492_000, 862_399, 3_665_000, -5, NaN, 4000].map(ms => fmtDuration(ms))).toEqual([
@@ -145,6 +162,102 @@ describe("notifyLine", () => {
   it("a turn that did not complete says why over its reply's last line; one that did says its last line", () => {
     expect(notifyLine(THREAD, { status: "failed", durationMs: 12_000, costUsd: 0.02, text: "Waiting for the gate to finish.", error: "ended with 1 background task running" })).toBe("thread c452d1e8 finished (failed, 12s, $0.02): ended with 1 background task running");
     expect(notifyLine(THREAD, { status: "completed", durationMs: 12_000, text: "All green.", error: "[ede_diagnostic] noise" })).toBe("thread c452d1e8 finished (completed, 12s): All green.");
+  });
+});
+
+describe("a turn's activity in one line each", () => {
+  it("reads a shell call behind a prompt, its first line only, whatever the harness calls the tool", () => {
+    expect(toolActivityLine("Bash", JSON.stringify({ command: "git status" }))).toBe("$ git status");
+    expect(toolActivityLine("Bash", JSON.stringify({ command: "  git   log \n  | head -3" }))).toBe("$ git log");
+    expect(toolActivityLine("command_execution", JSON.stringify({ command: "pnpm test" }))).toBe("$ pnpm test");
+  });
+
+  it("reads a file behind the verb that touched it, and a search behind what it looked for", () => {
+    expect(toolActivityLine("Read", JSON.stringify({ file_path: "packages/engine/src/golden-mcp.ts" }))).toBe("read packages/engine/src/golden-mcp.ts");
+    expect(toolActivityLine("Write", JSON.stringify({ file_path: "src/a.ts" }))).toBe("wrote src/a.ts");
+    expect(toolActivityLine("Edit", JSON.stringify({ file_path: "src/a.ts" }))).toBe("edited src/a.ts");
+    expect(toolActivityLine("NotebookEdit", JSON.stringify({ notebook_path: "run.ipynb" }))).toBe("edited run.ipynb");
+    expect(toolActivityLine("Grep", JSON.stringify({ pattern: "shellQuote" }))).toBe("searched code for shellQuote");
+    expect(toolActivityLine("WebSearch", JSON.stringify({ query: "solari snapshot" }))).toBe("searched the web for solari snapshot");
+    expect(toolActivityLine("WebFetch", JSON.stringify({ url: "https://example.com" }))).toBe("fetched https://example.com");
+    expect(toolActivityLine("Task", JSON.stringify({ description: "review the diff" }))).toBe("agent: review the diff");
+  });
+
+  it("counts the paths of a change call that carries several, and names the one it carries alone", () => {
+    const one = [{ kind: "edit", path: "src/a.ts" }];
+    expect(toolActivityLine("file_change", JSON.stringify({ changes: one }))).toBe("edited src/a.ts");
+    expect(toolActivityLine("file_change", JSON.stringify({ changes: [...one, { kind: "add", path: "src/b.ts" }] }))).toBe(`edited ${plural(2, "file")}`);
+  });
+
+  it("falls back to the tool's own name when there is no row for it, when its input carries nothing the row needs, and when the input is not an object", () => {
+    expect(toolActivityLine("TodoWrite", JSON.stringify({ todos: [] }))).toBe("TodoWrite");
+    expect(toolActivityLine("mcp__wsp__send", JSON.stringify({ id: "t1" }))).toBe("mcp__wsp__send");
+    expect(toolActivityLine("Bash", JSON.stringify({ description: "list them" }))).toBe("Bash");
+    expect(toolActivityLine("Bash", "{\"comm")).toBe("Bash");
+    expect(toolActivityLine("Bash", JSON.stringify(null))).toBe("Bash");
+    expect(toolActivityLine(undefined, JSON.stringify({ command: "ls" }))).toBe("tool");
+  });
+
+  it("ends a turn on the same words the app's footer shows, in the app's order, and leaves out what the harness did not report", () => {
+    expect(turnSettledLine({ status: "completed", durationMs: 72_000, costUsd: 0.22 })).toBe("completed · Worked for 1m 12s · $0.22");
+    expect(turnSettledLine({ status: "failed" })).toBe("failed");
+    expect(turnSettledLine({ status: "interrupted", durationMs: 1_500 })).toBe("interrupted · Worked for 1.5s");
+    expect(turnSettledParts({ durationMs: null, costUsd: null })).toEqual([]);
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.22 })).toEqual(["Worked for 1m 12s", "$0.22"]);
+  });
+});
+
+describe("what a tool call answered, in one line", () => {
+  it("is the result's first line, cut by the rule that cuts the call's own line", () => {
+    expect(toolResultLine("On branch main\nnothing to commit")).toBe("On branch main");
+    expect(toolResultLine("  total   0 \nfoo")).toBe("total 0");
+  });
+
+  it("marks a failed result in words, with what the harness said when it said anything", () => {
+    expect(toolResultLine("exit 1: no such file", true)).toBe("failed: exit 1: no such file");
+    expect(toolResultLine("", true)).toBe("failed");
+    expect(toolResultLine("\n  \n", true)).toBe("failed");
+  });
+
+  it("has nothing to say for a result that answered with nothing", () => {
+    expect(toolResultLine("")).toBeUndefined();
+    expect(toolResultLine("\n  \n")).toBeUndefined();
+  });
+});
+
+describe("the one registry every client reads a tool call from", () => {
+  it("says which field a call's row shows, what kind of item it is and what it changed, Claude's names and Codex's alike", () => {
+    expect(toolCallFacts("Bash", JSON.stringify({ command: "git status", description: "Show working tree status" })))
+      .toEqual({ itemType: "command_execution", requestKind: "command", detail: "Show working tree status", command: "git status", description: "Show working tree status" });
+    expect(toolCallFacts("command_execution", JSON.stringify({ command: "pnpm test" })))
+      .toEqual({ itemType: "command_execution", requestKind: "command", command: "pnpm test" });
+    expect(toolCallFacts("Read", JSON.stringify({ file_path: "/x/a.ts" }))).toEqual({ requestKind: "file-read", detail: "/x/a.ts" });
+    expect(toolCallFacts("Edit", JSON.stringify({ file_path: "/x/a.ts", old_string: "a" })))
+      .toEqual({ itemType: "file_change", requestKind: "file-change", detail: "/x/a.ts", changedFiles: ["/x/a.ts"] });
+    expect(toolCallFacts("NotebookEdit", JSON.stringify({ notebook_path: "run.ipynb" })))
+      .toEqual({ itemType: "file_change", requestKind: "file-change", detail: "run.ipynb", changedFiles: ["run.ipynb"] });
+    expect(toolCallFacts("file_change", JSON.stringify({ changes: [{ kind: "edit", path: "src/a.ts" }, { kind: "add", path: "src/b.ts" }] })))
+      .toEqual({ itemType: "file_change", requestKind: "file-change", changedFiles: ["src/a.ts", "src/b.ts"] });
+    expect(toolCallFacts("Grep", JSON.stringify({ pattern: "shellQuote", path: "src" }))).toEqual({ detail: "shellQuote" });
+    expect(toolCallFacts("web_search", JSON.stringify({ query: "solari snapshot" }))).toEqual({ itemType: "web_search", detail: "solari snapshot" });
+    expect(toolCallFacts("Task", JSON.stringify({ description: "scan repo", prompt: "find every caller" }))).toEqual({ itemType: "collab_agent_tool_call", detail: "scan repo" });
+  });
+
+  it("reads a name with no row by the general field order, and an mcp call by its name", () => {
+    expect(toolCallFacts("TodoWrite", JSON.stringify({ todos: [] }))).toEqual({});
+    expect(toolCallFacts("mcp__wsp__send", JSON.stringify({ prompt: "hello" }))).toEqual({ itemType: "mcp_tool_call", detail: "hello" });
+    expect(toolCallFacts("Wombat", JSON.stringify({ query: "grey fur" }))).toEqual({ detail: "grey fur" });
+  });
+
+  it("shows input still arriving as it stands, and reads an empty input as a call with nothing said about it yet", () => {
+    expect(toolCallFacts("Bash", "{\"comm")).toEqual({ itemType: "command_execution", requestKind: "command", detail: "{\"comm" });
+    expect(toolCallFacts("Bash", "")).toEqual({ itemType: "command_execution", requestKind: "command" });
+    expect(toolCallFacts("Bash", JSON.stringify(null))).toEqual({ itemType: "command_execution", requestKind: "command", detail: "null" });
+  });
+
+  it("names the calls that looked through the code, for the client that folds them into one row", () => {
+    expect(["Grep", "Glob"].map(name => isCodeSearchTool(name))).toEqual([true, true]);
+    expect(["Bash", "Read", "WebSearch", undefined].map(name => isCodeSearchTool(name))).toEqual([false, false, false, false]);
   });
 });
 

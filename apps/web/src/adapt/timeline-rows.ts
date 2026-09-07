@@ -5,9 +5,8 @@
 // wsp's turns can express: no proposed plans, subagent fleets, checkpoints or
 // MCP presentation tables. Turn duration comes from the turn summary because
 // entries are unstamped on our wire.
-import { fmtDuration } from "@wsp/protocol";
+import { fmtDuration, isCodeSearchTool } from "@wsp/protocol";
 import type { MessagesTimelineRow, TimelineEntry, ToolGroupAction, ToolGroupSummaryKind, TurnSummary, WorkLogEntry } from "./view-model.js";
-import { isCodeSearchTool } from "./session.js";
 
 const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 
