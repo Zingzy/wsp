@@ -639,6 +639,139 @@ describe("status.history", () => {
   });
 });
 
+describe("a workspace older than the tracker", () => {
+  it("meters from the machine's birth, not the attach: the series opens there at zero", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    // The wizard's fork: a first host creates the workspace and dies before anything meters it, so the store holds
+    // a running workspace and no cost history at all.
+    const wizard = createRuntime({ backend, store, adapters: {}, status: ticking, idle });
+    const ws = await wizard.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await wizard.close();
+    expect(await store.list("cost-histories")).toEqual([]);
+
+    // The app comes up two minutes later and attaches to the machine the provider has been billing since the fork.
+    const born = Date.parse(backend.machines[0]!.shape.createdAt!);
+    expect(born).toBeGreaterThanOrEqual(Date.parse(ws.createdAt));
+    const attached = born + 120_000;
+    const fc = fakeClock(attached);
+    const app = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
+    const costs: Cost[] = [];
+    app.events.on("workspace.cost", e => costs.push(e as Cost));
+    const stop = app.status.watch();
+    fc.advance(TICK_MS);
+    await until(() => costs.length >= 1);
+    stop();
+
+    // The opening point sits on the machine's birth with nothing accrued; the tick that follows carries the whole
+    // life since then, the two minutes before the attach included.
+    expect(costs.map(c => [c.at, c.awakeMs])).toEqual([
+      [new Date(born).toISOString(), 0],
+      [new Date(attached + TICK_MS).toISOString(), 120_000 + TICK_MS],
+    ]);
+    expect(costs[0]).toMatchObject({ workspaceId: ws.id, phase: "running", accruedUsd: 0 });
+    const tick = costs[1]!;
+    expect(tick.accruedUsd).toBeCloseTo((tick.rateUsdPerHour * tick.awakeMs) / 3_600_000, 10);
+    // Both points are the series, so the chart reads tracked since the fork rather than since the attach.
+    expect((await app.status.history(ws.id)).map(p => [p.at, p.awakeMs])).toEqual([
+      [new Date(born).toISOString(), 0],
+      [tick.at, tick.awakeMs],
+    ]);
+    await app.close();
+  });
+
+  it("never re-opens a meter it already has an opinion about: a nap it metered holds the start where the tick found it", async () => {
+    const fc = fakeClock();
+    const now = fc.clock.now();
+    const listeners: ((e: EventUnion) => void)[] = [];
+    const costs: Cost[] = [];
+    const tracker = createStatusTracker({
+      rateUsdPerHour: () => 0.11,
+      // An hour-old workspace whose machine is the one it was forked with: nothing about it says a fresh start.
+      records: async () => [
+        {
+          id: "ws_a",
+          name: "alpha",
+          machineId: "m_a",
+          phase: "running" as const,
+          golden: "snap_g",
+          createdAt: new Date(now - 3_600_000).toISOString(),
+          providerCreatedAt: new Date(now - 3_600_000).toISOString(),
+          size: { cpu: 2, memMb: 4096 },
+          providerState: async () => "running" as const,
+          exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        },
+      ],
+      store: memoryStore(),
+      emit: e => {
+        if (e.type === "workspace.cost") costs.push(e);
+      },
+      on: (_type, l) => {
+        listeners.push(l);
+        return () => {};
+      },
+      defaults: ticking,
+      clock: fc.clock,
+    });
+
+    // The nap landed before any tick ran, and the machine is running again without a wake this tracker saw: an
+    // upgrade or an image move, which replaces the machine and leaves the record running.
+    for (const l of listeners) l({ type: "workspace.napped", workspaceId: "ws_a", machineId: "m_a", found: true } as EventUnion);
+    const stop = tracker.watch();
+    fc.advance(TICK_MS);
+    await until(() => costs.length >= 1);
+    fc.advance(TICK_MS);
+    await until(() => costs.length >= 2);
+    stop();
+
+    // The stretch starts at the tick that found it running, so the hour before the nap is not billed twice.
+    expect(costs.map(c => c.awakeMs)).toEqual([0, TICK_MS]);
+  });
+
+  it("opens at the newest readable stamp of the record's own and the machine's, and at now when neither can be read", async () => {
+    const fc = fakeClock();
+    const now = fc.clock.now();
+    const record = (id: string, createdAt: string, providerCreatedAt?: string) => ({
+      id,
+      name: id,
+      machineId: `m_${id}`,
+      phase: "running" as const,
+      golden: "snap_g",
+      createdAt,
+      size: { cpu: 2, memMb: 4096 },
+      ...(providerCreatedAt !== undefined ? { providerCreatedAt } : {}),
+      providerState: async () => "running" as const,
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    });
+    const costs: Cost[] = [];
+    const tracker = createStatusTracker({
+      rateUsdPerHour: () => 0.11,
+      records: async () => [
+        record("ws_unreadable", "yesterday", new Date(now - 180_000).toISOString()),
+        record("ws_rebuilt", new Date(now - 3_600_000).toISOString(), new Date(now - 180_000).toISOString()),
+        record("ws_ahead", new Date(now + 300_000).toISOString()),
+      ],
+      store: memoryStore(),
+      emit: e => {
+        if (e.type === "workspace.cost") costs.push(e);
+      },
+      on: () => () => {},
+      defaults: ticking,
+      clock: fc.clock,
+    });
+    const stop = tracker.watch();
+    fc.advance(TICK_MS);
+    await until(() => costs.length >= 3);
+    stop();
+
+    // An unreadable stamp is answered by the machine's own, an older record by the machine it runs now, and nothing
+    // ahead of now can start a stretch.
+    expect(costs.filter(c => c.workspaceId === "ws_unreadable").map(c => c.awakeMs)).toEqual([0, 180_000 + TICK_MS]);
+    expect(costs.filter(c => c.workspaceId === "ws_rebuilt").map(c => c.awakeMs)).toEqual([0, 180_000 + TICK_MS]);
+    expect(costs.filter(c => c.workspaceId === "ws_ahead").map(c => c.awakeMs)).toEqual([0]);
+  });
+});
+
 describe("serveRuntime status.subscribe", () => {
   it("returns a snapshot and pushes cost events to a subscribed socket", async () => {
     const { rt } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });

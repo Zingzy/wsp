@@ -113,9 +113,21 @@ export interface StatusApi {
 export interface StatusRecord extends WorkspaceView {
   size: WorkspaceSize;
   idleAt?: number;
+  /** The provider's creation time for the machine under this record now, as it was read at the fork. Never re-read:
+   * the provider's own moves on a running machine nobody touched (canary 2026-09-04). */
+  providerCreatedAt?: string;
   daemonReach?: () => Promise<PreviewReach>;
   providerState: () => Promise<MachineState>;
   exec: (cmd: string, opts?: { timeoutMs?: number }) => Promise<ExecResult>;
+}
+
+/** When a workspace's meter opens: the birth of the machine the provider is billing. Two stamps say when that was,
+ * the record's own and the machine's as the fork read it, and the newest of them wins, so a machine rebuilt under an
+ * older record is billed from the rebuild. A stamp that cannot be read, or one ahead of now, is no stamp at all;
+ * with neither the meter opens now. */
+export function meteringStart(r: Pick<StatusRecord, "createdAt" | "providerCreatedAt">, now: number): number {
+  const stamps = [r.createdAt, r.providerCreatedAt].map(s => (s === undefined ? NaN : Date.parse(s))).filter(t => Number.isFinite(t) && t <= now);
+  return stamps.length === 0 ? now : Math.max(...stamps);
 }
 
 export interface StatusTrackerOptions {
@@ -133,6 +145,10 @@ export interface StatusTrackerOptions {
 
 interface Meter {
   awakeMs: number;
+  /** Set once anything knows where this workspace's awake time stands: a create or a wake here, a nap, a death, a
+   * stored series, or the first tick that opened the meter. While it is unset, another process forked the workspace
+   * and nothing here has ever metered it. */
+  opened?: true;
   /** Set while running: when the current awake stretch began. */
   mark?: number;
   /** The newest instant anything proved the machine awake. A pause or a death the provider made ended the stretch
@@ -197,7 +213,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const suspects = new Map<string, Suspect>();
 
   // Exact awake accounting comes from lifecycle events, not poll edges. A
-  // workspace hydrated already-running starts its meter lazily at first tick.
+  // workspace hydrated already-running has no event to start from, so its
+  // first tick opens the meter back at the birth of the machine it runs.
   const meter = (id: string): Meter => {
     let m = meters.get(id);
     if (!m) {
@@ -212,7 +229,9 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     meter(id).awakeUntil = clock.now();
   };
   const beganAwake = (id: string): void => {
-    meter(id).mark = clock.now();
+    const m = meter(id);
+    m.mark = clock.now();
+    m.opened = true;
     sawAwake(id);
   };
   o.on("workspace.created", e => {
@@ -232,6 +251,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       const ended = found ? (m.awakeUntil ?? clock.now()) : clock.now();
       if (m.mark !== undefined) m.awakeMs += Math.max(0, ended - m.mark);
       m.mark = undefined;
+      m.opened = true;
     });
   }
   o.on("workspace.deleted", e => {
@@ -255,6 +275,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       histories.set(doc.workspaceId, doc.points);
       const m = meter(doc.workspaceId);
       m.awakeMs = last.awakeMs;
+      m.opened = true;
       if (last.phase === "running") m.mark = m.awakeUntil = Date.parse(last.at);
     }
   })().catch((e: unknown) => console.warn("cost histories not loaded; the series begins at the first tick", e));
@@ -363,7 +384,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
 
     return Promise.all(
       records.map(async (r): Promise<WorkspaceStatus> => {
-        const { size, idleAt, daemonReach, providerState, exec, ...view } = r;
+        const { size, idleAt, providerCreatedAt, daemonReach, providerState, exec, ...view } = r;
+        void providerCreatedAt;
         void providerState;
         void exec;
         const base = { ...view, size, rateUsdPerHour: o.rateUsdPerHour(size), ...(idleAt !== undefined ? { idleAt } : {}) };
@@ -424,19 +446,43 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   let stopPoll: (() => void) | undefined;
   const lastEmitted = new Map<string, string>();
 
+  /** Folds a tick into the workspace's series and puts it on the bus. A tick that replaced the newest point lies on
+   * the stored line; only an added point changes the document. */
+  const fold = (tick: WorkspaceCostEvent): void => {
+    const id = tick.workspaceId;
+    const before = histories.get(id) ?? [];
+    const next = appendCostPoint(before, tick);
+    histories.set(id, next);
+    const added = before.length === 0 || next[next.length - 2] === before[before.length - 1];
+    if (added) persist(() => o.store.put(COST_HISTORIES, id, { workspaceId: id, points: next } satisfies CostHistoryRecord));
+    o.emit(tick);
+  };
+
   const costTick = async (): Promise<void> => {
     await loading;
     const now = clock.now();
     for (const { size, ...view } of await o.records()) {
       const m = meter(view.id);
+      const rate = o.rateUsdPerHour(size);
+      // A meter nothing here has an opinion about belongs to a workspace another process forked (the wizard, the
+      // command line): the provider has billed its machine since that machine was born and this tracker only just
+      // met it, so the stretch opens back there and the series opens there at zero. Every other meter keeps what it
+      // knows, so a stretch that ended stays ended and no gap is billed twice.
+      if (m.opened !== true) {
+        if (view.phase === "running") {
+          const from = meteringStart(view, now);
+          m.mark = from;
+          if (from < now) fold({ type: "workspace.cost", workspaceId: view.id, phase: view.phase, rateUsdPerHour: rate, awakeMs: 0, accruedUsd: 0, at: new Date(from).toISOString() });
+        }
+        m.opened = true;
+      }
       if (view.phase === "running") m.mark ??= now;
       // A gone record's stretch is over and its end unknown (the host may have been down when the provider lost the
       // machine): the mark goes without folding, so no tick after a rebuild bills the gap.
       else if (view.phase === "gone") m.mark = undefined;
       const running = view.phase === "running" && m.mark !== undefined;
-      const rate = o.rateUsdPerHour(size);
       const awakeMs = m.awakeMs + (running ? now - m.mark! : 0);
-      const tick: WorkspaceCostEvent = {
+      fold({
         type: "workspace.cost",
         workspaceId: view.id,
         phase: view.phase,
@@ -444,14 +490,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         awakeMs,
         accruedUsd: (rate * awakeMs) / 3_600_000,
         at: new Date(now).toISOString(),
-      };
-      const before = histories.get(view.id) ?? [];
-      const next = appendCostPoint(before, tick);
-      histories.set(view.id, next);
-      // A tick that replaced the newest point lies on the stored line; only an added point changes the document.
-      const added = before.length === 0 || next[next.length - 2] === before[before.length - 1];
-      if (added) persist(() => o.store.put(COST_HISTORIES, view.id, { workspaceId: view.id, points: next } satisfies CostHistoryRecord));
-      o.emit(tick);
+      });
     }
   };
 

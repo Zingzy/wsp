@@ -3409,6 +3409,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...view(e.record),
         size: e.record.size,
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
+        ...(e.record.shape?.createdAt !== undefined ? { providerCreatedAt: e.record.shape.createdAt } : {}),
         ...(e.machine.previewUrl ? { daemonReach: () => e.ws.daemonReach() } : {}),
         providerState: () => e.machine.state(),
         exec: (cmd, o) => e.machine.exec(cmd, o),
