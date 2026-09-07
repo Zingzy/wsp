@@ -28,6 +28,7 @@ import {
   type SnapshotRollbackResult,
   type SnapshotStorage,
   type WorkspaceCreateResult,
+  type WorkspaceSize,
   WorkspaceCostEvent,
   type WorkspaceStatus,
   type WorkspaceView,
@@ -237,9 +238,10 @@ export class ProtocolClient {
 export interface Api {
   listWorkspaces(): Promise<WorkspaceView[]>;
   getWorkspace(id: string): Promise<WorkspaceView>;
-  createWorkspace(golden: string, name?: string): Promise<CreatedWorkspace>;
+  /** `size` is one of capabilities().sizes; absent, the workspace takes the golden's size. */
+  createWorkspace(golden: string, name?: string, size?: WorkspaceSize): Promise<CreatedWorkspace>;
   /** Resolves the default golden manifest's head so the UI never handles snapshot ids. */
-  createFromGoldenHead(name: string): Promise<CreatedWorkspace>;
+  createFromGoldenHead(name: string, size?: WorkspaceSize): Promise<CreatedWorkspace>;
   /** Snapshot of enriched statuses; keeps the runtime's poller + cost ticker running for this socket. */
   watchStatuses(): Promise<WorkspaceStatus[]>;
   nap(id: string): Promise<WorkspaceView>;
@@ -327,6 +329,9 @@ export interface StartSessionOptions {
   requestId?: string;
   harness?: string;
   resume?: string;
+  /** The thread the message goes to, by its runtime id, when the view has no session to resume: the runtime resumes
+   * the thread's latest session or, after a launch that failed, runs the message as the thread's first turn. */
+  thread?: string;
   cwd?: string;
   /** Values from the harness catalog; absent leaves the CLI's own default for that flag. */
   model?: string;
@@ -365,19 +370,19 @@ export interface CreatedWorkspace extends WorkspaceView {
 }
 
 export function makeApi(c: ProtocolClient): Api {
-  const create = async (golden: string, name?: string): Promise<CreatedWorkspace> => {
-    const { workspace, notice } = await c.request<WorkspaceCreateResult>("workspaces.create", { golden, ...(name ? { name } : {}) });
+  const create = async (golden: string, name?: string, size?: WorkspaceSize): Promise<CreatedWorkspace> => {
+    const { workspace, notice } = await c.request<WorkspaceCreateResult>("workspaces.create", { golden, ...(name ? { name } : {}), ...size });
     return notice === undefined ? workspace : { ...workspace, notice };
   };
   return {
     listWorkspaces: async () => (await c.request<{ workspaces: WorkspaceView[] }>("workspaces.list")).workspaces,
     getWorkspace: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.get", { workspaceId: id })).workspace,
     createWorkspace: create,
-    createFromGoldenHead: async name => {
+    createFromGoldenHead: async (name, size) => {
       const { manifest } = await c.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
       const head = goldenHead(manifest);
       if (!head) throw new Error("no golden image yet; build one first (wspx golden build)");
-      return create(head.snapshotId, name);
+      return create(head.snapshotId, name, size);
     },
     watchStatuses: async () => (await c.request<{ statuses: WorkspaceStatus[] }>("status.subscribe")).statuses,
     nap: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: id })).workspace,

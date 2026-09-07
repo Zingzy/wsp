@@ -13,6 +13,7 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import WebSocket from "ws";
 import {
   AFTER_CUT_LINE,
+  EMPTY_TASK_LINE,
   NOTIFY_ME,
   actionRefusal,
   canTravel,
@@ -29,10 +30,18 @@ import {
   goneRefusal,
   importConsented,
   importRequest,
+  noAdapterLine,
+  offeredSize,
   secretOffer,
+  sizeFromWord,
+  sizeRefusal,
   startPicks,
+  toolActivityLine,
+  toolResultLine,
+  turnSettledLine,
   workspaceState,
   workspaceWord,
+  type Capabilities,
   type ExecEvent,
   type GoldenManifest,
   type HarnessCatalog,
@@ -54,6 +63,7 @@ import {
   type TurnResult,
   type WorkspaceCreateResult,
   type WorkspaceCreatingEvent,
+  type WorkspaceSize,
   type WorkspaceView,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
@@ -382,11 +392,19 @@ function threadLine(t: ThreadRow): string[] {
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
-export async function createFromHead(client: HostClient, out: Out, name: string): Promise<WorkspaceCreateResult> {
+export async function createFromHead(client: HostClient, out: Out, name: string, size?: string): Promise<WorkspaceCreateResult> {
   const { manifest } = await client.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
   const head = goldenHead(manifest);
   if (head === undefined) throw new Error("no golden yet; run wsp init");
-  return create(client, out, head.snapshotId, name);
+  return create(client, out, head.snapshotId, name, size);
+}
+
+/** The size a --size word names, checked against what the host's provider offers before anything is minted. */
+async function sizeChosen(client: HostClient, word: string): Promise<WorkspaceSize> {
+  const { capabilities } = await client.request<{ capabilities: Capabilities }>("capabilities.get");
+  const size = sizeFromWord(word);
+  if (size === undefined || !offeredSize(capabilities.sizes, size)) throw new Error(sizeRefusal(word, capabilities.sizes));
+  return size;
 }
 
 /** The project golden a person names: by snapshot id, else the newest whose project carries that name. */
@@ -410,7 +428,9 @@ export function projectGoldenLine(g: ProjectGolden): string {
   return `project golden ${g.snapshotId}: ${version} plus ${g.project.name} as imported ${g.project.importedAt.slice(0, 10)}, taken from ${g.workspaceName}\nfork it with: wsp new <name> --from ${g.project.name}`;
 }
 
-export async function create(client: HostClient, out: Out, golden: string, name: string): Promise<WorkspaceCreateResult> {
+/** `size` is the --size word; absent, the workspace takes the golden's size. */
+export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string): Promise<WorkspaceCreateResult> {
+  const chosen = size === undefined ? undefined : await sizeChosen(client, size);
   const pushed = pushedFrames(client);
   await client.events();
   pushed.follow(
@@ -421,7 +441,7 @@ export async function create(client: HostClient, out: Out, golden: string, name:
     },
   );
   try {
-    const { workspace, notice } = await client.request<{ workspace: WorkspaceView; notice?: string }>("workspaces.create", { golden, name });
+    const { workspace, notice } = await client.request<{ workspace: WorkspaceView; notice?: string }>("workspaces.create", { golden, name, ...chosen });
     const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
     out.emit(created, `created ${workspace.name} ${workspace.id}${notice !== undefined ? `\n${notice}` : ""}`);
     return created;
@@ -479,11 +499,15 @@ export function pickFlags(flags: Flags): Picks {
   return Object.fromEntries(PICK_FLAGS.map(name => [name, flag(flags, name)]));
 }
 
-/** Refuses a pick the harness table does not list, in the runtime's own words, before a machine is minted for it;
- * the table is what the runtime knows without a machine, and the start on the new machine checks the rest. */
-export async function checkedPicks(client: HostClient, harness: string | undefined, picks: Picks): Promise<void> {
+/** Refuses, in the runtime's own words and before a machine is minted or woken for it, what the runtime would refuse
+ * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's table
+ * does not list. The tables are what the runtime knows without a machine; the start on the machine checks the rest. */
+export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks): Promise<void> {
+  if (task.trim() === "") throw new Error(EMPTY_TASK_LINE);
   const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list");
-  startPicks(harnesses.find(c => (harness === undefined ? c.isDefault === true : c.harness === harness)), picksOf(picks), true);
+  const table = harnesses.find(c => (harness === undefined ? c.isDefault === true : c.harness === harness));
+  if (table === undefined && harness !== undefined) throw new Error(noAdapterLine(harness, harnesses.map(c => c.harness)));
+  startPicks(table, picksOf(picks), true);
 }
 
 /** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the named
@@ -594,10 +618,30 @@ const JOINED: Record<Exclude<SessionStartOutcome, "started">, (picks: Picks) => 
   queued: () => "queued behind the running turn; it has ended and this turn started",
 };
 
-/** The verbs' way through a turn: text streams to stderr as it arrives, the last message is printed on stdout when
- * the reply is complete, with --json every event of the turn up to its done is printed instead; the failure is one
- * line on stderr, exit 1. */
+/** A turn's stderr as a person watching it reads it: the reply's prose as it arrives, and a quiet line of its own
+ * for each tool call, for what the call answered and for the turn's own end, so a turn that runs commands for
+ * minutes shows work rather than silence. A line that lands mid-sentence breaks the sentence first; nothing is
+ * redrawn, since the stream may be a file. */
+function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string): void } {
+  let atLineStart = true;
+  return {
+    text: t => {
+      if (t === "") return;
+      ctx.out.stream(t);
+      atLineStart = t.endsWith("\n");
+    },
+    line: l => {
+      ctx.out.stream(`${atLineStart ? "" : "\n"}${ctx.io.muted?.(l) ?? l}\n`);
+      atLineStart = true;
+    },
+  };
+}
+
+/** The verbs' way through a turn: text, the tool calls behind it and what each answered stream to stderr as they
+ * arrive, the last message is printed on stdout when the reply is complete, with --json every event of the turn up
+ * to its done is printed instead; the failure is one line on stderr, exit 1. */
 async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}): Promise<number> {
+  const stream = turnStream(ctx);
   const turn = await follow(client, start, "cli", {
     queued: () => ctx.io.error(WAITING),
     started: (t: Turn) => {
@@ -607,7 +651,13 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
     event: e => {
       ctx.out.emit(e, e.type === "session.done" ? e.result.text : undefined);
       if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
-      if (e.type === "session.delta" && e.kind === "text") ctx.out.stream(e.text);
+      if (e.type === "session.delta" && e.kind === "text") stream.text(e.text);
+      if (e.type === "session.delta" && e.kind === "tool_use") stream.line(toolActivityLine(e.toolName, e.text));
+      if (e.type === "session.delta" && e.kind === "tool_result") {
+        const answer = toolResultLine(e.text, e.isError);
+        if (answer !== undefined) stream.line(answer);
+      }
+      if (e.type === "session.done") stream.line(turnSettledLine(e.result));
       if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
     },
   });
@@ -763,16 +813,17 @@ async function confirmed(ctx: VerbContext, question: string, d: Dropping): Promi
 export const VERBS: readonly Verb[] = [
   {
     name: "new",
-    usage: "wsp new <name> [--from <project golden>]",
-    about: "a workspace forked from the golden's head, or with --from, from a project golden",
-    options: { from: { type: "string" } },
+    usage: "wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>]",
+    about: "a workspace from the golden's head or, with --from, a project golden; --size picks a size",
+    options: { from: { type: "string" }, size: { type: "string" } },
     run: async ctx => {
       const [name] = ctx.args;
       if (name === undefined || ctx.args.length !== 1) throw new Error("wsp new takes one name");
       const client = await ctx.client();
       const from = flag(ctx.flags, "from");
-      if (from === undefined) await createFromHead(client, ctx.out, name);
-      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name);
+      const size = flag(ctx.flags, "size");
+      if (from === undefined) await createFromHead(client, ctx.out, name, size);
+      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size);
       return 0;
     },
   },
@@ -791,9 +842,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "fork",
-    usage: 'wsp fork <workspace> [--name <name>] [--send "<task>" [the flags of thread new]]',
-    about: "a new machine from the source's golden version, not a copy of its live disk",
-    options: { name: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" } },
+    usage: 'wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>" [thread new\'s flags]]',
+    about: "a new machine from the source's golden version, not a copy of its live disk; --size as new's",
+    options: { name: { type: "string" }, size: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp fork takes one workspace");
@@ -806,8 +857,8 @@ export const VERBS: readonly Verb[] = [
       const notify = await notifyOf(client, flag(ctx.flags, "notify"));
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
-      if (task !== undefined) await checkedPicks(client, harness, picks);
-      const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`);
+      if (task !== undefined) await checkedStart(client, task, harness, picks);
+      const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`, flag(ctx.flags, "size"));
       if (task === undefined) return 0;
       return followVerb(ctx, client, openingOf(created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true);
     },
@@ -894,8 +945,12 @@ export const VERBS: readonly Verb[] = [
       if (within === undefined) throw new Error("wsp thread new needs --in <workspace>");
       if (task === undefined || ctx.args.length !== 1) throw new Error("wsp thread new takes one task");
       const client = await ctx.client();
-      const workspace = await awake(client, await workspaceOf(client, within), "send", line => ctx.io.error(line));
-      return followVerb(ctx, client, openingOf(workspace, task, { harness: flag(ctx.flags, "agent"), ...pickFlags(ctx.flags), cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true);
+      const found = await workspaceOf(client, within);
+      const harness = flag(ctx.flags, "agent");
+      const picks = pickFlags(ctx.flags);
+      await checkedStart(client, task, harness, picks);
+      const workspace = await awake(client, found, "send", line => ctx.io.error(line));
+      return followVerb(ctx, client, openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")) }), true);
     },
   },
   {
@@ -909,6 +964,7 @@ export const VERBS: readonly Verb[] = [
       const client = await ctx.client();
       const picks = pickFlags(ctx.flags);
       const thread = await threadOf(client, ref);
+      await checkedStart(client, message, thread.harness, picks);
       await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
       return followVerb(ctx, client, messageTo(thread, message, picks), false, picks);
     },

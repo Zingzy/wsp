@@ -58,6 +58,21 @@ afterEach(async () => {
   openServers.length = 0;
 });
 
+type Cost = EventUnion & { type: "workspace.cost" };
+
+/** The clock jumps an hour in the tests below: the idle window must not nap the workspace behind the test. */
+const idle = { defaultWindowMs: 24 * 3_600_000 };
+const TICK_MS = 10_000;
+/** A cost tick every TICK_MS of a fake clock; the poll timer never falls due, only the poll a watch runs at once. */
+const ticking = { costIntervalMs: TICK_MS, pollIntervalMs: 24 * 3_600_000 };
+
+/** One cost tick under a fake clock: the clock reaches the next interval and the tick it fired has landed on the bus. */
+async function tickCost(fc: ReturnType<typeof fakeClock>, costs: Cost[]): Promise<void> {
+  const n = costs.length;
+  fc.advance(TICK_MS);
+  await until(() => costs.length > n);
+}
+
 describe("status.list", () => {
   it("enriches views with machine state, reach, size, and rate from backend pricing", async () => {
     const { rt, backend } = testRuntime();
@@ -313,8 +328,6 @@ describe("the status ticks", () => {
 });
 
 describe("a pause the provider made", () => {
-  type Cost = EventUnion & { type: "workspace.cost" };
-
   it("the poll asks the provider when the edge answers for the machine instead of the daemon, and the record follows", async () => {
     const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 0 });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
@@ -348,42 +361,38 @@ describe("a pause the provider made", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const fc = fakeClock();
-    const status = { costIntervalMs: 15, pollIntervalMs: 60_000 };
-    // The clock jumps an hour: the idle window must not nap the workspace behind the test.
-    const idle = { defaultWindowMs: 24 * 3_600_000 };
-    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
-    await until(() => costs.length >= 1);
-    fc.advance(60_000);
-    await until(() => costs.at(-1)!.awakeMs >= 60_000);
+    await tickCost(fc, costs);
     stop();
     await first.close();
-    const metered = costs.at(-1)!.awakeMs;
+    expect(costs.at(-1)).toMatchObject({ phase: "running", awakeMs: TICK_MS });
 
     // An hour down, and the provider paused the machine meanwhile: the next host reads the state off the view it fetches.
     backend.machines[0]!.paused = true;
     fc.advance(3_600_000);
-    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     expect((await second.workspaces.get(ws.id)).phase).toBe("napping");
     expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "napping" });
     const after: Cost[] = [];
     second.events.on("workspace.cost", e => after.push(e as Cost));
     stop = second.status.watch();
-    await until(() => after.filter(t => t.phase === "napping").length >= 2);
-    const held = after.filter(t => t.phase === "napping");
-    expect(held[0]).toMatchObject({ rateUsdPerHour: 0 });
-    expect(held[1]!.awakeMs).toBe(held[0]!.awakeMs);
-    expect(held[0]!.awakeMs).toBeLessThanOrEqual(metered);
+    await tickCost(fc, after);
+    await tickCost(fc, after);
+    // The hour down bills nothing: the stretch ended at the last tick that proved the machine awake.
+    expect(after).toMatchObject([
+      { phase: "napping", rateUsdPerHour: 0, awakeMs: TICK_MS },
+      { phase: "napping", rateUsdPerHour: 0, awakeMs: TICK_MS },
+    ]);
 
     // The wake resumes the machine the provider paused, and the stretch starts there, not an hour ago.
     await second.workspaces.wake(ws.id);
-    fc.advance(10_000);
-    await until(() => after.at(-1)!.phase === "running" && after.at(-1)!.awakeMs > held[0]!.awakeMs);
+    await tickCost(fc, after);
     stop();
-    expect(after.at(-1)!.awakeMs).toBe(held[0]!.awakeMs + 10_000);
+    expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: 2 * TICK_MS });
     expect(backend.machines[0]!.resumes).toBe(1);
     await second.close();
   });
@@ -391,9 +400,8 @@ describe("a pause the provider made", () => {
   it("a pause found after a gap in watching ends the awake stretch at the last proof the machine was awake", async () => {
     const backend = stubBackend();
     const fc = fakeClock();
-    const status = { costIntervalMs: 15, pollIntervalMs: 15, promptMs: 10_000, probeTimeoutMs: 50, reconcileMinMs: 0 };
-    // The clock jumps an hour: the idle window must not nap the workspace behind the test.
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status, idle: { defaultWindowMs: 24 * 3_600_000 } });
+    const status = { ...ticking, promptMs: 10_000, probeTimeoutMs: 50, reconcileMinMs: 0 };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status, idle });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
     const live = await httpStub(426);
     openServers.push(live.server);
@@ -404,15 +412,18 @@ describe("a pause the provider made", () => {
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const napped: string[] = [];
     rt.events.on("workspace.napped", () => napped.push("napped"));
+    const statuses: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
 
+    const before = statuses.length;
     let stop = rt.status.watch();
-    fc.advance(60_000);
-    const proofs = live.hits();
-    try {
-      await until(() => live.hits() > proofs && costs.at(-1)?.awakeMs === 60_000, 5_000);
-    } finally {
-      stop();
-    }
+    // The poll a watch runs at once has finished, so its proof of an awake machine lands before the clock moves.
+    await until(() => statuses.length > before);
+    await tickCost(fc, costs);
+    expect(costs.at(-1)).toMatchObject({ phase: "running", awakeMs: TICK_MS });
+    // The last proof the machine was awake: the daemon answers a list at this instant.
+    expect((await rt.status.list())[0]).toMatchObject({ machineState: "running", reach: { state: "reachable" } });
+    stop();
 
     // An hour with nothing watching: no tick and no poll runs, and the provider pauses the machine within it.
     fc.advance(3_600_000);
@@ -425,19 +436,17 @@ describe("a pause the provider made", () => {
     stop = rt.status.watch();
     try {
       await until(() => napped.length >= 1, 5_000);
-      const seen = costs.length;
-      await until(() => costs.length > seen, 2_000);
+      await tickCost(fc, costs);
     } finally {
       stop();
     }
     expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
-    expect(costs.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: 60_000 });
-    expect((await rt.status.history(ws.id)).at(-1)).toMatchObject({ awakeMs: 60_000 });
+    expect(costs.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: TICK_MS });
+    expect((await rt.status.history(ws.id)).at(-1)).toMatchObject({ awakeMs: TICK_MS });
   }, 20_000);
 });
 
 describe("status.history", () => {
-  type Cost = EventUnion & { type: "workspace.cost" };
   /** A store whose writes to the cost history collection are counted. */
   function countingStore(): { store: Store; puts: () => number; deletes: () => number } {
     const store = memoryStore();
@@ -456,38 +465,43 @@ describe("status.history", () => {
   }
 
   it("holds the folded ticks since metering began and hands them out over the wire", async () => {
-    const { rt } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
+    const fc = fakeClock();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
     expect(await rt.status.history(ws.id)).toEqual([]);
     const costs: Cost[] = [];
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = rt.status.watch();
-    await until(() => costs.length >= 4);
+    for (let i = 0; i < 4; i++) await tickCost(fc, costs);
+    const rate = costs[0]!.rateUsdPerHour;
+    expect(rate).toBeGreaterThan(0);
     // One rate the whole way: the first tick and the newest, nothing between.
     let history = await rt.status.history(ws.id);
-    expect(history).toHaveLength(2);
+    expect(history.map(p => [p.rateUsdPerHour, p.awakeMs])).toEqual([[rate, TICK_MS], [rate, 4 * TICK_MS]]);
     // The bus stamps a seq on what it emits; the history holds the ticks as the tracker built them.
     expect(costs[0]).toMatchObject(history[0]!);
-    expect(costs.at(-1)).toMatchObject(history[1]!);
+    expect(costs[3]).toMatchObject(history[1]!);
 
     await rt.workspaces.nap(ws.id);
-    const before = costs.length;
-    await until(() => costs.length >= before + 3);
+    for (let i = 0; i < 3; i++) await tickCost(fc, costs);
+    stop();
     history = await rt.status.history(ws.id);
-    const rates = history.map(p => p.rateUsdPerHour);
     // The last running tick and the first napping one bracket the change; the napping run folds to its newest.
-    expect(rates.slice(0, 2).every(r => r > 0)).toBe(true);
-    expect(rates.slice(2).every(r => r === 0)).toBe(true);
-    expect(history).toHaveLength(4);
-    expect(costs.at(-1)).toMatchObject(history.at(-1)!);
+    expect(history.map(p => [p.phase, p.rateUsdPerHour, p.awakeMs])).toEqual([
+      ["running", rate, TICK_MS],
+      ["running", rate, 4 * TICK_MS],
+      ["napping", 0, 4 * TICK_MS],
+      ["napping", 0, 4 * TICK_MS],
+    ]);
+    expect(costs[4]).toMatchObject(history[2]!);
+    expect(costs[6]).toMatchObject(history[3]!);
 
     srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     const res = await c.request("cost.history", { workspaceId: ws.id });
-    stop();
     c.close();
     expect(res.ok).toBe(true);
-    expect(res["points"]).toEqual(await rt.status.history(ws.id));
+    expect(res["points"]).toEqual(history);
     expect(await rt.status.history("ws_nobody")).toEqual([]);
   });
 
@@ -495,39 +509,34 @@ describe("status.history", () => {
     const backend = stubBackend();
     const { store, puts } = countingStore();
     const fc = fakeClock();
-    const status = { costIntervalMs: 15, pollIntervalMs: 60_000 };
-    // The clock jumps an hour: the idle window must not nap the workspace behind the test.
-    const idle = { defaultWindowMs: 24 * 3_600_000 };
-    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
-    await until(() => costs.length >= 2);
-    fc.advance(60_000);
-    await until(() => costs.at(-1)!.awakeMs >= 60_000 && costs.length >= 6);
+    for (let i = 0; i < 3; i++) await tickCost(fc, costs);
     stop();
     const stored = await first.status.history(ws.id);
-    expect(stored).toHaveLength(2);
+    expect(stored.map(p => p.awakeMs)).toEqual([TICK_MS, 3 * TICK_MS]);
     // Ticks of one rate replace the newest point in memory and reach the store only when a point is added.
     expect(puts()).toBe(2);
 
     // An hour down, the machine still running and billing the whole time. The store's newest point is the tick
     // that added it, so the series it hands out before its first tick ends where the rate run began.
     fc.advance(3_600_000);
-    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const handed = await second.status.history(ws.id);
-    expect(handed).toHaveLength(2);
+    expect(handed.map(p => p.awakeMs)).toEqual([TICK_MS, 2 * TICK_MS]);
     expect(handed[0]).toEqual(stored[0]);
     expect(handed[1]).toMatchObject({ workspaceId: ws.id, phase: "running", rateUsdPerHour: stored[1]!.rateUsdPerHour });
     const after: Cost[] = [];
     second.events.on("workspace.cost", e => after.push(e as Cost));
     stop = second.status.watch();
-    await until(() => after.length >= 2);
-    const tick = after.at(-1)!;
-    expect(tick.awakeMs).toBeGreaterThanOrEqual(60_000 + 3_600_000);
+    await tickCost(fc, after);
+    // The meter runs on from the stored point through the hour down, as the provider billed it.
+    const tick = after[0]!;
+    expect(tick).toMatchObject({ phase: "running", awakeMs: 4 * TICK_MS + 3_600_000 });
     expect(tick.accruedUsd).toBeCloseTo((tick.rateUsdPerHour * tick.awakeMs) / 3_600_000, 10);
-    expect(tick.accruedUsd).toBeGreaterThan(0.1);
     // The run continues at one rate: the stored first tick stays, the newest moves, no point was added.
     const history = await second.status.history(ws.id);
     expect(history).toHaveLength(2);
@@ -537,81 +546,79 @@ describe("status.history", () => {
 
     // A nap after the restart is a rate change: it adds two points and both reach the store.
     await second.workspaces.nap(ws.id);
-    const before = after.length;
-    await until(() => after.length >= before + 3);
+    for (let i = 0; i < 3; i++) await tickCost(fc, after);
     stop();
-    expect(await second.status.history(ws.id)).toHaveLength(4);
+    expect((await second.status.history(ws.id)).map(p => [p.rateUsdPerHour, p.awakeMs])).toEqual([
+      [tick.rateUsdPerHour, TICK_MS],
+      [tick.rateUsdPerHour, tick.awakeMs],
+      [0, tick.awakeMs],
+      [0, tick.awakeMs],
+    ]);
     expect(puts()).toBe(4);
-    const third = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const third = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const restored = await third.status.history(ws.id);
     expect(restored).toHaveLength(4);
-    expect(restored.at(-1)!.rateUsdPerHour).toBe(0);
-    expect(restored.at(-1)!.awakeMs).toBe(tick.awakeMs);
+    expect(restored.at(-1)).toMatchObject({ rateUsdPerHour: 0, awakeMs: tick.awakeMs });
   });
 
   it("a workspace napping across the restart keeps its total and accrues nothing until it wakes", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const fc = fakeClock();
-    const status = { costIntervalMs: 15, pollIntervalMs: 60_000 };
-    // The clock jumps an hour: the idle window must not nap the workspace behind the test.
-    const idle = { defaultWindowMs: 24 * 3_600_000 };
-    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
-    await until(() => costs.length >= 1);
-    fc.advance(30_000);
+    for (let i = 0; i < 3; i++) await tickCost(fc, costs);
     await first.workspaces.nap(ws.id);
-    await until(async () => costs.at(-1)!.rateUsdPerHour === 0 && (await first.status.history(ws.id)).length >= 3);
+    await tickCost(fc, costs);
     stop();
-    const total = costs.at(-1)!.awakeMs;
-    expect(total).toBe(30_000);
+    const total = 3 * TICK_MS;
+    expect(costs.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: total });
+    expect(await first.status.history(ws.id)).toHaveLength(3);
 
     fc.advance(3_600_000);
-    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const after: Cost[] = [];
     second.events.on("workspace.cost", e => after.push(e as Cost));
     stop = second.status.watch();
-    await until(() => after.length >= 2);
+    await tickCost(fc, after);
     expect(after.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: total });
     await second.workspaces.wake(ws.id);
-    fc.advance(10_000);
-    await until(() => after.at(-1)!.phase === "running" && after.at(-1)!.awakeMs >= total + 10_000);
+    await tickCost(fc, after);
     stop();
-    expect(after.at(-1)!.awakeMs).toBe(total + 10_000);
+    expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: total + TICK_MS });
   });
 
   it("a host that died between a nap and its tick does not bill the nap: the wake starts the stretch afresh", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const fc = fakeClock();
-    const status = { costIntervalMs: 15, pollIntervalMs: 60_000 };
-    const idle = { defaultWindowMs: 24 * 3_600_000 };
-    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
-    await until(() => costs.length >= 2);
+    await tickCost(fc, costs);
+    await tickCost(fc, costs);
     stop();
     // The store's newest point still says running when the nap lands and the host dies before the next tick.
     await first.workspaces.nap(ws.id);
 
     fc.advance(3_600_000);
-    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
-    expect((await second.status.history(ws.id)).at(-1)).toMatchObject({ phase: "running" });
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
+    expect((await second.status.history(ws.id)).at(-1)).toMatchObject({ phase: "running", awakeMs: 2 * TICK_MS });
     const after: Cost[] = [];
     second.events.on("workspace.cost", e => after.push(e as Cost));
     stop = second.status.watch();
-    await until(() => after.length >= 1);
-    expect(after.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: 0 });
+    await tickCost(fc, after);
+    // The hour between the nap and the restart is not on the bill: the stretch ended at the newest stored tick.
+    expect(after.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: 2 * TICK_MS });
     await second.workspaces.wake(ws.id);
-    fc.advance(10_000);
-    await until(() => after.at(-1)!.phase === "running" && after.at(-1)!.awakeMs > 0);
+    await tickCost(fc, after);
     stop();
-    expect(after.at(-1)!.awakeMs).toBe(10_000);
+    expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: 3 * TICK_MS });
   });
 
   it("forgets a deleted workspace's history, in memory and in the store", async () => {
@@ -751,46 +758,41 @@ describe("status zombie at rest", () => {
 });
 
 describe("gone machines and the meter", () => {
-  type Cost = EventUnion & { type: "workspace.cost" };
-
   it("a record found gone at hydrate drops its awake mark without folding: gone ticks are frozen and the first tick after a rebuild does not bill the downtime", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const fc = fakeClock();
-    const status = { costIntervalMs: 15, pollIntervalMs: 60_000 };
-    // The clock jumps an hour: the idle window must not nap the workspace behind the test.
-    const idle = { defaultWindowMs: 24 * 3_600_000 };
-    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
-    await until(() => costs.length >= 1);
-    fc.advance(60_000);
-    await until(() => costs.at(-1)!.awakeMs >= 60_000);
+    await tickCost(fc, costs);
     stop();
     await first.close();
-    const stored = costs.at(-1)!.awakeMs;
+    expect(costs.at(-1)).toMatchObject({ phase: "running", awakeMs: TICK_MS });
 
     // An hour down, and the machine deleted at the provider meanwhile: the next host finds it gone.
     backend.machines[0]!.killed = true;
     fc.advance(3_600_000);
-    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status, idle });
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
+    expect((await second.workspaces.get(ws.id)).phase).toBe("gone");
     const after: Cost[] = [];
     second.events.on("workspace.cost", e => after.push(e as Cost));
     stop = second.status.watch();
-    await until(() => after.filter(t => t.phase === "gone").length >= 2);
-    const gone = after.filter(t => t.phase === "gone");
-    expect(gone[0]).toMatchObject({ rateUsdPerHour: 0 });
-    expect(gone[1]!.awakeMs).toBe(gone[0]!.awakeMs);
-    expect(gone[0]!.awakeMs).toBeLessThanOrEqual(stored);
+    await tickCost(fc, after);
+    await tickCost(fc, after);
+    expect(after).toMatchObject([
+      { phase: "gone", rateUsdPerHour: 0, awakeMs: TICK_MS },
+      { phase: "gone", rateUsdPerHour: 0, awakeMs: TICK_MS },
+    ]);
 
     await second.workspaces.rebuild(ws.id);
-    await until(() => after.at(-1)!.phase === "running");
-    fc.advance(10_000);
-    await until(() => after.at(-1)!.awakeMs >= gone[0]!.awakeMs + 10_000);
-    // The stretch begins at the rebuild: the hour the host was down and the machine did not exist is not on the bill.
-    expect(after.at(-1)!.awakeMs).toBe(gone[0]!.awakeMs + 10_000);
+    // The first tick after the rebuild starts the stretch: the hour the host was down and the machine did not exist is not on the bill.
+    await tickCost(fc, after);
+    expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: TICK_MS });
+    await tickCost(fc, after);
+    expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: 2 * TICK_MS });
     stop();
     await second.close();
   });

@@ -4,7 +4,7 @@
 // workspace's machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { behindGoldenLine, foldThreads, imageMoveRefusal, needsRebuild, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { behindGoldenLine, fmtRate, fmtSize, foldThreads, imageMoveRefusal, needsRebuild, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -33,7 +33,6 @@ import {
   percentLabel,
   phaseLabel,
   reachLabel,
-  sizeLabel,
   type DiskTier,
 } from "./format.js";
 import { SnapshotStorageLine } from "./SnapshotStorageLine.js";
@@ -169,14 +168,14 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
             "pending"
           )}
         </Row>
-        <Row label="Size" k="size" title={pendingSize ? `${sizeLabel(pendingSize)} · resizing` : status ? sizeLabel(status.size) : "pending"}>
+        <Row label="Size" k="size" title={pendingSize ? `${fmtSize(pendingSize)} · resizing` : status ? fmtSize(status.size) : "pending"}>
           {pendingSize ? (
             <>
-              {sizeLabel(pendingSize)}
+              {fmtSize(pendingSize)}
               <span className="text-muted-foreground"> · resizing</span>
             </>
           ) : status ? (
-            sizeLabel(status.size)
+            fmtSize(status.size)
           ) : (
             "pending"
           )}
@@ -725,7 +724,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   const capabilities = useCapabilities();
   const sessions = useStore(s => s.sessions[workspace.id]);
   const [open, setOpen] = useState(false);
-  const [picked, setPicked] = useState<WorkspaceSize | null>(null);
+  const [picked, setPicked] = useState<MachineSizeOffer | null>(null);
   const [forgetting, setForgetting] = useState(false);
   const running = workspace.phase === "running";
   const waking = workspace.phase === "waking";
@@ -733,7 +732,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   const gone = workspace.phase === "gone";
   // Backend fact, not a probe: a provider that cannot resize gets no picker at all.
   const canResize = capabilities?.resize === true;
-  const options = status && canResize ? upgradeOptions(status.size) : [];
+  const options = status && canResize && capabilities ? upgradeOptions(status.size, capabilities.sizes) : [];
   const choice = picked ?? options[0] ?? null;
   const rate = status?.rateUsdPerHour ?? null;
 
@@ -744,7 +743,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   const confirm = (): void => {
     if (!choice) return;
     close();
-    upgrade.run(choice);
+    upgrade.run({ cpu: choice.cpu, memMb: choice.memMb });
   };
 
   return (
@@ -795,26 +794,25 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
             <div className="flex flex-wrap gap-1">
               {options.map(o => (
                 <Button
-                  key={o.cpu}
+                  key={sizeWord(o)}
                   size="xs"
                   variant="outline"
-                  aria-pressed={o.cpu === choice.cpu}
-                  className={cn(o.cpu === choice.cpu && "border-foreground/60")}
+                  aria-pressed={sizeWord(o) === sizeWord(choice)}
+                  className={cn(sizeWord(o) === sizeWord(choice) && "border-foreground/60")}
                   onClick={() => setPicked(o)}
                 >
-                  {sizeLabel(o)}
+                  {fmtSize(o)}
                 </Button>
               ))}
             </div>
           )}
           <div className="divide-y divide-border/40">
             <Row label="Current" k="resize-from">
-              {sizeLabel(status.size)}
-              {rate !== null ? ` · ${money(rate, 3)}/hr` : ""}
+              {fmtSize(status.size)}
+              {rate !== null ? ` · ${fmtRate(rate)}` : ""}
             </Row>
             <Row label="New" k="resize-to">
-              {sizeLabel(choice)}
-              {rate !== null ? ` · ~${money((rate * choice.cpu) / status.size.cpu, 3)}/hr` : ""}
+              {`${fmtSize(choice)} · ${fmtRate(choice.rateUsdPerHour)}`}
             </Row>
           </div>
           <div className="flex justify-end gap-2">

@@ -9,13 +9,13 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { nodeHost } from "@wsp/collect";
 import { AFTER_CUT_LINE, LOGIN_CHOICES, ProjectExportResult, ProjectGolden, ProjectImportResult, ProjectPlan, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, actionRefusal, deleteNotice, importConsented, importRequest, workspaceState } from "@wsp/protocol";
-import { smallRecipePath } from "./recipe-file.js";
+import { historyCache, smallRecipePath } from "./recipe-file.js";
 import { runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { INSTRUCTIONS } from "./skill.js";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, absolutePath, agentsChosen, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, messageTo, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workFolder, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, absolutePath, agentsChosen, awake, checkedStart, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, messageTo, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workFolder, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -121,6 +121,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
     },
     async ({ project }) => {
       const scan = await runScan(nodeHost(), {
+        cache: historyCache(statePath),
         ...(project !== undefined ? { projects: projectFolders(project) } : {}),
         ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}),
       });
@@ -147,6 +148,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
     async ({ tick, set, signin, add, add_check: addCheck, why, project, out }) => {
       const table = await runRecipe(nodeHost(), {
         out: out === undefined ? smallRecipePath(statePath) : absolutePath("out is a path on this computer", out),
+        cache: historyCache(statePath),
         ...(tick !== undefined ? { tick } : {}),
         ...(set !== undefined ? { set } : {}),
         ...(signin !== undefined ? { signin } : {}),
@@ -172,17 +174,20 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
     },
     async ({ workspace: within }) => asJson({ threads: await threadRows(await dial(), within) }),
   );
+  /** The same word on new and fork; the refusal for a size the provider does not offer names the ones it does. */
+  const size = z.string().optional().describe("the machine size as <cpu>x<memGb>, like 2x4; absent takes the golden's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered");
+
   server.registerTool(
     "new",
     {
       description: "A new workspace forked from the golden image's head, or with from, from a project golden (the project already in place), booted and reachable when this returns.",
-      inputSchema: { name: z.string(), from: z.string().optional().describe("a project golden: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them") },
+      inputSchema: { name: z.string(), from: z.string().optional().describe("a project golden: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"), size },
       outputSchema: Created.shape,
     },
-    async ({ name, from }) => {
+    async ({ name, from, size: word }) => {
       const client = await dial();
-      if (from === undefined) return asJson(await createFromHead(client, QUIET, name));
-      return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name));
+      if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word));
+      return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word));
     },
   );
   server.registerTool(
@@ -198,15 +203,15 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
     "fork",
     {
       description: "A sibling workspace from the source's golden version (a new machine, not a copy of its live disk); with a task, its first thread is opened and the reply returned. When that first turn fails, the error still names the workspace, which exists: continue with thread_new on it rather than forking again.",
-      inputSchema: { workspace, name: z.string().optional().describe("defaults to <source>-fork"), task: z.string().optional(), agent, ...picks, cwd, notify },
+      inputSchema: { workspace, name: z.string().optional().describe("defaults to <source>-fork"), size, task: z.string().optional(), agent, ...picks, cwd, notify },
       outputSchema: Created.extend({ turn: TurnOut.optional(), failure: z.string().optional() }).shape,
     },
-    async ({ workspace: ref, name, task, agent: harness, cwd: folder, notify: tell, ...input }) => {
+    async ({ workspace: ref, name, size: word, task, agent: harness, cwd: folder, notify: tell, ...input }) => {
       absoluteFolder(folder);
       const client = await dial();
       const source = await workspaceOf(client, ref);
-      if (task !== undefined) await checkedPicks(client, harness, input);
-      const created = await create(client, QUIET, source.golden, name ?? `${source.name}-fork`);
+      if (task !== undefined) await checkedStart(client, task, harness, input);
+      const created = await create(client, QUIET, source.golden, name ?? `${source.name}-fork`, word);
       if (task === undefined) return asJson(created);
       let failure: string;
       try {
@@ -279,7 +284,9 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
     },
     async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, ...input }) => {
       const client = await dial();
-      const target = await awake(client, await workspaceOf(client, ref), "send", QUIET_LINE);
+      const found = await workspaceOf(client, ref);
+      await checkedStart(client, task, harness, input);
+      const target = await awake(client, found, "send", QUIET_LINE);
       const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN));
       return asText(turnText(out), out);
     },
@@ -294,6 +301,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
     async ({ thread: ref, message, ...input }) => {
       const client = await dial();
       const thread = await threadOf(client, ref);
+      await checkedStart(client, message, thread.harness, input);
       await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
       const out = turnOut(await follow(client, messageTo(thread, message, input), "agent", QUIET_TURN));
       return asText(turnText(out), out);

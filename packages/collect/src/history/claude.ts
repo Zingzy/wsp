@@ -4,7 +4,7 @@
 // sessions moved under _cleared_sessions. An assistant line's tool_use blocks
 // are the calls; Bash carries the shell line.
 import type { Host } from "../host.js";
-import { type Call, type HistoryReader, isRecord, stem, tryJson } from "./reader.js";
+import { type Call, type HistoryReader, isRecord, jsonlFiles, stem, tryJson } from "./reader.js";
 
 const CLEARED = "_cleared_sessions";
 
@@ -25,24 +25,22 @@ export function claudeCall(session: string, name: string, input: unknown, folder
 }
 
 export const claudeReader: HistoryReader = {
-  async *read(host: Host, root: string): AsyncIterable<Call> {
-    for (const file of await host.fs.walk(root)) {
-      if (!file.endsWith(".jsonl")) continue;
-      const session = claudeSession(file.slice(root.length + 1));
-      if (session === undefined) continue;
-      for await (const line of host.fs.lines(file)) {
-        // Only an assistant line holds a tool_use block; the two checks keep the large tool-result lines unparsed.
-        if (!line.includes('"tool_use"') || !line.includes('"assistant"')) continue;
-        const row = tryJson(line);
-        if (!isRecord(row) || row["type"] !== "assistant" || !isRecord(row["message"])) continue;
-        const content = row["message"]["content"];
-        if (!Array.isArray(content)) continue;
-        // Every line of a transcript carries the folder the session ran in, this one included.
-        const folder = typeof row["cwd"] === "string" ? row["cwd"] : undefined;
-        for (const block of content) {
-          if (!isRecord(block) || block["type"] !== "tool_use" || typeof block["name"] !== "string") continue;
-          yield claudeCall(session, block["name"], block["input"], folder);
-        }
+  files: (host, root) => jsonlFiles(host, root, file => claudeSession(file.slice(root.length + 1))),
+  async *read(host: Host, root: string, file: string): AsyncIterable<Call> {
+    const session = claudeSession(file.slice(root.length + 1));
+    if (session === undefined) return;
+    for await (const line of host.fs.lines(file)) {
+      // Only an assistant line holds a tool_use block; the two checks keep the large tool-result lines unparsed.
+      if (!line.includes('"tool_use"') || !line.includes('"assistant"')) continue;
+      const row = tryJson(line);
+      if (!isRecord(row) || row["type"] !== "assistant" || !isRecord(row["message"])) continue;
+      const content = row["message"]["content"];
+      if (!Array.isArray(content)) continue;
+      // Every line of a transcript carries the folder the session ran in, this one included.
+      const folder = typeof row["cwd"] === "string" ? row["cwd"] : undefined;
+      for (const block of content) {
+        if (!isRecord(block) || block["type"] !== "tool_use" || typeof block["name"] !== "string") continue;
+        yield claudeCall(session, block["name"], block["input"], folder);
       }
     }
   },

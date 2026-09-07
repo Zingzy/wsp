@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The new-workspace dialog: a name with a default and one choice, start
-// fresh or import a project from this Mac once the machine is up. Enter
-// creates, Escape cancels. The parent keys this component per opening so
-// the initial name resets; a refusal shows on the creation view, not here.
+// The new-workspace dialog: a name with a default, one choice, start fresh
+// or import a project from this Mac once the machine is up, and the machine
+// sizes the provider offers, the golden's own checked. Enter creates, Escape
+// cancels. The parent keys this component per opening so the initial name
+// resets; a refusal shows on the creation view, not here.
 import { useState } from "react";
+import { fmtRate, fmtSize, offeredSize, sizeWord, type MachineSizeOffer, type WorkspaceSize } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import {
   Dialog,
@@ -29,18 +31,29 @@ const isStart = (value: unknown): value is WorkspaceStart => value === "fresh" |
 
 export function NewWorkspaceDialog({
   initialName,
+  sizes,
+  goldenSize,
   onCreate,
   onCancel,
 }: {
   initialName: string;
-  onCreate: (name: string, start: WorkspaceStart) => void;
+  /** What the provider offers; none hides the size row and the workspace takes the golden's size. */
+  sizes: readonly MachineSizeOffer[];
+  /** The golden head's size, the row checked until the person picks; null while unknown or when no golden says. */
+  goldenSize: WorkspaceSize | null;
+  /** `size` is the row the person picked; absent, they left the golden's size standing. */
+  onCreate: (name: string, start: WorkspaceStart, size?: WorkspaceSize) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(initialName);
   const [start, setStart] = useState<WorkspaceStart>("fresh");
+  const [picked, setPicked] = useState<WorkspaceSize | null>(null);
   const trimmed = name.trim();
+  const checked = picked ?? (goldenSize !== null && offeredSize(sizes, goldenSize) ? goldenSize : null);
   const submit = (): void => {
-    if (trimmed.length > 0) onCreate(trimmed, start);
+    if (trimmed.length === 0) return;
+    if (picked === null) onCreate(trimmed, start);
+    else onCreate(trimmed, start, picked);
   };
 
   return (
@@ -91,6 +104,28 @@ export function NewWorkspaceDialog({
                 </label>
               ))}
             </RadioGroup>
+            {sizes.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <Label id="new-workspace-size">Size</Label>
+                <RadioGroup
+                  aria-labelledby="new-workspace-size"
+                  className="gap-1"
+                  value={checked === null ? "" : sizeWord(checked)}
+                  onValueChange={value => {
+                    const size = sizes.find(s => sizeWord(s) === value);
+                    if (size !== undefined) setPicked({ cpu: size.cpu, memMb: size.memMb });
+                  }}
+                >
+                  {sizes.map(s => (
+                    <label key={sizeWord(s)} className="flex h-7 cursor-pointer items-center gap-2.5 font-mono text-[11px] text-muted-foreground">
+                      <Radio value={sizeWord(s)} />
+                      <span className="flex-1 tabular-nums">{fmtSize(s)}</span>
+                      <span className="tabular-nums">{fmtRate(s.rateUsdPerHour)}</span>
+                    </label>
+                  ))}
+                </RadioGroup>
+              </div>
+            )}
           </DialogPanel>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onCancel}>
