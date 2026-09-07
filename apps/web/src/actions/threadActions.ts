@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The thread's actions, one registry: what a thread row's context menu offers
 // for one session. Stop takes the runtime's session id, the one
-// sessions.interrupt is keyed by.
+// sessions.interrupt is keyed by, and so does the rename: it opens the name
+// for editing on the row, and the row sends it.
 import { LinkIcon, PencilIcon, SquareIcon, Trash2Icon } from "lucide-react";
 import { threadHash, type SessionStatus } from "@wsp/protocol";
 import { CLIENT_CANNOT_STOP, NO_THREAD_DELETE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_WORDS, threadRenameRefusal } from "./format.js";
@@ -21,6 +22,9 @@ export interface ThreadTarget {
 
 export interface ThreadVerbs {
   readonly stop?: ((sessionId: string) => Promise<void>) | undefined;
+  /** Opens the name for editing on the thread's own row, keyed by the same session id a stop takes; the surface that
+   * draws the rows puts its own opener here, and a surface with no row to edit leaves it out. */
+  readonly rename?: ((sessionId: string) => void) | undefined;
   readonly copyText: (text: string) => Promise<void>;
 }
 
@@ -41,8 +45,8 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     group: "edit",
     icon: () => PencilIcon,
     title: () => THREAD_WORDS.rename,
-    refusal: target => threadRenameRefusal(target.harness),
-    run: () => {},
+    refusal: (target, verbs) => threadRenameRefusal(target.harness, verbs.rename !== undefined),
+    run: (target, verbs) => verbs.rename?.(target.sessionId),
   },
   {
     id: "copy-link",

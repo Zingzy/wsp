@@ -4,7 +4,7 @@
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import { NOTIFY_ME, foldThreads, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { noSuchThreadLine } from "../actions/format.js";
+import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
@@ -111,6 +111,9 @@ interface State {
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
+  /** Names the thread's harness session through the runtime, which writes it into the harness's own store, then
+   * reloads the workspace's rows so the sidebar shows it; an answer that named nothing, and a failure, are a toast. */
+  renameThread(opts: { sessionId: string; workspaceId: string; harness: string; title: string }): Promise<void>;
   /** Asks the runtime for the catalogs as the workspace's machine reports them; a refusal leaves the table's in place. */
   loadHarnesses(workspaceId: string): Promise<void>;
 }
@@ -298,6 +301,20 @@ export const useStore = create<State>((set, get) => {
         set(s => ({ sessions: { ...s.sessions, [workspaceId]: rows } }));
       } catch {
         // the next session event asks again
+      }
+    },
+    async renameThread({ sessionId, workspaceId, harness, title }) {
+      const api = get().api;
+      if (!api?.renameSession) return;
+      try {
+        const outcome = await api.renameSession(sessionId, title);
+        if (outcome !== "renamed") {
+          set({ toast: renameNotTakenLine(harness, outcome) });
+          return;
+        }
+        await get().reloadSessions(workspaceId);
+      } catch (e: unknown) {
+        if (!(e instanceof DisconnectedError)) set({ toast: `${title}: ${e instanceof Error ? e.message : String(e)}` });
       }
     },
     async loadHarnesses(workspaceId) {

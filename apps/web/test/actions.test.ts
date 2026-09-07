@@ -181,17 +181,19 @@ describe("workspace actions", () => {
 
 describe("thread actions", () => {
   const thread = (status: "running" | "completed", threadId: string | null = "thr_1", harness = "claude") => ({ sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status });
-  const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), copyText: vi.fn(async () => {}), ...over });
+  const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), copyText: vi.fn(async () => {}), ...over });
 
-  it("a running thread offers stop and copy link; rename and delete carry their refusal", async () => {
+  it("a running thread offers stop, rename and copy link; delete carries its refusal", async () => {
     const verbs = threadVerbs();
     const actions = resolveActions(threadActions, thread("running"), verbs);
     expect(titles(actions)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.delete]);
-    expect(enabled(actions)).toEqual(["stop", "copy-link"]);
-    expect(actionById(actions, "rename").refusal).toBe("No rename box here yet; wsp thread rename names a thread");
+    expect(enabled(actions)).toEqual(["stop", "rename", "copy-link"]);
     expect(actionById(actions, "delete").refusal).toBe("Deleting a thread is not in the runtime yet");
     await actionById(actions, "stop").run();
     expect(verbs.stop).toHaveBeenCalledWith("s1");
+    // The rename opens the name on the row the session id names; the row sends it.
+    await actionById(actions, "rename").run();
+    expect(verbs.rename).toHaveBeenCalledWith("s1");
   });
 
   it("a settled thread refuses stop; a client without the verb says so; a thread without an id has no link", () => {
@@ -200,12 +202,16 @@ describe("thread actions", () => {
     expect(actionById(resolveActions(threadActions, thread("running", null), threadVerbs()), "copy-link").refusal).toBe("This thread has no id yet");
   });
 
-  it("says the rename is not kept for an agent whose own store keeps no name, and names that agent", () => {
-    const claude = resolveActions(threadActions, thread("completed"), threadVerbs());
-    const gemini = resolveActions(threadActions, thread("completed", "thr_1", "gemini"), threadVerbs());
-    expect(actionById(claude, "rename").refusal).toBe("No rename box here yet; wsp thread rename names a thread");
-    expect(actionById(gemini, "rename").refusal).toBe("Rename in Gemini CLI is not kept");
-    expect(actionById(resolveActions(threadActions, thread("completed", "thr_1", "codex"), threadVerbs()), "rename").refusal).toBe("No rename box here yet; wsp thread rename names a thread");
+  it("says the rename is not kept for an agent whose own store keeps no name, and names that agent; a client with nowhere to type says that instead", () => {
+    const renameOf = (harness: string, over: Partial<ThreadVerbs> = {}): string | null =>
+      actionById(resolveActions(threadActions, thread("completed", "thr_1", harness), threadVerbs(over)), "rename").refusal;
+    expect(renameOf("claude")).toBeNull();
+    expect(renameOf("codex")).toBeNull();
+    expect(renameOf("gemini")).toBe("Rename in Gemini CLI is not kept");
+    // The agent keeps a name and this client has no row to edit: that is the client's own refusal.
+    expect(renameOf("claude", { rename: undefined })).toBe("This client cannot rename a thread");
+    // An agent that keeps none refuses whatever the client has.
+    expect(renameOf("gemini", { rename: undefined })).toBe("Rename in Gemini CLI is not kept");
   });
 
   it("copy link writes the page's address for the thread", async () => {

@@ -4,7 +4,7 @@
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
 import { agentName, keepsRename } from "@wsp/catalog";
-import { actionRefusal, goneRefusal, isBilling, workspaceWord, type WorkspaceState } from "@wsp/protocol";
+import { actionRefusal, goneRefusal, isBilling, workspaceWord, type SessionRenameOutcome, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -115,14 +115,34 @@ export const openBrowserRefusal = (state: WorkspaceState): string | null => acti
 export const THREAD_NOT_RUNNING = "Thread is not running";
 export const CLIENT_CANNOT_STOP = "This client cannot stop a turn";
 export const THREAD_HAS_NO_ID = "This thread has no id yet";
-export const RENAME_NEEDS_COMMAND_LINE = "No rename box here yet; wsp thread rename names a thread";
+export const CLIENT_CANNOT_RENAME = "This client cannot rename a thread";
 export const NO_THREAD_DELETE = "Deleting a thread is not in the runtime yet";
 
-/** Why the rename cannot run, per agent: an agent whose own store keeps no name of a person's would lose it at the
- * thread's next turn, so no client offers one there; where the store does keep one, this app has nowhere to type the
- * name yet and the command line does it. */
-export function threadRenameRefusal(harness: string): string {
-  return keepsRename(harness) ? RENAME_NEEDS_COMMAND_LINE : `Rename in ${agentName(harness)} is not kept`;
+/** The one sentence for an agent whose own store keeps no name of a person's: a rename there would be gone at the
+ * thread's next turn, so nothing offers one. The refusal and the toast both read it. */
+export const notKeptLine = (harness: string): string => `Rename in ${agentName(harness)} is not kept`;
+
+/** Why the rename cannot run, or null when it can: an agent that keeps no name of a person's refuses whatever the
+ * client is, and a client with nowhere to send the name says so. */
+export function threadRenameRefusal(harness: string, hasVerb: boolean): string | null {
+  if (!keepsRename(harness)) return notKeptLine(harness);
+  return hasVerb ? null : CLIENT_CANNOT_RENAME;
+}
+
+/** What the toast says when the runtime named nothing: the answer in the person's words, never the enum. */
+export function renameNotTakenLine(harness: string, outcome: Exclude<SessionRenameOutcome, "renamed">): string {
+  switch (outcome) {
+    case "unsupported":
+      return notKeptLine(harness);
+    case "no-session":
+      return `${agentName(harness)} on the machine has no session for this thread yet`;
+    case "not-found":
+      return "The runtime has no such thread any more";
+    default: {
+      const _exhaustive: never = outcome;
+      return "";
+    }
+  }
 }
 
 export const FOLDER_OPENS_IN_TREE = "A folder opens in the tree";

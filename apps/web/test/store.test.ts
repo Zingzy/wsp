@@ -357,6 +357,57 @@ describe("store sessions", () => {
     expect(useStore.getState().sessions["ws_a"]![0]!.status).toBe("completed");
   });
 
+  it("renameThread names the session through the runtime and reloads that workspace's rows, so the row shows the new name", async () => {
+    const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed", claudeSessionId: "c1", prompt: "fix the port list", threadId: "thr_1" }];
+    const { api, listCalls } = fakeApi([view("ws_a")], sessions);
+    const renames: [string, string][] = [];
+    api.renameSession = async (sessionId, title) => {
+      renames.push([sessionId, title]);
+      sessions[0]!.harnessTitle = title;
+      return "renamed";
+    };
+    useStore.getState().bind(api);
+    await flush();
+    listCalls.length = 0;
+
+    await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name he typed" });
+    expect(renames).toEqual([["s1", "the name he typed"]]);
+    expect(listCalls).toEqual(["ws_a"]);
+    expect(useStore.getState().sessions["ws_a"]![0]!.harnessTitle).toBe("the name he typed");
+    expect(useStore.getState().toast).toBeNull();
+  });
+
+  it("a rename the runtime named nothing for is a toast in the agent's words, and no reload", async () => {
+    const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed" }];
+    const { api, listCalls } = fakeApi([view("ws_a")], sessions);
+    api.renameSession = async () => "no-session";
+    useStore.getState().bind(api);
+    await flush();
+    listCalls.length = 0;
+
+    await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" });
+    expect(useStore.getState().toast).toBe("Claude Code on the machine has no session for this thread yet");
+    expect(listCalls).toEqual([]);
+  });
+
+  it("a rename the socket refused is a toast under the name, and a dropped socket says nothing", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    api.renameSession = async () => {
+      throw new RequestError("the runtime refused it");
+    };
+    useStore.getState().bind(api);
+    await flush();
+    await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" });
+    expect(useStore.getState().toast).toBe("the name: the runtime refused it");
+
+    api.renameSession = async () => {
+      throw new DisconnectedError("lost");
+    };
+    useStore.setState({ toast: null });
+    await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" });
+    expect(useStore.getState().toast).toBeNull();
+  });
+
   it("workspace.deleted drops the workspace's rows", async () => {
     const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed" }];
     const { api, emit } = fakeApi([view("ws_a")], sessions);

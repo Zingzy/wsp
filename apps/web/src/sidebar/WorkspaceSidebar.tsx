@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { COMPUTER_OFFLINE_LINE, computerOffline, goldenHead, type WorkspaceSize } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions } from "../actions/registry.js";
-import { threadActions } from "../actions/threadActions.js";
+import { threadActions, type ThreadVerbs } from "../actions/threadActions.js";
 import { useThreadVerbs, useWorkspaceVerbs } from "../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
@@ -106,8 +106,18 @@ export function WorkspaceSidebar() {
   /** Workspace id to the machine id a rebuild was asked for; the action stays disabled while that machine is still the one reported. */
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
   const [forgetting, setForgetting] = useState<string | null>(null);
+  /** The session id of the thread row whose name is being typed; one row at a time, and the row is the only editor. */
+  const [renaming, setRenaming] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const threadVerbs = useThreadVerbs();
+  const renameThread = useStore(s => s.renameThread);
+  const canRename = useStore(s => s.api?.renameSession !== undefined);
+  // The sidebar draws the rows, so it owns the rename's opener, as it owns the forget's dialog; a client that cannot
+  // send the name offers no box, and the action carries that refusal.
+  const defaultThreadVerbs = useThreadVerbs();
+  const threadVerbs = useMemo<ThreadVerbs>(
+    () => ({ ...defaultThreadVerbs, ...(canRename ? { rename: (sessionId: string) => setRenaming(sessionId) } : {}) }),
+    [canRename, defaultThreadVerbs],
+  );
   const defaultVerbs = useWorkspaceVerbs();
 
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
@@ -162,6 +172,24 @@ export function WorkspaceSidebar() {
   const toggleSettled = (id: string): void => {
     setSettledCollapsed(prev => (prev.includes(id) ? prev.filter(other => other !== id) : [...prev, id]));
   };
+
+  /** One thread's row, wherever it is listed: the active list and the idle shelf read the same props. */
+  const threadRow = (thread: SidebarThreadSnapshot, time: string) => (
+    <ThreadRow
+      key={thread.id}
+      thread={thread}
+      time={time}
+      active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
+      renaming={renaming === thread.sessionId}
+      onSelect={() => select(thread.workspaceId, thread.threadId)}
+      onContextMenu={event => void openContextMenu(event, resolveActions(threadActions, thread, threadVerbs))}
+      onRename={title => {
+        setRenaming(null);
+        void renameThread({ sessionId: thread.sessionId, workspaceId: thread.workspaceId, harness: thread.harness, title });
+      }}
+      onRenameCancel={() => setRenaming(null)}
+    />
+  );
 
   const rows = (): HTMLElement[] => Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []);
   const focusRow = (id: string | null): void => {
@@ -300,16 +328,7 @@ export function WorkspaceSidebar() {
                         ) : null}
                         {showThreads ? (
                           <SidebarMenuSub>
-                            {active.map(thread => (
-                              <ThreadRow
-                                key={thread.id}
-                                thread={thread}
-                                time={compactTimeLabel(thread.startedAt)}
-                                active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
-                                onSelect={() => select(thread.workspaceId, thread.threadId)}
-                                onContextMenu={event => void openContextMenu(event, resolveActions(threadActions, thread, threadVerbs))}
-                              />
-                            ))}
+                            {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt)))}
                             {settled.length > 0 ? (
                               <SidebarMenuSubItem data-thread-selection-safe>
                                 <button
@@ -328,18 +347,7 @@ export function WorkspaceSidebar() {
                                 </button>
                               </SidebarMenuSubItem>
                             ) : null}
-                            {settledOpen
-                              ? settled.map(thread => (
-                                  <ThreadRow
-                                    key={thread.id}
-                                    thread={thread}
-                                    time={compactTimeLabel(resolveSettledTimestamp(thread))}
-                                    active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
-                                    onSelect={() => select(thread.workspaceId, thread.threadId)}
-                                    onContextMenu={event => void openContextMenu(event, resolveActions(threadActions, thread, threadVerbs))}
-                                  />
-                                ))
-                              : null}
+                            {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)))) : null}
                           </SidebarMenuSub>
                         ) : null}
                       </SidebarMenuItem>

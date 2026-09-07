@@ -52,7 +52,7 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
 });
 const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, sizes: [] };
 
-type FakeApi = Api & { nap: ReturnType<typeof vi.fn>; interruptSession: ReturnType<typeof vi.fn>; forget: ReturnType<typeof vi.fn> };
+type FakeApi = Api & { nap: ReturnType<typeof vi.fn>; interruptSession: ReturnType<typeof vi.fn>; forget: ReturnType<typeof vi.fn>; renameSession: ReturnType<typeof vi.fn> };
 
 function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessions: SessionView[] = []): FakeApi {
   return {
@@ -66,6 +66,12 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     forget: vi.fn(async () => {}),
     rebuild: async id => ({ ...view(id, "?", "running"), machineId: "m_rebuilt" }),
     interruptSession: vi.fn(async () => "accepted" as const),
+    // The runtime keeps the name on the row, so the next listing carries it, as the real one does.
+    renameSession: vi.fn(async (sessionId: string, title: string) => {
+      const row = sessions.find(s => s.id === sessionId);
+      if (row !== undefined) row.harnessTitle = title;
+      return "renamed" as const;
+    }),
     upgrade: async id => view(id, "?", "running"),
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s_x", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
@@ -103,6 +109,8 @@ async function mountSidebar(api: FakeApi, firstName: string) {
 }
 
 const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
+/** A row by the id it carries, for a row whose own text is being edited. */
+const rowOf2 = (rowId: string): HTMLElement => document.querySelector<HTMLElement>(`[data-row-id="${rowId}"]`)!;
 const menu = () => screen.queryByRole("menu");
 const items = () => within(screen.getByRole("menu")).getAllByRole("menuitem");
 const item = (label: string) => items().find(el => el.textContent?.startsWith(label))!;
@@ -269,9 +277,9 @@ describe("a thread row's menu", () => {
     rightClick(row);
     await screen.findByRole("menu");
     expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.delete]);
-    expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBe("true");
-    // The agent's own store keeps a name; what is missing is a box here to type it in.
-    expect(refusalOf(THREAD_WORDS.rename)).toBe("No rename box here yet; wsp thread rename names a thread");
+    // The agent's own store keeps a name, and the row is the box: the rename runs.
+    expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBeNull();
+    expect(refusalOf(THREAD_WORDS.rename)).toBeNull();
     expect(item(THREAD_WORDS.delete).getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(item(THREAD_WORDS.stop));
     await waitFor(() => expect(api.interruptSession).toHaveBeenCalledWith("s1"));
@@ -281,6 +289,83 @@ describe("a thread row's menu", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${window.location.origin}${window.location.pathname}#w/ws_a/t/thr_1`));
     // The workspace row's menu did not open under the thread's.
     expect(screen.queryByText(WORKSPACE_WORDS.pause)).toBeNull();
+  });
+
+  it("Rename turns the row's title into an input in place, and Enter names the thread through the runtime", async () => {
+    const api = fakeApi([API], [statusOf(API)], [{ ...RUNNING }]);
+    await mountSidebar(api, "api");
+    const row = rowOf("fix the port list");
+    const height = row.className;
+    rightClick(row);
+    await screen.findByRole("menu");
+    expect(refusalOf(THREAD_WORDS.rename)).toBeNull();
+    fireEvent.click(item(THREAD_WORDS.rename));
+
+    const input = (await screen.findByRole("textbox", { name: THREAD_WORDS.rename })) as HTMLInputElement;
+    expect(input.value).toBe("fix the port list");
+    expect(document.activeElement).toBe(input);
+    // The input took the title's place inside the row, and the row is the same row it was.
+    expect(input.closest("[data-sidebar-row]")).toBe(rowOf2("thread:thr_1"));
+    expect(rowOf2("thread:thr_1").className).toBe(height);
+
+    fireEvent.change(input, { target: { value: "the name he typed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(api.renameSession).toHaveBeenCalledWith("s1", "the name he typed"));
+    await waitFor(() => expect(screen.getByText("the name he typed")).toBeDefined());
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("Escape leaves the old name, and so does clicking away", async () => {
+    const api = fakeApi([API], [statusOf(API)], [{ ...RUNNING }]);
+    await mountSidebar(api, "api");
+    const openEdit = async (): Promise<HTMLInputElement> => {
+      rightClick(rowOf("fix the port list"));
+      await screen.findByRole("menu");
+      fireEvent.click(item(THREAD_WORDS.rename));
+      return (await screen.findByRole("textbox", { name: THREAD_WORDS.rename })) as HTMLInputElement;
+    };
+
+    const first = await openEdit();
+    fireEvent.change(first, { target: { value: "not this one" } });
+    fireEvent.keyDown(first, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    expect(api.renameSession).not.toHaveBeenCalled();
+    expect(screen.getByText("fix the port list")).toBeDefined();
+
+    const second = await openEdit();
+    fireEvent.change(second, { target: { value: "nor this one" } });
+    fireEvent.blur(second);
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    expect(api.renameSession).not.toHaveBeenCalled();
+    expect(screen.getByText("fix the port list")).toBeDefined();
+  });
+
+  it("the keys the sidebar traverses with are the field's while a name is typed", async () => {
+    const api = fakeApi([API], [statusOf(API)], [{ ...RUNNING }]);
+    await mountSidebar(api, "api");
+    rightClick(rowOf("fix the port list"));
+    await screen.findByRole("menu");
+    fireEvent.click(item(THREAD_WORDS.rename));
+    const input = (await screen.findByRole("textbox", { name: THREAD_WORDS.rename })) as HTMLInputElement;
+    // Home and End move the caret in a field; the sidebar reads them as go-to-first-row and would take the focus.
+    fireEvent.keyDown(input, { key: "Home" });
+    fireEvent.keyDown(input, { key: "End" });
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("a name that is only space, or the name it already had, is a cancel: nothing is sent", async () => {
+    const api = fakeApi([API], [statusOf(API)], [{ ...RUNNING }]);
+    await mountSidebar(api, "api");
+    for (const typed of ["   ", "fix the port list"]) {
+      rightClick(rowOf("fix the port list"));
+      await screen.findByRole("menu");
+      fireEvent.click(item(THREAD_WORDS.rename));
+      const input = (await screen.findByRole("textbox", { name: THREAD_WORDS.rename })) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: typed } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    }
+    expect(api.renameSession).not.toHaveBeenCalled();
   });
 
   it("a settled thread's stop carries the refusal", async () => {

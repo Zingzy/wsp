@@ -95,6 +95,12 @@ const api: Api = {
   snapshotStorage: async () => null,
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
   listSessions: async () => sessions,
+  // The runtime keeps the name on the row, so the next listing carries it; the shell fixture does the same.
+  renameSession: async (sessionId, title) => {
+    const row = sessions.find(s => s.id === sessionId);
+    if (row !== undefined) row.harnessTitle = title;
+    return "renamed";
+  },
   listHarnesses: async () => catalogs,
   subscribe: () => () => {},
   getGolden: async () => undefined,
