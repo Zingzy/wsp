@@ -443,6 +443,13 @@ export function stillWorkingRefusal(threadId: string): string {
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 
+/** The refusal of a flag another verb reads: the verbs it belongs to, then the one that does not read it, so the
+ * caller is told where the flag lives rather than left with the parser's bare unknown-option line. */
+export function foreignFlagLine(flag: string, readers: readonly string[], here: string): string {
+  const owners = readers.length > 1 ? `${readers.slice(0, -1).join(", ")} and ${readers.at(-1)}` : readers[0];
+  return `${flag} belongs to ${owners}; ${here} does not read it`;
+}
+
 /** The refusal of a start naming an agent the host has no adapter for, listing the ones it has. */
 export function noAdapterLine(harness: string, agents: readonly string[]): string {
   return `no adapter registered for harness "${harness}"; agents on this host: ${agents.join(", ") || "none"}`;

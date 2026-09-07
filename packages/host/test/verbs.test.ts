@@ -208,7 +208,7 @@ describe("wsp verbs over the host", () => {
 
   it("wsp --help names the six screens of wsp init in order, as the wizard draws them", () => {
     expect(HELP).not.toContain("three screens");
-    const init = HELP.slice(HELP.indexOf("  wsp init "), HELP.indexOf("  wsp recipe scan ")).replace(/\s+/g, " ");
+    const init = HELP.slice(HELP.indexOf("  wsp init "), HELP.indexOf("  wsp doctor ")).replace(/\s+/g, " ");
     expect(init).toContain("six screens: Agents, Tools, Also on this Mac, Sign-ins, wsp for your agents on this Mac, and Build");
   });
 
@@ -1314,7 +1314,19 @@ describe("wsp verbs over the host", () => {
     }
     const bad = await run("threads", "--nope");
     expect(bad.code).toBe(1);
+    expect(bad.io.errors[0]).toContain("Unknown option '--nope'");
     expect(bad.io.errors[0]).toContain("usage: wsp threads");
+    // A flag another verb reads is refused naming that verb, so the caller is told where it lives: thread new's --agent on send, threads' --in on stop.
+    const foreign = await run("send", "row_1", "--agent", "claude", "hello");
+    expect(foreign.code).toBe(1);
+    expect(foreign.io.errors).toEqual(['--agent belongs to wsp fork and wsp thread new; wsp send does not read it\n\nusage: wsp send <thread> [--model, --effort, --access <value>] "<message>"']);
+    const within = await run("stop", "row_1", "--in", "alpha");
+    expect(within.io.errors[0]).toContain("--in belongs to wsp threads and wsp thread new; wsp stop does not read it");
+    // A flag spelled like a prototype member is nobody's: the tables are read as own keys, so it gets the parser's line.
+    const proto = await run("threads", "--constructor");
+    expect(proto.code).toBe(1);
+    expect(proto.io.errors[0]).toContain("Unknown option '--constructor'");
+    expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(1);
     expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"']);
@@ -1347,10 +1359,10 @@ describe("messageTo", () => {
 });
 
 describe("the verbs never talk to the provider", () => {
-  it("import the protocol and the host's lock file only: no runtime, engine, backend or key loading", () => {
+  it("import the protocol, the collector for the recipe verbs and the host's lock file only: no runtime, engine, backend or key loading", () => {
     const source = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
     const imports = [...source.matchAll(/ from "([^"]+)";$/gm)].map(m => m[1]!);
-    expect(imports.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/protocol"]);
+    expect(imports.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/collect", "@wsp/protocol"]);
     expect(imports).not.toContain("@wsp/runtime");
     expect(imports).not.toContain("@wsp/engine");
     expect(source).not.toMatch(/SOLARI|ANTHROPIC|loadKeys|SolariBackend|getsolari/);

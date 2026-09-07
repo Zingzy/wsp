@@ -9,7 +9,7 @@ import { CATALOG_AGENTS } from "@wsp/catalog";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SECTION_BEGIN, SECTION_END, placeSections, projectDocPaths, removeSections, sectionText, withSection, withoutSection } from "../src/agents-md.js";
 import { SKILL_NAME } from "../src/skill.js";
-import { VERBS } from "../src/verbs.js";
+import { CLI_VERBS } from "../src/verbs.js";
 
 const entryOf = (id: string) => CATALOG_AGENTS.find(a => a.id === id)!;
 
@@ -23,7 +23,7 @@ describe("the wsp section a project's instructions carry", () => {
     expect(text).toContain("skills folder; read it before opening a thread, sending into one, or setting anyone up on wsp.");
     const named = text.split("\n").filter(l => l.startsWith("- `wsp "));
     expect(named).toEqual(["threads", "thread new", "send"].map(name => {
-      const verb = VERBS.find(v => v.name === name)!;
+      const verb = CLI_VERBS.find(v => v.name === name)!;
       return `- \`wsp ${verb.name}\` ${verb.about}`;
     }));
   });
