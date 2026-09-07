@@ -7,7 +7,7 @@ import { ROOT, sourceFiles } from "./source-files.js";
 const PACKAGES = join(ROOT, "packages");
 const PORT_FILE = "packages/protocol/src/adapter-port.ts";
 /** What an adapter is written against; each of these may be declared in PORT_FILE and nowhere else. */
-const PORT_NAMES = ["AdapterEvent", "ExecStream", "ExecStreamFactory"];
+const PORT_NAMES = ["AdapterEvent", "ExecStream", "ExecStreamFactory", "SessionTitleReader"];
 /** Matches whatever keywords a declaration uses, so a duplicate written as an interface, class or const cannot hide from a type-only pattern. */
 const declarationOf = (name: string): RegExp => new RegExp(`^export (?:\\w+ )+${name}\\b`, "m");
 

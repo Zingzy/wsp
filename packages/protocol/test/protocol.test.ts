@@ -760,6 +760,23 @@ describe("thread provenance", () => {
     expect(t!.title).toBe("You are a builder.");
   });
 
+  it("foldThreads titles a thread by what the harness calls the session the next send resumes, so a rename made inside the harness shows everywhere", () => {
+    const [t] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", prompt: "make a server", claudeSessionId: "c1", harnessTitle: "Building the server", startedAt: 1_000 },
+      { ...row, id: "s2", threadId: "thr_a", prompt: "and tests", claudeSessionId: "c1", harnessTitle: "the sidebar's own name", startedAt: 2_000 },
+    ]);
+    expect(t!.title).toBe("the sidebar's own name");
+  });
+
+  it("foldThreads keeps the opening turn's words while the harness has no title of its own, and cuts a harness title to one line", () => {
+    const [none] = foldThreads([{ ...row, id: "s1", threadId: "thr_a", prompt: "make a server" }]);
+    expect(none!.title).toBe("make a server");
+    const [wrapped] = foldThreads([{ ...row, id: "s2", threadId: "thr_b", prompt: "make a server", harnessTitle: "  Building  the server \nand its tests" }]);
+    expect(wrapped!.title).toBe("Building the server");
+    const [named] = foldThreads([{ ...row, id: "s3", threadId: "thr_c", claudeSessionId: "c3", harnessTitle: "Building the server" }]);
+    expect(named!.title).toBe("Building the server");
+  });
+
   it("a thread always says who opened it: the fold reads a row from before provenance as a person's, once, for every client", () => {
     const [t] = foldThreads([{ ...row, prompt: "old" }]);
     expect(t!.startedBy).toBe("person");
