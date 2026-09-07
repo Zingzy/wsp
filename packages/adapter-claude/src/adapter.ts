@@ -3,7 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { fmtDuration, harnessExitLine } from "@wsp/protocol";
+import { backgroundTasksLine, fmtDuration, harnessExitLine } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe, type ClaudeCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
@@ -225,6 +225,20 @@ function noOutputError(result: TurnResult, stderrTail: readonly string[]): strin
   return stderrTail.length === 0 ? head : `${head}: ${stderrTail.join("\n")}`;
 }
 
+/** The CLI's own count of its live background tasks (commands and subagents the agent did not wait for), sent whole
+ * each time the set changes; a CLI from before the signal never sends it, and its turns are never flagged. */
+function backgroundTasksOf(event: Record<string, unknown>): number | undefined {
+  if (str(event.type) !== "system" || str(event.subtype) !== "background_tasks_changed") return undefined;
+  return Array.isArray(event.tasks) ? event.tasks.length : 0;
+}
+
+/** A success that arrived while the agent's background tasks still ran is a turn that ended before its work did: the
+ * CLI kills those tasks on exit and no completion ever reaches the thread. The reply stays; the error says why. */
+function endedEarly(result: TurnResult, backgroundTasks: number): TurnResult {
+  if (result.status !== "completed" || backgroundTasks === 0) return result;
+  return { ...result, status: "failed", error: backgroundTasksLine(backgroundTasks) };
+}
+
 function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: string): AdapterEvent[] {
   const sessionId = str(event.session_id) ?? fallbackSessionId;
   switch (str(event.type)) {
@@ -328,6 +342,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     const stderrTail: string[] = [];
     let harnessCwd: string | undefined;
     let shellCwd: string | undefined;
+    let backgroundTasks = 0;
 
     const finished = (async (): Promise<TurnResult> => {
       let streamError: string | undefined;
@@ -337,6 +352,11 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (event === undefined) {
             const text = raw.trim();
             if (text.length > 0 && stderrTail.push(text) > STDERR_TAIL_LINES) stderrTail.shift();
+            continue;
+          }
+          const tasks = backgroundTasksOf(event);
+          if (tasks !== undefined) {
+            backgroundTasks = tasks;
             continue;
           }
           for (const normalized of normalizeEvent(event, claudeSessionId)) {
@@ -357,6 +377,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               sawResult = true;
               // The CLI waits for more input after its result; EOF is what lets it exit.
               stream.closeInput();
+              normalized.result = endedEarly(normalized.result, backgroundTasks);
               // Held until the process exits, since the CLI writes its reason to stderr after the result.
               if (answeredNothing(normalized.result)) {
                 emptyResult = normalized.result;

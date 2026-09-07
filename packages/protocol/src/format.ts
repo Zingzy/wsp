@@ -56,12 +56,12 @@ export function fmtCost(usd: number): string {
 }
 
 /** The one line a thread's end sends to whoever its start named: the thread's first eight characters, the outcome
- * word with the duration and cost the harness reported, and the last non-empty line of the reply, or the error when
- * there is no reply. */
+ * word with the duration and cost the harness reported, then the last non-empty line of the reply, or the error when
+ * there is no reply. A turn that did not complete says its error first, since that is what whoever waits needs. */
 export function notifyLine(threadId: string, result: TurnResult): string {
   const facts = [result.status, ...(result.durationMs !== undefined ? [fmtDuration(result.durationMs)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
   const lines = (result.text ?? "").split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-  const tail = lines.at(-1) ?? result.error;
+  const tail = result.status === "completed" ? lines.at(-1) ?? result.error : result.error ?? lines.at(-1);
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
@@ -117,6 +117,13 @@ export function harnessExitLine(bin: string, exitCode: number | null, path: stri
   if (exitCode !== 127) return `${bin} exited with code ${String(exitCode)} before emitting a result`;
   const searched = path === undefined ? "the launch exported no PATH, the machine's own was searched" : `PATH searched: ${path}`;
   return `${bin} was not found on PATH (exit 127); ${searched}`;
+}
+
+/** The turn's error when the harness's result arrived while the agent's own background tasks were still running: the
+ * harness kills them with the turn and nothing wakes the thread when they would have finished, so the turn ended
+ * before the work it started did. */
+export function backgroundTasksLine(running: number): string {
+  return `ended with ${plural(running, "background task")} running`;
 }
 
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
