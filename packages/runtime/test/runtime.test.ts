@@ -8,11 +8,11 @@ import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
 import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, SessionEvent, foldThreads, type EventUnion, type RecipeDigest, type WorkspaceStatus } from "@wsp/protocol";
-import { BUILDER_IDLE_MS, type GoldenDelta, type GoldenImport } from "@wsp/engine";
+import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { TABLE_PIN } from "../src/harness-catalog.js";
-import { CATALOG_TTL_MS, GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
+import { CATALOG_TTL_MS, GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -76,7 +76,10 @@ describe("runtime", () => {
 
   it("runs a harness session and fans adapter events out as session.* protocol events", async () => {
     const backend = stubBackend();
-    const scripted: HarnessAdapterFactory = () => ({
+    const contexts: HarnessAdapterContext[] = [];
+    const scripted: HarnessAdapterFactory = ctx => {
+      contexts.push(ctx);
+      return {
       steers: false,
       start: ({ onEvent }) => {
         const sessionId = "11111111-1111-4111-8111-111111111111";
@@ -93,7 +96,8 @@ describe("runtime", () => {
         })();
         return { localId: sessionId, finished, interrupt: async () => {} };
       },
-    });
+      };
+    };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: scripted } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
@@ -101,6 +105,8 @@ describe("runtime", () => {
     const session = await rt.sessions.start(ws.id, { prompt: "say hi" });
     const result = await session.finished;
     expect(result.status).toBe("completed");
+    // The adapter is handed the golden's login PATH: a launch served by a bare-PATH exec must still find the binary.
+    expect(contexts.map(c => c.env)).toEqual([{ PATH: TOOLS_PATH }]);
     const types = events.map(e => e.type);
     expect(types).toContain("session.start");
     expect(types).toContain("session.delta");

@@ -110,6 +110,15 @@ export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: numbe
     : `stopped after ${fmtDuration(elapsedMs, "clock")} at the ${fmtLimit(limitMs)} cap on one turn`;
 }
 
+/** The turn's error when the harness process ended before any result. Exit 127 is the shell saying the binary was
+ * not on PATH, so the line names the binary and the PATH the launch exported (or that it exported none) instead of a
+ * bare code; every other code reads as the code. */
+export function harnessExitLine(bin: string, exitCode: number | null, path: string | undefined): string {
+  if (exitCode !== 127) return `${bin} exited with code ${String(exitCode)} before emitting a result`;
+  const searched = path === undefined ? "the launch exported no PATH, the machine's own was searched" : `PATH searched: ${path}`;
+  return `${bin} was not found on PATH (exit 127); ${searched}`;
+}
+
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 

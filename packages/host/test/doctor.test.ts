@@ -80,6 +80,25 @@ describe("stageDaemonBundle", () => {
     expect(readFileSync(join(stage, "wsp-open"), "utf8")).toBe(OPEN_SHIM_SCRIPT);
     expect(statSync(join(stage, "wsp-open")).mode & 0o111).toBe(0o111);
   });
+
+  it("start.mjs sets the golden's PATH before the daemon loads, so a relaunch from a bare environment runs agents with it", async () => {
+    dir = tmp("wsp-start-mjs-");
+    const daemonDir = join(dir, "daemon");
+    mkdirSync(join(daemonDir, "dist"), { recursive: true });
+    writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ name: "@wsp/daemon", dependencies: {} }));
+    // A stand-in daemon that reports the environment it was started with and what start.mjs asked of it.
+    writeFileSync(
+      join(daemonDir, "dist", "index.js"),
+      'export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";\nexport async function startDaemon(o) { console.log(JSON.stringify({ path: process.env.PATH, ...o })); return { port: 7070 }; }\n',
+    );
+    const stage = join(dir, "stage");
+    await stageDaemonBundle(stage, daemonDir);
+
+    const { stdout } = await promisify(execFile)(process.execPath, [join(stage, "start.mjs")], { env: { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" } });
+    const started = JSON.parse(stdout.split("\n")[0]!) as { path: string; host: string; openSocketPath: string };
+    expect(started).toEqual({ path: TOOLS_PATH, host: "0.0.0.0", openSocketPath: "/root/.wsp/open.sock" });
+    expect(stdout).toContain("wsp-daemon listening on 0.0.0.0:7070");
+  });
 });
 
 describe("browser shim in the guest", () => {

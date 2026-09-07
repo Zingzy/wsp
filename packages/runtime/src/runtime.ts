@@ -59,6 +59,7 @@ import {
   rollback as rollbackGolden,
   snapshotStorage,
   applyMachineContext,
+  TOOLS_PATH,
 } from "@wsp/engine";
 import type {
   DaemonEvent,
@@ -110,7 +111,13 @@ import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, type HarnessCatalog
 export interface HarnessAdapterContext {
   machine: Machine;
   workspaceId: string;
+  /** The machine's login environment, exported under the harness's own on every launch: the golden's PATH, so a
+   * launch served by a process with a bare one still finds the binary. */
+  env: Readonly<Record<string, string>>;
 }
+
+/** What every adapter is handed as the machine's login environment: the PATH the golden's login shells get. */
+export const GUEST_LOGIN_ENV: Readonly<Record<string, string>> = { PATH: TOOLS_PATH };
 
 export interface HarnessStartOptions {
   prompt: string;
@@ -2159,7 +2166,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
     if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
-    return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id }) };
+    return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, env: GUEST_LOGIN_ENV }) };
   };
 
   type LiveSession = { view: SessionView; turnId: string; handle: SessionHandle };
@@ -3206,7 +3213,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (workspaceId === undefined) return table.map(markDefault);
         const entry = await entryOf(workspaceId);
         if (entry.record.phase !== "running") return table.map(markDefault);
-        return Promise.all(table.map(c => catalogOn(c, entry.machine, adapters[c.harness]!({ machine: entry.machine, workspaceId })).then(markDefault)));
+        return Promise.all(table.map(c => catalogOn(c, entry.machine, adapterFor(entry, c.harness).adapter).then(markDefault)));
       },
     },
     golden,
