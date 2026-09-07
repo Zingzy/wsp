@@ -391,7 +391,8 @@ describe("rows from the fixture wire", () => {
     expect(title.parentElement!.children).toHaveLength(2);
     expect(time.textContent).toBe("3m");
     expect(time.className).toContain("font-mono");
-    expect(time.className).toContain("min-w-[3ch]");
+    expect(time.className).toContain("w-[3ch]");
+    expect(time.className).not.toContain("min-w-");
     expect(time.className).toContain("text-right");
     expect(time.className).toContain("shrink-0");
     // The same leading slot on both rows, so the title starts where the name starts.

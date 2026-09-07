@@ -28,6 +28,7 @@ import { useRightPanelStore } from "../../src/rightPanelStore";
 import { AppShell } from "../../src/shell/AppShell";
 import { openPanelTerminal } from "../../src/shell/shellCommands";
 import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
+import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
 import "../../src/index.css";
 
@@ -101,8 +102,9 @@ const api: Api = {
   hostTerminalConfig: async () => TRANSLUCENT,
 };
 
-/** A Ghostty config with a background-opacity under 1, the shape whose translucency belongs to the canvas alone. */
-const TRANSLUCENT: TerminalConfig = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], palette: Array<null>(16).fill(null), backgroundOpacity: 0.85 };
+/** A Ghostty config with a background-opacity under 1, the shape whose translucency belongs to the canvas alone, and a
+ * font-size of 16, the size the pane's cells must take from the file. */
+const TRANSLUCENT: TerminalConfig = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], fontSize: 16, palette: Array<null>(16).fill(null), windowPaddingX: { left: 14, right: 14 }, windowPaddingY: { top: 14, bottom: 14 }, backgroundOpacity: 0.85 };
 
 /** A daemon that holds the ptys the page opens and answers nothing else. */
 function fakeWire(): TerminalWire {
@@ -131,6 +133,10 @@ useStore.getState().bind(api);
 // The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
 useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
 if (params.get("panel") === "terminal" && shown !== null) {
+  const surfaces: GhosttyTerminalSurface[] = [];
+  const create = GhosttyTerminalSurface.create.bind(GhosttyTerminalSurface);
+  GhosttyTerminalSurface.create = async (mount, options) => { const s = await create(mount, options); surfaces.push(s); return s; };
+  Object.assign(window, { surfaces });
   const terminals = new WorkspaceTerminals(fakeWire());
   terminals.feedStatus("live");
   provideTerminals(shown, terminals);

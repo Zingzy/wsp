@@ -760,6 +760,14 @@ describe("thread provenance", () => {
     expect(t!.title).toBe("You are a builder.");
   });
 
+  it("foldThreads titles a thread with no harness title by its opening turn's first sentence, cut to 48 characters, so a brief-shaped turn never shows whole in the row, the breadcrumb, the switcher card or the CLI's table", () => {
+    const brief = "You are a builder for the wsp repo, which is at /Users/dev/wsp on this Mac: read the ticket, then run `pnpm test` and report.\n\nTicket: Zingzy/wsp-map#408.";
+    const [t] = foldThreads([{ ...row, prompt: brief }]);
+    expect(t!.title).toBe("You are a builder for the wsp repo, which is at\u2026");
+    const [two] = foldThreads([{ ...row, prompt: "Bump the lockfile. Then run the gate." }]);
+    expect(two!.title).toBe("Bump the lockfile.");
+  });
+
   it("foldThreads titles a thread by what the harness calls the session the next send resumes, so a rename made inside the harness shows everywhere", () => {
     const [t] = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", prompt: "make a server", claudeSessionId: "c1", harnessTitle: "Building the server", startedAt: 1_000 },

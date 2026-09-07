@@ -803,6 +803,15 @@ export class GhosttyTerminalSurface {
     this.requestRender();
   }
 
+  /** The size the text draws at and the cell it fits, for a probe that measures what the pane took from a config. */
+  get textSize(): number {
+    return this.fontSize;
+  }
+
+  get cellHeight(): number {
+    return this.metrics.height;
+  }
+
   setTheme(theme: GhosttyTheme): void {
     if (this.disposed) return;
     this.theme = theme;
