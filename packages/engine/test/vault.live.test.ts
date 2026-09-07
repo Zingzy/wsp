@@ -3,7 +3,8 @@ import { buildGolden, forkGolden } from "../src/golden.js";
 import { SolariBackend } from "../src/solari-backend.js";
 import { exportPaths, importInto } from "../src/vault.js";
 import type { Machine } from "../src/machine.js";
-import { CLAUDE_INSTALL, claudeEnvs, isReserved, LIVE, liveEnv } from "./live.js";
+import { GOLDEN_SETUP } from "@wsp/catalog";
+import { claudeEnvs, isReserved, LIVE, liveEnv } from "./live.js";
 
 const TEST_LABEL = { wsp: "1", "wsp-test": "vault-live" };
 const CLAUDE_FLAGS = "--output-format json --dangerously-skip-permissions </dev/null";
@@ -26,7 +27,7 @@ describe.runIf(LIVE)("vault (live: P8 replay, cross-machine claude resume)", () 
     const { manifest, version } = await buildGolden({
       backend, baseTemplate: "base", cpu: 2, memMb: 4096,
       envs: claudeEnvs(env), labels: TEST_LABEL,
-      setup: CLAUDE_INSTALL, smoke: "claude --version",
+      setup: GOLDEN_SETUP, smoke: "claude --version",
     });
 
     let a: Machine | undefined;

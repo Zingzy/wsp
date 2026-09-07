@@ -3,8 +3,8 @@
 // every browser or device sign-in has a status that proves it, the agents are
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -143,7 +143,7 @@ describe("catalog", () => {
     expect(CATALOG_AGENTS.filter(a => a.guestStateHome !== undefined).map(a => [a.id, a.guestStateHome])).toEqual([["claude", "/root/.claude-cfg"]]);
     expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.153.0");
     expect(installLine(catalogEntry("pi")!)).toBe("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4");
-    expect(installLine(catalogEntry("claude")!)).toBe("curl -fsSL https://claude.ai/install.sh | bash");
+    expect(installLine(catalogEntry("claude")!)).toBe(catalog.GOLDEN_SETUP);
     expect(installLine(catalogEntry("hermes")!)).toMatch(/git clone -q --depth 1 --branch v[\d.]+ https:\/\/github\.com\/NousResearch\/hermes-agent\.git/);
     // An agent's npm road is pinned in the data; an unpinned one would install whatever the registry serves that day.
     for (const a of CATALOG_AGENTS) if (a.installRoad.road === "npm") expect(a.installRoad.version, a.id).toMatch(/^\d/);
@@ -330,7 +330,46 @@ describe("catalog", () => {
     expect(out.split("\n").filter(l => l !== "")).toEqual(["--connect-timeout", "15", "--speed-limit", "1", "--speed-time", "60", "--retry", "1", "--fail", "--silent", "--show-error", "--location", "-o", "/tmp/x", "https://example.test/a b"]);
   });
 
-  it("no road line spells curl's flags itself: the function is their one home, and the vendor installer is the one line outside it", () => {
+  it("a vendor installer is downloaded to a file through the curl function, checked to be a shell script, then run from the file: never piped into a shell", () => {
+    const s = catalog.installerScript("https://vendor.test/install.sh");
+    expect(s).toBe([
+      'f="$(mktemp)"',
+      `trap 'rm -f "$f"' EXIT`,
+      `curl -o "$f" 'https://vendor.test/install.sh'`,
+      `test "$(head -c 2 "$f")" = '#!' || { echo 'Error: what https://vendor.test/install.sh served is not a shell script' >&2; exit 1; }`,
+      'bash "$f" </dev/null',
+    ].join("\n"));
+    expect(s).not.toMatch(/\|\s*(bash|sh)\b/);
+    expect(s).not.toMatch(/\bcurl +-[A-Za-z]*[fsSL]\b/);
+    expect(catalog.GOLDEN_SETUP).toBe(catalog.installerScript("https://claude.ai/install.sh"));
+  });
+
+  it("the downloaded installer runs only when what curl saved starts with a shebang; an empty or HTML body fails on its own Error line, runs nothing and leaves no file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-installer-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    // A curl stand-in that saves the body the test hands it where -o points, as the real one saves what the vendor serves.
+    writeFileSync(join(dir, "curl"), '#!/bin/sh\nwhile [ "$1" != "-o" ]; do shift; done\nprintf "%s" "$BODY" > "$2"\n', { mode: 0o755 });
+    const run = (body: string) =>
+      spawnSync("bash", ["-c", `set -euo pipefail\n${CURL_NET}\n${catalog.installerScript("https://vendor.test/install.sh")}`], {
+        encoding: "utf8",
+        env: { ...process.env, BODY: body, TMPDIR: dir, PATH: `${dir}:${process.env["PATH"] ?? ""}` },
+      });
+    for (const body of ["", "<html>signed out</html>"]) {
+      const r = run(body);
+      expect(r.status, body).toBe(1);
+      expect(r.stdout, body).toBe("");
+      expect(r.stderr.trim(), body).toBe("Error: what https://vendor.test/install.sh served is not a shell script");
+      expect(readdirSync(dir), body).toEqual(["curl"]);
+    }
+    // The installer reads nothing from stdin: a pipe would have handed it the rest of its own text.
+    const ran = run('#!/bin/sh\necho "ran with $(cat | wc -c | tr -d \' \') bytes on stdin"\n');
+    expect(ran.stderr).toBe("");
+    expect(ran.status).toBe(0);
+    expect(ran.stdout).toBe("ran with 0 bytes on stdin\n");
+    expect(readdirSync(dir)).toEqual(["curl"]);
+  });
+
+  it("no road line spells curl's flags itself: the function is their one home", () => {
     const own = /\bcurl +-[A-Za-z]*[fsSL]\b/;
     const lines = [
       ...CATALOG.map(e => installLine(e)),
@@ -343,7 +382,6 @@ describe("catalog", () => {
     ];
     for (const line of lines) {
       const text = typeof line === "string" ? line : line.note;
-      if (text === catalog.GOLDEN_SETUP) continue;
       expect(text).not.toMatch(own);
     }
     expect(lines.filter(l => typeof l === "string" && /\bcurl\b/.test(l)).length).toBeGreaterThanOrEqual(8);
@@ -569,8 +607,8 @@ describe("catalog", () => {
     expect(catalogToolFor("1password-cli")?.id).toBe("op");
   });
 
-  it("pipes a download into a shell on one road only: the harness vendor's own installer", () => {
-    expect(CATALOG.filter(e => /curl[^\n]*\|\s*(ba)?sh/.test(installLine(e))).map(e => e.id)).toEqual(["claude"]);
+  it("pipes a download into a shell on no road: the harness vendor's own installer is saved to a file first", () => {
+    expect(CATALOG.filter(e => /curl[^\n]*\|\s*(ba)?sh/.test(installLine(e))).map(e => e.id)).toEqual([]);
   });
 
   it("carries no token-looking value", () => {
