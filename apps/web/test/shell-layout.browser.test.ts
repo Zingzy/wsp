@@ -23,8 +23,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
+import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -59,14 +60,12 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     base = `${vite.base}/test/shell/index.html`;
     browser = await chromium.launch();
     page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+    // Each case starts the page as a first visit: what one case selects or opens is not the next one's memory.
+    await page.addInitScript(() => window.localStorage.clear());
     mkdirSync(SHOTS_DIR, { recursive: true });
   }, 60_000);
 
   afterAll(() => stopRender(browser, vite?.child));
-  const afterWidths: Array<() => Promise<void>> = [];
-  afterEach(async () => {
-    for (const reset of afterWidths.splice(0)) await reset();
-  });
 
   async function open(theme: "dark" | "light"): Promise<void> {
     await page!.goto(`${base}?theme=${theme}`);
@@ -87,13 +86,16 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       const search = await box("button[aria-label='Search']");
       expect(Math.abs(toggle.x - search.x)).toBeLessThan(1);
       expect(Math.abs(lockup.x - (toggle.x + toggle.width + (await rowGap("[data-slot=sidebar-header]"))))).toBeLessThan(1);
+      // One vertical centre: the toggle glyph's ink (its icon box, whose panel fills it edge to edge) and the wordmark's optical centre.
+      const glyph = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger] svg");
+      expect(Math.abs(glyph.y + glyph.height / 2 - (lockup.y + lockup.height * LOCKUP_OPTICAL_CENTRE))).toBeLessThan(0.5);
       const path = join(SHOTS_DIR, `sidebar-header-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar header screenshot: ${path}`);
     }
   }, 30_000);
 
-  it("the search row and the Workspaces row are one height, start where the workspace rows do, paint nothing at rest, carry one glyph each at the right edge and no chord on their faces, and open the palette without moving anything", async () => {
+  it("the search row and the Workspaces row are one height, start where the workspace rows do, the search row alone wears a tint that deepens on hover, they carry one glyph each at the right edge and no chord on their faces, and open the palette without moving anything", async () => {
     const shot = async (name: string, theme: string): Promise<void> => {
       const path = join(SHOTS_DIR, `sidebar-top-${name}-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -104,6 +106,14 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         const s = getComputedStyle(el);
         return s.backgroundColor === "rgba(0, 0, 0, 0)" && s.borderTopWidth === "0px" && s.boxShadow === "none";
       });
+    // The alpha of a computed black tint: color(srgb 0 0 0 / a), or rgba(0, 0, 0, a).
+    const tintAlpha = (selector: string): Promise<number> =>
+      page!.locator(selector).first().evaluate(el => {
+        const s = getComputedStyle(el);
+        if (s.borderTopWidth !== "0px" || s.boxShadow !== "none") return Number.NaN;
+        const m = /^(?:color\(srgb 0 0 0|rgba\(0, 0, 0,?) ?\/? ?([\d.]+)\)$/.exec(s.backgroundColor);
+        return m === null ? Number.NaN : Number(m[1]);
+      });
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const search = await box("button[aria-label='Search']");
@@ -113,7 +123,15 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(search.height).toBe(section.height);
       expect(Math.abs(search.x - section.x)).toBeLessThan(1);
       expect(Math.abs(search.x - workspace.x)).toBeLessThan(1);
-      expect(await transparent("button[aria-label='Search']")).toBe(true);
+      const rest = await tintAlpha("button[aria-label='Search']");
+      expect(rest).toBeGreaterThan(0.01);
+      expect(rest).toBeLessThan(0.1);
+      await page!.locator("button[aria-label='Search']").hover();
+      await page!.waitForTimeout(250);
+      const hovered = await tintAlpha("button[aria-label='Search']");
+      expect(hovered).toBeGreaterThan(rest);
+      await page!.mouse.move(600, 400);
+      await page!.waitForTimeout(250);
       expect(await transparent("button[aria-label='Workspaces']")).toBe(true);
       expect(await page!.locator("[data-slot=sidebar] input").count()).toBe(0);
       expect(await page!.locator("button[aria-label='Search'] kbd").count()).toBe(0);
@@ -164,6 +182,43 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       await shot("collapsed", theme);
       await page!.locator("button[aria-label='Workspaces']").click();
       await page!.waitForSelector("[data-sidebar-row]");
+    }
+  }, 60_000);
+
+  it("in the desktop window a translucent Ghostty config opens a hole under the terminal canvas alone: the tab strip and the column beside keep the Browser tab's backgrounds, every layer under the canvas is clear and the canvas backing carries the file's alpha, in both themes", async () => {
+    // What an element sits on: the first painted background walking up from it, or "none" when the window shows through.
+    const backdrops = () =>
+      page!.evaluate(() => {
+        const on = (selector: string): string => {
+          for (let n: Element | null = document.querySelector(selector)!; n !== null; n = n.parentElement) {
+            const c = getComputedStyle(n).backgroundColor;
+            if (c !== "rgba(0, 0, 0, 0)") return c;
+          }
+          return "none";
+        };
+        return { strip: on("[data-right-panel-tabbar]"), centre: on("[data-shell-center]"), canvas: on("[data-terminal-viewport] canvas") };
+      });
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a&mac=1&panel=terminal`);
+      await page!.waitForSelector("[data-terminal-translucent] canvas");
+      const terminal = await backdrops();
+      // The corner pixel of the canvas backing: the theme's background at the file's alpha, so the material behind shows through it.
+      const alpha = await page!.locator("[data-terminal-viewport] canvas").evaluate((c: HTMLCanvasElement) => c.getContext("2d")!.getImageData(2, 2, 1, 1).data[3]!);
+      expect(Math.abs(alpha - Math.round(0.85 * 255))).toBeLessThanOrEqual(2);
+      expect(terminal.canvas).toBe("none");
+      expect(await page!.locator("[data-right-panel-tab-list] [data-active-tab]").count()).toBe(2);
+      await page!.locator("[data-right-panel-tab-list] [data-active-tab='false'] button:has(> span.truncate)").click();
+      await page!.waitForSelector("[data-terminal-viewport]", { state: "detached" });
+      const browser = await backdrops();
+      expect(browser.strip).not.toBe("none");
+      expect(browser.strip).toBe(browser.centre);
+      expect(terminal.strip).toBe(browser.strip);
+      expect(terminal.centre).toBe(browser.centre);
+      await page!.locator("[data-right-panel-tab-list] [data-active-tab='false'] button:has(> span.truncate)").click();
+      await page!.waitForSelector("[data-terminal-viewport] canvas");
+      const path = join(SHOTS_DIR, `terminal-pane-${theme}.png`);
+      await page!.screenshot({ path });
+      console.info(`terminal pane screenshot: ${path}`);
     }
   }, 60_000);
 
@@ -380,14 +435,10 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         const trips = document.querySelectorAll("[data-slot=sidebar] svg.lucide-folder-input, [data-slot=sidebar] svg.lucide-folder-output").length;
         return { workspaces, threads, idle, trips };
       });
-    // The width is the shell's remembered one; the cases after this one read the default, so it is dropped even on a failure.
-    afterWidths.push(() => page!.evaluate(() => window.localStorage.removeItem("wsp:sidebar-width")));
-    // The width is read from storage on the page's origin, so the page is on it before the first write.
-    await page!.goto(base);
     for (const width of [240, 300, 360]) {
       for (const theme of ["dark", "light"] as const) {
-        await page!.evaluate(w => window.localStorage.setItem("wsp:sidebar-width", String(w)), width);
-        await open(theme);
+        await page!.goto(`${base}?theme=${theme}&sidebar=${width}`);
+        await page!.waitForSelector("[data-sidebar-row]");
         await page!.waitForFunction(w => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - w) < 1, width);
         const rows = await readRows();
         console.info(`rows at ${width}px ${theme}: ${JSON.stringify(rows)}`);

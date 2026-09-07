@@ -18,7 +18,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip"
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({ children }: { children?: ReactNode }) {
   return (
     <HeaderRow frame className="@container/sidebar-header relative" data-slot="sidebar-header">
-      <Lockup className="h-3.5 w-fit shrink-0 -translate-y-px text-muted-foreground" />
+      {/* At 14px tall the optical centre sits 2px above the box's middle, so the box drops 2px onto the row's centre line. */}
+      <Lockup className="h-3.5 w-fit shrink-0 translate-y-0.5 text-muted-foreground" />
       {children}
     </HeaderRow>
   );

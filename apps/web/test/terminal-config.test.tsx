@@ -2,9 +2,9 @@
 // The drawer's viewport asks the host for the person's Ghostty config as it
 // opens and hands the surface what the file says: the theme's colors under the
 // app's, the font and its fallbacks unless the viewer typed one, the cursor,
-// the padding and the opacity; a translucent file marks the mount so the pane
-// around it stops painting; no host, or a host that cannot answer, leaves the
-// defaults.
+// the padding and the opacity; a translucent file marks the mount and drops
+// its background, so the desktop window's material can show through the canvas
+// alone; no host, or a host that cannot answer, leaves the defaults.
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TerminalConfig } from "@wsp/protocol";

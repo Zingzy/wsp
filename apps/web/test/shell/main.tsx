@@ -10,20 +10,29 @@
 // workspaces and the model picker's agent marks for their size and colour;
 // ?ws=ws_a&linger=1 replays a turn that replied but whose process has not
 // exited; ?shell=desktop puts a desktop bridge on the page so the workspace
-// switch chord reaches it.
+// switch chord reaches it; ?mac=1 marks the html the way the macOS preload
+// does; ?panel=terminal opens the right panel with a Browser tab and a
+// terminal over a fake daemon wire, the host answering a translucent Ghostty
+// config, so the pane's material can be measured with each tab active;
+// ?sidebar=<px> opens the sidebar at that remembered width so the rows can
+// be measured at several.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, type HarnessCatalog, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DESKTOP_MAC_CLASS, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
+import { useRightPanelStore } from "../../src/rightPanelStore";
 import { AppShell } from "../../src/shell/AppShell";
+import { openPanelTerminal } from "../../src/shell/shellCommands";
 import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
+import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
 import "../../src/index.css";
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
+document.documentElement.classList.toggle(DESKTOP_MAC_CLASS, params.get("mac") === "1");
 // The bridge alone tells the page which shell holds it; with ?shell=desktop the chords a browser tab keeps for its
 // own tabs reach the page, which is what the switcher's chord needs. It carries the two picture calls, which is what
 // the switcher's well reads, and neither answers with a picture, so the wells draw empty.
@@ -88,14 +97,46 @@ const api: Api = {
   listHarnesses: async () => catalogs,
   subscribe: () => () => {},
   getGolden: async () => undefined,
+  hostTerminalConfig: async () => TRANSLUCENT,
 };
+
+/** A Ghostty config with a background-opacity under 1, the shape whose translucency belongs to the canvas alone. */
+const TRANSLUCENT: TerminalConfig = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], palette: Array<null>(16).fill(null), backgroundOpacity: 0.85 };
+
+/** A daemon that holds the ptys the page opens and answers nothing else. */
+function fakeWire(): TerminalWire {
+  const held = new Set<string>();
+  return {
+    request: async (op, params = {}) => {
+      if (op === "pty.create") {
+        const ptyId = `p${held.size + 1}`;
+        held.add(ptyId);
+        return { ok: true, ptyId };
+      }
+      if (op === "pty.kill") held.delete(String(params["ptyId"]));
+      if (op === "pty.list") return { ok: true, ptys: [...held].map(id => ({ id, pid: 1, cols: 80, rows: 24, exited: false })) };
+      return { ok: true };
+    },
+  };
+}
 
 const toast = params.get("toast");
 const shown = params.get("ws");
 useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(shown !== null ? { selectedId: shown } : {}) });
+// ?sidebar=<px> is the width the shell remembers; it is written here, after a test's init script has cleared storage.
+const sidebarWidth = params.get("sidebar");
+if (sidebarWidth !== null) window.localStorage.setItem("wsp:sidebar-width", sidebarWidth);
 useStore.getState().bind(api);
 // The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
 useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
+if (params.get("panel") === "terminal" && shown !== null) {
+  const terminals = new WorkspaceTerminals(fakeWire());
+  terminals.feedStatus("live");
+  provideTerminals(shown, terminals);
+  useRightPanelStore.setState({ byWorkspaceId: {} });
+  useRightPanelStore.getState().open(shown, "preview");
+  void openPanelTerminal(shown);
+}
 if (params.get("oom") === "1") {
   const GiB = 1024 ** 3;
   getLive("ws_a").feedStatus("live");
