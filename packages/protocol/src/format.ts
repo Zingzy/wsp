@@ -233,6 +233,14 @@ export const DAEMON_UPDATE_FAILED = "could not update the helper";
  * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
 export const ALREADY_RUNNING = "already running at the provider";
 
+/** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how
+ * long it was given in all, and what the provider reads about the machine after it, or that the provider could not
+ * be read. The person's road is to try again; the runtime never leaves the row at Pausing or Waking. */
+export function moveTimedOutLine(move: "pause" | "wake", elapsedMs: number, reads: MachineState | undefined): string {
+  const provider = reads === undefined ? "could not be read about the machine" : `reads the machine ${reads}`;
+  return `${move} did not complete in ${fmtDuration(elapsedMs)}; the provider did not answer and ${provider}; try again`;
+}
+
 /** One noun's change in a golden build line: "2 tools added". */
 export interface GoldenChange {
   count: number;

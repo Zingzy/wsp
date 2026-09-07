@@ -23,6 +23,7 @@ import {
   harnessExitLine,
   machineUnreachedLine,
   mcpServerCommandLine,
+  moveTimedOutLine,
   notifyLine,
   offeredSize,
   plural,
@@ -282,6 +283,16 @@ describe("DAEMON_UPDATING and DAEMON_UPDATE_FAILED", () => {
       expect(line).not.toContain("daemon");
       expect(line.length).toBeLessThanOrEqual(30);
     }
+  });
+});
+
+describe("a pause or a wake the provider never answered", () => {
+  it("names the move, how long it was given in all, and what the provider reads about the machine after it", () => {
+    expect(moveTimedOutLine("wake", 361_000, "paused")).toBe("wake did not complete in 6m 1s; the provider did not answer and reads the machine paused; try again");
+    expect(moveTimedOutLine("pause", 480_000, "running")).toBe("pause did not complete in 8m; the provider did not answer and reads the machine running; try again");
+  });
+  it("says when the provider could not be read about the machine either", () => {
+    expect(moveTimedOutLine("pause", 240_000, undefined)).toBe("pause did not complete in 4m; the provider did not answer and could not be read about the machine; try again");
   });
 });
 

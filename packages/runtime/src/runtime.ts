@@ -48,7 +48,9 @@ import {
   type MachineKind,
   type MachineShape,
   type MachineSpec,
+  type MachineState,
   type PreviewReach,
+  type ProviderMove,
   type ReapFailure,
   type ReapResult,
   type ReapedMachine,
@@ -97,7 +99,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, moveTimedOutLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -360,8 +362,20 @@ interface LiveWorkspace {
   napping?: Promise<WorkspaceView>;
   /** The record following a machine the provider runs under a napping word: a second verb that read the same fact joins it. */
   adopting?: Promise<void>;
+  /** The pause or wake in flight: what the row calls it, when it began, and when its provider calls stop waiting. */
+  budget?: MoveBudget;
+  /** Cancels the one read armed after a wake gave up. */
+  lateRead?: () => void;
   /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
   creating?: true;
+}
+
+/** One pause or wake's time: the word its row uses, when the verb started, and the instant its provider calls stop
+ * waiting. Every call the verb makes shares it, so the row's words describe the whole verb. */
+interface MoveBudget {
+  what: "pause" | "wake";
+  started: number;
+  deadline: number;
 }
 
 /** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. */
@@ -435,6 +449,10 @@ export interface RuntimeOptions {
    * each other's. The entry points pass hostIdentity(); the bare hostname when absent, which touches no disk. */
   hostId?: string;
   wake?: WakeOptions;
+  /** How long a pause gets in all before the row says it did not complete (tests shrink it). */
+  nap?: { pauseDeadlineMs?: number };
+  /** How long one read of the provider gets after a pause or a resume missed its deadline (tests shrink it). */
+  providerReadMs?: number;
   /** The token every daemon this runtime reaches is given; minted fresh per process when absent (tests pin one). */
   daemonToken?: string;
   /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
@@ -445,11 +463,24 @@ export interface RuntimeOptions {
 export interface WakeOptions {
   /** How long a resumed guest's daemon gets to answer through the edge before the wake counts as failed. */
   pingTimeoutMs?: number;
+  /** How long a wake gets in all, across its resume, re-pause and second resume, before the row says it did not
+   * complete (tests shrink it). */
+  deadlineMs?: number;
+  /** How long after a wake gave up the provider is read once more for a resume that landed late (tests shrink it). */
+  lateReadMs?: number;
   /** A nap-time vault archive over this is not stored (a warning names the size). */
   vaultCapBytes?: number;
 }
 
 const WAKE_PING_TIMEOUT_MS = 30_000;
+/** How long a pause and a wake get in all, each provider call inside them sharing the budget: a pause takes about
+ * 75 s live and a resume under a minute, and each verb sends its call twice at most. */
+const PAUSE_DEADLINE_MS = 4 * 60_000;
+const WAKE_DEADLINE_MS = 6 * 60_000;
+/** One read of the provider after a missed deadline; the client sets no request timeout of its own. */
+const PROVIDER_READ_MS = 30_000;
+/** A resume the runtime stopped waiting on can still land: one read this long after a wake gave up finds it. */
+const WAKE_LATE_READ_MS = 3 * 60_000;
 /** A daemon that is up answers the hello on connect; a machine whose daemon is gone costs this once on each side of an update. */
 const DAEMON_HELLO_TIMEOUT_MS = 5_000;
 /** The probe's fetch bound; the frame keeps loading meanwhile, so silence costs nothing but the sentence. */
@@ -517,11 +548,15 @@ const VAULT_CAP_BYTES = 200 * 1024 * 1024;
 /** Blob collection: the latest nap-time vault per workspace id. */
 const VAULTS = "vaults";
 
+/** What `until` rejects with when the deadline passed and not the promise, so a caller that retries can tell the
+ * two apart. */
+class DeadlineError extends Error {}
+
 /** Rejects once the deadline passes; the underlying promise is left to settle on its own. */
 function until<T>(p: Promise<T>, deadline: number, what: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const ms = Math.max(0, deadline - Date.now());
-    const timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+    const timer = setTimeout(() => reject(new DeadlineError(`${what} timed out after ${ms} ms`)), ms);
     p.then(
       v => { clearTimeout(timer); resolve(v); },
       e => { clearTimeout(timer); reject(e); },
@@ -943,6 +978,44 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const { backend, store, adapters } = opts;
   const bus = eventBus();
   const pingTimeoutMs = opts.wake?.pingTimeoutMs ?? WAKE_PING_TIMEOUT_MS;
+  const pauseDeadlineMs = opts.nap?.pauseDeadlineMs ?? PAUSE_DEADLINE_MS;
+  const wakeDeadlineMs = opts.wake?.deadlineMs ?? WAKE_DEADLINE_MS;
+  const providerReadMs = opts.providerReadMs ?? PROVIDER_READ_MS;
+  const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
+  /** Each provider move the guest has to cooperate with: the state it leaves the machine in, and the state a
+   * machine the move never touched still reads. */
+  const moves: Record<ProviderMove, { leaves: MachineState; from: MachineState }> = {
+    pause: { leaves: "paused", from: "running" },
+    resume: { leaves: "running", from: "paused" },
+  };
+  /** One provider move inside a pause or a wake, bounded by what is left of the verb's budget: a call that has not
+   * answered in time is left to settle on its own and the provider is read once. A machine that landed is done;
+   * one still where it was gets the call once more; anything else, a second miss or a spent budget ends the move
+   * with the row's words, measured from the verb's start. A call the provider refuses is the caller's to judge. */
+  const settleMove = async (machine: Machine, move: ProviderMove, budget: MoveBudget): Promise<void> => {
+    const rule = moves[move];
+    for (let attempt = 1; ; attempt++) {
+      const left = budget.deadline - Date.now();
+      if (left > 0) {
+        // The two attempts share what is left: the first takes half, the second the rest.
+        try {
+          return await until(machine[move](), Date.now() + (attempt === 1 ? left / 2 : left), `${move} of ${machine.id}`);
+        } catch (e) {
+          if (!(e instanceof DeadlineError)) throw e;
+        }
+      }
+      const reads = await until(machine.state(), Date.now() + providerReadMs, `state of ${machine.id}`).catch(() => undefined);
+      if (reads === rule.leaves) return;
+      if (attempt === 1 && reads === rule.from && budget.deadline > Date.now()) continue;
+      const words = moveTimedOutLine(budget.what, Date.now() - budget.started, reads);
+      console.warn(`${machine.id}: ${words}`);
+      throw new Error(words);
+    }
+  };
+  const budgetFor = (what: MoveBudget["what"], ms: number): MoveBudget => {
+    const started = Date.now();
+    return { what, started, deadline: started + ms };
+  };
   const daemonHelloTimeoutMs = opts.daemonHelloTimeoutMs ?? DAEMON_HELLO_TIMEOUT_MS;
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
@@ -1526,6 +1599,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const payload = await store.getBlob(VAULTS, record.id);
           if (payload !== undefined) await importInto(m, payload, "/");
         },
+        move: (m, move) => {
+          if (entry.budget === undefined) throw new Error(`${move} of ${m.id} outside a pause or a wake`);
+          return settleMove(m, move, entry.budget);
+        },
         wakeCheck: async m => {
           const expected = record.shape;
           let both = "";
@@ -1563,6 +1640,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** Everything a workspace left on this side once its machine is dealt with: live state, flushes, stored rows, vault. */
   const drop = async (id: string): Promise<void> => {
+    live.get(id)?.lateRead?.();
     live.delete(id);
     transcripts.delete(id);
     daemonNotes.delete(id);
@@ -1589,6 +1667,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (entry.napping) return entry.napping;
     if (entry.record.phase !== "running") return view(entry.record);
     entry.napping = (async () => {
+      entry.budget = budgetFor("pause", pauseDeadlineMs);
       try {
         entry.record.phase = "pausing";
         await persist(entry.record);
@@ -1609,10 +1688,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await emitStatus(entry, "napping", reason);
         return view(entry.record);
       } finally {
+        delete entry.budget;
         delete entry.napping;
       }
     })();
     return entry.napping;
+  };
+
+  /** One read of the provider a while after a wake gave up: a resume the runtime stopped waiting on can land later,
+   * and a record still saying napping over a machine that runs would bill under a paused row until a verb met it.
+   * The read that finds it running adopts, as any verb would. */
+  const armLateRead = (entry: LiveWorkspace): void => {
+    entry.lateRead?.();
+    entry.lateRead = clock.schedule(() => {
+      delete entry.lateRead;
+      void runsUnderNapping(entry)
+        .then(runs => (runs ? adoptRunning(entry) : undefined))
+        .catch((e: unknown) => console.warn(`late read of ${entry.record.id}: ${e instanceof Error ? e.message : String(e)}`));
+    }, lateReadMs, { unref: true });
   };
 
   /** The provider paused the machine outside a nap (its idle timer, a console click): the record follows the fact, so a wake resumes it the normal way. */
@@ -1991,6 +2084,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       else if (await runsUnderNapping(entry)) await adoptRunning(entry);
       if (entry.record.phase === "running") return view(entry.record);
       entry.waking = (async () => {
+        entry.budget = budgetFor("wake", wakeDeadlineMs);
         entry.record.phase = "waking";
         await persist(entry.record);
         await emitStatus(entry, "napping");
@@ -2006,8 +2100,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           entry.record.phase = entry.ws.currentPhase;
           await persist(entry.record);
           await emitStatus(entry, "napping", e instanceof Error ? e.message : String(e));
+          armLateRead(entry);
           throw e;
         } finally {
+          delete entry.budget;
           delete entry.waking;
         }
       })();
