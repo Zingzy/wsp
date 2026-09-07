@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS } from "@wsp/catalog";
-import { SessionStartOutcome, notifyLine } from "@wsp/protocol";
+import { SessionStartOutcome, backgroundTasksLine, notifyLine } from "@wsp/protocol";
 import { INSTRUCTIONS, SETUP_HEADING, SKILL_NAME, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
 import { THREAD_AGENTS } from "../src/thread-agents.js";
 import { VERBS } from "../src/verbs.js";
@@ -40,6 +40,11 @@ describe("the wsp skill", () => {
   it("quotes the notify line as the protocol prints it and names every send outcome the protocol knows", () => {
     expect(WSP_SKILL).toContain(`\`${notifyLine("1a2b3c4d-0000", { status: "completed", durationMs: 724_000, costUsd: 0.41, text: "first line\n<last line of the reply>" })}\``);
     for (const outcome of SessionStartOutcome.options) expect(WSP_SKILL, outcome).toContain(`(outcome \`${outcome}\`)`);
+  });
+
+  it("quotes the failure a reply with a background command gets, as the adapter words it", () => {
+    const rules = WSP_SKILL.slice(WSP_SKILL.indexOf("## Rules learned the hard way"));
+    expect(rules).toContain(`\`${backgroundTasksLine(1)}\``);
   });
 
   it("tells an agent how to add a tool the catalog does not carry, and what not to add", () => {
