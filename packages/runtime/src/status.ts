@@ -113,6 +113,8 @@ export interface StatusApi {
  * backend.get. daemonReach is absent on backends without preview URLs. */
 export interface StatusRecord extends WorkspaceView {
   size: WorkspaceSize;
+  /** Which write of the record this view is of; the poll drops a row built on a view the record has moved past. */
+  generation: number;
   idleAt?: number;
   daemonReach?: () => Promise<PreviewReach>;
   providerState: () => Promise<MachineState>;
@@ -364,16 +366,16 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     return { state: provider, reach: { ...reach, state: "zombie" }, reason };
   };
 
-  const list: StatusApi["list"] = async opts => {
-    const records = await o.records();
+  const statusesOf = async (records: StatusRecord[], opts: StatusListOptions | undefined): Promise<WorkspaceStatus[]> => {
     const probe: ProbeOptions = { promptMs: opts?.promptMs ?? promptMs, timeoutMs: opts?.probeTimeoutMs ?? probeTimeoutMs };
     const reconcile = opts?.reconcile ?? "always";
 
     return Promise.all(
       records.map(async (r): Promise<WorkspaceStatus> => {
-        const { size, idleAt, daemonReach, providerState, exec, ...view } = r;
+        const { size, idleAt, daemonReach, providerState, exec, generation, ...view } = r;
         void providerState;
         void exec;
+        void generation;
         const base = { ...view, size, rateUsdPerHour: o.rateUsdPerHour(size), ...(idleAt !== undefined ? { idleAt } : {}) };
         const gone = (reason: string | undefined): WorkspaceStatus => ({ ...base, machineState: "gone", reach: { state: "gone" }, ...(reason !== undefined ? { reason } : {}) });
         const done = (state: MachineState, reach: WorkspaceStatus["reach"]): WorkspaceStatus =>
@@ -411,6 +413,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       }),
     );
   };
+
+  const list: StatusApi["list"] = async opts => statusesOf(await o.records(), opts);
 
   /** A tick that throws is a tick that failed, never an unhandled rejection: one of those takes the host down with it. */
   const guarded = (what: string, run: () => Promise<void>) => (): void => {
@@ -482,7 +486,13 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   }
 
   const pollTick = async (): Promise<void> => {
-    for (const status of await list({ reconcile: "on-failure" })) {
+    const records = await o.records();
+    const statuses = await statusesOf(records, { reconcile: "on-failure" });
+    // A record written while its poll was in flight pushed its own row since; the poll's older row would put a phase the record has left back on the screen.
+    const built = new Map(records.map(r => [r.id, r.generation]));
+    const now = new Map((await o.records()).map(r => [r.id, r.generation]));
+    for (const status of statuses) {
+      if (now.get(status.id) !== built.get(status.id)) continue;
       const key = JSON.stringify(status);
       if (lastEmitted.get(status.id) === key) continue;
       lastEmitted.set(status.id, key);
