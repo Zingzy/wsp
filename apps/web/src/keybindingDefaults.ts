@@ -1,11 +1,12 @@
 // Adapted from pingdotgg/t3code packages/shared/src/keybindings.ts at 57a66608 (MIT).
 // Kept: the shortcut parser, the when-expression parser and the compiler.
 // The default list is the subset of their rules whose commands this shell
-// dispatches; the jump, model-picker, zoom, diff, stash, settings and editor
-// rules are left out with the features they drive. The workspace switch is
-// ours: a Control chord is the terminal's while it has focus, and Tab and the
-// digits with mod are the browser's inside a tab, where keybindings.ts drops
-// them.
+// dispatches; the jump, model-picker, diff, stash, settings and editor rules
+// are left out with the features they drive. The zoom is here but it is the
+// terminal's own, reaching a focused pane and never the app around it. The
+// workspace switch is ours: a Control chord is the terminal's while it has
+// focus, and Tab and the digits with mod are the browser's inside a tab, where
+// keybindings.ts drops them.
 import {
   MAX_KEYBINDINGS_COUNT,
   MAX_WHEN_EXPRESSION_DEPTH,
@@ -32,6 +33,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+b", command: "rightPanel.toggle" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
+  { key: "mod+=", command: "terminal.zoomIn", when: "terminalFocus" },
+  { key: "mod+shift+=", command: "terminal.zoomIn", when: "terminalFocus" },
+  { key: "mod+-", command: "terminal.zoomOut", when: "terminalFocus" },
+  { key: "mod+0", command: "terminal.zoomReset", when: "terminalFocus" },
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalOwnsMod" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },

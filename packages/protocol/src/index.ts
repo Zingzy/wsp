@@ -824,6 +824,17 @@ export interface ContextMenuItem {
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
 export const DESKTOP_MAC_CLASS = "desktop-mac";
 
+/** A key press the desktop shell took from its own menu and handed to the page, spelled the way a keyboard event
+ * spells it, so the page's one keybinding table answers it. */
+export interface ShellChord {
+  readonly key: string;
+  readonly code: string;
+  readonly metaKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly shiftKey: boolean;
+  readonly altKey: boolean;
+}
+
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
@@ -837,6 +848,10 @@ export interface DesktopBridge {
   capturePreview(workspaceId: string): Promise<void>;
   /** The last photograph taken of this workspace, as a data url, or nothing when none was taken. */
   workspacePreview(workspaceId: string): Promise<string | undefined>;
+  /** Whether a terminal holds focus, so the chords the shell's menu would zoom the window on stand aside for it. */
+  setTerminalFocus(focused: boolean): void;
+  /** A chord the shell stood aside from, for the page's keybindings to answer; returns the unsubscribe. */
+  onShellChord(handler: (chord: ShellChord) => void): () => void;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------

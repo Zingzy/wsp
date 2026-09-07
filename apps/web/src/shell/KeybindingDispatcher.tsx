@@ -11,6 +11,7 @@ import { useSidebar } from "../components/ui/sidebar.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { resolveShortcutCommand } from "../keybindings.js";
 import type { ResolvedKeybindingsConfig } from "../keybindingTypes.js";
+import { desktopBridge } from "../lib/desktopShell.js";
 import { isPreviewFocused } from "../lib/previewFocus.js";
 import { isTerminalFocused } from "../lib/terminalFocus.js";
 import { useSelectedWorkspaceId } from "../protocol/store.js";
@@ -59,6 +60,41 @@ export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDING
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
+    };
+  }, [keybindings]);
+
+  useEffect(() => {
+    const bridge = desktopBridge();
+    const setTerminalFocus = bridge?.setTerminalFocus;
+    const onShellChord = bridge?.onShellChord;
+    if (setTerminalFocus === undefined || onShellChord === undefined) return;
+    // A focusout fires before the focus lands, so what has it is read on the turn after the move.
+    let reported: boolean | null = null;
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const report = (): void => {
+      pending = null;
+      const focused = isTerminalFocused();
+      if (focused === reported) return;
+      reported = focused;
+      setTerminalFocus(focused);
+    };
+    const scheduleReport = (): void => {
+      if (pending === null) pending = setTimeout(report, 0);
+    };
+    report();
+    window.addEventListener("focusin", scheduleReport);
+    window.addEventListener("focusout", scheduleReport);
+    const stopChords = onShellChord(chord => {
+      const command = resolveShortcutCommand(chord, keybindings, {
+        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
+      });
+      if (command !== null) runShellCommand(command, target.current);
+    });
+    return () => {
+      if (pending !== null) clearTimeout(pending);
+      window.removeEventListener("focusin", scheduleReport);
+      window.removeEventListener("focusout", scheduleReport);
+      stopChords();
     };
   }, [keybindings]);
 

@@ -23,8 +23,9 @@ import { cssFontFamilies, isMonospaceFamily } from "../../appearanceFonts";
 import { TERMINAL_SYMBOLS_FACE, terminalFontChain } from "./fontChain";
 import { localFontFamilies, registerLocalFonts } from "./localFonts";
 
-/** The app's mono size, --font-size-mono in index.css: the terminal's text matches the sidebar's and the composer's. */
-export const DEFAULT_TERMINAL_FONT_SIZE = 11;
+const TERMINAL_FONT_SIZE_TOKEN = "--font-size-terminal";
+/** The number that token names, for a page whose stylesheet has not landed; the two must stay one size. */
+const TERMINAL_FONT_SIZE_FALLBACK = 14;
 const MIN_TERMINAL_FONT_SIZE = 6;
 const MAX_TERMINAL_FONT_SIZE = 32;
 export const DEFAULT_TERMINAL_FONT_FAMILY = terminalFontChain(undefined);
@@ -118,8 +119,15 @@ export async function loadTerminalFontFamily(
   return (environment?.resolve ?? terminalFontFamily)(family, fallbacks);
 }
 
+/** The size a pane draws at with nothing else asked for: the app's own text size, from the type scale in index.css. */
+export function appTerminalFontSize(): number {
+  if (typeof document === "undefined") return TERMINAL_FONT_SIZE_FALLBACK;
+  const named = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(TERMINAL_FONT_SIZE_TOKEN));
+  return Number.isFinite(named) ? named : TERMINAL_FONT_SIZE_FALLBACK;
+}
+
 export function terminalFontSize(size?: number): number {
-  if (size === undefined || !Number.isFinite(size)) return DEFAULT_TERMINAL_FONT_SIZE;
+  if (size === undefined || !Number.isFinite(size)) return appTerminalFontSize();
   return Math.max(MIN_TERMINAL_FONT_SIZE, Math.min(MAX_TERMINAL_FONT_SIZE, Math.round(size)));
 }
 

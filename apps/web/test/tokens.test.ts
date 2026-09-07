@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TERMINAL_FONT_SIZE } from "../src/terminal/ghostty/surface.js";
+import { appTerminalFontSize } from "../src/terminal/ghostty/surface.js";
 
 const css = readFileSync(join(__dirname, "../src/index.css"), "utf8");
 
@@ -17,9 +17,14 @@ describe("index.css", () => {
     expect(body).toContain("@theme inline {");
   });
 
-  it("the mono size token is the 11px the sidebar and composer set their code and meta text in, and the terminal's default size is the same number", () => {
+  it("the mono size token is the 11px the sidebar and composer set their code and meta text in", () => {
     expect(css).toMatch(/^\s*--font-size-mono: 11px;$/m);
-    expect(DEFAULT_TERMINAL_FONT_SIZE).toBe(11);
+  });
+
+  it("the terminal size token beside it is the app's text size, and the pane's default is the number that token names", () => {
+    expect(css).toMatch(/^\s*--font-size-terminal: 14px;$/m);
+    // A page with no stylesheet yet falls back to the number in the code; the two must be the same size.
+    expect(appTerminalFontSize()).toBe(14);
   });
 
   it("the search row's tint is one token, a few percent of black", () => {

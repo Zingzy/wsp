@@ -15,6 +15,7 @@ import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
 import { useStore } from "../protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
+import { resetTerminalFontSize, stepTerminalFontSize } from "../terminal/fontSetting.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import { requestComposerFocus, requestNewThread } from "./shellRequests.js";
 import { highlightedWorkspaceId, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
@@ -176,6 +177,15 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
     case "terminal.split":
       if (!workspaceId) return;
       void (getTerminalFocusOwner() === "right-panel" ? splitActivePanelTerminal(workspaceId) : splitDrawerTerminal(workspaceId));
+      return;
+    case "terminal.zoomIn":
+      if (workspaceId) stepTerminalFontSize(workspaceId, 1);
+      return;
+    case "terminal.zoomOut":
+      if (workspaceId) stepTerminalFontSize(workspaceId, -1);
+      return;
+    case "terminal.zoomReset":
+      if (workspaceId) resetTerminalFontSize(workspaceId);
       return;
     case "chat.new":
       if (workspaceId) requestNewThread({ workspaceId });
