@@ -4,6 +4,17 @@
 // library. A rule is what a config file holds; a resolved rule is what the
 // matcher reads. Commands are the closed set this shell can dispatch.
 
+/** The sidebar slots a chord jumps to, counted down the workspace rows. The
+ * chord table, the palette rows and the switch all read this one list, so a
+ * tenth slot is added here and nowhere else. */
+export const WORKSPACE_SELECT_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+export type WorkspaceSelectSlot = (typeof WORKSPACE_SELECT_SLOTS)[number];
+export type WorkspaceSelectCommand = `workspace.select.${WorkspaceSelectSlot}`;
+
+export function workspaceSelectCommand(slot: WorkspaceSelectSlot): WorkspaceSelectCommand {
+  return `workspace.select.${slot}`;
+}
+
 export const KEYBINDING_COMMANDS = [
   "sidebar.toggle",
   "terminal.toggle",
@@ -13,8 +24,24 @@ export const KEYBINDING_COMMANDS = [
   "preview.toggle",
   "commandPalette.toggle",
   "chat.new",
+  "workspace.next",
+  "workspace.previous",
+  ...WORKSPACE_SELECT_SLOTS.map(workspaceSelectCommand),
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];
+
+const WORKSPACE_SELECT_SLOT_BY_COMMAND = Object.fromEntries(
+  WORKSPACE_SELECT_SLOTS.map(slot => [workspaceSelectCommand(slot), slot]),
+) as Record<WorkspaceSelectCommand, WorkspaceSelectSlot>;
+
+export function isWorkspaceSelectCommand(command: KeybindingCommand): command is WorkspaceSelectCommand {
+  return command in WORKSPACE_SELECT_SLOT_BY_COMMAND;
+}
+
+/** The slot the command jumps to; the command type is the proof it names one. */
+export function workspaceSelectSlot(command: WorkspaceSelectCommand): WorkspaceSelectSlot {
+  return WORKSPACE_SELECT_SLOT_BY_COMMAND[command];
+}
 
 export const MAX_WHEN_EXPRESSION_DEPTH = 64;
 export const MAX_KEYBINDINGS_COUNT = 256;

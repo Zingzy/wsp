@@ -18,6 +18,7 @@ import { EXPORT_SESSIONS_NOTE, NO_THREADS_NOTE, NOT_LANDED_WORD, exportFromLine,
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { useThreadFolder } from "../files/root.js";
+import { desktopBridge } from "../lib/desktopShell.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { agentRows, agentsRequest, exportLandedLine, exportProgress, isExportOf, pickedDest } from "./exportProject.js";
@@ -35,7 +36,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
   const sessions = useStore(s => s.sessions[workspace.id]);
   const rows = useMemo(() => agentRows(sessions), [sessions]);
   const folder = useThreadFolder(workspace.id);
-  const bridge = typeof window === "undefined" ? undefined : window.wsp?.pickFolder;
+  const bridge = desktopBridge()?.pickFolder;
   const lastFolder = useLastFolderParent();
   const [source, setSource] = useState(folder ?? "");
   /** The destination once the person edited or picked it; before that it mirrors the source. */
