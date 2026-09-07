@@ -793,22 +793,18 @@ export function templateWaitedLine(templateId: string, status: string, waitedMs:
   return `the template ${templateId} still reads ${status} after ${fmtDuration(waitedMs)}`;
 }
 
-/** The doctor's line per version it made durable: the golden and version, the template, and whether the provider
- * already held one under the version's name or the doctor promoted the snapshot now. */
-export function templateRecordedLine(golden: string, version: number, templateId: string, found: boolean): string {
-  return `golden ${golden} v${version}: template ${templateId} ${found ? "found by name" : "promoted"} and recorded`;
+/** The doctor's line per version it made durable: the golden and version, the template it promoted, and when other
+ * templates already carry the name (another host's, or a run that recorded nothing), how many; none when the count
+ * is zero or the listing was not given. */
+export function templateRecordedLine(golden: string, version: number, templateId: string, sharing: number | undefined): string {
+  const head = `golden ${golden} v${version}: template ${templateId} promoted and recorded`;
+  return sharing === undefined || sharing === 0 ? head : `${head}; ${sharing} other ${sharing === 1 ? "template carries" : "templates carry"} its name`;
 }
 
 /** The doctor's line per version it could not make durable and why: a lost snapshot in the provider's own words is
  * left to the doctor's rebuild road below it. */
 export function templateSkippedLine(golden: string, version: number, reason: string): string {
   return `golden ${golden} v${version}: no template recorded, ${reason}`;
-}
-
-/** What a version's row says when more than one template carries its name: the provider allows the duplicates and
- * a template names no source snapshot, so none is the version's to record. */
-export function templatesCarryNameReason(count: number): string {
-  return `${count} templates carry its name`;
 }
 
 /** What a version's row says when the provider answers 404 for its snapshot: the vanish the templates exist to outlive. */

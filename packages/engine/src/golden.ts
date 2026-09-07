@@ -132,20 +132,9 @@ export interface Templates {
   delete(id: string): Promise<void>;
 }
 
-/** The name a version's template is promoted under and found by: one rule, so a version promoted by hand under it
- * is recognised and never promoted twice. The host is in it because the provider lets two templates share a name
- * and a template names no source snapshot: two hosts on one account with the same golden name would otherwise
- * adopt each other's. */
+/** The name a version's template is promoted under: one rule. The host is in it because the provider lets two
+ * templates share a name, so two hosts on one account with the same golden name would otherwise read as one. */
 export const templateName = (hostId: string, golden: string, version: number): string => `wsp-${hostId}-${golden}-v${version}`;
-
-/** The name the first seals promoted under, before the host was in it; accepted for adoption on the same rule. */
-export const legacyTemplateName = (golden: string, version: number): string => `wsp-${golden}-v${version}`;
-
-/** The names a version's template may carry: this host's shape, and the first seals' shape. */
-export interface TemplateNames {
-  name: string;
-  legacy: string;
-}
 
 /** How long a promoted template may read building before the seal gives up (a promotion reads ready at once per the
  * provider's reference; the wait covers a slower day), and how often it is read. Tests shrink both. */
@@ -174,16 +163,14 @@ export async function awaitTemplate(templates: Templates, templateId: string, wa
   }
 }
 
-/** The template a version should be recorded with: the one template the provider holds under either of the
- * version's names (a promotion done by hand, or a run that recorded nothing), else a fresh promotion of its snapshot
- * under this host's name; ready either way. More than one under the names is nobody's to pick, since a template
- * names no source snapshot: nothing is recorded or promoted, and the count is answered. */
-export async function adoptOrPromote(templates: Templates, snapshotId: string, names: TemplateNames, wait: TemplateWait = {}): Promise<{ templateId: string; found: boolean } | { carrying: number }> {
-  const held = (await templates.list()).filter(t => t.name === names.name || t.name === names.legacy);
-  if (held.length > 1) return { carrying: held.length };
-  const templateId = held[0]?.id ?? (await templates.promote(snapshotId, names.name));
+/** A fresh template for a version, promoted from its snapshot and ready. A template names no source snapshot, so
+ * none the provider already holds under the name is ever taken as this version's; the listing is read only to say
+ * how many carry the name already, and a listing the provider will not give leaves the count out. */
+export async function promoteVersion(templates: Templates, snapshotId: string, name: string, wait: TemplateWait = {}): Promise<{ templateId: string; sharing?: number }> {
+  const sharing = await templates.list().then(rows => rows.filter(t => t.name === name).length, () => undefined);
+  const templateId = await templates.promote(snapshotId, name);
   await awaitTemplate(templates, templateId, wait);
-  return { templateId, found: held.length === 1 };
+  return { templateId, ...(sharing !== undefined ? { sharing } : {}) };
 }
 
 /** Solari's built-in templates are kind-specific (TemplateKindMismatch otherwise). */

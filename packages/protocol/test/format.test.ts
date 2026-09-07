@@ -20,7 +20,6 @@ import {
   templateFailedLine,
   templateRecordedLine,
   templateSkippedLine,
-  templatesCarryNameReason,
   templateStatusLine,
   templateWaitedLine,
   REPO_STATE_WORDS,
@@ -693,11 +692,12 @@ describe("template words", () => {
     expect(templateWaitedLine("tpl_a", "building", 300_000)).toBe("the template tpl_a still reads building after 5m");
   });
 
-  it("the doctor's line per version says whether the template was found under the version's name or promoted now", () => {
-    expect(templateRecordedLine("default", 1, "tpl_e6f2", true)).toBe("golden default v1: template tpl_e6f2 found by name and recorded");
-    expect(templateRecordedLine("default", 2, "tpl_0f1e", false)).toBe("golden default v2: template tpl_0f1e promoted and recorded");
+  it("the doctor's line per version names the template it promoted and, when other templates already carry the name, how many", () => {
+    expect(templateRecordedLine("default", 2, "tpl_0f1e", 0)).toBe("golden default v2: template tpl_0f1e promoted and recorded");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", 1)).toBe("golden default v1: template tpl_0f1e promoted and recorded; 1 other template carries its name");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", 2)).toBe("golden default v1: template tpl_0f1e promoted and recorded; 2 other templates carry its name");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", undefined)).toBe("golden default v1: template tpl_0f1e promoted and recorded");
     expect(templateSkippedLine("default", 1, "its snapshot is gone at the provider")).toBe("golden default v1: no template recorded, its snapshot is gone at the provider");
-    expect(templateSkippedLine("default", 1, templatesCarryNameReason(2))).toBe("golden default v1: no template recorded, 2 templates carry its name");
     expect(NO_TEMPLATES_LINE).toBe("this backend has no templates; goldens stay as snapshots");
   });
 });

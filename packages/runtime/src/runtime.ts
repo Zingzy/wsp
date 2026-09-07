@@ -24,7 +24,6 @@ import {
   exportFolder,
   exportPaths,
   exportPathsInto,
-  adoptOrPromote,
   goldenHead,
   importInto,
   isMissing,
@@ -41,8 +40,8 @@ import {
   prepareBuilder,
   reap,
   refreshPreviewToken,
+  promoteVersion,
   sealGolden,
-  legacyTemplateName,
   templateName,
   templatesOf,
   applyDelta,
@@ -127,7 +126,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, SNAPSHOT_GONE_REASON, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, templatesCarryNameReason, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, SNAPSHOT_GONE_REASON, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -684,9 +683,10 @@ export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" |
   name?: string;
 }
 
-/** One version the promote road visited: recorded with its template (found under its name or promoted now), or left
- * as it was with the reason, a lost snapshot in the row's own words. */
-export type GoldenPromotion = { golden: string; version: number } & ({ templateId: string; found: boolean } | { error: string });
+/** One version the promote road visited: recorded with the template promoted for it, with how many templates
+ * already carried the name when the listing was given, or left as it was with the reason, a lost snapshot in the
+ * row's own words. */
+export type GoldenPromotion = { golden: string; version: number } & ({ templateId: string; sharing?: number } | { error: string });
 
 export interface GoldenUpgradeResult {
   manifest: GoldenManifest;
@@ -844,9 +844,9 @@ export interface Runtime {
     kill(builderId: string): Promise<void>;
     /** Moves the golden's head; new forks follow it, workspaces already forked keep their image. */
     rollback(version: number, name?: string): Promise<GoldenManifest>;
-    /** Makes every version of the golden durable: one with no template is recorded with the template the provider
-     * holds under its name, or with a fresh promotion of its snapshot, and forks boot from it from then on.
-     * Undefined on a backend without templates; empty when every version already has one. */
+    /** Makes every version of the golden durable: one with no template gets a fresh promotion of its snapshot and
+     * forks boot from it from then on; one whose snapshot the provider has lost is a row saying so and nothing is
+     * written. Undefined on a backend without templates; empty when every version already has one. */
     promote(name?: string): Promise<GoldenPromotion[] | undefined>;
     /** Every project golden this runtime took, oldest first. */
     projects(): Promise<ProjectGolden[]>;
@@ -3526,16 +3526,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const v of manifest?.versions ?? []) {
         if (v.templateId !== undefined) continue;
         try {
-          const adopted = await adoptOrPromote(templates, v.snapshotId, { name: templateName(hostId, key, v.version), legacy: legacyTemplateName(key, v.version) });
-          if ("carrying" in adopted) {
-            rows.push({ golden: key, version: v.version, error: templatesCarryNameReason(adopted.carrying) });
-            continue;
-          }
-          const { templateId, found } = adopted;
+          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, templateName(hostId, key, v.version));
           const current = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
           if (current === undefined) throw new Error(`golden ${key} was dropped while its versions were being promoted`);
           await store.put(GOLDENS, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });
-          rows.push({ golden: key, version: v.version, templateId, found });
+          rows.push({ golden: key, version: v.version, templateId, ...(sharing !== undefined ? { sharing } : {}) });
         } catch (e) {
           // The provider's 404 on the promote is its word that the snapshot is gone; every other failure keeps its own words.
           rows.push({ golden: key, version: v.version, error: isMissing(e) ? SNAPSHOT_GONE_REASON : e instanceof Error ? e.message : String(e) });

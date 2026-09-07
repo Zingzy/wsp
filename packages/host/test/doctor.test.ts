@@ -55,22 +55,23 @@ describe("promoteGoldens", () => {
     return { lines, io: { log: (l: string) => void lines.push(l) } };
   };
 
-  it("records the template the provider holds under a version's name, promotes the rest, says each one, and notes the counts", async () => {
+  it("promotes a fresh template for every version without one, says each one with how many templates already carry its name, and notes the count", async () => {
     const backend = stubBackend();
     backend.capabilities.templates = true;
     const store = memoryStore();
     await store.put("goldens", "default", { head: 3, versions: [version(1), version(2), version(3, "tpl_three")] });
     for (const n of [1, 2, 3]) backend.snapshots.push({ id: `snap_golden-v${n}`, sizeBytes: 8e9 });
-    backend.templates.set("tpl_e6f26b64338f4eba", { id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready", snapshotId: "snap_golden-v1" });
+    // A template already under this version's own name, from a run that recorded nothing: counted, never adopted.
+    backend.templates.set("tpl_stale", { id: "tpl_stale", name: "wsp-h1-default-v1", status: "ready", snapshotId: "snap_golden-v1" });
     const rt = createRuntime({ backend, store, adapters: {}, hostId: "h1" });
     const { lines, io: cli } = io();
-    expect(await promoteGoldens(rt, cli)).toBe("1 promoted, 1 found by name");
+    expect(await promoteGoldens(rt, cli)).toBe("2 promoted");
     expect(lines).toEqual([
-      "golden default v1: template tpl_e6f26b64338f4eba found by name and recorded",
+      "golden default v1: template tpl_wsp-h1-default-v1 promoted and recorded; 1 other template carries its name",
       "golden default v2: template tpl_wsp-h1-default-v2 promoted and recorded",
     ]);
-    expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v2", name: "wsp-h1-default-v2" }]);
-    expect(((await store.get("goldens", "default")) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual(["tpl_e6f26b64338f4eba", "tpl_wsp-h1-default-v2", "tpl_three"]);
+    expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v1", name: "wsp-h1-default-v1" }, { snapshotId: "snap_golden-v2", name: "wsp-h1-default-v2" }]);
+    expect(((await store.get("goldens", "default")) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual(["tpl_wsp-h1-default-v1", "tpl_wsp-h1-default-v2", "tpl_three"]);
     expect(await promoteGoldens(rt, cli)).toBe("every version already has a template");
   });
 
@@ -90,9 +91,10 @@ describe("promoteGoldens", () => {
     ]);
     expect(((await store.get("goldens", "default")) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual([undefined, "tpl_wsp-h1-default-v2"]);
 
-    backend.listTemplates = async () => {
+    backend.promoteSnapshot = async () => {
       throw Object.assign(new Error("upstream unavailable"), { kind: "unavailable", status: 502 });
     };
+    backend.snapshots.push({ id: "snap_golden-v1", sizeBytes: 8e9 });
     const again = io();
     await expect(promoteGoldens(rt, again.io)).resolves.toBe("1 not made durable");
     expect(again.lines).toEqual(["golden default v1: no template recorded, upstream unavailable"]);

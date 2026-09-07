@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, adoptOrPromote, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, legacyTemplateName, sealGolden, smokeTally, templateName, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, promoteVersion, sealGolden, smokeTally, templateName, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import { shellQuote, type RecipeDigest } from "@wsp/protocol";
@@ -489,12 +489,11 @@ describe("golden templates", () => {
     ]);
   });
 
-  it("the template's name carries the host and the golden, the golden defaulting to the store's default key: one rule, with the shape the first seals used beside it", async () => {
+  it("the template's name carries the host and the golden, the golden defaulting to the store's default key: one rule", async () => {
     const { backend, promoted } = recordingBackend({}, { templates: true });
     await buildGolden({ backend, setup: "true", smoke: "true", hostId: "h1" });
     expect(promoted.map(p => p.name)).toEqual(["wsp-h1-default-v1"]);
     expect(templateName("h1", "default", 1)).toBe("wsp-h1-default-v1");
-    expect(legacyTemplateName("default", 1)).toBe("wsp-default-v1");
   });
 
   it("a template still building is read again until ready, each read a promoting line", async () => {
@@ -545,25 +544,23 @@ describe("golden templates", () => {
     expect(templatesOf(partial)).toBeUndefined();
   });
 
-  it("adoptOrPromote records the one template the provider holds under the version's name, this host's shape or the first seals' shape, and promotes only when none does", async () => {
-    const { backend, promoted, templates } = recordingBackend({}, { templates: true });
-    templates.set("tpl_e6f26b64338f4eba", { id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready" });
-    templates.set("tpl_mine", { id: "tpl_mine", name: "wsp-h1-default-v3", status: "ready" });
-    const road = templatesOf(backend)!;
-    expect(await adoptOrPromote(road, "snap_dl8pcs2yj1fu", { name: "wsp-h1-default-v1", legacy: "wsp-default-v1" }, FAST_WAIT)).toEqual({ templateId: "tpl_e6f26b64338f4eba", found: true });
-    expect(await adoptOrPromote(road, "snap_v3", { name: "wsp-h1-default-v3", legacy: "wsp-default-v3" }, FAST_WAIT)).toEqual({ templateId: "tpl_mine", found: true });
-    expect(promoted).toEqual([]);
-    expect(await adoptOrPromote(road, "snap_v2", { name: "wsp-h1-default-v2", legacy: "wsp-default-v2" }, FAST_WAIT)).toEqual({ templateId: "tpl_snap_v2", found: false });
-    expect(promoted).toEqual([{ snapshotId: "snap_v2", name: "wsp-h1-default-v2" }]);
-  });
-
-  it("adoptOrPromote records nothing and promotes nothing when more than one template carries the name: the provider allows duplicates and a template names no source snapshot, so the row says how many", async () => {
+  it("promoteVersion always mints a fresh template under this host's name, never adopting one by name, and counts the templates that already carry it", async () => {
     const { backend, promoted, templates } = recordingBackend({}, { templates: true });
     templates.set("tpl_his", { id: "tpl_his", name: "wsp-default-v1", status: "ready" });
-    templates.set("tpl_other_host", { id: "tpl_other_host", name: "wsp-default-v1", status: "ready" });
-    templates.set("tpl_ours", { id: "tpl_ours", name: "wsp-h1-default-v1", status: "ready" });
-    expect(await adoptOrPromote(templatesOf(backend)!, "snap_v1", { name: "wsp-h1-default-v1", legacy: "wsp-default-v1" }, FAST_WAIT)).toEqual({ carrying: 3 });
-    expect(promoted).toEqual([]);
+    templates.set("tpl_other_host", { id: "tpl_other_host", name: "wsp-h1-default-v1", status: "ready" });
+    const road = templatesOf(backend)!;
+    expect(await promoteVersion(road, "snap_v1", "wsp-h1-default-v1", FAST_WAIT)).toEqual({ templateId: "tpl_snap_v1", sharing: 1 });
+    expect(await promoteVersion(road, "snap_v2", "wsp-h1-default-v2", FAST_WAIT)).toEqual({ templateId: "tpl_snap_v2", sharing: 0 });
+    expect(promoted).toEqual([{ snapshotId: "snap_v1", name: "wsp-h1-default-v1" }, { snapshotId: "snap_v2", name: "wsp-h1-default-v2" }]);
+    expect(templates.has("tpl_his")).toBe(true);
+  });
+
+  it("promoteVersion leaves the count out when the provider will not give the listing, and the promote still lands", async () => {
+    const { backend } = recordingBackend({}, { templates: true });
+    backend.listTemplates = async () => {
+      throw Object.assign(new Error("upstream unavailable"), { kind: "unavailable", status: 502 });
+    };
+    expect(await promoteVersion(templatesOf(backend)!, "snap_v1", "wsp-h1-default-v1", FAST_WAIT)).toEqual({ templateId: "tpl_snap_v1" });
   });
 });
 
