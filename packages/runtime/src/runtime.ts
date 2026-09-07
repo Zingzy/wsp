@@ -100,7 +100,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, moveTimedOutLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, moveTimedOutLine, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -2322,7 +2322,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const adapterFor = (entry: LiveWorkspace, named?: string): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
-    if (!factory) throw new Error(`no adapter registered for harness "${harness}"; agents on this host: ${Object.keys(adapters).join(", ") || "none"}`);
+    if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
     return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, env: GUEST_LOGIN_ENV }) };
   };
 
