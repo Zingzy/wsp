@@ -510,8 +510,16 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
-/** The one line the sidebar puts above the rows while the probes fail before leaving this computer; the rows keep their last word. */
-export const COMPUTER_OFFLINE_LINE = "This computer is offline";
+/** The one line the sidebar puts above the rows while the probes fail before leaving this computer; the rows keep
+ * their last word. It names what could not be reached, not the computer: the road out was up and every other name
+ * resolved while this one did not (measured 2026-09-07). */
+export const PROVIDER_UNREACHED_LINE = "Solari cannot be reached from this computer";
+
+/** One line per retry of a provider call that never left this computer: which call, the system error the road gave,
+ * and which try of how many is about to go, so a run that still fails carries the whole flap in its log. */
+export function providerRoadRetryLine(call: string, code: string, tryNumber: number, tries: number): string {
+  return `${call} did not leave this computer (${code}); try ${tryNumber} of ${tries}`;
+}
 
 /** When a turn is over, in the one sentence every door the agent reads quotes whole: the skill, the tool
  * descriptions, the command line's help and the machine's own context. The reply comes back at once from a follow;

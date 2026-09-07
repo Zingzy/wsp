@@ -9,7 +9,7 @@
 // Solari's idle timer, so a poller that asked per tick kept every workspace
 // awake and billing forever.
 
-import { isMissing, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
+import { isMissing, roadFailed, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
 import { appendCostPoint, goneWords, hostLostAnswer, reachShown, type EventUnion, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import type { Store } from "./store.js";
@@ -61,20 +61,6 @@ export interface Probed {
   /** The request failed before it left this computer (no DNS, no route out): the silence is the computer's, and
    * says nothing about the machine. */
   offline?: boolean;
-}
-
-/** The system errors under a failed fetch that mean this computer has no road out: the name would not resolve, or
- * there is no route to anything. A refused or reset connection and a timeout are the far end's and stay the
- * machine's miss (a dropped edge request is how the poll finds a machine gone). */
-const OFFLINE_CODES = new Set(["ENOTFOUND", "EAI_AGAIN", "EAI_FAIL", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH", "EHOSTDOWN"]);
-
-/** fetch rejects with TypeError "fetch failed" for every failure under HTTP and puts the system error, or an
- * AggregateError of one per address tried, in its cause. */
-export function roadFailed(e: unknown): boolean {
-  if (!(e instanceof TypeError) || e.message !== "fetch failed") return false;
-  const cause = e.cause as { code?: unknown; errors?: unknown } | undefined;
-  const codes = Array.isArray(cause?.errors) ? cause.errors.map(err => (err as { code?: unknown } | null)?.code) : [cause?.code];
-  return codes.length > 0 && codes.every(code => typeof code === "string" && OFFLINE_CODES.has(code));
 }
 
 /** The silence a failed request is: the machine's, or this computer's when the request never got out. */

@@ -4,8 +4,8 @@
 // where the workspace rows do, the search row opens the palette without
 // moving a row, a thread row's title keeps its room at the
 // default width, a status toast holds a long token inside its box, the
-// computer offline is one muted mono line under the search row, the line
-// the runtime puts on a machine's row takes that row's second line whole,
+// line for a provider out of reach is one muted mono line under the
+// search row, the line the runtime puts on a machine's row takes that row's second line whole,
 // uncut and without growing the row, collapsing the sidebar leaves the
 // page header's left padding alone, a send refusal above the composer is
 // one muted mono line in a slot the composer keeps at one height whether or
@@ -27,7 +27,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { COMPUTER_OFFLINE_LINE, sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
+import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
@@ -585,13 +585,13 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 30_000);
 
-  it("the computer offline is one muted mono line under the search row, above Workspaces, with no box, badge or colour of its own, and the rows keep their words, in both themes", async () => {
+  it("Solari out of reach is one muted mono line under the search row, above Workspaces, with no box, badge or colour of its own, and the rows keep their words, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&offline=1`);
       await page!.waitForSelector("[data-sidebar-row]");
       const line = page!.locator("[data-sidebar-offline]").first();
       await line.waitFor();
-      expect((await line.textContent())?.trim()).toBe(COMPUTER_OFFLINE_LINE);
+      expect((await line.textContent())?.trim()).toBe(PROVIDER_UNREACHED_LINE);
       const b = await box("[data-sidebar-offline]");
       const search = await box("button[aria-label='Search']");
       const section = await box("button[aria-label='Workspaces']");
