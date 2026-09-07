@@ -66,6 +66,21 @@ export function hostTokenPath(statePath: string): string {
   return join(dirname(statePath), "host-token");
 }
 
+/** Where a host nobody is watching writes what a terminal run would have shown, beside the lock and the token. */
+export function hostLogPath(statePath: string): string {
+  return join(dirname(statePath), "host.log");
+}
+
+/** Where the host serving this state file is, as it prints them when it starts and as wsp status prints them while
+ * it runs: one rule for the three lines, so both readings name the same ports and the same token file. */
+export function addressLines(statePath: string, ports: { port: number; wsPort: number }): string[] {
+  return [
+    `app         http://127.0.0.1:${ports.port}`,
+    `runtime ws  ws://127.0.0.1:${ports.wsPort} (token: ${hostTokenPath(statePath)})`,
+    `state       ${statePath}`,
+  ];
+}
+
 /** The host whose lock names this state file, when that process is still alive. */
 export function servingHost(statePath: string): HostLock | undefined {
   const held = readLock(lockPathFor(statePath));

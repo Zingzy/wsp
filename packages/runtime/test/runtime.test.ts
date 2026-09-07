@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, SessionEvent, foldThreads, type EventUnion, type RecipeDigest, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, SessionEvent, foldThreads, stillWorkingRefusal, type EventUnion, type RecipeDigest, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -32,6 +32,27 @@ describe("runtime", () => {
     expect(events).toContain("workspace.created");
     await rt.workspaces.nap(ws.id);
     expect(events).toContain("workspace.napped");
+  });
+
+  it("a create that asks for an offered size forks the machine at it and the record and the rate follow; one off the list is refused with the list before any machine is forked", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "big", cpu: 2, memMb: 8192 });
+    expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
+    const [status] = await rt.status.list();
+    expect(status).toMatchObject({ id: ws.id, size: { cpu: 2, memMb: 8192 } });
+    expect(status!.rateUsdPerHour).toBeCloseTo(0.15, 10);
+
+    await expect(rt.workspaces.create({ golden: "snap_g", name: "odd", cpu: 8, memMb: 16384 })).rejects.toMatchObject({
+      kind: "invalid",
+      message: "8x16 is not a size this provider offers; the sizes are 2x2 ($0.09/hr), 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)",
+    });
+    expect(backend.machines).toHaveLength(1);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["big"]);
+
+    // No size asked: the golden's own, whether or not the provider offers it today.
+    const plain = await rt.workspaces.create({ golden: "snap_g", name: "plain" });
+    expect((await rt.status.list()).find(s => s.id === plain.id)!.size).toEqual({ cpu: 2, memMb: 4096 });
   });
 
   it("same behavior over the wire: serveRuntime round-trips create via WS", async () => {
@@ -502,6 +523,29 @@ describe("runtime session history", () => {
     expect(ended.endedAt).toBeGreaterThanOrEqual(ended.startedAt!);
     expect(ended.endedAt).toBeLessThanOrEqual(Date.now());
     expect(ended.prompt).toBe("go");
+    await rt.close();
+  });
+
+  it("keeps the row running while the process lives past its reply, refuses a send until it exits, then completes", async () => {
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    m.done("here is the reply");
+    // The reply is recorded, but the process has not exited: the row is still running, not completed.
+    expect(handle.view().status).toBe("running");
+    expect((await rt.sessions.list(ws.id))[0]!.status).toBe("running");
+    expect((await rt.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done"]);
+    const sid = (await rt.sessions.list(ws.id))[0]!.claudeSessionId!;
+    // A send while the process lives is refused in words naming the thread, never run as a second agent.
+    await expect(rt.sessions.start(ws.id, { prompt: "again", resume: sid })).rejects.toThrow(stillWorkingRefusal(handle.view().threadId!));
+
+    m.end();
+    await handle.finished;
+    // The process exited: the row completes and no longer refuses a send.
+    expect((await rt.sessions.list(ws.id))[0]!.status).toBe("completed");
+    await expect(rt.sessions.start(ws.id, { prompt: "again", resume: sid })).resolves.toBeDefined();
     await rt.close();
   });
 
@@ -2509,7 +2553,7 @@ describe("runtime verified wake", () => {
     backend.execImpl = (m, cmd) => {
       if (cmd.includes(TOKEN_PATH)) return tokenGuest(m, cmd);
       if (cmd.includes("ls -A /root")) return { exitCode: 0, stdout: "notes.md\n.local\n", stderr: "" };
-      if (cmd.startsWith("stat -c %s")) return { exitCode: 0, stdout: `${tgzBytes}\n`, stderr: "" };
+      if (cmd.startsWith("wc -c <")) return { exitCode: 0, stdout: `${tgzBytes}\n`, stderr: "" };
       if (cmd.includes("tar czf")) tars.push(m.id);
       if (cmd.includes("tar xzf")) untars.push(m.id);
       return { exitCode: 0, stdout: "", stderr: "" };
@@ -2613,22 +2657,34 @@ describe("runtime verified wake", () => {
     }
   });
 
-  it("every nap replaces the stashed vault; one over the cap is refused with a warning and the previous stays", async () => {
+  it("every nap replaces the stashed vault; one over the cap is refused with a warning, the previous stays, and the napping status says so once", async () => {
     const { backend, tars, setTgzBytes } = guestBackend();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const store = memoryStore();
-      const rt = createRuntime({ backend, store, adapters: {}, wake: { vaultCapBytes: 5_000 } });
+      const rt = createRuntime({ backend, store, adapters: {}, wake: { vaultCapBytes: 5_000 }, vaultCaches: { dirs: ["node_modules", "dist"], files: [".DS_Store"], markers: [".git"] } });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
+      const napReason = (): string | undefined => (events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status.reason;
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
       await rt.workspaces.nap(ws.id);
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
+      expect(napReason()).toBeUndefined();
+      const script = backend.machines[0]!.runLog.find(s => s.includes("tar czf"))!;
+      expect(script).toContain(`find 'root/notes.md' -mindepth 1 -path '*/.git' -prune -o \\( \\( -type d \\( -name 'node_modules' -o -name 'dist' \\) \\) -o \\( -type f \\( -name '.DS_Store' \\) \\) -o \\( -type d -exec test -f '{}/.git' \\; \\) \\) -prune -print > `);
+      expect(script).toMatch(/tar czf '[^']+' --no-recursion --null -T '[^']+\.keep'/);
       await rt.workspaces.wake(ws.id);
       setTgzBytes(6_000);
       await rt.workspaces.nap(ws.id);
       expect(tars).toEqual(["m1", "m1"]);
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
-      expect(warn.mock.calls.some(c => /6000 bytes, over the 5000 byte cap/.test(String(c[0])))).toBe(true);
+      expect(warn.mock.calls.map(c => String(c[0])).filter(l => l.startsWith("nap vault"))).toEqual([`nap vault for ${ws.id} not stored, previous kept: the export was 5.9 KB, over the 4.9 KB cap`]);
       expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
+      expect(napReason()).toBe("nap kept the previous vault; the export was 5.9 KB, over the 4.9 KB cap");
+      await rt.workspaces.wake(ws.id);
+      setTgzBytes(1_000);
+      await rt.workspaces.nap(ws.id);
+      expect(napReason()).toBeUndefined();
       await rt.workspaces.delete(ws.id);
       expect(await store.getBlob("vaults", ws.id)).toBeUndefined();
     } finally {
@@ -2908,12 +2964,14 @@ describe("nap vault against the stub backend", () => {
     }
   });
 
-  it("warns once and keeps the previous vault when the download URL cannot be fetched", async () => {
+  it("warns once, keeps the previous vault and says so on the napping status when the download URL cannot be fetched", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const rt = createRuntime({ backend, store, adapters: {} });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
       await rt.workspaces.nap(ws.id);
       const first = await store.getBlob("vaults", ws.id);
@@ -2924,6 +2982,7 @@ describe("nap vault against the stub backend", () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]![0]).toBe(`nap vault for ${ws.id} not stored, previous kept: fetch failed`);
       expect(await store.getBlob("vaults", ws.id)).toEqual(first);
+      expect((events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status).toMatchObject({ phase: "napping", reason: "nap kept the previous vault; fetch failed" });
     } finally {
       warn.mockRestore();
     }
@@ -4761,14 +4820,24 @@ const held = (steers: boolean) => {
       };
     },
   });
-  const end = (turn: number, text: string, more: Partial<TurnResult> = {}): void => {
+  const results: TurnResult[] = [];
+  /** The harness's result lands while its process keeps running. */
+  const reply = (turn: number, text: string, more: Partial<TurnResult> = {}): void => {
     const t = turns[turn]!;
-    const result: TurnResult = { status: "completed", text, ...more };
-    t.onEvent({ type: "turn.done", sessionId: t.sessionId, result });
-    t.onEvent({ type: "session.end", sessionId: t.sessionId, exitCode: 0, sawResult: true });
-    t.finish(result);
+    results[turn] = { status: "completed", text, ...more };
+    t.onEvent({ type: "turn.done", sessionId: t.sessionId, result: results[turn]! });
   };
-  return { adapter, starts, steered, end };
+  /** The process exits, after its reply. */
+  const exit = (turn: number): void => {
+    const t = turns[turn]!;
+    t.onEvent({ type: "session.end", sessionId: t.sessionId, exitCode: 0, sawResult: true });
+    t.finish(results[turn]!);
+  };
+  const end = (turn: number, text: string, more: Partial<TurnResult> = {}): void => {
+    reply(turn, text, more);
+    exit(turn);
+  };
+  return { adapter, starts, steered, reply, exit, end };
 };
 const settle = () => new Promise<void>(r => setTimeout(r, 20));
 
@@ -4918,6 +4987,79 @@ describe("a thread whose start named who to tell", () => {
     expect(history.at(-1)).toMatchObject({ type: "session.start", threadId: parentThread, prompt: line });
     h.end(2, "read it");
     await rt.close();
+  });
+
+  it("a parent that replied while its process still runs is told once that process exits: the line waits for its session.end, then goes as a turn of its own", async () => {
+    const h = held(true);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    const parentThread = parent.view().threadId!;
+    const parentSid = parent.view().claudeSessionId!;
+    h.reply(0, "waiting for the builder");
+    expect(parent.view().status).toBe("running");
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: parentThread });
+    h.end(1, "done", { durationMs: 1_500, costUsd: 0.0042 });
+    const line = `thread ${kid.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): done`;
+    await settle();
+    // The parent's turn has replied, so it takes no steer and is not queued behind; the line waits for its exit.
+    expect(h.steered).toEqual([]);
+    expect(h.starts).toHaveLength(2);
+    expect(events.filter(e => e.type === "session.queued")).toEqual([]);
+    expect((await rt.sessions.history(ws.id)).find(e => e.type === "session.notify")).toMatchObject({ notify: parentThread, text: line });
+
+    h.exit(0);
+    await parent.finished;
+    await vi.waitFor(() => expect(h.starts).toHaveLength(3));
+    expect(h.starts[2]).toMatchObject({ prompt: line, resume: parentSid });
+    expect(h.steered).toEqual([]);
+    const history = await rt.sessions.history(ws.id);
+    expect(history.filter(e => e.threadId === parentThread).map(e => e.type)).toEqual(["session.start", "session.done", "session.end", "session.start"]);
+    h.end(2, "read it");
+    await rt.close();
+  });
+
+  it("a turn that replied and is then ended by a nap keeps its reply's status and tells its parent nothing more", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "orchestrate", notify: "me" });
+    h.reply(0, "the reply", { durationMs: 1_500, costUsd: 0.0042 });
+    const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): the reply`;
+    await rt.workspaces.nap(ws.id);
+    expect(events.filter(e => e.type === "session.notify").map(e => (e as { text: string }).text)).toEqual([line]);
+    expect((await rt.sessions.list(ws.id))[0]!.status).toBe("completed");
+    const history = await rt.sessions.history(ws.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, sawResult: true, reason: "machine paused while the agent was working" });
+    await rt.close();
+  });
+
+  it("a turn that replied and whose host restarts before its process exited settles to its reply's status at load and tells its parent nothing more", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h1 = held(false);
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const turn = await rt1.sessions.start(ws.id, { prompt: "orchestrate", notify: "me" });
+    h1.reply(0, "the reply", { durationMs: 1_500, costUsd: 0.0042 });
+    const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): the reply`;
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: held(false).adapter } });
+    try {
+      const history = await rt2.sessions.history(ws.id);
+      expect(history.map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
+      expect(history.filter(e => e.type === "session.notify").map(e => (e as { text: string }).text)).toEqual([line]);
+      expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, sawResult: true, reason: "host restarted while the agent was working" });
+      expect((await rt2.sessions.list(ws.id))[0]!.status).toBe("completed");
+    } finally {
+      await rt2.close();
+    }
   });
 
   it("a running parent that cannot steer is told once its turn ends: the line waits behind it as a queued send does", async () => {

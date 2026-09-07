@@ -3,7 +3,7 @@
 // history, then the live ticks folded onto it) and the optimistic upgrade
 // flow, mirroring the store's nap/wake pattern.
 import { useCallback, useEffect, useState } from "react";
-import { appendCostPoint, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceView } from "@wsp/protocol";
+import { appendCostPoint, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceView } from "@wsp/protocol";
 import type { Api } from "./client.js";
 import { useProtocolEvents, useStatus, useStore } from "./store.js";
 
@@ -89,12 +89,7 @@ export function useUpgrade(id: string): Upgrade {
   return { phase, run, dismiss };
 }
 
-/** Doubling ladder above the current size. The 16 vCPU cap is a placeholder
- * guess, not a provider fact: no size catalog exists on the wire, only the
- * capabilities.resize flag the panel gates on. Pricing is linear per vCPU +
- * per GB, so scaling both by k scales the rate by k. */
-export function upgradeOptions(current: WorkspaceSize): WorkspaceSize[] {
-  const out: WorkspaceSize[] = [];
-  for (let k = 2; current.cpu * k <= 16; k *= 2) out.push({ cpu: current.cpu * k, memMb: current.memMb * k });
-  return out;
+/** The provider's offers that are larger than the current size on both counts, rates included, in the order it lists them. */
+export function upgradeOptions(current: WorkspaceSize, sizes: readonly MachineSizeOffer[]): MachineSizeOffer[] {
+  return sizes.filter(s => s.cpu >= current.cpu && s.memMb >= current.memMb && !(s.cpu === current.cpu && s.memMb === current.memMb));
 }

@@ -7,7 +7,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { ThreadView, markedDefault } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, ThreadView, markedDefault } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -17,7 +17,7 @@ import type { HostHandle } from "../src/server.js";
 import { PLAN_ONLY, dialHost, messageTo } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -107,6 +107,33 @@ describe("wsp verbs over the host", () => {
     expect(again.io.streamed).toBe("");
   });
 
+  it("new and fork take --size as <cpu>x<memGb>, which reaches the create's size; a size the provider does not offer, or no size at all, is refused in one line naming the list, and nothing is minted", async () => {
+    const big = await run("new", "big", "--size", "2x8");
+    expect(big.code).toBe(0);
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
+    const [status] = await rt.status.list();
+    expect(status).toMatchObject({ name: "big", size: { cpu: 2, memMb: 8192 } });
+
+    const forked = await run("fork", "big", "--name", "wide", "--size", "4x8");
+    expect(forked.code).toBe(0);
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 4, memMb: 8192 });
+    expect((await rt.status.list()).find(w => w.name === "wide")!.size).toEqual({ cpu: 4, memMb: 8192 });
+
+    const list = "the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)";
+    const odd = await run("new", "odd", "--size", "8x16");
+    expect(odd.code).toBe(1);
+    expect(odd.io.errors).toEqual([`wsp new: 8x16 is not a size this provider offers; ${list}`]);
+    const word = await run("fork", "big", "--size", "large");
+    expect(word.code).toBe(1);
+    expect(word.io.errors).toEqual([`wsp fork: large is not a size this provider offers; ${list}`]);
+    expect(backend.machines).toHaveLength(2);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["big", "wide"]);
+
+    // Without --size the golden's own size stands.
+    await run("new", "plain");
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+  });
+
   it("new refuses in one line when there is no golden", async () => {
     await restartHost({}, memoryStore());
     const { code, io } = await run("new", "alpha");
@@ -130,7 +157,7 @@ describe("wsp verbs over the host", () => {
     const [thread] = await rt.sessions.list(worker.id);
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
     expect(sent.io.lines).toEqual([`created worker ${worker.id}`, `thread ${thread!.threadId}`, "re: build it"]);
-    expect(sent.io.streamed.endsWith("re: build it")).toBe(true);
+    expect(sent.io.streamed.endsWith("Ready.\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
   });
 
   it("fork, thread new, exec and wake refuse a workspace whose machine is gone, quoting the provider, with no waking line", async () => {
@@ -367,18 +394,94 @@ describe("wsp verbs over the host", () => {
     expect(codex.starts.map(s => s.prompt)).toEqual(["write tests"]);
     expect(claude.starts).toEqual([]);
     expect(io.lines).toEqual([`thread ${row!.threadId}`, "codex: write tests"]);
-    expect(io.streamed).toBe("codex: write tests");
+    expect(io.streamed).toBe("code\n$ ls\nx: write tests\ncompleted\n");
     expect(io.errors).toEqual([]);
   });
 
-  it("thread new without an agent takes the runtime's default; an agent the runtime has no adapter for is refused by the runtime", async () => {
+  it("a turn's tool calls stream one muted line each as they land, what each answered behind it, and its end reads as the app's status line", async () => {
+    await restartHost({
+      claude: toolingAgent(
+        [
+          { toolName: "Bash", input: { command: "git status\n--porcelain" }, output: "On branch main\nnothing to commit" },
+          { toolName: "Read", input: { file_path: "packages/engine/src/golden-mcp.ts" }, output: "" },
+          { toolName: "Grep", input: { pattern: "shellQuote" }, output: "packages/host/src/exec.ts:12:  shellQuote(argv)" },
+          { toolName: "Wombat", input: { fur: "grey" }, output: "no tool by that name", failed: true },
+        ],
+        { status: "completed", text: "had a look", durationMs: 72_000, costUsd: 0.22 },
+      ),
+    });
+    await run("new", "alpha");
+    const io = captured();
+    io.muted = text => `~${text}~`;
+    expect(await cli(["thread", "new", "--in", "alpha", "look around", "--state", statePath], io)).toBe(0);
+    expect(io.streamed.split("\n")).toEqual([
+      "~$ git status~",
+      "~On branch main~",
+      "~read packages/engine/src/golden-mcp.ts~",
+      "~searched code for shellQuote~",
+      "~packages/host/src/exec.ts:12: shellQuote(argv)~",
+      "~Wombat~",
+      "~failed: no tool by that name~",
+      "~completed · Worked for 1m 12s · $0.22~",
+      "",
+    ]);
+    expect(io.lines).toEqual([expect.stringMatching(/^thread /), "had a look"]);
+    expect(io.errors).toEqual([]);
+
+    // --json keeps stdout the raw deltas and writes no line of its own.
+    const asJson = await run("thread", "new", "--in", "alpha", "again", "--json");
+    expect(asJson.io.streamed).toBe("");
+    const calls = (json(asJson.io) as { type?: string; kind?: string; toolName?: string }[]).filter(e => e.type === "session.delta");
+    expect(calls.map(e => [e.kind, e.toolName])).toEqual([
+      ["tool_use", "Bash"], ["tool_result", undefined],
+      ["tool_use", "Read"], ["tool_result", undefined],
+      ["tool_use", "Grep"], ["tool_result", undefined],
+      ["tool_use", "Wombat"], ["tool_result", undefined],
+    ]);
+  });
+
+  it("thread new without an agent takes the runtime's default; an agent the host has no adapter for is refused naming the agents it has, before a napping machine is woken", async () => {
     await run("new", "alpha");
     const ok = await run("thread", "new", "--in", "alpha", "hello");
     expect(ok.code).toBe(0);
     expect((await rt.sessions.list())[0]).toMatchObject({ harness: "claude", startedBy: "cli" });
+    await run("pause", "alpha");
     const refused = await run("thread", "new", "--in", "alpha", "--agent", "gemini", "hello");
     expect(refused.code).toBe(1);
     expect(refused.io.errors).toEqual(['wsp thread new: no adapter registered for harness "gemini"; agents on this host: claude, codex']);
+    expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
+    expect(await rt.sessions.list()).toHaveLength(1);
+  });
+
+  it("fork --send under an agent the host has no adapter for is refused naming the agents it has, and no machine is minted", async () => {
+    await run("new", "alpha");
+    const refused = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--agent", "gemini");
+    expect(refused.code).toBe(1);
+    expect(refused.io.errors).toEqual(['wsp fork: no adapter registered for harness "gemini"; agents on this host: claude, codex']);
+    expect(refused.io.lines).toEqual([]);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
+    expect(await rt.sessions.list()).toEqual([]);
+  });
+
+  it("an empty or whitespace task or message is refused in words by thread new, fork --send and send; no machine is minted or woken and nothing starts", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "first");
+    const [row] = await rt.sessions.list();
+    await run("pause", "alpha");
+    for (const task of ["", "  \n\t"]) {
+      const opened = await run("thread", "new", "--in", "alpha", task);
+      expect(opened.code).toBe(1);
+      expect(opened.io.errors).toEqual([`wsp thread new: ${EMPTY_TASK_LINE}`]);
+      const forked = await run("fork", "alpha", "--name", "worker", "--send", task);
+      expect(forked.code).toBe(1);
+      expect(forked.io.errors).toEqual([`wsp fork: ${EMPTY_TASK_LINE}`]);
+      const sent = await run("send", row!.threadId!, task);
+      expect(sent.code).toBe(1);
+      expect(sent.io.errors).toEqual([`wsp send: ${EMPTY_TASK_LINE}`]);
+    }
+    expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
+    expect(claude.starts).toHaveLength(1);
+    expect(await rt.sessions.list()).toHaveLength(1);
   });
 
   it("a failed turn exits 1 with the error on stderr and no last message", async () => {
@@ -600,7 +703,7 @@ describe("wsp verbs over the host", () => {
     expect(code).toBe(0);
     expect(codex.starts.map(s => [s.prompt, s.resume])).toEqual([["first", undefined], ["second", byCli!.claudeSessionId]]);
     expect(io.lines).toEqual(["codex: second"]);
-    expect(io.streamed).toBe("codex: second");
+    expect(io.streamed).toBe("code\n$ ls\nx: second\ncompleted\n");
     const followUp = await run("send", byPerson!.threadId!, "and this");
     expect(followUp.code).toBe(0);
     expect(claude.starts.map(s => [s.prompt, s.resume])).toEqual([["from the app", undefined], ["and this", byPerson!.claudeSessionId]]);
@@ -642,7 +745,7 @@ describe("wsp verbs over the host", () => {
     // The picks cannot change a turn already running; the one line says which were dropped.
     expect(joined.io.errors).toEqual(["joined the running turn; --model, --effort dropped, it keeps its own model, effort and access"]);
     expect(joined.io.lines).toEqual(["done STEERED"]);
-    expect(joined.io.streamed).toBe("done STEERED");
+    expect(joined.io.streamed).toBe("done STEERED\ncompleted\n");
     expect(opened.io.lines).toEqual([`thread ${row!.threadId}`, "done STEERED"]);
     const [alpha] = await rt.workspaces.list();
     const history = await rt.sessions.history(alpha!.id);
@@ -909,7 +1012,7 @@ describe("wsp verbs over the host", () => {
     old.on("connection", socket => {
       socket.on("message", raw => {
         const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
-        const reply = op === "workspaces.list" ? { workspaces: [workspace] } : op === "workspaces.wake" ? { workspace } : op === "sessions.start" ? { session } : {};
+        const reply = op === "workspaces.list" ? { workspaces: [workspace] } : op === "workspaces.wake" ? { workspace } : op === "harnesses.list" ? { harnesses: [] } : op === "sessions.start" ? { session } : {};
         socket.send(JSON.stringify({ id, ok: true, ...reply }));
       });
     });

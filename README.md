@@ -106,9 +106,20 @@ rather than a build.
 wsp up
 ```
 
-starts the app and the runtime over the golden you sealed. Everything else
-runs from another terminal while the host is up, and every verb takes
-`--json` for the raw protocol values:
+starts the app and the runtime over the golden you sealed, and serves until
+you stop it, so closing that terminal takes the app down with it. To have this
+computer keep it up instead:
+
+```sh
+wsp up --service   # a launchd agent on a Mac, a systemd user unit on Linux
+wsp status         # what serves this state file, on which ports, and what keeps it there
+wsp down           # stop the service and take it away
+```
+
+A service starts without your shell, so its keys have to be in `~/.wsp/.env`
+rather than exported. Everything else runs from another terminal while a host
+is up, however it was started, and every verb takes `--json` for the raw
+protocol values:
 
 | command | what it does |
 |---|---|

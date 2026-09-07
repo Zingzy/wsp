@@ -21,7 +21,14 @@ describe("SolariBackend", () => {
       containers: false,
       callbackRelay: true,
       snapshotListing: true,
+      sizes: [
+        { cpu: 2, memMb: 4096, rateUsdPerHour: expect.closeTo(0.11, 10) },
+        { cpu: 2, memMb: 8192, rateUsdPerHour: expect.closeTo(0.15, 10) },
+      ],
     });
+    // The offers' rates are the pricing's own, and the default size is the first offer.
+    for (const s of b.capabilities.sizes) expect(s.rateUsdPerHour).toBeCloseTo(b.pricing.rateUsdPerHour(s), 10);
+    expect(b.capabilities.sizes[0]).toMatchObject(b.pricing.defaultSize);
   });
 
   it("lists every snapshot on the account with the size the provider bills", async () => {

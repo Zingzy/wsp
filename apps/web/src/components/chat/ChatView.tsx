@@ -5,13 +5,11 @@
 // render-prop slot filled by whoever mounts the view. A new-thread request
 // for this workspace clears the thread, whether it arrived before or after
 // the view mounted; a view pinned to an older thread unpins first, since the
-// new thread opens as the workspace's latest. A send from a pinned thread
-// that never started opens a new thread too, and the pin moves to it: the
-// sidebar then marks that thread, and a reload lands on it rather than back
-// on the dead one.
+// new thread opens as the workspace's latest. A send from a thread that never
+// started runs as that thread's first turn, so the pin stays where it is.
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { fmtCost, fmtDuration, workspaceState } from "@wsp/protocol";
+import { turnSettledParts, workspaceState } from "@wsp/protocol";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
@@ -58,10 +56,7 @@ export function ChatView({
     if (wait === null) return null;
     return { label: wait.label, onWake: wait.wake ? () => void wake(workspaceId) : null };
   }, [phase, machineState, reach, view.running, wake, workspaceId]);
-  const { startNewThread, hydrated, named } = thread;
-  useEffect(() => {
-    if (threadId !== null && named !== null && named.key === threadId && named.thread !== threadId) select(workspaceId, named.thread);
-  }, [named, select, threadId, workspaceId]);
+  const { startNewThread, hydrated } = thread;
   useEffect(() => {
     // The latest view takes the request once its transcript is in, so it knows which thread it leaves behind.
     const consume = () => {
@@ -126,9 +121,7 @@ const TURN_STATUS: Record<TurnSummary["state"], string> = {
 /** Duration and cost of the turn that just settled; its error, when it has one, is already a row in the thread. */
 function SettledFooter({ turn }: { turn: TurnSummary }) {
   const failed = turn.state !== "completed";
-  const parts: string[] = [];
-  if (turn.durationMs !== null) parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
-  if (turn.costUsd !== null) parts.push(fmtCost(turn.costUsd));
+  const parts = turnSettledParts(turn);
   return (
     <div
       data-testid="settled-footer"

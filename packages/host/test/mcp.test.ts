@@ -12,7 +12,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG } from "@wsp/catalog";
-import { ProjectGolden, Recipe, ThreadView, WorkspaceView } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, ProjectGolden, Recipe, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
@@ -135,9 +135,9 @@ describe("the MCP server over the host", () => {
     expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "forget", "fork", "import", "new", "pause", "recipe", "recipe_scan", "send", "snapshot", "stop", "thread_new", "threads", "wake", "workspaces"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
-    expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name"]);
+    expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name", "size"]);
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "task", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "size", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "effort", "message", "model", "thread"]);
     expect(Object.keys((tools.find(t => t.name === "exec")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["argv", "cwd", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
@@ -188,6 +188,19 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
   });
 
+  it("new and fork take size as <cpu>x<memGb>, which reaches the machine; one the provider does not offer is a tool error naming the list", async () => {
+    const big = await call("new", { name: "big", size: "2x8" });
+    expect(big.isError).toBe(false);
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
+    const wide = await call("fork", { workspace: "big", name: "wide", size: "4x8" });
+    expect(wide.isError).toBe(false);
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 4, memMb: 8192 });
+    const odd = await call("new", { name: "odd", size: "8x16" });
+    expect(odd.isError).toBe(true);
+    expect(odd.text).toBe("8x16 is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)");
+    expect(backend.machines).toHaveLength(2);
+  });
+
   it("new forks the golden's head into a workspace of that name; workspaces lists it as the app sees it", async () => {
     const made = await call("new", { name: "alpha" });
     expect(made.isError).toBe(false);
@@ -227,16 +240,31 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha", "worker"]);
   });
 
-  it("fork with a task under an agent the host has no adapter for still names the minted workspace beside the refusal", async () => {
+  it("fork and thread_new under an agent the host has no adapter for are refused naming the agents it has; no machine is minted or woken", async () => {
     await call("new", { name: "alpha" });
     const refused = await call("fork", { workspace: "alpha", name: "worker", task: "hi", agent: "gpt9" });
-    const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
-    expect(worker).toMatchObject({ phase: "running" });
-    expect(refused.isError).toBe(true);
-    expect(refused.text).toBe(`created worker ${worker.id}; first turn failed: no adapter registered for harness "gpt9"; agents on this host: claude, codex`);
-    expect(refused.structured).toEqual({ workspace: expect.objectContaining({ id: worker.id, name: "worker" }), failure: 'no adapter registered for harness "gpt9"; agents on this host: claude, codex' });
-    expect(await rt.sessions.list(worker.id)).toEqual([]);
-    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha", "worker"]);
+    expect(refused).toEqual({ text: 'no adapter registered for harness "gpt9"; agents on this host: claude, codex', structured: undefined, isError: true });
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
+    await call("pause", { workspace: "alpha" });
+    const opened = await call("thread_new", { workspace: "alpha", task: "hi", agent: "gpt9" });
+    expect(opened).toEqual({ text: 'no adapter registered for harness "gpt9"; agents on this host: claude, codex', structured: undefined, isError: true });
+    expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
+    expect(await rt.sessions.list()).toEqual([]);
+  });
+
+  it("an empty or whitespace task or message is refused in words by thread_new, fork and send; no machine is minted or woken and nothing starts", async () => {
+    await call("new", { name: "alpha" });
+    const first = await call("thread_new", { workspace: "alpha", task: "first" });
+    const threadId = (first.structured as { threadId: string }).threadId;
+    await call("pause", { workspace: "alpha" });
+    for (const task of ["", " \n\t "]) {
+      expect(await call("thread_new", { workspace: "alpha", task })).toEqual({ text: EMPTY_TASK_LINE, structured: undefined, isError: true });
+      expect(await call("fork", { workspace: "alpha", name: "worker", task })).toEqual({ text: EMPTY_TASK_LINE, structured: undefined, isError: true });
+      expect(await call("send", { thread: threadId, message: task })).toEqual({ text: EMPTY_TASK_LINE, structured: undefined, isError: true });
+    }
+    expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
+    expect(claude.starts).toHaveLength(1);
+    expect(await rt.sessions.list()).toHaveLength(1);
   });
 
   it("pause naps the workspace; a workspace that is not there is a tool error in one line", async () => {

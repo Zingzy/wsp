@@ -45,7 +45,7 @@ const catalog = (steers: boolean): HarnessCatalog => ({ harness: "claude", label
 
 function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionView[] = [], harnesses?: HarnessCatalog[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
-  const started: Array<{ workspaceId: string; prompt: string; resume?: string }> = [];
+  const started: Array<{ workspaceId: string; prompt: string; resume?: string; thread?: string }> = [];
   const interrupted: string[] = [];
   const steered: Array<{ sessionId: string; prompt: string; requestId: string }> = [];
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
@@ -70,7 +70,7 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionV
     nap: async () => workspace,
     wake: async () => workspace,
     upgrade: async () => workspace,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true }),
+    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, sizes: [] }),
     listSessions: async () => rows,
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspace,
@@ -335,7 +335,7 @@ describe("composer queue", () => {
     expect(rowFor("second").querySelectorAll("button").length).toBe(before);
   });
 
-  it("a first send whose harness dies before its start frees the composer at that turn's end and holds the rows that rode it; the next Enter goes first", async () => {
+  it("a first send whose harness dies before its start frees the composer at that turn's end and holds the rows that rode it; the next Enter goes first, naming the dead thread, and its start there takes the rows", async () => {
     const { api, started, emit } = fixtureApi();
     await setup(api);
     await enter("first");
@@ -352,10 +352,14 @@ describe("composer queue", () => {
     expect(queued()).toEqual(["second"]);
     await enter("third");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third"]));
+    expect(started[0]?.thread).toBeUndefined();
+    expect(started[1]).toMatchObject({ thread: "thr_x" });
+    expect(started[1]?.resume).toBeUndefined();
     expect(queued()).toEqual(["second"]);
-    const Y = { workspaceId: WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_y" };
+    const Y = { workspaceId: WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_x" };
     emit({ type: "session.start", ...Y, prompt: "third" });
-    expect(useComposerDraftStore.getState().queues["thr_y"]?.map(r => r.prompt)).toEqual(["second"]);
+    expect(useComposerDraftStore.getState().queues["thr_x"]?.map(r => r.prompt)).toEqual(["second"]);
+    expect(useComposerDraftStore.getState().queues[WS]).toBeUndefined();
     emit({ type: "session.done", ...Y, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...Y, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third", "second"]));
@@ -462,7 +466,7 @@ describe("composer queue", () => {
     expect(queued()).toEqual([]);
   });
 
-  it("a fresh thread whose harness dies before its start settles the send and shows the failure; the rows that rode it stay visible and editable and follow the next Enter", async () => {
+  it("a fresh thread whose harness dies before its start settles the send and shows the failure; the rows that rode it stay visible and editable and follow the next Enter, which names the dead thread", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_a", threadId: "thr_a" })) };
     const { api, started, emit } = fixtureApi(history);
     await setup(api);
@@ -487,10 +491,11 @@ describe("composer queue", () => {
     await enter("third");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third"]));
     expect(started[1]?.resume).toBeUndefined();
+    expect(started[1]?.thread).toBe("thr_x");
     expect(queued()).toEqual(["second, edited"]);
-    const Y = { workspaceId: WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_y" };
+    const Y = { workspaceId: WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_x" };
     emit({ type: "session.start", ...Y, prompt: "third" });
-    expect(useComposerDraftStore.getState().queues["thr_y"]?.map(r => r.prompt)).toEqual(["second, edited"]);
+    expect(useComposerDraftStore.getState().queues["thr_x"]?.map(r => r.prompt)).toEqual(["second, edited"]);
     emit({ type: "session.done", ...Y, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...Y, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third", "second, edited"]));
@@ -694,7 +699,7 @@ describe("composer queue", () => {
     expect(queued()).toEqual([]);
   });
 
-  it("after a reload that follows a dead fresh send, the start-less view keeps its restored row, stays quiet on another thread's events, and the next send lands and takes the row", async () => {
+  it("after a reload that follows a dead fresh send, the start-less view keeps its restored row, stays quiet on another thread's events, and the next send names the dead thread, lands under it and takes the row", async () => {
     useComposerDraftStore.getState().enqueue(WS, "retry later");
     await reloadStore();
     const A = { workspaceId: WS, sessionId: "sess_a", turnId: "turn_a1", threadId: "thr_a" };
@@ -722,10 +727,13 @@ describe("composer queue", () => {
     expect(queued()).toEqual(["retry later"]);
     await enter("retry");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["retry"]));
-    const Z = { workspaceId: WS, sessionId: "sess_z", turnId: "turn_z1", threadId: "thr_z" };
+    expect(started[0]).toMatchObject({ thread: "thr_x" });
+    expect(started[0]?.resume).toBeUndefined();
+    const Z = { workspaceId: WS, sessionId: "sess_z", turnId: "turn_z1", threadId: "thr_x" };
     emit({ type: "session.start", ...Z, prompt: "retry" });
     expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
-    expect(useComposerDraftStore.getState().queues["thr_z"]?.map(r => r.prompt)).toEqual(["retry later"]);
+    expect(useComposerDraftStore.getState().queues["thr_x"]?.map(r => r.prompt)).toEqual(["retry later"]);
+    expect(useComposerDraftStore.getState().queues[WS]).toBeUndefined();
     expect(useComposerDraftStore.getState().held).toEqual({});
     emit({ type: "session.done", ...Z, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...Z, exitCode: 0, sawResult: true });

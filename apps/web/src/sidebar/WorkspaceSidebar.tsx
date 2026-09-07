@@ -8,7 +8,7 @@
 import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { agentName } from "@wsp/catalog";
-import { needsRebuild } from "@wsp/protocol";
+import { goldenHead, needsRebuild, type WorkspaceSize } from "@wsp/protocol";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
@@ -34,7 +34,7 @@ import { useNowMinute } from "../hooks/useNowMinute.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { cn } from "../lib/utils.js";
-import { useSelectedId, useSelectedThreadId, useStore, type Creation } from "../protocol/store.js";
+import { useCapabilities, useSelectedId, useSelectedThreadId, useStore, type Creation } from "../protocol/store.js";
 import { onNewWorkspaceRequest, requestNewThread } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
@@ -105,6 +105,8 @@ function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>, query:
 interface DialogState {
   readonly key: number;
   readonly name: string;
+  /** The golden head's size, read when the dialog opens; null until it lands or when no golden says. */
+  readonly goldenSize: WorkspaceSize | null;
 }
 
 /** A project dialog open for one workspace; keyed per opening so its folder and plan reset. */
@@ -132,6 +134,7 @@ export function WorkspaceSidebar() {
   const select = useStore(s => s.select);
   const creations = useStore(s => s.creations);
   const createWorkspace = useStore(s => s.createWorkspace);
+  const capabilities = useCapabilities();
   const selectedId = useSelectedId();
   const selectedThreadId = useSelectedThreadId();
   const nowMinute = useNowMinute();
@@ -159,15 +162,20 @@ export function WorkspaceSidebar() {
   const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting);
 
   const openDialog = (): void => {
-    setDialog({ key: Date.now(), name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]) });
+    const key = Date.now();
+    setDialog({ key, name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]), goldenSize: null });
+    void api?.getGolden().then(
+      manifest => setDialog(d => (d?.key === key ? { ...d, goldenSize: goldenHead(manifest)?.size ?? null } : d)),
+      () => {},
+    );
   };
   const openDialogRef = useRef(openDialog);
   openDialogRef.current = openDialog;
   useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current()), []);
 
-  const create = async (name: string, start: WorkspaceStart): Promise<void> => {
+  const create = async (name: string, start: WorkspaceStart, size?: WorkspaceSize): Promise<void> => {
     setDialog(null);
-    const id = await createWorkspace(name);
+    const id = await createWorkspace(name, undefined, size);
     if (start === "import" && id !== null) setImporting({ key: Date.now(), workspaceId: id });
   };
 
@@ -484,7 +492,9 @@ export function WorkspaceSidebar() {
         <NewWorkspaceDialog
           key={dialog.key}
           initialName={dialog.name}
-          onCreate={(name, start) => void create(name, start)}
+          sizes={capabilities?.sizes ?? []}
+          goldenSize={dialog.goldenSize}
+          onCreate={(name, start, size) => void create(name, start, size)}
           onCancel={() => setDialog(null)}
         />
       ) : null}

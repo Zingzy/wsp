@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { posix } from "node:path";
-import type { AdapterEvent, ExecStream, TurnResult } from "@wsp/adapter-claude";
+import type { AdapterEvent, ExecStream, TurnResult, TurnStatus } from "@wsp/adapter-claude";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
@@ -56,6 +56,7 @@ import {
   type ReapedMachine,
   type RunOptions,
   type RetentionPlan,
+  type VaultOptions,
   type WspError,
   type WorkspacePhase as EnginePhase,
   retentionPlan,
@@ -99,7 +100,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, moveTimedOutLine, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, moveTimedOutLine, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -368,6 +369,8 @@ interface LiveWorkspace {
   lateRead?: () => void;
   /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
   creating?: true;
+  /** Why the nap in flight kept the previous vault, for the napping status it pushes; said once. */
+  vaultNote?: string;
 }
 
 /** One pause or wake's time: the word its row uses, when the verb started, and the instant its provider calls stop
@@ -436,6 +439,9 @@ export interface RuntimeOptions {
    * /root except golden-provided dirs (VAULT_SKIP), enumerated at export time.
    */
   vaultPaths?: string[];
+  /** What a vault export leaves behind under those paths: the project bundle's cache rule, so a checkout's installs,
+   * build output and nested worktrees never travel and never count against the nap-time cap. */
+  vaultCaches?: CacheRule;
   /** Defaults for the status poller / cost ticker (tests shrink the intervals). */
   status?: StatusWatchOptions;
   idle?: { defaultWindowMs?: number };
@@ -810,9 +816,16 @@ interface TranscriptRecord {
   events: SessionEvent[];
 }
 
+/** What a live turn knows beyond its row: the status of a reply that landed while its process still ran, absent
+ * until the harness's result arrives and read by every road that ends the row before the process exits. */
+interface TurnLive {
+  reply?: TurnStatus;
+}
+
 interface SessionIndexRecord {
   workspaceId: string;
-  sessions: (SessionView & { turnId: string; notify?: string })[];
+  /** reply is the held status of a turn whose result landed while its process still ran, on a row still running. */
+  sessions: (SessionView & { turnId: string; notify?: string; reply?: TurnStatus })[];
 }
 
 /** Builders live apart from workspaces: never in the rail, and a record left
@@ -1034,12 +1047,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       .filter(s => s.length > 0 && !VAULT_SKIP.has(s))
       .map(s => `/root/${s}`);
   };
+  const vaultExport = async (m: Machine, o: Pick<VaultOptions, "maxBytes"> = {}): Promise<Buffer> =>
+    exportPaths(m, await vaultPathsOf(m), { ...o, ...(opts.vaultCaches !== undefined ? { exclude: opts.vaultCaches } : {}) });
   const live = new Map<string, LiveWorkspace>();
   const builders = new Map<string, LiveBuilder>();
   /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
   const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
   /** A row read back from the store has no handle: its process died with the runtime that started it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: string; handle?: SessionHandle; end?: (reason: string) => void }>();
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -1095,7 +1110,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const persistSessions = (workspaceId: string): Promise<void> => {
     if (!live.has(workspaceId)) return Promise.resolve();
     capSessions(workspaceId);
-    const rows = [...sessions.values()].filter(s => s.view.workspaceId === workspaceId).map(s => ({ ...s.view, turnId: s.turnId, ...(s.notify !== undefined ? { notify: s.notify } : {}) }));
+    const rows = [...sessions.values()]
+      .filter(s => s.view.workspaceId === workspaceId)
+      .map(s => ({
+        ...s.view,
+        turnId: s.turnId,
+        ...(s.notify !== undefined ? { notify: s.notify } : {}),
+        ...(s.view.status === "running" && s.turnLive?.reply !== undefined ? { reply: s.turnLive.reply } : {}),
+      }));
     const snapshot: SessionIndexRecord = { workspaceId, sessions: rows };
     const queued = (indexFlushes.get(workspaceId) ?? Promise.resolve())
       .then(() => store.put(SESSIONS, workspaceId, snapshot))
@@ -1583,16 +1605,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           fork(record, m => {
             entry.machine = m;
           }, override),
-        vaultExport: async m => exportPaths(m, await vaultPathsOf(m)),
+        vaultExport: m => vaultExport(m),
         vaultImport: async (m, payload) => {
           await importInto(m, payload, "/");
         },
         stashVault: async m => {
           try {
-            const payload = await exportPaths(m, await vaultPathsOf(m), { maxBytes: vaultCapBytes });
-            await store.putBlob(VAULTS, record.id, payload);
+            await store.putBlob(VAULTS, record.id, await vaultExport(m, { maxBytes: vaultCapBytes }));
           } catch (e) {
-            console.warn(`nap vault for ${record.id} not stored, previous kept: ${e instanceof Error ? e.message : String(e)}`);
+            const why = e instanceof Error ? e.message : String(e);
+            entry.vaultNote = vaultKeptLine(why);
+            console.warn(`nap vault for ${record.id} not stored, previous kept: ${why}`);
           }
         },
         restoreVault: async m => {
@@ -1672,6 +1695,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "pausing";
         await persist(entry.record);
         await emitStatus(entry, "napping");
+        delete entry.vaultNote;
         try {
           await entry.ws.nap();
         } catch (e) {
@@ -1685,7 +1709,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "napping";
         await persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
-        await emitStatus(entry, "napping", reason);
+        const said = [reason, entry.vaultNote].filter((s): s is string => s !== undefined);
+        delete entry.vaultNote;
+        await emitStatus(entry, "napping", said.length === 0 ? undefined : said.join("; "));
         return view(entry.record);
       } finally {
         delete entry.budget;
@@ -1914,7 +1940,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
       }
-      const cut: { view: SessionView; turnId: string; notify?: string }[] = [];
+      const cut: { view: SessionView; turnId: string; notify?: string; turnLive?: TurnLive }[] = [];
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
@@ -1922,20 +1948,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        for (const { turnId, notify, ...view } of index.sessions) {
-          const row = { view, turnId, ...(notify !== undefined ? { notify } : {}) };
+        for (const { turnId, notify, reply, ...view } of index.sessions) {
+          const row = { view, turnId, ...(notify !== undefined ? { notify } : {}), ...(reply !== undefined ? { turnLive: { reply } } : {}) };
           if (view.status === "running") cut.push(row);
           sessions.set(view.id, row);
         }
       }
       // The harness process died with the runtime that started it, so a turn still running never settles. Its end
       // is told once every workspace's rows are in: the parent it tells may sit in a workspace read after its own.
-      for (const s of cut) {
-        s.view.status = "failed";
-        s.view.endedAt = Date.now();
-        if (s.notify !== undefined) notifyEnd(s, s.notify, { status: "failed", error: restartCutLine(s.view.endedAt - (s.view.startedAt ?? s.view.endedAt)) });
-        record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: false, reason: RESTARTED_REASON });
-      }
+      for (const s of cut) settleCut(s, RESTARTED_REASON, endedAt => restartCutLine(endedAt - (s.view.startedAt ?? endedAt)));
       for (const workspaceId of new Set(cut.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
     })();
@@ -1973,6 +1994,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       },
       firstLife: true,
     };
+    // Only an asked size is checked: the golden's own is what it was built at, whatever the provider offers today.
+    if ((o.cpu !== undefined || o.memMb !== undefined) && !offeredSize(backend.capabilities.sizes, record.size)) {
+      throw Object.assign(new Error(sizeRefusal(sizeWord(record.size), backend.capabilities.sizes)), { kind: "invalid" });
+    }
     const bind = (m: Machine): void => {
       record.machineId = m.id;
       attach(record, m).creating = true;
@@ -2306,11 +2331,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const adapterFor = (entry: LiveWorkspace, named?: string): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
-    if (!factory) throw new Error(`no adapter registered for harness "${harness}"; agents on this host: ${Object.keys(adapters).join(", ") || "none"}`);
+    if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
     return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, env: GUEST_LOGIN_ENV }) };
   };
 
-  type LiveSession = { view: SessionView; turnId: string; handle: SessionHandle };
+  type LiveSession = { view: SessionView; turnId: string; handle: SessionHandle; turnLive?: TurnLive };
   const runningOn = (threadId: string): LiveSession | undefined => {
     for (const s of sessions.values()) {
       if (s.view.threadId === threadId && s.view.status === "running" && s.handle !== undefined) return s as LiveSession;
@@ -2336,11 +2361,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * the child), sent when that workspace wakes; in memory only, so a host restart during the nap drops them. */
   const heldLines = new Map<string, { from: string; notify: string; text: string }[]>();
   /** The line into the parent thread as a send would go: steered into its running turn, queued behind it, or a turn
-   * of its own. A parent with no session to resume drops the line with a warning; the child's end must not fail on it. */
+   * of its own. A parent whose turn replied but whose process still runs takes no message and a send would be
+   * refused, so the line waits for that process to exit and goes then, by the same road. A parent with no session to
+   * resume drops the line with a warning; the child's end must not fail on it. */
   const deliver = (from: string, notify: string, text: string): void => {
     const parent = latestOn(notify);
     if (parent?.claudeSessionId === undefined) {
       console.warn(`thread ${from.slice(0, 8)} ended, but thread ${notify.slice(0, 8)} has no session to tell`);
+      return;
+    }
+    const lingering = runningOn(notify);
+    if (lingering?.turnLive?.reply !== undefined) {
+      const again = (): void => deliver(from, notify, text);
+      void lingering.handle.finished.then(again, again);
       return;
     }
     const phase = live.get(parent.workspaceId)?.record.phase;
@@ -2369,6 +2402,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const text = notifyLine(threadId, result);
     record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify, text });
     if (notify !== NOTIFY_ME) deliver(threadId, notify, text);
+  };
+  /** Settles a running row whose process the runtime ended or lost before the harness's own session.end: to the reply
+   * it held, whose line already went, or failed with `cutLine` as the parent's word when it never replied. The
+   * session.end carries `reason` either way. The one rule for both roads, the runtime's end() and the restart load. */
+  const settleCut = (s: { view: SessionView; turnId: string; notify?: string; turnLive?: TurnLive }, reason: string, cutLine: (endedAt: number) => string): void => {
+    const reply = s.turnLive?.reply;
+    const endedAt = Date.now();
+    s.view.status = reply ?? "failed";
+    s.view.endedAt = endedAt;
+    if (reply === undefined && s.notify !== undefined) notifyEnd(s, s.notify, { status: "failed", error: cutLine(endedAt) });
+    record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
   };
   /** Recorded once the harness took the line, so the row sits where the turn could first see it. */
   const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string }): void => {
@@ -2414,6 +2458,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let outcome: SessionStartOutcome = "started";
       // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time.
       for (let running = runningOn(threadId); running !== undefined; running = runningOn(threadId)) {
+        // The turn replied and its process has not exited: it takes no message and waiting on it would block the
+        // caller for however long the harness lingers, so the send is refused in words naming the thread.
+        if (running.turnLive?.reply !== undefined) throw new Error(stillWorkingRefusal(threadId));
         if (adapter.steers && running.handle.steer !== undefined && (await running.handle.steer(o.prompt)) === "accepted") {
           recordSteer(running, running.handle.id, o);
           return { ...running.handle, outcome: "steered" };
@@ -2445,6 +2492,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
       let ended = false;
       let startRecorded = false;
+      // The reply's status, held while the process still runs. Shared with this turn's session-map entry so runningOn
+      // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
+      // exists) or later from its stream.
+      const turnLive: TurnLive = {};
 
       const forward = (event: AdapterEvent): void => {
         if (ended) return;
@@ -2492,12 +2543,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             });
             return;
           case "turn.done":
-            sessionView.status = event.result.status;
+            // The reply is in, but the row stays running until session.end (the process exited): the harness can
+            // keep working past its result, and a row read as completed here lets a send start a second agent in the
+            // same worktree. The result is held and applied at the exit below.
+            turnLive.reply = event.result.status;
             void persistSessions(workspaceId);
             if (notify !== undefined) notifyEnd({ view: sessionView, turnId }, notify, event.result);
             record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
             return;
           case "session.end":
+            // The process exited: the turn is over now, so the row takes the reply's status here (synchronously,
+            // before the event is recorded, so a waiter woken by it reads the settled row, not the running one).
+            if (turnLive.reply !== undefined) sessionView.status = turnLive.reply;
             sessionView.endedAt = Date.now();
             record({
               type: "session.end",
@@ -2554,14 +2611,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const end = (reason: string): void => {
         if (ended || sessionView.status !== "running") return;
         ended = true;
-        sessionView.status = "failed";
-        sessionView.endedAt = Date.now();
+        settleCut({ view: sessionView, turnId, ...(notify !== undefined ? { notify } : {}), turnLive }, reason, () => reason);
         void persistSessions(workspaceId);
-        if (notify !== undefined) notifyEnd({ view: sessionView, turnId }, notify, { status: "failed", error: reason });
-        record({ type: "session.end", workspaceId, sessionId: sessionView.claudeSessionId ?? handleId, turnId, threadId, exitCode: null, sawResult: false, reason });
         void started.interrupt().catch(() => {});
       };
-      sessions.set(handleId, { view: sessionView, turnId, ...(notify !== undefined ? { notify } : {}), handle, end });
+      sessions.set(handleId, { view: sessionView, turnId, ...(notify !== undefined ? { notify } : {}), handle, end, turnLive });
       void persistSessions(workspaceId);
       started.finished
         .then(result => {

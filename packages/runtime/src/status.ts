@@ -126,7 +126,8 @@ export interface StatusTrackerOptions {
   emit(event: EventUnion): void;
   on(type: EventUnion["type"] | "*", listener: (e: EventUnion) => void): () => void;
   defaults?: StatusWatchOptions;
-  /** Time source for the meters, the reconcile and zombie windows and the probe's elapsed read; tests inject one they can advance. */
+  /** Time source for the meters, the reconcile and zombie windows and the probe's elapsed read, and the timer the cost
+   * and poll ticks run on; tests inject one they can advance. */
   clock?: Clock;
 }
 
@@ -406,9 +407,19 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     void run().catch((e: unknown) => console.warn(`${what} tick failed`, e));
   };
 
+  /** Runs fn every ms on the clock, the first time one interval from now; the returned function stops it. */
+  const every = (fn: () => void, ms: number): (() => void) => {
+    let cancel = (): void => {};
+    const arm = (): void => {
+      cancel = clock.schedule(() => { arm(); fn(); }, ms, { unref: true });
+    };
+    arm();
+    return () => cancel();
+  };
+
   let watchers = 0;
-  let costTimer: ReturnType<typeof setInterval> | undefined;
-  let pollTimer: ReturnType<typeof setInterval> | undefined;
+  let stopCost: (() => void) | undefined;
+  let stopPoll: (() => void) | undefined;
   const lastEmitted = new Map<string, string>();
 
   const costTick = async (): Promise<void> => {
@@ -454,10 +465,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const watch: StatusApi["watch"] = opts => {
     watchers++;
     if (watchers === 1) {
-      costTimer = setInterval(guarded("cost", costTick), opts?.costIntervalMs ?? costIntervalMs);
-      pollTimer = setInterval(guarded("status poll", pollTick), opts?.pollIntervalMs ?? pollIntervalMs);
-      costTimer.unref?.();
-      pollTimer.unref?.();
+      stopCost = every(guarded("cost", costTick), opts?.costIntervalMs ?? costIntervalMs);
+      stopPoll = every(guarded("status poll", pollTick), opts?.pollIntervalMs ?? pollIntervalMs);
       // Every machine's state before the first cost tick: nothing polls while no client watches, so a client
       // attaching after a gap would otherwise meter a stretch the provider ended hours ago.
       guarded("status poll", pollTick)();
@@ -468,9 +477,9 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       released = true;
       watchers--;
       if (watchers === 0) {
-        clearInterval(costTimer);
-        clearInterval(pollTimer);
-        costTimer = pollTimer = undefined;
+        stopCost?.();
+        stopPoll?.();
+        stopCost = stopPoll = undefined;
         lastEmitted.clear();
       }
     };

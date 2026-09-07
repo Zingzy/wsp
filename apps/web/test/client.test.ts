@@ -72,9 +72,22 @@ describe("makeApi wrappers", () => {
     expect(got).toEqual(workspace);
   });
 
+  it("createWorkspace and createFromGoldenHead send a picked size as cpu and memMb, and nothing about size without one", async () => {
+    const { api, lastSent } = await connect();
+    const workspace = { id: "ws_1", name: "beta", machineId: "m1", phase: "running", golden: "snap_1", createdAt: "t" };
+    const manifest = { head: 1, versions: [{ version: 1, snapshotId: "snap_1", baseTemplate: "default", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } }] };
+    ScriptedSocket.reply = f => (f["op"] === "golden.get" ? { id: f["id"], ok: true, manifest } : { id: f["id"], ok: true, workspace });
+    await api.createWorkspace("snap_1", "beta", { cpu: 2, memMb: 8192 });
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.create", golden: "snap_1", name: "beta", cpu: 2, memMb: 8192 });
+    await api.createFromGoldenHead("beta", { cpu: 2, memMb: 8192 });
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.create", golden: "snap_1", name: "beta", cpu: 2, memMb: 8192 });
+    await api.createFromGoldenHead("beta");
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.create", golden: "snap_1", name: "beta" });
+  });
+
   it("capabilities sends capabilities.get and unwraps the flags", async () => {
     const { api, lastSent } = await connect();
-    const capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true };
+    const capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, capabilities });
     expect(await api.capabilities()).toEqual(capabilities);
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "capabilities.get" });
