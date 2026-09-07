@@ -1,15 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Where the small recipe lives on this computer and how it is read and
-// written. Nothing here reaches past the catalog and the protocol, so the MCP
-// server can write a recipe without the runtime or the engine coming with it.
+// Where the small recipe and the cache of what the session histories came to
+// live on this computer, and how the recipe is read and written. Nothing here
+// reaches past the catalog, the protocol and the collector, so the MCP server
+// can write a recipe without the runtime or the engine coming with it.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { loginIdOf } from "@wsp/catalog";
+import { type HistoryCache, fileHistoryCache } from "@wsp/collect";
 import { Recipe } from "@wsp/protocol";
 
 /** Where the small recipe lives, beside the saved manifest: what wsp recipe writes and wsp init --recipe reads. */
 export function smallRecipePath(statePath: string): string {
   return join(dirname(statePath), "recipe.json");
+}
+
+/** What each of the agents' session files came to, beside the state: the one place that path is decided, so the
+ * wizard, the recipe verb and the MCP tools all read and rewrite the same cache and none of them reads a session
+ * file another already read. */
+export function historyCache(statePath: string): HistoryCache {
+  return fileHistoryCache(join(dirname(statePath), "history-cache.json"));
 }
 
 /** The small recipe wsp recipe wrote (or a person or an agent did), checked against the protocol's shape. */

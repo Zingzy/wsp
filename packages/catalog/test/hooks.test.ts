@@ -4,7 +4,7 @@
 // script the placer refuses comes out of the copy, listed by the path as it was
 // written. The placer is a fake here; the host owns the disk.
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, catalogEntry, onMachine, type AgentEntry } from "../src/index.js";
+import { CATALOG_AGENTS, CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, CODEX_CONFIG_FILE, CODEX_HOOKS, catalogEntry, onMachine, type AgentEntry } from "../src/index.js";
 
 const HOME = "/Users/dev";
 const HERE = new Map([
@@ -12,6 +12,7 @@ const HERE = new Map([
   [`${HOME}/.codync/notify.sh`, "/root/.codync/notify.sh"],
   [`${HOME}/bin/say it`, "/root/bin/say it"],
   [`${HOME}/x.sh`, "/root/x.sh"],
+  [`${HOME}/.codex/notify.py`, "/root/.codex/notify.py"],
 ]);
 const place = (abs: string): string | undefined => HERE.get(abs);
 const text = (v: unknown): string => `${JSON.stringify(v, null, 2)}\n`;
@@ -19,10 +20,11 @@ const text = (v: unknown): string => `${JSON.stringify(v, null, 2)}\n`;
 describe("the catalog's hook carries", () => {
   it("are registered on the agent entries whose settings run hooks, each naming a file among the entry's own config paths", () => {
     const carriers = CATALOG_AGENTS.filter((a): a is AgentEntry & { hooks: NonNullable<AgentEntry["hooks"]> } => a.hooks !== undefined);
-    expect(carriers.map(a => a.id)).toEqual(["claude"]);
+    expect(carriers.map(a => a.id)).toEqual(["claude", "codex"]);
     for (const a of carriers) expect(a.configPaths, a.id).toContain(a.hooks.file);
     expect(CLAUDE_HOOKS.file).toBe(CLAUDE_SETTINGS_FILE);
-    expect((catalogEntry("codex") as AgentEntry).hooks).toBeUndefined();
+    expect(CODEX_HOOKS.file).toBe(CODEX_CONFIG_FILE);
+    expect((catalogEntry("gemini") as AgentEntry).hooks).toBeUndefined();
   });
 });
 
@@ -151,5 +153,78 @@ describe("Claude Code's hooks", () => {
     const plain = '{"model": "opus", "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "jq -r .tool_input.command"}, {"type": "prompt", "prompt": "check it"}]}]}}';
     expect(CLAUDE_HOOKS.carry(plain, HOME, place)).toEqual({ text: plain, carried: [], left: [] });
     for (const t of ['{"model": "opus"}', "{not json", '{"hooks": "none"}', "[]"]) expect(CLAUDE_HOOKS.carry(t, HOME, place)).toEqual({ text: t, carried: [], left: [] });
+  });
+});
+
+describe("Codex's notify", () => {
+  const MAC_APP = `${HOME}/.codex/computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseClient`;
+  const config = (notify: string): string => `model = "gpt-5.5"\n${notify}\n\n[projects."${HOME}"]\ntrust_level = "trusted"\n\n[tui]\npet = "fireball"\n`;
+
+  it("takes out a notify whose program is neither on the image nor a bare command name, listed by the path as written, and leaves every other line as it was", () => {
+    const out = CODEX_HOOKS.carry(config(`notify = ["${MAC_APP}", "turn-ended"]`), HOME, place);
+    expect(out.text).toBe('model = "gpt-5.5"\n\n[projects."/Users/dev"]\ntrust_level = "trusted"\n\n[tui]\npet = "fireball"\n');
+    expect(out.left).toEqual([MAC_APP]);
+    expect(out.carried).toEqual([]);
+  });
+
+  it("takes out a notify whose array closes on a later line, with its comment", () => {
+    const out = CODEX_HOOKS.carry(`notify = [\n  "${MAC_APP}", # the Mac app\n  "turn-ended",\n]\nmodel = "gpt-5.5"\n`, HOME, place);
+    expect(out.text).toBe('model = "gpt-5.5"\n');
+    expect(out.left).toEqual([MAC_APP]);
+  });
+
+  it("leaves a notify the machine can run, a bare command name and a notify key under a table exactly as written, byte for byte", () => {
+    for (const notify of ['notify = ["/usr/bin/notify-send", "turn-ended"]', 'notify = ["notify-send"]', "notify = []", 'notify = "/bin/echo"']) {
+      const text = config(notify);
+      expect(CODEX_HOOKS.carry(text, HOME, place), notify).toEqual({ text, carried: [], left: [] });
+    }
+    const under = `model = "x"\n\n[tui]\nnotify = ["${MAC_APP}"]\n`;
+    expect(CODEX_HOOKS.carry(under, HOME, place)).toEqual({ text: under, carried: [], left: [] });
+  });
+
+  it("puts the script an interpreter runs through the placer, so it travels to its guest path, and takes the key out when the placer refuses it", () => {
+    const asked: string[] = [];
+    const placer = (abs: string): string | undefined => {
+      asked.push(abs);
+      return place(abs);
+    };
+    const out = CODEX_HOOKS.carry(config(`notify = ["python3", "${HOME}/.codex/notify.py"]`), HOME, placer);
+    expect(out.text).toBe(config('notify = ["python3", "/root/.codex/notify.py"]'));
+    expect(out.carried).toEqual([{ from: `${HOME}/.codex/notify.py`, to: "/root/.codex/notify.py" }]);
+    expect(out.left).toEqual([]);
+    expect(asked).toEqual([`${HOME}/.codex/notify.py`]);
+    // The same shape written with ~, with a flag before the script, and with the interpreter by a path the image has.
+    for (const notify of ['notify = ["python3", "-u", "~/.codex/notify.py"]', 'notify = ["/usr/bin/python3", "~/.codex/notify.py"]', 'notify = ["node", "$HOME/.codex/notify.py"]']) {
+      const one = CODEX_HOOKS.carry(config(notify), HOME, place);
+      expect(one.text, notify).toBe(config(notify.replace(/"[^"]*notify\.py"/, '"/root/.codex/notify.py"')));
+      expect(one.carried, notify).toEqual([{ from: `${HOME}/.codex/notify.py`, to: "/root/.codex/notify.py" }]);
+    }
+    // A script the placer will not take: the key goes, listed by the script's path, not the interpreter's.
+    const gone = CODEX_HOOKS.carry(config('notify = ["python3", "~/.codex/gone.py"]'), HOME, place);
+    expect(gone.text).toBe('model = "gpt-5.5"\n\n[projects."/Users/dev"]\ntrust_level = "trusted"\n\n[tui]\npet = "fireball"\n');
+    expect(gone.left).toEqual(["~/.codex/gone.py"]);
+    expect(gone.carried).toEqual([]);
+    // An interpreter with nothing to run, and one whose argument names no path, are left as written.
+    for (const notify of ['notify = ["python3"]', 'notify = ["python3", "-c", "-q"]', 'notify = ["node", "notify.js"]']) {
+      const text = config(notify);
+      expect(CODEX_HOOKS.carry(text, HOME, place), notify).toEqual({ text, carried: [], left: [] });
+    }
+  });
+
+  it("takes the comment lines above the key out with it, so the machine's config never carries a comment about a key that is gone", () => {
+    const out = CODEX_HOOKS.carry(`# fires after every turn\n# the Mac app\nnotify = ["${MAC_APP}"]\nmodel = "x"\n`, HOME, place);
+    expect(out.text).toBe('model = "x"\n');
+    expect(out.left).toEqual([MAC_APP]);
+  });
+
+  it("never asks the placer about the program itself, since a binary from this computer would not run there whatever a copy of it landed as, and copies a file with no notify byte for byte", () => {
+    const asked: string[] = [];
+    const out = CODEX_HOOKS.carry(config(`notify = ["${MAC_APP}"]`), HOME, abs => {
+      asked.push(abs);
+      return place(abs);
+    });
+    expect(asked).toEqual([]);
+    expect(out.left).toEqual([MAC_APP]);
+    for (const t of ['model = "gpt-5.5"\n', "", "not toml at all", '[mcp_servers.a]\ncommand = "npx"\n', `notify = [\n  "${MAC_APP}",\n`]) expect(CODEX_HOOKS.carry(t, HOME, place), t).toEqual({ text: t, carried: [], left: [] });
   });
 });

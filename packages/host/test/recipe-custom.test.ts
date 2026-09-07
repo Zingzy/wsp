@@ -10,6 +10,7 @@ import { cli, type CliIO } from "../src/cli.js";
 import { ADDED_GROUP } from "../src/init-table.js";
 import { RecipeAnswerRow, answerRows, recipeAnswer, recipePrintout } from "../src/recipe-answer.js";
 import { customFromFlags, parsePair, withCustom } from "../src/recipe-custom.js";
+import { withHome } from "./recipe-fixture.js";
 
 const bare: Recipe = { version: 1, at: "2026-09-06T03:00:00Z", histories: [], rows: [] };
 
@@ -106,13 +107,15 @@ describe("the recipe verb's flags", () => {
     expect(lines).toEqual([]);
   });
 
-  it("writes what --add named into the recipe it mints from this computer", async () => {
+  it("writes what --add named into the recipe it mints, reading an empty home and never this computer's", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-recipe-cli-"));
     dirs.push(dir);
     const out = join(dir, "recipe.json");
-    expect(await cli(["recipe", "--out", out, "--add", "just=brew install just", "--add-check", "just=just --version"], io([], []))).toBe(0);
-    expect(JSON.parse(readFileSync(out, "utf8")).custom).toEqual([
+    expect(await withHome(dir, () => cli(["recipe", "--out", out, "--add", "just=brew install just", "--add-check", "just=just --version"], io([], [])))).toBe(0);
+    const recipe: Recipe = JSON.parse(readFileSync(out, "utf8"));
+    expect(recipe.histories.filter(h => h.state === "read")).toEqual([]);
+    expect(recipe.custom).toEqual([
       { kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "just --version", why: "added by the agent" },
     ]);
-  }, 60_000);
+  });
 });
