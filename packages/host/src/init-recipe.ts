@@ -3,17 +3,18 @@
 // what a login defaults to, the recipe file (the same list with the person's
 // ticks, saved next to the state so golden v2 is a re-run of it), and the
 // golden recipe the ticked rows add up to.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { LOGIN_CHOICES, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { LOGIN_CHOICES, parseManifest, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { CATALOG_AGENTS, catalogEntry, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow } from "@wsp/catalog";
-import { CATALOG_PREFIX, agentOwning, isMcpRow, neverCopied, packageOf, parseMcpId, rowRoad, type RecipeDigest } from "@wsp/engine";
+import { CATALOG_PREFIX, agentOwning, diffRecipes, isMcpRow, neverCopied, packageOf, parseMcpId, rowRoad, type BrewTable, type RecipeDigest } from "@wsp/engine";
 import { Recipe, type LoginChoice } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
 import { SIGN_IN_WORDS } from "./signin-words.js";
-export { loadRecipe, saveSmallRecipe, smallRecipePath, withTicksOf } from "./recipe-file.js";
+import { pinsOf } from "./recipe-file.js";
+export { loadRecipe, pinsOf, saveSmallRecipe, smallRecipePath, withPins, withTicksOf } from "./recipe-file.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
   identity: "Identity",
@@ -60,8 +61,8 @@ function loginBin(e: ManifestEntry): string | undefined {
 }
 
 /** The command a tools row puts on PATH, when a road installs the row: the catalog's answer, else the road's, else the package's name. */
-function rowBin(t: ManifestEntry): string | undefined {
-  const planned = rowRoad(t);
+function rowBin(t: ManifestEntry, brew: BrewTable): string | undefined {
+  const planned = rowRoad(t, brew);
   if (planned === undefined) return undefined;
   const pkg = packageOf(t);
   return catalogToolFor(pkg)?.bin ?? planned.bin ?? pkg.slice(pkg.lastIndexOf("/") + 1);
@@ -85,10 +86,10 @@ export interface LoginTool {
 }
 
 /** Whether the command a CLI login needs is coming with the ticks so far; undefined for a login that follows an agent. */
-export function loginTool(e: ManifestEntry, manifest: Manifest, coming: ReadonlySet<string>): LoginTool | undefined {
+export function loginTool(e: ManifestEntry, manifest: Manifest, coming: ReadonlySet<string>, brew: BrewTable): LoginTool | undefined {
   const bin = e.rung === "logins" ? loginBin(e) : undefined;
   if (bin === undefined) return undefined;
-  const rows = manifest.entries.filter(t => t.rung === "tools" && rowBin(t) === bin);
+  const rows = manifest.entries.filter(t => t.rung === "tools" && rowBin(t, brew) === bin);
   const row = rows.find(r => coming.has(r.id)) ?? rows.find(isTickable) ?? rows[0];
   if (row === undefined) return { bin, coming: false, why: `${bin} is not coming: no row lists it; ${brings(bin)}` };
   if (!isTickable(row)) return { bin, row, coming: false, why: `${bin} is not coming: its tool row cannot come (${row.reason})` };
@@ -97,12 +98,12 @@ export function loginTool(e: ManifestEntry, manifest: Manifest, coming: Readonly
 }
 
 /** Every login answered copy or sign in ticks the row of the command it needs, when that row can come; the rows ticked, by label. */
-export function tickLoginTools(manifest: Manifest, choices: ReadonlyMap<string, string>, ticks: Set<string>): string[] {
+export function tickLoginTools(manifest: Manifest, choices: ReadonlyMap<string, string>, ticks: Set<string>, brew: BrewTable): string[] {
   const added: string[] = [];
   for (const e of manifest.entries) {
     const choice = e.rung === "logins" ? choices.get(e.id) : undefined;
     if (choice === undefined || choice === "skip") continue;
-    const tool = loginTool(e, manifest, ticks);
+    const tool = loginTool(e, manifest, ticks, brew);
     if (tool?.row === undefined || tool.coming || !isTickable(tool.row)) continue;
     ticks.add(tool.row.id);
     added.push(tool.row.label);
@@ -158,10 +159,10 @@ export interface Answers {
 }
 
 /** The answers a fresh screen starts with; `coming` is what earlier screens ticked, else every tools and agents row's default. */
-export function defaultAnswers(manifest: Manifest, coming: ReadonlySet<string> = comingRows(manifest)): Answers {
+export function defaultAnswers(manifest: Manifest, brew: BrewTable, coming: ReadonlySet<string> = comingRows(manifest)): Answers {
   const shown = manifest.entries.filter(e => loginShown(e, manifest, coming));
   // A login whose command is not coming starts at skip; a saved answer stands, and ticks the command's row instead (tickLoginTools).
-  const choiceOf = (e: ManifestEntry): LoginChoice => (e.rung === "logins" && e.choice === undefined && e.bring === undefined && loginTool(e, manifest, coming)?.coming === false ? "skip" : initialChoice(e));
+  const choiceOf = (e: ManifestEntry): LoginChoice => (e.rung === "logins" && e.choice === undefined && e.bring === undefined && loginTool(e, manifest, coming, brew)?.coming === false ? "skip" : initialChoice(e));
   return {
     // A saved recipe keeps its ticks: a login it brought as a sign-in on the machine stays ticked, as the run that saved it had it;
     // a credential-shaped row is ticked only by its copy answer.
@@ -196,18 +197,21 @@ export function catalogIdOf(e: ManifestEntry): string | undefined {
 
 /** The collector's rows with the recipe's ticks written on: an agents or tools row is on when its catalog row is,
  * off when it is not or when no catalog row stands for it; an MCP row follows its agent; a saved sign-in answer
- * lands on the login row it names. Every other row keeps its default. A ticked catalog tool this computer has no
- * row for gets a bare row, the floor's aside, so the build installs it by its catalog road; the bare rows of an
- * earlier pass are made anew, so an untick takes its row away. */
+ * lands on the login row it names; a recorded pin lands on the tools row of the catalog id it names, so the road
+ * installs that release and checks its sum. Every other row keeps its default. A ticked catalog tool this computer
+ * has no row for gets a bare row, the floor's aside, so the build installs it by its catalog road; the bare rows of
+ * an earlier pass are made anew, so an untick takes its row away. */
 export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
   const on = new Set(recipe.rows.filter(r => r.on).map(r => r.id));
   const answers = new Map<string, LoginChoice>(recipe.rows.flatMap(r => (r.signIn === undefined ? [] : [[`logins/${loginIdOf(r.id)}`, r.signIn]])));
+  const pins = pinsOf(recipe.rows);
+  const pinOf = (id: string | undefined): Pick<ManifestEntry, "pin"> => (id !== undefined && pins.has(id) ? { pin: pins.get(id)! } : {});
   const own = manifest.entries.filter(e => !e.id.startsWith(CATALOG_PREFIX));
   const here = new Set(own.map(catalogIdOf));
   const bare = recipe.rows.flatMap((r): ManifestEntry[] => {
     const e = catalogEntry(r.id);
     if (!r.on || here.has(r.id) || e?.kind !== "tool" || e.floor) return [];
-    return [{ rung: "tools", id: `${CATALOG_PREFIX}${e.id}`, label: e.name, group: "Catalog", paths: [], bytes: 0, default: "skip", linux: "yes", bring: true }];
+    return [{ rung: "tools", id: `${CATALOG_PREFIX}${e.id}`, label: e.name, group: "Catalog", paths: [], bytes: 0, default: "skip", linux: "yes", bring: true, ...pinOf(e.id) }];
   });
   return {
     ...manifest,
@@ -218,7 +222,7 @@ export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
           return { ...e, bring: initialTicks(e) && (agent === undefined || catalogEntry(agent)?.kind !== "agent" || on.has(agent)) };
         }
         const id = catalogIdOf(e);
-        if (id !== undefined || e.rung === "tools") return { ...e, bring: id !== undefined && on.has(id) };
+        if (id !== undefined || e.rung === "tools") return { ...e, bring: id !== undefined && on.has(id), ...pinOf(id) };
         const answer = e.rung === "logins" ? answers.get(e.id) : undefined;
         return answer === undefined ? e : { ...e, choice: answer };
       }),
@@ -234,6 +238,26 @@ export function rowsHere(entries: readonly ManifestEntry[]): Set<string> {
 
 export function recipePath(statePath: string): string {
   return join(dirname(statePath), "golden-recipe.json");
+}
+
+/** The manifest the last run saved at that path, or nothing when there is none or it does not parse: it is about to
+ * be rewritten either way. */
+export function readSavedManifest(path: string): Manifest | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    return parseManifest(JSON.parse(readFileSync(path, "utf8")));
+  } catch {
+    return undefined;
+  }
+}
+
+/** This computer's rows with the pins the saved manifest recorded on them, by id. The small recipe carries pins for
+ * catalog ids only; a row outside the catalog (a tap formula on its release) has this manifest as the one home of
+ * its pin, and the build stamps that pin on the sealed digest, so the fresh row has to carry it too or every re-run
+ * reads the row as unpinned. A row that carries one already keeps it. */
+export function withSavedPins(manifest: Manifest, saved: Manifest | undefined): Manifest {
+  const pins = pinsOf(saved?.entries);
+  return pins.size === 0 ? manifest : { ...manifest, entries: manifest.entries.map(e => (e.pin === undefined && pins.has(e.id) ? { ...e, pin: pins.get(e.id)! } : e)) };
 }
 
 /** The small recipe with the login answers written on: a row whose login rows were answered carries the word they
@@ -278,11 +302,15 @@ export function recipeChanges(from: RecipeDigest, to: RecipeDigest, manifest: Ma
   const noted = new Set<string>();
   const was = new Map(from.ticks.map(t => [t.id, t]));
   const now = new Map(to.ticks.map(t => [t.id, t]));
+  // Why a tool installs differently under the same version is the diff's to say; this only names the rows.
+  const moved = new Map(diffRecipes(from, to).tools.flatMap(t => (t.why === undefined ? [] : [[t.id, t.why]])));
   for (const [id, t] of now) {
     const b = was.get(id);
+    const why = moved.get(id);
     if (b === undefined) out.push(`${label(id)} ticked`);
     else if (b.choice !== t.choice) out.push(`${label(id)} now ${word(t.choice)}`);
     else if (b.version !== t.version) out.push(`${label(id)} now ${t.version ?? "unpinned"}`);
+    else if (why !== undefined) out.push(`${label(id)}: ${why}`);
     else continue;
     noted.add(id);
   }

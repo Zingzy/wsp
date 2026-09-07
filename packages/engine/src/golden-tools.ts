@@ -7,7 +7,7 @@
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
 import { HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
-import { fmtBytes, listedName, nameList, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep } from "@wsp/protocol";
+import { fmtBytes, listedName, nameList, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
@@ -68,6 +68,24 @@ export function reasonOf(res: ExecResult, timeoutS: number): string {
   const lines = (text: string): string[] => text.split("\n").map(l => l.trim()).filter(l => l !== "");
   const err = lines(res.stderr);
   return (err.filter(l => l.startsWith("Error:")).at(-1) ?? err.at(-1) ?? lines(res.stdout).at(-1) ?? `exit ${res.exitCode}`).slice(0, 160);
+}
+
+/** The pin an install recorded: the tag it fetched and the sum it read, when its road printed both. The one place a
+ * result becomes a pin, for the recipe row that carries it and the digest tick the seal writes. */
+export function recordedPin(t: ToolResult): ToolPin | undefined {
+  return t.outcome === "installed" && t.road?.sha256 !== undefined && t.road.tag !== undefined ? { tag: t.road.tag, sha256: t.road.sha256 } : undefined;
+}
+
+/** The pins a tools stage recorded, by the row's id. */
+export function recordedPins(tools: readonly ToolResult[]): Map<string, ToolPin> {
+  return new Map(tools.flatMap((t): [string, ToolPin][] => { const pin = recordedPin(t); return pin === undefined ? [] : [[t.id, pin]]; }));
+}
+
+/** The digest with the pins the tools stage recorded written on its ticks, so the sealed version says which release
+ * each row is fixed to and the recipe that carries the same pins reads as no change. */
+export function withRecordedPins(digest: RecipeDigest, tools: readonly ToolResult[]): RecipeDigest {
+  const pins = recordedPins(tools);
+  return pins.size === 0 ? digest : { ...digest, ticks: digest.ticks.map(t => (pins.has(t.id) ? { ...t, pin: pins.get(t.id)! } : t)) };
 }
 
 /** The last WSP_ROAD line a road install printed, when it printed one. */

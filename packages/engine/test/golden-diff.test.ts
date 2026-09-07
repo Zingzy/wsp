@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { LOGIN_CHOICES, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
+import { INSTALLER_MOVED_LINE, LOGIN_CHOICES, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
 import { SMALL_BYTES, SMALL_TOOLS, changeCounts, describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, retiredBy, rowsToApply, type RecipeDiff } from "../src/golden-diff.js";
 import type { RecipeEntry } from "../src/golden-import.js";
 
@@ -152,6 +152,42 @@ describe("recipe diff", () => {
     const from = snap([row("tools", "tools/brew/jq", { bring: false }), row("agents", "agents/codex", { bring: false })]);
     const to = snap([row("tools", "tools/brew/jq"), row("agents", "agents/codex")]);
     expect(diffRecipes(from, to)).toEqual({ ...EMPTY, tools: [{ id: "tools/brew/jq", label: "jq", change: "added" }], agents: [{ id: "agents/codex", label: "codex", change: "added" }] });
+  });
+});
+
+describe("a tool's road, pin and install lines", () => {
+  type Tick = RecipeDigest["ticks"][number];
+  const ID = "tools/catalog/gh";
+  const gh = (over: Partial<Tick>): RecipeDigest => ({ ticks: [{ id: ID, ...over }], files: [] });
+  const pin = (tag: string, sha = "b") => ({ tag, sha256: sha.repeat(64) });
+  const release = (over: Partial<Tick> = {}): RecipeDigest => gh({ road: "release", installer: "i".repeat(64), ...over });
+  const changed = (why: string): RecipeDiff => ({ ...EMPTY, tools: [{ id: ID, label: "gh", change: "changed", why }] });
+
+  const cases: { name: string; from: RecipeDigest; to: RecipeDigest; diff: RecipeDiff }[] = [
+    { name: "a recipe whose recorded pin is not the sealed one reinstalls the row at its pin, and says which release moved", from: release({ pin: pin("v2.86.0") }), to: release({ pin: pin("v2.85.0") }), diff: changed("release v2.86.0 to v2.85.0") },
+    { name: "the same pin folds away", from: release({ pin: pin("v2.86.0") }), to: release({ pin: pin("v2.86.0") }), diff: EMPTY },
+    { name: "a recorded sum that changed under the same tag is a reinstall", from: release({ pin: pin("v2.86.0", "b") }), to: release({ pin: pin("v2.86.0", "c") }), diff: changed("the checksum recorded for v2.86.0 changed") },
+    { name: "a pin recorded where the sealed version had none fixes the row", from: release(), to: release({ pin: pin("v2.86.0") }), diff: changed("now fixed to release v2.86.0") },
+    { name: "a road that moved is a changed row, in the roads' own words", from: gh({ road: "brew", installer: "a" }), to: gh({ road: "script", installer: "b" }), diff: changed("now by its own installer, was with Homebrew") },
+    { name: "install lines that moved under the same road and pin are a changed row", from: release({ installer: "a" }), to: release({ installer: "b" }), diff: changed(INSTALLER_MOVED_LINE) },
+    { name: "a version that moved is said by version, whatever moved with it", from: release({ version: "v2.86.0" }), to: release({ version: "v2.87.0", installer: "j" }), diff: { ...EMPTY, tools: [{ id: ID, label: "gh", change: "changed", from: "v2.86.0", to: "v2.87.0" }] } },
+    { name: "a tick sealed before the digest carried a road moves nothing on its account", from: gh({}), to: release({ pin: pin("v2.86.0") }), diff: EMPTY },
+    { name: "the same road and lines with no pin on either side is no change", from: release(), to: release(), diff: EMPTY },
+  ];
+
+  it.each(cases)("$name", ({ from, to, diff }) => {
+    const got = diffRecipes(from, to);
+    expect(got).toEqual(diff);
+    expect([...rowsToApply(got)]).toEqual(diff === EMPTY ? [] : [ID]);
+    expect(isEmptyDiff(got)).toBe(diff === EMPTY);
+  });
+
+  it("the words name the row and why, and the build line counts it as a tool updated", () => {
+    const d = diffRecipes(release({ pin: pin("v2.86.0") }), release({ pin: pin("v2.85.0") }));
+    expect(describeDiff(d)).toEqual(["update 1 tool: gh (release v2.86.0 to v2.85.0)"]);
+    expect(changeCounts(d).filter(c => c.count > 0)).toEqual([{ count: 1, noun: "tool", word: "updated" }]);
+    expect(isSmallDelta(d, () => 0)).toBe(true);
+    expect(describeDiff(diffRecipes(gh({ road: "brew", installer: "a" }), gh({ road: "script", installer: "b" })))).toEqual(["update 1 tool: gh (now by its own installer, was with Homebrew)"]);
   });
 });
 

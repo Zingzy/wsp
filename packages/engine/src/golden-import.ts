@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, BASE_FLOOR, BASE_IMAGE_COMMANDS, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, ROADS, ROAD_MODULES, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installAfter, installLine, nodeInstallScript, pinStateOf, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -436,29 +436,45 @@ export interface DigestedFile {
 }
 
 const sorted = <T extends object>(rows: T[]): T[] => rows.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+type Tick = RecipeDigest["ticks"][number];
 
-/** What a golden is built from: the ticked ids with their login answers and
- * tool pins, the computer's login shell once when a shell row is ticked, and
- * every planned path with its digest, volatile ones marked, and every row
- * outside the catalog under its install line. Labels, row order, disk stats and
- * the terminal font row do not enter, so a file rewritten with the same bytes
- * reads the same and a font tick changes no golden. */
-export function recipeDigest(entries: readonly RecipeEntry[], files: readonly DigestedFile[] = [], custom: readonly RecipeCustomRow[] = []): RecipeDigest {
+/** What identifies a tools row's install: the version its road installs at (the laptop's, or the one the road reads
+ * for the row, a tap formula's release tag), the road by name, the sha256 of the lines it runs before any recorded
+ * pin (what a first run of it installs), and the pin those lines are fixed to while it stands. The one rule the
+ * seal, the diff and the hash read a road's identity by. */
+function roadIdentity(e: RecipeEntry, brew: BrewTable): Pick<Tick, "version" | "road" | "installer" | "pin"> {
+  const planned = e.rung === "tools" ? rowRoad(e, brew) : undefined;
+  if (planned === undefined) return e.version !== undefined ? { version: e.version } : {};
+  const bare = unpinned(planned.road);
+  const line = roadModule(bare).install(bare, planned.bin ?? packageOf(e));
+  const pin = standingPin(planned.road);
+  const version = ("version" in planned.road ? planned.road.version : undefined) ?? e.version;
+  return { ...(version !== undefined ? { version } : {}), road: planned.road.road, ...(typeof line === "string" ? { installer: createHash("sha256").update(line).digest("hex") } : {}), ...(pin !== undefined ? { pin } : {}) };
+}
+
+/** What a golden is built from: the ticked ids with their login answers, tool
+ * pins and install roads, the computer's login shell once when a shell row is
+ * ticked, and every planned path with its digest, volatile ones marked, and
+ * every row outside the catalog under its install line. Labels, row order, disk
+ * stats and the terminal font row do not enter, so a file rewritten with the
+ * same bytes reads the same and a font tick changes no golden. */
+export function recipeDigest(entries: readonly RecipeEntry[], files: readonly DigestedFile[], custom: readonly RecipeCustomRow[], brew: BrewTable): RecipeDigest {
   const login = entries.find(e => ticked(e) && e.rung === "shell" && e.login !== undefined)?.login;
   // A row outside the catalog is pinned by the lines that install it: change one and the golden is another golden.
   // A check that changed alone is not a change to the machine, so it does not rebuild.
   const customTicks = custom.map(c => ({ id: `${CUSTOM_PREFIX}${c.id}`, version: c.install.join("; ") }));
   return {
-    ticks: sorted([...entries.filter(e => ticked(e) && e.font === undefined).map(e => ({ id: e.id, ...(e.choice !== undefined ? { choice: e.choice } : {}), ...(e.version !== undefined ? { version: e.version } : {}) })), ...customTicks]),
+    ticks: sorted([...entries.filter(e => ticked(e) && e.font === undefined).map(e => ({ id: e.id, ...(e.choice !== undefined ? { choice: e.choice } : {}), ...roadIdentity(e, brew) })), ...customTicks]),
     ...(login !== undefined ? { login } : {}),
     files: sorted(files.map(f => ({ id: f.id, path: f.path, dest: f.dest, digest: f.digest, ...(f.volatile === true ? { volatile: true } : {}) }))),
   };
 }
 
 /** The digest's hash, the same for any key or row order, with the volatile entries left out; a builder
- * carrying it needs nothing re-applied but those. */
+ * carrying it needs nothing re-applied but those. A recorded pin stays out too: the build that records one stamps
+ * it on the builder's own digest, so the recipe that then carries it still attaches to that builder. */
 export function recipeHash(digest: RecipeDigest): string {
-  const ticks = sorted(digest.ticks.map(t => [t.id, t.choice ?? null, t.version ?? null]));
+  const ticks = sorted(digest.ticks.map(t => [t.id, t.choice ?? null, t.version ?? null, t.road ?? null, t.installer ?? null]));
   const files = sorted(digest.files.filter(f => f.volatile !== true).map(f => [f.id, f.path, f.dest, f.digest]));
   return createHash("sha256").update(JSON.stringify({ ticks, login: digest.login ?? null, files })).digest("hex");
 }
@@ -621,24 +637,37 @@ const TAP_PREFIX = "tools/brew-tap/";
 const isTap = (e: Pick<RecipeEntry, "id">): boolean => e.id.startsWith(TAP_PREFIX);
 const tapOf = (e: Pick<RecipeEntry, "id">): string => e.id.slice(TAP_PREFIX.length);
 
+/** The formula a Homebrew row names; nothing for a tap or any other row. */
+export const formulaOf = (e: Pick<RecipeEntry, "id">): string | undefined => (e.id.startsWith(BREW_ID_PREFIX) ? e.id.slice(BREW_ID_PREFIX.length) : undefined);
+const macOsOnly = (formula: string, info: BrewFormula | undefined): boolean => MACOS_ONLY_FORMULAE.has(formula) || info?.macosOnly === true;
+
+/** A tap formula with no Linux bottle whose GitHub release the Mac's Homebrew names installs from that release, with
+ * the pin its first install recorded. Only a tap formula takes the road: a core formula unknown to the snapshot may
+ * well have a Linux bottle by now. The one place that decides it, read by the Brewfile, the plan and the digest. */
+function releaseFor(e: RecipeEntry, brew: BrewTable): PlannedRoad | undefined {
+  const formula = formulaOf(e);
+  const info = formula === undefined ? undefined : brew.get(formula);
+  if (formula === undefined || e.linux !== "unknown" || !formula.includes("/") || info?.source === undefined || macOsOnly(formula, info)) return undefined;
+  return { id: e.id, name: info.name, source: info.source, ...pinOf(e) };
+}
+
 export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = new Map()): Brewfile {
   const out: Brewfile = { text: "", taps: [], formulae: [], skipped: [], roads: [], base: [] };
   for (const e of entries) {
     if (!ticked(e) || e.rung !== "tools") continue;
     const base = baseRowFor(e, brew);
+    const formula = formulaOf(e);
     if (base !== undefined) {
       out.base.push(base);
     } else if (isTap(e)) {
       out.taps.push(tapOf(e));
-    } else if (e.id.startsWith(BREW_ID_PREFIX)) {
+    } else if (formula !== undefined) {
       // A formula the catalog brings as a manager's toolchain takes the catalog's road, so it is no formula here.
       if (catalogToolOf(e) !== undefined) continue;
-      const formula = e.id.slice(BREW_ID_PREFIX.length);
-      const info = brew.get(formula);
+      const road = releaseFor(e, brew);
       if (e.linux === "no") out.skipped.push({ id: e.id, note: "no Linux bottle" });
-      else if (e.linux === "unknown" && (MACOS_ONLY_FORMULAE.has(formula) || info?.macosOnly === true)) out.skipped.push({ id: e.id, note: "macOS only" });
-      // Only a tap formula takes the road: a core formula unknown to the snapshot may well have a Linux bottle by now.
-      else if (e.linux === "unknown" && formula.includes("/") && info?.source !== undefined) out.roads.push({ id: e.id, name: info.name, source: info.source, ...(e.pin !== undefined ? { pin: e.pin } : {}) });
+      else if (e.linux === "unknown" && macOsOnly(formula, brew.get(formula))) out.skipped.push({ id: e.id, note: "macOS only" });
+      else if (road !== undefined) out.roads.push(road);
       else if (e.linux === "unknown") out.skipped.push({ id: e.id, note: "no Linux bottle known" });
       else out.formulae.push(formula);
     }
@@ -696,9 +725,10 @@ const releaseRoad = (r: Pick<PlannedRoad, "source" | "pin">): InstallRoad => ({ 
 
 /** What a tools row installs by, with the command it puts on PATH where known: a catalog row its entry's road at the
  * row's version where the road pins one (noted when no golden build has proven the road, or when the version could not
- * be pinned), a formula row the brew road, a manager row its manager's road at the row's version; nothing for a row no
- * road installs. A road carries the pin the row's first install recorded. */
-export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
+ * be pinned), a tap formula with no Linux bottle its GitHub release when this Mac's Homebrew (`brew`) names one, any
+ * other formula row the brew road, a manager row its manager's road at the row's version; nothing for a row no road
+ * installs. A road carries the pin the row's first install recorded. The one resolver the plan and the digest read. */
+export function rowRoad(e: RecipeEntry, brew: BrewTable): PlannedRow | undefined {
   const pkg = packageOf(e);
   const known = catalogToolOf(e);
   if (known !== undefined) {
@@ -711,6 +741,8 @@ export function rowRoad(e: RecipeEntry): PlannedRow | undefined {
     const after = installAfter(known);
     return { road: { ...road, ...pinOf(e) }, bin: known.bin, ...(after !== undefined ? { after } : {}), ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };
   }
+  const release = releaseFor(e, brew);
+  if (release !== undefined) return { road: releaseRoad(release), bin: release.name };
   if (e.id.startsWith(CATALOG_PREFIX)) return undefined;
   const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(`tools/${m}/`));
   if (manager === undefined) return undefined;
@@ -728,11 +760,11 @@ export interface PlannedRow {
 }
 
 /** How a removed tool comes off the machine: through its road's module, on the tools PATH; a row no road installed is noted. */
-export function toolUninstall(e: RecipeEntry): { cmd: string } | { note: string } {
-  const base = baseRowFor(e);
+export function toolUninstall(e: RecipeEntry, brew: BrewTable): { cmd: string } | { note: string } {
+  const base = baseRowFor(e, brew);
   if (base !== undefined) return { note: `${base.name} is part of the base and stays` };
   if (isTap(e)) return { cmd: withPath(asLinuxbrew(`untap ${tapOf(e)}`)) };
-  const planned = rowRoad(e);
+  const planned = rowRoad(e, brew);
   if (planned === undefined) return { note: "no manager known for this row" };
   const r = roadModule(planned.road).uninstall(planned.road, planned.bin ?? packageOf(e));
   return "cmd" in r ? { cmd: withPath(r.cmd) } : r;
@@ -807,7 +839,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   // This Mac's formula for a manager's toolchain is one of them: the catalog's road, once, under the row's own id.
   const catalog = toolRows.flatMap(e => {
     if (!e.id.startsWith(CATALOG_PREFIX) && catalogToolOf(e) === undefined) return [];
-    const planned = rowRoad(e);
+    const planned = rowRoad(e, table);
     if (planned === undefined) skipped.push({ id: e.id, note: "not in the catalog" });
     return planned === undefined ? [] : [{ e, planned }];
   });
@@ -892,13 +924,16 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     if (brings?.step !== undefined) installs.push(brings.step);
     if (brings?.row !== undefined) plan(brings.row.e, brings.row.planned);
     for (const e of rows) {
-      const planned = rowRoad(e);
+      const planned = rowRoad(e, table);
       if (planned !== undefined) plan(e, planned);
     }
-    for (const e of fromCatalog) plan(e, rowRoad(e)!);
+    for (const e of fromCatalog) plan(e, rowRoad(e, table)!);
   }
   // Last, after any go the plan brings: a road install needs no brew and waits on nothing.
-  for (const r of brew.roads) plan(entries.find(e => e.id === r.id)!, { road: releaseRoad(r), bin: r.name });
+  for (const r of brew.roads) {
+    const e = entries.find(x => x.id === r.id)!;
+    plan(e, rowRoad(e, table)!);
+  }
   // The catalog rows on every other road: Homebrew's (unless one went out as a manager's step above), apt's, a release, a vendor's, a script.
   for (const { e, planned } of catalog) if (!(MANAGER_ORDER as readonly string[]).includes(planned.road.road) && !asManager.has(e.id)) plan(e, planned);
   // Last of all: the rows the catalog does not carry, each after the manager its line calls, so every road they
@@ -913,9 +948,9 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
 /** What a tools row is known by: the names its road gives the package (a formula is named after its command
  * unless the catalog says otherwise), the command the road puts on PATH, and the catalog's command and the ones it
  * brings along for a row the catalog knows. Nothing for a tap or a row no road installs. */
-function rowNames(e: RecipeEntry): string[] {
+function rowNames(e: RecipeEntry, brew: BrewTable): string[] {
   if (e.rung !== "tools" || isTap(e)) return [];
-  const planned = rowRoad(e);
+  const planned = rowRoad(e, brew);
   const known = catalogToolFor(packageOf(e));
   return [...(planned === undefined ? [] : [...roadModule(planned.road).names(planned.road), ...(planned.bin === undefined ? [] : [planned.bin])]), ...(known === undefined ? [] : [known.bin, ...(known.brings ?? []).map(b => b.bin)])];
 }
@@ -924,7 +959,7 @@ function rowNames(e: RecipeEntry): string[] {
  * the shell the shell rows bring, each ticked tools row by its names, the command each step of the tools plan puts
  * on PATH, and each ticked agent's command. An unticked row adds nothing: a call to it in an rc file is what the
  * guard covers. */
-export function imageCommands(entries: readonly RecipeEntry[], tools: ToolsPlan): Set<string> {
+export function imageCommands(entries: readonly RecipeEntry[], tools: ToolsPlan, brew: BrewTable): Set<string> {
   const out = new Set(BASE_IMAGE_COMMANDS);
   for (const e of BASE_FLOOR) for (const bin of [e.bin, ...(e.brings ?? []).map(b => b.bin)]) out.add(bin);
   const shell = shellInstallFor(entries);
@@ -932,7 +967,7 @@ export function imageCommands(entries: readonly RecipeEntry[], tools: ToolsPlan)
   for (const e of entries) {
     if (!ticked(e)) continue;
     if (e.rung === "agents" && !isMcpRow(e)) out.add(catalogEntry(name(e))?.bin ?? name(e));
-    for (const n of rowNames(e)) out.add(n);
+    for (const n of rowNames(e, brew)) out.add(n);
   }
   for (const t of tools.installs) if (t.bin !== undefined) out.add(t.bin);
   return out;
@@ -941,10 +976,10 @@ export function imageCommands(entries: readonly RecipeEntry[], tools: ToolsPlan)
 /** Every command the recipe or the catalog knows a tool for, ticked or not: the catalog's tools by id and command,
  * and each tools row by its names. An oh-my-zsh plugin by one of these names, with the tool off the image, is a
  * plugin for a missing tool and leaves the list; a plugin by any other name is a plugin and stays. */
-export function toolNames(entries: readonly RecipeEntry[]): Set<string> {
+export function toolNames(entries: readonly RecipeEntry[], brew: BrewTable): Set<string> {
   const out = new Set<string>();
   for (const e of CATALOG_TOOLS) for (const bin of [e.id, e.bin, ...(e.brings ?? []).map(b => b.bin)]) out.add(bin);
-  for (const e of entries) for (const n of rowNames(e)) out.add(n);
+  for (const e of entries) for (const n of rowNames(e, brew)) out.add(n);
   return out;
 }
 

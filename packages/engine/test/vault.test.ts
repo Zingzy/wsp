@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { gzipSync } from "node:zlib";
-import { UPLOAD_PART_BYTES, exportFolder, exportPaths, fitsTar, folderExportScript, importInto, landBundle, tarOf, type CacheRule } from "../src/vault.js";
+import { UPLOAD_PART_BYTES, exportFolder, exportPaths, exportPathsInto, fitsTar, folderExportScript, importInto, landBundle, tarOf, type CacheRule } from "../src/vault.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const TAR_BYTES = Buffer.from("fake-tgz-bytes-" + "x".repeat(64));
@@ -542,8 +542,9 @@ describe("exportFolder", () => {
     return root;
   }
 
-  /** This computer stands in for the guest: bash runs the script and the download serves the file the URL names. */
-  async function guest() {
+  /** This computer stands in for the guest: bash runs the script and the download serves the file the URL names.
+   * With chunkBytes the body arrives in writes of that size a tick apart, the way an archive off a real machine does. */
+  async function guest(chunkBytes?: number) {
     const server = createServer((req, res) => {
       const path = new URL(req.url!, "http://x").searchParams.get("path")!;
       if (!existsSync(path)) {
@@ -551,7 +552,22 @@ describe("exportFolder", () => {
         return;
       }
       const body = readFileSync(path);
-      res.writeHead(200, { "content-length": String(body.length) }).end(body);
+      res.writeHead(200, { "content-length": String(body.length) });
+      if (chunkBytes === undefined) {
+        res.end(body);
+        return;
+      }
+      let at = 0;
+      const write = (): void => {
+        if (at >= body.length) {
+          res.end();
+          return;
+        }
+        res.write(body.subarray(at, at + chunkBytes));
+        at += chunkBytes;
+        setTimeout(write, 1);
+      };
+      write();
     });
     await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
     server.unref();
@@ -633,17 +649,21 @@ describe("exportFolder", () => {
     }
   });
 
-  it("brings the archive home over the download road with its size known up front and the excluded roots, and leaves nothing on the guest", async () => {
+  it("streams the archive into a file on this computer with its size known up front, names the excluded roots, and leaves nothing on the guest", async () => {
     const g = await guest();
     const root = folder();
+    const dir = mkdtempSync(join(tmpdir(), "wsp-export-into-"));
+    dirs.push(dir);
+    const into = join(dir, "folder.tgz");
     try {
       const seen: { bytes: number; total: number }[] = [];
-      const { tar, excluded } = await exportFolder(g.machine, root, RULE, { fetch: globalThis.fetch, onProgress: p => seen.push(p) });
+      const { bytes, excluded } = await exportFolder(g.machine, root, RULE, into, { fetch: globalThis.fetch, onProgress: p => seen.push(p) });
       expect(excluded).toEqual([".DS_Store", ".cache", "deep/dir/.DS_Store", "dist", "myenv", "node_modules"]);
-      expect(listing(tar)).toContain("src/a.ts");
-      expect(listing(tar)).not.toContain("dist/out.js");
-      expect(seen.at(-1)).toEqual({ bytes: tar.length, total: tar.length });
-      expect(seen.every(p => p.total === tar.length && p.bytes <= tar.length)).toBe(true);
+      expect(statSync(into).size).toBe(bytes);
+      expect(listing(readFileSync(into))).toContain("src/a.ts");
+      expect(listing(readFileSync(into))).not.toContain("dist/out.js");
+      expect(seen.at(-1)).toEqual({ bytes, total: bytes });
+      expect(seen.every(p => p.total === bytes && p.bytes <= bytes)).toBe(true);
       const tmp = /tar czf '([^']+)'/.exec(g.cmds.find(c => c.includes("tar czf")) ?? "")?.[1];
       expect(tmp).toMatch(/^\/tmp\/wsp-out-/);
       expect(existsSync(tmp!)).toBe(false);
@@ -653,11 +673,67 @@ describe("exportFolder", () => {
     }
   });
 
+  it("the archive lands as it arrives: the file on disk grows while the response is still open, and every progress line is one the file has already taken", async () => {
+    const g = await guest(256 * 1024);
+    const root = folder();
+    // Random bytes so the archive gzips to about its own size, several download chunks worth.
+    writeFileSync(join(root, "src", "big.bin"), randomBytes(6 * 1024 * 1024));
+    const dir = mkdtempSync(join(tmpdir(), "wsp-export-into-"));
+    dirs.push(dir);
+    const into = join(dir, "folder.tgz");
+    try {
+      const seen: { bytes: number; total: number }[] = [];
+      const midStream: { disk: number; reported: number }[] = [];
+      const { bytes } = await exportFolder(g.machine, root, RULE, into, {
+        fetch: globalThis.fetch,
+        onProgress: p => {
+          seen.push(p);
+          if (p.bytes > 0 && p.bytes < p.total) midStream.push({ disk: statSync(into).size, reported: p.bytes });
+        },
+      });
+      expect(bytes).toBeGreaterThan(4 * 1024 * 1024);
+      expect(seen.length).toBeGreaterThanOrEqual(4);
+      expect(seen.map(p => p.bytes).every((b, i, all) => i === 0 || b > all[i - 1]!)).toBe(true);
+      // The write stream holds a chunk until its watermark, so the file trails the progress; it never runs ahead of it.
+      expect(midStream.every((m, i, all) => m.disk < bytes && m.disk <= m.reported && (i === 0 || m.disk >= all[i - 1]!.disk))).toBe(true);
+      const held = midStream.filter(m => m.disk > 0);
+      expect(held.length).toBeGreaterThanOrEqual(3);
+      expect(held.at(-1)!.disk).toBeGreaterThan(held[0]!.disk);
+      expect(statSync(into).size).toBe(bytes);
+      expect(listing(readFileSync(into))).toContain("src/big.bin");
+    } finally {
+      g.close();
+    }
+  }, 60_000);
+
+  it("exportPathsInto streams the paths into a file on this computer, and a download that fails or answers with no body leaves no half file behind", async () => {
+    const g = await guest();
+    const root = folder();
+    const dir = mkdtempSync(join(tmpdir(), "wsp-export-into-"));
+    dirs.push(dir);
+    const into = join(dir, "state.tgz");
+    try {
+      const bytes = await exportPathsInto(g.machine, [join(root, "src")], into, { fetch: globalThis.fetch });
+      expect(statSync(into).size).toBe(bytes);
+      expect(listing(readFileSync(into)).map(l => basename(l))).toEqual(["src", "a.ts", "cache-utils.ts", "dist"]);
+      const gone = join(dir, "never.tgz");
+      const refusing: typeof globalThis.fetch = async () => new Response(null, { status: 503 });
+      await expect(exportPathsInto(g.machine, [join(root, "src")], gone, { fetch: refusing })).rejects.toThrow(/HTTP 503/);
+      expect(existsSync(gone)).toBe(false);
+      const bodyless = join(dir, "bodyless.tgz");
+      const empty: typeof globalThis.fetch = async () => new Response(null, { status: 200 });
+      await expect(exportPathsInto(g.machine, [join(root, "src")], bodyless, { fetch: empty })).rejects.toThrow(/HTTP 200 with no body/);
+      expect(existsSync(bodyless)).toBe(false);
+    } finally {
+      g.close();
+    }
+  });
+
   it("a folder that is not on the machine fails with a plain sentence before any download", async () => {
     const g = await guest();
     try {
       const missing = join(tmpdir(), "wsp-export-none-" + randomBytes(4).toString("hex"));
-      await expect(exportFolder(g.machine, missing, RULE, { fetch: globalThis.fetch })).rejects.toThrow(`${missing} is not a folder on the machine`);
+      await expect(exportFolder(g.machine, missing, RULE, join(tmpdir(), "wsp-never.tgz"), { fetch: globalThis.fetch })).rejects.toThrow(`${missing} is not a folder on the machine`);
       expect(g.cmds.some(c => c.includes("tar czf"))).toBe(false);
     } finally {
       g.close();

@@ -2,10 +2,10 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ManifestEntry, parseManifest } from "@wsp/collect";
+import { type Manifest, type ManifestEntry, parseManifest } from "@wsp/collect";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GoldenImport } from "@wsp/runtime";
-import { Recipe } from "@wsp/protocol";
+import { Recipe, type RecipeDigest } from "@wsp/protocol";
 import {
   answeredRows,
   applyRecipe,
@@ -19,8 +19,11 @@ import {
   isTickable,
   loadRecipe,
   loginTool,
+  readSavedManifest,
+  recipeChanges,
   recipePath,
   saveRecipe,
+  withSavedPins,
   tickLoginTools,
   withoutAgentTools,
   withCatalogAgents,
@@ -81,41 +84,41 @@ describe("the command a login needs", () => {
   it("a login's command is coming when its tools row is ticked, else the row is named as unticked, locked, or missing with the catalog entry that brings it", () => {
     const manifest = { entries: [GCLOUD_ROW, KUBECTL_ROW, AWSCLI, ...FIXTURE.entries, GCLOUD, WRANGLER, KUBE, AWS] };
     const none = new Set<string>();
-    expect(loginTool(GCLOUD, manifest, none)).toEqual({ bin: "gcloud", row: GCLOUD_ROW, coming: false, why: "gcloud is not coming: its tool row is unticked; copy or sign in ticks it" });
-    expect(loginTool(GCLOUD, manifest, new Set(["tools/catalog/gcloud"]))).toEqual({ bin: "gcloud", row: GCLOUD_ROW, coming: true });
-    expect(loginTool(WRANGLER, manifest, none)).toEqual({ bin: "wrangler", coming: false, why: "wrangler is not coming: no row lists it; tick Cloudflare Wrangler under Tools to bring it" });
-    expect(loginTool(KUBE, manifest, none)).toMatchObject({ bin: "kubectl", row: KUBECTL_ROW, coming: false, why: "kubectl is not coming: its tool row is unticked; copy or sign in ticks it" });
-    expect(loginTool(KUBE, { entries: [KUBE] }, none)?.why).toBe("kubectl is not coming: no row lists it; tick kubectl under Tools to bring it");
+    expect(loginTool(GCLOUD, manifest, none, new Map())).toEqual({ bin: "gcloud", row: GCLOUD_ROW, coming: false, why: "gcloud is not coming: its tool row is unticked; copy or sign in ticks it" });
+    expect(loginTool(GCLOUD, manifest, new Set(["tools/catalog/gcloud"]), new Map())).toEqual({ bin: "gcloud", row: GCLOUD_ROW, coming: true });
+    expect(loginTool(WRANGLER, manifest, none, new Map())).toEqual({ bin: "wrangler", coming: false, why: "wrangler is not coming: no row lists it; tick Cloudflare Wrangler under Tools to bring it" });
+    expect(loginTool(KUBE, manifest, none, new Map())).toMatchObject({ bin: "kubectl", row: KUBECTL_ROW, coming: false, why: "kubectl is not coming: its tool row is unticked; copy or sign in ticks it" });
+    expect(loginTool(KUBE, { entries: [KUBE] }, none, new Map())?.why).toBe("kubectl is not coming: no row lists it; tick kubectl under Tools to bring it");
     // A formula not named for its command still counts; a locked row says so.
-    expect(loginTool(AWS, manifest, new Set(["tools/brew/awscli"]))).toEqual({ bin: "aws", row: AWSCLI, coming: true });
-    expect(loginTool(AWS, { entries: [LOCKED_AWSCLI, AWS] }, none)).toMatchObject({ coming: false, why: "aws is not coming: its tool row cannot come (no Linux bottle)" });
+    expect(loginTool(AWS, manifest, new Set(["tools/brew/awscli"]), new Map())).toEqual({ bin: "aws", row: AWSCLI, coming: true });
+    expect(loginTool(AWS, { entries: [LOCKED_AWSCLI, AWS] }, none, new Map())).toMatchObject({ coming: false, why: "aws is not coming: its tool row cannot come (no Linux bottle)" });
     // A command the catalog does not know is named plainly.
-    expect(loginTool({ ...KUBE, id: "logins/cloudflared" }, { entries: [] }, none)?.why).toBe("cloudflared is not coming: no row lists it; tick cloudflared under Tools to bring it");
+    expect(loginTool({ ...KUBE, id: "logins/cloudflared" }, { entries: [] }, none, new Map())?.why).toBe("cloudflared is not coming: no row lists it; tick cloudflared under Tools to bring it");
     // gh's row is ticked in the fixture's defaults; an agent's login follows its agent, not a tools row.
-    expect(loginTool(byId("logins/gh"), manifest, new Set(["tools/brew/gh"]))).toEqual({ bin: "gh", row: byId("tools/brew/gh"), coming: true });
-    expect(loginTool(byId("logins/claude"), manifest, none)).toBeUndefined();
+    expect(loginTool(byId("logins/gh"), manifest, new Set(["tools/brew/gh"]), new Map())).toEqual({ bin: "gh", row: byId("tools/brew/gh"), coming: true });
+    expect(loginTool(byId("logins/claude"), manifest, none, new Map())).toBeUndefined();
     // Any catalog tool's login names its command; a keys row beside an agent's login follows the agent.
-    expect(loginTool(login("fly", "Fly login"), { entries: [] }, none)?.why).toBe("fly is not coming: no row lists it; tick flyctl under Tools to bring it");
-    expect(loginTool(login("hermes-keys", "Hermes keys"), { entries: [] }, none)).toBeUndefined();
-    expect(loginTool(byId("tools/brew/gh"), manifest, none)).toBeUndefined();
+    expect(loginTool(login("fly", "Fly login"), { entries: [] }, none, new Map())?.why).toBe("fly is not coming: no row lists it; tick flyctl under Tools to bring it");
+    expect(loginTool(login("hermes-keys", "Hermes keys"), { entries: [] }, none, new Map())).toBeUndefined();
+    expect(loginTool(byId("tools/brew/gh"), manifest, none, new Map())).toBeUndefined();
   });
 
   it("a wrangler row under any node package manager or Homebrew's own formula counts as the command", () => {
     for (const id of ["tools/npm/wrangler", "tools/pnpm/wrangler", "tools/bun/wrangler", "tools/brew/cloudflare-wrangler"]) {
       const row: ManifestEntry = { rung: "tools", id, label: "wrangler", paths: [], bytes: 0, default: "bring", linux: "yes" };
-      expect(loginTool(WRANGLER, { entries: [row, WRANGLER] }, new Set([id]))).toEqual({ bin: "wrangler", row, coming: true });
+      expect(loginTool(WRANGLER, { entries: [row, WRANGLER] }, new Set([id]), new Map())).toEqual({ bin: "wrangler", row, coming: true });
     }
   });
 
   it("tickLoginTools ticks the row of every login answered copy or sign in; a skip, a coming row and a locked row leave the ticks alone", () => {
     const manifest = { entries: [GCLOUD_ROW, KUBECTL_ROW, GCLOUD, KUBE, WRANGLER, AWS, AWSCLI] };
     const ticks = new Set<string>(["tools/brew/awscli"]);
-    const added = tickLoginTools(manifest, new Map([["logins/gcloud", "copy"], ["logins/kube", "machine"], ["logins/wrangler", "copy"], ["logins/aws", "copy"]]), ticks);
+    const added = tickLoginTools(manifest, new Map([["logins/gcloud", "copy"], ["logins/kube", "machine"], ["logins/wrangler", "copy"], ["logins/aws", "copy"]]), ticks, new Map());
     expect(added).toEqual(["Google Cloud CLI", "kubernetes-cli"]);
     expect([...ticks]).toEqual(["tools/brew/awscli", "tools/catalog/gcloud", "tools/brew/kubernetes-cli"]);
     const untouched = new Set<string>();
-    expect(tickLoginTools({ entries: [LOCKED_AWSCLI, AWS] }, new Map([["logins/aws", "copy"]]), untouched)).toEqual([]);
-    expect(tickLoginTools(manifest, new Map([["logins/gcloud", "skip"]]), untouched)).toEqual([]);
+    expect(tickLoginTools({ entries: [LOCKED_AWSCLI, AWS] }, new Map([["logins/aws", "copy"]]), untouched, new Map())).toEqual([]);
+    expect(tickLoginTools(manifest, new Map([["logins/gcloud", "skip"]]), untouched, new Map())).toEqual([]);
     expect(untouched.size).toBe(0);
   });
 });
@@ -368,6 +371,55 @@ describe("the small recipe", () => {
     expect(again.entries.map(e => e.id)).toEqual(["tools/catalog/agent-browser"]);
   });
 
+  it("a recorded pin rides the small recipe onto the tools row of the catalog id it names, the bare row and this computer's own alike, and survives withTicksOf and the file", () => {
+    const pin = { tag: "v2.86.0", sha256: "b".repeat(64) };
+    const pinned: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "gh" ? { ...r, pin } : r)) };
+    expect(applyRecipe(FIXTURE, pinned).entries.find(e => e.id === "tools/brew/gh")).toMatchObject({ bring: true, pin });
+    const bare = applyRecipe({ entries: [] }, pinned);
+    expect(bare.entries.find(e => e.id === "tools/catalog/gh")).toMatchObject({ bring: true, pin });
+    expect(bare.entries.find(e => e.id === "tools/catalog/agent-browser")).not.toHaveProperty("pin");
+    expect(parseManifest(bare)).toEqual(bare);
+    // A recipe without one leaves the row as this computer has it.
+    expect(applyRecipe(FIXTURE, RECIPE).entries.find(e => e.id === "tools/brew/gh")).not.toHaveProperty("pin");
+    const here: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => { const { pin: _pin, signIn: _signIn, ...rest } = r; return { ...rest, on: false }; }) };
+    expect(withTicksOf(here, pinned).rows.find(r => r.id === "gh")).toMatchObject({ on: true, signIn: "copy", pin });
+    expect(withTicksOf(here, pinned).rows.find(r => r.id === "yq")).not.toHaveProperty("pin");
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
+    const path = join(dir, "recipe.json");
+    writeFileSync(path, JSON.stringify(pinned));
+    expect(loadRecipe(path).rows.find(r => r.id === "gh")?.pin).toEqual(pin);
+  });
+
+  it("the saved manifest's pins come back onto this computer's rows by id, for the rows no small recipe carries; a row with its own pin keeps it, and a missing or broken file gives nothing", () => {
+    const pin = { tag: "v0.1.0", sha256: "a".repeat(64) };
+    const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", paths: [], bytes: 0, default: "bring", linux: "unknown" };
+    const gh: ManifestEntry = { rung: "tools", id: "tools/brew/gh", label: "gh", paths: [], bytes: 0, default: "bring" };
+    const saved: Manifest = { entries: [{ ...tap, bring: true, pin }, { ...gh, bring: true, pin: { tag: "v2.86.0", sha256: "b".repeat(64) } }] };
+    const fed = withSavedPins({ entries: [tap, { ...gh, pin: { tag: "v2.87.0", sha256: "c".repeat(64) } }] }, saved);
+    expect(fed.entries.find(e => e.id === tap.id)).toEqual({ ...tap, pin });
+    expect(fed.entries.find(e => e.id === gh.id)?.pin).toEqual({ tag: "v2.87.0", sha256: "c".repeat(64) });
+    expect(withSavedPins({ entries: [tap] }, undefined)).toEqual({ entries: [tap] });
+    expect(withSavedPins({ entries: [tap] }, { entries: [gh] })).toEqual({ entries: [tap] });
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
+    const path = recipePath(join(dir, "state.json"));
+    expect(readSavedManifest(path)).toBeUndefined();
+    writeFileSync(path, "{");
+    expect(readSavedManifest(path)).toBeUndefined();
+    saveRecipe(path, saved, new Set([tap.id]));
+    expect(readSavedManifest(path)?.entries.find(e => e.id === tap.id)?.pin).toEqual(pin);
+  });
+
+  it("recipeChanges says why a tool installs differently when more than its version moved: the road in the roads' words, the pin by release, the lines otherwise; a tick sealed without a road says nothing", () => {
+    const manifest: Manifest = { entries: [{ rung: "tools", id: "tools/catalog/rust", label: "Rust", paths: [], bytes: 0, default: "skip" }] };
+    const at = (t: Partial<RecipeDigest["ticks"][number]>): RecipeDigest => ({ ticks: [{ id: "tools/catalog/rust", ...t }], files: [] });
+    expect(recipeChanges(at({ road: "brew", installer: "a" }), at({ road: "script", installer: "b" }), manifest)).toEqual(["Rust: now by its own installer, was with Homebrew"]);
+    expect(recipeChanges(at({ road: "release", installer: "a", pin: { tag: "v1", sha256: "x" } }), at({ road: "release", installer: "a", pin: { tag: "v2", sha256: "y" } }), manifest)).toEqual(["Rust: release v1 to v2"]);
+    expect(recipeChanges(at({ road: "release", installer: "a" }), at({ road: "release", installer: "b" }), manifest)).toEqual(["Rust: its install lines changed"]);
+    expect(recipeChanges(at({ version: "1", road: "release", installer: "a" }), at({ version: "2", road: "release", installer: "b" }), manifest)).toEqual(["Rust now 2"]);
+    expect(recipeChanges(at({}), at({ road: "script", installer: "b" }), manifest)).toEqual([]);
+    expect(recipeChanges(at({ road: "script", installer: "b" }), at({ road: "script", installer: "b" }), manifest)).toEqual([]);
+  });
+
   it("a Mac's rustup formula is the rust row the recipe ticks, so no bare catalog row lands beside it", () => {
     const rustup: ManifestEntry = { rung: "tools", id: "tools/brew/rustup", label: "rustup", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "yes" };
     const recipe: Recipe = { ...RECIPE, rows: [...RECIPE.rows, { id: "rust", kind: "tool", on: true, source: { kind: "used", sessions: 4, calls: 100 } }] };
@@ -378,7 +430,7 @@ describe("the small recipe", () => {
 
   it("a login's command counts as coming when the catalog's bare row brings it", () => {
     const gh: ManifestEntry = { rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", group: "Catalog", paths: [], bytes: 0, default: "skip", linux: "yes", bring: true };
-    expect(loginTool(byId("logins/gh"), { entries: [byId("logins/gh"), gh] }, new Set(["tools/catalog/gh"]))).toEqual({ bin: "gh", row: gh, coming: true });
+    expect(loginTool(byId("logins/gh"), { entries: [byId("logins/gh"), gh] }, new Set(["tools/catalog/gh"]), new Map())).toEqual({ bin: "gh", row: gh, coming: true });
   });
 
   it("withCatalogAgents adds a bare agents row and a bare login row for every catalog agent this computer has none for, and leaves the found ones alone", () => {

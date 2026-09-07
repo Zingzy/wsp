@@ -3,6 +3,7 @@
 // files without overwriting the machine's own, so a module emits a python3
 // script the machine runs once its files have landed: nothing on the machine
 // can run the engine, and python3 with its sqlite3 module is on the images.
+import { PY_PREAMBLE, pyData } from "./py.js";
 
 /** What the script prints as its last line: the rows it inserted or updated and the ones already as they should be,
  * with a note when a row was kept as the machine had it rather than as carried, or why it could not merge yet (the
@@ -27,22 +28,17 @@ export function parseMergeOutput(stdout: string): MergeOutput {
   throw new Error(`the merge script ended with: ${last}`);
 }
 
-/** A python expression for any JSON value, carried as base64 so no byte of a path or a row needs escaping. */
-export const pyData = (value: unknown): string => `data(${JSON.stringify(Buffer.from(JSON.stringify(value), "utf8").toString("base64"))})`;
-
 /**
- * A merge script from its steps: the preamble defines FROM and TO, the path rule as moved(), data() for the values
- * the steps carry, out() and fail() for the result, and write() for a file replaced in place; each step adds to
- * merged and kept, and to notes when it kept something as the machine had it, and the last line prints them.
- * Text files are read and written with surrogateescape so a line that is not UTF-8 passes through byte for byte.
+ * A merge script from its steps: the shared preamble, then FROM and TO, the path rule over them as moved(), out()
+ * and fail() for the result, and write() for a file replaced in place; each step adds to merged and kept, and to
+ * notes when it kept something as the machine had it, and the last line prints them. Text files are read and
+ * written with surrogateescape so a line that is not UTF-8 passes through byte for byte.
  */
 export function mergeScript(from: string, to: string, steps: readonly string[]): string {
   return [
-    "import base64, json, os, shutil, sqlite3, sys",
-    "def data(b):",
-    "    return json.loads(base64.b64decode(b))",
+    PY_PREAMBLE,
     "def moved(p):",
-    '    return TO + p[len(FROM):] if p == FROM or p.startswith(FROM + "/") else None',
+    "    return TO + p[len(FROM):] if under(p, FROM) else None",
     "def out(o):",
     "    print(json.dumps(o))",
     "    sys.exit(0)",
