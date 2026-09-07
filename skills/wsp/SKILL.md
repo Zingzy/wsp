@@ -159,7 +159,7 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 
 1. One workspace with the repo imported (`wsp import <folder> --to <workspace>` on a fresh workspace, the app's import dialog, or `new --from` a project golden taken after an import). `wsp threads --in <workspace>` shows what is on it.
 2. One thread per ticket, each in its own worktree: the brief opens with `git worktree add -b ticket/<n>-<slug> <folder> origin/main`, and `--cwd` points at the repo. Two threads writing in one checkout collide.
-3. The brief names the ticket, the files to read whole, the laws (the repo's review skill), the exact test commands and the proof required. A brief that says "fix the bug" comes back with a guess.
+3. The brief names the ticket, the files to read whole, the laws (the repo's review skill), the exact test commands and the proof required, and says to run every command in the foreground, since a turn ends when the agent replies. A brief that says "fix the bug" comes back with a guess.
 4. Start builder threads with `--notify me` when you are a person, or `--notify <your thread>` when you are an agent that wants to keep working; then do not poll `threads`, the line arrives. Both `wsp thread new` and the `thread_new` tool follow the first turn and return only when it ends, so over MCP a coordinator runs one builder at a time. On the command line a builder that should run beside you is started detached, `nohup wsp thread new ... > /tmp/<name>.log 2>&1 &` (a Mac has no `setsid`; a wsp machine does), and its id is the log's first `thread <id>` line.
 5. A review is its own thread on the same workspace with the branch name and the review skill; the builder fixes in its thread through `send`. A review runs well on a cheaper model, `--model` on thread new.
 6. Work leaves the machine by `git push` from the thread (only when the golden signed in to GitHub during wsp init) or by `export` to this computer.
@@ -208,6 +208,7 @@ wsp recipe --add ruff="uv tool install ruff"
 - A thread's end reaches its parent thread or the person only when its start said `--notify`; nothing polls (#286).
 - A thread works in `--cwd` or the workspace's project folder; a relative `--cwd` is refused before anything starts (#280).
 - A turn ends on 10 minutes of silence, not a 15 minute wall clock; long steps must print (#295).
+- A turn ends when the agent replies; a command it ran in the background is killed with the turn and nothing wakes it when the command would have finished. Briefs say run every command in the foreground and wait for it. A turn that ended with one still running reads failed with the reason `ended with 1 background task running` (#313).
 - `thread new` and `send` return when the reply is complete, not when the process is reaped minutes later (#293).
 - A turn's process group dies with the turn; a server that must outlive it starts with `setsid nohup ... &` (#275).
 - Snapshot only a running first-life machine with a project loaded; a woken machine is refused (#223).

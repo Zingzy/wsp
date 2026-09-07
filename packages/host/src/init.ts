@@ -11,7 +11,7 @@ import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type ProjectScan, type Rung } from "@wsp/collect";
-import { describeAge, type BackendPricing } from "@wsp/engine";
+import { SnapshotFailedError, describeAge, type BackendPricing } from "@wsp/engine";
 import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
@@ -19,7 +19,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, plural, shownOf, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb } from "@wsp/protocol";
+import { ALREADY_APPLIED, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -923,6 +923,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   saveRecipe(path, manifest, ticks, choices);
   // The small recipe beside it: the catalog ids with the ticks and answers as the screens left them, the form wsp init --recipe reads.
   const small = { path: smallRecipePath(opts.statePath), recipe: catalogRecipe };
+  const attachCommand = `wsp init --recipe ${shellQuote(small.path)}`;
   saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
   log.step(`Recipe saved to ${path} and ${small.path}`, out);
   const wspToolsPlaced = installEach(wspTools, mcpServerSpec(opts.statePath), opts.home);
@@ -1146,7 +1147,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const line =
       e instanceof PrepareStoppedError && e.builderId !== undefined
         ? e.kept
-          ? `Stopped ${where}. Your earlier builder ${attach?.name ?? GOLDEN_NAME} (${e.builderId}) was not stopped: it has a first life worth keeping and stays up at about $${opts.pricing.rateUsdPerHour(attach?.size ?? opts.pricing.defaultSize).toFixed(2)}/hr. wsp init --recipe ${small.path} attaches to it again; the sweep stops it once it is six hours old.`
+          ? `Stopped ${where}. Your earlier builder ${attach?.name ?? GOLDEN_NAME} was not stopped: it has a first life worth keeping. ${builderStaysLine(e.builderId, opts.pricing.rateUsdPerHour(attach?.size ?? opts.pricing.defaultSize), attachCommand)}`
           : e.left === undefined
             ? `Stopped ${where}. Builder ${e.builderId} is gone; nothing is billing.`
             : `Stopped ${where}. Builder ${e.builderId} did not stop (${e.left}); ${SWEEP}`
@@ -1246,10 +1247,11 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const next = ((await rt.golden.get())?.head ?? 0) + 1;
   card(`Ready to seal golden v${next}`, sealSummary(landed, outcomes, secretOutcomes, widthOf(io.output)), io.output);
   const result: InitResult = { code: 0, logins: outcomes, secrets: secretOutcomes };
+  const builderRate = opts.pricing.rateUsdPerHour(builder.size);
   if (interactive) {
     const go = await confirmPrompt({ message: `Seal this machine as golden v${next}?`, hint: "Enter seals: a snapshot, then a fork to prove it. No leaves the machine up.", initialValue: true, input: io.input, output: io.output });
     if (isCancel(go) || !go) {
-      cancel(`Nothing was sealed. Builder ${builder.id} stays up at about $${opts.pricing.rateUsdPerHour(builder.size).toFixed(2)}/hr; wsp init --recipe ${small.path} attaches to it again, and the sweep stops it once it is six hours old.`, out);
+      cancel(`Nothing was sealed. ${builderStaysLine(builder.id, builderRate, attachCommand)}`, out);
       await closeRuntime();
       return { ...result, code: 1 };
     }
@@ -1266,7 +1268,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     runLog.note(`failed: ${message}`);
     if (view.failure === undefined) log.error(message, out);
     log.step(logLine(), out);
-    outro("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.", out);
+    // The words follow the provider: only a builder it answers 404 for went at its hand; one it has, or would not describe, is untouched.
+    const refused = error instanceof SnapshotFailedError ? error : undefined;
+    const stays = refused !== undefined && refused.builderState !== "gone";
+    const staysLine = refused?.builderState === "unread" ? sealFailedBuilderUnreadLine : sealFailedBuilderStaysLine;
+    io.json?.({
+      event: "seal-failed",
+      builder: builder.id,
+      message,
+      recipe: small.path,
+      ...(refused !== undefined ? { builderState: refused.builderState, attempts: refused.attempts, provider: refused.answer } : {}),
+      ...(stays ? { attachCommand, rateUsdPerHour: builderRate } : {}),
+    });
+    outro(stays ? staysLine(builder.id, builderRate, attachCommand) : refused !== undefined ? SEAL_FAILED_BUILDER_GONE_LINE : SEAL_FAILED_LINE, out);
     await closeRuntime();
     return { ...result, code: 1 };
   }

@@ -566,6 +566,89 @@ describe("wsp init, interactive", () => {
     expect(f.backends[0]!.machines.every(m => m.killed)).toBe(true);
   });
 
+  /** The provider refusing the snapshot as it did on 2026-09-07: a 502 with its message and a request id per reply. */
+  const refusedSnapshot = (nth: number): Error => Object.assign(new Error("Failed to snapshot sandbox"), { kind: "snapshotUnavailable", status: 502, requestId: `req_${nth}` });
+  const refusing = (f: Fake, refuse: (m: StubMachine, nth: number) => void): void => {
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.beforeSnapshot = refuse;
+      f.backends.push(backend);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, snapshotRetryMs: 1 });
+      f.runtimes.push(rt);
+      return rt;
+    };
+  };
+
+  it("a snapshot the provider refuses is asked for three times while the builder runs, each attempt on the stage line with the provider's answer; the builder is left up, the outro says how to attach and what it costs, and the run log holds the status and request id", async () => {
+    // The widest terminal the wizard draws for, so the cut stage lines keep the provider's answer in view.
+    const f = fake({ yes: true, columns: 100 });
+    refusing(f, (_m, nth) => { throw refusedSnapshot(nth); });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    expect(result.handle).toBeUndefined();
+    expect(f.hosts).toBe(0);
+    expect(f.relaysClosed).toBe(1);
+    const out = f.text();
+    // The terminal cuts each stage line at its edge; the run log below holds them whole.
+    expect(out).toContain("attempt 1 of 3 answered 502 Failed to snapshot sandbox (request req_1); the builder reads");
+    expect(out).toContain("attempt 2 of 3 answered 502 Failed to snapshot sandbox (request req_2); the builder reads");
+    expect(out).toContain("Snapshot failed");
+    expect(out).toContain("the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_");
+    const recipe = join(dirname(f.opts.statePath), "recipe.json");
+    expect(out).toContain(`Seal failed; the builder is as you left it. Builder m1 stays up at about $0.11/hr; wsp init --recipe '${recipe}' attaches to it again, and the sweep stops it once it is six hours old.`);
+    expect(out).not.toContain("the builder is gone");
+    expect(f.backends[0]!.machines.map(m => m.killed)).toEqual([false]);
+    expect(await f.runtimes[0]!.golden.builders()).toEqual([expect.objectContaining({ id: "m1", firstLife: true })]);
+    const log = readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8");
+    expect(log).toContain("stage snapshotting: attempt 1 of 3 answered 502 Failed to snapshot sandbox (request req_1); the builder reads running, next attempt in 1ms");
+    expect(log).toContain("stage failed: the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_3) while the builder read running");
+  });
+
+  it("a refused snapshot on a builder the provider answers 404 for ends at once: the outro names the provider as the cause and the record is gone", async () => {
+    const f = fake({ yes: true, columns: 100 });
+    refusing(f, m => { m.killed = true; throw refusedSnapshot(1); });
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const out = f.text();
+    expect(out).toContain("the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_");
+    expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).toContain("stage failed: the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_1) and no longer has the builder (404)");
+    expect(out).toContain("Seal failed and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again; the recipe is kept.");
+    expect(out).not.toContain("attaches to it again");
+    expect(await f.runtimes[0]!.golden.builders()).toEqual([]);
+  });
+
+  it("a refused snapshot whose read of the builder fails with anything but 404 leaves the builder untouched: the outro says the provider could not be read and how to attach", async () => {
+    const f = fake({ yes: true, columns: 100 });
+    // The read is the machine's own state call, the second GET on Solari; it fails while the snapshot call did.
+    refusing(f, m => { m.state = async () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); }; throw refusedSnapshot(1); });
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const out = f.text();
+    expect(out).toContain("the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_");
+    const recipe = join(dirname(f.opts.statePath), "recipe.json");
+    expect(out).toContain(`Seal failed; the provider could not be read about the builder, so nothing on it was touched. Builder m1 stays up at about $0.11/hr; wsp init --recipe '${recipe}' attaches to it again, and the sweep stops it once it is six hours old.`);
+    expect(f.backends[0]!.machines.map(m => m.killed)).toEqual([false]);
+    expect(await f.runtimes[0]!.golden.builders()).toEqual([expect.objectContaining({ id: "m1", firstLife: true })]);
+    expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).toContain("stage failed: the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_1) and could not be read about the builder (upstream sad)");
+  });
+
+  it("under --json a failed seal ends with one object carrying the same facts: the provider's answer, the builder's state, and the attach command and cost while it is up", async () => {
+    const f = fake({ nonInteractive: true, json: true });
+    refusing(f, (_m, nth) => { throw refusedSnapshot(nth); });
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const recipe = join(dirname(f.opts.statePath), "recipe.json");
+    expect(f.records.at(-1)).toEqual({
+      event: "seal-failed",
+      builder: "m1",
+      message: "the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_3) while the builder read running",
+      recipe,
+      builderState: "running",
+      attempts: 3,
+      provider: { status: 502, message: "Failed to snapshot sandbox", requestId: "req_3", at: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/) as string },
+      attachCommand: `wsp init --recipe '${recipe}'`,
+      rateUsdPerHour: expect.closeTo(0.11, 5) as number,
+    });
+    expect(f.backends[0]!.machines.map(m => m.killed)).toEqual([false]);
+  });
+
   it("no at the seal question leaves the builder running for a later attach, closes the relay, starts no host and exits 1", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
@@ -582,7 +665,7 @@ describe("wsp init, interactive", () => {
     expect(f.hosts).toBe(0);
     // The runtime is closed on the way out, so the builder left up carries no dead pid's hold for the next run to age out.
     expect(await f.store.get("builders", "m1")).not.toHaveProperty("heldBy");
-    expect(f.text()).toContain(`Nothing was sealed. Builder m1 stays up at about $0.11/hr; wsp init --recipe ${join(dirname(f.opts.statePath), "recipe.json")} attaches to it again, and the sweep stops it once it is six hours old.`);
+    expect(f.text()).toContain(`Nothing was sealed. Builder m1 stays up at about $0.11/hr; wsp init --recipe '${join(dirname(f.opts.statePath), "recipe.json")}' attaches to it again, and the sweep stops it once it is six hours old.`);
     expect(f.backends[0]!.machines.map(m => m.killed)).toEqual([false]);
     expect(await f.runtimes.at(-1)!.golden.get()).toBeUndefined();
     expect(f.opened).toEqual([]);
@@ -2661,7 +2744,7 @@ describe("wsp init, a signal during prepare", () => {
     expect(record.building).toBeUndefined();
     expect(record.heldBy).toBeUndefined();
     const out = f.text();
-    expect(out).toMatch(/Stopped between stages\. Your earlier builder default \(m1\) was not stopped: it has a first life worth keeping and stays up at about \$\d+\.\d\d\/hr\. wsp init --recipe .*recipe\.json attaches to it again; the sweep stops it once it is six hours old\./);
+    expect(out).toMatch(/Stopped between stages\. Your earlier builder default was not stopped: it has a first life worth keeping\. Builder m1 stays up at about \$\d+\.\d\d\/hr; wsp init --recipe '.*recipe\.json' attaches to it again, and the sweep stops it once it is six hours old\./);
     expect(out).not.toContain("nothing is billing");
   });
 
@@ -2956,7 +3039,7 @@ describe("wsp init with a golden already built from a recipe", () => {
       const f = fake({ yes: true, home: first.opts.home, statePath: first.opts.statePath, ...o });
       f.opts.runtime = recipe => {
         f.backends.push(shared);
-        const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" } });
+        const rt = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" }, snapshotRetryMs: 1 });
         f.runtimes.push(rt);
         return rt;
       };
@@ -3112,6 +3195,43 @@ describe("wsp init with a golden already built from a recipe", () => {
     const out = f.text();
     expect(out).toContain("Golden v1 is unchanged and the builder kept since the save is gone. Run wsp init again to retry on a fork of the golden (about two minutes), or pick the rebuild.");
     expect(shared.machines[0]!.killed).toBe(true);
+  });
+
+  it("an update whose snapshot the provider refuses leaves the kept builder up and says so; one the provider dropped is named gone at its hand", async () => {
+    const { shared, first, next } = await sealed();
+    writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    shared.beforeSnapshot = (_m, nth) => { throw Object.assign(new Error("Failed to snapshot sandbox"), { kind: "snapshotUnavailable", status: 502, requestId: `req_${nth}` }); };
+    const f = next({ tty: false });
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    // Off a terminal the stream prints a step's end line only, so the attempts are read from the run log; the v1 seal was ask 1 on this machine.
+    expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).toContain("stage snapshotting: attempt 1 of 3 answered 502 Failed to snapshot sandbox (request req_2); the builder reads running, next attempt in 1ms");
+    expect(f.text()).toContain("the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_4) while the builder read running");
+    expect(f.text()).toContain("Golden v1 is unchanged. Builder m1 is as it was, up at about $0.11/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.");
+    expect(shared.machines.map(m => m.killed)).toEqual([false, true]);
+    // The retry: the next wsp init finds the builder with the new recipe on it, attaches, and seals v2 off it.
+    shared.beforeSnapshot = undefined;
+    const h = next({ tty: false });
+    expect((await runInit(h.opts, h.io)).code).toBe(0);
+    expect(h.text()).toContain("Golden v2 is sealed");
+    expect(goldenHead(await h.runtimes.at(-1)!.golden.get())).toMatchObject({ version: 2, snapshotId: "snap_golden-v2" });
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], ["snap_golden-v2", true]]);
+
+    const unread = await sealed();
+    writeFileSync(join(unread.first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    unread.shared.beforeSnapshot = m => { m.state = async () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); }; throw Object.assign(new Error("Failed to snapshot sandbox"), { kind: "snapshotUnavailable", status: 502 }); };
+    const u = unread.next({ tty: false });
+    expect((await runInit(u.opts, u.io)).code).toBe(1);
+    expect(u.text()).toContain("Golden v1 is unchanged. The provider could not be read about builder m1, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.");
+    expect(unread.shared.machines.map(m => m.killed)).toEqual([false, true]);
+
+    const dropped = await sealed();
+    writeFileSync(join(dropped.first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
+    dropped.shared.beforeSnapshot = m => { m.killed = true; throw Object.assign(new Error("Failed to snapshot sandbox"), { kind: "snapshotUnavailable", status: 502 }); };
+    const g = dropped.next({ tty: false });
+    expect((await runInit(g.opts, g.io)).code).toBe(1);
+    expect(g.text()).toMatch(/the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox \(no request id from the provider, at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z\) and no longer has the builder \(404\)/);
+    expect(g.text()).toContain("Golden v1 is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.");
+    expect(await g.runtimes.at(-1)!.golden.builders()).toEqual([]);
   });
 
   it("an unchanged recipe says the golden already matches and boots nothing", async () => {

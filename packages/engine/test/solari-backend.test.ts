@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { EXEC_ENV, SolariBackend } from "../src/solari-backend.js";
+import { EXEC_ENV, REQUEST_ID_HEADER, SolariBackend } from "../src/solari-backend.js";
 
-function fakeFetch(routes: Record<string, { status: number; body: unknown }>) {
+function fakeFetch(routes: Record<string, { status: number; body: unknown; headers?: Record<string, string> }>) {
   return vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const key = `${init?.method ?? "GET"} ${new URL(String(url)).pathname}`;
     const hit = routes[key] ?? { status: 404, body: { error: "no route " + key } };
-    return new Response(JSON.stringify(hit.body), { status: hit.status });
+    return new Response(JSON.stringify(hit.body), { status: hit.status, ...(hit.headers !== undefined ? { headers: hit.headers } : {}) });
   });
 }
 
@@ -94,6 +94,17 @@ describe("SolariBackend", () => {
     expect(body.args[1]).not.toContain("SHELL");
     expect(body.args[0]).toBe("-c");
   });
+  it("a refused call's error carries the request id the reply's header named", async () => {
+    const id = "vm_1";
+    const f = fakeFetch({
+      "POST /sandboxes": { status: 201, body: { sandboxId: id, kind: "sandbox" } },
+      [`POST /sandboxes/${id}/snapshots`]: { status: 502, body: { error: "Failed to snapshot sandbox" }, headers: { [REQUEST_ID_HEADER]: "req_42" } },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox", template: "base" });
+    await expect(m.snapshot("g")).rejects.toMatchObject({ kind: "snapshotUnavailable", status: 502, requestId: "req_42" });
+  });
+
   it("surfaces snapshotUnavailable without retrying", async () => {
     const id = "x";
     const f = fakeFetch({
