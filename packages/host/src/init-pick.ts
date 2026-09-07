@@ -8,15 +8,15 @@
 // the collector's rows follow it.
 import type { Readable, Writable } from "node:stream";
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type Size, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
-import { type LoginChoice, type Manifest, type ManifestEntry, floorApplies } from "@wsp/collect";
+import { withProject, type LoginChoice, type Manifest, type ManifestEntry, type ProjectScan, floorApplies } from "@wsp/collect";
 import { estimateDisk, isMcpRow, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
 import { customRows, fmtBytes, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
-import { GUTTER, colourDepth, isTTY } from "./init-layout.js";
+import { GUTTER, card, colourDepth, isTTY, table, textPrompt } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
 import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, scannedTicks, withScanned } from "./init-also.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
-import { BASE_GROUP, FLOOR_LINE, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
+import { BASE_GROUP, FLOOR_LINE, PROJECT_GROUP, candidatesLine, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
 import { hasLogin, signInFor, type SignIn } from "./signin-table.js";
 import { SIGN_IN_CHOICES, SIGN_IN_WORDS, signInChoice } from "./signin-words.js";
@@ -34,6 +34,9 @@ export const WSP_TITLE = "wsp for your agents on this Mac";
 export const WSP_TOP = "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces.";
 /** How many screens a run has, the build counted; the counter on every screen reads against it. */
 export const SCREENS = 6;
+/** The first screen's own question when no folder was named on the command line; nothing has to answer it. */
+export const PROJECT_QUESTION = "Which project are you bringing first?";
+const PROJECT_HINT = "optional; a folder on this Mac, read for what its own files say it needs";
 
 const rowOf = (recipe: Recipe, id: string): RecipeRow | undefined => recipe.rows.find(r => r.id === id);
 /** Whether the recipe found the entry on this Mac. */
@@ -124,6 +127,8 @@ export function agentItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
 /** The recipe source in words with its counts, for a tool's detail pane. */
 function sourceLine(e: ToolEntry, r: RecipeRow | undefined): string {
   switch (r?.source.kind) {
+    case "project":
+      return r.source.why;
     case "installed":
       return r.source.bin ? "installed on this Mac" : `on this Mac: ${r.source.paths.join(", ")}`;
     case "used":
@@ -335,6 +340,17 @@ export function tableScreen(o: TableScreenOptions): Promise<RungSelectResult> {
 
 // --- the flow ------------------------------------------------------------------
 
+/** What the folder asked for, in the card the question leaves behind: a row per catalog tool with the file that
+ * asked, then the names the catalog carries no row for. */
+export function projectNote(scan: ProjectScan): string[] {
+  if (scan.rows.length === 0 && scan.candidates.length === 0) return [`Nothing in ${scan.dir} named a tool the catalog carries.`];
+  const candidates = candidatesLine(scan);
+  return [...table(scan.rows.map(n => [n.name, n.why])), ...(candidates === undefined ? [] : [candidates])];
+}
+
+/** What the card says when the answer names no folder that is there. */
+export const noFolderNote = (folder: string): string => `There is no folder at ${folder}; nothing was read.`;
+
 export interface PickOptions {
   /** The collector's rows, every catalog agent among them. */
   manifest: Manifest;
@@ -347,6 +363,11 @@ export interface PickOptions {
   /** What the package managers here could put on the image: the rows of screen three. With none, that screen keeps
    * its place and says nothing was found. */
   scan?: readonly ScanRow[];
+  /** The project folder named on the command line, already weighed into the recipe; absent, the run asks for one
+   * before the first screen. */
+  project?: string;
+  /** Reads one project folder's own manifests for what it needs; nothing when there is no folder there. */
+  scanProject(folder: string): Promise<ProjectScan | undefined>;
   input: Readable;
   output: Writable;
 }
@@ -363,12 +384,29 @@ type Screen = "agents" | "tools" | "also" | "logins" | "wsp";
 /** Where each screen sits in the six a run has; the build is the sixth. */
 const SCREEN_AT: Record<Screen, number> = { agents: 1, tools: 2, also: 3, logins: 4, wsp: 5 };
 
+/** The recipe with the answered folder's needs ticked and a card naming them; an empty answer leaves it as it was,
+ * and a folder that is not there is said so rather than read as a project that needs nothing. */
+async function askProject(o: PickOptions, recipe: Recipe): Promise<Recipe | "cancel"> {
+  const answer = await textPrompt({ message: PROJECT_QUESTION, hint: PROJECT_HINT, input: o.input, output: o.output });
+  if (typeof answer === "symbol") return "cancel";
+  const folder = answer.trim();
+  if (folder === "") return recipe;
+  const scan = await o.scanProject(folder);
+  card(PROJECT_GROUP, scan === undefined ? [noFolderNote(folder)] : projectNote(scan), o.output);
+  return scan === undefined ? recipe : withProject(recipe, scan);
+}
+
 /** The screens in order, esc stepping back one; the recipe carries the ticks and the answers between them. */
 export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
   // The scan screen keeps its place in the six whether or not the managers here had anything to offer.
   const scan = o.scan ?? [];
   const screens: readonly Screen[] = o.from === "agents" ? ["agents", "tools", "also", "logins", "wsp"] : ["logins", "wsp"];
   let recipe = o.recipe;
+  if (o.from === "agents" && o.project === undefined) {
+    const asked = await askProject(o, recipe);
+    if (asked === "cancel") return "cancel";
+    recipe = asked;
+  }
   let logins = new Map<string, LoginChoice>();
   // What screens four and five were left on, so esc back onto them shows the answers again, as the recipe shows the
   // ticks; undefined until the screen has been answered once, since an empty set is an answer of its own.

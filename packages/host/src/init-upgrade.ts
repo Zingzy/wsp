@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// wsp init when a golden already exists: the saved recipe against the one
-// the golden was built from, an offer to update it from the delta with the
-// full rebuild one keypress away, and the update itself through the runtime.
+// wsp init when a golden already exists: the saved recipe against the one the
+// golden was built from, an offer to build the next version on top of it from
+// the delta with the full rebuild one keypress away, and the update itself
+// through the runtime. An update only ever adds: a row the recipe dropped is
+// retired on the new version, never taken off the image.
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
-import { describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, removalsFor, rowsToApply, type GoldenDelta, type GoldenImport, type RecipeDiff } from "@wsp/engine";
-import type { GoldenLogin, RecipeDigest } from "@wsp/protocol";
+import { changeCounts, describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, retiredBy, rowsToApply, type GoldenDelta, type GoldenImport, type RecipeDiff } from "@wsp/engine";
+import { goldenBuildLine, type GoldenLogin, type GoldenRetired, type RecipeDigest } from "@wsp/protocol";
 import { GRACE_MS, goldenHead, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
 import { cancel, isCancel, log, note, outro, select } from "@clack/prompts";
 import { rebuildEstimate, type BuildTimes } from "./init-times.js";
@@ -72,7 +74,13 @@ const ON_FORK = "about two minutes";
 
 export function describeOffer(o: UpgradeOffer): string[] {
   const where = o.onBuilder ? `on the builder kept since the save, ${ON_BUILDER}` : `on a fork of the golden, ${ON_FORK}`;
-  return [...describeDiff(o.diff), "", o.small ? `Small change: update ${where}; ${describeCost(o)}.` : `A big change: a rebuild from scratch is the safer road, ${rebuildEstimate(o.lastBuild)}.`, ...(o.small ? [] : [`An update would run ${where}; ${describeCost(o)}.`])];
+  return [
+    goldenBuildLine(o.version, o.version + 1, changeCounts(o.diff)),
+    ...describeDiff(o.diff),
+    "",
+    o.small ? `Small change: update ${where}; ${describeCost(o)}.` : `A big change: a rebuild from scratch is the safer road, ${rebuildEstimate(o.lastBuild)}.`,
+    ...(o.small ? [] : [`An update would run ${where}; ${describeCost(o)}.`]),
+  ];
 }
 
 /** What the updated version says about its logins: the previous version's outcomes as they were, since the update
@@ -87,13 +95,17 @@ export function carryLogins(previous: readonly GoldenLogin[] | undefined, diff: 
 }
 
 /** The delta the runtime applies: the rows the diff names, planned like a
- * first build but hashed as the whole recipe, plus what comes off. */
-export function deltaFor(diff: RecipeDiff, from: RecipeDigest, full: GoldenImport, bring: readonly ManifestEntry[], importOf: (rows: readonly ManifestEntry[]) => GoldenImport): GoldenDelta {
+ * first build but hashed as the whole recipe, the rows this run takes out of
+ * the recipe, and what the next version's image will carry that its recipe
+ * does not ask for: the run's own rows are what it says, the folded list is
+ * what the version records. */
+export function deltaFor(diff: RecipeDiff, full: GoldenImport, bring: readonly ManifestEntry[], importOf: (rows: readonly ManifestEntry[]) => GoldenImport, retired: readonly GoldenRetired[] = []): GoldenDelta {
   const rows = rowsToApply(diff);
   const part = importOf(bring.filter(e => rows.has(e.id)));
   return {
     import: { ...part, recipeHash: full.recipeHash, ...(full.recipe !== undefined ? { recipe: full.recipe } : {}) },
-    removals: removalsFor(diff, from),
+    retired: retiredBy(diff),
+    retiredOnImage: retiredBy(diff, retired),
   };
 }
 
@@ -162,7 +174,7 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
   }
   if (road === "rebuild") return "rebuild";
 
-  const delta = deltaFor(diff, o.current, o.imp, o.bring, o.importOf);
+  const delta = deltaFor(diff, o.imp, o.bring, o.importOf, head.retired ?? []);
   log.step(upgradeSentence(version, version + 1), out);
   const t0 = Date.now();
   let result: Awaited<ReturnType<Runtime["golden"]["upgrade"]>> | undefined;

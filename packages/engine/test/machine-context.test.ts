@@ -183,10 +183,13 @@ describe("the facts", () => {
     ]);
   });
 
-  it("a removal takes its row out, and no result leaves the facts as they were", () => {
-    const next = mergeFacts(FACTS, result({ removed: [{ what: "tool", id: "tools/brew-cask/raycast", label: "raycast", outcome: "removed" }, { what: "agent", id: "agents/zed", label: "Zed", outcome: "failed", note: "x" }] }));
+  it("a retired row takes its own row out of the facts, and no result leaves the facts as they were", () => {
+    const next = mergeFacts(FACTS, result({ retired: [{ id: "tools/brew-cask/raycast", name: "raycast" }] }));
     expect(next.tools).toEqual([]);
     expect(next.agents).toEqual(FACTS.agents);
+    const noZed = mergeFacts(FACTS, result({ retired: [{ id: "agents/zed", name: "Zed" }] }));
+    expect(noZed.agents).toEqual([]);
+    expect(noZed.tools).toEqual(FACTS.tools);
     expect(mergeFacts(FACTS, undefined)).toEqual(FACTS);
     expect(mergeFacts(undefined, undefined)).toEqual({ tools: [], agents: [], files: [] });
   });

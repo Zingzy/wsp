@@ -20,6 +20,7 @@ import { GOLDEN_SETUP, catalogEntry } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
+import { PROJECT_QUESTION, noFolderNote } from "../src/init-pick.js";
 import { reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import { FIRST_QUESTION, FOLDER_QUESTION } from "../src/init-first.js";
 import type { HostHandle } from "../src/server.js";
@@ -30,7 +31,7 @@ import { importResultPath } from "../src/init-import.js";
 import { noteOutcomes } from "../src/init-signin.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
-import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
+import { guestAnswer, mcpEditPlan, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
@@ -188,8 +189,11 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const { tty: _tty, env: _env, columns: _columns, signedIn: _signedIn, hold: _hold, missing: _missing, json: _json, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
+    // The folder was named on the command line, so the first screen's question is not asked; the run that answers it deletes this.
+    project: NAMED_PROJECT,
     collect: async () => FIXTURE,
     recipe: async () => RECIPE,
+    scanProject: async folder => ({ dir: folder, rows: [], candidates: [] }),
     keys: { solari: SOLARI },
     pricing: PRICING,
     statePath: join(dir, "state.json"),
@@ -326,6 +330,9 @@ const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
+
+/** The project folder a run names on the command line. */
+const NAMED_PROJECT = "/Users/dev/proj";
 
 /** The gh login answered copy in the recipe the run starts from. */
 function withGhCopy(f: Fake): void {
@@ -613,6 +620,90 @@ describe("wsp init, interactive", () => {
   });
 });
 
+describe("wsp init, the project the run is for", () => {
+  it("with no folder named the first screen asks for one, and what it answers is read, carded and grouped on the tools screen", async () => {
+    const f = fake();
+    delete f.opts.project;
+    const asked: string[] = [];
+    f.opts.scanProject = async folder => {
+      asked.push(folder);
+      return { dir: folder, rows: [{ id: "go", name: "Go", why: "go.mod needs Go" }, { id: "docker", name: "Docker engine and compose", why: "compose.yaml needs Docker" }], candidates: [{ id: "ruby", name: "Ruby", why: "Gemfile needs Ruby" }] };
+    };
+    const run = runInit(f.opts, f.io);
+    await f.until(PROJECT_QUESTION);
+    expect(f.text()).toContain("optional; a folder on this Mac, read for what its own files say it needs");
+    await f.press(..."~/proj".split(""), KEY.enter);
+    await f.until("Your project needs");
+    expect(asked).toEqual(["~/proj"]);
+    const card = f.text().slice(f.text().lastIndexOf("Your project needs"));
+    expect(card).toContain("go.mod needs Go");
+    expect(card).toContain("Not in the catalog: Ruby (Gemfile needs Ruby)");
+    await f.until("Agents");
+    await f.press(KEY.enter);
+    await f.until("Tools  2/6");
+    // Go is off in the catalog and never used here; the folder's own go.mod put it on the machine, in its own group.
+    expect(f.text()).toMatch(/▾ Your project needs\s+1 of 1\s+239\.1 MB/);
+    expect(f.text()).toMatch(/● +Go +project +go\.mod needs… +239\.1 MB/);
+    await f.press(KEY.enter);
+    await throughScreens(f, ["Also on this Mac", "Sign-ins", "wsp for your agents"]);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("an empty answer asks nothing more: the folder is optional and the ticks stand as this computer left them", async () => {
+    const f = fake();
+    delete f.opts.project;
+    const asked: string[] = [];
+    f.opts.scanProject = async folder => {
+      asked.push(folder);
+      return { dir: folder, rows: [], candidates: [] };
+    };
+    const run = runInit(f.opts, f.io);
+    await f.until(PROJECT_QUESTION);
+    await f.press(KEY.enter);
+    await f.until("Agents");
+    expect(asked).toEqual([]);
+    expect(f.text()).not.toContain("Your project needs");
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("an answer that names no folder is said so, not read as a project that needs nothing", async () => {
+    const f = fake();
+    delete f.opts.project;
+    f.opts.scanProject = async () => undefined;
+    const run = runInit(f.opts, f.io);
+    await f.until(PROJECT_QUESTION);
+    await f.press(..."~/prj".split(""), KEY.enter);
+    await f.until(noFolderNote("~/prj"));
+    expect(f.text()).not.toContain("named a tool the catalog carries");
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("a folder named on the command line is not asked for again, and cards what it asked for the way the question does", async () => {
+    const f = fake();
+    f.opts.recipe = async (_onHistory, onProject) => {
+      onProject({ dir: NAMED_PROJECT, rows: [{ id: "go", name: "Go", why: "go.mod needs Go" }], candidates: [] });
+      return RECIPE;
+    };
+    const run = runInit(f.opts, f.io);
+    await f.until("Your project needs");
+    expect(f.text().slice(f.text().lastIndexOf("Your project needs"))).toContain("go.mod needs Go");
+    await f.until("Agents");
+    expect(f.text()).not.toContain(PROJECT_QUESTION);
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+});
+
 describe("wsp init, the summary-first screens", () => {
   const hermesKeys: ManifestEntry = { rung: "logins", id: "logins/hermes-keys", label: "Hermes Agent API keys", group: "Agent logins", paths: ["~/.hermes/.env"], bytes: 25_000, default: "bring", detail: "the keys in ~/.hermes/.env travel only by copy; no sign-in produces them" };
   const hermesLogin: ManifestEntry = { rung: "logins", id: "logins/hermes", label: "Hermes Agent login", group: "Agent logins", paths: ["~/.hermes/auth.json"], bytes: 400, default: "skip" };
@@ -700,6 +791,11 @@ describe("wsp init, the summary-first screens", () => {
     await f.until(/Hermes Agent API keys\s+[^\n]*skip/);
     await f.press(KEY.left);
     await f.until(/Hermes Agent API keys\s+[^\n]*copy from this Mac/);
+    // Down past the CLIs, headers included, onto the server with a token: copy keeps it in the machine's config with its secret.
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.down, KEY.down);
+    await f.until("its token is in the agent's own config");
+    await f.press(KEY.left);
+    await f.until(/▾ MCP servers from your agents' configs\s+1 copy\s+0 skip\n┃ ❯\s+github\s+in Claude Code's config\s+copy from this Mac\n/);
     await f.press(KEY.enter);
 
     await f.until("wsp for your agents on this Mac  5/6");
@@ -707,14 +803,14 @@ describe("wsp init, the summary-first screens", () => {
 
     await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
-    // The four agents and the one MCP server without a secret; the one with a token, unticked, is out and unlisted.
+    // The four agents and both MCP servers, the one with a token by the copy it was given on the screen.
     // Gemini's row is the catalog's, added after what the collector found, so it installs last.
-    expect(summary).toMatch(/Agents\s+5 of 8/);
+    expect(summary).toMatch(/Agents\s+6 of 8/);
     expect(summary).toMatch(/Sign-ins\s+1 copy, 5 sign in\s+24\.4 KB\n/);
     expect(summary).toMatch(/Hermes Agent API keys\s+copy\n/);
     expect(summary).toMatch(/kubectl config\s+skip\n/);
-    expect(summary).not.toContain("github");
-    expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, Gemini CLI, 2 tools plus Homebrew's toolchain, 1 MCP server/);
+    expect(summary).toMatch(/github\s+copy\n/);
+    expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, Gemini CLI, 2 tools plus Homebrew's toolchain, 2 MCP servers/);
     expect(f.text()).toMatch(/Recipe saved to .*golden-recipe\.json and .*recipe\.json/);
     await f.press("y");
     await sealIt(f);
@@ -744,10 +840,14 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("logins/hermes")).toMatchObject({ bring: false, choice: "machine" });
     expect(saved.get("logins/gemini")).toMatchObject({ bring: false, choice: "machine" });
     expect(saved.get("logins/kube")).toMatchObject({ bring: false, choice: "skip" });
-    expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
+    expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: true, choice: "copy" });
     expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
-    // The server with the token was never ticked, so the build left it off the machine's config and says why.
-    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).mcp).toEqual(expect.arrayContaining([expect.objectContaining({ name: "github", outcome: "skipped", note: "unticked" })]));
+    // The server with the token was answered copy on the screen, so the edit the machine ran kept it in the config
+    // beside the one without a secret, and the build says both are there.
+    const edits = log.flatMap(c => mcpEditPlan(c) ?? []);
+    expect(edits.map(e => e.write)).toEqual([false, true]);
+    expect(edits[1]!.agents[0]!.scopes[0]).toMatchObject({ keep: ["github", "notes"], drop: [] });
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).mcp).toEqual(expect.arrayContaining([expect.objectContaining({ name: "github", outcome: "installed" }), expect.objectContaining({ name: "notes", outcome: "installed" })]));
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
     const rows = new Map(small.rows.map(r => [r.id, r]));
     expect(rows.get("gemini")).toMatchObject({ on: true, signIn: "machine" });
@@ -2767,39 +2867,24 @@ describe("wsp init with a golden already built from a recipe", () => {
   /** The recipe with yq off: the formula this Mac has comes off the golden on the next update. */
   const withoutYq = (): Recipe => ({ ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "yq" ? { ...r, on: false } : r)) });
 
-  it("a binary row unticked after the seal comes off on the update, and the tally names what was removed", async () => {
+  it("a binary row unticked after the seal is retired on the update, left on the image, and the tally names it", async () => {
     const { store, shared, next } = await sealed();
     const f = next({ tty: false, recipe: async () => withoutYq() });
     const builder = shared.machines[0]!;
     const before = builder.execLog.length;
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
-    expect(out).toContain("remove 1 tool: yq");
+    expect(out).toContain("Builds version 2 on top of version 1: 1 row retired");
+    expect(out).toContain("retire 1 tool: yq, left on the image");
     expect(out).toContain("Small change: update on the builder kept since the save");
     const ran = builder.execLog.slice(before);
-    expect(ran.filter(c => c.includes("brew uninstall yq"))).toHaveLength(1);
+    expect(ran.filter(c => c.includes("brew uninstall yq"))).toEqual([]);
     expect(ran.some(c => c.includes("brew install"))).toBe(false);
     expect(out).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
-    expect(out).toMatch(/Tools, agents and machine context: 0 installed, 1 removed, 0 failed, 0 skipped; the list is in .*golden-import\.json/);
-    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ tools: [], removed: [{ what: "tool", id: "tools/brew/yq", label: "yq", outcome: "removed" }] });
-    expect(await store.get("goldens", "default")).toMatchObject({ head: 2 });
-  });
-
-  it("the tally counts tools and agents removed and says how many were not", async () => {
-    const { shared, next } = await sealed();
-    shared.execImpl = (_m, cmd) => (cmd.includes("brew uninstall yq") ? { exitCode: 1, stdout: "", stderr: "Error: Refusing to uninstall yq because it is required by gh" } : guestAnswer(cmd));
-    const f = next({ tty: false, recipe: async () => withoutYq() });
-    expect((await runInit(f.opts, f.io)).code).toBe(0);
-    const out = f.text();
-    expect(out).toContain("remove 1 tool: yq");
-    const tally = out.slice(out.indexOf("Tools, agents and machine context:"));
-    expect(tally.split("\n").slice(0, 2).map(l => l.replace(/^[│◇●]\s+/, ""))).toEqual([
-      expect.stringMatching(/^Tools, agents and machine context: 0 installed, 0 removed, 0 failed, 1 not removed, 0 skipped; the list is in .*golden-import\.json$/),
-      "yq not removed: Error: Refusing to uninstall yq because it is required by gh",
-    ]);
-    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
-      removed: [{ what: "tool", id: "tools/brew/yq", outcome: "failed", note: "Error: Refusing to uninstall yq because it is required by gh" }],
-    });
+    expect(out).toMatch(/Tools, agents and machine context: 0 installed, 1 retired, 0 failed, 0 skipped; the list is in .*golden-import\.json/);
+    expect(out).toContain("yq retired: out of the recipe, left on the image");
+    expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ tools: [], retired: [{ id: "tools/brew/yq", name: "yq" }] });
+    expect(await store.get("goldens", "default")).toMatchObject({ head: 2, versions: [{ version: 1 }, { version: 2, retired: [{ id: "tools/brew/yq", name: "yq" }] }] });
   });
 
   it("when the cap refuses the smoke fork the update falls back and the line about the builder staying up is not printed", async () => {
@@ -2938,6 +3023,74 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(await store.get("goldens", "default")).toMatchObject({ head: 3, versions: [{ version: 2 }, { version: 3 }] });
     expect(await store.get("golden-recipes", "default@v1")).toBeUndefined();
     expect(await store.get("golden-recipes", "default@v3")).toBeDefined();
+  });
+
+  it("a recipe with one row added builds the next version on top of the golden's head: one road only, v2 with v1 as its parent, and the wizard says what it builds", async () => {
+    const { store, shared, first, next } = await sealed();
+    const f = next({ tty: false, recipe: async () => ticking("tmux") });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Builds version 2 on top of version 1: 1 tool added");
+    expect(out).toContain("Updating the golden. Taken as the default (--yes).");
+    // One road: the delta landed on the builder kept from v1, and nothing was built from scratch beside it.
+    expect(out).not.toContain("Rebuilding from scratch");
+    expect(out).not.toMatch(BOOT);
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v2", true]]);
+    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
+    expect(manifest.head).toBe(2);
+    expect(manifest.versions.map(v => v.version)).toEqual([1, 2]);
+    expect(manifest.versions[1]).toMatchObject({ version: 2, parentSnapshotId: manifest.versions[0]!.snapshotId });
+    expect(manifest.versions[1]).not.toHaveProperty("retired");
+    expect(first.text()).toContain("Golden v1 sealed.");
+  });
+
+  it("a row unticked after the seal is retired on the next version and left on the image: nothing is uninstalled, and the lineage carries it", async () => {
+    const { store, shared, next } = await sealed();
+    const added = next({ tty: false, recipe: async () => ticking("tmux") });
+    expect((await runInit(added.opts, added.io)).code).toBe(0);
+    const before = shared.machines.length;
+
+    const dropped = next({ tty: false });
+    expect((await runInit(dropped.opts, dropped.io)).code).toBe(0);
+    const out = dropped.text();
+    expect(out).toContain("Builds version 3 on top of version 2: 1 row retired");
+    expect(out).toContain("retire 1 tool: tmux, left on the image");
+    expect(out).toContain("tmux retired: out of the recipe, left on the image");
+    const ran = shared.machines.slice(before - 1).flatMap(m => m.execLog);
+    expect(ran.filter(c => /uninstall|apt-get purge/.test(c))).toEqual([]);
+    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
+    expect(manifest.head).toBe(3);
+    expect(manifest.versions.find(v => v.version === 3)!.retired).toEqual([{ id: "tools/catalog/tmux", name: "tmux" }]);
+  });
+
+  it("a third version names only the row it retires, while its record carries every row the image still holds", async () => {
+    const { store, shared, next } = await sealed();
+    // v2 drops yq and picks up tmux.
+    const two = next({ tty: false, recipe: async () => without(ticking("tmux"), "yq") });
+    expect((await runInit(two.opts, two.io)).code).toBe(0);
+    expect(two.text()).toContain("Builds version 2 on top of version 1: 1 tool added, 1 row retired");
+    const before = shared.machines.length;
+
+    // v3 drops tmux. yq was retired a version ago and is nothing this run did.
+    const three = next({ tty: false, recipe: async () => without(RECIPE, "yq") });
+    expect((await runInit(three.opts, three.io)).code).toBe(0);
+    const out = three.text();
+    expect(out).toContain("Builds version 3 on top of version 2: 1 row retired");
+    expect(out).toContain("retire 1 tool: tmux, left on the image");
+    expect(out).toMatch(/Tools, agents and machine context: 0 installed, 1 retired, /);
+    expect(out).toContain("tmux retired: out of the recipe, left on the image");
+    // The run never claims to have retired yq: that happened at v2.
+    expect(out).not.toContain("yq retired");
+    expect(out).not.toContain("retired: yq");
+    expect(shared.machines.slice(before - 1).flatMap(m => m.execLog).filter(c => /uninstall|apt-get purge/.test(c))).toEqual([]);
+
+    // The version's record is the whole truth about its image, so it carries both.
+    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
+    expect(manifest.versions.find(v => v.version === 2)!.retired).toEqual([{ id: "tools/brew/yq", name: "yq" }]);
+    expect(manifest.versions.find(v => v.version === 3)!.retired).toEqual([
+      { id: "tools/brew/yq", name: "yq" },
+      { id: "tools/catalog/tmux", name: "tmux" },
+    ]);
   });
 
   it("--yes with a big change (an agent added) takes the rebuild: the boot question follows, the kept builder is no blocker, a fresh builder boots beside it, and its seal forks nothing beside the existing workspace", async () => {

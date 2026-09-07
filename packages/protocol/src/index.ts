@@ -737,9 +737,18 @@ export type GoldenLogin = z.infer<typeof GoldenLogin>;
  * record of what did not install is kept by. */
 export const GoldenMissingTool = z.object({ id: z.string(), name: z.string(), outcome: z.enum(["skipped", "failed"]), note: z.string() });
 export type GoldenMissingTool = z.infer<typeof GoldenMissingTool>;
+/** A path the pack left off the image, by the recipe row it belongs to and why: a hook whose script is not a plain
+ * file under home. Forks of the version run without it. */
+export const GoldenLeftBehind = z.object({ id: z.string(), path: z.string(), note: z.string() });
+export type GoldenLeftBehind = z.infer<typeof GoldenLeftBehind>;
 /** One base tool's command with the version read on the builder after the base stage. */
 export const GoldenBaseTool = z.object({ name: z.string(), version: z.string() });
 export type GoldenBaseTool = z.infer<typeof GoldenBaseTool>;
+/** A row an update took out of the recipe. An update never takes anything off the image: the bytes stay where the
+ * version before it put them and the row is recorded here, so the lineage says what a fork still carries but the
+ * recipe no longer asks for. A row ticked again later leaves this list at the version that re-installs it. */
+export const GoldenRetired = z.object({ id: z.string(), name: z.string() });
+export type GoldenRetired = z.infer<typeof GoldenRetired>;
 
 /** One sealed image. `kind` is the machine kind the snapshot was taken from and
  * therefore restores as; entries sealed before kind was recorded were all
@@ -767,12 +776,18 @@ export const GoldenVersion = z.object({
   /** What the login shell printed to stderr when the builder started it interactively after the files landed, first
    * line and line count; absent when it started quiet or no shell row was ticked. */
   shellNoise: z.string().optional(),
+  /** What the pack left off the image and why, by row and path; absent when everything ticked travelled or the version
+   * was sealed before this was recorded. */
+  leftBehind: z.array(GoldenLeftBehind).optional(),
   /** The snapshot the builder that sealed this version descends from: an update's head. Absent on a version built
    * from a fresh machine, and on versions sealed before this was recorded. */
   parentSnapshotId: z.string().optional(),
   /** Every base tool's command with the version read after the base stage on the builder this version descends from.
    * Absent on a version sealed before the base tools existed; its forks never ran them, so an update is refused. */
   base: z.array(GoldenBaseTool).optional(),
+  /** Every row on this version's image that its recipe no longer asks for, carried from the version before it.
+   * Absent when the recipe asks for everything the image carries. */
+  retired: z.array(GoldenRetired).optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 
@@ -784,13 +799,20 @@ export function goldenHead(manifest: GoldenManifest | undefined): GoldenVersion 
   return manifest?.versions.find(v => v.version === manifest.head);
 }
 
+/** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an
+ * API key the tool reads, or left out. One list, read by the collector's rows, by a recipe's rows and by the words
+ * `wsp recipe --signin` takes. */
+export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
+export const LoginChoice = z.enum(LOGIN_CHOICES);
+export type LoginChoice = z.infer<typeof LoginChoice>;
+
 /** What a golden is built from, as its builder records it: every ticked row
  * with its login answer and tool pin, and every planned path with a digest of
  * the bytes that travel. Two recipes with equal digests build the same golden;
  * the hash a builder carries is this object's, so a later run can say what
  * changed instead of only that something did. */
 export const RecipeDigest = z.object({
-  ticks: z.array(z.object({ id: z.string(), choice: z.string().optional(), version: z.string().optional() })),
+  ticks: z.array(z.object({ id: z.string(), choice: LoginChoice.optional(), version: z.string().optional() })),
   /** The computer's login shell by name, when a shell row is ticked: it decides which shell the machine logs into. */
   login: z.string().optional(),
   /** A volatile entry (its tool rewrites it, or it is a Keychain value the machine gets rendered) is recorded but never hashed. */
@@ -798,22 +820,17 @@ export const RecipeDigest = z.object({
 });
 export type RecipeDigest = z.infer<typeof RecipeDigest>;
 
-/** Where a recipe row's tick comes from: the entry is on this computer (what was found: its config paths and
- * whether its command is on PATH), the agents' session histories on this computer used it (in how many sessions,
- * how many calls), or nothing local says anything and the catalog's own evidence decides. */
+/** Where a recipe row's tick comes from: the project the recipe was written for names it in its own manifests (with
+ * the line saying which file said so), the entry is on this computer (what was found: its config paths and whether
+ * its command is on PATH), the agents' session histories on this computer used it (in how many sessions, how many
+ * calls), or nothing local says anything and the catalog's own evidence decides. */
 export const RecipeSource = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("project"), why: z.string().min(1) }),
   z.object({ kind: z.literal("installed"), paths: z.array(z.string()), bin: z.boolean() }),
   z.object({ kind: z.literal("used"), sessions: z.number().int().nonnegative(), calls: z.number().int().nonnegative() }),
   z.object({ kind: z.literal("popular"), sessions: z.number().int().nonnegative(), images: z.number().int().nonnegative() }),
 ]);
 export type RecipeSource = z.infer<typeof RecipeSource>;
-
-/** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an
- * API key the tool reads, or left out. One list, read by the collector's rows, by a recipe's rows and by the words
- * `wsp recipe --signin` takes. */
-export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
-export const LoginChoice = z.enum(LOGIN_CHOICES);
-export type LoginChoice = z.infer<typeof LoginChoice>;
 
 /** One catalog entry in a recipe: ticked or not, why, its size on the machine when the catalog measured one, and
  * the sign-in answer the person or the agent that wrote the recipe gave; absent, the wizard's default stands. */
@@ -1344,6 +1361,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     cpu: z.number().optional(),
     memMb: z.number().optional(),
   }),
+  /** Moves a workspace onto the golden's head version: a fresh fork of the newer image carrying this workspace's
+   * files across, the way a resize does. The person asks for it; nothing moves a machine they are working on.
+   * Refused (kind "conflict") for a workspace forked from a project golden, whose disk the move would throw away. */
+  z.object({ id: reqId, op: z.literal("workspaces.updateImage"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Drops a workspace whose machine the provider no longer has: the record, its transcripts and its sessions leave the
    * store, workspace.deleted follows, and nothing is asked of the provider. Refused with the reason (kind "conflict")
@@ -1599,8 +1620,8 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, notifyLine, plural, titleLine, turnCutLine, type DurationStyle, type TurnCutRule } from "./format.js";
+export { actionRefusal, goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { AFTER_CUT_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, behindGoldenLine, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, notifyLine, plural, titleLine, turnCutLine, type DurationStyle, type GoldenChange, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";

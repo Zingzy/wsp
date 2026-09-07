@@ -357,6 +357,51 @@ describe("packPlan", () => {
     expect(readFileSync(join(extract(plain.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{"model": "opus"}');
   });
 
+  it("a hook whose script is a plain file under home travels with the settings and points at its guest path; one naming a file outside home, or none under it, comes out of the copy and is listed as left behind", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".claude", "hooks"), { recursive: true });
+    mkdirSync(join(home, ".codync"), { recursive: true });
+    writeFileSync(join(home, ".claude", "hooks", "remind"), "#!/bin/sh\necho remind\n", { mode: 0o755 });
+    writeFileSync(join(home, ".codync", "notify.sh"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
+    const settings = {
+      model: "opus",
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: "command", command: "~/.claude/hooks/remind > /dev/null 2>&1" }, { type: "command", command: `${home}/.codync/notify.sh --quiet`, timeout: 10 }] },
+          { matcher: "resume", hooks: [{ type: "command", command: "/opt/homebrew/bin/terminal-notifier -title done" }] },
+        ],
+        Stop: [{ hooks: [{ type: "command", command: "~/.claude/hooks/gone" }] }],
+        PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "jq -r .tool_input.command" }, { type: "command", command: "/usr/bin/env node -e 1" }] }],
+      },
+    };
+    writeFileSync(join(home, ".claude", "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
+    const plan = planFiles([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json"] })], { home, stat: statOf, platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] });
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const dir = extract(packed.tar);
+    expect(JSON.parse(readFileSync(join(dir, ".claude-cfg", "settings.json"), "utf8"))).toEqual({
+      model: "opus",
+      hooks: {
+        SessionStart: [{ hooks: [{ type: "command", command: "/root/.claude-cfg/hooks/remind > /dev/null 2>&1" }, { type: "command", command: "/root/.codync/notify.sh --quiet", timeout: 10 }] }],
+        PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "jq -r .tool_input.command" }, { type: "command", command: "/usr/bin/env node -e 1" }] }],
+      },
+    });
+    expect(readFileSync(join(dir, ".claude-cfg", "hooks", "remind"), "utf8")).toBe("#!/bin/sh\necho remind\n");
+    expect(statSync(join(dir, ".claude-cfg", "hooks", "remind")).mode & 0o777).toBe(0o755);
+    expect(readFileSync(join(dir, ".codync", "notify.sh"), "utf8")).toBe("#!/bin/sh\necho hi\n");
+    const left = [
+      { id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: /opt/homebrew/bin/terminal-notifier" },
+      { id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: ~/.claude/hooks/gone" },
+    ];
+    expect(packed.skipped).toEqual(left);
+    expect(packed.leftBehind).toEqual(left);
+    // A settings file without hooks, or one whose hooks name no file, is copied as it is and leaves nothing behind.
+    writeFileSync(join(home, ".claude", "settings.json"), '{"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo done"}]}]}}');
+    const plain = await packPlan(plan, { secrets: new Map(), home });
+    expect(plain.skipped).toEqual([]);
+    expect(plain.leftBehind).toBeUndefined();
+    expect(readFileSync(join(extract(plain.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo done"}]}]}}');
+  });
+
   it("a helper key that travels without the Claude Code config lands beside a settings.json holding only the line that reads it, with a note on the login", async () => {
     const home = laptop();
     mkdirSync(join(home, ".claude"), { recursive: true });
@@ -892,6 +937,7 @@ describe("importFor", () => {
       row({ rung: "agents", id: "agents/mcp/claude/github" }),
       row({ rung: "agents", id: "agents/mcp/claude/notes", bring: false, default: "skip", reason: "command ~/Library/x is macOS-only, will not run" }),
       row({ rung: "agents", id: "agents/mcp/claude/home/zomato" }),
+      row({ rung: "agents", id: "agents/mcp/claude/gsc", consent: true, choice: "skip" }),
       row({ rung: "agents", id: "agents/codex", bring: false }),
       row({ rung: "agents", id: "agents/mcp/codex/grafana" }),
     ];
@@ -902,7 +948,7 @@ describe("importFor", () => {
         {
           id: "claude", label: "Claude Code",
           scopes: [
-            { files: ["/root/.claude-cfg/.claude.json"], format: MCP_SERVERS_JSON, keep: ["github"], drop: [{ name: "notes", reason: "command ~/Library/x is macOS-only, will not run" }] },
+            { files: ["/root/.claude-cfg/.claude.json"], format: MCP_SERVERS_JSON, keep: ["github"], drop: [{ name: "notes", reason: "command ~/Library/x is macOS-only, will not run" }, { name: "gsc", reason: "credential-shaped; not copied without your answer on its row" }] },
             { files: ["/root/.claude-cfg/.claude.json"], format: MCP_SERVERS_JSON, project: { from: home, to: "/root" }, keep: ["zomato"], drop: [] },
           ],
           aside: [],

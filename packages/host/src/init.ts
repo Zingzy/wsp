@@ -8,7 +8,7 @@
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
-import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type ProjectScan, type Rung } from "@wsp/collect";
 import { describeAge, type BackendPricing } from "@wsp/engine";
 import type { Recipe, RecipeCustomRow, RecipeHistory } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
@@ -21,6 +21,7 @@ import { ALREADY_APPLIED, customRows, fmtBytes, fmtDuration, fmtMemGb } from "@w
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
+  answeredRows,
   applyRecipe,
   goldenRecipeFor,
   type Answers,
@@ -42,7 +43,8 @@ import {
   withoutAgentTools,
 } from "./init-recipe.js";
 import { ALSO_TITLE } from "./init-also.js";
-import { TOOLS_TITLE, pickScreens, signInItems, wspToolsAgent, wspToolsItems } from "./init-pick.js";
+import { TOOLS_TITLE, pickScreens, projectNote, signInItems, wspToolsAgent, wspToolsItems } from "./init-pick.js";
+import { PROJECT_GROUP } from "./init-table.js";
 import { SIGN_IN_WORDS } from "./signin-words.js";
 import type { ScanRow } from "./scan.js";
 import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
@@ -87,6 +89,12 @@ export interface InitOptions {
   /** The small recipe of catalog ids that ticks the agents and tools rows: the screens for them are skipped and the
    * run lands on the sign-ins. This machine is still read for the rows and files. */
   recipeFile?: string;
+  /** A project folder named on the command line, already weighed into the recipe opts.recipe returns; absent, the
+   * first screen asks for one. */
+  project?: string;
+  /** Reads one project folder's own manifests for what it needs, for the folder the first screen asks for; nothing
+   * when there is no folder there. */
+  scanProject(folder: string): Promise<ProjectScan | undefined>;
   /** --first-workspace: the name the first fork takes, and an answer of yes to the last question. */
   firstWorkspace?: string;
   /** --import: the folder whose project lands on that first workspace, and an answer of yes to the last question. */
@@ -94,8 +102,9 @@ export interface InitOptions {
   /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
   collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   /** Reads this computer against the catalog and the agents' session histories for the recipe the screens start
-   * from, telling onHistory each agent's counts as its history is read. */
-  recipe(onHistory: (h: RecipeHistory) => void): Promise<Recipe>;
+   * from, telling onHistory each agent's counts as its history is read and onProject what a named project asked
+   * for, so the flag path shows the same card the wizard's own question leaves. */
+  recipe(onHistory: (h: RecipeHistory) => void, onProject: (scan: ProjectScan) => void): Promise<Recipe>;
   keys: Keys;
   /** Prices the builder the confirm names. */
   pricing: BackendPricing;
@@ -697,8 +706,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // their sources are what is here, so a row about this Mac (an agent's config to write) never follows another's.
   let catalogRecipe: Recipe;
   const histories = spin(io.output, "Reading what your agents used", io.isTTY);
+  let projectScan: ProjectScan | undefined;
   try {
-    const here = await opts.recipe(h => histories.detail(historyLine(h)));
+    const here = await opts.recipe(h => histories.detail(historyLine(h)), scan => (projectScan = scan));
     // The rows outside the catalog are the file's, not this computer's: a plain run keeps what wsp recipe --add
     // wrote into the recipe beside the state, which is the same file this run ends by writing.
     catalogRecipe = given === undefined ? { ...here, ...carriedOver(smallRecipePath(opts.statePath), line => notes.push(line)) } : withTicksOf(here, given);
@@ -742,13 +752,26 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   manifest = applyRecipe(withCatalogAgents(manifest), catalogRecipe);
   if (notes.length > 0) log.warn(notes.join("\n"), out);
   card("Found on this computer", detectionNote(found, source), io.output);
+  // The folder named on the command line gets the card the wizard's own question leaves, so both paths say the same.
+  if (projectScan !== undefined) card(PROJECT_GROUP, projectNote(projectScan), io.output);
 
   let answers: Answers;
   // The agents here whose config gets the wsp MCP server: a tick on screen five, never a default and never --yes,
   // since a run that asks nothing writes nothing on this computer.
   let wspTools = new Set<string>();
   if (interactive) {
-    const picked = await pickScreens({ manifest, recipe: catalogRecipe, brew, from: opts.recipeFile === undefined ? "agents" : "logins", home: opts.home, scan: scanned, input: io.input, output: io.output });
+    const picked = await pickScreens({
+      manifest,
+      recipe: catalogRecipe,
+      brew,
+      from: opts.recipeFile === undefined ? "agents" : "logins",
+      home: opts.home,
+      scan: scanned,
+      ...(opts.project !== undefined ? { project: opts.project } : {}),
+      scanProject: opts.scanProject,
+      input: io.input,
+      output: io.output,
+    });
     if (picked === "cancel") {
       cancel("Nothing was changed.", out);
       return { code: 1 };
@@ -790,11 +813,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const { ticks, choices } = answers;
   const offered: Manifest = { entries: manifest.entries.filter(e => loginShown(e, manifest, ticks)) };
 
-  const bringing = (): ManifestEntry[] =>
-    manifest.entries.filter(e => ticks.has(e.id)).map(e => {
-      const choice = choices.get(e.id);
-      return isLoginChoice(choice) ? { ...e, choice } : e;
-    });
+  const bringing = (): ManifestEntry[] => answeredRows(manifest, ticks, choices).filter(e => e.bring);
   let bring = bringing();
   // Filled by the Keychain reads below, after the earlier-builder check; the pack reads it only at build time.
   const secrets = new Map<string, string>();
@@ -808,7 +827,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       home: opts.home,
       secrets,
       platform: opts.platform,
-      rows: manifest.entries.map(e => ({ ...e, bring: ticks.has(e.id) })),
+      rows: answeredRows(manifest, ticks, choices),
       brew,
       custom: customRows(catalogRecipe),
       onResult: r => {
@@ -1241,17 +1260,16 @@ export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO,
 function installsTally(landed: ImportResult, resultsPath: string): string[] {
   const all = [...landed.tools.map(t => ({ ...t, name: t.label })), ...landed.agents];
   const n = (o: string) => all.filter(x => x.outcome === o).length;
-  // The header counts tools, editors, agents and a machine context that was not written; an update's file removals
-  // are in the stream and the saved list.
-  const removed = (landed.removed ?? []).filter(x => x.what !== "file");
-  const notRemoved = removed.filter(x => x.outcome !== "removed");
+  // The header counts tools, editors, agents, a machine context that was not written, and the rows this run took
+  // out of the recipe, whatever their rung: a retired dotfile is counted here too.
+  const retired = landed.retired ?? [];
   const failed = n("failed") + (landed.contextFailure === undefined ? 0 : 1);
   return [
-    `Tools, agents and machine context: ${n("installed")} installed, ${landed.removed !== undefined ? `${removed.length - notRemoved.length} removed, ` : ""}${failed} failed${notRemoved.length > 0 ? `, ${notRemoved.length} not removed` : ""}, ${n("skipped")} skipped; the list is in ${resultsPath}`,
+    `Tools, agents and machine context: ${n("installed")} installed, ${retired.length > 0 ? `${retired.length} retired, ` : ""}${failed} failed, ${n("skipped")} skipped; the list is in ${resultsPath}`,
     ...all.filter(x => x.outcome === "failed").map(x => dim(`${x.name} failed: ${x.note ?? "no reason given"}`)),
     ...(landed.contextFailure === undefined ? [] : [dim(`machine context failed: ${landed.contextFailure}`)]),
     ...all.filter(x => x.outcome === "skipped").map(x => dim(`${x.name} skipped: ${x.note ?? "no reason given"}`)),
-    ...notRemoved.map(x => dim(`${x.label} not removed: ${x.note ?? "no reason given"}`)),
+    ...retired.map(x => dim(`${x.name} retired: out of the recipe, left on the image`)),
   ];
 }
 

@@ -5,6 +5,7 @@
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
 import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE_CONTEXT, PI_CONTEXT, type AgentContext } from "./context.js";
+import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { APT_INDEX, roadModule } from "./road-modules.js";
@@ -88,6 +89,9 @@ export interface AgentEntry extends EntryBase {
   mcp?: McpConfig;
   /** How the agent loads the machine context on the guest; absent, it gets no hook and no skill there. */
   context?: AgentContext;
+  /** How the agent's settings name the hook scripts it runs, so a copy carries each script or takes the hook out;
+   * absent when the catalog knows no hooks for it, and its settings copy as they are. */
+  hooks?: HookCarry;
   /** The directory on this computer the agent loads its global skills from, `~/`-relative, one folder per skill with
    * a SKILL.md inside; the wsp skill goes there with the MCP server. */
   skills: string;
@@ -157,8 +161,9 @@ export const CATALOG: readonly CatalogEntry[] = [
     signIn: SIGN_IN_ROWS.claude,
     // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
     mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login" },
+    hooks: CLAUDE_HOOKS,
     configPaths: [
-      "~/.claude/settings.json", "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
+      CLAUDE_SETTINGS_FILE, "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
       "~/.claude/plugins/installed_plugins.json", "~/.claude/plugins/known_marketplaces.json", "~/.claude.json",
     ],
     // ~/.claude.json holds per-project state and caches rewritten on every run; the plugin indexes carry lastUpdated stamps.
@@ -274,7 +279,7 @@ export const CATALOG: readonly CatalogEntry[] = [
 
   // --- tools on by default: both sources agree or one is overwhelming --------------------------------------------
   // The floor rows first, in the order the base stage installs them: a row waits only on rows above it.
-  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, floor: true, covers: ["node@22"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: measured("unpacked", 208449536) },
+  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, floor: true, covers: ["node@22", "nodejs"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: measured("unpacked", 208449536) },
   { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", ...npm(20357120, "pnpm", "11.9.0"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
   { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL }, floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" }, size: measured("unpacked", 49660896) },
   { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL }, floor: true, after: "uv", covers: ["python@3.12"], major: { name: "Python", version: "3.12" }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" }, size: measured("du", 108105728) },
@@ -295,7 +300,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "agent-browser", name: "agent-browser", bin: "agent-browser", ...npm(81702912, "agent-browser", "0.31.1"), signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 45, images: 0, road: "unmeasured", note: "sessions counted on one Mac only; on by default for this user until a second data point" } },
 
   // --- tools on request ---------------------------------------------------------------------------------------------
-  { ...tool, id: "go", name: "Go", bin: "go", ...brew("go", 250752891), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 9, images: 4, road: "measured" } },
+  { ...tool, id: "go", name: "Go", bin: "go", ...brew("go", 250752891), covers: ["golang"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 9, images: 4, road: "measured" } },
   // Homebrew's rust bottle links against its llvm bottle, which is 2.5 GB of the total.
   { ...tool, id: "rust", name: "Rust with cargo", bin: "cargo", ...brew("rust", 3153304814), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 4, images: 3, road: "unmeasured" } },
   { ...tool, id: "java", name: "Java 21", bin: "java", ...brew("openjdk@21", 613280230), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },

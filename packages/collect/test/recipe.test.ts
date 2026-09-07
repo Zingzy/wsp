@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The three sources of a tick, in their order, and the shape the file takes.
+// The sources of a tick, in their order, and the shape the file takes.
 import { CATALOG } from "@wsp/catalog";
 import { Recipe } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
@@ -18,6 +18,9 @@ const laptop = () =>
       "~/.claude/skills/": 2048,
       "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", "agent-browser open https://x && export API=sk-ant-x-secret-value"), claudeLine("s1", "agent-browser click a; agent-browser click b; agent-browser fill c"), claudeLine("s1", "go version")].join("\n"),
       "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "agent-browser snapshot"),
+      "/Users/dev/proj/package.json": JSON.stringify({ engines: { node: ">=22" } }),
+      "/Users/dev/proj/go.mod": "module example.com/x\n",
+      "/Users/dev/proj/Gemfile": 'source "https://rubygems.org"\n',
     },
   });
 
@@ -44,6 +47,21 @@ describe("computeRecipe", () => {
       { agent: "pi", state: "no-reader", sessions: 0, calls: 0 },
       { agent: "hermes", state: "empty", sessions: 0, calls: 0 },
     ]);
+  });
+
+  it("a project's own files weigh before anything this computer says, and tick the row whatever the catalog thought", async () => {
+    const host = laptop();
+    const scans: string[] = [];
+    const recipe = await computeRecipe(host, { folders: ["/Users/dev/proj"], onProject: s => scans.push(...s.rows.map(n => `${n.id} ${n.why}`), ...s.candidates.map(n => `candidate ${n.id}`)) });
+    const row = (id: string) => recipe.rows.find(r => r.id === id)!;
+    // go was one session's use and off; the project's go.mod ticks it and says which file asked.
+    expect(row("go")).toMatchObject({ on: true, source: { kind: "project", why: "go.mod needs Go" } });
+    // gh is installed here and stays on, with the source this computer gave it: the project never named it.
+    expect(row("gh")).toMatchObject({ on: true, source: { kind: "installed", paths: [], bin: true } });
+    // node is installed here too, and the project's own file outranks that.
+    expect(row("node")).toMatchObject({ on: true, source: { kind: "project", why: "engines.node >=22" } });
+    expect(scans).toEqual(["node engines.node >=22", "go go.mod needs Go", "candidate ruby"]);
+    expect(Recipe.parse(JSON.parse(JSON.stringify(recipe)))).toEqual(recipe);
   });
 
   it("a tool both installed here and used by the agents records what they ran, and being here still ticks it", async () => {
@@ -150,6 +168,14 @@ describe("computeRecipe", () => {
       { name: "pulumi", calls: 3, sessions: 2 },
       { name: "tofu", calls: 1, sessions: 1 },
     ]);
+  });
+
+  it("a project's need outside the catalog the caller narrowed to never becomes a row", async () => {
+    const only = CATALOG.filter(e => e.id === "node");
+    const recipe = await computeRecipe(laptop(), { catalog: only, folders: ["/Users/dev/proj"] });
+    // go.mod asked for Go, and Go is outside the catalog this caller handed in: the rows stay the ones it named.
+    expect(recipe.rows.map(r => r.id)).toEqual(["node"]);
+    expect(recipe.rows[0]).toMatchObject({ on: true, source: { kind: "project", why: "engines.node >=22" } });
   });
 
   it("writes the protocol's shape and never a value it read", async () => {

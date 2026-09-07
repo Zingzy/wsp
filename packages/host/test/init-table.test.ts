@@ -7,7 +7,7 @@ import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { GREY, grey } from "../src/init-layout.js";
 import { HEAVY_BYTES } from "@wsp/collect";
-import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, GROUP_LABEL, GROUP_ORDER, HERE_GROUP, USED_GROUP, groupTotal, recipeTable, sizeCell, sizeText, tableLines, totalsLine, whyCell, type TableRow } from "../src/init-table.js";
+import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, GROUP_LABEL, GROUP_ORDER, HERE_GROUP, PROJECT_GROUP, USED_GROUP, groupTotal, recipeTable, sizeCell, sizeText, tableLines, totalsLine, whyCell, type TableRow } from "../src/init-table.js";
 import { RECIPE } from "./init-fixture.js";
 
 /** A few catalog entries, in the catalog's own order. */
@@ -88,7 +88,22 @@ describe("the table of what travels", () => {
     expect(rows.map(r => r.name)).toEqual(["Node 22 with npm", "Go", "Cloudflare Wrangler", "Codex", "Claude Code", "GitHub CLI"]);
     expect(rows.filter(r => r.heavy).map(r => r.name)).toEqual(["Codex"]);
     expect(HEAVY_BYTES).toBe(300 * 1024 * 1024);
-    expect(GROUP_ORDER).toEqual(["Always on the image", "You use these", "Installed here, never used", "Added by your agent", "Also in the catalog"]);
+    expect(GROUP_ORDER).toEqual(["Always on the image", "Your project needs", "You use these", "Installed here, never used", "Added by your agent", "Also in the catalog"]);
+  });
+
+  it("a row the project's own files asked for is its own group, first after the base, and its why line is the file that asked", () => {
+    const project = (id: string, why: string): Recipe["rows"][number] => ({ id, kind: "tool", on: true, source: { kind: "project", why } });
+    const rows = recipeTable(with_(project("go", "go.mod needs Go"), used("wrangler", 4, 9), installed("yq")), slice("node", "go", "wrangler", "yq"));
+    expect(rows.map(r => r.group)).toEqual([BASE_GROUP, PROJECT_GROUP, USED_GROUP, HERE_GROUP]);
+    expect(shape(rows)).toEqual([
+      ["on", "Node 22 with npm", "always on the image", "198.8 MB"],
+      ["on", "Go", "go.mod needs Go", "239.1 MB"],
+      ["on", "Cloudflare Wrangler", "9 commands in 4 sessions", "239.4 MB"],
+      ["on", "yq", "installed here, never used", "13.5 MB"],
+    ]);
+    // A floor row the project also named stays in the base: it installs whatever anyone ticks.
+    expect(recipeTable(with_(project("pnpm", "pnpm-lock.yaml needs pnpm")), slice("pnpm"))[0]).toMatchObject({ group: BASE_GROUP, why: "always on the image" });
+    expect(GROUP_LABEL[PROJECT_GROUP]).toBe("project");
   });
 
   it("the totals: what comes, what it downloads, and how many sizes the catalog does not have", () => {

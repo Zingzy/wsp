@@ -60,8 +60,9 @@ export interface BuildFacts {
 
 const EMPTY_FACTS: BuildFacts = { tools: [], agents: [], files: [] };
 
-/** A run's outcomes over what the guest already records: a row that installed or was removed leaves the list,
- * one that was skipped or failed enters it or replaces its earlier note. */
+/** A run's outcomes over what the guest already records: a row that installed or was retired leaves the list,
+ * one that was skipped or failed enters it or replaces its earlier note. A retired row leaves because the recipe
+ * stopped asking for it, so an agent has nothing to be told is missing. */
 export function mergeFacts(prior: BuildFacts | undefined, result: ImportResult | undefined): BuildFacts {
   const facts: BuildFacts = { tools: [...(prior?.tools ?? [])], agents: [...(prior?.agents ?? [])], files: [...(prior?.files ?? [])] };
   if (result === undefined) return facts;
@@ -72,8 +73,7 @@ export function mergeFacts(prior: BuildFacts | undefined, result: ImportResult |
   };
   facts.tools = fold(facts.tools, [...(result.base ?? []), ...result.tools]);
   facts.agents = fold(facts.agents, result.agents.map(a => ({ id: a.id, label: a.name, outcome: a.outcome, ...(a.note !== undefined ? { note: a.note } : {}) })));
-  for (const r of result.removed ?? []) {
-    if (r.outcome !== "removed") continue;
+  for (const r of result.retired ?? []) {
     facts.tools = facts.tools.filter(m => m.id !== r.id);
     facts.agents = facts.agents.filter(m => m.id !== r.id);
   }

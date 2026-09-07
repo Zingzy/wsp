@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
-import { diffRecipes, removalsFor, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
+import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import type { RecipeDigest } from "@wsp/protocol";
@@ -361,7 +361,7 @@ describe("golden disk", () => {
     const builder = await prepareBuilder({ backend, setup: "true" });
     const { manifest, version } = await sealGolden(builder, { backend, smoke: "true" });
     await forkGolden(backend, manifest);
-    await upgradeBuilder({ backend, head: version, delta: { import: { recipeHash: "h2", tools: [], agents: [] }, removals: [] }, setup: "true" });
+    await upgradeBuilder({ backend, head: version, delta: { import: { recipeHash: "h2", tools: [], agents: [] }, retired: [], retiredOnImage: [] }, setup: "true" });
     expect(created.map(c => c.diskGb)).toEqual([BUILDER_DISK_GB, BUILDER_DISK_GB, BUILDER_DISK_GB, BUILDER_DISK_GB]);
     expect(BUILDER_DISK_GB).toBe(20);
   });
@@ -1606,16 +1606,36 @@ describe("golden import stages", () => {
     expect(again.ledger.missingTools).toEqual([{ id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }]);
   });
 
+  it("the ledger carries what the pack left off the image, the seal stamps it on the version, and an attach whose files are already there keeps it", async () => {
+    const { backend, fetch } = backendFor();
+    const leftBehind = [{ id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: /opt/homebrew/bin/terminal-notifier" }];
+    const files = { ...importOf().files!, pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [...leftBehind], cut: [], silenced: [], leftBehind }) };
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ files }) });
+    expect(builder.import?.leftBehind).toEqual(leftBehind);
+    expect((await sealGolden(builder, { backend, smoke: "true" })).version.leftBehind).toEqual(leftBehind);
+    const again = await applyGoldenImport(builder.machine, { import: importOf(), setup: "true", ledger: builder.import, fetch });
+    expect(again.ledger.leftBehind).toEqual(leftBehind);
+    const clean = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    expect(clean.import?.leftBehind).toBeUndefined();
+    expect((await sealGolden(clean, { backend, smoke: "true" })).version.leftBehind).toBeUndefined();
+  });
+
   describe("golden update", () => {
     const SNAPSHOT: RecipeDigest = { ticks: [], files: [] };
     const head: GoldenVersion = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", kind: "desktop", setupSha: "s1", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "claude --version && gemini --version", exitCode: 0 }, size: { cpu: 2, memMb: 8192 }, base: [{ name: "node", version: "22.23.2" }, { name: "jq", version: "1.7.1" }] };
     const deltaOf = (over: Partial<GoldenDelta> = {}): GoldenDelta => ({
       import: importOf({ recipeHash: "h2", recipe: SNAPSHOT, tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }], agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }] }),
-      removals: [
-        { what: "file", id: "shell/zshrc", label: "~/.zshrc", cmd: "rm -rf -- '/root/.zshrc'" },
-        { what: "tool", id: "tools/npm/bun", label: "bun", cmd: "npm uninstall -g bun" },
-        { what: "agent", id: "agents/gemini", label: "Gemini CLI", cmd: "npm uninstall -g @google/gemini-cli", smoke: "gemini --version" },
-        { what: "agent", id: "agents/claude", label: "Claude Code", note: "Claude Code has no uninstaller; left on the machine", smoke: "claude --version" },
+      retired: [
+        { id: "shell/zshrc", name: "~/.zshrc" },
+        { id: "tools/npm/bun", name: "bun" },
+        { id: "agents/gemini", name: "Gemini CLI" },
+        { id: "agents/claude", name: "Claude Code" },
+      ],
+      retiredOnImage: [
+        { id: "shell/zshrc", name: "~/.zshrc" },
+        { id: "tools/npm/bun", name: "bun" },
+        { id: "agents/gemini", name: "Gemini CLI" },
+        { id: "agents/claude", name: "Claude Code" },
       ],
       ...over,
     });
@@ -1674,17 +1694,16 @@ describe("golden import stages", () => {
       expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
     });
 
-    it("applyDelta takes the removals off first, one guarded command each with failures and notes in the detail, then runs the delta's stages and folds the smoke", async () => {
-      const { backend, cmds, ran, fetch } = backendFor([["npm uninstall -g bun", { exitCode: 1, stdout: "", stderr: "npm ERR! not installed" }]]);
+    it("applyDelta leaves every dropped row on the image, names them once, then runs the delta's stages and folds the retired agents out of the smoke", async () => {
+      const { backend, cmds, ran, fetch } = backendFor();
       const machine = await backend.create({ kind: "sandbox", template: "base" });
       const { stages, onStage } = stageRecorder();
       const { ledger } = await applyDelta(machine, deltaOf(), { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, fetch, onStage });
-      expect(ran.filter(r => r.script.includes("npm uninstall -g bun"))).toHaveLength(1);
-      expect(stages.slice(0, 2)).toEqual([
-        "applying-setup:removing 4 items",
-        "applying-setup:removed ~/.zshrc, Gemini CLI; bun not removed (npm ERR! not installed); Claude Code: Claude Code has no uninstaller; left on the machine",
-      ]);
-      expect(stages.slice(2)).toEqual([
+      // Nothing an earlier version installed is taken off: no uninstall, no rm of a file the recipe dropped.
+      expect(ran.filter(r => /uninstall|\brm -rf -- /.test(r.script))).toEqual([]);
+      expect(cmds.filter(c => /uninstall|\brm -rf -- /.test(c))).toEqual([]);
+      expect(stages.slice(0, 1)).toEqual(["applying-setup:4 rows left on the image, retired: ~/.zshrc, bun, Gemini CLI, Claude Code"]);
+      expect(stages.slice(1)).toEqual([
         "applying-setup:3 files: identity 1, shell 2",
         "applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer)",
         "uploading-files:1.2 KB",
@@ -1697,20 +1716,16 @@ describe("golden import stages", () => {
         "installing-mcp:none configured",
         CONTEXT_WRITTEN,
       ]);
-      const removals = cmds.slice(0, 3);
-      expect(removals.every(c => /\nsetsid bash -c '.*' &\np=\$!\n/s.test(c) && c.includes("while [ $t -lt 600 ]"))).toBe(true);
-      expect(removals[0]).toContain("rm -rf -- '\\''/root/.zshrc'\\''");
-      expect(removals[2]).toContain("npm uninstall -g @google/gemini-cli");
-      expect(cmds.indexOf(FREE_KB_CMD)).toBeGreaterThan(2);
-      // Claude Code was removed from the recipe even though nothing could uninstall it, so its check leaves the smoke.
+      expect(cmds[0]).toBe(FREE_KB_CMD);
+      // Both agents are still on the image, but the recipe stopped asking for them, so their checks leave the smoke.
       expect(ledger).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "codex --version", recipe: SNAPSHOT });
     });
 
-    it("a delta with nothing to remove goes straight to the stages", async () => {
+    it("a delta that retires nothing goes straight to the stages", async () => {
       const { backend, cmds, fetch } = backendFor();
       const machine = await backend.create({ kind: "sandbox", template: "base" });
       const { stages, onStage } = stageRecorder();
-      await applyDelta(machine, deltaOf({ removals: [] }), { setup: "true", previousSmoke: "true", previousBase: head.base, fetch, onStage });
+      await applyDelta(machine, deltaOf({ retired: [], retiredOnImage: [] }), { setup: "true", previousSmoke: "true", previousBase: head.base, fetch, onStage });
       expect(stages[0]).toBe("applying-setup:3 files: identity 1, shell 2");
       expect(cmds[0]).toBe(FREE_KB_CMD);
     });
@@ -1759,15 +1774,15 @@ describe("golden import stages", () => {
     it("nextMissing drops the tool whose id the delta addressed, not every tool sharing its label", () => {
       const brewGh = { id: "tools/brew/gh", name: "gh", outcome: "skipped" as const, note: "no Linux bottle" };
       const cliGh = { id: "tools/cli/gh", name: "gh", outcome: "failed" as const, note: "exit 1: download refused" };
-      const removed = deltaOf({ removals: [{ what: "tool", id: "tools/brew/gh", label: "gh", cmd: "brew uninstall gh" }] });
-      expect(nextMissing([brewGh, cliGh], removed, [])).toEqual([cliGh]);
+      const retired = deltaOf({ retired: [{ id: "tools/brew/gh", name: "gh" }], retiredOnImage: [{ id: "tools/brew/gh", name: "gh" }] });
+      expect(nextMissing([brewGh, cliGh], retired, [])).toEqual([cliGh]);
       const replanned = deltaOf({ import: { ...deltaOf().import, tools: [{ id: "tools/cli/gh", label: "gh", manager: "script", cmd: "install-gh" }] } });
       expect(nextMissing([brewGh, cliGh], replanned, [])).toEqual([brewGh]);
       const setAside = deltaOf({ import: { ...deltaOf().import, tools: [], skippedTools: [{ id: "tools/cli/gh", label: "gh", note: "no Linux build" }] } });
       expect(nextMissing([brewGh, cliGh], setAside, [])).toEqual([brewGh]);
     });
 
-    it("applyDelta keeps the previous version's missing tools the delta neither removed nor planned again, beside what this run skipped or failed", async () => {
+    it("applyDelta keeps the previous version's missing tools the delta neither retired nor planned again, beside what this run skipped or failed", async () => {
       const { backend, fetch } = backendFor();
       const machine = await backend.create({ kind: "sandbox", template: "base" });
       const previousMissing = [gopls, bun, jq];
@@ -1778,9 +1793,33 @@ describe("golden import stages", () => {
       expect(clean.ledger.missingTools).toBeUndefined();
     });
 
+    it("nextLeftBehind keeps the previous version's notes for rows the delta neither planned again nor retired, beside what this pack left behind", () => {
+      const hook = { id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: ~/.claude/hooks/gone" };
+      const codexNote = { id: "agents/codex", path: "~/.codex/config.toml", note: "hook left behind: ~/x" };
+      // deltaOf retires agents/claude and plans agents/codex again.
+      expect(nextLeftBehind([hook, codexNote], deltaOf(), [])).toEqual([]);
+      const untouched = deltaOf({ retired: [], retiredOnImage: [], import: { ...deltaOf().import, agents: [] } });
+      expect(nextLeftBehind([hook], untouched, [])).toEqual([hook]);
+      const replanned = deltaOf({ retired: [], retiredOnImage: [], import: { ...deltaOf().import, agents: [{ id: "agents/claude", name: "Claude Code", install: "claude-install", smoke: "claude --version" }] } });
+      const fresh = { ...hook, note: "hook left behind: ~/.claude/hooks/new" };
+      expect(nextLeftBehind([hook], replanned, [fresh])).toEqual([fresh]);
+    });
+
+    it("applyDelta and upgradeBuilder carry the head's left-behind notes through that rule, and the next seal stamps them", async () => {
+      const { backend, fetch } = backendFor();
+      const hook = { id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: ~/.claude/hooks/gone" };
+      const untouched = deltaOf({ retired: [], retiredOnImage: [], import: { ...deltaOf().import, agents: [] } });
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const { ledger } = await applyDelta(machine, untouched, { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, previousLeftBehind: [hook], fetch });
+      expect(ledger.leftBehind).toEqual([hook]);
+      const builder = await upgradeBuilder({ backend, head: { ...head, leftBehind: [hook] }, delta: untouched, setup: "true", fetch });
+      expect(builder.import?.leftBehind).toEqual([hook]);
+      expect((await sealGolden(builder, { backend, smoke: "true" })).version.leftBehind).toEqual([hook]);
+    });
+
     it("upgradeBuilder hands the head's missing tools to the delta, so the next version still names them", async () => {
       const { backend, fetch } = backendFor();
-      const builder = await upgradeBuilder({ backend, head: { ...head, missingTools: [gopls] }, delta: deltaOf({ removals: [] }), setup: "true", fetch });
+      const builder = await upgradeBuilder({ backend, head: { ...head, missingTools: [gopls] }, delta: deltaOf({ retired: [], retiredOnImage: [] }), setup: "true", fetch });
       expect(builder.import?.missingTools).toEqual([gopls]);
       expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual([gopls]);
     });
@@ -1794,23 +1833,23 @@ describe("golden import stages", () => {
       expect(builder.base).toEqual(floor);
       const v1 = await sealGolden(builder, { backend, smoke: "true" });
       expect(v1.version.base).toEqual(floor);
-      const b2 = await upgradeBuilder({ backend, head: v1.version, delta: deltaOf({ removals: [] }), setup: "true", fetch });
+      const b2 = await upgradeBuilder({ backend, head: v1.version, delta: deltaOf({ retired: [], retiredOnImage: [] }), setup: "true", fetch });
       expect(b2.base).toEqual(floor);
       expect((await sealGolden(b2, { backend, smoke: "true", manifest: v1.manifest })).version.base).toEqual(floor);
 
       const booted = created.length;
       const { base: _floor, ...preFloor } = v1.version;
-      await expect(upgradeBuilder({ backend, head: preFloor, delta: deltaOf({ removals: [] }), setup: "true", fetch })).rejects.toThrow("golden v1 was sealed before the base tools existed and cannot take an update; run wsp init and pick the rebuild");
+      await expect(upgradeBuilder({ backend, head: preFloor, delta: deltaOf({ retired: [], retiredOnImage: [] }), setup: "true", fetch })).rejects.toThrow("golden v1 was sealed before the base tools existed and cannot take an update; run wsp init and pick the rebuild");
       expect(created).toHaveLength(booted);
       const machine = await backend.create({ kind: "sandbox", template: "base" });
-      await expect(applyDelta(machine, deltaOf({ removals: [] }), { setup: "true", previousSmoke: "true", previousBase: undefined, fetch })).rejects.toThrow("this golden was sealed before the base tools existed and cannot take an update; run wsp init and pick the rebuild");
+      await expect(applyDelta(machine, deltaOf({ retired: [], retiredOnImage: [] }), { setup: "true", previousSmoke: "true", previousBase: undefined, fetch })).rejects.toThrow("this golden was sealed before the base tools existed and cannot take an update; run wsp init and pick the rebuild");
     });
 
     it("an update on a version with the floor reports a newly ticked covered row as the base's, by the planner's note", async () => {
       const { backend, cmds, fetch } = backendFor();
       const machine = await backend.create({ kind: "sandbox", template: "base" });
       const results: ImportResult[] = [];
-      const delta = deltaOf({ removals: [], import: importOf({ recipeHash: "h2", recipe: SNAPSHOT, tools: [], agents: [], baseTools: [{ id: "tools/brew/jq", label: "jq", note: "jq is part of the base" }], onResult: r => void results.push(r) }) });
+      const delta = deltaOf({ retired: [], import: importOf({ recipeHash: "h2", recipe: SNAPSHOT, tools: [], agents: [], baseTools: [{ id: "tools/brew/jq", label: "jq", note: "jq is part of the base" }], onResult: r => void results.push(r) }) });
       await applyDelta(machine, delta, { setup: "true", previousSmoke: "true", previousBase: head.base, fetch });
       expect(results.at(-1)!.tools).toEqual([{ id: "tools/brew/jq", label: "jq", outcome: "installed", note: "jq is part of the base" }]);
       expect(cmds.some(c => c.includes("apt-get install") || c.includes("brew install"))).toBe(false);
@@ -1820,7 +1859,7 @@ describe("golden import stages", () => {
       const { backend, created, cmds, fetch } = backendFor();
       const { stages, onStage } = stageRecorder();
       const labels = { wsp: "1", "wsp-builder": "1", "wsp-owner": "h_me", createdAt: "2026-09-04T00:00:00.000Z" };
-      const builder = await upgradeBuilder({ backend, head, delta: deltaOf({ removals: [] }), setup: "true", fetch, onStage, labels });
+      const builder = await upgradeBuilder({ backend, head, delta: deltaOf({ retired: [], retiredOnImage: [] }), setup: "true", fetch, onStage, labels });
       expect(created[0]).toMatchObject({ kind: "desktop", fromSnapshot: "snap_golden-v1", cpu: 2, memMb: 8192, onIdle: "kill", idleTimeoutMs: BUILDER_IDLE_MS, labels });
       expect(created[0]!.template).toBeUndefined();
       expect(stages[0]).toBe("creating:fork of golden v1");
@@ -1830,7 +1869,7 @@ describe("golden import stages", () => {
       expect(builder).toMatchObject({ kind: "desktop", baseTemplate: "base", firstLife: true, size: { cpu: 2, memMb: 8192 } });
       expect(builder.import).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "claude --version && gemini --version && codex --version", recipe: SNAPSHOT });
       // The version's sha chains the previous version's with what this delta ran, so v(n+1)'s sha says both.
-      expect(builder.setupSha).toBe(nextSetupSha("s1", "true", deltaOf({ removals: [] }).import));
+      expect(builder.setupSha).toBe(nextSetupSha("s1", "true", deltaOf({ retired: [], retiredOnImage: [] }).import));
       expect(builder.setupSha).toBe(createHash("sha256").update(`s1\n${createHash("sha256").update("true\ncodex-install").digest("hex")}`).digest("hex"));
     });
 
@@ -1855,10 +1894,10 @@ describe("golden import stages", () => {
     const deltaBetween = (from: RecipeEntry[], to: RecipeEntry[], recipeHash: string, results: ImportResult[] = []): GoldenDelta => {
       const diff = diffRecipes(recipeDigest(from), recipeDigest(to));
       const rows = rowsToApply(diff);
-      return { import: { ...planOf(to.filter(e => rows.has(e.id)), recipeHash, results), recipe: recipeDigest(to) }, removals: removalsFor(diff, recipeDigest(from)) };
+      return { import: { ...planOf(to.filter(e => rows.has(e.id)), recipeHash, results), recipe: recipeDigest(to) }, retired: retiredBy(diff), retiredOnImage: retiredBy(diff) };
     };
 
-    it("a binary row toggled after the seal: ticked, the next version installs it; unticked, the version after takes it off; a Homebrew formula and a road tool each way", async () => {
+    it("a binary row toggled after the seal: ticked, the next version installs it; unticked, the version after retires it and leaves it on the image; a Homebrew formula and a road tool each way", async () => {
       const { backend, cmds, fetch } = backendFor();
       const { stages, onStage } = stageRecorder();
       const results: ImportResult[] = [];
@@ -1871,14 +1910,14 @@ describe("golden import stages", () => {
       expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
 
       const up = deltaBetween(base, [...base, ...binaries], "h2", results);
-      expect(up.removals).toEqual([]);
+      expect(up.retired).toEqual([]);
       const b2 = await upgradeBuilder({ backend, head: v1.version, delta: up, setup: "true", fetch, onStage });
       const installs = guardedCmds(n1);
       expect(installs.some(c => c.includes("brew install gh"))).toBe(true);
       expect(installs.some(c => c.includes("name='\\''diskbloom'\\''") && c.includes('install -m 0755 "$bin" "/usr/local/bin/$name"'))).toBe(true);
       expect(installs.some(c => c.includes("uninstall"))).toBe(false);
       expect(results.at(-1)!.tools.filter(t => binaries.some(b => b.id === t.id)).map(t => [t.id, t.outcome])).toEqual([["tools/brew/gh", "installed"], ["tools/brew/zingzy/tap/diskbloom", "installed"]]);
-      expect(results.at(-1)!.removed).toBeUndefined();
+      expect(results.at(-1)!.retired).toBeUndefined();
       const v2 = await sealGolden(b2, { backend, smoke: "true", manifest: v1.manifest });
       expect(v2.version.version).toBe(2);
 
@@ -1888,30 +1927,31 @@ describe("golden import stages", () => {
       expect(down.import.tools).toEqual([]);
       expect(down.import.files).toBeUndefined();
       const b3 = await upgradeBuilder({ backend, head: v2.version, delta: down, setup: "true", fetch, onStage });
-      const removals = guardedCmds(n2);
-      expect(removals).toHaveLength(2);
-      expect(removals[0]).toContain("brew uninstall gh");
-      expect(removals[1]).toContain("rm -f /usr/local/bin/'\\''diskbloom'\\''");
-      expect(cmds.slice(n2).some(c => c.includes("brew install"))).toBe(false);
-      expect(stages).toContain("applying-setup:removed gh, diskbloom");
+      // Nothing runs on the machine for the two rows that left the recipe: they keep their bytes and the version records them.
+      expect(guardedCmds(n2)).toEqual([]);
+      expect(cmds.slice(n2).some(c => c.includes("brew install") || c.includes("uninstall"))).toBe(false);
+      expect(stages).toContain("applying-setup:2 rows left on the image, retired: gh, diskbloom");
       expect(results.at(-1)).toEqual({
         recipeHash: "h3",
         files: { bytes: 0, skipped: [] },
         tools: [],
         agents: [],
-        removed: [
-          { what: "tool", id: "tools/brew/gh", label: "gh", outcome: "removed" },
-          { what: "tool", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", outcome: "removed" },
+        retired: [
+          { id: "tools/brew/gh", name: "gh" },
+          { id: "tools/brew/zingzy/tap/diskbloom", name: "diskbloom" },
         ],
         context: [],
       });
       const v3 = await sealGolden(b3, { backend, smoke: "true", manifest: v2.manifest });
       expect(v3.version.version).toBe(3);
+      // The lineage carries what v3's image holds that its recipe does not ask for.
+      expect(v3.version.retired).toEqual([{ id: "tools/brew/gh", name: "gh" }, { id: "tools/brew/zingzy/tap/diskbloom", name: "diskbloom" }]);
+      expect(v2.version.retired).toBeUndefined();
       expect(b3.import).toEqual({ recipeHash: "h3", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "true", recipe: recipeDigest(base) });
     });
 
-    it("a removal that fails or has no road is in the result as such, beside what the delta installed", async () => {
-      const { backend, fetch } = backendFor([["npm uninstall -g bun", { exitCode: 1, stdout: "", stderr: "npm ERR! not installed" }]]);
+    it("every retired row is in the result beside what the delta installed, so the run's list says what the image still carries", async () => {
+      const { backend, fetch } = backendFor();
       const machine = await backend.create({ kind: "sandbox", template: "base" });
       const results: ImportResult[] = [];
       const delta = deltaOf();
@@ -1919,12 +1959,23 @@ describe("golden import stages", () => {
       await applyDelta(machine, delta, { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, fetch });
       expect(results).toHaveLength(1);
       expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/brew/jq", "installed"]]);
-      expect(results[0]!.removed).toEqual([
-        { what: "file", id: "shell/zshrc", label: "~/.zshrc", outcome: "removed" },
-        { what: "tool", id: "tools/npm/bun", label: "bun", outcome: "failed", note: "npm ERR! not installed" },
-        { what: "agent", id: "agents/gemini", label: "Gemini CLI", outcome: "removed" },
-        { what: "agent", id: "agents/claude", label: "Claude Code", outcome: "kept", note: "Claude Code has no uninstaller; left on the machine" },
-      ]);
+      expect(results[0]!.retired).toEqual(deltaOf().retired);
+    });
+
+    it("a retired tools row whose last segment is an agent's name leaves that agent's check in the smoke", async () => {
+      const { backend, fetch } = backendFor();
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const named = deltaOf({ retired: [{ id: "tools/brew/claude", name: "claude" }], retiredOnImage: [{ id: "tools/brew/claude", name: "claude" }] });
+      const { ledger } = await applyDelta(machine, named, { setup: "true", previousSmoke: head.smoke.cmd, previousBase: head.base, fetch });
+      expect(ledger.smoke).toBe("claude --version && gemini --version && codex --version");
+    });
+
+    it("the builder an update forks carries the rows the new recipe dropped, and the version it seals records them", async () => {
+      const { backend, fetch } = backendFor();
+      const builder = await upgradeBuilder({ backend, head, delta: deltaOf(), setup: "true", fetch });
+      expect(builder.retired).toEqual(deltaOf().retired);
+      const sealed = await sealGolden(builder, { backend, smoke: "true", manifest: { head: 1, versions: [head] } });
+      expect(sealed.version).toMatchObject({ version: 2, parentSnapshotId: head.snapshotId, retired: deltaOf().retired });
     });
   });
 });

@@ -94,7 +94,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -589,6 +589,10 @@ export interface Runtime {
     nap(id: string): Promise<WorkspaceView>;
     wake(id: string): Promise<WorkspaceView>;
     upgrade(id: string, spec?: WorkspaceSpec): Promise<WorkspaceView>;
+    /** Moves the workspace onto its golden's head version, carrying its files across. Refused in one sentence when
+     * the machine is not running, the image is a project golden, or no golden knows the image; a workspace past
+     * those and already on the head is returned untouched. */
+    updateImage(id: string): Promise<WorkspaceView>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
     rebuild(id: string): Promise<WorkspaceView>;
     /** Snapshots the running machine as a project golden: the golden it stands on plus the project as it is now, so a
@@ -1111,14 +1115,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The workspaces forked from this snapshot, whatever their phase: the lineage retention must not cut. */
   const forkedFrom = (snapshotId: string): string[] => [...live.values()].filter(e => e.record.golden === snapshotId).map(e => e.record.name);
 
-  /** The sealed version behind this snapshot, if any manifest knows it. */
-  const goldenVersionOf = async (snapshotId: string): Promise<GoldenVersion | undefined> => {
+  /** The manifest holding this snapshot as one of its versions, if any does. */
+  const goldenManifestOf = async (snapshotId: string): Promise<GoldenManifest | undefined> => {
     for (const raw of await store.list(GOLDENS)) {
-      const hit = (raw as GoldenManifest).versions.find(v => v.snapshotId === snapshotId);
-      if (hit !== undefined) return hit;
+      const m = raw as GoldenManifest;
+      if (m.versions.some(v => v.snapshotId === snapshotId)) return m;
     }
     return undefined;
   };
+
+  /** The sealed version behind this snapshot, if any manifest knows it. */
+  const goldenVersionOf = async (snapshotId: string): Promise<GoldenVersion | undefined> =>
+    (await goldenManifestOf(snapshotId))?.versions.find(v => v.snapshotId === snapshotId);
 
   /** What stands behind a snapshot a workspace forks from: a golden version, or a project golden and the version at
    * the root of its lineage. `golden` is that root's snapshot id, the one a snapshot taken from the fork records. */
@@ -1961,6 +1969,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
+      return view(entry.record);
+    },
+
+    async updateImage(id) {
+      const entry = await entryOf(id);
+      const manifest = await goldenManifestOf(entry.record.golden);
+      const head = goldenHead(manifest);
+      const project = (await store.get(PROJECT_GOLDENS, entry.record.golden)) as ProjectGolden | undefined;
+      const refusal = imageMoveRefusal(entry.record.name, workspaceState({ phase: entry.record.phase }), { knownVersion: head !== undefined, projectImage: project !== undefined });
+      if (refusal !== null) throw Object.assign(new Error(refusal), { kind: "conflict" });
+      // The refusal covers an image no manifest knows, so both are there by the time the move runs.
+      const to = head!;
+      const from = manifest!.versions.find(v => v.snapshotId === entry.record.golden)!.version;
+      if (to.snapshotId === entry.record.golden) return view(entry.record);
+      // The fork reads the record, so the new image is named before the machine is replaced; the vault carries the
+      // work across the way a resize does. A move that throws puts the record back, so a retry forks what the
+      // workspace is actually running.
+      const was = entry.record.golden;
+      entry.record.golden = to.snapshotId;
+      try {
+        await entry.ws.upgrade();
+      } catch (e) {
+        entry.record.golden = was;
+        throw e;
+      }
+      followMachine(entry);
+      await persist(entry.record);
+      bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
+      await emitStatus(entry, entry.machine.previewUrl ? "reachable" : "unsupported", `moved from image v${from ?? "?"} to v${to.version}`);
       return view(entry.record);
     },
 
@@ -2847,13 +2884,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         } else {
           stage("creating", `your builder from v${head.version}, kept since the save`);
           try {
-            const applied = await applyDelta(kept.builder.machine, o.delta, { setup: recipe.setup, previousSmoke: head.smoke.cmd, previousBase: head.base, ...(head.missingTools !== undefined ? { previousMissing: head.missingTools } : {}), onStage: stage });
+            const applied = await applyDelta(kept.builder.machine, o.delta, { setup: recipe.setup, previousSmoke: head.smoke.cmd, previousBase: head.base, ...(head.missingTools !== undefined ? { previousMissing: head.missingTools } : {}), ...(head.leftBehind !== undefined ? { previousLeftBehind: head.leftBehind } : {}), onStage: stage });
             const setupSha = nextSetupSha(head.setupSha, recipe.setup, o.delta.import);
             kept.record.import = applied.ledger;
             kept.record.setupSha = setupSha;
             delete kept.record.building;
             // The builder was sealed as the head, so the version it seals next descends from the head's snapshot.
-            kept.builder = { ...kept.builder, import: applied.ledger, setupSha, parentSnapshotId: head.snapshotId };
+            kept.builder = { ...kept.builder, import: applied.ledger, setupSha, parentSnapshotId: head.snapshotId, retired: o.delta.retiredOnImage };
             kept.life = "own";
             await hold(kept);
           } catch (e) {

@@ -6,9 +6,9 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { MCP_ID_PREFIX, shellQuote, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
+import { MCP_ID_PREFIX, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, BASE_FLOOR, BASE_IMAGE_COMMANDS, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, CLAUDE_KEY_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, BASE_FLOOR, BASE_IMAGE_COMMANDS, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, NODE_PATH_LINE, NODE_RELEASES, LINUXBREW_SHIM, ROADS, UV_INSTALL, asLinuxbrew, asLinuxbrewScript, baseEntryFor, baseNote, catalogEntry, catalogToolFor, installLine, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, smokeOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 
@@ -30,7 +30,9 @@ export interface RecipeEntry {
   reason?: string;
   required?: boolean;
   bring?: boolean;
-  choice?: string;
+  /** A logins or consent row's answer; the same union the collector and the recipe carry, so a digest built from
+   * these rows is a digest the diff can read exhaustively. */
+  choice?: LoginChoice;
   linux?: string;
   /** The version the laptop runs (tools rows); the install pins it. */
   version?: string;
@@ -121,6 +123,9 @@ export interface PlanFilesOptions {
 }
 
 const ticked = (e: RecipeEntry): boolean => e.bring === true;
+/** A credential-shaped row travels only on a copy answer; the tick alone withholds it, and so does a skip. */
+export const withheld = (e: Pick<RecipeEntry, "consent" | "choice">): boolean => e.consent === true && e.choice !== "copy";
+export const WITHHELD_NOTE = "credential-shaped; not copied without your answer on its row";
 const name = (e: RecipeEntry): string => e.id.slice(e.id.indexOf("/") + 1);
 
 /** An MCP server's row: under the agents rung, filed by the MCP id prefix; the one rule every reader of the agents rung asks. */
@@ -316,7 +321,7 @@ export function withApiKeyHelper(text: string | undefined, helper: string | unde
 
 /** Where the key a settings file's helper prints lands on the guest, and how the command is read from the file. */
 const HELPERS: Record<string, { dest: string; command: (text: string | undefined) => string | undefined }> = {
-  "~/.claude/settings.json": { dest: `.claude/${CLAUDE_KEY_FILE}`, command: apiKeyHelperOf },
+  [CLAUDE_SETTINGS_FILE]: { dest: `.claude/${CLAUDE_KEY_FILE}`, command: apiKeyHelperOf },
 };
 
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {
@@ -336,8 +341,8 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
     let brought = 0;
     for (const p of e.paths) {
       const skip = (note: string): void => void plan.skipped.push({ id: e.id, path: p, note });
-      if (e.consent === true && e.choice !== "copy") {
-        skip("credential-shaped; not copied without your answer on its row");
+      if (withheld(e)) {
+        skip(WITHHELD_NOTE);
         continue;
       }
       const keychainPath = /^keychain:\s*(.+)$/i.exec(p);
