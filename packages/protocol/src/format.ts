@@ -50,6 +50,13 @@ export function fmtDuration(ms: number, style: DurationStyle = "short"): string 
   return hours === 0 ? `${minutes}m ${pad2(seconds)}s` : `${hours}h ${pad2(minutes)}m ${pad2(seconds)}s`;
 }
 
+/** A running clock on a row redrawn every tick: whole seconds, then the short style's minutes and seconds; tenths
+ * would flicker. */
+export function fmtElapsed(ms: number): string {
+  const seconds = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1_000) : 0;
+  return seconds < 60 ? `${seconds}s` : fmtDuration(seconds * 1_000);
+}
+
 /** A turn's cost in dollars: cents, or four places under a cent so a short turn does not read as free. */
 export function fmtCost(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
@@ -108,6 +115,17 @@ export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: numbe
   return rule === "idle"
     ? `stopped after ${fmtDuration(elapsedMs, "clock")} with no output for ${fmtLimit(limitMs)}`
     : `stopped after ${fmtDuration(elapsedMs, "clock")} at the ${fmtLimit(limitMs)} cap on one turn`;
+}
+
+/** An install step the guard ended at its road's limit: the seconds, and that it was the second time when it was. */
+export function timedOutLine(limitS: number, times = 1): string {
+  return `timed out after ${limitS}s${times === 2 ? ", twice" : ""}`;
+}
+
+/** The step's line when its road's limit ended it and the step is run once more: a download that ran the clock out
+ * was a dead read, and the words say so before the second run starts. */
+export function stepRetryLine(limitS: number): string {
+  return `${timedOutLine(limitS)}; trying once more`;
 }
 
 /** The turn's error when the harness process ended before any result. Exit 127 is the shell saying the binary was

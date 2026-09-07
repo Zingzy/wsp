@@ -145,17 +145,21 @@ describe("a recipe's rows outside the catalog in its digest", () => {
 });
 
 describe("the tools stage on rows outside the catalog", () => {
-  it("runs each one alone, shows the exact command in the log, and records the outcome by name", async () => {
+  it("runs each one alone, names the exact command on the step's frames, and records the outcome by name", async () => {
     const machine = builder();
-    const lines: string[] = [];
-    const out = await installTools(machine, customInstallsFor([just, ruff]), (_stage, detail) => lines.push(detail ?? ""));
+    const frames: string[] = [];
+    const out = await installTools(machine, customInstallsFor([just, ruff]), (_stage, detail, step) => frames.push(step === undefined ? (detail ?? "") : `${detail} [${step.label}: ${step.command}]`));
     expect(out.tools.map(t => ({ label: t.label, outcome: t.outcome }))).toEqual([
       { label: "just", outcome: "installed" },
       { label: "ruff", outcome: "installed" },
     ]);
-    expect(lines).toContain("just runs brew install just");
-    expect(lines).toContain("ruff runs uv tool install ruff");
+    expect(frames).toContain("just (1/2) [just: brew install just]");
+    expect(frames).toContain("ruff (2/2) [ruff: uv tool install ruff]");
     expect(machine.scripts.filter(s => s.includes("brew install just"))).toHaveLength(1);
+    // A row may type any manager's command, so its script opens with every road's network clock and the script road's limit.
+    const script = machine.scripts.find(s => s.includes("brew install just"))!;
+    expect(script).toMatch(/export npm_config_fetch_timeout=60000 .*\nexport PIP_TIMEOUT=60 .*\nexport UV_HTTP_TIMEOUT=60 .*\nexport CARGO_HTTP_TIMEOUT=60 .*\ncurl\(\) \{ command curl --connect-timeout 15 .*\nexport PATH=/);
+    expect(script).toContain("while [ $t -lt 600 ]");
   });
 
   it("checks each one after its install, and a row whose install exited 0 without leaving the tool is a failure", async () => {

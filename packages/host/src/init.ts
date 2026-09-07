@@ -12,14 +12,14 @@ import { stripVTControlCharacters, styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type Manifest, type ManifestEntry, type ProjectScan, type Rung } from "@wsp/collect";
 import { SnapshotFailedError, describeAge, type BackendPricing } from "@wsp/engine";
-import type { Recipe, RecipeCustomRow, RecipeHistory } from "@wsp/protocol";
+import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, plural, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtMemGb, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote } from "@wsp/protocol";
+import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, plural, shownOf, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
+import { ALREADY_APPLIED, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -182,6 +182,11 @@ export interface StageWords {
   fail: string;
 }
 
+/** The install step the stage is on: what the frames named, and when the first of them arrived. */
+export interface RunningStep extends GoldenStep {
+  since?: number;
+}
+
 export interface StageStep {
   stage: GoldenStage;
   start: string;
@@ -191,6 +196,8 @@ export interface StageStep {
   tail: string[];
   /** How long the stage ran, known once a later frame ends it. */
   ms?: number;
+  /** The step the latest frame belongs to; a frame naming none ends it. */
+  running?: RunningStep;
 }
 
 export interface StageView {
@@ -203,9 +210,13 @@ export interface StageFrame {
   name: string;
   stage: string;
   detail?: string;
+  step?: GoldenStep;
   /** When the frame arrived, epoch ms; stamped by the stream, absent on the wire. */
   at?: number;
 }
+
+/** A golden.stage event off the runtime as the stream takes it. */
+export const toFrame = (e: GoldenStageEvent): StageFrame => ({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.step !== undefined ? { step: e.step } : {}) });
 
 /** The words the terminal shows for each prepare stage while it runs and once
  * it is over. The stage names are the protocol's; the harness stage installs
@@ -231,6 +242,8 @@ export const SEAL_STEPS: readonly StageWords[] = [
 ];
 
 const LAST_STAGE = new Set<string>(["ready", "sealed"]);
+/** Cells the step row keeps for its clock: room for a build past an hour ("61m 44s"). */
+const CLOCK_CELLS = 7;
 
 /** The steps as the frames built them: a step appears on its first frame, runs until a frame names another
  * stage, and is closed by nothing else. The engine runs one stage at a time, so one step is current at most. */
@@ -243,6 +256,7 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
     if (current === undefined) return;
     if (since !== undefined && at !== undefined) current.ms = at - since;
     current.state = "done";
+    delete current.running;
     current = undefined;
     since = undefined;
   };
@@ -272,9 +286,13 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
       steps.push(step);
     }
     if (f.detail !== undefined) step.tail.push(f.detail);
+    // The step's clock starts at its first frame and runs while the frames keep naming it.
+    if (f.step === undefined) delete step.running;
+    else if (step.running?.label !== f.step.label || step.running.command !== f.step.command) step.running = { ...f.step, ...(f.at !== undefined ? { since: f.at } : {}) };
     // A stage the builder already holds is over the moment it is named, and the last stage has nothing after it to end it; neither gets a clock.
     if (f.detail === ALREADY_APPLIED || LAST_STAGE.has(f.stage)) {
       step.state = "done";
+      delete step.running;
       current = undefined;
       since = undefined;
       continue;
@@ -331,6 +349,8 @@ export class StageStream {
     private readonly sink?: (line: string) => void,
     /** The other stream on the same screen, whose lines would land under the block: stderr when the block is on stdout. Off a terminal it cannot move the cursor and is left alone. */
     private readonly aside?: Writable,
+    /** Under --json, where every frame of the golden's goes as one object. */
+    private readonly json?: (record: Record<string, unknown>) => void,
   ) {
     this.view = reduceStages([], words);
   }
@@ -355,12 +375,16 @@ export class StageStream {
     this.draw();
   }
 
-  /** The detail is flattened once, here, to the row it is drawn as; a failure is drawn one row per line, so it keeps its newlines. */
+  /** The detail and the step's command are flattened once, here, to the row each is drawn as; a failure is drawn one
+   * row per line, so it keeps its newlines. */
   push(frame: StageFrame): void {
     const prev = this.view;
     const detail = frame.detail === undefined ? undefined : frame.stage === "failed" ? frame.detail.split("\n").map(plainLine).join("\n") : plainLine(frame.detail);
-    this.frames.push({ ...frame, ...(detail !== undefined ? { detail } : {}), at: frame.at ?? Date.now() });
+    const step = frame.step === undefined ? undefined : { ...frame.step, command: plainLine(frame.step.command) };
+    const stamped: StageFrame = { ...frame, ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}), at: frame.at ?? Date.now() };
+    this.frames.push(stamped);
     this.view = reduceStages(this.frames, this.words);
+    if (frame.name === GOLDEN_NAME) this.json?.(stageRecord(stamped, this.view));
     if (this.animate) this.draw();
     else this.announce(prev);
   }
@@ -429,6 +453,16 @@ export class StageStream {
     return stageLine(styleText("green", S_STEP_SUBMIT), s.end, s.tail.at(-1), s.ms, this.width, this.labelWidth);
   }
 
+  /** The row under the current stage while a step runs: the command it runs and its seconds so far at the edge, so
+   * a step that has gone quiet reads as a stall of so many seconds and not as a hang. The clock keeps its cells as
+   * the seconds widen, so a cut command's ellipsis stays put. */
+  private stepLine(running: RunningStep, width: number | undefined): string {
+    const clock = running.since === undefined ? "" : fmtElapsed(Date.now() - running.since);
+    const command = width === undefined ? running.command : ellipsize(running.command, width - 3 - (clock === "" ? 0 : GUTTER.length + CLOCK_CELLS));
+    const gap = clock === "" ? "" : width === undefined ? GUTTER : " ".repeat(Math.max(GUTTER.length, width - 3 - command.length - clock.length));
+    return `${dim(S_BAR)}  ${dim(command)}${gap}${dim(clock)}`;
+  }
+
   private lines(final: boolean, stopped: boolean): string[] {
     const out: string[] = [];
     const width = this.width;
@@ -439,6 +473,7 @@ export class StageStream {
       switch (s.state) {
         case "current":
           out.push(stageLine(stopped ? styleText("red", S_STEP_CANCEL) : styleText("cyan", StageStream.SPIN[this.tick % StageStream.SPIN.length]!), s.start, s.tail.at(-1), undefined, width, this.labelWidth));
+          if (s.running !== undefined) out.push(this.stepLine(s.running, width));
           break;
         case "done":
           out.push(this.doneLine(s));
@@ -489,6 +524,13 @@ export class StageStream {
       if (s.state === "done" && was !== "done") this.output.write(`${this.doneLine(s)}\n`);
     }
   }
+}
+
+/** A frame as one --json object: its stage and detail, and for a frame of a step, the step with its seconds so far. */
+function stageRecord(frame: StageFrame, view: StageView): Record<string, unknown> {
+  const since = view.steps.find(s => s.stage === frame.stage)?.running?.since;
+  const elapsedSeconds = frame.step === undefined ? undefined : Math.round(((frame.at ?? 0) - (since ?? frame.at ?? 0)) / 1000);
+  return { event: "stage", stage: frame.stage, ...(frame.detail !== undefined ? { detail: frame.detail } : {}), ...(frame.step !== undefined ? { step: { ...frame.step, elapsedSeconds } } : {}) };
 }
 
 interface Spinner {
@@ -641,7 +683,7 @@ export function summaryNote(
     ["Installs", installs.length > 0 ? installs.join(", ") : "nothing; the machine boots bare", undefined],
     // A row outside the catalog is a line the person's own agent wrote, run as root on the builder: the card is the
     // last thing read before the boot, so each one is named here with the command it runs, never only counted.
-    ...custom.map((c, i): [string, string, Tone | undefined] => [i === 0 ? ADDED_LABEL : "", `${c.name} runs ${c.install.join("; ")}`, undefined]),
+    ...custom.map((c, i): [string, string, Tone | undefined] => [i === 0 ? ADDED_LABEL : "", `${c.name} runs ${shownOf(c.install)}`, undefined]),
     ["Disk", diskLine(est), diskTone(est.total, est.room)],
   ];
   const column = Math.max(...closing.map(([label]) => label.length)) + GUTTER.length;
@@ -1057,9 +1099,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
   if (attach === undefined) await stopKeptBuilder(rt, io.output);
 
-  const stream = new StageStream(io.output, io.isTTY, PREPARE_STEPS, runLog.note, io.stderr);
+  const stream = new StageStream(io.output, io.isTTY, PREPARE_STEPS, runLog.note, io.stderr, io.json);
   const off = rt.events.on("golden.stage", e => {
-    if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
+    if (e.type === "golden.stage") stream.push(toFrame(e));
   });
   const retry = opts.retry ?? DEFAULT_RETRY;
   stream.start();
@@ -1315,10 +1357,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 }
 
 /** One stage stream around one runtime call; the frames it draws are the golden's, whatever the call. */
-export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO, "output" | "stderr" | "isTTY">, words: readonly StageWords[], run: () => Promise<unknown>, sink: (line: string) => void): Promise<StageView> {
-  const stream = new StageStream(io.output, io.isTTY, words, sink, io.stderr);
+export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO, "output" | "stderr" | "isTTY" | "json">, words: readonly StageWords[], run: () => Promise<unknown>, sink: (line: string) => void): Promise<StageView> {
+  const stream = new StageStream(io.output, io.isTTY, words, sink, io.stderr, io.json);
   const off = rt.events.on("golden.stage", e => {
-    if (e.type === "golden.stage") stream.push({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}) });
+    if (e.type === "golden.stage") stream.push(toFrame(e));
   });
   stream.start();
   let view!: StageView;
