@@ -60,8 +60,8 @@ export const nodeFs: HostFs = {
     } catch {
       return undefined;
     }
-    if (s.isDirectory()) return { kind: "dir", bytes: await treeBytes(path) };
-    if (s.isFile()) return { kind: "file", bytes: s.size };
+    if (s.isDirectory()) return { kind: "dir", bytes: await treeBytes(path), mtimeMs: s.mtimeMs };
+    if (s.isFile()) return { kind: "file", bytes: s.size, mtimeMs: s.mtimeMs };
     return undefined;
   },
   async list(dir) {
