@@ -156,9 +156,9 @@ describe("the tools stage on rows outside the catalog", () => {
     expect(frames).toContain("just (1/2) [just: brew install just]");
     expect(frames).toContain("ruff (2/2) [ruff: uv tool install ruff]");
     expect(machine.scripts.filter(s => s.includes("brew install just"))).toHaveLength(1);
-    // A row may type any manager's command, so its script opens with every road's network clock and the script road's limit.
+    // A row may type any manager's command, so its script opens under set -e with every road's network clock, and takes the script road's limit.
     const script = machine.scripts.find(s => s.includes("brew install just"))!;
-    expect(script).toMatch(/export npm_config_fetch_timeout=60000 .*\nexport PIP_TIMEOUT=60 .*\nexport UV_HTTP_TIMEOUT=60 .*\nexport CARGO_HTTP_TIMEOUT=60 .*\ncurl\(\) \{ command curl --connect-timeout 15 .*\nexport PATH=/);
+    expect(script).toMatch(/set -euo pipefail\nexport npm_config_fetch_timeout=60000 .*\nexport PIP_TIMEOUT=60 .*\nexport UV_HTTP_TIMEOUT=60 .*\nexport CARGO_HTTP_TIMEOUT=60 .*\ncurl\(\) \{ command curl --connect-timeout 15 .*\nexport PATH=/);
     expect(script).toContain("while [ $t -lt 600 ]");
   });
 

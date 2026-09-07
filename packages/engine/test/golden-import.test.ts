@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { CATALOG_AGENTS, GOLDEN_SETUP } from "@wsp/catalog";
 import {
   UNMEASURED_ROAD,
@@ -567,7 +570,7 @@ describe("toolInstallsFor", () => {
       ["tools/brew-toolchain/glibc", "brew", "tools/homebrew"],
       ["tools/brew-toolchain/gcc", "brew", "tools/brew-toolchain/glibc"],
       ["tools/brew-tap/zingzy/tap", "brew", "tools/brew-toolchain/gcc"],
-      // What two or more of the formulae (gh and the managers' pipx, rust, go) share installs once, after the taps it may need.
+      // What two or more of the formulae (gh and the managers' pipx and go) share installs once, after the taps it may need.
       ["tools/brew-shared", "brew", "tools/brew-toolchain/gcc"],
       ["tools/brew/gh", "brew", "tools/brew-toolchain/gcc"],
       ["tools/npm/bun", "npm", undefined],
@@ -578,7 +581,8 @@ describe("toolInstallsFor", () => {
       ["tools/uv/ty", "uv", undefined],
       ["tools/manager/pipx", "brew", "tools/brew-toolchain/gcc"],
       ["tools/pipx/black", "pipx", "tools/manager/pipx"],
-      ["tools/manager/cargo", "brew", "tools/brew-toolchain/gcc"],
+      // cargo comes by rustup, which needs no Homebrew, so its step waits on nothing.
+      ["tools/manager/cargo", "script", undefined],
       ["tools/cargo/bat", "cargo", "tools/manager/cargo"],
       ["tools/manager/go", "brew", "tools/brew-toolchain/gcc"],
       ["tools/go/sqlc", "go", "tools/manager/go"],
@@ -587,7 +591,8 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/homebrew")).toContain(`--branch ${HOMEBREW.tag} https://github.com/Homebrew/brew /home/linuxbrew/.linuxbrew/Homebrew`);
     expect(cmd("tools/homebrew")).toContain(`rev-parse HEAD)" = "${HOMEBREW.commit}"`);
     expect(cmd("tools/homebrew")).toContain("useradd");
-    expect(cmd("tools/homebrew")).toContain("/etc/profile.d/wsp-golden.sh");
+    // The login-shell PATH file is written by the base stage on every golden, so the bootstrap no longer writes it.
+    expect(cmd("tools/homebrew")).not.toContain("/etc/profile.d/wsp-golden.sh");
     expect(cmd("tools/homebrew")).not.toContain("Brewfile");
     expect(cmd("tools/brew-toolchain/glibc")).toMatch(/brew install glibc'$/);
     expect(cmd("tools/brew-toolchain/gcc")).toMatch(/brew install gcc'$/);
@@ -595,7 +600,7 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/brew/gh")).toMatch(/su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install gh'$/);
     const shared = cmd("tools/brew-shared");
     expect(shared).toMatch(/su -s \/bin\/bash linuxbrew -c 'export HOMEBREW_NO_AUTO_UPDATE=1 .*NONINTERACTIVE=1 HOMEBREW_CURL_RETRIES=1\n/);
-    expect(shared).toContain(`brew deps --for-each '\\''gh'\\'' '\\''pipx'\\'' '\\''rust'\\'' '\\''go'\\'' | sed`);
+    expect(shared).toContain(`brew deps --for-each '\\''gh'\\'' '\\''pipx'\\'' '\\''go'\\'' | sed`);
     // Homebrew's own toolchain is never in the shared set: it installed before, on request, and stays that way.
     expect(shared).toContain(`grep -vx -e '\\'''\\'' -e glibc -e gcc | sort | uniq -d`);
     expect(shared).toContain("brew install $shared; rc=$?");
@@ -610,7 +615,8 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/uv/ty")).toMatch(/uv tool install ty==0\.0\.56$/);
     expect(cmd("tools/manager/pipx")).toMatch(/brew install pipx'$/);
     expect(cmd("tools/pipx/black")).toMatch(/pipx install black==24\.1\.0$/);
-    expect(cmd("tools/manager/cargo")).toMatch(/brew install rust'$/);
+    expect(cmd("tools/manager/cargo")).toContain('curl -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/1.29.1/$arch-unknown-linux-gnu/rustup-init"');
+    expect(cmd("tools/manager/cargo")).toMatch(/\n\/tmp\/rustup-init -y --no-modify-path --profile default --default-toolchain stable\nrm -f \/tmp\/rustup-init$/);
     expect(cmd("tools/cargo/bat")).toMatch(/cargo install bat --version 0\.24\.0$/);
     expect(cmd("tools/manager/go")).toMatch(/brew install go'$/);
     expect(cmd("tools/go/sqlc")).toMatch(/go install github\.com\/sqlc-dev\/sqlc\/cmd\/sqlc@v1\.31\.1$/);
@@ -633,20 +639,20 @@ describe("toolInstallsFor", () => {
     expect(toolInstallsFor([row({ rung: "tools", id: "tools/go/mystery", label: "mystery (no module info)" })]).skipped).toEqual([{ id: "tools/go/mystery", note: "no module to install from" }]);
   });
 
-  it("a row with no version installs the manager's latest; a manager already ticked as a formula is not installed twice", () => {
+  it("a row with no version installs the manager's latest; a manager already ticked as a formula is not installed twice, and takes the catalog's road for it", () => {
     const t = toolInstallsFor([
       row({ rung: "tools", id: "tools/brew/bun", linux: "yes" }),
       row({ rung: "tools", id: "tools/bun/elysia", label: "elysia" }),
       row({ rung: "tools", id: "tools/uv/ty", label: "ty" }),
     ]);
-    expect(t.installs.map(i => [i.id, i.after])).toEqual([
-      ["tools/homebrew", undefined],
-      ["tools/brew-toolchain/glibc", "tools/homebrew"],
-      ["tools/brew-toolchain/gcc", "tools/brew-toolchain/glibc"],
-      ["tools/brew/bun", "tools/brew-toolchain/gcc"],
-      ["tools/bun/elysia", "tools/brew/bun"],
-      ["tools/uv/ty", undefined],
+    // The Mac's bun formula is the catalog's bun row, so it comes by the catalog's npm install and Homebrew stays off the machine.
+    expect(t.installs.map(i => [i.id, i.manager, i.after])).toEqual([
+      ["tools/brew/bun", "npm", undefined],
+      ["tools/bun/elysia", "bun", "tools/brew/bun"],
+      ["tools/uv/ty", "uv", undefined],
     ]);
+    expect(t.installs[0]!.cmd).toMatch(/\nnpm install -g bun$/);
+    expect(t.brewfile).toBe("");
     expect(t.installs.find(i => i.id === "tools/bun/elysia")!.cmd).toMatch(/bun add -g elysia$/);
     expect(t.installs.find(i => i.id === "tools/uv/ty")!.cmd).toMatch(/uv tool install ty$/);
   });
@@ -703,10 +709,40 @@ describe("toolInstallsFor", () => {
     expect(BREW_HOUSEKEEPING[1]).toMatch(/\nsu -s \/bin\/bash linuxbrew -c '.*brew cleanup -s --prune=all'$/);
   });
 
-  it("a manager needed only for its rows brings Homebrew along even when no formula is ticked", () => {
-    const t = toolInstallsFor([row({ rung: "tools", id: "tools/cargo/bat", label: "bat 0.24.0", version: "0.24.0" })]);
-    expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/manager/cargo", "tools/cargo/bat"]);
+  it("a manager needed only for its rows brings Homebrew along when a formula is the only road to it", () => {
+    const t = toolInstallsFor([row({ rung: "tools", id: "tools/pipx/black", label: "black 24.1.0", version: "24.1.0" })]);
+    expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/manager/pipx", "tools/pipx/black"]);
   });
+
+  it("cargo's rows bring the catalog's rustup instead of Homebrew, and wait on it", () => {
+    const t = toolInstallsFor([row({ rung: "tools", id: "tools/cargo/bat", label: "bat 0.24.0", version: "0.24.0" })]);
+    expect(t.installs.map(i => [i.id, i.manager, i.after])).toEqual([
+      ["tools/manager/cargo", "script", undefined],
+      ["tools/cargo/bat", "cargo", "tools/manager/cargo"],
+    ]);
+    expect(t.installs[0]).toMatchObject({ label: "cargo", bin: "cargo" });
+    expect(t.installs[0]!.cmd).toContain("static.rust-lang.org/rustup/archive/1.29.1/");
+    expect(t.brewfile).toBe("");
+  });
+
+  // Both of Homebrew's names for the Rust toolchain, the second the one Homebrew recommends: either one is the catalog's row.
+  for (const formula of ["rust", "rustup"]) {
+    it(`a Mac's ${formula} formula is the catalog's rust row, and Homebrew's ${formula} never installs beside it`, () => {
+      const t = toolInstallsFor([
+        row({ rung: "tools", id: `tools/brew/${formula}`, linux: "yes" }),
+        row({ rung: "tools", id: "tools/cargo/bat", label: "bat 0.24.0", version: "0.24.0" }),
+      ]);
+      expect(t.installs.map(i => [i.id, i.manager, i.after])).toEqual([
+        [`tools/brew/${formula}`, "script", undefined],
+        ["tools/cargo/bat", "cargo", `tools/brew/${formula}`],
+      ]);
+      expect(t.installs[0]!.cmd).toContain("static.rust-lang.org/rustup/archive/1.29.1/");
+      expect(t.installs[0]!.cmd).not.toContain("brew install");
+      expect(t.brewfile).toBe("");
+      // With no cargo row behind it the formula still comes by the catalog's road: one rust on the machine, never the bottle.
+      expect(toolInstallsFor([row({ rung: "tools", id: `tools/brew/${formula}`, linux: "yes" })]).installs.map(i => [i.id, i.manager])).toEqual([[`tools/brew/${formula}`, "script"]]);
+    });
+  }
 
   it("a manager the catalog carries installs by the catalog's road: bun's rows wait on an npm install of bun, and no Homebrew comes along", () => {
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/bun/eslint", label: "eslint 9.0.0", version: "9.0.0" })]);
@@ -812,7 +848,9 @@ describe("catalog rows", () => {
     expect(t.installs.at(-1)!.cmd).toMatch(/brew install go'$/);
     expect(t.installs.at(-1)).not.toHaveProperty("note");
     // Homebrew's own bootstrap comes along for a catalog formula alone, as it does for a manager's.
-    expect(toolInstallsFor([catalog("rust")]).installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/catalog/rust"]);
+    expect(toolInstallsFor([catalog("java")]).installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/catalog/java"]);
+    // A catalog row on the script road brings none of it: Rust's rustup install is the whole step.
+    expect(toolInstallsFor([catalog("rust")]).installs.map(i => [i.id, i.manager])).toEqual([["tools/catalog/rust", "script"]]);
   });
 
   it("a catalog tool the floor carries is the base's, an id the catalog does not know is skipped, and a row this computer has keeps its own road at the laptop's version", () => {
@@ -1104,5 +1142,16 @@ describe("shellInstallFor", () => {
       expect(repo.branch).toMatch(/^(main|master)$/);
       expect(repo.home).not.toMatch(/^[~/]/);
     }
+  });
+});
+
+describe("one place for the brew row's id prefix", () => {
+  const HOME = join("packages", "protocol", "src", "index.ts");
+  // The prefix of a recipe row naming a Homebrew formula, which the collector writes and the engine, sizes and host all read back.
+  const RULE = /tools\/brew\//;
+
+  it("no source file outside the protocol's own const writes the prefix", () => {
+    const copies = sourceFiles().filter(rel => rel !== HOME && RULE.test(readFileSync(join(ROOT, rel), "utf8")));
+    expect(copies).toEqual([]);
   });
 });

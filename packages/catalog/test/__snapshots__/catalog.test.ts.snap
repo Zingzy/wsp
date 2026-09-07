@@ -582,17 +582,21 @@ exports[`catalog > is the seeded catalog 1`] = `
     "status": undefined,
   },
   {
-    "argument": "rust",
+    "argument": "11 lines",
     "configPaths": 0,
+    "covers": [
+      "rustup",
+      "rustup-init",
+    ],
     "defaultOn": false,
     "floor": false,
     "id": "rust",
     "kind": "tool",
-    "road": "brew",
+    "road": "script",
     "signIn": "none",
     "size": {
-      "bytes": 3153304814,
-      "method": "brew",
+      "bytes": 1595346944,
+      "method": "du",
       "on": "2026-09-07",
     },
     "source": {

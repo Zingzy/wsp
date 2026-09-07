@@ -983,6 +983,8 @@ export type GoldenStageEvent = z.infer<typeof GoldenStageEvent>;
 export const ALREADY_APPLIED = "already applied";
 /** Recipe rows under the agents rung that are MCP servers, not agents: `agents/mcp/<agent>/<name>`. The collector writes them, the engine's import reads them. */
 export const MCP_ID_PREFIX = "agents/mcp/";
+/** Recipe rows under the tools rung that name a Homebrew formula. It lives here, not beside the engine's other row prefixes, because the collector writes these ids and cannot import the engine. */
+export const BREW_ID_PREFIX = "tools/brew/";
 
 /** Where the event sits in its runtime's stream: one counter per runtime process, monotonic from 1, so a client that
  * lost its socket can ask events.subscribe for everything after the last one it saw. Absent on events from an older
