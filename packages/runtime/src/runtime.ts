@@ -17,6 +17,7 @@ import {
   exportPaths,
   goldenHead,
   importInto,
+  isNetworkError,
   landBundle,
   parseMergeOutput,
   plural,
@@ -107,7 +108,7 @@ import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
-import { createStatusTracker, goneWords, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
+import { POLL_INTERVAL_MS, createStatusTracker, goneWords, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, type HarnessCatalogProbe } from "./harness-catalog.js";
 
@@ -558,6 +559,10 @@ const VAULTS = "vaults";
  * two apart. */
 class DeadlineError extends Error {}
 
+/** What settleMove ends with when the provider never answered the move (a missed deadline, a call the network
+ * dropped), carrying the last such failure as its cause; a refusal the provider answered with is rethrown as itself. */
+class MoveUnansweredError extends Error {}
+
 /** Rejects once the deadline passes; the underlying promise is left to settle on its own. */
 function until<T>(p: Promise<T>, deadline: number, what: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -995,11 +1000,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     resume: { leaves: "running", from: "paused" },
   };
   /** One provider move inside a pause or a wake, bounded by what is left of the verb's budget: a call that has not
-   * answered in time is left to settle on its own and the provider is read once. A machine that landed is done;
-   * one still where it was gets the call once more; anything else, a second miss or a spent budget ends the move
-   * with the row's words, measured from the verb's start. A call the provider refuses is the caller's to judge. */
+   * answered in time, or that nothing answered (the network failed under it), is left to settle on its own and the
+   * provider is read once. A machine that landed is done; one still where it was gets the call once more; anything
+   * else, a second miss or a spent budget ends the move with the row's words, measured from the verb's start. A call
+   * the provider refuses is the caller's to judge. */
   const settleMove = async (machine: Machine, move: ProviderMove, budget: MoveBudget): Promise<void> => {
     const rule = moves[move];
+    let unanswered: unknown;
     for (let attempt = 1; ; attempt++) {
       const left = budget.deadline - Date.now();
       if (left > 0) {
@@ -1007,7 +1014,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         try {
           return await until(machine[move](), Date.now() + (attempt === 1 ? left / 2 : left), `${move} of ${machine.id}`);
         } catch (e) {
-          if (!(e instanceof DeadlineError)) throw e;
+          if (!(e instanceof DeadlineError) && !isNetworkError(e)) throw e;
+          unanswered = e;
         }
       }
       const reads = await until(machine.state(), Date.now() + providerReadMs, `state of ${machine.id}`).catch(() => undefined);
@@ -1015,7 +1023,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (attempt === 1 && reads === rule.from && budget.deadline > Date.now()) continue;
       const words = moveTimedOutLine(budget.what, Date.now() - budget.started, reads);
       console.warn(`${machine.id}: ${words}`);
-      throw new Error(words);
+      throw new MoveUnansweredError(words, { cause: unanswered });
     }
   };
   const budgetFor = (what: MoveBudget["what"], ms: number): MoveBudget => {
@@ -1783,8 +1791,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return entry === undefined ? null : idleWindowOf(entry.record);
     },
     onIdle: async (id, windowMs) => {
-      await napWith(id, idleReason(windowMs));
+      try {
+        await napWith(id, idleReason(windowMs));
+      } catch (e) {
+        if (e instanceof MoveUnansweredError) throw e;
+        // The provider answered with a refusal: asking again at once changes nothing, so a full window starts from
+        // its answer and the row is pushed once more with that window, the words unchanged.
+        idle.touch(id);
+        const entry = live.get(id);
+        if (entry !== undefined) await emitStatus(entry, reachOf(entry), e instanceof Error ? e.message : String(e));
+        throw e;
+      }
     },
+    retryMs: opts.status?.pollIntervalMs ?? POLL_INTERVAL_MS,
     clock,
   });
   // Every road into a workspace the runtime can see starts its window over;

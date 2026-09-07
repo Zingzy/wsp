@@ -709,6 +709,33 @@ describe("a provider move that never answers", () => {
     expect(pushes(events).at(-1)).toMatchObject({ phase: "running", machineState: "running", reason: ALREADY_RUNNING });
   });
 
+  it("a pause that fails on a network error is read and tried once more inside the budget; a second failure ends it with the words", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, nap: { pauseDeadlineMs: 20 } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const m = backend.machines[0]!;
+    const pause = m.pause.bind(m);
+    let calls = 0;
+    let failing = 2;
+    m.pause = async () => {
+      calls++;
+      if (failing-- > 0) throw new Error("fetch failed");
+      await pause();
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(/^pause did not complete in \d+ms; the provider did not answer and reads the machine running; try again$/);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(calls).toBe(2);
+    expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+    failing = 1;
+    expect((await rt.workspaces.nap(ws.id)).phase).toBe("napping");
+    expect(calls).toBe(4);
+    expect(m.paused).toBe(true);
+  });
+
   it("a pause the provider refuses is not retried: the refusal is the answer", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, nap: { pauseDeadlineMs: 20 } });
