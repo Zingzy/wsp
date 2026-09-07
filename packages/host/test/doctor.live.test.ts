@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { prepareBuilder, SolariBackend, type GoldenStage } from "@wsp/engine";
+import { prepareBuilder, SolariBackend, isReserved as untouchable, type GoldenStage } from "@wsp/engine";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
 import { goldenRecipe } from "../src/cli.js";
-import { deployDaemon, isReserved as untouchable } from "../src/doctor.js";
+import { deployDaemon } from "../src/doctor.js";
 
 const LABEL = { wsp: "1", "wsp-test": "daemon-desktop-live" };
 

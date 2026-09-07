@@ -589,6 +589,25 @@ describe("host sweeps orphaned machines", () => {
     expect(await store.list("builders")).toEqual([]);
   });
 
+  it("a workspace machine from this setup that no record claims is recorded at start under the name its fork stamped, named in the log, listed by the app and deletable", async () => {
+    const { rt, backend, store } = testRuntime();
+    const earlier = createRuntime({ backend, store, adapters: {} });
+    const lost = await earlier.workspaces.create({ golden: "snap_gold", name: "first" });
+    await earlier.close();
+    await store.delete("workspaces", lost.id);
+    backend.machines[0]!.spec.labels!["createdAt"] = ago(2 * 60_000);
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
+
+    expect(backend.machines[0]!.killed).toBe(false);
+    expect(lines).toEqual([`reap: recorded ${lost.machineId} as workspace first (${lost.id}): a machine from this setup that no record claimed; it bills until wsp delete first`]);
+    const list = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
+    expect(list.body.workspaces).toMatchObject([{ id: lost.id, name: "first", machineId: lost.machineId, phase: "running" }]);
+    await rt.workspaces.delete(lost.id);
+    expect(backend.machines[0]!.killed).toBe(true);
+  });
+
   it("a failed listing reaps nothing beyond the recorded builder, and logs both", async () => {
     const { rt, backend, store } = testRuntime();
     const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
@@ -628,7 +647,7 @@ describe("host sweeps orphaned machines", () => {
       `reap: stopped ${stray.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
       `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
       `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
-      `reap: could not stop ${lost.id} (Bad Gateway)`,
+      `reap: ${lost.id}: could not stop: Bad Gateway`,
     ]);
   });
 
@@ -650,7 +669,7 @@ describe("host sweeps orphaned machines", () => {
     expect(lines).toEqual([
       `reap: left alone ${ahead.id}: builder from another wsp setup (owner h_other), 0 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: left alone ${almostMinute.id}: builder from another wsp setup (owner h_other), 59 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
-      `reap: left alone ${ownWs.id}: workspace from this setup that no record claims, 45 s old, $0.11/h (about $0.00 so far); reaped once it is 1 min old unless a record claims it first`,
+      `reap: left alone ${ownWs.id}: workspace from this setup that no record claims, 45 s old, $0.11/h (about $0.00 so far); recorded once it is 1 min old unless a record claims it first`,
       `reap: left alone ${hours.id}: builder from another wsp setup (owner h_other), 6.0 h old, $0.11/h (about $0.66 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: left alone ${freshOwn.id}: builder from this setup that no record claims, 30 s old, $0.11/h (about $0.00 so far); reaped once it is 1 min old unless a record claims it first`,
     ]);
@@ -671,7 +690,7 @@ describe("host sweeps orphaned machines", () => {
     expect(backend.machines.map(m => m.killed)).toEqual([false, true]);
     expect(lines).toEqual([
       `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
-      `reap: could not stop ${stuck.id} (502 exec failed; stays recorded, retried next sweep)`,
+      `reap: ${stuck.id}: could not stop: 502 exec failed; stays recorded, retried next sweep`,
     ]);
   });
 
@@ -775,7 +794,7 @@ describe("host sweeps orphaned machines", () => {
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
 
     expect(lines).toEqual([
-      "reap: could not stop m1 (Bad Gateway; stays recorded, retried next sweep)",
+      "reap: m1: could not stop: Bad Gateway; stays recorded, retried next sweep",
       "reap: left alone m1: your earlier builder from this setup; its setup never finished; the next sweep stops it",
     ]);
     expect(lines.join("\n")).not.toContain("reuse it");

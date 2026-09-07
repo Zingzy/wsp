@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
-import { DAEMON_PORT, TOOLS_PATH, type Machine } from "@wsp/engine";
+import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, TOOLS_PATH, WSP_LABEL, isReserved, type Machine } from "@wsp/engine";
 import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
@@ -395,10 +395,6 @@ class Timings {
   }
 }
 
-/** Sleeping experiments on the account carry a poc label (ttl-test, p1, ...): never touch them. */
-export function isReserved(labels: Record<string, string>): boolean {
-  return "poc" in labels;
-}
 /** Envs every guest needs: a PATH that reaches the daemon's node, the harness
  * install, and what the golden import's tools stage puts on the machine. */
 export const GUEST_ENVS: Record<string, string> = {
@@ -442,7 +438,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
       setup: GOLDEN_SETUP,
       smoke: GOLDEN_SMOKE,
       envs: opts.envs,
-      labels: { wsp: "1", "wsp-doctor": "1", createdAt: new Date().toISOString() },
+      labels: { [WSP_LABEL]: "1", [DOCTOR_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
     });
     return version.snapshotId;
   };
@@ -466,7 +462,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
           golden,
           name: `doctor-${Date.now().toString(36)}`,
           ...(opts.envs !== undefined ? { envs: opts.envs } : {}),
-          labels: { wsp: "1", "wsp-doctor": "1", createdAt: new Date().toISOString() },
+          labels: { [WSP_LABEL]: "1", [DOCTOR_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
         };
         try {
           return await rt.workspaces.create(spec);

@@ -20,6 +20,7 @@ import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
+import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { importInto } from "./vault.js";
 
 export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
@@ -1016,7 +1017,7 @@ export async function buildGolden(
     backend,
     setup,
     ...size,
-    labels: { ...labels, "wsp-builder": "1" },
+    labels: { ...labels, [BUILDER_LABEL]: "1" },
     ...(kind !== undefined ? { kind } : {}),
     ...(baseTemplate !== undefined ? { baseTemplate } : {}),
     ...(setupTimeoutMs !== undefined ? { setupTimeoutMs } : {}),
@@ -1026,7 +1027,7 @@ export async function buildGolden(
     backend,
     smoke,
     ...size,
-    labels: { ...labels, "wsp-smoke": "1", createdAt: new Date().toISOString() },
+    labels: { ...labels, [SMOKE_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
     ...(manifest !== undefined ? { manifest } : {}),
     ...(smokeTimeoutMs !== undefined ? { smokeTimeoutMs } : {}),
     ...(onStage !== undefined ? { onStage } : {}),

@@ -4,7 +4,7 @@
 // workspace's machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, imageMoveRefusal, needsRebuild, outOfMemoryLine, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { LINEAGE_MARKS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, imageMoveRefusal, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -18,7 +18,6 @@ import {
   AlertDialogPopup,
   AlertDialogTitle,
 } from "../ui/alert-dialog.js";
-import { Badge } from "../ui/badge.js";
 import { Button, WARN_BUTTON } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
@@ -514,20 +513,19 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
   const offered = api?.updateImage !== undefined;
   return (
     <Section label="Lineage" aside={lineage?.head !== null && lineage?.head !== undefined ? `head v${lineage.head}` : undefined}>
-      <ul className="mt-1 divide-y divide-border/40">
+      <ul className={cn("mt-1 divide-y divide-border/40", LINEAGE_GRID)}>
         <LineageRow
           dot={workspace.phase === "running" ? "bg-success" : "border border-muted-foreground/60"}
           title={<span className="font-medium">Live disk</span>}
           detail={`forked ${workspace.createdAt.slice(0, 10)}${project !== undefined ? ` · ${project.name} imported ${project.importedAt.slice(0, 10)}` : ""}`}
+          marks={["now"]}
           aside={
-            <span className="flex items-center gap-2">
-              <span className="text-muted-foreground">now</span>
-              {project !== undefined && api?.snapshotWorkspace !== undefined && (
-                <Button size="xs" variant="outline" disabled={busy !== null || workspace.phase !== "running"} aria-label={`snapshot ${workspace.name} as a project golden`} onClick={() => void snapshot()}>
-                  Snapshot
-                </Button>
-              )}
-            </span>
+            project !== undefined &&
+            api?.snapshotWorkspace !== undefined && (
+              <Button size="xs" variant="outline" disabled={busy !== null || workspace.phase !== "running"} aria-label={`snapshot ${workspace.name} as a project golden`} onClick={() => void snapshot()}>
+                Snapshot
+              </Button>
+            )
           }
         />
         {versions.length === 0 ? (
@@ -550,21 +548,12 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                 key={v.version}
                 dot={head ? "bg-foreground" : "bg-muted-foreground/60"}
                 title={
-                  <span className="flex min-w-0 items-center gap-1.5" data-k={`v${v.version}`}>
-                    <span className="font-mono">v{v.version}</span>
-                    {head && (
-                      <Badge size="sm" variant="secondary">
-                        head
-                      </Badge>
-                    )}
-                    {fork && (
-                      <Badge size="sm" variant="outline">
-                        this fork
-                      </Badge>
-                    )}
+                  <span className="font-mono" data-k={`v${v.version}`}>
+                    v{v.version}
                   </span>
                 }
                 detail={`built ${v.createdAt.slice(0, 10)}${fork && behind !== null ? ` · ${behindGoldenLine(v.version, behind)}` : ""}`}
+                marks={[...(head ? ["head" as const] : []), ...(fork ? ["fork" as const] : [])]}
                 below={
                   <>
                     {fork && v.missingTools !== undefined && v.missingTools.length > 0 && <MissingTools tools={v.missingTools} />}
@@ -578,7 +567,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                 aside={
                   // Two different actions on one row: Update moves this workspace onto the head, Roll back moves the
                   // golden's head for every fork after it. Neither stands in for the other.
-                  <span className="flex items-center gap-1.5">
+                  <>
                     {fork && behind !== null && offered && (
                       <Button size="xs" variant="outline" disabled={busy !== null || moveRefusal !== null} aria-label={`update ${workspace.name} to v${behind}`} onClick={() => void updateImage(behind)}>
                         Update
@@ -589,7 +578,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                         Roll back
                       </Button>
                     )}
-                  </span>
+                  </>
                 }
               />
             );
@@ -618,18 +607,36 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
   );
 }
 
-/** Dot, title and aside share one row at a button's height, so a wrapping detail or an appearing button moves nothing. */
-function LineageRow({ dot, title, detail, aside, below }: { dot: string; title: ReactNode; detail: string; aside?: ReactNode; below?: ReactNode }) {
+/** The lineage list's columns: dot, title, marks, buttons. The list owns the grid and every row, nested lists included,
+ * is a subgrid of it, so the marks sit in one column and the buttons in the next across the whole section. */
+const LINEAGE_GRID = "grid grid-cols-[0.375rem_minmax(0,1fr)_auto_auto] gap-x-2";
+const LINEAGE_SUBGRID = "col-span-4 grid grid-cols-subgrid";
+
+/** One row of the lineage grid at a button's height, so a wrapping detail or an appearing button moves nothing; a
+ * nested row keeps the columns and indents its dot and title. */
+function LineageRow({ dot, title, detail, marks = [], aside, below, nested = false }: { dot: string; title: ReactNode; detail: string; marks?: readonly LineageMark[]; aside?: ReactNode; below?: ReactNode; nested?: boolean }) {
   return (
-    <li className="py-1.5 text-xs">
-      <div className="grid grid-cols-[0.375rem_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5">
-        <span aria-hidden className={cn("size-1.5 rounded-full", dot)} />
-        <span className="flex min-w-0 items-center">{title}</span>
-        <span className="flex min-h-6 items-center text-[11px]">{aside}</span>
-        <span className="col-span-2 col-start-2 text-[11px] text-muted-foreground">{detail}</span>
-      </div>
-      {below}
+    <li className={cn(LINEAGE_SUBGRID, "items-center gap-y-0.5 py-1.5 text-xs")}>
+      <span aria-hidden className={cn("size-1.5 rounded-full", dot, nested && "ml-3.5")} />
+      <span className={cn("flex min-w-0 items-center", nested && "pl-3.5")}>{title}</span>
+      <span className="flex min-h-6 items-center gap-2 text-[11px]">
+        {marks.map(m => (
+          <Mark key={m} kind={m} />
+        ))}
+      </span>
+      <span className="flex min-h-6 items-center gap-1.5 text-[11px]">{aside}</span>
+      <span className="col-span-3 col-start-2 text-[11px] text-muted-foreground">{detail}</span>
+      {below !== undefined && <div className={cn(LINEAGE_SUBGRID, "[&>*]:col-span-4")}>{below}</div>}
     </li>
+  );
+}
+
+/** One state word on a lineage row, muted mono like the row's other metadata: a state is text there, never a badge. */
+function Mark({ kind }: { kind: LineageMark }) {
+  return (
+    <span className="font-mono text-muted-foreground" data-mark={kind}>
+      {LINEAGE_MARKS[kind]}
+    </span>
   );
 }
 
@@ -639,22 +646,19 @@ function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGol
   if (goldens.length === 0) return null;
   const rows = [...goldens].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return (
-    <ul className="mt-1 ml-3.5 divide-y divide-border/40" aria-label="project goldens">
+    <ul className={cn(LINEAGE_SUBGRID, "mt-1 divide-y divide-border/40")} aria-label="project goldens">
       {rows.map(g => (
         <LineageRow
           key={g.snapshotId}
+          nested
           dot="border border-muted-foreground/60"
           title={
-            <span className="flex min-w-0 items-center gap-1.5" data-k={`pg-${g.snapshotId}`}>
-              <span className="truncate font-mono">{g.project.name}</span>
-              {g.snapshotId === forkOf && (
-                <Badge size="sm" variant="outline">
-                  this fork
-                </Badge>
-              )}
+            <span className="truncate font-mono" data-k={`pg-${g.snapshotId}`}>
+              {g.project.name}
             </span>
           }
           detail={`snapshot ${g.createdAt.slice(0, 10)} · imported ${g.project.importedAt.slice(0, 10)} · from ${g.workspaceName}`}
+          marks={g.snapshotId === forkOf ? ["fork"] : []}
           aside={
             <Button size="xs" variant="outline" disabled={busy} aria-label={`fork ${g.project.name} from ${g.snapshotId}`} onClick={() => onFork(g)}>
               Fork
@@ -677,17 +681,21 @@ function UnderVersion({ label, k, children }: { label: string; k: string; childr
   );
 }
 
-/** Rows of name and note under a version; `keys` are the data-k of the list, the name and the note. */
-function VersionNotes({ label, aria, keys, rows }: { label: string; aria: string; keys: [string, string, string]; rows: { key: string; name: string; note: string }[] }) {
+/** Rows of name, note and state under a version, the states in one column; `keys` are the data-k of the list, the
+ * name and the note. */
+function VersionNotes({ label, aria, keys, rows }: { label: string; aria: string; keys: [string, string, string]; rows: { key: string; name: string; note?: string; mark?: LineageMark }[] }) {
   return (
     <UnderVersion label={label} k={keys[0]}>
-      <ul className="mt-0.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted-foreground" aria-label={aria}>
+      <ul className="mt-0.5 grid grid-cols-[fit-content(7rem)_minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted-foreground" aria-label={aria}>
         {rows.map(r => (
           <li key={r.key} className="contents">
-            <span data-k={keys[1]}>{r.name}</span>
+            <span className="min-w-0 break-words" data-k={keys[1]}>
+              {r.name}
+            </span>
             <span className="min-w-0 break-words" data-k={keys[2]}>
               {r.note}
             </span>
+            <span>{r.mark !== undefined && <Mark kind={r.mark} />}</span>
           </li>
         ))}
       </ul>
@@ -698,22 +706,13 @@ function VersionNotes({ label, aria, keys, rows }: { label: string; aria: string
 /** What a version's image carries that its recipe no longer asks for: an update leaves the bytes where they are, so
  * a fork still has them and nothing says they are missing. */
 function RetiredRows({ rows }: { rows: GoldenRetired[] }) {
-  return (
-    <UnderVersion label="retired, still on this image" k="retired-rows">
-      <ul className="mt-0.5 font-mono text-[11px] text-muted-foreground" aria-label="rows retired from this image">
-        {rows.map(r => (
-          <li key={r.id} data-k="retired-row">
-            {r.name}
-          </li>
-        ))}
-      </ul>
-    </UnderVersion>
-  );
+  return <VersionNotes label="retired, still on this image" aria="rows retired from this image" keys={["retired-rows", "retired-row", "retired-note"]} rows={rows.map(r => ({ key: r.id, name: r.name }))} />;
 }
 
-/** One row per tool the import left off the image, with its cause and reason: a count would not say why a tool is missing. */
+/** One row per tool the import left off the image, the reason beside its name and the outcome as its mark: a count
+ * would not say why a tool is missing. */
 function MissingTools({ tools }: { tools: GoldenMissingTool[] }) {
-  return <VersionNotes label="not on this image" aria="tools not on this image" keys={["missing-tools", "missing-tool", "missing-note"]} rows={tools.map(t => ({ key: t.id, name: t.name, note: `${t.outcome}: ${t.note}` }))} />;
+  return <VersionNotes label="not on this image" aria="tools not on this image" keys={["missing-tools", "missing-tool", "missing-note"]} rows={tools.map(t => ({ key: t.id, ...missingToolRow(t) }))} />;
 }
 
 /** One row per path the pack left off the image, the file it was read from beside the reason. */

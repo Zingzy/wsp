@@ -3,7 +3,7 @@
 // runtime's import events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { MachineSizeOffer, MachineState, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, MachineSizeOffer, MachineState, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -514,6 +514,26 @@ export function vaultKeptLine(why: string): string {
  * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
 export const ALREADY_RUNNING = "already running at the provider";
 
+/** The machine row's line on a workspace the sweep recorded from the provider's listing: a machine of this setup's
+ * that no record claimed, kept rather than killed, since a machine nobody records bills unseen. */
+export const RECORD_RESTORED = "record restored from the provider's listing";
+
+/** The host's line for it, with the name the fork stamped on the machine (or the machine id where it stamped none)
+ * and the verb that removes it. */
+export function recordRestoredLine(machineId: string, name: string, workspaceId: string): string {
+  return `reap: recorded ${machineId} as workspace ${name} (${workspaceId}): a machine from this setup that no record claimed; it bills until wsp delete ${name}`;
+}
+
+/** The refusal a fork gets for a name another workspace holds; a name names at most one workspace. */
+export function nameTakenRefusal(name: string): string {
+  return `${name} is already a workspace; pick another name, or delete it first`;
+}
+
+/** The refusal a fork gets for a name whose workspace is being deleted this moment: the two never interleave. */
+export function nameDeletingRefusal(name: string): string {
+  return `${name} is being deleted; wait for the delete to finish, then fork it again`;
+}
+
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how
  * long it was given in all, and what the provider reads about the machine after it, or that the provider could not
  * be read. The person's road is to try again; the runtime never leaves the row at Pausing or Waking. */
@@ -543,6 +563,17 @@ export function goldenBuildLine(from: number, to: number, changes: readonly Gold
  * a state in words, never a badge. The move is the person's; nothing replaces a machine they are working on. */
 export function behindGoldenLine(on: number, head: number): string {
   return `on image v${on}, v${head} available`;
+}
+
+/** The states a lineage row can be in, each as the muted mono word the row's marks column shows: state is text there,
+ * never a badge, and a missing tool's outcome indexes this table as it is. */
+export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" } as const;
+export type LineageMark = keyof typeof LINEAGE_MARKS;
+
+/** A missing tool's row as the lineage shows it. A record sealed before the name and outcome were recorded still
+ * carries its id, so it reads by that and as failed rather than as a blank row. */
+export function missingToolRow(t: { id: string; name?: string; outcome?: GoldenMissingTool["outcome"]; note: string }): { name: string; note: string; mark: LineageMark } {
+  return { name: t.name === undefined || t.name === "" ? t.id : t.name, note: t.note, mark: t.outcome ?? "failed" };
 }
 
 /** What the provider answered one call with: the status, its message, the request id its reply carried when it

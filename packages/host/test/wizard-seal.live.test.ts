@@ -3,12 +3,11 @@
 // the provider once golden.seal returns; a builder that outlives its seal
 // bills and eats the second Starter slot. Nothing but poc-labelled
 // machines may be left on the account afterwards.
-import { SolariBackend, type MachineState } from "@wsp/engine";
+import { SolariBackend, isReserved, type MachineState } from "@wsp/engine";
 import { connectDaemon, createRuntime, memoryStore } from "@wsp/runtime";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv, sleep } from "../../engine/test/live.js";
 import { goldenRecipe } from "../src/cli.js";
-import { isReserved } from "../src/doctor.js";
 
 const LABEL = { wsp: "1", "wsp-test": "wizard-seal-live" };
 

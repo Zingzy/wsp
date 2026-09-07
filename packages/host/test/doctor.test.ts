@@ -13,6 +13,7 @@ import { TOOLS_PATH } from "@wsp/engine";
 import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ } from "@wsp/protocol";
 import { rotateDaemonTokenScript, writeDaemonTokenScript } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
+import { isReserved } from "@wsp/engine";
 import {
   connectDaemonSocket,
   deployDaemon,
@@ -25,7 +26,6 @@ import {
   claudeEnvs,
   OPEN_SHIM_SCRIPT,
   START_MJS,
-  isReserved,
   packBundle,
   stageDaemonBundle,
   tarPackCommand,

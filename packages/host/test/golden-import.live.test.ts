@@ -6,11 +6,11 @@
 // this test created are ever touched; a running machine from another session
 // is left alone, so this never runs the host's account sweep.
 import { homedir } from "node:os";
-import { SolariBackend, type GoldenStage } from "@wsp/engine";
+import { SolariBackend, isReserved, type GoldenStage } from "@wsp/engine";
 import { createRuntime, memoryStore, type ImportResult } from "@wsp/runtime";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
-import { deployDaemon, isReserved } from "../src/doctor.js";
+import { deployDaemon } from "../src/doctor.js";
 import { importFor } from "../src/init-import.js";
 import { goldenRecipeFor } from "../src/init-recipe.js";
 import type { ManifestEntry } from "@wsp/collect";
