@@ -2,9 +2,35 @@
 // The Files surface over a fake daemon wire: the root lists one level with
 // its folders shut, a folder lists itself when opened, a folder the daemon cut
 // carries a note row with the count, a file opens as its own surface, and the
-// location bar follows the thread's folder until pinned.
+// one breadcrumb row follows the thread's folder until pinned. Base UI menus
+// never settle under jsdom (see composer-pickers.test), so the root switch's
+// menu is stood in by a plain open/closed context; diff-surface.test renders
+// the real one.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/components/ui/menu.js", () => {
+  const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
+  const Menu = ({ children }: { children: ReactNode }) => {
+    const [open, setOpen] = useState(false);
+    return <Ctx.Provider value={{ open, set: setOpen }}>{children}</Ctx.Provider>;
+  };
+  const MenuTrigger = ({ children, ...props }: { children: ReactNode; [key: string]: unknown }) => {
+    const ctx = useContext(Ctx);
+    return (
+      <button type="button" onClick={() => ctx.set(!ctx.open)} {...(props as Record<string, unknown>)}>
+        {children}
+      </button>
+    );
+  };
+  const MenuPopup = ({ children }: { children: ReactNode }) => (useContext(Ctx).open ? <div role="menu">{children}</div> : null);
+  const MenuItem = ({ children, onClick, ...props }: { children: ReactNode; onClick?: () => void; [key: string]: unknown }) => (
+    <div role="menuitem" onClick={onClick} {...(props as Record<string, unknown>)}>{children}</div>
+  );
+  return { Menu, MenuTrigger, MenuPopup, MenuItem };
+});
+
 import { FilesSurface } from "../src/files/FilesSurface.js";
 import { resetListings } from "../src/files/listing.js";
 import { useRootStore } from "../src/files/root.js";
@@ -12,7 +38,7 @@ import { provideDaemonWire } from "../src/files/wire.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { useStore } from "../src/protocol/store.js";
-import { fakeWire, imported, LEVELS, LISTING, PROJECT_DEST, resetSurfaces, WS } from "./surface-harness.js";
+import { fakeWire, folderCrumbRow, imported, LEVELS, LISTING, PROJECT_DEST, resetSurfaces, shownFolder, WS } from "./surface-harness.js";
 import { provideDaemonHello } from "../src/files/wire.js";
 
 beforeEach(resetSurfaces);
@@ -36,9 +62,14 @@ function rowFor(container: HTMLElement, path: string): HTMLElement {
 }
 
 const listCalls = (wire: { calls: [string, Record<string, unknown>][] }) => wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"]);
-const rootLabel = (container: HTMLElement) => container.querySelector("[data-files-root]")?.textContent;
-const rootSwitch = (container: HTMLElement) =>
-  Array.from(container.querySelectorAll<HTMLButtonElement>("[data-files-roots] button")).map(b => [b.textContent, b.getAttribute("aria-pressed")]);
+/** The chevron beside the root crumb, which is the only control that switches root. */
+const ROOT_SWITCH = "Pick a browsable folder";
+const rootMenu = () => screen.getAllByRole("menuitem").map(item => [item.textContent, item.dataset["currentRoot"]]);
+/** Opening the switch names every browsable root, and an item pins the one picked. */
+const pickRoot = (path: string) => {
+  fireEvent.click(screen.getByRole("button", { name: ROOT_SWITCH }));
+  fireEvent.click(screen.getByRole("menuitem", { name: path }));
+};
 
 describe("files surface", () => {
   it("lists the root one level with its folders shut, and lists a folder when it is opened", async () => {
@@ -54,9 +85,7 @@ describe("files surface", () => {
     fireEvent.click(rowFor(container, "src/"));
     await waitFor(() => expect(treeRows(container).map(r => r.path)).toContain("src/a.ts"));
     expect(listCalls(wire)).toEqual(["/root", "/root/src"]);
-    expect(rootLabel(container)).toBe("/root");
-    expect((screen.getByRole("button", { name: "Up one folder" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(container.querySelector("[data-files-roots]")).toBeNull();
+    expect(shownFolder(container)).toBe("/root");
 
     fireEvent.click(rowFor(container, "src/"));
     await settle();
@@ -65,6 +94,69 @@ describe("files surface", () => {
     await settle();
     expect(treeRows(container).map(r => r.path)).toContain("src/a.ts");
     expect(listCalls(wire)).toEqual(["/root", "/root/src"]);
+  });
+
+  it("names the folder in one row at a root: the root is its only crumb, and nothing stands there for up", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING }));
+    const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
+    expect(container.querySelectorAll("[data-files-location]")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-folder-crumbs]")).toHaveLength(1);
+    expect(folderCrumbRow(container)).toEqual([["/root", "/root"]]);
+    expect(shownFolder(container)).toBe("/root");
+    // The path is in the row once and the row holds no control for up, at a root or anywhere.
+    expect(container.querySelector("[data-files-location]")?.textContent).toBe("/root");
+    expect(screen.queryByRole("button", { name: /up/i })).toBeNull();
+    expect(container.querySelector("[data-files-roots]")).toBeNull();
+    expect(screen.queryByRole("button", { name: ROOT_SWITCH })).toBeNull();
+  });
+
+  it("draws the root and every folder below it as crumbs, and a crumb between them goes there", async () => {
+    const wire = fakeWire({ "fs.list": LISTING });
+    provideDaemonWire(WS, wire);
+    act(() => useRootStore.getState().follow(WS, "/root/app/lib"));
+    const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(treeRows(container).map(r => r.path)).toEqual(["index.ts"]));
+    expect(folderCrumbRow(container)).toEqual([["/root", "/root"], ["app", "/root/app"], ["lib", "/root/app/lib"]]);
+    expect(shownFolder(container)).toBe("/root/app/lib");
+    expect(container.querySelectorAll("[data-files-location]")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "app" }));
+    await waitFor(() => expect(shownFolder(container)).toBe("/root/app"));
+    expect(folderCrumbRow(container)).toEqual([["/root", "/root"], ["app", "/root/app"]]);
+    expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: "/root/app/lib", pinned: "/root/app", shell: null });
+    expect(listCalls(wire)).toEqual(["/root/app/lib", "/root/app"]);
+    expect(treeRows(container).map(r => r.path)).toEqual(["lib/", "package.json"]);
+  });
+
+  it("goes up a folder on Backspace and Alt+Up, is inert at the root, and leaves a field's own keys alone", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING }));
+    act(() => useRootStore.getState().follow(WS, "/root/app/lib"));
+    const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(shownFolder(container)).toBe("/root/app/lib"));
+    const pane = container.querySelector<HTMLElement>("[data-files-pane]")!;
+    // Nothing was clicked in the pane: it is focusable and took focus as it was shown, so the keys are live.
+    expect(pane.getAttribute("tabindex")).toBe("0");
+    expect(document.activeElement).toBe(pane);
+
+    // From a tree row, where the key is pressed in practice: the row lives in the tree's shadow root.
+    fireEvent.keyDown(rowFor(container, "index.ts"), { key: "Backspace" });
+    await waitFor(() => expect(shownFolder(container)).toBe("/root/app"));
+    fireEvent.keyDown(pane, { key: "ArrowUp", altKey: true });
+    await waitFor(() => expect(shownFolder(container)).toBe("/root"));
+
+    fireEvent.keyDown(pane, { key: "Backspace" });
+    fireEvent.keyDown(pane, { key: "ArrowUp", altKey: true });
+    await settle();
+    expect(shownFolder(container)).toBe("/root");
+
+    act(() => useRootStore.getState().pin(WS, "/root/app"));
+    await waitFor(() => expect(shownFolder(container)).toBe("/root/app"));
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search api files" }), { key: "Backspace" });
+    fireEvent.keyDown(pane, { key: "ArrowUp" });
+    fireEvent.keyDown(pane, { key: "Backspace", metaKey: true });
+    await settle();
+    expect(shownFolder(container)).toBe("/root/app");
   });
 
   it("puts a note row with the count under a folder the daemon cut at its cap", async () => {
@@ -112,7 +204,7 @@ describe("files surface", () => {
     const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(treeRows(container).map(r => r.path)).toEqual(["lib/", "package.json"]));
     expect(listCalls(wire)).toEqual(["/root/app"]);
-    expect(rootLabel(container)).toBe("/root/app");
+    expect(shownFolder(container)).toBe("/root/app");
 
     fireEvent.click(rowFor(container, "package.json"));
     await settle();
@@ -121,28 +213,25 @@ describe("files surface", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stay in this folder" }));
     act(() => useRootStore.getState().follow(WS, "/root"));
     await settle();
-    expect(rootLabel(container)).toBe("/root/app");
+    expect(shownFolder(container)).toBe("/root/app");
     expect(screen.getByRole("button", { name: "Follow the agent's folder" }).getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "Follow the agent's folder" }));
-    await waitFor(() => expect(rootLabel(container)).toBe("/root"));
+    await waitFor(() => expect(shownFolder(container)).toBe("/root"));
     expect(treeRows(container).map(r => r.path)).toContain("README.md");
     fireEvent.click(rowFor(container, "README.md"));
     await settle();
     expect(useRightPanelStore.getState().byWorkspaceId[WS]!.activeSurfaceId).toBe("file:/root/README.md");
   });
 
-  it("up one folder pins the parent; new thread here follows the shown folder and asks for a thread", async () => {
+  it("the root crumb pins the root; new thread here follows the shown folder and asks for a thread", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING }));
     act(() => useRootStore.getState().follow(WS, "/root/app"));
     const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
-    await waitFor(() => expect(rootLabel(container)).toBe("/root/app"));
-    const up = () => screen.getByRole("button", { name: "Up one folder" }) as HTMLButtonElement;
-    expect(up().disabled).toBe(false);
-    fireEvent.click(up());
-    await waitFor(() => expect(rootLabel(container)).toBe("/root"));
+    await waitFor(() => expect(shownFolder(container)).toBe("/root/app"));
+    fireEvent.click(screen.getByRole("button", { name: "/root" }));
+    await waitFor(() => expect(shownFolder(container)).toBe("/root"));
     expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: "/root/app", pinned: "/root", shell: null });
-    expect(up().disabled).toBe(true);
 
     const requests: string[] = [];
     const off = onNewThreadRequest(detail => requests.push(detail.workspaceId));
@@ -178,7 +267,7 @@ describe("files surface", () => {
     await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
     expect(container.querySelector("[data-files-behind]")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: PROJECT_DEST }));
+    pickRoot(PROJECT_DEST);
     await waitFor(() => expect(container.querySelector("[data-files-behind]")).not.toBeNull());
     expect(container.querySelector("[data-files-behind]")?.textContent).toBe("daemon v2 predates Files in imported projects");
     expect(screen.queryByText(`${PROJECT_DEST} resolves outside the workspace root`)).toBeNull();
@@ -209,34 +298,48 @@ describe("files surface", () => {
     expect(screen.getAllByText("The workspace is not running.")).toHaveLength(2);
   });
 
-  it("offers home and the imported project as roots, switches by pinning, and up stops at each root's edge", async () => {
+  it("keeps the root crumb going to its root when the daemon browses two roots, with the switch its own button beside it, and up stops at each root's edge", async () => {
     const wire = fakeWire({ "fs.list": LISTING });
     provideDaemonWire(WS, wire);
     useStore.setState({ workspaces: [imported] });
     const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
-    expect(rootSwitch(container)).toEqual([["/root", "true"], [PROJECT_DEST, "false"]]);
-    expect(rootLabel(container)).toBe("/root");
-    expect(screen.getByRole("group", { name: "Browsable folders" })).toBeTruthy();
+    expect(folderCrumbRow(container)).toEqual([["/root", "/root"]]);
+    expect(container.querySelector("[data-files-roots]")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: PROJECT_DEST }));
-    await waitFor(() => expect(rootLabel(container)).toBe(PROJECT_DEST));
+    fireEvent.click(screen.getByRole("button", { name: ROOT_SWITCH }));
+    expect(rootMenu()).toEqual([["/root", "true"], [PROJECT_DEST, "false"]]);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: PROJECT_DEST }));
+    await waitFor(() => expect(shownFolder(container)).toBe(PROJECT_DEST));
     expect(treeRows(container).map(r => r.path)).toEqual(["packages/", "pnpm-workspace.yaml"]);
     expect(listCalls(wire)).toEqual(["/root", PROJECT_DEST]);
-    expect(rootSwitch(container)).toEqual([["/root", "false"], [PROJECT_DEST, "true"]]);
+    expect(folderCrumbRow(container)).toEqual([[PROJECT_DEST, PROJECT_DEST]]);
     expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: null, pinned: PROJECT_DEST, shell: null });
-    expect((screen.getByRole("button", { name: "Up one folder" }) as HTMLButtonElement).disabled).toBe(true);
+
+    // At a root's edge the key does nothing, as the daemon lists nothing above it.
+    const pane = container.querySelector<HTMLElement>("[data-files-pane]")!;
+    fireEvent.keyDown(pane, { key: "Backspace" });
+    await settle();
+    expect(shownFolder(container)).toBe(PROJECT_DEST);
 
     fireEvent.click(rowFor(container, "packages/"));
     await waitFor(() => expect(treeRows(container).map(r => r.path)).toContain("packages/web/"));
     act(() => useRootStore.getState().pin(WS, `${PROJECT_DEST}/packages`));
-    await waitFor(() => expect(rootLabel(container)).toBe(`${PROJECT_DEST}/packages`));
-    expect(rootSwitch(container)).toEqual([["/root", "false"], [PROJECT_DEST, "true"]]);
-    expect((screen.getByRole("button", { name: "Up one folder" }) as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => expect(shownFolder(container)).toBe(`${PROJECT_DEST}/packages`));
+    expect(folderCrumbRow(container)).toEqual([[PROJECT_DEST, PROJECT_DEST], ["packages", `${PROJECT_DEST}/packages`]]);
+    fireEvent.keyDown(pane, { key: "Backspace" });
+    await waitFor(() => expect(shownFolder(container)).toBe(PROJECT_DEST));
 
+    pickRoot("/root");
+    await waitFor(() => expect(shownFolder(container)).toBe("/root"));
+    expect(folderCrumbRow(container)).toEqual([["/root", "/root"]]);
+
+    // Two roots, and the crumb is still one click to its root, the same gesture it is with one root.
+    act(() => useRootStore.getState().pin(WS, "/root/app"));
+    await waitFor(() => expect(shownFolder(container)).toBe("/root/app"));
     fireEvent.click(screen.getByRole("button", { name: "/root" }));
-    await waitFor(() => expect(rootLabel(container)).toBe("/root"));
-    expect(rootSwitch(container)).toEqual([["/root", "true"], [PROJECT_DEST, "false"]]);
+    await waitFor(() => expect(shownFolder(container)).toBe("/root"));
   });
 
   it("follows the thread into the imported project and lists it there", async () => {
@@ -247,7 +350,7 @@ describe("files surface", () => {
     const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(treeRows(container).map(r => r.path)).toEqual(["packages/", "pnpm-workspace.yaml"]));
     expect(listCalls(wire)).toEqual([PROJECT_DEST]);
-    expect(rootSwitch(container)).toEqual([["/root", "false"], [PROJECT_DEST, "true"]]);
+    expect(folderCrumbRow(container)).toEqual([[PROJECT_DEST, PROJECT_DEST]]);
     expect(container.querySelector("[data-files-error]")).toBeNull();
   });
 });

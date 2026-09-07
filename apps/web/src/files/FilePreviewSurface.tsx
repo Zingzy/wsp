@@ -20,6 +20,7 @@ import { cn } from "../lib/utils.js";
 import { useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore, type RightPanelSurface } from "../rightPanelStore.js";
 import { fsRead } from "../terminal/daemon-fs.js";
+import { CrumbScroller } from "./CrumbScroller.js";
 import { isMarkdownFile } from "./entries.js";
 import { NotRunning } from "./FilesSurface.js";
 import { useWorkspaceListing } from "./listing.js";
@@ -83,20 +84,18 @@ export function FilePreviewSurface({ workspaceId, surface, theme }: { workspaceI
         className="flex h-10 min-h-10 shrink-0 items-center gap-2 border-b border-border/60 bg-background px-3 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader
       >
-        <ScrollArea hideScrollbars scrollFade className="min-w-0 flex-1 rounded-none" data-file-breadcrumbs>
-          <div className="flex h-full w-max min-w-full items-center text-xs">
-            <FileBreadcrumbs
-              projectName={workspace?.name ?? "workspace"}
-              root={rootOf(roots, path) ?? "/"}
-              path={path}
-              levels={listing.levels}
-              onBrowseDirectory={listing.ensure}
-              onRefreshDirectory={listing.refresh}
-              onOpenFile={next => openFile(workspaceId, next)}
-              theme={theme}
-            />
-          </div>
-        </ScrollArea>
+        <CrumbScroller label="File path" rowClassName="text-xs" data-file-breadcrumbs>
+          <FileBreadcrumbs
+            projectName={workspace?.name ?? "workspace"}
+            root={rootOf(roots, path) ?? "/"}
+            path={path}
+            levels={listing.levels}
+            onBrowseDirectory={listing.ensure}
+            onRefreshDirectory={listing.refresh}
+            onOpenFile={next => openFile(workspaceId, next)}
+            theme={theme}
+          />
+        </CrumbScroller>
         {isMarkdown ? (
           <Tooltip>
             <TooltipTrigger

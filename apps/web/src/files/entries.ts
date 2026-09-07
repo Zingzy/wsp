@@ -21,6 +21,19 @@ export function parentPath(path: string): string | null {
   return cut <= 0 ? "/" : path.slice(0, cut);
 }
 
+export interface PathSegment {
+  /** The one folder or file name this segment is. */
+  readonly name: string;
+  /** The absolute path the segment names, root included. */
+  readonly path: string;
+}
+
+/** Every segment of path below root, in order, each with the absolute path it names; empty at the root itself. */
+export function pathSegments(root: string, path: string): PathSegment[] {
+  const parts = relativeTo(root, path).split("/").filter(Boolean);
+  return parts.map((name, index) => ({ name, path: joinPath(root, parts.slice(0, index + 1).join("/")) }));
+}
+
 /** path below root as the tree shows it; the root itself is "". */
 export function relativeTo(root: string, path: string): string {
   if (path === root) return "";
