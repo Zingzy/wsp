@@ -3,7 +3,8 @@
 // where the search row does, the two top rows are one height and start
 // where the workspace rows do, the search row opens the palette without
 // moving a row, a thread row's title keeps its room at the
-// default width, a status toast holds a long token inside its box, the line
+// default width, a status toast holds a long token inside its box, the
+// computer offline is one muted mono line under the search row, the line
 // the runtime puts on a machine's row takes that row's second line whole,
 // uncut and without growing the row, collapsing the sidebar leaves the
 // page header's left padding alone, a send refusal above the composer is
@@ -21,7 +22,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
+import { COMPUTER_OFFLINE_LINE, sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
@@ -376,6 +377,42 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       const path = join(SHOTS_DIR, `sidebar-toast-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar toast screenshot: ${path}`);
+    }
+  }, 30_000);
+
+  it("the computer offline is one muted mono line under the search row, above Workspaces, with no box, badge or colour of its own, and the rows keep their words, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&offline=1`);
+      await page!.waitForSelector("[data-sidebar-row]");
+      const line = page!.locator("[data-sidebar-offline]").first();
+      await line.waitFor();
+      expect((await line.textContent())?.trim()).toBe(COMPUTER_OFFLINE_LINE);
+      const b = await box("[data-sidebar-offline]");
+      const search = await box("button[aria-label='Search']");
+      const section = await box("button[aria-label='Workspaces']");
+      expect(b.y).toBeGreaterThanOrEqual(search.y + search.height);
+      expect(b.y + b.height).toBeLessThanOrEqual(section.y + 0.5);
+      expect(Math.abs(b.x - search.x)).toBeLessThan(1);
+      expect(await line.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
+      const style = await line.evaluate(el => {
+        const s = getComputedStyle(el);
+        return { background: s.backgroundColor, border: s.borderTopWidth, shadow: s.boxShadow, font: s.fontFamily, size: s.fontSize };
+      });
+      expect(style.background).toBe("rgba(0, 0, 0, 0)");
+      expect(style.border).toBe("0px");
+      expect(style.shadow).toBe("none");
+      expect(style.font.toLowerCase()).toMatch(/mono/);
+      // The line's ink is the muted foreground beside it, not a colour of its own.
+      const [lineColor, metaColor] = await Promise.all([
+        line.evaluate(el => getComputedStyle(el).color),
+        page!.locator("[data-row-id='ws:ws_a'] [data-workspace-meta]").first().evaluate(el => getComputedStyle(el).color),
+      ]);
+      expect(lineColor).toBe(metaColor);
+      expect(await page!.locator("[data-row-id='ws:ws_a']").textContent()).toContain("Running");
+      expect(await page!.locator("[data-row-id='ws:ws_b']").textContent()).toContain("Paused");
+      const path = join(SHOTS_DIR, `sidebar-offline-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar offline screenshot: ${path}`);
     }
   }, 30_000);
 

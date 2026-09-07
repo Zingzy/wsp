@@ -11,7 +11,7 @@
 import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, MessageSquarePlusIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { agentName } from "@wsp/catalog";
-import { goldenHead, needsRebuild, outOfMemoryRowLine, type WorkspaceSize } from "@wsp/protocol";
+import { COMPUTER_OFFLINE_LINE, computerOffline, goldenHead, needsRebuild, outOfMemoryRowLine, type WorkspaceSize } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions, rowLabelOf } from "../actions/registry.js";
 import { threadActions } from "../actions/threadActions.js";
@@ -238,6 +238,7 @@ export function WorkspaceSidebar() {
     e.preventDefault();
   };
 
+  const offline = useMemo(() => computerOffline(Object.values(statuses)), [statuses]);
   const search = (
     <div className="px-[var(--sidebar-content-inset)] pt-3 pb-1" data-sidebar-search>
       <div className="relative">
@@ -262,6 +263,11 @@ export function WorkspaceSidebar() {
           }
         />
       </div>
+      {offline ? (
+        <p data-sidebar-offline className="px-2 pt-1 font-mono text-[11px] leading-4 text-sidebar-muted-foreground">
+          {COMPUTER_OFFLINE_LINE}
+        </p>
+      ) : null}
     </div>
   );
 
