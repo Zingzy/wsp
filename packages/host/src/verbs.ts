@@ -29,13 +29,17 @@ import {
   goneRefusal,
   importConsented,
   importRequest,
+  offeredSize,
   secretOffer,
+  sizeFromWord,
+  sizeRefusal,
   startPicks,
   toolActivityLine,
   toolResultLine,
   turnSettledLine,
   workspaceState,
   workspaceWord,
+  type Capabilities,
   type ExecEvent,
   type GoldenManifest,
   type HarnessCatalog,
@@ -57,6 +61,7 @@ import {
   type TurnResult,
   type WorkspaceCreateResult,
   type WorkspaceCreatingEvent,
+  type WorkspaceSize,
   type WorkspaceView,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
@@ -385,11 +390,19 @@ function threadLine(t: ThreadRow): string[] {
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
-export async function createFromHead(client: HostClient, out: Out, name: string): Promise<WorkspaceCreateResult> {
+export async function createFromHead(client: HostClient, out: Out, name: string, size?: string): Promise<WorkspaceCreateResult> {
   const { manifest } = await client.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
   const head = goldenHead(manifest);
   if (head === undefined) throw new Error("no golden yet; run wsp init");
-  return create(client, out, head.snapshotId, name);
+  return create(client, out, head.snapshotId, name, size);
+}
+
+/** The size a --size word names, checked against what the host's provider offers before anything is minted. */
+async function sizeChosen(client: HostClient, word: string): Promise<WorkspaceSize> {
+  const { capabilities } = await client.request<{ capabilities: Capabilities }>("capabilities.get");
+  const size = sizeFromWord(word);
+  if (size === undefined || !offeredSize(capabilities.sizes, size)) throw new Error(sizeRefusal(word, capabilities.sizes));
+  return size;
 }
 
 /** The project golden a person names: by snapshot id, else the newest whose project carries that name. */
@@ -413,7 +426,9 @@ export function projectGoldenLine(g: ProjectGolden): string {
   return `project golden ${g.snapshotId}: ${version} plus ${g.project.name} as imported ${g.project.importedAt.slice(0, 10)}, taken from ${g.workspaceName}\nfork it with: wsp new <name> --from ${g.project.name}`;
 }
 
-export async function create(client: HostClient, out: Out, golden: string, name: string): Promise<WorkspaceCreateResult> {
+/** `size` is the --size word; absent, the workspace takes the golden's size. */
+export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string): Promise<WorkspaceCreateResult> {
+  const chosen = size === undefined ? undefined : await sizeChosen(client, size);
   const pushed = pushedFrames(client);
   await client.events();
   pushed.follow(
@@ -424,7 +439,7 @@ export async function create(client: HostClient, out: Out, golden: string, name:
     },
   );
   try {
-    const { workspace, notice } = await client.request<{ workspace: WorkspaceView; notice?: string }>("workspaces.create", { golden, name });
+    const { workspace, notice } = await client.request<{ workspace: WorkspaceView; notice?: string }>("workspaces.create", { golden, name, ...chosen });
     const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
     out.emit(created, `created ${workspace.name} ${workspace.id}${notice !== undefined ? `\n${notice}` : ""}`);
     return created;
@@ -792,16 +807,17 @@ async function confirmed(ctx: VerbContext, question: string, d: Dropping): Promi
 export const VERBS: readonly Verb[] = [
   {
     name: "new",
-    usage: "wsp new <name> [--from <project golden>]",
-    about: "a workspace forked from the golden's head, or with --from, from a project golden",
-    options: { from: { type: "string" } },
+    usage: "wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>]",
+    about: "a workspace from the golden's head or, with --from, a project golden; --size picks a size",
+    options: { from: { type: "string" }, size: { type: "string" } },
     run: async ctx => {
       const [name] = ctx.args;
       if (name === undefined || ctx.args.length !== 1) throw new Error("wsp new takes one name");
       const client = await ctx.client();
       const from = flag(ctx.flags, "from");
-      if (from === undefined) await createFromHead(client, ctx.out, name);
-      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name);
+      const size = flag(ctx.flags, "size");
+      if (from === undefined) await createFromHead(client, ctx.out, name, size);
+      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size);
       return 0;
     },
   },
@@ -820,9 +836,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "fork",
-    usage: 'wsp fork <workspace> [--name <name>] [--send "<task>" [the flags of thread new]]',
-    about: "a new machine from the source's golden version, not a copy of its live disk",
-    options: { name: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" } },
+    usage: 'wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>" [thread new\'s flags]]',
+    about: "a new machine from the source's golden version, not a copy of its live disk; --size as new's",
+    options: { name: { type: "string" }, size: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw new Error("wsp fork takes one workspace");
@@ -836,7 +852,7 @@ export const VERBS: readonly Verb[] = [
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
       if (task !== undefined) await checkedPicks(client, harness, picks);
-      const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`);
+      const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`, flag(ctx.flags, "size"));
       if (task === undefined) return 0;
       return followVerb(ctx, client, openingOf(created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true);
     },

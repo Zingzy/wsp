@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
@@ -29,6 +29,8 @@ export interface Creation {
   readonly name: string;
   /** The snapshot the create forks, when it is not the golden's head: a project golden's. */
   readonly golden?: string;
+  /** The size the person picked; absent, the golden's. */
+  readonly size?: WorkspaceSize;
   /** The id the runtime minted, known from its first stage event. */
   readonly workspaceId: string | null;
   readonly lines: ReadonlyArray<CreationLine>;
@@ -90,7 +92,7 @@ interface State {
   /** Starts a create from the golden head, or from `golden` (a project golden's snapshot) when given, selects its row,
    * and follows it through the stage events; resolves with the runtime's id for the new workspace, or null when the
    * create was refused. */
-  createWorkspace(name: string, golden?: string): Promise<string | null>;
+  createWorkspace(name: string, golden?: string, size?: WorkspaceSize): Promise<string | null>;
   /** Runs a failed creation again under the same row. */
   retryCreation(key: string): Promise<void>;
   dismissCreation(key: string): void;
@@ -142,11 +144,11 @@ export const useStore = create<State>((set, get) => {
       selectedId: s.selectedId === key ? workspaceId : s.selectedId,
     }));
   };
-  const runCreation = async (key: string, name: string, golden?: string): Promise<string | null> => {
+  const runCreation = async (key: string, name: string, golden?: string, size?: WorkspaceSize): Promise<string | null> => {
     const api = get().api;
     if (!api) return null;
     try {
-      const { notice, ...workspace } = await (golden === undefined ? api.createFromGoldenHead(name) : api.createWorkspace(golden, name));
+      const { notice, ...workspace } = await (golden === undefined ? api.createFromGoldenHead(name, size) : api.createWorkspace(golden, name, size));
       if (notice !== undefined) set({ toast: notice });
       // The created event normally lands first; when the reply beats it, the row still has a workspace to become.
       set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
@@ -238,17 +240,17 @@ export const useStore = create<State>((set, get) => {
       if (conn === "live" && api) pull(api);
     },
     select(id, threadId = null) { set({ selectedId: id, selectedThreadId: threadId }); },
-    async createWorkspace(name, golden) {
+    async createWorkspace(name, golden, size) {
       if (!get().api) return null;
       const key = `creating:${++creationSeq}`;
-      set(s => ({ creations: [...s.creations, { key, name, ...(golden !== undefined ? { golden } : {}), workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key, selectedThreadId: null }));
-      return runCreation(key, name, golden);
+      set(s => ({ creations: [...s.creations, { key, name, ...(golden !== undefined ? { golden } : {}), ...(size !== undefined ? { size } : {}), workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key, selectedThreadId: null }));
+      return runCreation(key, name, golden, size);
     },
     async retryCreation(key) {
       const creation = get().creations.find(c => c.key === key);
       if (!creation) return;
       patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
-      await runCreation(key, creation.name, creation.golden);
+      await runCreation(key, creation.name, creation.golden, creation.size);
     },
     dismissCreation(key) {
       set(s => ({

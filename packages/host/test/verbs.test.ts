@@ -107,6 +107,33 @@ describe("wsp verbs over the host", () => {
     expect(again.io.streamed).toBe("");
   });
 
+  it("new and fork take --size as <cpu>x<memGb>, which reaches the create's size; a size the provider does not offer, or no size at all, is refused in one line naming the list, and nothing is minted", async () => {
+    const big = await run("new", "big", "--size", "2x8");
+    expect(big.code).toBe(0);
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
+    const [status] = await rt.status.list();
+    expect(status).toMatchObject({ name: "big", size: { cpu: 2, memMb: 8192 } });
+
+    const forked = await run("fork", "big", "--name", "wide", "--size", "4x8");
+    expect(forked.code).toBe(0);
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 4, memMb: 8192 });
+    expect((await rt.status.list()).find(w => w.name === "wide")!.size).toEqual({ cpu: 4, memMb: 8192 });
+
+    const list = "the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)";
+    const odd = await run("new", "odd", "--size", "8x16");
+    expect(odd.code).toBe(1);
+    expect(odd.io.errors).toEqual([`wsp new: 8x16 is not a size this provider offers; ${list}`]);
+    const word = await run("fork", "big", "--size", "large");
+    expect(word.code).toBe(1);
+    expect(word.io.errors).toEqual([`wsp fork: large is not a size this provider offers; ${list}`]);
+    expect(backend.machines).toHaveLength(2);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["big", "wide"]);
+
+    // Without --size the golden's own size stands.
+    await run("new", "plain");
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+  });
+
   it("new refuses in one line when there is no golden", async () => {
     await restartHost({}, memoryStore());
     const { code, io } = await run("new", "alpha");

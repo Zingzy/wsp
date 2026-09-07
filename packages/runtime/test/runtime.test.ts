@@ -34,6 +34,27 @@ describe("runtime", () => {
     expect(events).toContain("workspace.napped");
   });
 
+  it("a create that asks for an offered size forks the machine at it and the record and the rate follow; one off the list is refused with the list before any machine is forked", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "big", cpu: 2, memMb: 8192 });
+    expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
+    const [status] = await rt.status.list();
+    expect(status).toMatchObject({ id: ws.id, size: { cpu: 2, memMb: 8192 } });
+    expect(status!.rateUsdPerHour).toBeCloseTo(0.15, 10);
+
+    await expect(rt.workspaces.create({ golden: "snap_g", name: "odd", cpu: 8, memMb: 16384 })).rejects.toMatchObject({
+      kind: "invalid",
+      message: "8x16 is not a size this provider offers; the sizes are 2x2 ($0.09/hr), 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)",
+    });
+    expect(backend.machines).toHaveLength(1);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["big"]);
+
+    // No size asked: the golden's own, whether or not the provider offers it today.
+    const plain = await rt.workspaces.create({ golden: "snap_g", name: "plain" });
+    expect((await rt.status.list()).find(s => s.id === plain.id)!.size).toEqual({ cpu: 2, memMb: 4096 });
+  });
+
   it("same behavior over the wire: serveRuntime round-trips create via WS", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     const srv = await serveRuntime(rt, { port: 0, authToken: "t" });

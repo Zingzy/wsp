@@ -3,7 +3,7 @@
 // runtime's import events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { MachineState, TurnResult } from "./index.js";
+import type { MachineSizeOffer, MachineState, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -17,9 +17,48 @@ export function fmtBytes(n: number): string {
   return `${(n / GIB).toFixed(1)} GB`;
 }
 
-/** A machine size's memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
+/** Memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
+const memGb = (memMb: number): number => Number((memMb / 1024).toFixed(1));
+
+/** A machine size's memory with its unit. */
 export function fmtMemGb(memMb: number): string {
-  return `${Number((memMb / 1024).toFixed(1))} GB`;
+  return `${memGb(memMb)} GB`;
+}
+
+/** A size as the Machine tab and the new-workspace form show it: "2 vCPU · 4 GB". */
+export function fmtSize(size: WorkspaceSize): string {
+  return `${size.cpu} vCPU · ${fmtMemGb(size.memMb)}`;
+}
+
+/** A size as the --size flag and the fork tools spell it: vCPUs, an x, memory in GB ("2x4", "2x0.5"). */
+export function sizeWord(size: WorkspaceSize): string {
+  return `${size.cpu}x${memGb(size.memMb)}`;
+}
+
+/** The size a word names, or nothing when the word is not one. */
+export function sizeFromWord(word: string): WorkspaceSize | undefined {
+  const m = /^(\d+)x(\d+(?:\.\d+)?)$/.exec(word.trim());
+  if (m === null) return undefined;
+  const cpu = Number(m[1]);
+  const memMb = Math.round(Number(m[2]) * 1024);
+  return cpu > 0 && memMb > 0 ? { cpu, memMb } : undefined;
+}
+
+/** Whether a size is one the provider offers; the golden's own size is taken without this check. */
+export function offeredSize(sizes: readonly WorkspaceSize[], size: WorkspaceSize): boolean {
+  return sizes.some(s => s.cpu === size.cpu && s.memMb === size.memMb);
+}
+
+/** An awake rate in dollars an hour, to the cent. */
+export function fmtRate(usdPerHour: number): string {
+  return `$${usdPerHour.toFixed(2)}/hr`;
+}
+
+/** The one refusal every road gives a size the provider does not offer, malformed or merely absent: the word as it
+ * was given, then every size that is offered with its rate. */
+export function sizeRefusal(word: string, sizes: readonly MachineSizeOffer[]): string {
+  const offered = sizes.map(s => `${sizeWord(s)} (${fmtRate(s.rateUsdPerHour)})`).join(", ");
+  return `${word} is not a size this provider offers; the sizes are ${offered}`;
 }
 
 /** How a duration reads: short is the chat footer's and the notify line's ("1.5s", "8m 12s"), clock is the cut

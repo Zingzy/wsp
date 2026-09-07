@@ -50,7 +50,23 @@ const costEvent = (workspaceId: string, rate: number, awakeMs: number, at: strin
   at,
 });
 
-const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true };
+const CAPS: Capabilities = {
+  liveCloneForks: true,
+  ramPreservingPause: true,
+  resize: true,
+  previewUrls: true,
+  signedUrls: true,
+  containers: true,
+  callbackRelay: true,
+  snapshotListing: true,
+  sizes: [
+    { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
+    { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 },
+    { cpu: 4, memMb: 16384, rateUsdPerHour: 0.3 },
+    { cpu: 8, memMb: 16384, rateUsdPerHour: 0.44 },
+    { cpu: 16, memMb: 32768, rateUsdPerHour: 0.88 },
+  ],
+};
 const EMPTY_LINEAGE: SnapshotLineage = { name: "default", head: null, versions: [] };
 
 // The surface's cost series listens through api.subscribe like the store does,
@@ -649,7 +665,7 @@ describe("project goldens in the lineage", () => {
     expect(screen.getByText("snapshot 2026-09-06 · imported 2026-09-06 · from task-a")).toBeDefined();
     expect(screen.getByText("forked 2026-08-30 · proj imported 2026-09-06")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "fork proj from snap_p1" }));
-    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("snap_p1", "proj-fork"));
+    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("snap_p1", "proj-fork", undefined));
     expect(api.createFromGoldenHead).not.toHaveBeenCalled();
   });
 
@@ -745,13 +761,16 @@ describe("pause and wake", () => {
 describe("upgrade", () => {
   const openPicker = () => fireEvent.click(screen.getByRole("button", { name: "upgrade api" }));
 
-  it("offers doubling tiers with the estimated rate", async () => {
+  it("offers the provider's sizes above the current one on both counts, the current left out, with the estimated rate", async () => {
     await mount([view("ws_a", "api")]);
     openPicker();
-    expect(screen.getByRole("button", { name: "4 vCPU · 8 GB" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "8 vCPU · 16 GB" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "16 vCPU · 32 GB" })).toBeDefined();
-    expect(screen.getByText("~$0.220/hr", { exact: false })).toBeDefined();
+    expect(screen.getAllByRole("button").map(b => b.textContent).filter(t => t?.includes("vCPU"))).toEqual(["4 vCPU · 8 GB", "4 vCPU · 16 GB", "8 vCPU · 16 GB", "16 vCPU · 32 GB"]);
+    expect(screen.queryByRole("button", { name: "2 vCPU · 4 GB" })).toBeNull();
+    // The new row prices the pick at the table's own rate, not the current rate scaled by vCPU.
+    expect(fact("resize-to")).toBe("4 vCPU · 8 GB · $0.22/hr");
+    fireEvent.click(screen.getByRole("button", { name: "4 vCPU · 16 GB" }));
+    expect(fact("resize-to")).toBe("4 vCPU · 16 GB · $0.30/hr");
+    expect(fact("resize-from")).toBe("2 vCPU · 4 GB · $0.11/hr");
   });
 
   it("paints the new size while the op runs, calls the api once, then settles on the status event", async () => {

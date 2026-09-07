@@ -2,11 +2,9 @@
 // Words the machine surface puts next to wire values. Phase is the product
 // word (Running, Paused, Waking); machine state is the provider word and only
 // shows when it diverges from what the phase implies.
-import { fmtBytes, fmtMemGb, workspaceState, workspaceWord, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceSize } from "@wsp/protocol";
+import { fmtBytes, workspaceState, workspaceWord, type MachineState, type ReachState, type WorkspacePhase } from "@wsp/protocol";
 
 export const money = (n: number, digits = 4): string => `$${n.toFixed(digits)}`;
-
-export const sizeLabel = (size: WorkspaceSize): string => `${size.cpu} vCPU · ${fmtMemGb(size.memMb)}`;
 
 /** A tick's wall-clock time in the person's zone, hours and minutes. */
 export const clockLabel = (iso: string): string => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
