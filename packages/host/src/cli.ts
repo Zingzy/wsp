@@ -361,8 +361,6 @@ export function goldenRecipe(
   return {
     setup: GOLDEN_SETUP,
     smoke: GOLDEN_SMOKE,
-    cpu: 2,
-    memMb: 4096,
     envs: claudeEnvs(keys.anthropic),
     deployDaemon: hooks.deployDaemon ?? (async machine => `daemon on node ${(await deployDaemon(machine)).node}`),
   };
