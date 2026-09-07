@@ -69,6 +69,7 @@ import type {
   GoldenBuilderView,
   GoldenLogin,
   GoldenStage,
+  GoldenStep,
   HarnessCatalog,
   RecipeDigest,
   PortProbeView,
@@ -2611,8 +2612,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await store.delete(BUILDERS, id);
   };
 
-  const stageOf = (name: string) => (stage: GoldenStage, detail?: string) =>
-    bus.emit({ type: "golden.stage", name, stage, ...(detail !== undefined ? { detail } : {}) });
+  const stageOf = (name: string) => (stage: GoldenStage, detail?: string, step?: GoldenStep) =>
+    bus.emit({ type: "golden.stage", name, stage, ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}) });
 
   const recipeOrThrow = (): GoldenRecipe => {
     if (!opts.goldenRecipe) throw new Error("this runtime has no golden recipe; the host wires one (setup + smoke) before the wizard can run");

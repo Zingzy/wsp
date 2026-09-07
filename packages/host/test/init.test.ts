@@ -1523,7 +1523,12 @@ describe("wsp init, flags and no terminal", () => {
     expect(goldenHead(await rt.golden.get())?.snapshotId).toBe("snap_golden-v1");
     // An agent pays for no machine it did not ask for: nothing is forked, and the object names the command that would.
     expect(await rt.workspaces.list()).toEqual([]);
-    expect(f.records).toEqual([
+    // Every stage frame is one object too, so whoever drives the run can clock a step; the sign-ins and the end follow in order.
+    const stages = f.records.filter(r => r["event"] === "stage");
+    expect(stages[0]).toEqual({ event: "stage", stage: "creating", detail: expect.any(String) });
+    expect(stages.map(r => r["stage"])).toEqual(expect.arrayContaining(["creating", "installing-tools", "ready", "snapshotting", "sealed"]));
+    expect(stages.some(r => r["stage"] === "installing-tools" && typeof (r["step"] as { command?: unknown } | undefined)?.command === "string")).toBe(true);
+    expect(f.records.filter(r => r["event"] !== "stage")).toEqual([
       { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE_URL, nextCommand: `open '${DEVICE_URL}'`, waitSeconds: 960 },
       { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: "gh auth login exited 0" },
       { event: "sign-in", tool: "claude", label: "Claude Code login", browserUrl: CLAUDE_URL, nextCommand: `open '${CLAUDE_URL}'`, waitSeconds: 900 },

@@ -6,8 +6,8 @@
 // install in its own session and, at the timeout, kills that session and every
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
-import { HOMEBREW, MIB, ROAD_MODULES, type RoadName } from "@wsp/catalog";
-import { fmtBytes, shellQuote, type GoldenStage } from "@wsp/protocol";
+import { HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
+import { fmtBytes, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
@@ -38,13 +38,12 @@ export interface ToolsOutcome {
   homebrew?: { tag: string; commit: string };
 }
 
-type Stage = (stage: GoldenStage, detail?: string) => void;
+type Stage = (stage: GoldenStage, detail?: string, step?: GoldenStep) => void;
 
 export const FREE_KB_CMD = "df -Pk /root | awk 'NR==2{print $4}'";
 export { MIB };
 /** One unpack peak filled the disk from 1.6 GB free (measured 2026-09-05), so the loop stops above that. */
 export const TOOLS_DISK_FLOOR = 2048 * MIB;
-export const TOOL_TIMEOUT_S = 600;
 /** How long the guard gives the TERM, then the KILL, to land. */
 const KILL_GRACE_S = 10;
 /** The run's deadline sits past the timeout, both graces and the one-second polls between them. */
@@ -65,7 +64,7 @@ export { plural } from "@wsp/protocol";
 /** The line that names the failure, for a warning: the last `Error:` line on stderr (Homebrew
  * follows its error with advice), else the last stderr line, else stdout's; 124 is the guest-side timeout. */
 export function reasonOf(res: ExecResult, timeoutS: number): string {
-  if (res.exitCode === 124) return `timed out after ${timeoutS}s`;
+  if (res.exitCode === 124) return timedOutLine(timeoutS);
   const lines = (text: string): string[] => text.split("\n").map(l => l.trim()).filter(l => l !== "");
   const err = lines(res.stderr);
   return (err.filter(l => l.startsWith("Error:")).at(-1) ?? err.at(-1) ?? lines(res.stdout).at(-1) ?? `exit ${res.exitCode}`).slice(0, 160);
@@ -160,6 +159,14 @@ export function guarded(script: string, timeoutS: number): string {
   ].join("\n");
 }
 
+/** Seconds a road's step may run: the guard ends it after that many. */
+export const roadLimitS = (road: RoadName): number => ROAD_STEPS[road].limitS;
+
+/** A road's script under the guard: the road's network clock ahead of the command, the road's limit on the run. */
+export function guardedRoad(road: RoadName, cmd: string): string {
+  return guarded([...ROAD_STEPS[road].env, cmd].join("\n"), roadLimitS(road));
+}
+
 /** Every skipped tool by name, those sharing a reason together: the reason is one line, the names are what the person ticked. */
 function skippedByReason(skipped: readonly ToolResult[]): string {
   const byNote = new Map<string, string[]>();
@@ -167,15 +174,15 @@ function skippedByReason(skipped: readonly ToolResult[]): string {
   return [...byNote].map(([note, names]) => `${names.join(", ")} (${note})`).join("; ");
 }
 
-type Run = (cmd: string, label: string) => Promise<ExecResult>;
+type Run = (cmd: string, label: string, road: RoadName, step?: GoldenStep) => Promise<ExecResult>;
 
 /** Homebrew's autoremove then cleanup, each under the guard; the phrase says what came back or what failed, nothing when neither. */
 async function brewHousekeeping(machine: Machine, run: Run): Promise<string | undefined> {
   const before = await freeBytes(machine);
   const failed: string[] = [];
   for (const cmd of BREW_HOUSEKEEPING) {
-    const res = await run(cmd, "Homebrew cleanup");
-    if (res.exitCode !== 0) failed.push(reasonOf(res, TOOL_TIMEOUT_S));
+    const res = await run(cmd, "Homebrew cleanup", "brew");
+    if (res.exitCode !== 0) failed.push(reasonOf(res, roadLimitS("brew")));
   }
   const after = await freeBytes(machine);
   if (failed.length > 0) return `Homebrew cleanup failed (${failed.join("; ")})`;
@@ -268,13 +275,12 @@ async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], res
  * at that point on one run; the loop stops only if the disk is still under the floor, and the tools
  * left are skipped with the reading. */
 export async function installTools(machine: Machine, tools: readonly ToolInstall[], onStage: Stage, at: GoldenStage = "installing-tools"): Promise<ToolsOutcome> {
-  const stage = (detail: string): void => onStage(at, detail);
+  const stage = (detail: string, step?: GoldenStep): void => onStage(at, detail, step);
   await machine.exec(SWEEP_TMP_CMD, { timeoutMs: INLINE_EXEC_MS });
   const out: ToolsOutcome = { tools: [] };
   const installed = new Set<string>();
   const labelOf = (id: string): string => tools.find(t => t.id === id)?.label ?? id;
-  const run: Run = (cmd, label) =>
-    machine.run(guarded(cmd, TOOL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(TOOL_TIMEOUT_S), onLine: line => stage(`${label}: ${line}`) });
+  const run: Run = (cmd, label, road, step) => machine.run(guardedRoad(road, cmd), { deadlineMs: guardDeadlineMs(roadLimitS(road)), onLine: line => stage(`${label}: ${line}`, step) });
   let floor: string | undefined;
   let dfWarned = false;
   let cleanedAtFloor = false;
@@ -315,15 +321,21 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       }
       free = after;
     }
-    stage(`${tool.label} (${i + 1}/${tools.length})`);
-    // Not the "label: line" shape a tool's own output takes, so the command being shown is not read as its first line.
-    if (tool.shown !== undefined) stage(`${tool.label} runs ${tool.shown}`);
+    const step: GoldenStep = { label: tool.label, command: tool.shown ?? tool.cmd };
+    const limit = roadLimitS(tool.manager);
+    stage(`${tool.label} (${i + 1}/${tools.length})`, step);
     const t0 = Date.now();
-    let res = await run(tool.cmd, tool.label);
+    let res = await run(tool.cmd, tool.label, tool.manager, step);
     if (res.exitCode !== 0 && CELLAR_LOCKED.test(res.stderr)) {
-      stage(`${tool.label}: another brew holds its cellar; waiting for it, then once more`);
+      stage(`${tool.label}: another brew holds its cellar; waiting for it, then once more`, step);
       await machine.run(BREW_LOCK_WAIT_CMD, { deadlineMs: (BREW_LOCK_WAIT_S + 60) * 1000 });
-      res = await run(tool.cmd, tool.label);
+      res = await run(tool.cmd, tool.label, tool.manager, step);
+    }
+    let timeouts = res.exitCode === 124 ? 1 : 0;
+    if (timeouts === 1 && ROAD_STEPS[tool.manager].retry) {
+      stage(`${tool.label}: ${stepRetryLine(limit)}`, step);
+      res = await run(tool.cmd, tool.label, tool.manager, step);
+      if (res.exitCode === 124) timeouts = 2;
     }
     const ms = Date.now() - t0;
     if (res.exitCode === 0) {
@@ -335,7 +347,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       const bytes = free.kind === "free" && left.kind === "free" ? Math.max(0, free.bytes - left.bytes) : undefined;
       out.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ...(tool.note !== undefined ? { note: tool.note } : {}), ms, ...(bytes !== undefined ? { bytes } : {}), ...(road !== undefined ? { road } : {}) });
     } else {
-      out.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: reasonOf(res, TOOL_TIMEOUT_S), ms });
+      out.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: timeouts === 2 ? timedOutLine(limit, 2) : reasonOf(res, limit), ms });
     }
   }
   await verifyCommands(machine, tools, out.tools, stage);

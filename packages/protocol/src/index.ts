@@ -955,6 +955,11 @@ export const GoldenStage = z.enum([
 ]);
 export type GoldenStage = z.infer<typeof GoldenStage>;
 
+/** The install step a frame belongs to, within its stage: what the step is called and the one line a person reads
+ * for what it runs. A reader's clock for the step starts at the first frame naming it and stops at the first without. */
+export const GoldenStep = z.object({ label: z.string(), command: z.string() });
+export type GoldenStep = z.infer<typeof GoldenStep>;
+
 /** Progress of a golden prepare or seal, keyed by golden name; `detail` is
  * free text for a progress line (the failure message on `failed`). */
 export const GoldenStageEvent = z.object({
@@ -962,6 +967,7 @@ export const GoldenStageEvent = z.object({
   name: z.string(),
   stage: GoldenStage,
   detail: z.string().optional(),
+  step: GoldenStep.optional(),
 });
 export type GoldenStageEvent = z.infer<typeof GoldenStageEvent>;
 /** The detail a golden.stage frame carries for a step the builder already holds; a reader closes the step at once and charges it no time. */
@@ -1621,7 +1627,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { actionRefusal, goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, behindGoldenLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, titleLine, turnCutLine, type DurationStyle, type GoldenChange, type TurnCutRule } from "./format.js";
+export { AFTER_CUT_LINE, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, behindGoldenLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, stepRetryLine, timedOutLine, titleLine, turnCutLine, type DurationStyle, type GoldenChange, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";

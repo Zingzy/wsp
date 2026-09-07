@@ -1155,6 +1155,64 @@ describe("golden import stages", () => {
     expect(guard).not.toMatch(/pkill|killall/);
   });
 
+  it("a download road that hits its limit is tried once more and the frames say so; the second run's success is an install", async () => {
+    let tries = 0;
+    const { backend, cmds, fetch } = backendFor([["npm install -g bun@1.4.0", () => (++tries === 1 ? { exitCode: 124, stdout: "", stderr: "" } : ok)]]);
+    const results: ImportResult[] = [];
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(tries).toBe(2);
+    expect(results[0]!.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
+      ["tools/homebrew", "installed", undefined],
+      ["tools/brew/gh", "installed", undefined],
+      ["tools/npm/bun", "installed", undefined],
+    ]);
+    expect(stages).toContain("installing-tools:bun@1.4.0: timed out after 300s; trying once more");
+    // The step's script opens with the road's network clock, and the guard's limit is the road's, not one number for every tool.
+    const guards = cmds.filter(c => c.includes("npm install -g bun@1.4.0"));
+    expect(guards).toHaveLength(2);
+    for (const g of guards) {
+      expect(g).toContain("export npm_config_fetch_timeout=60000 npm_config_fetch_retries=1 npm_config_fetch_retry_maxtimeout=10000\nnpm install -g bun@1.4.0");
+      expect(g).toContain("while [ $t -lt 300 ]");
+    }
+    const brew = cmds.find(c => c.includes("brew install gh"))!;
+    expect(brew).toContain("while [ $t -lt 600 ]");
+    expect(brew).not.toContain("npm_config_fetch_timeout");
+  });
+
+  it("a download road that hits its limit twice is recorded failed with both timeouts, and the compile roads are not tried again", async () => {
+    const { backend, cmds, fetch } = backendFor([["npm install -g bun@1.4.0", { exitCode: 124, stdout: "", stderr: "" }]]);
+    const results: ImportResult[] = [];
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(results[0]!.tools.find(t => t.id === "tools/npm/bun")).toMatchObject({ outcome: "failed", note: "timed out after 300s, twice" });
+    expect(stages).toContain("installing-tools:2 installed, 1 failed: bun@1.4.0 (timed out after 300s, twice); caches swept; 2.9 GB free");
+    expect(cmds.filter(c => c.includes("npm install -g bun@1.4.0"))).toHaveLength(2);
+  });
+
+  it("every frame of a step names the step and the line a person reads for it, so a screen can clock the step; the stage's own lines name none", async () => {
+    const frames: { detail?: string; step?: { label: string; command: string } }[] = [];
+    const rb = recordingBackend({}, {
+      stream: true,
+      exec: cmd => (cmd.includes("brew install gh") ? { exitCode: 0, stdout: "==> Downloading gh\n==> Pouring gh\n", stderr: "" } : cmd === FREE_KB_CMD ? { exitCode: 0, stdout: `${mb(3000)}\n`, stderr: "" } : cmd === "echo ok" ? REACH_OK : cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" } : ok),
+    });
+    const fetchStub: typeof fetch = async () => new Response(null, { status: 200 });
+    const onStage = (stage: GoldenStage, detail?: string, step?: { label: string; command: string }) => {
+      if (stage === "installing-tools") frames.push({ ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}) });
+    };
+    await prepareBuilder({ backend: rb.backend, setup: "true", fetch: fetchStub, onStage, import: importOf({ tools: [{ id: "tools/brew/gh", label: "gh", manager: "brew", cmd: "su -c 'brew install gh'", shown: "brew install gh" }, { id: "tools/npm/bun", label: "bun@1.4.0", manager: "npm", cmd: "npm install -g bun@1.4.0" }] }) });
+    const gh = { label: "gh", command: "brew install gh" };
+    expect(frames.slice(0, 3)).toEqual([
+      { detail: "gh (1/2)", step: gh },
+      { detail: "gh: ==> Downloading gh", step: gh },
+      { detail: "gh: ==> Pouring gh", step: gh },
+    ]);
+    // A step with no line of its own is read by its command.
+    expect(frames).toContainEqual({ detail: "bun@1.4.0 (2/2)", step: { label: "bun@1.4.0", command: "npm install -g bun@1.4.0" } });
+    expect(frames.at(-1)!.step).toBeUndefined();
+    expect(frames.at(-1)!.detail).toMatch(/^2 installed/);
+  });
+
   it("a cellar lock error waits once for every Homebrew lock to clear, then tries the tool once more", async () => {
     let tries = 0;
     const locked = { exitCode: 1, stdout: "", stderr: "Error: A `brew install glibc` process has already locked /home/linuxbrew/.linuxbrew/Cellar/linux-headers@6.8.\nPlease wait for it to finish or terminate it to continue." };
