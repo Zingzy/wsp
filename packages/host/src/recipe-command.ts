@@ -5,7 +5,7 @@
 // histories are read here and nothing of them leaves.
 import { existsSync } from "node:fs";
 import { agentName, catalogEntry } from "@wsp/catalog";
-import { type AgentHistory, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
+import { type AgentHistory, type HistoryCache, type HistoryProgress, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
 import { LOGIN_CHOICES, RECIPE_TICKS, customRows, plural, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick } from "@wsp/protocol";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { loadRecipe, saveSmallRecipe } from "./recipe-file.js";
@@ -31,6 +31,12 @@ export function historyLine(h: RecipeHistory): string {
       return _exhaustive;
     }
   }
+}
+
+/** One line while an agent's store is read: how far through its own session files the read is, so a first run on a
+ * computer with hundreds of them counts them off instead of sitting on a bare spinner. */
+export function historyProgressLine(p: HistoryProgress): string {
+  return `${agentName(p.agent)}: reading session ${p.read} of ${p.files}`;
 }
 
 /** What a `--set` word says: the catalog row and the tick it is to have. */
@@ -97,6 +103,8 @@ export interface RecipeInput {
   why?: string;
   /** Folders to weigh the histories against, absolute: only sessions that ran in one of them count. */
   projects?: readonly string[];
+  /** Keeps what each session file came to, so a second run reads only the histories that changed. */
+  cache?: HistoryCache;
 }
 
 export interface RecipeIo {
@@ -147,25 +155,29 @@ export function carriedOver(out: string, log: (line: string) => void): { custom?
 /** Whether the run named something the rule reads, so the rule decides every row again rather than the file standing. */
 const namesRule = (input: RecipeInput): boolean => input.tick !== undefined || (input.projects ?? []).length > 0;
 
-/** What the scan reads; it writes nothing, so it names no file. */
+/** What the scan reads; it decides nothing, so it names no recipe file. */
 export interface ScanInput {
   /** Folders to weigh the histories by, absolute. */
   projects?: readonly string[];
+  /** Keeps what each session file came to, so a second scan reads only the histories that changed. */
+  cache?: HistoryCache;
   /** What else a package manager on this computer has. Handed in rather than imported: the scanner reaches the
    * engine for its sizes and its road lines, and the MCP server may not, so its caller decides whether it runs.
    * Absent, the scan says nothing looked rather than that nothing was found. */
   alsoHere?: (recipe: readonly RecipeCustomRow[]) => Promise<readonly ScanRow[]>;
 }
 
-/** Reads this computer once and answers with every option it offers and what to do about each. Nothing is written,
- * so a caller can run it before the person has decided anything. The rule is `used`: the recommendation is what
- * the person's own agents reach for, and every other row is there to be turned on knowingly. */
+/** Reads this computer once and answers with every option it offers and what to do about each. No recipe and no
+ * answer is written, so a caller can run it before the person has decided anything; the cache of what the session
+ * files came to is, since reading them all again on the next call is what this is not for. The rule is `used`: the
+ * recommendation is what the person's own agents reach for, and every other row is there to be turned on knowingly. */
 export async function runScan(host: Host, input: ScanInput = {}, io: RecipeIo = QUIET, now?: () => Date): Promise<RecipeScan> {
   io.note("Reading this computer against the catalog and your agents' session histories. Nothing leaves this computer.");
   const histories: AgentHistory[] = [];
   const recipe = await computeRecipe(host, {
     tick: "used",
     threadAgents: THREAD_AGENTS,
+    ...(input.cache !== undefined ? { cache: input.cache } : {}),
     ...(input.projects !== undefined && input.projects.length > 0 ? { folders: input.projects } : {}),
     ...(now !== undefined ? { now } : {}),
     onHistory: h => {
@@ -203,6 +215,7 @@ export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = Q
   const computed = await computeRecipe(host, {
     ...rule,
     threadAgents: THREAD_AGENTS,
+    ...(input.cache !== undefined ? { cache: input.cache } : {}),
     ...(input.projects !== undefined && input.projects.length > 0 ? { folders: input.projects } : {}),
     ...(now !== undefined ? { now } : {}),
     onHistory: h => {
