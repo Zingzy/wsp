@@ -208,7 +208,9 @@ export async function rewriteJsonl(file: string, edit: (line: Record<string, unk
     out.end();
     await finished(out);
   } catch (e) {
+    // The open runs on the thread pool: an unlink before it lands leaves the file the open then creates.
     out.destroy();
+    await finished(out).catch(() => undefined);
     await unlink(tmp).catch(() => undefined);
     throw e;
   }

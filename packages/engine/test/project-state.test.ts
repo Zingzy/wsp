@@ -11,6 +11,7 @@ import { CATALOG_AGENTS } from "@wsp/catalog";
 import { ProjectCarry } from "@wsp/protocol";
 import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, parseMergeOutput, resolveProjectPath, stateListing, underProject, type MergeOutput, type ProjectStateResolver } from "../src/project-state/index.js";
 import { mergeScript } from "../src/project-state/merge.js";
+import { rewriteJsonl } from "../src/project-state/resolver.js";
 import { PY_PREAMBLE } from "../src/project-state/py.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
@@ -485,6 +486,24 @@ describe("project path rules", () => {
     expect(underProject("/a/proj2", "/a/proj")).toBe(false);
     expect(underProject("/a", "/a/proj")).toBe(false);
     expect(resolveProjectPath("/a/proj/")).toBe("/a/proj");
+  });
+});
+
+describe("rewriteJsonl", () => {
+  it("a rewrite that fails leaves the file as it was and no .wsp-move beside it, whether the file is missing or an edit throws", async () => {
+    const dir = scratch();
+    const missing = join(dir, "missing.jsonl");
+    // The failure lands while the write stream is still opening, so the temp file's fate is a thread-pool race; many rounds catch it.
+    for (let i = 0; i < 300; i++) {
+      await expect(rewriteJsonl(missing, () => true)).rejects.toThrow(/ENOENT/);
+      expect(existsSync(`${missing}.wsp-move`)).toBe(false);
+    }
+    const file = join(dir, "s.jsonl");
+    const text = lines(JSON.stringify({ cwd: FROM }), JSON.stringify({ cwd: OTHER }));
+    write(file, text);
+    await expect(rewriteJsonl(file, () => { throw new Error("bad line"); })).rejects.toThrow("bad line");
+    expect(readFileSync(file, "utf8")).toBe(text);
+    expect(existsSync(`${file}.wsp-move`)).toBe(false);
   });
 });
 

@@ -81,7 +81,9 @@ async function downloadFile(machine: Machine, path: string, into: string, opts: 
     out.end();
     await finished(out);
   } catch (e) {
+    // The open runs on the thread pool: a removal before it lands leaves the file the open then creates.
     out.destroy();
+    await finished(out).catch(() => {});
     await rm(into, { force: true });
     throw e;
   }
