@@ -10,6 +10,7 @@ import { createClaudeAdapter } from "@wsp/adapter-claude";
 import {
   BROWSER_SHIM_PATH,
   SolariBackend,
+  TOOLS_PATH,
   applyDotfiles,
   createRuntime,
   describeAge,
@@ -54,7 +55,7 @@ function claudeEnvs(anthropicKey: string, golden?: { browserShim?: boolean }): R
     ANTHROPIC_API_KEY: anthropicKey,
     CLAUDE_CONFIG_DIR: CONFIG_DIR,
     IS_SANDBOX: "1",
-    PATH: "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    PATH: TOOLS_PATH,
     // Only a golden sealed with the browser shim may point tools at it.
     ...(golden?.browserShim === true ? { BROWSER: BROWSER_SHIM_PATH } : {}),
   };
@@ -72,6 +73,7 @@ function makeRuntime(): { rt: Runtime; envs: Record<string, string> } {
         createClaudeAdapter({
           exec: machineExecStream(ctx.machine),
           configDir: CONFIG_DIR,
+          baseEnv: ctx.env,
         }),
     },
     hostId: hostIdentity(),

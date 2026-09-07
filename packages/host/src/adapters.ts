@@ -8,5 +8,5 @@ import { machineExecStream, type HarnessAdapterFactory } from "@wsp/runtime";
 import type { ThreadAgent } from "./thread-agents.js";
 
 export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactory>> = {
-  claude: ctx => createClaudeAdapter({ exec: machineExecStream(ctx.machine), configDir: CLAUDE_CONFIG_DIR }),
+  claude: ctx => createClaudeAdapter({ exec: machineExecStream(ctx.machine), configDir: CLAUDE_CONFIG_DIR, baseEnv: ctx.env }),
 };

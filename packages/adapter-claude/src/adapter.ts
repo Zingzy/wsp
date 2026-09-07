@@ -3,7 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { fmtDuration } from "@wsp/protocol";
+import { fmtDuration, harnessExitLine } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe, type ClaudeCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
@@ -381,7 +381,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               ? { status: "interrupted" }
               : {
                   status: "failed",
-                  error: streamError ?? `claude exited with code ${String(exitCode)} before emitting a result`,
+                  error: streamError ?? harnessExitLine("claude", exitCode, env["PATH"]),
                 };
         options.onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
@@ -424,5 +424,5 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     return session;
   };
 
-  return { start, sessions, steers: true, probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir })).then(parseCatalogProbe), env };
+  return { start, sessions, steers: true, probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir, baseEnv: deps.baseEnv })).then(parseCatalogProbe), env };
 }

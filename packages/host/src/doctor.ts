@@ -22,7 +22,10 @@ const execFileAsync = promisify(execFile);
 
 // Runs inside /root/wsp-daemon. Loopback binds are unreachable through the
 // preview edge (it dials eth0), so 0.0.0.0 is the whole point of this file.
-const START_MJS = `import { OPEN_SOCKET_PATH, startDaemon } from "./dist/index.js";
+// PATH is set before the daemon loads, never inherited: a relaunch from the
+// guest's side arrives with a bare one (measured after an OOM kill, 2026-09-06).
+const START_MJS = `process.env.PATH = ${JSON.stringify(TOOLS_PATH)};
+const { OPEN_SOCKET_PATH, startDaemon } = await import("./dist/index.js");
 const d = await startDaemon({ host: "0.0.0.0", openSocketPath: OPEN_SOCKET_PATH });
 console.log(\`wsp-daemon listening on 0.0.0.0:\${d.port}\`);
 `;

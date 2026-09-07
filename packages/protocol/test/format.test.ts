@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { behindGoldenLine, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, notifyLine, plural, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
+import { behindGoldenLine, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -130,6 +130,23 @@ describe("the line a workspace behind the golden's head shows", () => {
   it("names the version it is on and the one available, in words short enough for the row", () => {
     expect(behindGoldenLine(11, 12)).toBe("on image v11, v12 available");
     expect(behindGoldenLine(11, 12).length).toBeLessThanOrEqual(30);
+  });
+});
+
+describe("harnessExitLine", () => {
+  it("exit 127 names the binary the shell could not find and the PATH it searched, never the bare code alone", () => {
+    const path = "/root/.local/bin:/usr/bin:/bin";
+    expect(harnessExitLine("claude", 127, path)).toBe("claude was not found on PATH (exit 127); PATH searched: /root/.local/bin:/usr/bin:/bin");
+    expect(harnessExitLine("codex", 127, path)).toBe("codex was not found on PATH (exit 127); PATH searched: /root/.local/bin:/usr/bin:/bin");
+  });
+
+  it("exit 127 with no PATH exported says the machine's own was searched", () => {
+    expect(harnessExitLine("claude", 127, undefined)).toBe("claude was not found on PATH (exit 127); the launch exported no PATH, the machine's own was searched");
+  });
+
+  it("any other exit reads as the code, a null one as null", () => {
+    expect(harnessExitLine("claude", 1, "/usr/bin")).toBe("claude exited with code 1 before emitting a result");
+    expect(harnessExitLine("claude", null, "/usr/bin")).toBe("claude exited with code null before emitting a result");
   });
 });
 

@@ -496,6 +496,29 @@ describe("result classification", () => {
     expect(end.sawResult).toBe(false);
   });
 
+  it("exit 127 before any event is reported in words: the binary the shell could not find and the PATH it searched", async () => {
+    const exec = scriptedExec(["bash: line 2: claude: command not found"], { exitCode: 127 });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", baseEnv: { PATH: "/root/.local/bin:/usr/bin:/bin" } });
+    const { events, onEvent } = collect();
+
+    const result = await adapter.start({ prompt: "x", onEvent }).finished;
+
+    expect(result).toEqual({ status: "failed", error: "claude was not found on PATH (exit 127); PATH searched: /root/.local/bin:/usr/bin:/bin" });
+    expect(events.at(-1)).toMatchObject({ type: "session.end", exitCode: 127, sawResult: false });
+    // The PATH the line quotes is the one the launch exported.
+    expect(exec.calls[0]?.env.PATH).toBe("/root/.local/bin:/usr/bin:/bin");
+  });
+
+  it("exit 127 from a launch that exported no PATH says so instead of quoting one", async () => {
+    const exec = scriptedExec([], { exitCode: 127 });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+
+    const result = await adapter.start({ prompt: "x", onEvent }).finished;
+
+    expect(result.error).toBe("claude was not found on PATH (exit 127); the launch exported no PATH, the machine's own was searched");
+  });
+
   it("when the transport ends the turn itself, its line is the turn's error, word for word", async () => {
     const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
     const cut = "stopped after 15m 00s with no output for 10m";
