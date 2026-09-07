@@ -540,6 +540,8 @@ export type SessionEvent = z.infer<typeof SessionEvent>;
 
 // --- workspace / port / inbox events ----------------------------------------
 
+/** A workspace record as the runtime holds it now, for a client to put in place of the row it has: a create that
+ * landed, a record the sweep restored from the provider's listing, a name a person typed. */
 export const WorkspaceCreatedEvent = z.object({ type: z.literal("workspace.created"), workspace: WorkspaceView });
 /** The awaited steps of a create in the order the runtime reaches them; `failed` ends a create that threw. */
 export const WorkspaceCreateStage = z.enum(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
@@ -1595,6 +1597,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * files across, the way a resize does. The person asks for it; nothing moves a machine they are working on.
    * Refused (kind "conflict") for a workspace forked from a project golden, whose disk the move would throw away. */
   z.object({ id: reqId, op: z.literal("workspaces.updateImage"), workspaceId: z.string() }),
+  /** Names the workspace and replies with its fresh { workspace }. The name is unique on this host, so one another
+   * workspace holds, one a fork is landing under and a blank one are refused (kind "conflict"); a name the workspace
+   * already carries comes back untouched. Threads running on the machine are untouched. */
+  z.object({ id: reqId, op: z.literal("workspaces.rename"), workspaceId: z.string(), name: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Drops a workspace whose machine the provider no longer has: the record, its transcripts and its sessions leave the
    * store, workspace.deleted follows, and nothing is asked of the provider. Refused with the reason (kind "conflict")

@@ -583,6 +583,26 @@ describe("the agents whose store keeps a name", () => {
     }
   });
 
+  it("a rename of the workspace leaves a running turn alone: it ends with its reply, on the same thread, under the new name", async () => {
+    const turn = gate<void>();
+    const { backend } = titledBackend(() => null);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ reply: "the server is up on 3000", hold: () => turn.wait }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "make a server, and its tests" });
+
+    // The thread is addressed by id inside, so the name it runs under is the record's alone.
+    expect(await rt.workspaces.rename(ws.id, "the name he typed")).toMatchObject({ id: ws.id, name: "the name he typed" });
+    const [running] = await rt.sessions.list(ws.id);
+    expect(running).toMatchObject({ workspaceId: ws.id, status: "running" });
+
+    turn.open();
+    expect(await handle.finished).toMatchObject({ status: "completed", text: "the server is up on 3000" });
+    const [ended] = await rt.sessions.list(ws.id);
+    expect(ended).toMatchObject({ id: running!.id, workspaceId: ws.id, status: "completed" });
+    expect(backend.machines).toHaveLength(1);
+    expect(backend.machines[0]!.killed).toBe(false);
+  });
+
   it("an adapter that carries no write says so on its row, and a client reads that as a no", async () => {
     const { backend } = titledBackend(() => null);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });

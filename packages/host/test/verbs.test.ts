@@ -351,6 +351,38 @@ describe("wsp verbs over the host", () => {
     expect((await rt.workspaces.list())[0]!.phase).toBe("running");
   });
 
+  it("rename names the workspace and prints both names; a name another workspace holds and a blank one are refused and nothing is renamed", async () => {
+    await run("new", "alpha");
+    await run("new", "beta");
+    const alpha = (await rt.workspaces.list()).find(w => w.name === "alpha")!;
+
+    const named = await run("rename", "alpha", "the name he typed");
+    expect(named.code).toBe(0);
+    expect(named.io.lines).toEqual([`alpha is now the name he typed ${alpha.id}`]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["beta", "the name he typed"]);
+    // The name is how a workspace is addressed, so every later verb takes the one it now carries.
+    expect((await run("pause", "the name he typed")).io.lines).toEqual(["the name he typed paused"]);
+
+    const taken = await run("rename", "beta", "the name he typed");
+    expect(taken.code).toBe(1);
+    expect(taken.io.errors).toEqual(["wsp rename: the name he typed is already a workspace; pick another name, or delete it first"]);
+    const blank = await run("rename", "beta", "  ");
+    expect(blank.code).toBe(1);
+    expect(blank.io.errors).toEqual(["wsp rename: a workspace name cannot be blank"]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["beta", "the name he typed"]);
+
+    const asJson = await run("rename", "beta", "gamma", "--json");
+    expect(asJson.code).toBe(0);
+    expect(json(asJson.io)).toMatchObject([{ was: "beta", workspace: { name: "gamma" } }]);
+
+    const missing = await run("rename", "nope", "a");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp rename: no workspace nope"]);
+    const short = await run("rename", "gamma");
+    expect(short.code).toBe(3);
+    expect(short.io.errors).toEqual(["wsp rename: wsp rename takes a workspace and one name"]);
+  });
+
   it("forget asks once, naming what goes, drops a workspace whose machine is gone, and is refused with the reason while the machine exists", async () => {
     await run("new", "alpha");
     await run("new", "beta");

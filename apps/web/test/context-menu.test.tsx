@@ -52,7 +52,14 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
 });
 const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] };
 
-type FakeApi = Api & { nap: ReturnType<typeof vi.fn>; interruptSession: ReturnType<typeof vi.fn>; forget: ReturnType<typeof vi.fn>; renameSession: ReturnType<typeof vi.fn>; wake: ReturnType<typeof vi.fn> };
+type FakeApi = Api & {
+  nap: ReturnType<typeof vi.fn>;
+  interruptSession: ReturnType<typeof vi.fn>;
+  forget: ReturnType<typeof vi.fn>;
+  renameSession: ReturnType<typeof vi.fn>;
+  renameWorkspace: ReturnType<typeof vi.fn>;
+  wake: ReturnType<typeof vi.fn>;
+};
 
 function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessions: SessionView[] = []): FakeApi {
   return {
@@ -71,6 +78,12 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
       const row = sessions.find(s => s.id === sessionId);
       if (row !== undefined) row.harnessTitle = title;
       return { outcome: "renamed" as const };
+    }),
+    // The runtime holds the name on this computer, so the record it answers with carries it, as the real one does.
+    renameWorkspace: vi.fn(async (id: string, name: string) => {
+      const row = workspaces.find(w => w.id === id)!;
+      row.name = name;
+      return row;
     }),
     upgrade: async id => view(id, "?", "running"),
     capabilities: async () => CAPS,
@@ -166,8 +179,8 @@ describe("a workspace row's menu", () => {
     ]);
     expect(within(opened).getAllByRole("separator")).toHaveLength(5);
     expect(item(WORKSPACE_WORDS.pause).getAttribute("aria-disabled")).toBeNull();
-    expect(item(WORKSPACE_WORDS.rename).getAttribute("aria-disabled")).toBe("true");
-    expect(refusalOf(WORKSPACE_WORDS.rename)).toBe("Renaming is not in the runtime yet");
+    expect(item(WORKSPACE_WORDS.rename).getAttribute("aria-disabled")).toBeNull();
+    expect(refusalOf(WORKSPACE_WORDS.rename)).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.forget)).toBe("Only a workspace whose machine is gone can be forgotten; this one is running");
     expect(refusalOf(WORKSPACE_WORDS.pause)).toBeNull();
     expect(item(WORKSPACE_WORDS.openTerminal).querySelector("kbd")?.textContent).toBe("⌘J");
@@ -191,7 +204,7 @@ describe("a workspace row's menu", () => {
     await mountSidebar(api, "api");
     rightClick(rowOf("api"));
     const opened = await screen.findByRole("menu");
-    fireEvent.click(item(WORKSPACE_WORDS.rename));
+    fireEvent.click(item(WORKSPACE_WORDS.fork));
     expect(menu()).not.toBeNull();
     fireEvent.keyDown(opened, { key: "ArrowDown" });
     fireEvent.keyDown(opened, { key: "ArrowDown" });
@@ -256,12 +269,12 @@ describe("a workspace row's menu", () => {
       ["open-machine", WORKSPACE_WORDS.openMachine, true],
       ["import-project", WORKSPACE_WORDS.importProject, false],
       ["export-project", WORKSPACE_WORDS.exportProject, false],
-      ["rename", WORKSPACE_WORDS.rename, false],
+      ["rename", WORKSPACE_WORDS.rename, true],
       ["fork", WORKSPACE_WORDS.fork, false],
       ["copy-id", WORKSPACE_WORDS.copyId, true],
       ["forget", WORKSPACE_WORDS.forget, false],
     ]);
-    expect(sent.find(i => i.id === "rename")?.refusal).toBe("Renaming is not in the runtime yet");
+    expect(sent.find(i => i.id === "rename")).not.toHaveProperty("refusal");
     expect(sent.find(i => i.id === "open-terminal")?.accelerator).toBe("CommandOrControl+J");
     expect(menu()).toBeNull();
     await waitFor(() => expect(api.nap).toHaveBeenCalledWith("ws_a"));
@@ -434,12 +447,107 @@ describe("a thread row's menu", () => {
     expect(api.renameSession).not.toHaveBeenCalled();
   });
 
+  it("a double-click on the title opens the same box the menu opens, and a refused rename leaves the title as text", async () => {
+    const api = fakeApi([API], [statusOf(API)], [{ ...RUNNING }]);
+    await mountSidebar(api, "api");
+    fireEvent.doubleClick(screen.getByText("fix the port list"));
+    const input = (await screen.findByRole("textbox", { name: THREAD_WORDS.rename })) as HTMLInputElement;
+    expect(input.value).toBe("fix the port list");
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+
+    cleanup();
+    const gone = fakeApi([OLD], [statusOf(OLD)], [{ ...RUNNING, id: "s9", workspaceId: "ws_c", threadId: "thr_9" }]);
+    await mountSidebar(gone, "old");
+    fireEvent.doubleClick(screen.getByText("fix the port list"));
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
   it("a settled thread's stop carries the refusal", async () => {
     await mountSidebar(fakeApi([API], [statusOf(API)], [{ ...RUNNING, status: "completed", endedAt: Date.now() - 30_000 }]), "api");
     rightClick(rowOf("fix the port list"));
     await screen.findByRole("menu");
     expect(item(THREAD_WORDS.stop).getAttribute("aria-disabled")).toBe("true");
     expect(refusalOf(THREAD_WORDS.stop)).toBe("Thread is not running");
+  });
+});
+
+describe("a workspace row's name box", () => {
+  const nameBox = () => screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename }) as Promise<HTMLInputElement>;
+  const openFromMenu = async (): Promise<HTMLInputElement> => {
+    rightClick(rowOf2("ws:ws_a"));
+    await screen.findByRole("menu");
+    fireEvent.click(item(WORKSPACE_WORDS.rename));
+    return nameBox();
+  };
+
+  it("Rename turns the row's name into a field in the same slot, and Enter names the workspace through the runtime", async () => {
+    const api = fakeApi([{ ...API }], [statusOf(API)]);
+    await mountSidebar(api, "api");
+    const rowClass = rowOf2("ws:ws_a").className;
+    const input = await openFromMenu();
+    expect(input.value).toBe("api");
+    expect(document.activeElement).toBe(input);
+    // The field took the name's place inside the row, and the row is the same row it was.
+    expect(input.closest("[data-sidebar-row]")).toBe(rowOf2("ws:ws_a"));
+    expect(rowOf2("ws:ws_a").className).toBe(rowClass);
+
+    fireEvent.change(input, { target: { value: "the name he typed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "the name he typed"));
+    await waitFor(() => expect(screen.getByText("the name he typed")).toBeDefined());
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("a double-click on the name opens the same box", async () => {
+    const api = fakeApi([{ ...API }], [statusOf(API)]);
+    await mountSidebar(api, "api");
+    fireEvent.doubleClick(screen.getByText("api"));
+    expect((await nameBox()).value).toBe("api");
+  });
+
+  it("Escape and clicking away leave the old name, and a name that is blank or unchanged is a cancel", async () => {
+    const api = fakeApi([{ ...API }], [statusOf(API)]);
+    await mountSidebar(api, "api");
+    for (const [typed, leave] of [["not this one", "Escape"], ["nor this one", "blur"], ["   ", "Enter"], ["api", "Enter"]] as const) {
+      const input = await openFromMenu();
+      fireEvent.change(input, { target: { value: typed } });
+      if (leave === "blur") fireEvent.blur(input);
+      else fireEvent.keyDown(input, { key: leave });
+      await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    }
+    expect(api.renameWorkspace).not.toHaveBeenCalled();
+    expect(screen.getByText("api")).toBeDefined();
+  });
+
+  it("a name the runtime refuses stays in the field for another go, with the runtime's own reason in the toast", async () => {
+    const api = fakeApi([{ ...API }], [statusOf(API)]);
+    api.renameWorkspace.mockImplementation(async () => {
+      throw new Error("web is already a workspace; pick another name, or delete it first");
+    });
+    await mountSidebar(api, "api");
+    const input = await openFromMenu();
+    fireEvent.change(input, { target: { value: "web" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(useStore.getState().toast).toBe("web is already a workspace; pick another name, or delete it first"));
+    // The name is where the person left it: a toast never eats it, and the row still holds the name it had.
+    const still = await nameBox();
+    expect(still.value).toBe("web");
+    fireEvent.keyDown(still, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    expect(screen.getByText("api")).toBeDefined();
+  });
+
+  it("one row at a time holds the box: opening a workspace's closes a thread's", async () => {
+    const api = fakeApi([{ ...API }], [statusOf(API)], [{ ...RUNNING }]);
+    await mountSidebar(api, "api");
+    rightClick(rowOf("fix the port list"));
+    await screen.findByRole("menu");
+    fireEvent.click(item(THREAD_WORDS.rename));
+    await screen.findByRole("textbox", { name: THREAD_WORDS.rename });
+    await openFromMenu();
+    expect(screen.queryAllByRole("textbox")).toHaveLength(1);
+    expect(screen.getByText("fix the port list")).toBeDefined();
   });
 });
 

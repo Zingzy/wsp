@@ -412,6 +412,24 @@ export async function nap(client: HostClient, ref: string): Promise<WorkspaceVie
   return (await client.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: source.id })).workspace;
 }
 
+/** What a workspace rename came to, as every director prints it: the name it went in under and the record after. */
+export interface RenamedWorkspace {
+  was: string;
+  workspace: WorkspaceView;
+}
+
+/** Names the workspace a person names, through the runtime, which holds the name on this computer. The name is
+ * unique here, so a duplicate and a blank one come back as the runtime's own refusal. */
+export async function renameWorkspace(client: HostClient, ref: string, name: string): Promise<RenamedWorkspace> {
+  const source = await workspaceOf(client, ref);
+  const { workspace } = await client.request<{ workspace: WorkspaceView }>("workspaces.rename", { workspaceId: source.id, name });
+  return { was: source.name, workspace };
+}
+
+export function renamedWorkspaceLine(r: RenamedWorkspace): string {
+  return `${r.was} is now ${r.workspace.name} ${r.workspace.id}`;
+}
+
 /** Every verb that needs the machine goes through here, so a paused or waking workspace is a wait and never the
  * provider's error. The runtime is asked even when the view says running: only its state read catches a provider-side
  * pause. The runtime refuses a gone workspace too; the refusal here exists to carry the verb's own action word. */
@@ -1404,6 +1422,29 @@ export const VERBS: readonly Verb[] = [
         const client = await deps.client();
         if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word));
         return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word));
+      },
+    }),
+  },
+  {
+    name: "rename",
+    usage: 'wsp rename <workspace> "<name>"',
+    about: "names the workspace on this computer; the name is unique here, so one another workspace holds is refused",
+    options: {},
+    run: async ctx => {
+      const [ref, name] = ctx.args;
+      if (ref === undefined || name === undefined || ctx.args.length !== 2) throw usageRefusal("wsp rename takes a workspace and one name");
+      const renamed = await renameWorkspace(await ctx.client(), ref, name);
+      ctx.out.emit(renamed, renamedWorkspaceLine(renamed));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Names the workspace on this computer, the name the sidebar and every listing show and the one workspace takes. A name is unique here, since that is how a workspace is addressed, so a name another workspace holds and a blank one are refused in one line and nothing is renamed. Threads on the machine are addressed by id and run on through it, and the machine at the provider keeps the metadata name it was forked under until it is next forked or rebuilt.",
+      input: { workspace: WorkspaceIn, name: z.string() },
+      output: { was: z.string(), workspace: WorkspaceView },
+      call: async ({ workspace: ref, name }, deps) => {
+        const renamed = await renameWorkspace(await deps.client(), ref, name);
+        return asText(renamedWorkspaceLine(renamed), { ...renamed });
       },
     }),
   },

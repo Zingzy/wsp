@@ -132,7 +132,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, BLANK_NAME_REFUSAL, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -752,6 +752,12 @@ export interface Runtime {
     updateImage(id: string): Promise<WorkspaceView>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
     rebuild(id: string): Promise<WorkspaceView>;
+    /** Names the workspace, under the rules a fork's name takes: unique on this host, so a name another workspace
+     * holds, one a fork is landing under and a blank one are refused (kind conflict) naming the holder. A name the
+     * workspace already carries answers with the record untouched. Threads on the machine are addressed by id and
+     * run on through it; the machine's own metadata keeps the name it was forked under, since the provider takes
+     * metadata at create and its API offers no update, and the next fork or rebuild stamps the new one. */
+    rename(id: string, name: string): Promise<WorkspaceView>;
     /** Snapshots the running machine as a project golden: the golden it stands on plus the project as it is now, so a
      * fork of the snapshot starts a task with the project in place. Refused in one sentence when the workspace is not
      * running or holds no project; a machine that was ever resumed is refused by the engine (kind notFirstLife). The
@@ -2239,6 +2245,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * (a delete in flight says so), or a fork of it is under way. A name never names two workspaces, and a fork and a
    * delete of one name never interleave. */
   const nameRefusal = (name: string): string | undefined => {
+    if (name.trim() === "") return BLANK_NAME_REFUSAL;
     const entry = [...live.values()].find(e => e.record.name === name);
     if (entry !== undefined) return entry.deleting ? nameDeletingRefusal(name) : nameTakenRefusal(name);
     return forking.has(name) ? nameTakenRefusal(name) : undefined;
@@ -2399,6 +2406,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       console.warn(`rebuild of ${id}: ${reason}`);
       await emitStatus(entry, reachOf(entry), reason);
       return view(entry.record);
+    },
+
+    async rename(id, name) {
+      const entry = await entryOf(id);
+      if (entry.record.name === name) return view(entry.record);
+      const refusal = nameRefusal(name);
+      if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
+      entry.record.name = name;
+      await persist(entry.record);
+      const named = view(entry.record);
+      bus.emit({ type: "workspace.created", workspace: named });
+      return named;
     },
 
     async snapshot(id) {

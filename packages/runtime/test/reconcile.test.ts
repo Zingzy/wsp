@@ -4,8 +4,10 @@
 // claims is recorded again at the sweep, never killed, so it can be seen and
 // deleted. A name names at most one workspace, and a fork of a name whose
 // workspace is being deleted is refused in words, so the two never interleave.
+// A rename takes the same rule the fork's name takes, keeps the record's id
+// and machine, and leaves the threads on that machine alone.
 import { describe, expect, it, vi } from "vitest";
-import { RECORD_RESTORED, nameDeletingRefusal, nameTakenRefusal, type EventUnion } from "@wsp/protocol";
+import { BLANK_NAME_REFUSAL, RECORD_RESTORED, nameDeletingRefusal, nameTakenRefusal, type EventUnion } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -233,6 +235,68 @@ describe("a name names one workspace", () => {
     await expect(rt.workspaces.create({ golden: "snap_g", name: "a" })).rejects.toMatchObject({ message: nameTakenRefusal("a"), kind: "conflict" });
     expect(backend.machines).toHaveLength(1);
     expect(await rt.workspaces.create({ golden: "snap_g", name: "b" })).toMatchObject({ name: "b" });
+  });
+});
+
+describe("a rename of a workspace", () => {
+  it("names the record, keeps its id and machine, says so once, and the next listing carries it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "first" });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+
+    expect(await rt.workspaces.rename(ws.id, "the name he typed")).toMatchObject({ id: ws.id, name: "the name he typed", machineId: ws.machineId });
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["the name he typed"]);
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ id: ws.id, name: "the name he typed" });
+    expect(events.filter(e => e.type === "workspace.created")).toMatchObject([{ workspace: { id: ws.id, name: "the name he typed" } }]);
+    // The machine is untouched: the provider takes metadata at create and offers no update, so the name it was
+    // forked under stands there until the next fork stamps the record's.
+    expect(backend.machines).toHaveLength(1);
+    expect(backend.machines[0]!.spec.labels).toMatchObject({ "wsp-name": "first" });
+    expect(backend.machines[0]!.killed).toBe(false);
+  });
+
+  it("takes the name the fork's own rule takes: one another workspace holds, one a fork is landing under, and a blank one are refused and nothing is renamed", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const a = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.workspaces.create({ golden: "snap_g", name: "b" });
+
+    await expect(rt.workspaces.rename(a.id, "b")).rejects.toMatchObject({ message: nameTakenRefusal("b"), kind: "conflict" });
+    await expect(rt.workspaces.rename(a.id, "   ")).rejects.toMatchObject({ message: BLANK_NAME_REFUSAL, kind: "conflict" });
+    expect(await rt.workspaces.get(a.id)).toMatchObject({ name: "a" });
+    // Its own name is no duplicate: the record comes back untouched.
+    expect(await rt.workspaces.rename(a.id, "a")).toMatchObject({ id: a.id, name: "a" });
+    // A fork of the name is landing this moment, so the rename waits for it as a second fork would.
+    const landing = rt.workspaces.create({ golden: "snap_g", name: "c" });
+    await expect(rt.workspaces.rename(a.id, "c")).rejects.toMatchObject({ message: nameTakenRefusal("c"), kind: "conflict" });
+    await landing;
+    // A fork of the name it gave up lands after it.
+    await rt.workspaces.rename(a.id, "d");
+    expect(await rt.workspaces.create({ golden: "snap_g", name: "a" })).toMatchObject({ name: "a" });
+  });
+
+  it("a blank name is refused a fork too, so the rule the rename takes is the fork's own", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    await expect(rt.workspaces.create({ golden: "snap_g", name: " " })).rejects.toMatchObject({ message: BLANK_NAME_REFUSAL, kind: "conflict" });
+    expect(backend.machines).toHaveLength(0);
+  });
+
+  it("the machine takes the new name at its next fork, so a rebuilt machine carries it", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "first" });
+    await rt.workspaces.rename(ws.id, "the name he typed");
+    await rt.workspaces.rebuild(ws.id);
+    expect(backend.machines.at(-1)!.spec.labels).toMatchObject({ "wsp-name": "the name he typed", "wsp-workspace": ws.id });
+  });
+
+  it("a workspace the runtime does not know is refused, and nothing is recorded", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    await expect(rt.workspaces.rename("ws_nope", "a")).rejects.toThrow();
   });
 });
 
