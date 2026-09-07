@@ -44,6 +44,8 @@ export interface Host {
   shell?: string;
   /** TERM_PROGRAM of the process running the collector: the terminal whoever started it types in. */
   terminal?: string;
+  /** XDG_CONFIG_HOME of the process running the collector; unset, the XDG config dir is ~/.config. */
+  xdgConfigHome?: string;
   fs: HostFs;
   exec: HostExec;
 }

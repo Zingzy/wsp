@@ -8,7 +8,9 @@ It is intentionally not an xterm compatibility layer.
 - `ghostty-write-pty.wasm` is a 112-byte callback trampoline for terminal-generated PTY replies.
 - `core.ts` owns per-terminal Ghostty handles and translates the C ABI into render snapshots.
 - `renderer.ts` batches backgrounds and style runs into a Canvas 2D frame.
-- `surface.ts` owns browser input, IME, selection, scrolling, sizing, links, and cursor blinking.
+- `surface.ts` owns browser input, IME, selection, scrolling, sizing, links, and cursor blinking;
+  its options take the padding, cursor defaults and background opacity that `../ghosttyConfig.ts`
+  maps from the person's own Ghostty config, which the host reads and serves.
 - `fontChain.ts` builds the canvas font list: the chosen family, the installed faces
   `localFonts.ts` registered for it (the desktop shell reads them from the computer's font
   directories), then the bundled symbols face. No Nerd Font is named that nobody chose.

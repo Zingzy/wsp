@@ -18,10 +18,26 @@ export interface GhosttyCellRange {
   readonly end: { readonly x: number; readonly y: number };
 }
 
+/** The room between the mount's edges and the grid, each side its own, as Ghostty's window-padding keys give it. */
+export interface TerminalPadding {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+export function uniformPadding(size: number): TerminalPadding {
+  return { left: size, right: size, top: size, bottom: size };
+}
+
 const DEFAULT_SELECTION_BACKGROUND = "rgba(72, 122, 191, 0.35)";
 
 function cssColor(color: GhosttyColor): string {
   return `rgb(${color.r}, ${color.g}, ${color.b})`;
+}
+
+function cssColorAt(color: GhosttyColor, opacity: number): string {
+  return opacity < 1 ? `rgba(${color.r}, ${color.g}, ${color.b}, ${opacity})` : cssColor(color);
 }
 
 function sameTextStyle(left: GhosttyCell, right: GhosttyCell): boolean {
@@ -84,11 +100,11 @@ export function terminalGridSize(
   width: number,
   height: number,
   metrics: GhosttyCellMetrics,
-  padding: number,
+  padding: TerminalPadding,
 ): { cols: number; rows: number } {
   return {
-    cols: Math.max(1, Math.floor((width - padding * 2) / metrics.width)),
-    rows: Math.max(1, Math.floor((height - padding * 2) / metrics.height)),
+    cols: Math.max(1, Math.floor((width - padding.left - padding.right) / metrics.width)),
+    rows: Math.max(1, Math.floor((height - padding.top - padding.bottom) / metrics.height)),
   };
 }
 
@@ -107,6 +123,9 @@ export function renderGhosttySnapshot(options: {
   readonly hoveredLinkRange?: GhosttyCellRange | null;
   /** Vertical origin of row 0; defaults to the horizontal padding. */
   readonly originY?: number;
+  /** The window background's opacity; under 1 the canvas is cleared first so what sits behind it shows through. Cells
+   * with their own background stay opaque, as Ghostty paints them. */
+  readonly backgroundOpacity?: number;
 }): void {
   const {
     context,
@@ -123,6 +142,9 @@ export function renderGhosttySnapshot(options: {
   const selectionBackground = options.selectionBackground ?? DEFAULT_SELECTION_BACKGROUND;
   const hoveredLinkRange = options.hoveredLinkRange ?? null;
   const originY = options.originY ?? padding;
+  const backgroundOpacity = options.backgroundOpacity ?? 1;
+  const translucent = backgroundOpacity < 1;
+  const windowBackground = cssColorAt(snapshot.background, backgroundOpacity);
   const rowsToDraw = forceFull
     ? Array.from({ length: snapshot.rows }, (_, index) => index)
     : [...snapshot.dirtyRows];
@@ -141,7 +163,8 @@ export function renderGhosttySnapshot(options: {
   if (forceFull) {
     context.save();
     context.resetTransform();
-    context.fillStyle = cssColor(snapshot.background);
+    if (translucent) context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+    context.fillStyle = windowBackground;
     context.fillRect(0, 0, context.canvas.width, context.canvas.height);
     context.restore();
   }
@@ -152,7 +175,8 @@ export function renderGhosttySnapshot(options: {
     if (!row) continue;
     const top = originY + rowIndex * metrics.height;
 
-    context.fillStyle = cssColor(snapshot.background);
+    if (translucent) context.clearRect(padding, top, snapshot.cols * metrics.width, metrics.height);
+    context.fillStyle = windowBackground;
     context.fillRect(padding, top, snapshot.cols * metrics.width, metrics.height);
 
     let backgroundStart = 0;

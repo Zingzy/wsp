@@ -5,6 +5,7 @@ import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { exists } from "./common.js";
 import { expand } from "../host.js";
+import { GHOSTTY_BUILT_IN_FONT, parseGhosttyDirectives, readGhosttyConfig } from "../ghostty-config.js";
 
 /** A family a config falls back to when it names none; not a font the pane can ask for. */
 const GENERIC = new Set(["monospace", "mono", ""]);
@@ -16,16 +17,18 @@ const usable = (family: string | undefined): string | undefined => {
 
 /** Ghostty: the first font-family line is the primary face; an empty one resets the list. */
 export function ghosttyFont(text: string): string | undefined {
-  let families: string[] = [];
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    const m = /^font-family\s*=\s*(.*)$/.exec(line);
-    if (m === null) continue;
-    const value = usable(m[1]);
-    if (value === undefined) families = [];
-    else families.push(value);
+  return primaryFace(parseGhosttyDirectives(text).filter(d => d.key === "font-family").map(d => d.value));
+}
+
+/** The first usable face of a font-family list; a generic word resets what came before it, as an empty line does. */
+function primaryFace(families: readonly string[]): string | undefined {
+  let kept: string[] = [];
+  for (const family of families) {
+    const value = usable(family);
+    if (value === undefined) kept = [];
+    else kept.push(value);
   }
-  return families[0];
+  return kept[0];
 }
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -90,9 +93,8 @@ async function firstText(host: Host, paths: readonly string[]): Promise<string |
   return undefined;
 }
 
-const GHOSTTY_CONFIGS = ["~/.config/ghostty/config", "~/Library/Application Support/com.mitchellh.ghostty/config"];
 /** Ghostty and WezTerm both ship JetBrains Mono and draw with it until a config says otherwise. */
-const BUILT_IN = "JetBrains Mono";
+const BUILT_IN = GHOSTTY_BUILT_IN_FONT;
 
 const TERMINALS: readonly Terminal[] = [
   {
@@ -101,8 +103,8 @@ const TERMINALS: readonly Terminal[] = [
     program: /ghostty/i,
     builtIn: BUILT_IN,
     async configured(host) {
-      const text = await firstText(host, GHOSTTY_CONFIGS);
-      return text === undefined ? undefined : (ghosttyFont(text) ?? BUILT_IN);
+      const config = await readGhosttyConfig(host);
+      return config.files.length === 0 ? undefined : (primaryFace(config.fontFamily) ?? BUILT_IN);
     },
     installed: host => (host.platform === "darwin" ? exists(host, "/Applications/Ghostty.app") : Promise.resolve(false)),
   },

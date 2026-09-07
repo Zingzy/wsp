@@ -57,7 +57,7 @@ function WorkspaceCenter() {
   }
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col" data-terminal-beside>
         <WorkspaceThread workspaceId={workspaceId} threadId={threadId} />
       </div>
       <WorkspaceTerminalDrawer workspaceId={workspaceId} />

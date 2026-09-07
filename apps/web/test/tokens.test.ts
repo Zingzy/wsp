@@ -79,6 +79,28 @@ describe("index.css", () => {
           --top-row-meta-alpha: 90%;
         }
       }
+
+      /* A Ghostty config with background-opacity under 1: the viewport marks itself
+         translucent, and the pane around it stops painting so the canvas sits on the
+         app background in a browser tab. In the macOS desktop window, whose html
+         carries the class the desktop preload sets, every element between the window
+         and the pane stops painting too, so the window's own material shows through
+         the terminal; the header row, the thread beside the pane and the column that
+         does not hold it paint the app background themselves, so text never sits on
+         the desktop. */
+      .thread-terminal-drawer:has([data-terminal-translucent]),
+      .thread-terminal-drawer :has([data-terminal-translucent]) {
+        background: transparent;
+      }
+
+      html.desktop-mac:has([data-terminal-translucent]),
+      html.desktop-mac :has([data-terminal-translucent]) {
+        background: transparent;
+      }
+
+      html.desktop-mac:has([data-terminal-translucent]) :is([data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
+        background: var(--background);
+      }
       "
     `);
   });
