@@ -2452,7 +2452,7 @@ describe("runtime verified wake", () => {
     backend.execImpl = (m, cmd) => {
       if (cmd.includes(TOKEN_PATH)) return tokenGuest(m, cmd);
       if (cmd.includes("ls -A /root")) return { exitCode: 0, stdout: "notes.md\n.local\n", stderr: "" };
-      if (cmd.startsWith("stat -c %s")) return { exitCode: 0, stdout: `${tgzBytes}\n`, stderr: "" };
+      if (cmd.startsWith("wc -c <")) return { exitCode: 0, stdout: `${tgzBytes}\n`, stderr: "" };
       if (cmd.includes("tar czf")) tars.push(m.id);
       if (cmd.includes("tar xzf")) untars.push(m.id);
       return { exitCode: 0, stdout: "", stderr: "" };
@@ -2556,22 +2556,34 @@ describe("runtime verified wake", () => {
     }
   });
 
-  it("every nap replaces the stashed vault; one over the cap is refused with a warning and the previous stays", async () => {
+  it("every nap replaces the stashed vault; one over the cap is refused with a warning, the previous stays, and the napping status says so once", async () => {
     const { backend, tars, setTgzBytes } = guestBackend();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const store = memoryStore();
-      const rt = createRuntime({ backend, store, adapters: {}, wake: { vaultCapBytes: 5_000 } });
+      const rt = createRuntime({ backend, store, adapters: {}, wake: { vaultCapBytes: 5_000 }, vaultCaches: { dirs: ["node_modules", "dist"], files: [".DS_Store"], markers: [".git"] } });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
+      const napReason = (): string | undefined => (events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status.reason;
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
       await rt.workspaces.nap(ws.id);
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
+      expect(napReason()).toBeUndefined();
+      const script = backend.machines[0]!.runLog.find(s => s.includes("tar czf"))!;
+      expect(script).toContain(`find 'root/notes.md' -mindepth 1 -path '*/.git' -prune -o \\( \\( -type d \\( -name 'node_modules' -o -name 'dist' \\) \\) -o \\( -type f \\( -name '.DS_Store' \\) \\) -o \\( -type d -exec test -f '{}/.git' \\; \\) \\) -prune -print > `);
+      expect(script).toMatch(/tar czf '[^']+' --no-recursion --null -T '[^']+\.keep'/);
       await rt.workspaces.wake(ws.id);
       setTgzBytes(6_000);
       await rt.workspaces.nap(ws.id);
       expect(tars).toEqual(["m1", "m1"]);
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
-      expect(warn.mock.calls.some(c => /6000 bytes, over the 5000 byte cap/.test(String(c[0])))).toBe(true);
+      expect(warn.mock.calls.map(c => String(c[0])).filter(l => l.startsWith("nap vault"))).toEqual([`nap vault for ${ws.id} not stored, previous kept: the export was 5.9 KB, over the 4.9 KB cap`]);
       expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
+      expect(napReason()).toBe("nap kept the previous vault; the export was 5.9 KB, over the 4.9 KB cap");
+      await rt.workspaces.wake(ws.id);
+      setTgzBytes(1_000);
+      await rt.workspaces.nap(ws.id);
+      expect(napReason()).toBeUndefined();
       await rt.workspaces.delete(ws.id);
       expect(await store.getBlob("vaults", ws.id)).toBeUndefined();
     } finally {
@@ -2851,12 +2863,14 @@ describe("nap vault against the stub backend", () => {
     }
   });
 
-  it("warns once and keeps the previous vault when the download URL cannot be fetched", async () => {
+  it("warns once, keeps the previous vault and says so on the napping status when the download URL cannot be fetched", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const rt = createRuntime({ backend, store, adapters: {} });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
       await rt.workspaces.nap(ws.id);
       const first = await store.getBlob("vaults", ws.id);
@@ -2867,6 +2881,7 @@ describe("nap vault against the stub backend", () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]![0]).toBe(`nap vault for ${ws.id} not stored, previous kept: fetch failed`);
       expect(await store.getBlob("vaults", ws.id)).toEqual(first);
+      expect((events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status).toMatchObject({ phase: "napping", reason: "nap kept the previous vault; fetch failed" });
     } finally {
       warn.mockRestore();
     }

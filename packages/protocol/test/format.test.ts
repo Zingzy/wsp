@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { behindGoldenLine, builderStaysLine, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, providerAnswerLine, SEAL_FAILED_BUILDER_GONE_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, SEAL_FAILED_LINE } from "../src/index.js";
+import { behindGoldenLine, builderStaysLine, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, providerAnswerLine, SEAL_FAILED_BUILDER_GONE_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, SEAL_FAILED_LINE, vaultKeptLine, vaultOverCapLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -155,6 +155,18 @@ describe("plural", () => {
     expect([0, 1, 2].map(n => plural(n, "row"))).toEqual(["0 rows", "1 row", "2 rows"]);
     expect(plural(1, "tool call")).toBe("1 tool call");
     expect([1, 2].map(fmtThreads)).toEqual([plural(1, "thread"), plural(2, "thread")]);
+  });
+});
+
+describe("the nap's words when its vault was not stored", () => {
+  it("vaultOverCapLine reads the export and the cap in the one byte rule", () => {
+    expect(vaultOverCapLine(797_760_137, 209_715_200)).toBe("the export was 760.8 MB, over the 200.0 MB cap");
+    expect(vaultOverCapLine(6_000, 5_000)).toBe("the export was 5.9 KB, over the 4.9 KB cap");
+  });
+
+  it("vaultKeptLine says the previous vault stands and why, whatever stopped the export", () => {
+    expect(vaultKeptLine(vaultOverCapLine(797_760_137, 209_715_200))).toBe("nap kept the previous vault; the export was 760.8 MB, over the 200.0 MB cap");
+    expect(vaultKeptLine("fetch failed")).toBe("nap kept the previous vault; fetch failed");
   });
 });
 

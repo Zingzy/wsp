@@ -29,6 +29,7 @@ import { HARNESS_ADAPTERS } from "./adapters.js";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
+import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
 import { FIRST_WORKSPACE } from "./init-first.js";
@@ -335,6 +336,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
     hostId: hostIdentity(),
+    vaultCaches: CACHE_RULE,
   });
 }
 

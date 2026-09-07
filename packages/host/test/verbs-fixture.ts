@@ -199,7 +199,7 @@ export function exportGuest(backend: StubBackend): { sources: string[] } {
     }
     if (cmd.startsWith("for p in ")) return { exitCode: 0, stdout: cmd.includes("'/root/.claude-cfg/projects'") ? "/root/.claude-cfg/projects\n" : "", stderr: "" };
     const out = /tar czf '([^']+)'/.exec(cmd)?.[1];
-    if (out !== undefined && cmd.includes("find .")) {
+    if (out !== undefined && cmd.includes("find '.'")) {
       tars.set(out, tarOf([{ path: "./src/index.ts", mode: 0o644, content: "export const a = 1;\n" }, { path: "./.env", mode: 0o600, content: "TOKEN=x\n" }]));
       return { exitCode: 0, stdout: "node_modules\n", stderr: "" };
     }

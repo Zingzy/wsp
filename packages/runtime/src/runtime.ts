@@ -54,6 +54,7 @@ import {
   type ReapedMachine,
   type RunOptions,
   type RetentionPlan,
+  type VaultOptions,
   type WspError,
   type WorkspacePhase as EnginePhase,
   retentionPlan,
@@ -96,7 +97,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, notifyLine, sendRefusal, shellQuote, startPicks, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -361,6 +362,8 @@ interface LiveWorkspace {
   adopting?: Promise<void>;
   /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
   creating?: true;
+  /** Why the nap in flight kept the previous vault, for the napping status it pushes; said once. */
+  vaultNote?: string;
 }
 
 /** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. */
@@ -421,6 +424,9 @@ export interface RuntimeOptions {
    * /root except golden-provided dirs (VAULT_SKIP), enumerated at export time.
    */
   vaultPaths?: string[];
+  /** What a vault export leaves behind under those paths: the project bundle's cache rule, so a checkout's installs,
+   * build output and nested worktrees never travel and never count against the nap-time cap. */
+  vaultCaches?: CacheRule;
   /** Defaults for the status poller / cost ticker (tests shrink the intervals). */
   status?: StatusWatchOptions;
   idle?: { defaultWindowMs?: number };
@@ -955,6 +961,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       .filter(s => s.length > 0 && !VAULT_SKIP.has(s))
       .map(s => `/root/${s}`);
   };
+  const vaultExport = async (m: Machine, o: Pick<VaultOptions, "maxBytes"> = {}): Promise<Buffer> =>
+    exportPaths(m, await vaultPathsOf(m), { ...o, ...(opts.vaultCaches !== undefined ? { exclude: opts.vaultCaches } : {}) });
   const live = new Map<string, LiveWorkspace>();
   const builders = new Map<string, LiveBuilder>();
   /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
@@ -1504,16 +1512,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           fork(record, m => {
             entry.machine = m;
           }, override),
-        vaultExport: async m => exportPaths(m, await vaultPathsOf(m)),
+        vaultExport: m => vaultExport(m),
         vaultImport: async (m, payload) => {
           await importInto(m, payload, "/");
         },
         stashVault: async m => {
           try {
-            const payload = await exportPaths(m, await vaultPathsOf(m), { maxBytes: vaultCapBytes });
-            await store.putBlob(VAULTS, record.id, payload);
+            await store.putBlob(VAULTS, record.id, await vaultExport(m, { maxBytes: vaultCapBytes }));
           } catch (e) {
-            console.warn(`nap vault for ${record.id} not stored, previous kept: ${e instanceof Error ? e.message : String(e)}`);
+            const why = e instanceof Error ? e.message : String(e);
+            entry.vaultNote = vaultKeptLine(why);
+            console.warn(`nap vault for ${record.id} not stored, previous kept: ${why}`);
           }
         },
         restoreVault: async m => {
@@ -1587,6 +1596,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "pausing";
         await persist(entry.record);
         await emitStatus(entry, "napping");
+        delete entry.vaultNote;
         try {
           await entry.ws.nap();
         } catch (e) {
@@ -1600,7 +1610,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "napping";
         await persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
-        await emitStatus(entry, "napping", reason);
+        const said = [reason, entry.vaultNote].filter((s): s is string => s !== undefined);
+        delete entry.vaultNote;
+        await emitStatus(entry, "napping", said.length === 0 ? undefined : said.join("; "));
         return view(entry.record);
       } finally {
         delete entry.napping;
