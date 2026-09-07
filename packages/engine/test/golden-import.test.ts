@@ -916,11 +916,10 @@ describe("agentInstallsFor", () => {
     for (const [name, a] of Object.entries(AGENT_INSTALLERS)) {
       expect(a.name, name).not.toBe("");
       expect(a.smoke, name).toMatch(/--version/);
-      // The one curl into a shell the rules allow: the harness vendor's own installer, unpinned by design.
-      if (a.install === GOLDEN_SETUP) continue;
       expect(a.install, name).not.toMatch(/\|\s*(ba)?sh\b/);
       expect(a.install, name).not.toMatch(/@latest\b/);
-      expect(a.install, name).toMatch(/@\d|==\d|--branch v?\d|releases\/download\/\d/);
+      // The harness vendor's own installer is unpinned by design; every other agent's line names a version.
+      if (a.install !== GOLDEN_SETUP) expect(a.install, name).toMatch(/@\d|==\d|--branch v?\d|releases\/download\/\d/);
     }
     expect(Object.keys(AGENT_INSTALLERS).sort()).toEqual(["aider", "claude", "codex", "gemini", "hermes", "opencode", "pi"]);
     expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version" });

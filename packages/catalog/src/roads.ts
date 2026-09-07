@@ -5,6 +5,7 @@
 // their checksummed releases, Hermes by a git checkout at a commit, Claude Code
 // by its vendor's installer. Every pin here is checked on the machine before
 // anything runs.
+import { shellQuote } from "@wsp/protocol";
 import type { LinuxCask } from "./linux-casks.js";
 
 export const MIB = 1024 * 1024;
@@ -52,9 +53,23 @@ export type InstallRoad =
 export type RoadName = InstallRoad["road"];
 export const ROADS: readonly RoadName[] = ["brew", "npm", "pnpm", "bun", "uv", "pipx", "cargo", "go", "release", "vendor", "apt", "script"];
 
-/** The one curl into a shell the rules allow: the harness vendor's own installer, run on a first-life builder and
- * recorded in the manifest as setupSha; the smoke is what proves the result. */
-export const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
+/** A vendor installer its vendor documents as curl piped into bash, run the one way a road may: the script is
+ * downloaded to a file through the road's curl function, so a retry re-reads the download and never a body a shell
+ * has begun to run; checked to be a shell script, since the vendor publishes no sum; then run from the file with
+ * nothing on stdin. */
+export function installerScript(url: string): string {
+  return [
+    'f="$(mktemp)"',
+    `trap 'rm -f "$f"' EXIT`,
+    `curl -o "$f" ${shellQuote(url)}`,
+    `test "$(head -c 2 "$f")" = '#!' || { echo ${shellQuote(`Error: what ${url} served is not a shell script`)} >&2; exit 1; }`,
+    'bash "$f" </dev/null',
+  ].join("\n");
+}
+
+/** The one vendor installer the rules allow: the harness vendor's own, run on a first-life builder and recorded in
+ * the manifest as setupSha; the smoke is what proves the result. */
+export const GOLDEN_SETUP = installerScript("https://claude.ai/install.sh");
 export const GOLDEN_SMOKE = "claude --version";
 
 /** The guest's home directory: every machine runs as root. */

@@ -3,7 +3,7 @@
 exports[`catalog > is the seeded catalog 1`] = `
 [
   {
-    "argument": "1 lines",
+    "argument": "5 lines",
     "configPaths": 8,
     "id": "claude",
     "kind": "agent",
