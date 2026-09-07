@@ -49,7 +49,7 @@ import { TOOLS_TITLE, pickScreens, projectNote, signInItems, wspToolsAgent, wspT
 import { PROJECT_GROUP } from "./init-table.js";
 import { SIGN_IN_WORDS } from "./signin-words.js";
 import type { ScanRow } from "./scan.js";
-import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
+import { installEach, installLines, mcpServerSpec, registeredLine } from "./mcp-install.js";
 import { carriedOver, historyLine, historyProgressLine } from "./recipe-command.js";
 import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
@@ -943,6 +943,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   log.step(`Recipe saved to ${path} and ${small.path}`, out);
   const wspToolsPlaced = installEach(wspTools, mcpServerSpec(opts.statePath), opts.home);
   for (const placed of wspToolsPlaced.installed) log.step(installLines(placed).join("\n"), out);
+  const registered = registeredLine(wspToolsPlaced);
+  if (registered !== undefined) log.step(registered, out);
   for (const failed of wspToolsPlaced.failures) {
     log.warn(`${catalogEntry(failed.id)?.name ?? failed.id} did not get the wsp tools: ${failed.error}. Fix the file and run wsp mcp install --agent ${failed.id}.`, out);
   }

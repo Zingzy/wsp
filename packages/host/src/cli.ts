@@ -43,7 +43,7 @@ import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
-import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
+import { installEach, installLines, mcpServerSpec, registeredLine } from "./mcp-install.js";
 import { COMMON, VERBS, findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
 import { VERSION } from "./version.js";
 
@@ -803,6 +803,8 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   if (json) io.log(JSON.stringify(report));
   else {
     for (const placed of report.installed) for (const line of installLines(placed)) io.log(line);
+    const registered = registeredLine(report);
+    if (registered !== undefined) io.log(registered);
     for (const failed of report.failures) io.error(`wsp mcp install: ${failed.error}`);
   }
   return report.failures.length > 0 ? 1 : 0;

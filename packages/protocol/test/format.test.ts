@@ -20,6 +20,7 @@ import {
   goldenBuildLine,
   harnessExitLine,
   machineUnreachedLine,
+  mcpServerCommandLine,
   moveTimedOutLine,
   notifyLine,
   plural,
@@ -212,6 +213,13 @@ describe("machineUnreachedLine", () => {
   it("says the machine could not be reached from this computer, with the attempts counted and the time they took", () => {
     expect(machineUnreachedLine(6, 23_400)).toBe("the machine could not be reached from this computer after 6 attempts over 23s");
     expect(machineUnreachedLine(1, 800)).toBe("the machine could not be reached from this computer after 1 attempt over 800ms");
+  });
+});
+
+describe("mcpServerCommandLine", () => {
+  it("names the command every agent's config now runs, as one shell line a person can paste", () => {
+    expect(mcpServerCommandLine("npx", ["-y", "@zingzy/wsp@0.1.2", "mcp", "--state", "/Users/p/.wsp/state.json"])).toBe("The server command is npx -y @zingzy/wsp@0.1.2 mcp --state /Users/p/.wsp/state.json");
+    expect(mcpServerCommandLine("/Users/p/.local/bin/wsp", ["mcp", "--state", "/Users/p/my wsp/state.json"])).toBe("The server command is /Users/p/.local/bin/wsp mcp --state '/Users/p/my wsp/state.json'");
   });
 });
 
