@@ -134,6 +134,7 @@ const CLAUDE: HarnessCatalog = {
   contextWindows: CONTEXT,
   permissionModes: MODES,
   steers: true,
+  renames: true,
 };
 
 /** The runtime's table, what stands before the machine answers. */
@@ -144,7 +145,7 @@ const TABLE: HarnessCatalog = {
   models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] }],
 };
 
-const CODEX: HarnessCatalog = { harness: "codex", label: "Codex", source: "table", version: null, models: [{ value: "gpt-6-astra", label: "GPT-6 Astra" }], efforts: [{ value: "high", label: "High" }], contextWindows: [], permissionModes: [], steers: false };
+const CODEX: HarnessCatalog = { harness: "codex", label: "Codex", source: "table", version: null, models: [{ value: "gpt-6-astra", label: "GPT-6 Astra" }], efforts: [{ value: "high", label: "High" }], contextWindows: [], permissionModes: [], steers: false, renames: false };
 
 /** The runtime's own tables, what the composer is served on a machine whose binaries never answered. */
 const CODEX_TABLE = harnessCatalog("codex")!;

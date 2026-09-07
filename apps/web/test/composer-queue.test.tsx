@@ -41,7 +41,7 @@ const workspace: WorkspaceView = {
 const runningRow: SessionView = { id: "sess_local_1", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: "sess_0001", prompt: "go", startedAt: 0 };
 
 /** The runtime's catalog for the running harness, with or without steer. */
-const catalog = (steers: boolean): HarnessCatalog => ({ harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [], efforts: [], contextWindows: [], permissionModes: [], steers });
+const catalog = (steers: boolean): HarnessCatalog => ({ harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [], efforts: [], contextWindows: [], permissionModes: [], steers, renames: true });
 
 function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionView[] = [], harnesses?: HarnessCatalog[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();

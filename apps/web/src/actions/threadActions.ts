@@ -1,24 +1,58 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The thread's actions, one registry: what a thread row's context menu offers
 // for one session. Stop takes the runtime's session id, the one
-// sessions.interrupt is keyed by.
+// sessions.interrupt is keyed by; the rename opens the name for editing on
+// the row by the thread's own key, and the row sends it.
 import { LinkIcon, PencilIcon, SquareIcon, Trash2Icon } from "lucide-react";
-import { threadHash, type SessionStatus } from "@wsp/protocol";
-import { CLIENT_CANNOT_STOP, NO_THREAD_DELETE, NO_THREAD_RENAME, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_WORDS } from "./format.js";
+import { threadHash, type HarnessCatalog, type SessionStatus, type WorkspaceState } from "@wsp/protocol";
+import type { SidebarThreadSnapshot } from "../adapt/index.js";
+import { CLIENT_CANNOT_STOP, NO_THREAD_DELETE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_WORDS, threadRenameRefusal } from "./format.js";
 import type { ActionEntry } from "./registry.js";
 
 export interface ThreadTarget {
+  /** The fold key of the thread, what a row is keyed by. */
+  readonly id: string;
   /** The runtime's thread id, what a link opens; null for a row the runtime stamped none on. */
   readonly threadId: string | null;
-  /** The latest turn's runtime session id, what a stop interrupts. */
+  /** The latest turn's runtime session id, what a stop interrupts and what a rename names. */
   readonly sessionId: string;
   readonly workspaceId: string;
+  /** The agent the thread runs on: whose store a rename would have to be kept in. */
+  readonly harness: string;
   readonly title: string;
   readonly status: SessionStatus;
+  /** That agent's catalog row on this workspace's machine, which says whether a name of a person's is kept there;
+   * null while no catalog is known, which is no answer either way. */
+  readonly catalog: HarnessCatalog | null;
+  /** The workspace's state, since the store a rename writes to is on its machine. */
+  readonly state: WorkspaceState;
+  /** What the runtime said about a machine that is gone, for the refusal that names it. */
+  readonly goneWords?: string | undefined;
+}
+
+/** One thread as its actions read it: the row, the agent's catalog row for the machine it runs on, and that
+ * machine's state, as workspaceTarget does for a workspace row. */
+export function threadTarget(thread: SidebarThreadSnapshot, machine: { catalog: HarnessCatalog | null; state: WorkspaceState; goneWords?: string | undefined }): ThreadTarget {
+  return {
+    id: thread.id,
+    threadId: thread.threadId,
+    sessionId: thread.sessionId,
+    workspaceId: thread.workspaceId,
+    harness: thread.harness,
+    title: thread.title,
+    status: thread.status,
+    catalog: machine.catalog,
+    state: machine.state,
+    ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}),
+  };
 }
 
 export interface ThreadVerbs {
   readonly stop?: ((sessionId: string) => Promise<void>) | undefined;
+  /** Opens the name for editing on the thread's own row, by the thread's fold key, which a turn starting on the
+   * thread does not move; the surface that draws the rows puts its own opener here, and a surface with no row to
+   * edit leaves it out. */
+  readonly rename?: ((threadId: string) => void) | undefined;
   readonly copyText: (text: string) => Promise<void>;
 }
 
@@ -39,8 +73,9 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     group: "edit",
     icon: () => PencilIcon,
     title: () => THREAD_WORDS.rename,
-    refusal: () => NO_THREAD_RENAME,
-    run: () => {},
+    refusal: (target, verbs) =>
+      threadRenameRefusal({ catalog: target.catalog, harness: target.harness, state: target.state, goneWords: target.goneWords, hasVerb: verbs.rename !== undefined }),
+    run: (target, verbs) => verbs.rename?.(target.id),
   },
   {
     id: "copy-link",

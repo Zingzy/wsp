@@ -10,7 +10,8 @@
 // page header's left padding alone, a send refusal above the composer is
 // one muted mono line in a slot the composer keeps at one height whether or
 // not a line is in it, a right-click on a workspace row opens the in-app menu
-// at the pointer in the tooltip skin, inside the viewport, and the switch
+// at the pointer in the tooltip skin, inside the viewport, Rename turns the
+// thread row's title into a field in the same slot at the same row height, and the switch
 // chord held down puts the workspace switcher up, its cards three parts
 // each, without moving the shell under it, and at three sidebar widths the
 // workspace and thread rows keep one grammar: one height per row kind, the
@@ -853,6 +854,26 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     await page!.screenshot({ path, clip: { x: 0, y: 0, width: 600, height: 120 } });
     console.info(`collapsed header screenshot: ${path}`);
   }, 30_000);
+  /** The thread row's title slot: the row's height, where the title starts, where the time column ends, and the
+   * title's own font, read the same way whether the slot holds the text or the field. */
+  const titleSlot = async (): Promise<{ rowHeight: number; titleX: number; timeRight: number; font: string; size: string; text: string; value: string; focused: boolean }> =>
+    page!.locator("[data-row-id^='thread:']").first().evaluate(row => {
+      const input = row.querySelector<HTMLInputElement>("[data-thread-title-input]");
+      const title = input ?? row.querySelector<HTMLElement>("[data-thread-title]")!;
+      const time = row.querySelector<HTMLElement>("[data-thread-title] ~ span, [data-thread-title-input] ~ span")!;
+      const s = getComputedStyle(title);
+      return {
+        rowHeight: row.getBoundingClientRect().height,
+        titleX: title.getBoundingClientRect().x,
+        timeRight: time.getBoundingClientRect().right,
+        font: s.fontFamily,
+        size: s.fontSize,
+        text: title.textContent ?? "",
+        value: input?.value ?? "",
+        focused: document.activeElement === input,
+      };
+    });
+
   it("a right-click on a workspace row opens the in-app menu at the pointer in the tooltip skin, kept inside the viewport, and Escape closes it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
@@ -900,7 +921,32 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(4);
       await page!.screenshot({ path: join(SHOTS_DIR, `thread-context-menu-${theme}.png`), clip: { x: 0, y: 0, width: 520, height: 520 } });
       console.info(`thread context menu screenshot: ${join(SHOTS_DIR, `thread-context-menu-${theme}.png`)}`);
+
+      // Rename turns that row's title into a field in the same slot: the row keeps its height and the time column
+      // keeps its place, and the field wears the title's own font and size.
+      const titled = await titleSlot();
+      await page!.locator("[data-context-menu] [role=menuitem]", { hasText: "Rename thread" }).click();
+      await page!.waitForSelector("[data-thread-title-input]");
+      const named = await titleSlot();
+      expect(named.rowHeight).toBe(titled.rowHeight);
+      expect(named.titleX).toBe(titled.titleX);
+      expect(named.timeRight).toBe(titled.timeRight);
+      expect(named.font).toBe(titled.font);
+      expect(named.size).toBe(titled.size);
+      expect(named.value).toBe(titled.text);
+      expect(named.focused).toBe(true);
+      // The name a person types: the selection goes, the field keeps the row's height and the time column's place.
+      await page!.keyboard.type("the name he typed");
+      const typed = await titleSlot();
+      expect(typed.value).toBe("the name he typed");
+      expect(typed.rowHeight).toBe(titled.rowHeight);
+      expect(typed.timeRight).toBe(titled.timeRight);
+      const namePath = join(SHOTS_DIR, `thread-row-renaming-${theme}.png`);
+      await page!.screenshot({ path: namePath, clip: { x: 0, y: 0, width: 520, height: 300 } });
+      console.info(`thread row renaming screenshot: ${namePath}`);
       await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[data-thread-title-input]", { state: "detached" });
+      expect((await titleSlot()).text).toBe(titled.text);
       await page!.waitForSelector("[data-context-menu]", { state: "detached" });
     }
   }, 60_000);

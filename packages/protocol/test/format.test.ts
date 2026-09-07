@@ -230,6 +230,7 @@ describe("where the composer's model lists came from, in one line", () => {
     contextWindows: [],
     permissionModes: [],
     steers: false,
+    renames: false,
   };
 
   it("names the agent's own binary and its own pin when its table stood in, never another agent's", () => {

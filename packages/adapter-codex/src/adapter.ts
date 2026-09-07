@@ -5,10 +5,10 @@
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
 import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, SessionTitleMaker, SessionTitleReader, TurnResult } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
-import { parseSessionTitle, parseTitleFor, sessionTitleCommand, titleForCommand } from "./session-title.js";
+import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 
 export interface CodexStartOptions {
   prompt: string;
@@ -53,6 +53,8 @@ export interface CodexAdapter {
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
   sessionTitle: SessionTitleReader;
+  /** Names the thread in that same index, in the column the CLI's own rename writes. */
+  renameSession: SessionRenamer;
   /** Asks the CLI itself, in one read-only turn, for a name for a thread it has just replied in. */
   titleFor: SessionTitleMaker;
   readonly env: Readonly<Record<string, string>>;
@@ -315,6 +317,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     steers: false,
     probeCatalog,
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
+    renameSession: (threadId, title, exec) => exec(renameCommand({ home: deps.home, threadId, title })).then(parseRename),
     titleFor: (turn, exec) =>
       exec(
         titleForCommand({

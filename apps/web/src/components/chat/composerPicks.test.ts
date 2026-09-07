@@ -18,6 +18,7 @@ const CLAUDE: HarnessCatalog = {
   contextWindows: [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }],
   permissionModes: [{ value: "plan", label: "Plan" }, { value: "bypassPermissions", label: "Bypass", isDefault: true }],
   steers: true,
+  renames: true,
 };
 
 describe("resolveModel", () => {

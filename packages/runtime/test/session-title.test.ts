@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The adapter here answers the store read the way the real ones do: one shell
-// line to the machine, its stdout the harness's own title. What is under test
-// is the runtime's side of it, which asks at a turn's end and on a refresh and
-// keeps the answer on the rows a thread is folded from.
+// The adapter here answers the store read and the store write the way the real
+// ones do: one shell line to the machine, its stdout the harness's own title or
+// what became of the name. What is under test is the runtime's side of it,
+// which asks at a turn's end and on a refresh, names the session on the machine
+// when a client renames the thread, and keeps the answer on the rows a thread
+// is folded from.
 import { randomUUID } from "node:crypto";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { createCodexAdapter } from "@wsp/adapter-codex";
-import { EMPTY_TITLE_LINE, foldThreads, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { THREAD_AGENTS, type ThreadAgent } from "@wsp/catalog";
+import type { Machine } from "@wsp/engine";
+import { EMPTY_TITLE_LINE, foldThreads, keepsRename, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
+import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { SESSION_TITLE_REFRESH_MAX, SESSION_TITLE_TTL_MS, createRuntime, type HarnessAdapter, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -16,21 +21,23 @@ import { until } from "./until.js";
 
 const SESSION = "33333333-3333-4333-8333-333333333333";
 const TITLE_COMMAND = "wsp-title-read";
+const RENAME_COMMAND = "wsp-title-write";
 
 /**
  * An adapter whose turn runs to its end on its own, and which reads its title with one line to the machine. A
  * resumed start announces the id it was given, as both real adapters do; `rekeys` mints its own local id beside it,
- * the way the codex adapter does, so two rows can share one harness session.
+ * the way the codex adapter does, so two rows can share one harness session, and `announces: false` is a turn that
+ * died before its harness ever named a session, as a launch that never reached the machine does.
  */
 function titledAdapter(
   options: {
     keepsTitles?: boolean;
+    keepsNames?: boolean;
     rekeys?: boolean;
+    announces?: boolean;
     reader?: HarnessAdapter["sessionTitle"];
     /** What the harness answers when asked to name a thread; absent means a harness that cannot be asked at all. */
     maker?: HarnessAdapter["titleFor"];
-    /** Present, the harness keeps a name of a person's, and every write lands here. */
-    written?: { sessionId: string; title: string }[];
     /** What the turn replies; the title question is asked of it. */
     reply?: string;
     /** Held open, the turn runs until the test lets it end. */
@@ -42,25 +49,26 @@ function titledAdapter(
   const reader: HarnessAdapter["sessionTitle"] =
     options.reader ??
     ((sessionId, exec) => exec(`${TITLE_COMMAND} ${sessionId}`).then(stdout => (stdout.trim() === "" ? null : stdout.trim())));
+  // The three answers a real store's line gives, off the same stdout the real parsers read.
+  const writer: HarnessAdapter["renameSession"] = (sessionId, title, exec) =>
+    exec(`${RENAME_COMMAND} ${sessionId} ${title}`).then(stdout => {
+      const said = stdout.trim();
+      if (said === "written") return { kind: "written" };
+      if (said === "no-session") return { kind: "no-session" };
+      return { kind: "failed", error: said };
+    });
   return () => ({
     steers: false,
     ...(options.keepsTitles === false ? {} : { sessionTitle: reader }),
     ...(options.maker !== undefined ? { titleFor: options.maker } : {}),
-    ...(options.written === undefined
-      ? {}
-      : {
-          renameSession: async (sessionId, title) => {
-            options.written!.push({ sessionId, title });
-            return { kind: "written" as const };
-          },
-        }),
+    ...(options.keepsNames === true ? { renameSession: writer } : {}),
     start: o => {
       options.starts?.push(o);
       const sessionId = o.resume ?? SESSION;
       const result: TurnResult = { status: "completed", text: options.reply ?? "ok" };
       const emit = (e: AdapterEvent): void => o.onEvent(e);
       const finished = (async () => {
-        emit({ type: "session.start", sessionId });
+        if (options.announces !== false) emit({ type: "session.start", sessionId });
         await options.hold?.();
         emit({ type: "turn.done", sessionId, result });
         emit({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
@@ -80,17 +88,25 @@ function gate<T>(): { open: (value: T) => void; wait: Promise<T> } {
   return { open, wait };
 }
 
-/** A backend whose guest answers the title command with `titled()` and nothing else, counting the reads. */
-function titledBackend(titled: () => string | null) {
+/** A backend whose guest answers the title command with `titled()` and nothing else, counting the reads. With
+ * `wrote`, it answers the write command too, in the words a real store's line prints: `written`, `no-session`, or
+ * anything else, which is the machine's own line for a write that did not land. */
+function titledBackend(titled: () => string | null, wrote?: (title: string) => string) {
   const backend = stubBackend();
   const reads: string[] = [];
+  const writes: string[] = [];
   const inner = backend.execImpl;
   backend.execImpl = (m, cmd) => {
+    if (cmd.startsWith(RENAME_COMMAND)) {
+      writes.push(cmd);
+      const title = cmd.slice(`${RENAME_COMMAND} `.length).split(" ").slice(1).join(" ");
+      return { exitCode: 0, stdout: wrote?.(title) ?? "", stderr: "" };
+    }
     if (!cmd.startsWith(TITLE_COMMAND)) return inner(m, cmd);
     reads.push(cmd);
     return { exitCode: 0, stdout: titled() ?? "", stderr: "" };
   };
-  return { backend, reads };
+  return { backend, reads, writes };
 }
 
 const titleOf = async (rt: ReturnType<typeof createRuntime>, workspaceId: string): Promise<string> =>
@@ -297,13 +313,12 @@ describe("the title the harness makes for a thread", () => {
   });
 
   it("writes the name it made into the harness's own store, so the harness's own list says the same", async () => {
-    const written: { sessionId: string; title: string }[] = [];
-    const { backend } = titledBackend(() => null);
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ written, maker: async () => "Seed thread titles here" }) } });
+    const { backend, writes } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, maker: async () => "Seed thread titles here" }) } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
-    await until(async () => written.length === 1);
-    expect(written).toEqual([{ sessionId: SESSION, title: "Seed thread titles here" }]);
+    await until(async () => writes.length === 1);
+    expect(writes).toEqual([`${RENAME_COMMAND} ${SESSION} Seed thread titles here`]);
   });
 
   it("never replaces what the harness itself calls the session, which is the person's, and does not ask for a title at all", async () => {
@@ -392,14 +407,13 @@ describe("the title the harness makes for a thread", () => {
 
   it("names a thread the start named, at the launch and in the harness's store, and asks for no title of its own", async () => {
     const starts: HarnessStartOptions[] = [];
-    const written: { sessionId: string; title: string }[] = [];
     const asked: unknown[] = [];
     const turn = gate<void>();
-    const { backend } = titledBackend(() => null);
+    const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({
       backend,
       store: memoryStore(),
-      adapters: { claude: titledAdapter({ starts, written, hold: () => turn.wait, maker: async t => (asked.push(t), "Seed thread titles here") }) },
+      adapters: { claude: titledAdapter({ starts, keepsNames: true, hold: () => turn.wait, maker: async t => (asked.push(t), "Seed thread titles here") }) },
     });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: OPENING, title: " Ticket 411 review\nand its branch " });
@@ -407,8 +421,8 @@ describe("the title the harness makes for a thread", () => {
     expect(await titleOf(rt, ws.id)).toBe("Ticket 411 review");
     expect((await rt.sessions.list(ws.id))[0]?.titleSource).toBe("person");
     expect(starts[0]?.title).toBe("Ticket 411 review");
-    await until(async () => written.length === 1);
-    expect(written).toEqual([{ sessionId: SESSION, title: "Ticket 411 review" }]);
+    await until(async () => writes.length === 1);
+    expect(writes).toEqual([`${RENAME_COMMAND} ${SESSION} Ticket 411 review`]);
 
     turn.open();
     await handle.finished;
@@ -422,5 +436,161 @@ describe("the title the harness makes for a thread", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     await expect(rt.sessions.start(ws.id, { prompt: OPENING, title: "  \n " })).rejects.toThrow(EMPTY_TITLE_LINE);
+  });
+});
+
+describe("naming a thread from wsp", () => {
+  it("writes the name into the harness's own store and keeps it on every row of the thread", async () => {
+    let named: string | null = null;
+    const { backend, writes } = titledBackend(() => named, title => {
+      named = title;
+      return "written";
+    });
+    const { clock, advance } = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, rekeys: true }) }, clock });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "make a server", resume: SESSION })).finished;
+    advance(1_000);
+    const second = await rt.sessions.start(ws.id, { prompt: "and tests", resume: SESSION });
+    await second.finished;
+
+    expect(await rt.sessions.rename(second.id, "the name he typed in wsp")).toEqual({ outcome: "renamed" });
+    expect(writes).toEqual([`${RENAME_COMMAND} ${SESSION} the name he typed in wsp`]);
+    const rows = (await rt.sessions.list(ws.id)).filter(v => v.claudeSessionId === SESSION);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(v => v.harnessTitle)).toEqual(["the name he typed in wsp", "the name he typed in wsp"]);
+    expect(await titleOf(rt, ws.id)).toBe("the name he typed in wsp");
+    // The harness's own store is where the name now lives, so the next read past the window brings it back.
+    advance(SESSION_TITLE_TTL_MS + 1);
+    expect(await titleOf(rt, ws.id)).toBe("the name he typed in wsp");
+  });
+
+  it("outlives the process: the name is on the session index the next host reads back", async () => {
+    const store = memoryStore();
+    const { backend } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store, adapters: { claude: titledAdapter({ keepsNames: true }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await session.finished;
+    await rt.sessions.rename(session.id, "the name");
+    expect(((await store.get("sessions", ws.id)) as { sessions: { harnessTitle?: string }[] }).sessions[0]?.harnessTitle).toBe("the name");
+  });
+
+  it("answers unsupported for a harness that keeps no name of a person's, and asks its machine nothing", async () => {
+    const { backend, writes } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await session.finished;
+    expect(await rt.sessions.rename(session.id, "the name")).toEqual({ outcome: "unsupported" });
+    expect(writes).toEqual([]);
+    expect(await titleOf(rt, ws.id)).toBe("make a server");
+  });
+
+  it("answers no-session when the store took nothing, and the row keeps the title it had", async () => {
+    const { backend } = titledBackend(() => "Building the server", () => "no-session");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await session.finished;
+    await until(async () => (await rt.sessions.list(ws.id))[0]?.harnessTitle !== undefined);
+    expect(await rt.sessions.rename(session.id, "the name")).toEqual({ outcome: "no-session" });
+    expect(await titleOf(rt, ws.id)).toBe("Building the server");
+  });
+
+  it("answers failed with the machine's own line when the store refused the write, and the row keeps the title it had", async () => {
+    const { backend } = titledBackend(() => "Building the server", () => "database is locked");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await session.finished;
+    await until(async () => (await rt.sessions.list(ws.id))[0]?.harnessTitle !== undefined);
+    // Not no-session: a store that refused the write said nothing about which sessions it has.
+    expect(await rt.sessions.rename(session.id, "the name")).toEqual({ outcome: "failed", error: "database is locked" });
+    expect(await titleOf(rt, ws.id)).toBe("Building the server");
+  });
+
+  it("answers no-session for a thread whose harness never named a session, and asks the machine nothing", async () => {
+    const { backend, writes } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, announces: false }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await session.finished;
+    // The turn ended without a session.start, so the row carries no harness id and the store is keyed by nothing.
+    expect((await rt.sessions.list(ws.id))[0]).not.toHaveProperty("claudeSessionId");
+    expect(await rt.sessions.rename(session.id, "the name")).toEqual({ outcome: "no-session" });
+    expect(writes).toEqual([]);
+    expect(await titleOf(rt, ws.id)).toBe("make a server");
+  });
+
+  it("answers not-found for a session this runtime does not hold", async () => {
+    const { backend } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
+    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    expect(await rt.sessions.rename("no-such-session", "the name")).toEqual({ outcome: "not-found" });
+  });
+
+  it("refuses a name that is nothing but space, before it asks anything of the machine", async () => {
+    const { backend, writes } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await session.finished;
+    await expect(rt.sessions.rename(session.id, "   ")).rejects.toThrow(EMPTY_TITLE_LINE);
+    expect(writes).toEqual([]);
+  });
+
+  it("refuses while the machine is not up, since the name goes into a store on it", async () => {
+    const { backend, writes } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await session.finished;
+    await rt.workspaces.nap(ws.id);
+    await expect(rt.sessions.rename(session.id, "the name")).rejects.toThrow("wake it to rename");
+    expect(writes).toEqual([]);
+  });
+
+  it("names the session the harness announced, whatever the runtime calls the row", async () => {
+    const { backend, writes } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, rekeys: true }) } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server", resume: SESSION });
+    await session.finished;
+    expect(session.id).not.toBe(SESSION);
+    await rt.sessions.rename(session.id, "the name");
+    expect(writes).toEqual([`${RENAME_COMMAND} ${SESSION} the name`]);
+  });
+});
+
+describe("the agents whose store keeps a name", () => {
+  it("rides on the harness's catalog row from its adapter, as steers does, and is written nowhere else", async () => {
+    const { backend } = titledBackend(() => null, () => "written");
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: HARNESS_ADAPTERS });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const rows = await rt.harnesses.list(ws.id);
+    expect(rows.map(c => c.harness).sort()).toEqual([...THREAD_AGENTS].sort());
+    const machine = { id: "m_1" } as unknown as Machine;
+    for (const row of rows) {
+      const adapter = HARNESS_ADAPTERS[row.harness as ThreadAgent]({ machine, workspaceId: ws.id, env: {} });
+      expect(row.renames, row.harness).toBe(adapter.renameSession !== undefined);
+      expect(keepsRename(row), row.harness).toBe(true);
+    }
+    // Without a machine the runtime's table answers, which is no answer: a client still offers the rename.
+    for (const row of await rt.harnesses.list()) {
+      expect(row.source).toBe("table");
+      expect(keepsRename(row), row.harness).toBe(true);
+    }
+  });
+
+  it("an adapter that carries no write says so on its row, and a client reads that as a no", async () => {
+    const { backend } = titledBackend(() => null);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const [row] = await rt.harnesses.list(ws.id);
+    expect(row).toMatchObject({ harness: "claude", renames: false, source: "table" });
+    // The row came from the table, so it is no answer yet; the same row from the machine is a no.
+    expect(keepsRename(row!)).toBe(true);
+    expect(keepsRename({ ...row!, source: "harness" })).toBe(false);
   });
 });

@@ -334,6 +334,10 @@ export const HarnessCatalog = z.object({
   /** Whether a running turn of this harness takes a message (sessions.steer); false where the runtime's table alone
    * answers, since only the adapter on a machine knows. The composer picks send-now's road from this before the click. */
   steers: z.boolean(),
+  /** Whether a person's name for one of this harness's sessions survives in the harness's own store (sessions.rename);
+   * false where the runtime's table alone answers, since only the adapter on a machine knows. Read it through
+   * keepsRename, which reads a table row as no answer rather than as a no. */
+  renames: z.boolean(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -345,6 +349,13 @@ export const HarnessCatalog = z.object({
   smallModel: z.string().optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
+
+/** Whether a rename of one of this harness's sessions is kept in its own store, as far as this catalog knows. The
+ * answer is the adapter's on the machine, so a row the runtime's table stood in for is not a no: a client offers the
+ * rename and the runtime answers unsupported if the adapter turns out to carry no write. */
+export function keepsRename(catalog: HarnessCatalog | null | undefined): boolean {
+  return catalog === null || catalog === undefined || catalog.source === "table" || catalog.renames;
+}
 
 /** The option a list marks as its default, if one is: what an unpicked picker shows and an unnamed start runs. */
 export function markedDefault<T extends HarnessOption>(options: ReadonlyArray<T>): T | undefined {
@@ -826,6 +837,17 @@ export interface ContextMenuItem {
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
 export const DESKTOP_MAC_CLASS = "desktop-mac";
 
+/** A key press the desktop shell took from its own menu and handed to the page, spelled the way a keyboard event
+ * spells it, so the page's one keybinding table answers it. */
+export interface ShellChord {
+  readonly key: string;
+  readonly code: string;
+  readonly metaKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly shiftKey: boolean;
+  readonly altKey: boolean;
+}
+
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
@@ -839,6 +861,10 @@ export interface DesktopBridge {
   capturePreview(workspaceId: string): Promise<void>;
   /** The last photograph taken of this workspace, as a data url, or nothing when none was taken. */
   workspacePreview(workspaceId: string): Promise<string | undefined>;
+  /** Whether a terminal holds focus, so the chords the shell's menu would zoom the window on stand aside for it. */
+  setTerminalFocus(focused: boolean): void;
+  /** A chord the shell stood aside from, for the page's keybindings to answer; returns the unsubscribe. */
+  onShellChord(handler: (chord: ShellChord) => void): () => void;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------
@@ -1629,6 +1655,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
   /** Sends a message into the session's running turn; replies with a SessionSteerResult. Takes the runtime's session
    * id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
+  /** Names the session's harness session in the harness's own store and keeps the name on the thread's rows; replies
+   * with a SessionRenameResult. Takes the runtime's session id, as sessions.interrupt does. */
+  z.object({ id: reqId, op: z.literal("sessions.rename"), sessionId: z.string(), title: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -1776,6 +1805,18 @@ export const SessionSteerOutcome = z.enum(["accepted", "not-running", "unsupport
 export type SessionSteerOutcome = z.infer<typeof SessionSteerOutcome>;
 export const SessionSteerResult = z.object({ outcome: SessionSteerOutcome });
 export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
+
+// --- session rename (what a name a person typed came to in the harness's store) -
+
+/** renamed: the harness's store took the name, in the field the harness itself writes, and the thread's rows carry
+ * it. unsupported: the session's harness keeps no name of a person's, so nothing was written and nothing would have
+ * survived its next turn. no-session: the store answered and holds no such session, or the harness never announced
+ * one for this thread. failed: the store was there and refused the write, and `error` is the line the machine gave
+ * for it. not-found: this runtime holds no such session. None is an error reply. */
+export const SessionRenameOutcome = z.enum(["renamed", "unsupported", "no-session", "failed", "not-found"]);
+export type SessionRenameOutcome = z.infer<typeof SessionRenameOutcome>;
+export const SessionRenameResult = z.object({ outcome: SessionRenameOutcome, error: z.string().optional() });
+export type SessionRenameResult = z.infer<typeof SessionRenameResult>;
 
 // --- session start (how the turn the caller asked for came to be) --------------
 

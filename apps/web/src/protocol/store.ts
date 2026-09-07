@@ -4,7 +4,7 @@
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import { NOTIFY_ME, foldThreads, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { noSuchThreadLine } from "../actions/format.js";
+import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
@@ -111,6 +111,11 @@ interface State {
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
+  /** Names the thread's harness session through the runtime, which writes it into the harness's own store: the
+   * machine comes up first, as the command line's own rename does, then the name goes, then the workspace's rows are
+   * reloaded so the sidebar shows it. True once the store took the name; an answer that named nothing and a failure
+   * are false and a toast, so the caller can leave the name where a person can still see it. */
+  renameThread(opts: { sessionId: string; workspaceId: string; harness: string; title: string }): Promise<boolean>;
   /** Asks the runtime for the catalogs as the workspace's machine reports them; a refusal leaves the table's in place. */
   loadHarnesses(workspaceId: string): Promise<void>;
 }
@@ -300,6 +305,26 @@ export const useStore = create<State>((set, get) => {
         // the next session event asks again
       }
     },
+    async renameThread({ sessionId, workspaceId, harness, title }) {
+      const api = get().api;
+      if (!api?.renameSession) return false;
+      try {
+        // The store the name goes into is on the machine, so a napping one is woken first and its reply repaints the
+        // row; every client that can rename can wake, since wake is not an optional verb.
+        const workspace = get().workspaces.find(w => w.id === workspaceId);
+        if (workspace !== undefined && workspace.phase !== "running") get().applyWorkspace(await api.wake(workspaceId));
+        const { outcome, error } = await api.renameSession(sessionId, title);
+        if (outcome !== "renamed") {
+          set({ toast: renameNotTakenLine(harness, outcome, error) });
+          return false;
+        }
+        await get().reloadSessions(workspaceId);
+        return true;
+      } catch (e: unknown) {
+        if (!(e instanceof DisconnectedError)) set({ toast: `${title}: ${e instanceof Error ? e.message : String(e)}` });
+        return false;
+      }
+    },
     async loadHarnesses(workspaceId) {
       const api = get().api;
       if (!api?.listHarnesses) return;
@@ -473,11 +498,20 @@ export function useForwarded(workspaceId: string | null, port: number | null): b
 export function useCapabilities(): Capabilities | null { return useStore(s => s.capabilities); }
 /** The catalogs a composer reads: the workspace's machine's once it answered, else the runtime's table. */
 export function useHarnessCatalogs(workspaceId: string | null): HarnessCatalog[] {
-  return useStore(s => (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? s.harnesses);
+  return useStore(s => catalogsIn(s, workspaceId));
 }
 export function useHarnessCatalog(harness: string, workspaceId: string | null = null): HarnessCatalog | null {
-  return useStore(s => ((workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? s.harnesses).find(c => c.harness === harness) ?? null);
+  return useStore(s => catalogIn(s, workspaceId, harness));
 }
+
+type Catalogs = Pick<State, "harnesses" | "harnessesByWorkspace">;
+
+/** The one rule for which catalogs answer for a workspace, so a surface reading many workspaces' rows and one
+ * reading its own read the same thing. */
+export const catalogsIn = (s: Catalogs, workspaceId: string | null): HarnessCatalog[] =>
+  (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? s.harnesses;
+export const catalogIn = (s: Catalogs, workspaceId: string | null, harness: string): HarnessCatalog | null =>
+  catalogsIn(s, workspaceId).find(c => c.harness === harness) ?? null;
 /** The thread the centre shows for a workspace: the one picked in the sidebar, else the workspace's latest; null with no threads yet. */
 export function useOpenThread(workspaceId: string | null): ThreadView | null {
   const sessions = useStore(s => (workspaceId !== null ? s.sessions[workspaceId] : undefined) ?? NO_SESSIONS);

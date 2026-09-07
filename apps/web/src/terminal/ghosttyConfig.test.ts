@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TerminalConfig } from "@wsp/protocol";
 import { appScheme, terminalSurfaceSettings } from "./ghosttyConfig";
 import type { GhosttyTheme } from "./ghostty/core";
+import { appTerminalFontSize } from "./ghostty/surface";
 
 const APP: GhosttyTheme = {
   background: { r: 14, g: 18, b: 24 },
@@ -32,11 +33,11 @@ describe("terminalSurfaceSettings", () => {
     for (const file of [null, NONE]) {
       expect(terminalSurfaceSettings(file, APP, { family: "Hack" }, false)).toEqual({
         theme: APP,
-        font: { family: "Hack" },
+        font: { family: "Hack", size: appTerminalFontSize() },
         padding: { left: 4, right: 4, top: 4, bottom: 4 },
         backgroundOpacity: 1,
       });
-      expect(terminalSurfaceSettings(file, APP, undefined, false).font).toBeUndefined();
+      expect(terminalSurfaceSettings(file, APP, undefined, false).font).toEqual({ size: appTerminalFontSize() });
     }
   });
 
@@ -49,18 +50,26 @@ describe("terminalSurfaceSettings", () => {
         selectionBackground: "rgb(88, 91, 112)",
         palette: FILE.palette,
       },
-      // The file's face and its fallbacks beat the detected family; the size is the file's since the pane offers no choice of it.
-      font: { family: "Berkeley Mono", fallbacks: ["Symbols Nerd Font Mono"], size: 13 },
+      // The file's face and its fallbacks beat the detected family; its size is not read, so the pane keeps the app's.
+      font: { family: "Berkeley Mono", fallbacks: ["Symbols Nerd Font Mono"], size: appTerminalFontSize() },
       cursor: { style: "underline", blink: false },
       padding: { left: 2, right: 4, top: 4, bottom: 4 },
       backgroundOpacity: 0.85,
     });
   });
 
-  it("a family the viewer typed wins over the file's, keeping the file's size; a file naming no face leaves the detected one", () => {
-    expect(terminalSurfaceSettings(FILE, APP, { family: "Hack" }, true).font).toEqual({ family: "Hack", size: 13 });
-    expect(terminalSurfaceSettings({ ...FILE, fontFamily: [] }, APP, { family: "Hack" }, false).font).toEqual({ family: "Hack", size: 13 });
-    expect(terminalSurfaceSettings({ ...FILE, fontFamily: [], fontSize: undefined }, APP, undefined, false).font).toBeUndefined();
+  it("a family the viewer typed wins over the file's; a file naming no face leaves the detected one", () => {
+    expect(terminalSurfaceSettings(FILE, APP, { family: "Hack" }, true).font).toEqual({ family: "Hack", size: appTerminalFontSize() });
+    expect(terminalSurfaceSettings({ ...FILE, fontFamily: [] }, APP, { family: "Hack" }, false).font).toEqual({ family: "Hack", size: appTerminalFontSize() });
+    expect(terminalSurfaceSettings({ ...FILE, fontFamily: [], fontSize: undefined }, APP, undefined, false).font).toEqual({ size: appTerminalFontSize() });
+  });
+
+  it("the size is the pane's, never the file's: a file at 16 leaves the pane's zoom on the surface, and the app's own size where the pane has no zoom", () => {
+    expect(terminalSurfaceSettings({ ...FILE, fontSize: 16 }, APP, { size: 12 }, false).font).toEqual({ family: "Berkeley Mono", fallbacks: ["Symbols Nerd Font Mono"], size: 12 });
+    expect(terminalSurfaceSettings({ ...FILE, fontSize: 16 }, APP, undefined, false).font).toEqual({ family: "Berkeley Mono", fallbacks: ["Symbols Nerd Font Mono"], size: appTerminalFontSize() });
+    expect(terminalSurfaceSettings({ ...FILE, fontFamily: [], fontSize: 16 }, APP, undefined, false).font).toEqual({ size: appTerminalFontSize() });
+    // The token the app ships is what the pane lands on, and it is the chat's size, not the meta one.
+    expect(appTerminalFontSize()).toBe(14);
   });
 
   it("a palette the file left empty is not sent, and a blink the file did not set leaves libghostty's default", () => {

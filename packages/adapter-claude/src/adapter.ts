@@ -4,9 +4,9 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { backgroundTasksLine, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionTitleMaker, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
-import { parseSessionTitle, parseTitleFor, sessionTitleCommand, titleForCommand } from "./session-title.js";
+import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
@@ -57,6 +57,8 @@ export interface ClaudeAdapter {
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
   /** What the CLI's own session file calls a session: its generated title, or the person's rename inside the CLI. */
   sessionTitle: SessionTitleReader;
+  /** Names the session in that same file, with the record the CLI's own rename appends. */
+  renameSession: SessionRenamer;
   /** Asks the CLI itself, in one print-mode turn, for a name for a thread it has just replied in. */
   titleFor: SessionTitleMaker;
   /** What every session's command is exported with; the one environment a turn on the machine gets. */
@@ -396,6 +398,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     steers: true,
     probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir, baseEnv: deps.baseEnv })).then(parseCatalogProbe),
     sessionTitle: (sessionId, exec) => exec(sessionTitleCommand({ configDir: deps.configDir, sessionId })).then(parseSessionTitle),
+    renameSession: (sessionId, title, exec) => exec(renameCommand({ configDir: deps.configDir, sessionId, title })).then(parseRename),
     titleFor: (turn, exec) =>
       exec(
         titleForCommand({

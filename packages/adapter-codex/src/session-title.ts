@@ -4,9 +4,11 @@
 // catalog's measured row for codex). Two columns name a thread: title, which
 // the CLI fills from the thread's opening words and never leaves null, and
 // name, which stays null until the person names the thread, so name wins where
-// it has one. Measured on codex-cli 0.153.0 against state_5.sqlite.
+// it has one, and a rename from here writes that same column. Measured on
+// codex-cli 0.153.0 against state_5.sqlite.
 
 import { generatedTitle, shellQuote } from "@wsp/protocol";
+import type { SessionRenameWrite } from "@wsp/protocol";
 import { buildCommand, buildEnv, slug } from "./command.js";
 
 /**
@@ -83,4 +85,46 @@ export function parseTitleFor(stdout: string): string | null {
     if (row.type === "agent_message" && typeof row.text === "string") text = row.text;
   }
   return text === undefined ? null : generatedTitle(text);
+}
+
+/** A SQL string literal: single quotes around it, and an embedded quote doubled, which is sqlite's own escape. */
+const sqlText = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+
+/** How long the write waits for a running codex to let go of the db before it gives up; a rename is a person waiting. */
+const BUSY_MS = 5_000;
+
+/** The words the write answers with on stdout: the rows the update changed, or the reason nothing was written. */
+const CHANGED = "changed";
+const FAILED = "failed";
+
+/**
+ * One shell line for the guest: the thread's name column set, the column the TUI's own rename writes, in the
+ * highest-versioned state db the read picks too. The db is the running codex's, so the write waits out its lock
+ * rather than failing at once, and `changes()` comes back on stdout so a row that is not there is not read as a
+ * write. The wait is the `.timeout` dot command and not the pragma of the same name, which would print its own
+ * value onto that stdout. Measured on sqlite3 3.40.1: the CLI stops at the first error, so a refused update never
+ * reaches `changes()` and prints its own message on stderr instead; that message is what a failure carries, since a
+ * lock that never came free says nothing about which threads the index has.
+ */
+export function renameCommand(options: { home: string; threadId: string; title: string }): string {
+  const query =
+    `update threads set name = ${sqlText(options.title)} where id = '${slug("threadId", options.threadId)}'; ` +
+    `select '${CHANGED} ' || changes();`;
+  return (
+    `command -v sqlite3 > /dev/null 2>&1 || { echo '${FAILED} sqlite3 is not on the machine'; exit 0; }; ` +
+    `cd ${shellQuote(options.home)} 2>/dev/null || { echo '${FAILED} no codex home on the machine'; exit 0; }; ` +
+    `d=$(ls -1 state_*.sqlite 2>/dev/null | sort -t_ -k2,2n | tail -n 1); ` +
+    `[ -n "$d" ] || { echo '${FAILED} no codex thread index on the machine'; exit 0; }; ` +
+    `e=$(sqlite3 -cmd ${shellQuote(`.timeout ${BUSY_MS}`)} "$d" ${shellQuote(query)} 2>&1) && printf '%s\n' "$e" || printf '%s %s\n' ${FAILED} "$e"`
+  );
+}
+
+/** What the write came to: the rows the update changed, a zero being a thread the index does not hold, and anything
+ * else the reason nothing was written, in the words the machine used. */
+export function parseRename(stdout: string): SessionRenameWrite {
+  const said = stdout.split("\n").map(line => line.trim()).filter(line => line !== "");
+  const changed = said.find(line => line.startsWith(`${CHANGED} `));
+  if (changed !== undefined) return Number.parseInt(changed.slice(CHANGED.length + 1), 10) > 0 ? { kind: "written" } : { kind: "no-session" };
+  const failed = said.find(line => line.startsWith(`${FAILED} `));
+  return { kind: "failed", error: failed !== undefined ? failed.slice(FAILED.length + 1) : said.join("; ") || "the machine said nothing about the write" };
 }

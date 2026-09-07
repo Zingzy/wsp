@@ -11,6 +11,7 @@ import type { Retry } from "./preload.js";
 import { pagePreviews } from "./previews.js";
 import { checkSetup } from "./setup.js";
 import { windowOptions } from "./window.js";
+import { isShellZoomChord, shellChordOf } from "./zoom.js";
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
 const WEB_DIR = here("../web");
@@ -65,6 +66,15 @@ ipcMain.handle("menu:context", (event, raw: unknown) => {
   return chooseFrom(parseContextMenuItems(raw), (template, onClose) => Menu.buildFromTemplate(template).popup({ ...(win === null ? {} : { window: win }), callback: onClose }));
 });
 
+// The windows whose page says a terminal holds focus. The page pushes it, since a key press is read here before the
+// page is asked anything.
+const terminalFocus = new Set<number>();
+ipcMain.on("terminal:focus", (event, focused: unknown) => {
+  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) return;
+  if (focused === true) terminalFocus.add(event.sender.id);
+  else terminalFocus.delete(event.sender.id);
+});
+
 function locate(): Promise<Located> {
   const env = process.env["WSP_HOME"];
   const pointer = currentHome();
@@ -110,6 +120,16 @@ async function showApp(located: Located): Promise<boolean> {
     event.preventDefault();
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
   });
+  // The window's contents are gone by the time it reports closed, so its id is read while they are here.
+  const contentsId = win.webContents.id;
+  // The menu's zoom rows are registered chords, so the page never receives them; while a terminal has focus they mean
+  // that pane's text size, so the window's zoom stands aside and the press goes to the page's own keybindings.
+  win.webContents.on("before-input-event", (event, input) => {
+    if (!terminalFocus.has(contentsId) || !isShellZoomChord(input, process.platform)) return;
+    event.preventDefault();
+    win.webContents.send("shell:chord", shellChordOf(input));
+  });
+  win.on("closed", () => terminalFocus.delete(contentsId));
   await win.loadURL(session.url);
   return true;
 }

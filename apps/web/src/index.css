@@ -113,8 +113,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --header-frame-inset: var(--sidebar-content-inset);
   --header-gap: 1.875rem;
   --top-row-meta-alpha: 55%;
-  /* The size of code and meta text in the sidebar and the composer; the terminal's default text size. */
+  /* The size of code and meta text in the sidebar and the composer. */
   --font-size-mono: 11px;
+  /* The terminal's default text size: a pane is read like the chat, so it takes the chat's size, not the meta one. */
+  --font-size-terminal: 14px;
   --search-row-tint: 5%;
 
   @variant dark {

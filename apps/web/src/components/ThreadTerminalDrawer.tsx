@@ -252,7 +252,7 @@ export function TerminalViewport({
   useEffect(() => {
     if (fontRef.current === config.font) return;
     fontRef.current = config.font;
-    void terminalRef.current?.setFont(terminalFontWith(fileRef.current, config.font, chosenRef.current) ?? {});
+    void terminalRef.current?.setFont(terminalFontWith(fileRef.current, config.font, chosenRef.current));
   }, [config.font]);
 
   // A read that failed while the socket was down, or a file saved since, lands on the next live socket: a pane already
@@ -267,7 +267,7 @@ export function TerminalViewport({
       fileRef.current = file;
       const settings = terminalSurfaceSettings(file, terminalThemeFromApp(containerRef.current), fontRef.current, chosenRef.current);
       terminal.setTheme(settings.theme);
-      void terminal.setFont(settings.font ?? {});
+      void terminal.setFont(settings.font);
       terminal.setPadding(settings.padding);
       terminal.setBackgroundOpacity(settings.backgroundOpacity);
       setTranslucent(terminal.translucent);
@@ -296,7 +296,7 @@ export function TerminalViewport({
       const settings = terminalSurfaceSettings(file, terminalThemeFromApp(mount), setupFont, chosenRef.current);
       const terminalOptions: GhosttyTerminalSurfaceOptions = {
         theme: settings.theme,
-        ...(settings.font ? { font: settings.font } : {}),
+        font: settings.font,
         ...(settings.cursor ? { cursor: settings.cursor } : {}),
         padding: settings.padding,
         backgroundOpacity: settings.backgroundOpacity,
@@ -325,7 +325,7 @@ export function TerminalViewport({
       terminalRef.current = terminal;
       setTranslucent(terminal.translucent);
       // A font change that landed while the surface was loading found terminalRef null.
-      if (fontRef.current !== setupFont) void terminal.setFont(terminalFontWith(file, fontRef.current, chosenRef.current) ?? {});
+      if (fontRef.current !== setupFont) void terminal.setFont(terminalFontWith(file, fontRef.current, chosenRef.current));
 
       setupCleanups.push(
         io.attach({

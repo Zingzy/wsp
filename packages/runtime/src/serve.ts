@@ -260,6 +260,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "sessions.interrupt":
               send({ id: msg.id, ok: true, ...(await rt.sessions.interrupt(msg.sessionId)) });
               return;
+            case "sessions.rename":
+              send({ id: msg.id, ok: true, ...(await rt.sessions.rename(msg.sessionId, msg.title)) });
+              return;
             case "sessions.steer":
               send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) })) });
               return;

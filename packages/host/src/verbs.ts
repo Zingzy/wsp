@@ -15,7 +15,7 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
-import { CATALOG_AGENTS, THREAD_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, THREAD_AGENTS, agentName } from "@wsp/catalog";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import {
   AFTER_CUT_LINE,
@@ -33,6 +33,8 @@ import {
   RecipeTick,
   SessionInterruptOutcome,
   SessionInterruptResult,
+  SessionRenameOutcome,
+  SessionRenameResult,
   SessionStartOutcome,
   SessionStartResult,
   TURN_END_WORDS,
@@ -424,6 +426,37 @@ const STOP_WORDS: Record<SessionInterruptOutcome, string> = { accepted: "stopped
 
 export function stopLine(stopped: Stopped): string {
   return `thread ${stopped.threadId} ${STOP_WORDS[stopped.outcome]}`;
+}
+
+/** What a rename came to, as every director prints it: the runtime's five answers, none an error. `error` is the
+ * line the machine gave for a write it refused, and rides only that answer. */
+export interface Renamed {
+  threadId: string;
+  title: string;
+  harness: string;
+  outcome: SessionRenameOutcome;
+  error?: string;
+}
+
+/** Names the thread a person names, through the runtime, which writes the name into the agent's own store on the
+ * machine. Parsed, not trusted: an outcome outside the enum must not read as renamed. */
+export async function rename(client: HostClient, thread: ThreadView, title: string): Promise<Renamed> {
+  const { outcome, error } = SessionRenameResult.parse(await client.request("sessions.rename", { sessionId: thread.sessionId, title }));
+  return { threadId: thread.id, title, harness: thread.harness, outcome, ...(error !== undefined ? { error } : {}) };
+}
+
+/** Each answer in one phrase, the agent named where the answer is about the agent's own store, and the machine's own
+ * line where the store refused the write: nothing here says which sessions a store has unless the store said it. */
+export function renameLine(renamed: Renamed): string {
+  const agent = agentName(renamed.harness);
+  const words: Record<SessionRenameOutcome, string> = {
+    renamed: `named ${renamed.title}, in ${agent} too`,
+    unsupported: `not named: ${agent} keeps no name of a person's for a session`,
+    "no-session": `not named: ${agent} on the machine has no such session`,
+    failed: `not named: ${renamed.error ?? "the machine said nothing about the write"}`,
+    "not-found": "not found by the host",
+  };
+  return `thread ${renamed.threadId} ${words[renamed.outcome]}`;
 }
 
 /** What dropping a workspace takes off this computer, counted before anyone is asked: its record and its threads. */
@@ -1387,6 +1420,35 @@ export const VERBS: readonly Verb[] = [
         const target = await awake(client, found, "send", QUIET_LINE);
         const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell), title }), "agent", QUIET_TURN));
         return asText(turnText(out), out);
+      },
+    }),
+  },
+  {
+    name: "thread rename",
+    usage: 'wsp thread rename <thread> "<title>"',
+    about: "names the thread inside the agent's own store, so the agent shows the same name",
+    options: {},
+    run: async ctx => {
+      const [ref, title] = ctx.args;
+      if (ref === undefined || title === undefined || ctx.args.length !== 2) throw usageRefusal("wsp thread rename takes a thread and one name");
+      const client = await ctx.client();
+      const thread = await threadOf(client, ref);
+      await awake(client, await workspaceOf(client, thread.workspaceId), "rename", line => ctx.io.error(line));
+      const renamed = await rename(client, thread, title);
+      ctx.out.emit(renamed, renameLine(renamed));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Names the thread (by id, or a prefix of it) in the agent's own store on the machine, the field the agent writes when a person renames the session inside it, so the thread reads by that name in wsp and in the agent. outcome renamed means the store took it; unsupported means the thread's agent keeps no name of a person's, which is an answer, not an error; no-session means the agent's store on the machine has no such session; failed means the store refused the write and error carries the machine's own line for it. Whether an agent keeps a name is on its row in harnesses.list, from the adapter on the machine.",
+      input: { thread: z.string(), title: z.string() },
+      output: { threadId: z.string(), title: z.string(), harness: z.string(), outcome: SessionRenameOutcome, error: z.string().optional() },
+      call: async ({ thread: ref, title }, deps) => {
+        const client = await deps.client();
+        const thread = await threadOf(client, ref);
+        await awake(client, await workspaceOf(client, thread.workspaceId), "rename", QUIET_LINE);
+        const renamed = await rename(client, thread, title);
+        return asText(renameLine(renamed), { ...renamed });
       },
     }),
   },
