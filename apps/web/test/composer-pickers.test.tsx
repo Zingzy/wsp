@@ -90,6 +90,7 @@ import { useComposerOptionsStore } from "../src/components/chat/composerOptionsS
 import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
 import { DAEMON_HELLO, LISTING, fakeWire, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
+import { harnessCatalog } from "@wsp/runtime";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -139,11 +140,15 @@ const CLAUDE: HarnessCatalog = {
 const TABLE: HarnessCatalog = {
   ...CLAUDE,
   source: "table",
-  version: "claude --help 2.1.257, 2026-09-05",
+  version: "--help 2.1.257, 2026-09-05",
   models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] }],
 };
 
 const CODEX: HarnessCatalog = { harness: "codex", label: "Codex", source: "table", version: null, models: [{ value: "gpt-6-astra", label: "GPT-6 Astra" }], efforts: [{ value: "high", label: "High" }], contextWindows: [], permissionModes: [], steers: false };
+
+/** The runtime's own tables, what the composer is served on a machine whose binaries never answered. */
+const CODEX_TABLE = harnessCatalog("codex")!;
+const CLAUDE_TABLE = harnessCatalog("claude")!;
 
 function fixtureApi(opts: { table: HarnessCatalog[]; machine?: HarnessCatalog[] | Error; history?: ReadonlyArray<SessionEvent>; sessions?: SessionView[] }) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
@@ -277,8 +282,40 @@ describe("composer pickers", () => {
     await setup(api);
     await waitFor(() => expect(picker("model")).not.toBeNull());
     const menu = await openModelMenu();
-    expect(menu.querySelector("[data-composer-catalog-source]")?.textContent).toBe("From a table, binary did not answer · pinned to claude --help 2.1.257, 2026-09-05");
+    expect(menu.querySelector("[data-composer-catalog-source]")?.textContent).toBe("claude table · --help 2.1.257, 2026-09-05");
     expect(within(menu).getAllByRole("option")).toHaveLength(1);
+  });
+
+  it("each tab of a machine that never answered lists that agent's own pinned models under that agent's own footer", async () => {
+    const { api } = fixtureApi({ table: [CLAUDE_TABLE, CODEX_TABLE], machine: new Error("machine not running") });
+    await setup(api);
+    await waitFor(() => expect(picker("model")).not.toBeNull());
+    await openModelMenu();
+    const source = () => modelMenu()!.querySelector("[data-composer-catalog-source]")?.textContent;
+    const tab = (harness: string) => modelMenu()!.querySelector<HTMLElement>(`[data-composer-harness="${harness}"]`)!;
+
+    fireEvent.click(tab("codex"));
+    await waitFor(() => expect(within(modelMenu()!).getAllByRole("option").map(el => el.dataset["composerOption"])).toEqual(CODEX_TABLE.models.map(m => m.value)));
+    expect(CODEX_TABLE.models.length).toBeGreaterThan(0);
+    expect(source()).toBe("codex table · app-server 0.153.0, 2026-09-07");
+
+    fireEvent.click(tab("claude"));
+    await waitFor(() => expect(source()).toBe("claude table · --help 2.1.257, 2026-09-05"));
+  });
+
+  it("a binary that answered and named a sign-in as why says that in the footer, with its own pin behind it", async () => {
+    const refused = { ...CODEX_TABLE, refusal: "Codex is not signed in on this machine; run codex login --device-auth there" };
+    const { api } = fixtureApi({ table: [CLAUDE_TABLE, refused], machine: [CLAUDE_TABLE, refused] });
+    await setup(api);
+    await waitFor(() => expect(picker("model")).not.toBeNull());
+    await openModelMenu();
+    fireEvent.click(modelMenu()!.querySelector<HTMLElement>('[data-composer-harness="codex"]')!);
+    await waitFor(() =>
+      expect(modelMenu()!.querySelector("[data-composer-catalog-source]")?.textContent).toBe(
+        "Codex is not signed in on this machine; run codex login --device-auth there · app-server 0.153.0, 2026-09-07",
+      ),
+    );
+    expect(within(modelMenu()!).getAllByRole("option").length).toBe(CODEX_TABLE.models.length);
   });
 
   it("sends nothing for a picker left alone, though it shows the default that will run", async () => {

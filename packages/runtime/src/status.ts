@@ -10,7 +10,7 @@
 // awake and billing forever.
 
 import { isMissing, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
-import { appendCostPoint, goneWords, type EventUnion, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { appendCostPoint, goneWords, reachShown, type EventUnion, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import type { Store } from "./store.js";
 
@@ -58,12 +58,35 @@ export interface Probed {
    * paused machine), which says nothing about the guest either way, so it decides nothing on its own and only sends
    * the caller to the provider for the machine's real state. */
   fromDaemon: boolean;
+  /** The request failed before it left this computer (no DNS, no route out): the silence is the computer's, and
+   * says nothing about the machine. */
+  offline?: boolean;
+}
+
+/** The system errors under a failed fetch that mean this computer has no road out: the name would not resolve, or
+ * there is no route to anything. A refused or reset connection and a timeout are the far end's and stay the
+ * machine's miss (a dropped edge request is how the poll finds a machine gone). */
+const OFFLINE_CODES = new Set(["ENOTFOUND", "EAI_AGAIN", "EAI_FAIL", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH", "EHOSTDOWN"]);
+
+/** fetch rejects with TypeError "fetch failed" for every failure under HTTP and puts the system error, or an
+ * AggregateError of one per address tried, in its cause. */
+export function roadFailed(e: unknown): boolean {
+  if (!(e instanceof TypeError) || e.message !== "fetch failed") return false;
+  const cause = e.cause as { code?: unknown; errors?: unknown } | undefined;
+  const codes = Array.isArray(cause?.errors) ? cause.errors.map(err => (err as { code?: unknown } | null)?.code) : [cause?.code];
+  return codes.length > 0 && codes.every(code => typeof code === "string" && OFFLINE_CODES.has(code));
+}
+
+/** The silence a failed request is: the machine's, or this computer's when the request never got out. */
+export function missed(e: unknown): Probed {
+  return { state: "unreachable", fromDaemon: false, ...(roadFailed(e) ? { offline: true } : {}) };
 }
 
 /** One HTTP round trip against the minted URL. A prompt 502 means the edge
  * dialed the guest and nothing listens on the daemon port. A late answer, 502
  * included, is a provider slow spell: the machine is there, the edge is not
- * keeping up. Silence is unreachable. */
+ * keeping up. Silence is unreachable; a request that never got out is the
+ * computer offline. */
 export async function probeReach(url: string, o: ProbeOptions, now: () => number = Date.now): Promise<Probed> {
   const started = now();
   try {
@@ -72,8 +95,8 @@ export async function probeReach(url: string, o: ProbeOptions, now: () => number
     const fromDaemon = res.status === DAEMON_ANSWER;
     if (now() - started > o.promptMs) return { state: "slow", fromDaemon };
     return { state: res.status === 502 ? "no-daemon" : "reachable", fromDaemon };
-  } catch {
-    return { state: "unreachable", fromDaemon: false };
+  } catch (e) {
+    return missed(e);
   }
 }
 
@@ -190,6 +213,13 @@ interface Suspect {
   zombie?: string;
 }
 
+/** What the last probe of a workspace's current machine found, raw, and the reach word its row was last given. */
+interface Probes {
+  machineId: string;
+  last?: ReachState;
+  shown: ReachState;
+}
+
 export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const probeTimeoutMs = o.defaults?.probeTimeoutMs ?? PROBE_TIMEOUT_MS;
   const promptMs = o.defaults?.promptMs ?? PROMPT_MS;
@@ -205,6 +235,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   /** The words behind a gone answer, per workspace, so the status that reports it can quote the provider. */
   const goneReasons = new Map<string, string>();
   const suspects = new Map<string, Suspect>();
+  const probes = new Map<string, Probes>();
 
   // Exact awake accounting comes from lifecycle events, not poll edges. A
   // workspace hydrated already-running starts its meter lazily at first tick.
@@ -252,6 +283,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     reconciled.delete(e.workspaceId);
     goneReasons.delete(e.workspaceId);
     suspects.delete(e.workspaceId);
+    probes.delete(e.workspaceId);
   });
 
   // The stored series is as of the tick that last added a point, and a run of one rate is a straight line from
@@ -318,6 +350,16 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     } catch (e) {
       return `${took()} (${e instanceof Error ? e.message : String(e)})`;
     }
+  };
+
+  /** The probes of this workspace's current machine; a replaced machine starts clean, and a machine never probed is
+   * given the word the runtime claims for a running one until a probe says otherwise. */
+  const probesOf = (r: StatusRecord): Probes => {
+    const known = probes.get(r.id);
+    if (known !== undefined && known.machineId === r.machineId) return known;
+    const fresh: Probes = { machineId: r.machineId, shown: "reachable" };
+    probes.set(r.id, fresh);
+    return fresh;
   };
 
   /** The spell this workspace's current machine is in; a replaced machine starts clean. */
@@ -393,23 +435,36 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         }
         if (!daemonReach) return done(await machineState(r, reconcile, false), { state: "unsupported" });
 
-        let reach: PreviewReach;
+        const memory = probesOf(r);
+        let route: PreviewReach | undefined;
+        let probed: Probed;
         try {
-          reach = await daemonReach();
-        } catch {
-          return done(await machineState(r, reconcile, true), { state: "unreachable" });
+          route = await daemonReach();
+          probed = await probeReach(route.url, probe, clock.now);
+        } catch (e) {
+          probed = missed(e);
         }
-        const probed = await probeReach(reach.url, probe, clock.now);
+        const at = route === undefined ? {} : { url: route.url, expiresAt: route.expiresAt };
+        // Nothing was learnt about the machine: the row keeps its word, the run of probes under it is left as it was.
+        if (probed.offline === true) return done(await machineState(r, reconcile, false), { state: memory.shown, ...at, offline: true });
         if (probed.fromDaemon) sawAwake(r.id);
-        const status: ReachStatus = { state: probed.state, url: reach.url, expiresAt: reach.expiresAt };
+        const shown = reachShown(memory.last, probed.state);
+        memory.last = probed.state;
+        memory.shown = shown;
+        // A route the provider would not mint is a failed reach with no zombie window: the guest was never dialled.
+        if (route === undefined) return done(await machineState(r, reconcile, true), { state: shown });
+        const status: ReachStatus = { state: probed.state, ...at };
         if (probed.state !== "slow" && probed.state !== "unreachable") {
           suspects.delete(r.id);
           // An answer the guest did not send is a reason to ask the provider, never a verdict on the guest: the
           // state on show stays as it was, and a machine the provider has paused is caught by its own word.
           return done(await machineState(r, reconcile, !probed.fromDaemon), status);
         }
+        // The window and the exec probe run on the raw silence; only the word on the row waits for a second one.
         const judged = await judge(r, status, reconcile);
-        return { ...done(judged.state, judged.reach), ...(judged.reason !== undefined ? { reason: judged.reason } : {}) };
+        const reach = judged.reach.state === "zombie" ? judged.reach : { ...judged.reach, state: shown };
+        memory.shown = reach.state;
+        return { ...done(judged.state, reach), ...(judged.reason !== undefined ? { reason: judged.reason } : {}) };
       }),
     );
   };

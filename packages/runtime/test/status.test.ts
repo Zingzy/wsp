@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer, type Server } from "node:http";
-import { EventUnion, sendRefusal, workspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { EventUnion, computerOffline, sendRefusal, workspaceState, workspaceWord, type WorkspaceStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { createStatusTracker, type StatusWatchOptions } from "../src/status.js";
+import { POLL_INTERVAL_MS, createStatusTracker, probeReach, roadFailed, type StatusWatchOptions } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -893,5 +893,199 @@ describe("gone machines and the meter", () => {
     expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: 2 * TICK_MS });
     stop();
     await second.close();
+  });
+});
+
+describe("the reach word a row shows", () => {
+  /** A daemon stub the test switches between answering 426 at once and holding every request open past the probe's timeout. */
+  async function switchable(): Promise<{ port: number; mode: { answer: boolean }; hits: () => number }> {
+    const mode = { answer: true };
+    let hits = 0;
+    const server = createServer((_req, res) => {
+      hits++;
+      if (mode.answer) res.writeHead(426).end();
+    });
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    openServers.push(server);
+    const addr = server.address();
+    return { port: typeof addr === "object" && addr !== null ? addr.port : 0, mode, hits: () => hits };
+  }
+  /** A port nothing listens on: the far end refuses, which is the machine's miss, not this computer's. */
+  async function closedPort(): Promise<number> {
+    const server = createServer();
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    await new Promise<void>(r => server.close(() => r()));
+    return port;
+  }
+  /** What fetch rejects with when the name will not resolve: the shape Node gives, with the system error as the cause. */
+  const noDns = (code = "ENOTFOUND"): TypeError => new TypeError("fetch failed", { cause: Object.assign(new Error(`getaddrinfo ${code} edge.example`), { code }) });
+  /** The same over several addresses tried, as Node reports a host with no route to any of them. */
+  const noRoute = (): TypeError => new TypeError("fetch failed", { cause: new AggregateError([Object.assign(new Error("connect ENETUNREACH"), { code: "ENETUNREACH" }), Object.assign(new Error("connect ENETUNREACH"), { code: "ENETUNREACH" })]) });
+  /** The probe's timeout is real time, so a held request costs the test 300 ms; the prompt bound never trips on the fake clock. */
+  const opts = { probeTimeoutMs: 300, promptMs: 5_000 };
+  const wordOf = (s: WorkspaceStatus): string => workspaceWord(workspaceState({ phase: s.phase, machineState: s.machineState, reach: s.reach.state }));
+
+  it("one silence keeps the word an answer earned, a second in a row turns it Unreachable, an answer clears it at once; the raw miss under it still sends the poll to the provider", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle });
+    await rt.workspaces.create({ golden: "snap_g", name: "steady" });
+    const daemon = await switchable();
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${daemon.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    const calls = countProvider(backend);
+    const poll = async (): Promise<WorkspaceStatus> => {
+      fc.advance(POLL_INTERVAL_MS);
+      return (await rt.status.list({ ...opts, reconcile: "on-failure" }))[0]!;
+    };
+
+    expect(wordOf(await poll())).toBe("Running");
+    daemon.mode.answer = false;
+    const first = await poll();
+    expect(first.reach.state).toBe("reachable");
+    expect(wordOf(first)).toBe("Running");
+    expect(calls().state).toBe(1);
+    const second = await poll();
+    expect(second.reach.state).toBe("unreachable");
+    expect(wordOf(second)).toBe("Unreachable");
+    daemon.mode.answer = true;
+    const back = await poll();
+    expect(back.reach.state).toBe("reachable");
+    expect(wordOf(back)).toBe("Running");
+    daemon.mode.answer = false;
+    expect(wordOf(await poll())).toBe("Running");
+    expect(wordOf(await poll())).toBe("Unreachable");
+    expect(daemon.hits()).toBe(6);
+  });
+
+  it("over the poll, a single silence pushes no status at all and two push Unreachable once", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle, status: { ...opts, costIntervalMs: 24 * 3_600_000 } });
+    await rt.workspaces.create({ golden: "snap_g", name: "watched" });
+    const daemon = await switchable();
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${daemon.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    const seen: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => seen.push((e as { status: WorkspaceStatus }).status));
+    const stop = rt.status.watch();
+    try {
+      await until(() => seen.length === 1);
+      expect(seen[0]!.reach.state).toBe("reachable");
+      daemon.mode.answer = false;
+      const polled = daemon.hits();
+      fc.advance(POLL_INTERVAL_MS);
+      await until(() => daemon.hits() > polled);
+      await new Promise(r => setTimeout(r, 400));
+      expect(seen.length).toBe(1);
+      fc.advance(POLL_INTERVAL_MS);
+      await until(() => seen.length === 2);
+      expect(wordOf(seen[1]!)).toBe("Unreachable");
+      daemon.mode.answer = true;
+      fc.advance(POLL_INTERVAL_MS);
+      await until(() => seen.length === 3);
+      expect(wordOf(seen[2]!)).toBe("Running");
+    } finally {
+      stop();
+    }
+  });
+
+  it("the probe tells this computer's road from the machine's silence: no DNS or no route is offline; a timeout, a refused port and a dropped request are the machine's miss", async () => {
+    expect(roadFailed(noDns())).toBe(true);
+    expect(roadFailed(noDns("EAI_AGAIN"))).toBe(true);
+    expect(roadFailed(noRoute())).toBe(true);
+    expect(roadFailed(new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) }))).toBe(false);
+    expect(roadFailed(new TypeError("fetch failed", { cause: Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }) }))).toBe(false);
+    expect(roadFailed(new TypeError("fetch failed"))).toBe(false);
+    expect(roadFailed(new DOMException("timed out", "TimeoutError"))).toBe(false);
+    expect(roadFailed(new Error("machine m1 is on a backend without preview URLs"))).toBe(false);
+
+    const probe = { timeoutMs: opts.probeTimeoutMs, promptMs: opts.promptMs };
+    const held = await httpStub(426, "never");
+    openServers.push(held.server);
+    expect(await probeReach(`http://127.0.0.1:${held.port}/`, probe)).toEqual({ state: "unreachable", fromDaemon: false });
+    expect(await probeReach(`http://127.0.0.1:${await closedPort()}/`, probe)).toEqual({ state: "unreachable", fromDaemon: false });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(noDns());
+    try {
+      expect(await probeReach("http://edge.example/", probe)).toEqual({ state: "unreachable", fromDaemon: false, offline: true });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("a request that never leaves this computer marks no row: each keeps its word with the computer flagged offline, the provider is not asked, the zombie window does not run, and the run of misses under it is neither broken nor extended", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle });
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await rt.workspaces.create({ golden: "snap_g", name: "beta" });
+    const alpha = await switchable();
+    const beta = await switchable();
+    // An expired mint, so every poll asks for the route again and the test can fail the mint itself the way a DNS miss does.
+    const ports = { m1: alpha.port, m2: beta.port };
+    let mintFails = false;
+    for (const m of backend.machines) {
+      m.previewUrl = async port => {
+        if (mintFails) throw noDns();
+        return { url: `http://127.0.0.1:${ports[m.id as keyof typeof ports]}/?port=${port}`, token: "t", expiresAt: Date.now() };
+      };
+    }
+    const calls = countProvider(backend);
+    const poll = async (): Promise<Record<string, WorkspaceStatus>> => {
+      fc.advance(POLL_INTERVAL_MS);
+      return Object.fromEntries((await rt.status.list({ ...opts, reconcile: "on-failure" })).map(s => [s.name, s]));
+    };
+    /** Polls with every request from this computer failing before it leaves, the probe's or the mint's. */
+    const offline = async (road: "probe" | "mint", fn: () => Promise<void>): Promise<void> => {
+      const fetchSpy = road === "probe" ? vi.spyOn(globalThis, "fetch").mockRejectedValue(noDns()) : undefined;
+      mintFails = road === "mint";
+      try {
+        await fn();
+      } finally {
+        fetchSpy?.mockRestore();
+        mintFails = false;
+      }
+    };
+
+    beta.mode.answer = false;
+    await poll();
+    let rows = await poll();
+    expect(wordOf(rows["alpha"]!)).toBe("Running");
+    expect(wordOf(rows["beta"]!)).toBe("Unreachable");
+    expect(computerOffline(Object.values(rows))).toBe(false);
+    const asked = calls().state;
+    const polled = alpha.hits() + beta.hits();
+
+    for (const road of ["probe", "mint"] as const) {
+      await offline(road, async () => {
+        for (let i = 0; i < 8; i++) {
+          rows = await poll();
+          expect(rows["alpha"]!.reach, road).toMatchObject({ state: "reachable", offline: true });
+          expect(rows["beta"]!.reach, road).toMatchObject({ state: "unreachable", offline: true });
+          expect(wordOf(rows["alpha"]!)).toBe("Running");
+          expect(wordOf(rows["beta"]!)).toBe("Unreachable");
+          expect(computerOffline(Object.values(rows))).toBe(true);
+        }
+      });
+    }
+    // Sixteen polls, four minutes on the clock: no provider call, no exec probe, and nothing reached the daemons.
+    expect(calls().state).toBe(asked);
+    expect(backend.machines.flatMap(m => m.execLog).filter(c => c === "echo ok")).toEqual([]);
+    expect(alpha.hits() + beta.hits()).toBe(polled);
+
+    beta.mode.answer = true;
+    rows = await poll();
+    expect(rows["alpha"]!.reach).toEqual(expect.not.objectContaining({ offline: true }));
+    expect(wordOf(rows["alpha"]!)).toBe("Running");
+    expect(wordOf(rows["beta"]!)).toBe("Running");
+    expect(computerOffline(Object.values(rows))).toBe(false);
+
+    // One miss, the computer offline, then a miss: two misses in a row for the machine, so the word turns.
+    alpha.mode.answer = false;
+    expect(wordOf((await poll())["alpha"]!)).toBe("Running");
+    await offline("probe", async () => {
+      expect((await poll())["alpha"]!.reach).toMatchObject({ state: "reachable", offline: true });
+    });
+    expect(wordOf((await poll())["alpha"]!)).toBe("Unreachable");
   });
 });

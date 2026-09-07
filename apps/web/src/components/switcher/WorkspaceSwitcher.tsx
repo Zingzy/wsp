@@ -11,6 +11,7 @@ import { deriveSidebarProjects } from "../../adapt/index.js";
 import { cn } from "../../lib/utils.js";
 import { desktopBridge } from "../../lib/desktopShell.js";
 import { useStore } from "../../protocol/store.js";
+import { ROW_META_CLASS } from "../../sidebar/rowGrammar.js";
 import { capturePagePreview, loadPagePreviews, useWorkspacePreviews } from "../../shell/workspacePreviews.js";
 import { highlightedWorkspaceId, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../../shell/workspaceSwitcher.js";
 import { buildSwitcherCards, type SwitcherCard } from "./switcherCards.js";
@@ -23,9 +24,7 @@ export function WorkspaceSwitcher() {
   const workspaces = useStore(s => s.workspaces);
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
-  const costs = useStore(s => s.costs);
   const selectedThreadId = useStore(s => s.selectedThreadId);
-  const lines = useWorkspacePreviews(s => s.lines);
   const images = useWorkspacePreviews(s => s.images);
   const [painted, setPainted] = useState(false);
 
@@ -63,13 +62,11 @@ export function WorkspaceSwitcher() {
     return buildSwitcherCards({
       projects: deriveSidebarProjects({ workspaces, statuses, sessions }),
       ids,
-      costs,
-      lines,
       images,
       currentId: from,
       pinnedThreadId: selectedThreadId,
     });
-  }, [costs, from, ids, images, lines, open, painted, selectedThreadId, sessions, statuses, workspaces]);
+  }, [from, ids, images, open, painted, selectedThreadId, sessions, statuses, workspaces]);
 
   if (!open || !painted) return null;
   return (
@@ -102,17 +99,11 @@ function SwitcherCardView({ card, highlighted }: { card: SwitcherCard; highlight
       role="option"
     >
       {desktopBridge()?.workspacePreview !== undefined ? <CardPreview card={card} /> : null}
-      <span className="truncate font-medium text-foreground text-sm" data-card-name>
+      <span className="truncate text-foreground text-sm" data-card-name>
         {card.name}
       </span>
-      <span className="truncate font-mono text-[11px] text-muted-foreground/70" data-card-meta>
-        {[card.stateWord, ...(card.costToday !== null ? [card.costToday] : []), ...(card.current ? ["open"] : [])].join(" · ")}
-      </span>
-      <span className="truncate text-foreground/80 text-xs" data-card-thread>
+      <span className={cn(ROW_META_CLASS, "truncate")} data-card-thread>
         {card.threadTitle ?? "No threads yet"}
-      </span>
-      <span className="min-h-4 truncate text-[11px] text-muted-foreground/70" data-card-line>
-        {card.lastLine ?? ""}
       </span>
     </div>
   );

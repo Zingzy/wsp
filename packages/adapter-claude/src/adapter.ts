@@ -4,8 +4,8 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { backgroundTasksLine, fmtDuration, harnessExitLine } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, SessionHarness, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
-import { catalogProbeCommand, parseCatalogProbe, type ClaudeCatalogProbe } from "./catalog.js";
+import type { AdapterEvent, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
+import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { parseSessionTitle, sessionTitleCommand } from "./session-title.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
@@ -50,8 +50,9 @@ export interface ClaudeAdapter {
   readonly sessions: ReadonlyMap<string, ClaudeSession>;
   /** Sessions take a message mid-turn over the stdin channel. */
   readonly steers: true;
-  /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. */
-  probeCatalog(exec: (command: string) => Promise<string>): Promise<ClaudeCatalogProbe | null>;
+  /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. The
+   * handshake carries no reason of its own, so this probe has no refusal to hand the footer. */
+  probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
   /** What the CLI's own session file calls a session: its generated title, or the person's rename inside the CLI. */
   sessionTitle: SessionTitleReader;
   /** What every session's command is exported with; the one environment a turn on the machine gets. */

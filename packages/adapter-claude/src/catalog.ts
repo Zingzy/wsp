@@ -7,6 +7,7 @@
 // 2.1.257: one line, exit 0 on stdin EOF, no API call.
 
 import { shellQuote } from "@wsp/protocol";
+import type { HarnessCatalogModelProbe, HarnessCatalogProbe } from "@wsp/protocol";
 import { buildEnv } from "./landmines.js";
 
 const SEP = "__WSP_CATALOG_SEP__";
@@ -16,26 +17,9 @@ const ONE_M = /\[1m\]$/;
 export const CONTEXT_WINDOWS = ["200k", "1m"] as const;
 export type ContextWindow = (typeof CONTEXT_WINDOWS)[number];
 
-export interface ClaudeCatalogModel {
-  /** The CLI's full model name with any context suffix removed. */
-  slug: string;
-  label: string;
-  description?: string;
-  /** The --effort values this model takes; empty when the CLI lists none for it. */
-  efforts: string[];
-  /** Both windows when the CLI lists a "[1m]" variant of the model, else none. */
-  contextWindows: ContextWindow[];
-  isDefault: boolean;
-}
-
-export interface ClaudeCatalogProbe {
-  version: string | null;
-  models: ClaudeCatalogModel[];
-  /** --effort choices from the help, in the CLI's order. */
-  efforts: string[];
-  /** --permission-mode choices from the help, "default" first: accepted though unlisted. */
-  permissionModes: string[];
-}
+/** A model as the handshake names it: the slug is its full name with any context suffix removed, and both windows are
+ * listed only where the CLI offers a "[1m]" variant of it. */
+type ClaudeModel = HarnessCatalogModelProbe & { efforts: string[]; contextWindows: ContextWindow[] };
 
 /**
  * One shell line for the guest. --bare skips hooks, plugins and CLAUDE.md, so the
@@ -94,9 +78,9 @@ function initResponse(section: string): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function modelsOf(init: Record<string, unknown>): ClaudeCatalogModel[] | undefined {
+function modelsOf(init: Record<string, unknown>): ClaudeModel[] | undefined {
   if (!Array.isArray(init.models)) return undefined;
-  const bySlug = new Map<string, ClaudeCatalogModel>();
+  const bySlug = new Map<string, ClaudeModel>();
   let defaultSlug: string | undefined;
   for (const raw of init.models) {
     if (typeof raw !== "object" || raw === null) continue;
@@ -135,7 +119,7 @@ function modelsOf(init: Record<string, unknown>): ClaudeCatalogModel[] | undefin
 }
 
 /** Null when the handshake is missing or names no model: the caller falls back to its table. */
-export function parseCatalogProbe(stdout: string): ClaudeCatalogProbe | null {
+export function parseCatalogProbe(stdout: string): HarnessCatalogProbe | null {
   const parts = stdout.split(SEP);
   if (parts.length < 3) return null;
   const [versionPart, help, initPart] = parts as [string, string, string];

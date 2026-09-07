@@ -3,19 +3,21 @@
 // where the search row does, the two top rows are one height and start
 // where the workspace rows do, the search row opens the palette without
 // moving a row, a thread row's title keeps its room at the
-// default width, a status toast holds a long token inside its box, the line
+// default width, a status toast holds a long token inside its box, the
+// computer offline is one muted mono line under the search row, the line
 // the runtime puts on a machine's row takes that row's second line whole,
 // uncut and without growing the row, collapsing the sidebar leaves the
 // page header's left padding alone, a send refusal above the composer is
 // one muted mono line in a slot the composer keeps at one height whether or
 // not a line is in it, a right-click on a workspace row opens the in-app menu
 // at the pointer in the tooltip skin, inside the viewport, and the switch
-// chord held down puts the workspace switcher up without moving the shell
-// under it, and at three sidebar widths the workspace and thread rows keep
-// one grammar: one height per row kind, the state word in its slot at the
-// right edge only off running, the meta line in one order cut from the
-// right, no import or export glyph, the thread title up to a fixed time
-// column. Vite serves test/shell to Playwright's browser, so like the glyph test it runs
+// chord held down puts the workspace switcher up, its cards three parts
+// each, without moving the shell under it, and at three sidebar widths the
+// workspace and thread rows keep one grammar: one height per row kind, the
+// state word in its slot at the right edge only off running, the meta line
+// in one order cut from the right, no import or export glyph, the thread
+// title up to a fixed time column. Vite serves test/shell to Playwright's
+// browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
 import { existsSync, mkdirSync } from "node:fs";
@@ -24,7 +26,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
+import { COMPUTER_OFFLINE_LINE, sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
@@ -222,7 +224,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
-  it("holding the switch chord puts the switcher up over the shell, one card per workspace, and the highlight moves nothing", async () => {
+  it("holding the switch chord puts the switcher up over the shell, one card per workspace of three parts, and the highlight moves nothing", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&shell=desktop`);
       await page!.waitForSelector("[data-sidebar-row]");
@@ -234,6 +236,22 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(await cards.count()).toBe(3);
       const boxes = await cards.evaluateAll(els => els.map(el => JSON.stringify(el.getBoundingClientRect().toJSON())));
       expect(new Set(await cards.evaluateAll(els => els.map(el => el.getBoundingClientRect().height))).size).toBe(1);
+      // Three parts, in one order, on every card: the well, the name in sans, the thread's title in muted mono.
+      const parts = await cards.evaluateAll(els =>
+        els.map(el =>
+          [...el.children].map(child => child.getAttributeNames().find(name => name.startsWith("data-card-"))?.slice("data-card-".length) ?? "?").join(","),
+        ),
+      );
+      expect(parts).toEqual(["preview,name,thread", "preview,name,thread", "preview,name,thread"]);
+      const fonts = await cards.evaluateAll(els =>
+        els.map(el => {
+          const mono = (part: string): boolean => /mono/i.test(getComputedStyle(el.querySelector(`[data-card-${part}]`)!).fontFamily);
+          return { name: mono("name"), thread: mono("thread") };
+        }),
+      );
+      expect(fonts).toEqual([...Array(3)].map(() => ({ name: false, thread: true })));
+      // No cost, no state word and no open word on any card: the state is read off the preview and the sidebar.
+      for (const text of await cards.evaluateAll(els => els.map(el => el.textContent ?? ""))) expect(text).not.toMatch(/\$|Running|Paused|Gone|open/);
       expect(await page!.locator("[data-workspace-card][aria-selected=true]").getAttribute("data-workspace-card")).toBe("ws_b");
       await page!.screenshot({ path: join(SHOTS_DIR, `workspace-switcher-${theme}.png`) });
       console.info(`workspace switcher screenshot: ${join(SHOTS_DIR, `workspace-switcher-${theme}.png`)}`);
@@ -531,6 +549,42 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 30_000);
 
+  it("the computer offline is one muted mono line under the search row, above Workspaces, with no box, badge or colour of its own, and the rows keep their words, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&offline=1`);
+      await page!.waitForSelector("[data-sidebar-row]");
+      const line = page!.locator("[data-sidebar-offline]").first();
+      await line.waitFor();
+      expect((await line.textContent())?.trim()).toBe(COMPUTER_OFFLINE_LINE);
+      const b = await box("[data-sidebar-offline]");
+      const search = await box("button[aria-label='Search']");
+      const section = await box("button[aria-label='Workspaces']");
+      expect(b.y).toBeGreaterThanOrEqual(search.y + search.height);
+      expect(b.y + b.height).toBeLessThanOrEqual(section.y + 0.5);
+      expect(Math.abs(b.x - search.x)).toBeLessThan(1);
+      expect(await line.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
+      const style = await line.evaluate(el => {
+        const s = getComputedStyle(el);
+        return { background: s.backgroundColor, border: s.borderTopWidth, shadow: s.boxShadow, font: s.fontFamily, size: s.fontSize };
+      });
+      expect(style.background).toBe("rgba(0, 0, 0, 0)");
+      expect(style.border).toBe("0px");
+      expect(style.shadow).toBe("none");
+      expect(style.font.toLowerCase()).toMatch(/mono/);
+      // The line's ink is the muted foreground beside it, not a colour of its own.
+      const [lineColor, metaColor] = await Promise.all([
+        line.evaluate(el => getComputedStyle(el).color),
+        page!.locator("[data-row-id='ws:ws_a'] [data-workspace-meta]").first().evaluate(el => getComputedStyle(el).color),
+      ]);
+      expect(lineColor).toBe(metaColor);
+      expect((await page!.locator("[data-row-id='ws:ws_a'] [data-workspace-state]").textContent())?.trim()).toBe("");
+      expect((await page!.locator("[data-row-id='ws:ws_b'] [data-workspace-state]").textContent())?.trim()).toBe("Paused");
+      const path = join(SHOTS_DIR, `sidebar-offline-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar offline screenshot: ${path}`);
+    }
+  }, 30_000);
+
   it("the line the runtime puts on a machine's row is the whole second line, drawn whole and at the row's own height, in both themes", async () => {
     const metaOf = (): Promise<{ text: string; clipped: boolean; height: number }[]> =>
       page!.locator("[data-row-id^='ws:']").evaluateAll(rows =>
@@ -682,6 +736,65 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       const path = join(SHOTS_DIR, `composer-picker-${theme}.png`);
       await page!.screenshot({ path });
       console.info(`composer picker screenshot: ${path}`);
+      await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[data-composer-model-menu]", { state: "detached" });
+    }
+  }, 60_000);
+
+  it("each tab's footer is one muted mono line naming that agent's own binary and pin, at the popup's width, in both themes", async () => {
+    interface Footer {
+      text: string;
+      title: string;
+      mono: boolean;
+      bare: boolean;
+      muted: boolean;
+      height: number;
+      /** Wider than the box it draws in, which is what a line the slot had to cut looks like. */
+      cut: boolean;
+    }
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
+      await page!.waitForSelector("[data-composer-picker='model']");
+      await page!.locator("[data-composer-picker='model']").click();
+      await page!.waitForSelector("[data-composer-model-menu]");
+      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-slot=popover-popup]")!).opacity === "1");
+      const read = async (): Promise<Footer> =>
+        page!.locator("[data-composer-catalog-source]").evaluate(el => {
+          const s = getComputedStyle(el);
+          return {
+            text: el.textContent ?? "",
+            title: el.getAttribute("title") ?? "",
+            mono: s.fontFamily.toLowerCase().includes("mono"),
+            bare: s.backgroundColor === "rgba(0, 0, 0, 0)" && s.borderRadius === "0px" && s.boxShadow === "none",
+            muted: s.color !== getComputedStyle(el.closest("[data-composer-model-menu]")!.querySelector("[role=option]")!).color,
+            height: el.getBoundingClientRect().height,
+            cut: el.scrollWidth > el.clientWidth,
+          };
+        });
+      // The composer remembers the last agent picked for the workspace, so the tab to read from is chosen, not assumed.
+      await page!.locator("[data-composer-harness='claude']").click();
+      await page!.waitForFunction(() => document.querySelector("[data-composer-catalog-source]")?.textContent?.endsWith("on this machine") === true);
+      const claude = await read();
+      expect(claude.text).toBe("Claude Code 2.1.257 on this machine");
+      await page!.locator("[data-composer-harness='codex']").click();
+      await page!.waitForFunction(() => document.querySelector("[data-composer-catalog-source]")?.textContent?.includes(" table · ") === true);
+      const codex = await read();
+      expect(codex.text).toBe("codex table · app-server 0.153.0, 2026-09-07");
+      // The words are the pinned table's own; a badge or a fill behind them would make a state out of a caption.
+      for (const line of [claude, codex]) {
+        expect([line.mono, line.bare, line.muted]).toEqual([true, true, true]);
+        // One line at this width, uncut, and the same height on either tab: switching tabs must not move the popup.
+        expect(line.cut).toBe(false);
+        expect(line.title).toBe(line.text);
+      }
+      expect(codex.height).toBe(claude.height);
+      const popup = await box("[data-slot=popover-popup]");
+      const footer = await box("[data-composer-catalog-source]");
+      expect(footer.width).toBeLessThanOrEqual(popup.width);
+      expect(footer.y + footer.height).toBeLessThanOrEqual(popup.y + popup.height + 1);
+      const path = join(SHOTS_DIR, `composer-catalog-source-${theme}.png`);
+      await page!.locator("[data-slot=popover-popup]").screenshot({ path });
+      console.info(`composer catalog source screenshot: ${path} (${JSON.stringify({ claude, codex })})`);
       await page!.keyboard.press("Escape");
       await page!.waitForSelector("[data-composer-model-menu]", { state: "detached" });
     }

@@ -3,7 +3,8 @@
 // workspaces (running, paused, gone) and four threads, in either theme
 // (?theme=light), with a status toast in the footer (?toast=...) and with the
 // runtime replacing the first machine's helper (?helper=1) or the first
-// machine's link dropped after a near-full memory sample (?oom=1), so a test
+// machine's link dropped after a near-full memory sample (?oom=1) or every
+// probe failing before it left this computer (?offline=1), so a test
 // can measure the chrome's geometry, which jsdom cannot lay out. With
 // ?ws=<id> the centre holds that workspace's thread and composer, so the
 // refusal line above the box can be measured for the running, paused and gone
@@ -62,7 +63,7 @@ const sessions: SessionView[] = [
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one.
 const catalogs: HarnessCatalog[] = [
   { harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }], efforts: [], contextWindows: [], permissionModes: [], steers: true },
-  { harness: "codex", label: "Codex", source: "table", version: null, models: [{ value: "gpt-6-astra", label: "GPT-6 Astra" }], efforts: [], contextWindows: [], permissionModes: [], steers: false },
+  { harness: "codex", label: "Codex", source: "table", version: "app-server 0.153.0, 2026-09-07", models: [{ value: "gpt-5.6-sol", label: "GPT-5.6-Sol", isDefault: true }], efforts: [], contextWindows: [], permissionModes: [], steers: false },
 ];
 
 const linger = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_linger" };
@@ -79,7 +80,7 @@ const api: Api = {
   createFromGoldenHead: async () => workspaces[0]!,
   watchStatuses: async () =>
     workspaces.map(w =>
-      statusOf(w, w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
+      statusOf(w, params.get("offline") === "1" ? { reach: { state: statusOf(w).reach.state, offline: true } } : w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
     ),
   forget: async () => {},
   nap: async id => workspaces.find(w => w.id === id)!,
