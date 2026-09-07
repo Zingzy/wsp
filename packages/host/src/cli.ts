@@ -33,7 +33,7 @@ import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
 import { FIRST_WORKSPACE } from "./init-first.js";
 import { recipePath } from "./init-recipe.js";
-import { smallRecipePath } from "./recipe-file.js";
+import { historyCache, smallRecipePath } from "./recipe-file.js";
 import { isRecipeTick, runRecipe, runScan } from "./recipe-command.js";
 import { recipeAnswer, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { scanTools } from "./scan.js";
@@ -457,7 +457,8 @@ async function init(
       ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
       ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
       collect: collectThisComputer,
-      recipe: (onHistory, onProject) => computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, ...(project !== undefined ? { folders: [project] } : {}) }),
+      recipe: (onHistory, onProject, onHistoryProgress) =>
+        computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, onHistoryProgress, cache: historyCache(opts.statePath), ...(project !== undefined ? { folders: [project] } : {}) }),
       scanProject: async folder => {
         const { path, exists } = projectFolder(folder);
         return exists ? scanProject(nodeHost(), path) : undefined;
@@ -705,7 +706,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
   const out = resolve(values.out ?? smallRecipePath(statePath));
   try {
     if (scanning) {
-      const scan = await runScan(nodeHost(), { ...projects, alsoHere: recipe => scanTools(nodeHost(), recipe) }, streams);
+      const scan = await runScan(nodeHost(), { ...projects, cache: historyCache(statePath), alsoHere: recipe => scanTools(nodeHost(), recipe) }, streams);
       if (values.json === true) io.log(JSON.stringify(scan));
       else {
         for (const line of scanPrintout(scan, depth)) io.log(line);
@@ -717,6 +718,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
       nodeHost(),
       {
         out,
+        cache: historyCache(statePath),
         ...(values.tick !== undefined ? { tick: values.tick } : {}),
         ...(values.set !== undefined ? { set: values.set } : {}),
         ...(values.signin !== undefined ? { signin: values.signin } : {}),
