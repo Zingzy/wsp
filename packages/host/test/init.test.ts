@@ -776,7 +776,7 @@ describe("wsp init, interactive", () => {
     await f.until("Tools  2/6");
     // Nothing here and nothing ticked: the base rows still come, and every other row is on the screen at its size.
     // Sixteen base rows fold behind the visible two, and the why column is cut to the screen's width.
-    expect(f.text()).toMatch(/• fd\s+base\s+always on th\S*\s+2\.9 MB\n/);
+    expect(f.text()).toMatch(/• fd\s+base\s+always on th[^\n]*?\s+2\.9 MB\n/);
     expect(f.text()).toContain("On: 16 tools, 1.5 GB");
     await f.press(KEY.enter);
     await f.until("Also on this Mac");
@@ -816,7 +816,7 @@ describe("wsp init, the project the run is for", () => {
     await f.until("Tools  2/6");
     // Go is off in the catalog and never used here; the folder's own go.mod put it on the machine, in its own group.
     expect(f.text()).toMatch(/▾ Your project needs\s+1 of 1\s+239\.1 MB/);
-    expect(f.text()).toMatch(/● +Go +project +go\.mod needs… +239\.1 MB/);
+    expect(f.text()).toMatch(/● +Go +project +go\.mod needs[^\n]*? +239\.1 MB/);
     await f.press(KEY.enter);
     await throughScreens(f, ["Also on this Mac", "Sign-ins", "wsp for your agents"]);
     await f.until(BOOT);

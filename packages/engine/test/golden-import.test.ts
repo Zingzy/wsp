@@ -773,6 +773,18 @@ describe("what a step shows while it runs", () => {
 describe("catalog rows", () => {
   const catalog = (id: string, over: Partial<RecipeEntry> = {}) => row({ rung: "tools", id: `${CATALOG_PREFIX}${id}`, label: catalogEntry(id)?.name ?? id, linux: "yes", ...over });
 
+  it("a catalog script row waits on what the catalog says it runs on top of: the apt index by its one step, a floor row on nothing", () => {
+    const t = toolInstallsFor([catalog("swift"), catalog("playwright"), catalog("yarn"), catalog("shellcheck")]);
+    expect(t.installs.map(i => [i.id, i.manager, i.after])).toEqual([
+      ["tools/apt-index", "apt", undefined],
+      ["tools/catalog/swift", "script", "tools/apt-index"],
+      ["tools/catalog/playwright", "script", undefined],
+      ["tools/catalog/yarn", "script", undefined],
+      ["tools/catalog/shellcheck", "apt", "tools/apt-index"],
+    ]);
+    expect(t.installs.filter(i => i.id === "tools/apt-index")).toHaveLength(1);
+  });
+
   it("a ticked catalog tool this computer has no row for installs by its catalog road, named for its command; a road no golden build has run is noted", () => {
     const t = toolInstallsFor([catalog("gh"), catalog("wrangler"), catalog("ffmpeg"), catalog("kubectl"), catalog("gcloud"), catalog("tmux")]);
     expect(t.installs.map(i => [i.id, i.manager, i.after, i.bin, i.note])).toEqual([

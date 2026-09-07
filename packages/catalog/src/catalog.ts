@@ -11,7 +11,7 @@ import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { APT_INDEX, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
-import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
+import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
@@ -106,6 +106,10 @@ export interface ToolEntry extends EntryBase {
   brings?: readonly { bin: string; version: string }[];
   /** Package names a recipe's tools row may carry for this same tool, besides its id, its command and its road's argument. */
   covers?: readonly string[];
+  /** Registry packages a project's manifest may depend on that mean this row, per the road the project installs
+   * them by: the row puts on the machine what the package needs and its own install does not bring (a browser). A
+   * client library named like a server's tools is not listed, so a dependency ticks nothing else. */
+  depends?: Partial<Record<RoadName, readonly string[]>>;
   /** The major the floor pins, with the tool's plain name: a Mac on another major hears both in the covered row's note. */
   major?: { name: string; version: string };
 }
@@ -325,12 +329,27 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "supabase", name: "Supabase CLI", bin: "supabase", ...github(96900296, "supabase/cli"), signIn: SIGN_IN_ROWS.supabase, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "railway", name: "Railway CLI", bin: "railway", ...npm(28459008, "@railway/cli"), signIn: SIGN_IN_ROWS.railway, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "doppler", name: "Doppler CLI", bin: "doppler", ...github(12550328, "DopplerHQ/cli", "github.com/DopplerHQ/cli"), signIn: SIGN_IN_ROWS.doppler, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
-  // 1Password publishes the CLI through its own apt repository, which the road has to add first.
-  { ...tool, id: "op", name: "1Password CLI", bin: "op", installRoad: { road: "apt", packages: ["1password-cli"] }, signIn: SIGN_IN_ROWS.op, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" }, size: { unmeasured: "the package sits in 1Password's own apt repository, which the road does not add yet, so no index carries its size" } },
+  // 1Password's package carries no Installed-Size, so the size is its one file, /usr/bin/op, unpacked from the deb.
+  { ...tool, id: "op", name: "1Password CLI", bin: "op", installRoad: { road: "script", script: OP_INSTALL }, covers: ["1password-cli"], signIn: SIGN_IN_ROWS.op, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" }, size: measured("unpacked", 42950840) },
   { ...tool, id: "ffmpeg", name: "ffmpeg", bin: "ffmpeg", ...apt(512696320, "ffmpeg"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
   { ...tool, id: "yq", name: "yq", bin: "yq", ...github(14180512, "mikefarah/yq", "github.com/mikefarah/yq/v4"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
   { ...tool, id: "git-lfs", name: "Git LFS", bin: "git-lfs", ...apt(11213824, "git-lfs"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 2, road: "unmeasured" } },
   { ...tool, id: "tmux", name: "tmux", bin: "tmux", ...apt(1492992, "tmux"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
+  { ...tool, id: "ruby", name: "Ruby 3.1 with bundler", bin: "ruby", ...apt(67206144, "ruby", "ruby-dev", "ruby-bundler"), covers: ["bundler"], brings: [{ bin: "bundle", version: "bundle --version" }, { bin: "gem", version: "gem --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
+  { ...tool, id: "php", name: "PHP 8.2 with Composer", bin: "php", ...apt(33120256, "php-cli", "composer", "php-mbstring", "php-xml", "php-curl", "php-zip"), brings: [{ bin: "composer", version: "composer --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
+  { ...tool, id: "postgresql-client", name: "PostgreSQL client", bin: "psql", ...apt(9606144, "postgresql-client"), covers: ["postgresql"], brings: [{ bin: "pg_dump", version: "pg_dump --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" } },
+  { ...tool, id: "redis-tools", name: "Redis tools", bin: "redis-cli", ...apt(6909952, "redis-tools"), covers: ["redis"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 3, images: 1, road: "unmeasured" } },
+  { ...tool, id: "golangci-lint", name: "golangci-lint", bin: "golangci-lint", ...github(41300128, "golangci/golangci-lint", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 2, images: 2, road: "unmeasured" } },
+  { ...tool, id: "mise", name: "mise", bin: "mise", ...github(119660224, "jdx/mise"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" } },
+  { ...tool, id: "git-delta", name: "git-delta", bin: "delta", ...github(7151152, "dandavison/delta"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
+  { ...tool, id: "shellcheck", name: "ShellCheck", bin: "shellcheck", ...apt(19442688, "shellcheck"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 4, images: 0, road: "unmeasured" } },
+  { ...tool, id: "swift", name: "Swift 6.3", bin: "swift", installRoad: { road: "script", script: SWIFT_INSTALL }, after: APT_INDEX, brings: [{ bin: "swiftc", version: "swiftc --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("du", 3562135552) },
+  { ...tool, id: "elixir", name: "Elixir 1.14 with Erlang", bin: "elixir", ...apt(33395712, "elixir"), covers: ["erlang"], brings: [{ bin: "mix", version: "mix --version" }, { bin: "erl", version: "erl +V" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" } },
+  // The first bazel --version fetches Bazel itself into ~/.cache/bazelisk; the du counts bazelisk and that Bazel.
+  { ...tool, id: "bazel", name: "Bazel via bazelisk", bin: "bazel", installRoad: { road: "release", repo: "bazelbuild/bazelisk", go: "github.com/bazelbuild/bazelisk" }, covers: ["bazelisk"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("du", 72921088) },
+  { ...tool, id: "llvm", name: "clang, clang-format, clang-tidy", bin: "clang", ...apt(750848000, "clang", "clang-format", "clang-tidy"), covers: ["llvm"], brings: [{ bin: "clang-format", version: "clang-format --version" }, { bin: "clang-tidy", version: "clang-tidy --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 2, road: "unmeasured" } },
+  // The du counts the global, Chromium with its headless shell and ffmpeg under ~/.cache/ms-playwright, and the browser's Debian packages.
+  { ...tool, id: "playwright", name: "Chromium for Playwright", bin: "playwright", installRoad: { road: "script", script: PLAYWRIGHT_INSTALL }, after: "node", covers: ["chromium"], depends: { npm: ["playwright", "@playwright/test", "playwright-core"] }, signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" }, size: measured("du", 1015808000) },
 ];
 
 export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is AgentEntry => e.kind === "agent");
@@ -369,6 +388,12 @@ const roadNames = (road: InstallRoad): readonly string[] => roadModule(road).nam
 /** The catalog tool that installs this package by this road (a formula by brew, a global by npm), or nothing. */
 export function catalogToolByRoad(road: RoadName, pkg: string): ToolEntry | undefined {
   return CATALOG_TOOLS.find(e => e.installRoad.road === road && roadNames(e.installRoad).includes(pkg));
+}
+
+/** The catalog tool a project's dependency stands for, by the road the project installs it by: only a row that names
+ * the package as meaning it, never a command or a cover word; or nothing. */
+export function catalogToolForDependency(road: RoadName, pkg: string): ToolEntry | undefined {
+  return CATALOG_TOOLS.find(e => (e.depends?.[road] ?? []).includes(pkg));
 }
 
 /** The catalog tool a package name the collector wrote stands for: by id, by the command it puts on PATH, by its
