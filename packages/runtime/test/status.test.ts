@@ -73,6 +73,14 @@ async function tickCost(fc: ReturnType<typeof fakeClock>, costs: Cost[]): Promis
   await until(() => costs.length > n);
 }
 
+/** A lifecycle step that opens or re-prices an awake stretch lands its own cost tick: the step, then that tick, so
+ * the next tickCost counts only the timer's. */
+async function stepped(costs: Cost[], step: () => Promise<unknown>): Promise<void> {
+  const n = costs.length;
+  await step();
+  await until(() => costs.length > n);
+}
+
 describe("status.list", () => {
   it("enriches views with machine state, reach, size, and rate from backend pricing", async () => {
     const { rt, backend } = testRuntime();
@@ -389,7 +397,7 @@ describe("a pause the provider made", () => {
     ]);
 
     // The wake resumes the machine the provider paused, and the stretch starts there, not an hour ago.
-    await second.workspaces.wake(ws.id);
+    await stepped(after, () => second.workspaces.wake(ws.id));
     await tickCost(fc, after);
     stop();
     expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: 2 * TICK_MS });
@@ -446,6 +454,94 @@ describe("a pause the provider made", () => {
   }, 20_000);
 });
 
+describe("accrued cost", () => {
+  const usd = (rateUsdPerHour: number, ms: number): number => (rateUsdPerHour * ms) / 3_600_000;
+
+  it("is each awake stretch billed at the rate that held over it: a pause, an unwatched wake and size change, a restart", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const fc = fakeClock();
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
+    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const small = backend.pricing.rateUsdPerHour(backend.pricing.defaultSize);
+    const big = backend.pricing.rateUsdPerHour({ cpu: 4, memMb: 4096 });
+    expect(big).toBeGreaterThan(small);
+    const costs: Cost[] = [];
+    first.events.on("workspace.cost", e => costs.push(e as Cost));
+    let stop = first.status.watch();
+    await tickCost(fc, costs);
+    await tickCost(fc, costs);
+    expect(costs.at(-1)).toMatchObject({ rateUsdPerHour: small, awakeMs: 2 * TICK_MS });
+    expect(costs.at(-1)!.accruedUsd).toBeCloseTo(usd(small, 2 * TICK_MS), 10);
+
+    // A pause adds nothing, tick after tick.
+    await first.workspaces.nap(ws.id);
+    await tickCost(fc, costs);
+    await tickCost(fc, costs);
+    expect(costs.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: 2 * TICK_MS });
+    expect(costs.at(-1)!.accruedUsd).toBeCloseTo(usd(small, 2 * TICK_MS), 10);
+    stop();
+
+    // Nobody watching. The wake lands its own tick, so the hour that follows is on record at the small size, and
+    // the size change an hour later bills that hour at small whatever the size is now.
+    await stepped(costs, () => first.workspaces.wake(ws.id));
+    expect(costs.at(-1)).toMatchObject({ phase: "running", rateUsdPerHour: small, awakeMs: 2 * TICK_MS });
+    fc.advance(3_600_000);
+    await stepped(costs, () => first.workspaces.upgrade(ws.id, { cpu: 4 }));
+    expect((await first.status.list())[0]!.rateUsdPerHour).toBeCloseTo(big, 10);
+    const atSmall = usd(small, 2 * TICK_MS + 3_600_000);
+    expect(costs.at(-1)).toMatchObject({ phase: "running", rateUsdPerHour: big, awakeMs: 2 * TICK_MS + 3_600_000 });
+    expect(costs.at(-1)!.accruedUsd).toBeCloseTo(atSmall, 10);
+
+    // From the change on, only the big size bills.
+    stop = first.status.watch();
+    await tickCost(fc, costs);
+    await tickCost(fc, costs);
+    stop();
+    const awake = 4 * TICK_MS + 3_600_000;
+    const twoStretches = atSmall + usd(big, 2 * TICK_MS);
+    expect(costs.at(-1)).toMatchObject({ rateUsdPerHour: big, awakeMs: awake });
+    expect(costs.at(-1)!.accruedUsd).toBeCloseTo(twoStretches, 10);
+    // Never the rate now times all awake time.
+    expect(Math.abs(costs.at(-1)!.accruedUsd - usd(big, awake))).toBeGreaterThan(1e-3);
+    await first.close();
+
+    // An hour down with the machine running: the next host meters on from the stored total at the stored rate.
+    fc.advance(3_600_000);
+    const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
+    const after: Cost[] = [];
+    second.events.on("workspace.cost", e => after.push(e as Cost));
+    stop = second.status.watch();
+    await tickCost(fc, after);
+    stop();
+    expect(after.at(-1)).toMatchObject({ phase: "running", rateUsdPerHour: big, awakeMs: awake + 3_600_000 + TICK_MS });
+    expect(after.at(-1)!.accruedUsd).toBeCloseTo(twoStretches + usd(big, 3_600_000 + TICK_MS), 10);
+    expect((await second.status.history(ws.id)).at(-1)!.accruedUsd).toBeCloseTo(after.at(-1)!.accruedUsd, 10);
+    await second.close();
+  });
+
+  it("a rebuild at an unchanged rate lands no cost event: an event's tick rides the bus only when it changed the series", async () => {
+    const fc = fakeClock();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await until(async () => (await rt.status.history(ws.id)).length === 1);
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    const stop = rt.status.watch();
+    await tickCost(fc, costs);
+    await tickCost(fc, costs);
+    const before = costs.length;
+    await rt.workspaces.rebuild(ws.id);
+    await tickCost(fc, costs);
+    stop();
+    // The timer's tick is the only one that landed: the rebuild's folded into the run and reported nothing.
+    expect(costs.length).toBe(before + 1);
+    expect(costs.at(-1)).toMatchObject({ phase: "running", awakeMs: 3 * TICK_MS });
+    expect(await rt.status.history(ws.id)).toHaveLength(2);
+    await rt.close();
+  });
+});
+
 describe("status.history", () => {
   /** A store whose writes to the cost history collection are counted. */
   function countingStore(): { store: Store; puts: () => number; deletes: () => number } {
@@ -468,18 +564,19 @@ describe("status.history", () => {
     const fc = fakeClock();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
-    expect(await rt.status.history(ws.id)).toEqual([]);
+    // The create opens the stretch with a tick of its own, before anything watches.
+    await until(async () => (await rt.status.history(ws.id)).length === 1);
+    expect(await rt.status.history(ws.id)).toMatchObject([{ phase: "running", awakeMs: 0, accruedUsd: 0 }]);
     const costs: Cost[] = [];
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = rt.status.watch();
     for (let i = 0; i < 4; i++) await tickCost(fc, costs);
     const rate = costs[0]!.rateUsdPerHour;
     expect(rate).toBeGreaterThan(0);
-    // One rate the whole way: the first tick and the newest, nothing between.
+    // One rate the whole way: the create's tick and the newest, nothing between.
     let history = await rt.status.history(ws.id);
-    expect(history.map(p => [p.rateUsdPerHour, p.awakeMs])).toEqual([[rate, TICK_MS], [rate, 4 * TICK_MS]]);
+    expect(history.map(p => [p.rateUsdPerHour, p.awakeMs])).toEqual([[rate, 0], [rate, 4 * TICK_MS]]);
     // The bus stamps a seq on what it emits; the history holds the ticks as the tracker built them.
-    expect(costs[0]).toMatchObject(history[0]!);
     expect(costs[3]).toMatchObject(history[1]!);
 
     await rt.workspaces.nap(ws.id);
@@ -488,7 +585,7 @@ describe("status.history", () => {
     history = await rt.status.history(ws.id);
     // The last running tick and the first napping one bracket the change; the napping run folds to its newest.
     expect(history.map(p => [p.phase, p.rateUsdPerHour, p.awakeMs])).toEqual([
-      ["running", rate, TICK_MS],
+      ["running", rate, 0],
       ["running", rate, 4 * TICK_MS],
       ["napping", 0, 4 * TICK_MS],
       ["napping", 0, 4 * TICK_MS],
@@ -517,8 +614,9 @@ describe("status.history", () => {
     for (let i = 0; i < 3; i++) await tickCost(fc, costs);
     stop();
     const stored = await first.status.history(ws.id);
-    expect(stored.map(p => p.awakeMs)).toEqual([TICK_MS, 3 * TICK_MS]);
-    // Ticks of one rate replace the newest point in memory and reach the store only when a point is added.
+    expect(stored.map(p => p.awakeMs)).toEqual([0, 3 * TICK_MS]);
+    // The create's tick and the first timer tick add points; ticks of one rate then replace the newest in memory and
+    // reach the store only when a point is added.
     expect(puts()).toBe(2);
 
     // An hour down, the machine still running and billing the whole time. The store's newest point is the tick
@@ -526,7 +624,7 @@ describe("status.history", () => {
     fc.advance(3_600_000);
     const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const handed = await second.status.history(ws.id);
-    expect(handed.map(p => p.awakeMs)).toEqual([TICK_MS, 2 * TICK_MS]);
+    expect(handed.map(p => p.awakeMs)).toEqual([0, TICK_MS]);
     expect(handed[0]).toEqual(stored[0]);
     expect(handed[1]).toMatchObject({ workspaceId: ws.id, phase: "running", rateUsdPerHour: stored[1]!.rateUsdPerHour });
     const after: Cost[] = [];
@@ -536,7 +634,7 @@ describe("status.history", () => {
     // The meter runs on from the stored point through the hour down, as the provider billed it.
     const tick = after[0]!;
     expect(tick).toMatchObject({ phase: "running", awakeMs: 4 * TICK_MS + 3_600_000 });
-    expect(tick.accruedUsd).toBeCloseTo((tick.rateUsdPerHour * tick.awakeMs) / 3_600_000, 10);
+    expect(tick.accruedUsd).toBeCloseTo(stored[1]!.accruedUsd + (stored[1]!.rateUsdPerHour * (TICK_MS + 3_600_000)) / 3_600_000, 10);
     // The run continues at one rate: the stored first tick stays, the newest moves, no point was added.
     const history = await second.status.history(ws.id);
     expect(history).toHaveLength(2);
@@ -549,7 +647,7 @@ describe("status.history", () => {
     for (let i = 0; i < 3; i++) await tickCost(fc, after);
     stop();
     expect((await second.status.history(ws.id)).map(p => [p.rateUsdPerHour, p.awakeMs])).toEqual([
-      [tick.rateUsdPerHour, TICK_MS],
+      [tick.rateUsdPerHour, 0],
       [tick.rateUsdPerHour, tick.awakeMs],
       [0, tick.awakeMs],
       [0, tick.awakeMs],
@@ -585,7 +683,7 @@ describe("status.history", () => {
     stop = second.status.watch();
     await tickCost(fc, after);
     expect(after.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: total });
-    await second.workspaces.wake(ws.id);
+    await stepped(after, () => second.workspaces.wake(ws.id));
     await tickCost(fc, after);
     stop();
     expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: total + TICK_MS });
@@ -608,17 +706,18 @@ describe("status.history", () => {
 
     fc.advance(3_600_000);
     const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
-    expect((await second.status.history(ws.id)).at(-1)).toMatchObject({ phase: "running", awakeMs: 2 * TICK_MS });
+    // The store holds the points that were added: the create's tick and the first timer tick; the second only moved the newest in memory.
+    expect((await second.status.history(ws.id)).at(-1)).toMatchObject({ phase: "running", awakeMs: TICK_MS });
     const after: Cost[] = [];
     second.events.on("workspace.cost", e => after.push(e as Cost));
     stop = second.status.watch();
     await tickCost(fc, after);
     // The hour between the nap and the restart is not on the bill: the stretch ended at the newest stored tick.
-    expect(after.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: 2 * TICK_MS });
-    await second.workspaces.wake(ws.id);
+    expect(after.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: TICK_MS });
+    await stepped(after, () => second.workspaces.wake(ws.id));
     await tickCost(fc, after);
     stop();
-    expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: 3 * TICK_MS });
+    expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: 2 * TICK_MS });
   });
 
   it("forgets a deleted workspace's history, in memory and in the store", async () => {
@@ -787,9 +886,8 @@ describe("gone machines and the meter", () => {
       { phase: "gone", rateUsdPerHour: 0, awakeMs: TICK_MS },
     ]);
 
-    await second.workspaces.rebuild(ws.id);
-    // The first tick after the rebuild starts the stretch: the hour the host was down and the machine did not exist is not on the bill.
-    await tickCost(fc, after);
+    // The rebuild starts the stretch with a tick at that instant: the hour the host was down and the machine did not exist is not on the bill.
+    await stepped(after, () => second.workspaces.rebuild(ws.id));
     expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: TICK_MS });
     await tickCost(fc, after);
     expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: 2 * TICK_MS });

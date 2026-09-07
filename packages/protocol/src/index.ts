@@ -556,6 +556,8 @@ export const WorkspaceCostEvent = z.object({
   rateUsdPerHour: z.number(),
   /** Total awake milliseconds behind accruedUsd since metering began; carried across host restarts. */
   awakeMs: z.number(),
+  /** The awake time so far billed stretch by stretch at the rate that held over each, so a size change or a wake at
+   * another size never re-prices what came before it. */
   accruedUsd: z.number(),
   at: z.string(),
 });
