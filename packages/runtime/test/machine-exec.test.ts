@@ -3,8 +3,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EXEC_ENV, INLINE_EXEC_MS, type ExecResult, type Machine } from "@wsp/engine";
-import { EXEC_BODY_MAX, TURN_IDLE_MS, shellQuote } from "@wsp/protocol";
+import { EXEC_ENV, INLINE_EXEC_MS, MachineUnreached, type ExecResult, type Machine } from "@wsp/engine";
+import { EXEC_BODY_MAX, machineUnreachedLine, TURN_IDLE_MS, shellQuote } from "@wsp/protocol";
 import { machineExecStream } from "../src/machine-exec.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
@@ -441,6 +441,97 @@ describe("machineExecStream", () => {
     for await (const l of stream.lines) lines.push(l);
     expect(lines).toEqual(["before nap", "after wake"]);
     expect(await stream.exited).toBe(0);
+  });
+
+  /** A guest whose launch fails `failures` times the way `make` says, each failed post costing five seconds of the
+   * clock as a DNS lookup that times out does; the stream's sleeps move the same clock. */
+  function unreachedGuest(backend: StubBackend, failures: number, make: () => Error, steps: Step[] = [{ append: "ran\n", exit: 0 }, {}]) {
+    const guest = scriptGuest(backend, steps);
+    const clock = { now: 0 };
+    const waits: number[] = [];
+    let launches = 0;
+    const inner = backend.execImpl;
+    backend.execImpl = async (m, cmd): Promise<ExecResult> => {
+      if (cmd.includes("WSP_LAUNCHED")) {
+        launches++;
+        if (launches <= failures) {
+          clock.now += 5_000;
+          throw make();
+        }
+      }
+      return inner(m, cmd);
+    };
+    const opts = {
+      pollMs: 5,
+      now: () => clock.now,
+      sleep: async (ms: number): Promise<void> => {
+        waits.push(ms);
+        clock.now += ms;
+      },
+    };
+    return { guest, opts, launches: () => launches, backoffs: () => waits.filter(w => w >= 1_000) };
+  }
+  const fetchFailed = (): Error => new TypeError("fetch failed", { cause: Object.assign(new Error("getaddrinfo EAI_AGAIN api.example"), { code: "EAI_AGAIN" }) });
+
+  it("a launch nothing answered twice is posted again at the engine's backoff, and the turn runs", async () => {
+    const { backend, machine } = await makeMachine();
+    const g = unreachedGuest(backend, 2, fetchFailed);
+    const stream = machineExecStream(machine, g.opts)("claude -p hi", { env: {} });
+    const lines: string[] = [];
+    for await (const l of stream.lines) lines.push(l);
+    expect(lines).toEqual(["ran"]);
+    expect(await stream.exited).toBe(0);
+    expect(g.launches()).toBe(3);
+    expect(g.backoffs().length).toBe(2);
+    expect(g.backoffs()[0]).toBeGreaterThanOrEqual(1_000);
+    expect(g.backoffs()[1]).toBeGreaterThanOrEqual(2_000);
+  });
+
+  it("a launch nothing answers for the whole reach window fails the turn in the protocol's words, not the fetch's, and reaps the run", async () => {
+    const { backend, machine } = await makeMachine();
+    const g = unreachedGuest(backend, 99, fetchFailed);
+    const stream = machineExecStream(machine, g.opts)("claude -p hi", { env: {} });
+    const failure = await (async (): Promise<Error> => {
+      for await (const l of stream.lines) void l;
+      throw new Error("the stream ended without a failure");
+    })().catch((e: unknown) => e as Error);
+    expect(failure).toBeInstanceOf(MachineUnreached);
+    expect(failure.message).toBe(machineUnreachedLine(4, (failure as MachineUnreached).elapsedMs));
+    expect(failure.message).toMatch(/^the machine could not be reached from this computer after 4 attempts over 2[78]s$/);
+    expect(failure.message).not.toContain("fetch failed");
+    expect(failure.message).not.toContain(machine.id);
+    expect(g.launches()).toBe(4);
+    expect(g.backoffs().length).toBe(3);
+    expect(await stream.exited).toBeNull();
+    expect(g.guest.kills.length).toBe(1);
+    expect(g.guest.files()).toEqual([]);
+  });
+
+  it("a launch that failed for any reason but the network fails at once, in the machine's own words", async () => {
+    const { backend, machine } = await makeMachine();
+    const g = unreachedGuest(backend, 99, () => Object.assign(new Error("gone"), { kind: "missing", status: 404 }));
+    const stream = machineExecStream(machine, g.opts)("claude -p hi", { env: {} });
+    await expect(
+      (async () => {
+        for await (const l of stream.lines) void l;
+      })(),
+    ).rejects.toThrow(`remote launch failed on ${machine.id}: gone`);
+    expect(g.launches()).toBe(1);
+    expect(g.backoffs()).toEqual([]);
+    expect(await stream.exited).toBeNull();
+  });
+
+  it("a gateway status the edge answered is not retried by the launch: the backend already retried it, and the turn keeps the provider's words", async () => {
+    const { backend, machine } = await makeMachine();
+    const g = unreachedGuest(backend, 99, () => Object.assign(new Error("Service Unavailable"), { kind: "transient", status: 503 }));
+    const stream = machineExecStream(machine, g.opts)("claude -p hi", { env: {} });
+    await expect(
+      (async () => {
+        for await (const l of stream.lines) void l;
+      })(),
+    ).rejects.toThrow(`remote launch failed on ${machine.id}: Service Unavailable`);
+    expect(g.launches()).toBe(1);
+    expect(g.backoffs()).toEqual([]);
   });
 });
 

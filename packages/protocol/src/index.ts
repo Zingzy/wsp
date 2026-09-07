@@ -1397,6 +1397,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     prompt: z.string(),
     harness: z.string().optional(),
     resume: z.string().optional(),
+    /** The thread the message goes to, by its runtime id: its latest turn is resumed, and a thread whose harness never
+     * announced a session takes the message as a first turn on that same thread. Refused when the workspace has no
+     * thread with that id. */
+    thread: z.string().optional(),
     cwd: z.string().optional(),
     /** Values from the harness's catalog for the workspace (harnesses.list), refused with that list on a miss. A
      * start that opens a thread without a model runs the one the catalog marks default, so the app, the command line
@@ -1628,7 +1632,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { actionRefusal, goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, backgroundTasksLine, behindGoldenLine, builderStaysLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, execFolderLine, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, providerAnswerLine, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, stepRetryLine, timedOutLine, titleLine, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, type BuilderReading, type DurationStyle, type GoldenChange, type ProviderAnswer, type TurnCutRule } from "./format.js";
+export { AFTER_CUT_LINE, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, backgroundTasksLine, behindGoldenLine, builderStaysLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, execFolderLine, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, machineUnreachedLine, notifyLine, plural, providerAnswerLine, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, stepRetryLine, timedOutLine, titleLine, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, type BuilderReading, type DurationStyle, type GoldenChange, type ProviderAnswer, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";

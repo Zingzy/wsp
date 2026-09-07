@@ -16,10 +16,13 @@
 // the command ended. When the stream ends, however it ends, the recorded
 // process group gets TERM then KILL and the run's files go: the CLI's own
 // children (MCP servers under npx) stay in the setsid group after it exits,
-// and were seen holding 90 MB each for the machine's life.
+// and were seen holding 90 MB each for the machine's life. A launch nothing
+// answered (this computer's DNS gone, a reset connection, a gateway error the
+// backend gave up on) is posted again at the engine's backoff for its reach
+// window before the turn fails; the claim makes one that did land a no-op.
 
 import { randomBytes } from "node:crypto";
-import { INLINE_EXEC_MS, putFiles, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
+import { INLINE_EXEC_MS, MachineUnreached, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
 import type { ExecStream, ExecStreamFactory } from "@wsp/adapter-claude";
 import { EXEC_CHUNK_BYTES, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine } from "@wsp/protocol";
 
@@ -36,13 +39,11 @@ export interface MachineExecOptions {
   runDir?: string;
   /** The clock both limits read. */
   now?: () => number;
+  /** What every wait runs on, the poll's and the launch retry's; tests hand in one that moves the clock. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
-}
 
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
@@ -51,6 +52,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
   const execTimeoutMs = opts.execTimeoutMs ?? INLINE_EXEC_MS;
   const runDir = opts.runDir ?? "/tmp/wsp-run";
   const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? realRetryClock.sleep;
 
   return (command, { env, input }) => {
     const id = randomBytes(6).toString("hex");
@@ -87,12 +89,16 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     };
 
     // Spawn eagerly, like a local child process would.
-    const launched: Promise<ExecResult> = putFiles(machine, files, {
-      // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
-      before: [`mkdir ${base}.d 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
-      after: [...(input === undefined ? [] : [`mkfifo ${base}.fifo`]), `setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`],
-      timeoutMs: execTimeoutMs,
-    });
+    const launched: Promise<ExecResult> = untilReached(
+      () =>
+        putFiles(machine, files, {
+          // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
+          before: [`mkdir ${base}.d 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
+          after: [...(input === undefined ? [] : [`mkfifo ${base}.fifo`]), `setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`],
+          timeoutMs: execTimeoutMs,
+        }),
+      { now, sleep },
+    );
 
     const signal = (sig: "TERM" | "KILL"): void => {
       void launched
@@ -137,6 +143,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       if (launch instanceof Error || launch.exitCode !== 0 || !launch.stdout.includes("WSP_LAUNCHED")) {
         await reap();
         finish(null);
+        if (launch instanceof MachineUnreached) throw launch;
         const detail = launch instanceof Error ? launch.message : `exit ${launch.exitCode}: ${launch.stderr}`;
         throw new Error(`remote launch failed on ${machine.id}: ${detail}`);
       }
