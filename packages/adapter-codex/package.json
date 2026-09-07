@@ -7,7 +7,6 @@
     "test": "vitest run packages/adapter-codex"
   },
   "dependencies": {
-    "@wsp/adapter-claude": "workspace:*",
     "@wsp/protocol": "workspace:*"
   },
   "devDependencies": {

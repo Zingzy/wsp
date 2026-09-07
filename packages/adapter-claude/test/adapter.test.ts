@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import type { AdapterEvent, ExecStream, ExecStreamFactory } from "../src/adapter.js";
+import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createClaudeAdapter } from "../src/adapter.js";
 import { userMessageLine } from "../src/landmines.js";
 
@@ -484,7 +484,7 @@ describe("a reply while the process keeps running", () => {
 });
 
 describe("result classification", () => {
-  function resultRun(resultLine: string): Promise<{ events: AdapterEvent[]; result: import("../src/adapter.js").TurnResult }> {
+  function resultRun(resultLine: string): Promise<{ events: AdapterEvent[]; result: TurnResult }> {
     const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
     const exec = scriptedExec([init, resultLine]);
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });

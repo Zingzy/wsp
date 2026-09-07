@@ -75,16 +75,16 @@ export function withPicked(recipe: Recipe, on: ReadonlySet<string>): Recipe {
 export const ticked = (recipe: Recipe, kind: RecipeRow["kind"]): Set<string> => new Set(recipe.rows.filter(r => r.kind === kind && r.on).map(r => r.id));
 
 /** The collector's rows the recipe ticks, as the build would take them before anyone answers, and the bytes they upload. */
-function rowsFor(manifest: Manifest, recipe: Recipe): { rows: ManifestEntry[]; bytes: number } {
+function rowsFor(manifest: Manifest, recipe: Recipe, brew: BrewTable): { rows: ManifestEntry[]; bytes: number } {
   const applied = applyRecipe(manifest, recipe);
-  const { ticks } = defaultAnswers(applied);
+  const { ticks } = defaultAnswers(applied, brew);
   const rows = applied.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
   return { rows, bytes: rows.reduce((n, e) => n + e.bytes, 0) };
 }
 
 /** What the recipe costs on the builder's disk: the collector's rows it ticks, sized as the build would size them. */
 export function pickEstimate(manifest: Manifest, recipe: Recipe, brew: BrewTable): DiskEstimate {
-  const { rows, bytes } = rowsFor(manifest, recipe);
+  const { rows, bytes } = rowsFor(manifest, recipe, brew);
   return estimateDisk(rows, bytes, brew, customRows(recipe));
 }
 
@@ -192,7 +192,7 @@ export function signInGroupLine(items: readonly SelectItem[], a: RungAnswer): st
  * The agents' own logins first, then the developer CLIs, then the MCP servers the agents' configs carry auth for.
  * A row whose command is not coming, or that the catalog locked out, is here with its reason and skip as its only
  * answer, so nothing on the screen is silent. */
-export function signInItems(manifest: Manifest): SignInScreen {
+export function signInItems(manifest: Manifest, brew: BrewTable): SignInScreen {
   const coming = comingRows(manifest);
   const shown = manifest.entries.filter(e => (e.rung === "logins" && loginShown(e, manifest, coming)) || mcpShown(e, manifest, coming));
   const items: SelectItem[] = [];
@@ -212,7 +212,7 @@ export function signInItems(manifest: Manifest): SignInScreen {
       only(e.id, e.label, group, where, [e.reason ?? "", "this one is left alone"]);
       continue;
     }
-    const tool = loginTool(e, manifest, coming);
+    const tool = loginTool(e, manifest, coming, brew);
     if (tool !== undefined && !tool.coming) {
       only(e.id, e.label, group, `${tool.bin} is not coming`, [tool.why ?? "", where]);
       continue;
@@ -463,7 +463,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
         break;
       }
       case "logins": {
-        const s = signInItems(applyRecipe(o.manifest, recipe));
+        const s = signInItems(applyRecipe(o.manifest, recipe), o.brew);
         const answers = new Map([...s.initial].map(([id, choice]): [string, LoginChoice] => [id, logins.get(id) ?? choice]));
         const r = await rungSelect({
           title: SIGN_INS_TITLE,

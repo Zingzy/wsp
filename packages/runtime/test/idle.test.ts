@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
-import type { EventUnion, WorkspaceStatus } from "@wsp/protocol";
+import type { AdapterEvent, EventUnion, TurnResult, WorkspaceStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IDLE_OFF_BACKSTOP_MS, createIdlePolicy, type IdlePolicy } from "../src/idle.js";
 import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "../src/runtime.js";

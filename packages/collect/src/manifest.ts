@@ -4,7 +4,7 @@
 // the same shape with bring and choice filled in is saved as the recipe file,
 // so one schema covers both a fresh collection and a saved recipe.
 import { z } from "zod";
-import { LoginChoice } from "@wsp/protocol";
+import { LoginChoice, ToolPin } from "@wsp/protocol";
 
 export const RUNGS = ["identity", "shell", "toolchains", "tools", "agents", "logins"] as const;
 export const Rung = z.enum(RUNGS);
@@ -48,7 +48,7 @@ const Fields = z.object({
   /** Only on a tools row: the version the laptop runs, which the machine installs by pin. */
   version: z.string().min(1).optional(),
   /** Only on a tools row installed from a release: the tag installed and its asset's sha256, recorded on the first install of that tag and checked while the tag stands. */
-  pin: z.object({ tag: z.string().min(1), sha256: z.string().min(1) }).optional(),
+  pin: ToolPin.optional(),
   /** Credential-shaped: travels only when the person answers copy on this row, never on a bare tick. */
   consent: z.boolean().optional(),
   /** One line for the detail pane: what found the row and what the flags mean. */

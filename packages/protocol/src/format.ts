@@ -3,7 +3,7 @@
 // runtime's import events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, MachineSizeOffer, MachineState, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, MachineSizeOffer, MachineState, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -591,6 +591,39 @@ export function goldenBuildLine(from: number, to: number, changes: readonly Gold
   const head = from === 0 ? `Builds version ${to}` : `Builds version ${to} on top of version ${from}`;
   return what.length === 0 ? head : `${head}: ${what.join(", ")}`;
 }
+
+/** How much of a checksum a line shows: enough to tell two apart, short enough that a reason line with both fits its cut. */
+export const SUM_SHOWN = 12;
+export const shortSum = (sha256: string): string => sha256.slice(0, SUM_SHOWN);
+
+/** The install step's failure when a download the recipe pinned does not hash to the recorded sum: what came down,
+ * at which tag, and both sums, so a moved asset reads as a moved asset and never as a broken download. */
+export function pinMismatchLine(what: string, tag: string, recorded: string, served: string): string {
+  return `${what} at ${tag} does not match the checksum recorded on its first install: recorded ${recorded}, served ${served}`;
+}
+
+/** Why a tool in the recipe installs differently now: the road it takes moved. Both sides in the roads' own words. */
+export function roadMovedLine(from: string, to: string): string {
+  return `now ${to}, was ${from}`;
+}
+
+/** Why a tool installs differently now: the version it installs at moved; a side with none reads as unpinned. */
+export function versionMovedLine(from: string | undefined, to: string | undefined): string {
+  return `${from ?? "unpinned"} to ${to ?? "unpinned"}`;
+}
+
+/** The words for a tools row no road installs, where a road's own words would stand. */
+export const NO_ROAD_WORDS = "by no road";
+
+/** Why a tool installs differently now: the release it is fixed to moved, or the sum recorded for that release did. */
+export function pinMovedLine(from: ToolPin | undefined, to: ToolPin | undefined): string {
+  if (from === undefined) return `now fixed to release ${to!.tag}`;
+  if (to === undefined) return `no longer fixed to release ${from.tag}`;
+  return from.tag === to.tag ? `the checksum recorded for ${from.tag} changed` : `release ${from.tag} to ${to.tag}`;
+}
+
+/** Why a tool installs differently now when its road and pin stand: the lines the road runs are not the golden's. */
+export const INSTALLER_MOVED_LINE = "its install lines changed";
 
 /** The app's line for a workspace still forked from an older golden version, offered the way the helper update is:
  * a state in words, never a badge. The move is the person's; nothing replaces a machine they are working on. */
