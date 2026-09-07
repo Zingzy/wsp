@@ -4,7 +4,7 @@
 // runtime runs on a fake clock and the waits below are driven by the socket's
 // own frames, so nothing here reads the wall clock.
 import { afterEach, describe, expect, it } from "vitest";
-import type { TurnResult } from "@wsp/adapter-claude";
+import type { TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";

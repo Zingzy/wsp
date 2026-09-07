@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
-import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
-import type { ForwardEvent, PortForward } from "@wsp/protocol";
+import type { AdapterEvent, ForwardEvent, PortForward, TurnResult } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 import { createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
 import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";

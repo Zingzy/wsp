@@ -183,9 +183,6 @@ importers:
 
   packages/adapter-codex:
     dependencies:
-      '@wsp/adapter-claude':
-        specifier: workspace:*
-        version: link:../adapter-claude
       '@wsp/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -311,9 +308,6 @@ importers:
 
   packages/runtime:
     dependencies:
-      '@wsp/adapter-claude':
-        specifier: workspace:*
-        version: link:../adapter-claude
       '@wsp/catalog':
         specifier: workspace:*
         version: link:../catalog
@@ -333,6 +327,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      '@wsp/adapter-claude':
+        specifier: workspace:*
+        version: link:../adapter-claude
       '@wsp/daemon':
         specifier: workspace:*
         version: link:../daemon

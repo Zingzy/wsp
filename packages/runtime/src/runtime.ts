@@ -1,7 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { posix } from "node:path";
-import type { AdapterEvent, ExecStream, TurnResult, TurnStatus } from "@wsp/adapter-claude";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
@@ -76,9 +75,11 @@ import {
   TOOLS_PATH,
 } from "@wsp/engine";
 import type {
+  AdapterEvent,
   DaemonEvent,
   DaemonReachView,
   EventUnion,
+  ExecStream,
   GoldenBaseTool,
   GoldenBuilderView,
   GoldenLogin,
@@ -104,6 +105,8 @@ import type {
   SessionOrigin,
   SessionView,
   SnapshotStorage,
+  TurnResult,
+  TurnStatus,
   WorkspaceCreateStage,
   WorkspacePhase,
   WorkspaceProject,

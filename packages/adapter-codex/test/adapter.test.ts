@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from "node:fs";
-import type { AdapterEvent, ExecStream, ExecStreamFactory } from "@wsp/adapter-claude";
 import { describe, expect, it } from "vitest";
 import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
+import type { AdapterEvent, ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { createCodexAdapter } from "../src/adapter.js";
 
 const THREAD_ID = "0199a213-81c0-7800-8aa1-bbab2a035a53";

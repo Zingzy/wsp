@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
+import type { AdapterEvent, TurnResult } from "@wsp/protocol";
 import { CATALOG } from "@wsp/catalog";
 import { allRows, type RecipeAnswer } from "../src/recipe-answer.js";
 import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
