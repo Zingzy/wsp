@@ -1388,8 +1388,15 @@ describe("a turn the host comes back to", () => {
       run.live = onEvent;
       return { localId, run: handle, finished, interrupt: async () => {} };
     };
+    const asked: string[] = [];
     const adapter: HarnessAdapterFactory = () => ({
       steers: false,
+      // Answering nothing leaves the row on its seed, so the only thing that can stop a second question after the
+      // restart is the start row the turn already wrote.
+      titleFor: async turn => {
+        asked.push(turn.opening);
+        return null;
+      },
       start: o => {
         const handle = `/tmp/wsp-run/${++minted}`;
         // The CLI keys the session by its own id, not by the one the launch minted, so the row and the harness
@@ -1419,6 +1426,7 @@ describe("a turn the host comes back to", () => {
       handles: () => [...runs.keys()],
       sweep: (handle: string) => runs.delete(handle),
       unreach: (e: Error) => (unreachable = e),
+      asked: () => [...asked],
     };
   };
 
@@ -1453,6 +1461,10 @@ describe("a turn the host comes back to", () => {
     expect(history.map(e => e.type)).toEqual(["session.start", "session.delta", "session.delta", "session.done", "session.end"]);
     expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual(["reading the ticket", "wrote the fix"]);
     expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: 0, sawResult: true });
+    // The name goes out under the one start row the turn writes, so the host that re-opened the run asks nothing:
+    // its own asked-set is empty and the row is still on its seed, and the start row is what stands in for both.
+    expect(h.asked()).toEqual(["build it"]);
+    expect((await rt2.sessions.list(workspaceId))[0]!.harnessTitle).toBeUndefined();
     await rt2.close();
   });
 

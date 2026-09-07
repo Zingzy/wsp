@@ -133,7 +133,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, NOTIFY_ME, RECORD_RESTORED, RUN_GONE_LINE, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, NOTIFY_ME, RECORD_RESTORED, RUN_GONE_LINE, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -2610,25 +2610,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // that asked for it. Nothing here rejects, so both callers may leave it unawaited.
     pending.done = Promise.resolve()
       .then(() => read(sessionId, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
+      // The window opens when the store answered, before the answer is kept: a row that shows the title is a read
+      // that is over, so a listing that sees one waits on nothing.
+      .finally(() => {
+        pending.at = clock.now();
+        pending.live = false;
+      })
       .then(
         async title => {
           if (title === null) return;
-          // A title in the harness's own store is either the person's rename inside it or the one the harness itself
-          // generated for them; both outrank anything we would generate, so the row reads as a person's from here.
+          // A title in the harness's own store is the person's rename inside it or the one the harness itself made
+          // for them, and both outrank anything we would generate; only the opening words, which codex writes there
+          // at a thread's start, are the seed again, and a seed is no news to a row that already carries a name.
           for (const s of sessions.values()) {
-            if (s.view.workspaceId === entry.record.id && s.view.claudeSessionId === sessionId) {
-              s.view.harnessTitle = title;
-              s.view.titleSource = "person";
-            }
+            if (s.view.workspaceId !== entry.record.id || s.view.claudeSessionId !== sessionId) continue;
+            const source = storedTitleSource(title, s.view.prompt);
+            if (source === "seed" && sourceOf(s.view) !== "seed") continue;
+            s.view.harnessTitle = title;
+            s.view.titleSource = source;
           }
           await persistSessions(entry.record.id);
         },
         (e: unknown) => console.warn(noTitleLogLine(sessionId, entry.record.id, e instanceof Error ? e.message : String(e))),
-      )
-      .then(() => {
-        pending.at = clock.now();
-        pending.live = false;
-      });
+      );
     titleReads.set(key, pending);
     return pending.done;
   };
@@ -2681,19 +2685,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** The threads whose one title question has been asked, so a harness that answered nothing is not asked again at
-   * the next turn's end. In memory only: a host that started again asks once more, which is not a loop. */
+   * the next turn's start. In memory only: a host that started again asks once more, which is not a loop. */
   const titlesAsked = new Set<string>();
-  /** Asks the harness for a name for the thread whose first turn just replied, once per thread and only while the
-   * thread still carries the words its opening turn seeded it with. A person's name, given here or found in the
-   * harness's own store, is never replaced: it is read before the question goes out and again when the answer lands,
-   * since a rename can happen while the harness is thinking. The answer is written back into the harness's store, so
-   * its own UI shows the same name.
+  /** Asks the harness for a name for the thread whose first turn just started, from the opening turn alone, once per
+   * thread and only while the thread still carries the words its opening turn seeded it with. A person's name, given
+   * here or found in the harness's own store, is never replaced: it is read before the question goes out and again
+   * when the answer lands, since a rename can happen while the harness is thinking. The answer is written back into
+   * the harness's store, so its own UI shows the same name.
    */
-  const makeTitle = async (view: SessionView, reply: string): Promise<void> => {
+  const makeTitle = async (view: SessionView): Promise<void> => {
     const threadId = view.threadId;
     const entry = live.get(view.workspaceId);
     if (threadId === undefined || entry === undefined || titlesAsked.has(threadId)) return;
-    if (view.prompt === undefined || reply.trim() === "" || threadSource(threadId) !== "seed") return;
+    if (view.prompt === undefined || threadSource(threadId) !== "seed") return;
     if (workspaceState({ phase: entry.record.phase }) !== "running" || adapters[view.harness] === undefined) return;
     const { harness, adapter } = adapterFor(entry, view.harness);
     if (adapter.titleFor === undefined) return;
@@ -2701,7 +2705,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const table = harnessCatalog(harness);
     const model = smallestModel(table === undefined ? undefined : await catalogOn(table, entry.machine, adapter));
     const title = await adapter.titleFor(
-      { opening: view.prompt, reply, ...(model !== undefined ? { model } : {}) },
+      { opening: view.prompt, ...(model !== undefined ? { model } : {}) },
       command => entry.machine.exec(command, { timeoutMs: TITLE_MAKE_TIMEOUT_MS }).then(res => res.stdout),
     );
     if (title === null) {
@@ -2913,6 +2917,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(event.tools !== undefined ? { tools: event.tools } : {}),
             ...(event.harness !== undefined ? { harness: event.harness } : {}),
           });
+          // The thread is named now, from its opening words, so a builder's row reads what it is about seconds
+          // after it starts rather than after an hour-long turn. Asked here and not before the harness announced
+          // its session: the store is read first, since what the harness already calls the session is a person's
+          // and a thread that has one is never asked, and the answer is written back under that same id. This sits
+          // under the one start row a turn writes, so a re-opened run, whose row the host that launched it wrote,
+          // returns above and asks nothing.
+          if (sourceOf(view) === "seed") {
+            void refreshTitle(view, false)
+              .then(() => makeTitle(view))
+              .catch((e: unknown) => console.warn(noMadeTitleLogLine(threadId, workspaceId, e instanceof Error ? e.message : String(e))));
+          }
           return;
         }
         case "turn.delta":
@@ -3020,11 +3035,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (!ended) view.status = result.status;
         view.endedAt ??= Date.now();
         void persistSessions(workspaceId);
-        // The store is read first and the question asked after: what the harness already calls the session is a
-        // person's, and a thread that has one is never asked for another.
-        void refreshTitle(view, true)
-          .then(() => makeTitle(view, result.text ?? ""))
-          .catch((e: unknown) => console.warn(noMadeTitleLogLine(threadId, workspaceId, e instanceof Error ? e.message : String(e))));
+        void refreshTitle(view, true);
       })
       .catch(() => {
         if (!ended) view.status = "failed";

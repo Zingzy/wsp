@@ -201,8 +201,9 @@ export const SessionOrigin = z.enum(["person", "cli", "agent"]);
 export type SessionOrigin = z.infer<typeof SessionOrigin>;
 
 /** Where a thread's title came from, the one rule that decides whether a new one may replace it: seed is the opening
- * turn's own words, auto the one title the harness was asked for after the first reply, person a name the person gave
- * the thread here or inside the harness. Auto replaces a seed and nothing else; a person's name is never replaced. */
+ * turn's own words, here or in the harness's own store, auto the one title the harness was asked for as the first turn
+ * started, person a name the person gave the thread here or inside the harness. Auto replaces a seed and nothing else;
+ * a person's name is never replaced. */
 export const TitleSource = z.enum(["seed", "auto", "person"]);
 export type TitleSource = z.infer<typeof TitleSource>;
 
