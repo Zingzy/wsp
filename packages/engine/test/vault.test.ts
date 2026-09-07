@@ -54,7 +54,7 @@ describe("vault", () => {
     const buf = await exportPaths(machine, ["/root/.claude-cfg"], { fetch: fetchStub });
     expect(buf.equals(TAR_BYTES)).toBe(true);
     const tarCmd = execCmds.find(c => c.startsWith("tar czf"));
-    expect(tarCmd).toMatch(/-C \/ 'root\/.claude-cfg'/);
+    expect(tarCmd).toMatch(/-C '\/' 'root\/.claude-cfg'/);
     expect(execCmds.some(c => c.startsWith("rm -f"))).toBe(true); // guest temp cleaned
   });
 
@@ -712,18 +712,53 @@ describe("exportFolder", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-export-into-"));
     dirs.push(dir);
     const into = join(dir, "state.tgz");
+    const src = [{ root, paths: [join(root, "src")] }];
     try {
-      const bytes = await exportPathsInto(g.machine, [join(root, "src")], into, { fetch: globalThis.fetch });
+      const bytes = await exportPathsInto(g.machine, src, into, { fetch: globalThis.fetch });
       expect(statSync(into).size).toBe(bytes);
       expect(listing(readFileSync(into)).map(l => basename(l))).toEqual(["src", "a.ts", "cache-utils.ts", "dist"]);
       const gone = join(dir, "never.tgz");
       const refusing: typeof globalThis.fetch = async () => new Response(null, { status: 503 });
-      await expect(exportPathsInto(g.machine, [join(root, "src")], gone, { fetch: refusing })).rejects.toThrow(/HTTP 503/);
+      await expect(exportPathsInto(g.machine, src, gone, { fetch: refusing })).rejects.toThrow(/HTTP 503/);
       expect(existsSync(gone)).toBe(false);
       const bodyless = join(dir, "bodyless.tgz");
       const empty: typeof globalThis.fetch = async () => new Response(null, { status: 200 });
-      await expect(exportPathsInto(g.machine, [join(root, "src")], bodyless, { fetch: empty })).rejects.toThrow(/HTTP 200 with no body/);
+      await expect(exportPathsInto(g.machine, src, bodyless, { fetch: empty })).rejects.toThrow(/HTTP 200 with no body/);
       expect(existsSync(bodyless)).toBe(false);
+    } finally {
+      g.close();
+    }
+  });
+
+  it("exportPathsInto archives each group from its own root, so a copy under a mirror root travels at the path it mirrors", async () => {
+    const g = await guest();
+    const dir = mkdtempSync(join(tmpdir(), "wsp-export-groups-"));
+    dirs.push(dir);
+    const home = mkdtempSync(join(tmpdir(), "wsp-export-home-"));
+    dirs.push(home);
+    const mirror = mkdtempSync(join(tmpdir(), "wsp-export-mirror-"));
+    dirs.push(mirror);
+    mkdirSync(join(home, "sessions"), { recursive: true });
+    writeFileSync(join(home, "sessions", "s.jsonl"), "a session\n");
+    writeFileSync(join(home, "store.db"), "every project's rows\n");
+    mkdirSync(join(mirror, home.slice(1)), { recursive: true });
+    writeFileSync(join(mirror, home.slice(1), "store.db"), "this project's rows\n");
+    const into = join(dir, "state.tgz");
+    try {
+      await exportPathsInto(
+        g.machine,
+        [
+          { root: "/", paths: [join(home, "sessions")] },
+          { root: mirror, paths: [join(mirror, home.slice(1), "store.db")] },
+        ],
+        into,
+        { fetch: globalThis.fetch },
+      );
+      const out = mkdtempSync(join(tmpdir(), "wsp-export-out-"));
+      dirs.push(out);
+      execFileSync("tar", ["-xzf", into, "-C", out]);
+      expect(readFileSync(join(out, home.slice(1), "sessions", "s.jsonl"), "utf8")).toBe("a session\n");
+      expect(readFileSync(join(out, home.slice(1), "store.db"), "utf8")).toBe("this project's rows\n");
     } finally {
       g.close();
     }

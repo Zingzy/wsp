@@ -34,6 +34,8 @@ import {
   plural,
   agentsOnMachine,
   guestAgentHomes,
+  guestTmpPath,
+  parseStateListing,
   stateListing,
   killUntilGone,
   prepareBuilder,
@@ -69,6 +71,7 @@ import {
   type ReapedMachine,
   type RunOptions,
   type RetentionPlan,
+  type UnreadStore,
   type VaultOptions,
   type WspError,
   type WorkspacePhase as EnginePhase,
@@ -113,7 +116,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -301,6 +304,9 @@ export interface LandRequest {
   /** The agents' state under the guest's root as an archive on this computer, each agent's home on the guest by
    * catalog id, and the agents whose state comes home (every one with sessions for the folder when absent). */
   state?: { archive: string; homes: Readonly<Record<string, string>>; agents?: readonly string[] };
+  /** The stores an agent keeps for every project that the listing on the machine could not read: nothing of theirs is
+   * in the archive, so the landing report carries a row for each one saying which store and why. */
+  unread?: readonly UnreadStore[];
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */
@@ -3474,26 +3480,38 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
       const downloading = (what: string) => (p: { bytes: number; total: number }): void => report("downloading", `${what}: ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, p);
       const scratch = mkdtempSync(join(tmpdir(), "wsp-exported-"));
+      // Where the listing writes the filtered copy of a store an agent keeps for every project, mirroring the homes.
+      const onMachine = guestTmpPath("wsp-state");
+      let listed = false;
       try {
         const homes = guestAgentHomes();
-        const listing = stateListing(homes, o.source, o.agents);
+        const listing = stateListing(homes, o.source, onMachine, o.agents);
         const at = await o.lander.probe(o.dest);
         if (at !== undefined && o.replace !== true) throw destExists(o.dest, at.files);
         report("packing", `Packing ${o.source} on the machine.`);
         const archive = join(scratch, "folder.tgz");
         const folder = await exportFolder(entry.machine, o.source, o.lander.caches, archive, { timeoutMs: 600_000, onProgress: downloading("The folder") });
-        const found = listing === "" ? { exitCode: 0, stdout: "", stderr: "" } : await entry.machine.run(listing, { deadlineMs: LISTING_DEADLINE_MS });
+        let found = { exitCode: 0, stdout: "", stderr: "" };
+        if (listing !== "") {
+          listed = true;
+          found = await entry.machine.run(listing, { deadlineMs: LISTING_DEADLINE_MS });
+        }
         if (found.exitCode !== 0) throw new Error(`could not look for agent state on the machine: ${found.stderr.slice(-200)}`);
-        const present = found.stdout.split("\n").filter(l => l !== "");
+        const { paths: present, unread } = parseStateListing(found.stdout);
         let state: LandRequest["state"];
         if (present.length > 0) {
           report("packing", `Packing the agents' state for it on the machine.`);
           const stateArchive = join(scratch, "state.tgz");
-          await exportPathsInto(entry.machine, present, stateArchive, { timeoutMs: 600_000, onProgress: downloading("Agent state") });
+          // A copy travels at the path it mirrors under the scratch root, so the archive is the homes as the project alone left them.
+          const groups = [
+            { root: "/", paths: present.filter(p => !underProject(p, onMachine)) },
+            { root: onMachine, paths: present.filter(p => underProject(p, onMachine)) },
+          ].filter(g => g.paths.length > 0);
+          await exportPathsInto(entry.machine, groups, stateArchive, { timeoutMs: 600_000, onProgress: downloading("Agent state") });
           state = { archive: stateArchive, homes, ...(o.agents !== undefined ? { agents: o.agents } : {}) };
         }
         report("landing", `Landing at ${o.dest}.`);
-        const landed = await o.lander.land({ source: o.source, dest: o.dest, replace: o.replace === true, archive, ...(state !== undefined ? { state } : {}) });
+        const landed = await o.lander.land({ source: o.source, dest: o.dest, replace: o.replace === true, archive, ...(state !== undefined ? { state } : {}), ...(unread.length > 0 ? { unread } : {}) });
         const outcomes = landed.agents.map(homeOutcome);
         const caches = folder.excluded.length === 0 ? "" : `; ${plural(folder.excluded.length, "cache")} left behind`;
         report("done", `${plural(landed.files, "file")}, ${fmtBytes(landed.bytes)}, landed at ${o.dest}${caches}; ${outcomes.length === 0 ? "no agent sessions for it on the machine" : `sessions: ${outcomes.join(", ")}`}.`);
@@ -3502,6 +3520,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         report("failed", e instanceof Error ? e.message : String(e));
         throw e;
       } finally {
+        if (listed) await entry.machine.exec(`rm -rf ${shellQuote(onMachine)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
         rmSync(scratch, { recursive: true, force: true });
       }
     },
