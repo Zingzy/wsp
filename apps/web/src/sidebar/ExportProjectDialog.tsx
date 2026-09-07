@@ -9,7 +9,9 @@
 // before the destination is checked, so an existing folder comes back as the
 // runtime's refusal naming it and its file count, the one loud line, and the
 // action becomes Replace and export. The desktop shell gives the folder here
-// as a picker row; a browser tab has the path input alone.
+// as a picker row; a browser tab browses this Mac's own folders under the
+// path input, and the folder lands inside a browsed one as it would inside a
+// picked one.
 import { useCallback, useMemo, useRef, useState } from "react";
 import { agentName } from "@wsp/catalog";
 import { EXPORT_SESSIONS_NOTE, NO_THREADS_NOTE, NOT_LANDED_WORD, exportFromLine, fmtBytes, type ProjectAgentResult, type ProjectExportEvent, type ProjectExportResult, type WorkspaceView } from "@wsp/protocol";
@@ -19,6 +21,8 @@ import { useThreadFolder } from "../files/root.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { agentRows, agentsRequest, exportLandedLine, exportProgress, isExportOf, pickedDest } from "./exportProject.js";
+import { FolderBrowser } from "./FolderBrowser.js";
+import { useLastFolderParent } from "./lastFolderStore.js";
 import { agentOutcome, count, refusalOf, slotWords, type Refusal } from "./projectTrip.js";
 import { CachesRow, ConsentRow, FactRow, FolderField, FolderPickerRow, TripSection, TripStatus } from "./ProjectTripRows.js";
 
@@ -32,6 +36,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
   const rows = useMemo(() => agentRows(sessions), [sessions]);
   const folder = useThreadFolder(workspace.id);
   const bridge = typeof window === "undefined" ? undefined : window.wsp?.pickFolder;
+  const lastFolder = useLastFolderParent();
   const [source, setSource] = useState(folder ?? "");
   /** The destination once the person edited or picked it; before that it mirrors the source. */
   const [chosen, setChosen] = useState<string | null>(null);
@@ -53,12 +58,15 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
   );
   useProtocolEvents(onEvent);
 
-  const pick = async (): Promise<void> => {
-    if (bridge === undefined) return;
-    const picked = await bridge();
-    if (picked === undefined) return;
+  const pick = (picked: string): void => {
     setChosen(pickedDest(picked, source));
     setRefusal(null);
+  };
+
+  const pickNative = async (): Promise<void> => {
+    if (bridge === undefined) return;
+    const picked = await bridge();
+    if (picked !== undefined) pick(picked);
   };
 
   const start = async (replace: boolean): Promise<void> => {
@@ -119,18 +127,21 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
             </TripSection>
             <TripSection k="dest" label="Folder on this Mac" {...(bridge === undefined ? { htmlFor: "export-dest" } : {})}>
               {bridge === undefined ? (
-                <FolderField
-                  id="export-dest"
-                  placeholder={DEST_PLACEHOLDER}
-                  value={dest}
-                  disabled={settled}
-                  onChange={next => {
-                    setChosen(next);
-                    setRefusal(null);
-                  }}
-                />
+                <>
+                  <FolderField
+                    id="export-dest"
+                    placeholder={DEST_PLACEHOLDER}
+                    value={dest}
+                    disabled={settled}
+                    onChange={next => {
+                      setChosen(next);
+                      setRefusal(null);
+                    }}
+                  />
+                  <FolderBrowser disabled={settled} start={lastFolder} onPick={pick} />
+                </>
               ) : (
-                <FolderPickerRow path={dest} placeholder={DEST_PLACEHOLDER} disabled={settled} onPick={() => void pick()} />
+                <FolderPickerRow path={dest} placeholder={DEST_PLACEHOLDER} disabled={settled} onPick={() => void pickNative()} />
               )}
             </TripSection>
             <TripSection k="agents" label="Sessions">

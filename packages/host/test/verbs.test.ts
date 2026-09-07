@@ -15,9 +15,13 @@ import { HELP, cli, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { PLAN_ONLY, dialHost, messageTo } from "../src/verbs.js";
+import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
+
+// A path the process may not read is refused here and not by chmod: these tests run as root, which reads anything.
+vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -1131,6 +1135,45 @@ describe("wsp verbs over the host", () => {
     return proj;
   }
   const landings = (): string[] => backend.machines[0]!.runLog.filter(s => s.includes("mv "));
+
+  it("folders lists one level of this computer's folders with the repository marked and the hidden ones counted, and refuses a path outside the roots", async () => {
+    const home = join(dir, "user");
+    mkdirSync(join(home, "code", "spoo", ".git"), { recursive: true });
+    mkdirSync(join(home, "code", "notes"), { recursive: true });
+    mkdirSync(join(home, "code", ".cache"), { recursive: true });
+    const { code, io } = await run("folders", join(home, "code"));
+    expect(code).toBe(0);
+    const lines = io.lines[0]!.split("\n");
+    const cells = (line: string): string[] => line.split(/ {2,}/);
+    expect(cells(lines[0]!)).toEqual(["FOLDER", "GIT"]);
+    expect(lines.slice(1, 3).map(cells)).toEqual([[join(home, "code", "notes")], [join(home, "code", "spoo"), "git"]]);
+    expect(lines.at(-1)).toBe(`2 folders in ${join(home, "code")}, 1 hidden. Browsable: ${home}.`);
+    // The dot-named folder is a row only when it is asked for, and --json is the listing the app's picker reads.
+    const shown = await run("folders", join(home, "code"), "--hidden", "--json");
+    expect(json(shown.io)).toEqual([{ dir: join(home, "code"), roots: [home], folders: [{ path: join(home, "code", ".cache"), repo: false }, { path: join(home, "code", "notes"), repo: false }, { path: join(home, "code", "spoo"), repo: true }], hidden: 1 }]);
+    const outside = await run("folders", "/etc");
+    expect(outside.code).toBe(1);
+    expect(outside.io.errors.join("\n")).toBe(`wsp folders: /etc is outside the folders wsp browses on this computer: ${home}`);
+    const many = await run("folders", join(home, "code"), join(home, "Applications"));
+    // A line refused before anything was dialled is a usage refusal, which is the code an agent branches on.
+    expect(many.code).toBe(3);
+    expect(many.io.errors.join("\n")).toContain("takes one folder on this computer at most");
+  });
+
+  it("a folder inside the roots this Mac will not let the host read comes back as one stderr line at the provider's code, not a usage refusal", async () => {
+    const home = join(dir, "user");
+    const shut = join(home, "Documents");
+    mkdirSync(shut, { recursive: true });
+    const words = `EACCES: permission denied, scandir '${shut}'`;
+    const refused = await withRefused(shut, () => run("folders", shut));
+    expect(refused.code).toBe(1);
+    expect(refused.io.errors).toEqual([`wsp folders: ${words}`]);
+    // The machine said no, so the class is the provider's on the JSON door too, where stdout stays empty.
+    const asJson = await withRefused(shut, () => run("folders", shut, "--json"));
+    expect(asJson.io.lines).toEqual([]);
+    expect(asJson.io.errors).toHaveLength(1);
+    expect(JSON.parse(asJson.io.errors[0]!)).toEqual({ error: words, class: "provider", exit: 1 });
+  });
 
   it("import off a terminal prints the plan with the .env cut by default, moves nothing without --yes, --keep or --cut, and names --yes on stderr", async () => {
     const proj = projectFolder();

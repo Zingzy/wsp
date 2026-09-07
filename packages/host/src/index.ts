@@ -40,7 +40,8 @@ export {
   type UrlOpener,
 } from "./relay.js";
 export { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
-export { isCacheDir, packProject, packState, planProject, projectBundler, type BundleFile, type ProjectListing } from "./project-bundle.js";
+export { hostFolderRoots, hostFolders, importedProjectFolders, listHostFolders, type HostFolderPaths } from "./host-folders.js";
+export { isCacheDir, isRepoFolder, packProject, packState, planProject, projectBundler, type BundleFile, type ProjectListing } from "./project-bundle.js";
 export {
   doctor,
   deployDaemon,

@@ -21,6 +21,7 @@ import {
   AFTER_CUT_LINE,
   EMPTY_TASK_LINE,
   EXIT_CODES,
+  HostFolderListing,
   LOGIN_CHOICES,
   NOTIFY_ME,
   NOTIFY_WORDS,
@@ -44,6 +45,7 @@ import {
   defaultConsent,
   deleteNotice,
   execFolderLine,
+  folderLevelLine,
   fmtBytes,
   plural,
   fmtThreads,
@@ -998,6 +1000,25 @@ function printTable(ctx: VerbContext, value: unknown, lines: (depth: number) => 
   ctx.io.log(next);
 }
 
+/** One level of this computer's own folders over the protocol: the folder picker a browser tab has, and the same
+ * answer here, so a line or an agent can look before it names a folder to import. */
+async function hostFolders(client: HostClient, dir: string | undefined, hidden: boolean | undefined): Promise<HostFolderListing> {
+  const { listing } = await client.request<{ listing: HostFolderListing }>("host.folders", {
+    ...(dir !== undefined ? { dir } : {}),
+    ...(hidden === true ? { hidden } : {}),
+  });
+  return listing;
+}
+
+/** The level as a table, then the level in words with the folders that are browsable at all beside them, since a path
+ * outside those is refused. The app's own browser draws the roots as crumbs instead. */
+function folderLines(listing: HostFolderListing): string[] {
+  return [
+    ...table([["FOLDER", "GIT"], ...listing.folders.map(f => [f.path, f.repo ? "git" : ""])]),
+    `${folderLevelLine(listing)} Browsable: ${listing.roots.join(", ")}.`,
+  ];
+}
+
 export const VERBS: readonly Verb[] = [
   {
     name: "workspaces",
@@ -1439,6 +1460,32 @@ export const VERBS: readonly Verb[] = [
         });
         if (exit.error !== undefined) throw new Error(exit.error);
         return asText(output.join("\n"), { exitCode: exit.exitCode, output, ...(ranIn !== undefined ? { cwd: ranIn } : {}) });
+      },
+    }),
+  },
+  {
+    name: "folders",
+    usage: "wsp folders [<folder>] [--hidden]",
+    about: "the folders inside one folder on this computer, for naming one to import; the home folder and every imported project are the roots and nothing outside them is listed",
+    options: { hidden: { type: "boolean" } },
+    run: async ctx => {
+      const [folder] = ctx.args;
+      if (ctx.args.length > 1) throw usageRefusal("wsp folders takes one folder on this computer at most");
+      const listing = await hostFolders(await ctx.client(), folder === undefined ? undefined : resolve(folder), ctx.flags["hidden"] === true);
+      ctx.out.emit(listing, folderLines(listing).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "The folders directly inside one folder on the person's own computer, one level at a time, as the app's import dialog browses them in a browser tab: each folder's absolute path, whether git tracks it, and how many dot-named ones the level holds. Browse this to name a folder for import instead of guessing a path. The roots are the person's home folder and every folder already imported into a workspace; a path outside those is refused, and folder absent lists the first root. Folders only: no file is named and nothing is read.",
+      input: {
+        folder: z.string().optional().describe("the folder to list, absolute and inside the roots; absent lists the home folder"),
+        hidden: z.boolean().optional().describe("true lists the dot-named folders too, which are otherwise only counted"),
+      },
+      output: HostFolderListing.shape,
+      call: async ({ folder, hidden }, deps) => {
+        const listing = await hostFolders(await deps.client(), folder === undefined ? undefined : absolutePath("folder is a path on this computer", folder), hidden);
+        return asText(folderLines(listing).join("\n"), listing);
       },
     }),
   },

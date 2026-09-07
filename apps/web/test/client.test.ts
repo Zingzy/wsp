@@ -48,6 +48,20 @@ describe("makeApi wrappers", () => {
     await expect(interrupt("s1")).rejects.toThrow();
   });
 
+  it("hostFolders sends host.folders with only the fields it was given and unwraps the level the wire type vouches for", async () => {
+    const { api, lastSent } = await connect();
+    const browse = api.hostFolders!;
+    const listing = { dir: "/Users/dev/code", roots: ["/Users/dev"], folders: [{ path: "/Users/dev/code/spoo", repo: true }], hidden: 2 };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, listing });
+    expect(await browse()).toEqual(listing);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "host.folders" });
+    expect(await browse("/Users/dev/code", true)).toEqual(listing);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "host.folders", dir: "/Users/dev/code", hidden: true });
+    // A level the wire type does not vouch for is not walked: the picker would render a path it never checked.
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, listing: { ...listing, folders: [{ path: "/Users/dev/code/spoo" }] } });
+    await expect(browse()).rejects.toThrow();
+  });
+
   it("planProject and importProject send the project ops and unwrap only what the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
     const plan = { source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [{ path: ".env", bytes: 10, signals: ["name"] }], excluded: ["node_modules"], skipped: [], agents: [] };

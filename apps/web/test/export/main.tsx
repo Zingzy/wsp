@@ -16,12 +16,15 @@ import { useRootStore } from "../../src/files/root";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
 import { ExportProjectDialog } from "../../src/sidebar/ExportProjectDialog";
+import { fakeHostFolders } from "../host-folders-fixture";
 import "../../src/index.css";
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
-// The desktop shell's bridge, so the picker button is laid out; nothing here opens a system dialog.
-window.wsp = { pickFolder: async () => undefined };
+// The desktop shell's bridge, so the picker button is laid out; nothing here opens a system dialog. With ?tab=1
+// there is no bridge, which is a browser tab: the folder browser over the host's own folders stands there instead.
+const TAB = params.get("tab") === "1";
+if (!TAB) window.wsp = { pickFolder: async () => undefined };
 
 const SOURCE = params.get("long") === "1" ? "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo" : "/Users/me/code/spoo";
 const workspace: WorkspaceView = { id: "ws_api", name: "api", machineId: "m_api", phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
@@ -65,6 +68,7 @@ const api: Api = {
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
   listSessions: async () => (params.get("threads") === "0" ? [] : [session("s1", "claude"), session("s2", "codex"), session("s3", "claude"), session("s4", "gemini")]),
   getGolden: async () => undefined,
+  hostFolders: fakeHostFolders(),
   exportProject: async o => {
     if (refusals > 0 && o.replace !== true) {
       refusals--;

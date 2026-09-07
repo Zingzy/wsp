@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Importing a folder on this Mac into a workspace: one container of quiet
 // sections, the folder, what travels, the agents whose sessions go with it
-// and the files that look like secrets, each a section only when the plan has
-// rows for it; one action starts the import and the runtime's events read in
-// the one slot above the footer that was empty until then. The desktop shell gives the
-// folder as a picker row; a browser tab has the path input alone and Enter
-// reads it. The path shows as the person picked it; the plan speaks in
-// realpaths, so the destination and the events are matched on that. A consent
-// is for the plan the person read: editing the path drops the plan and its
-// ticks until the folder is read again.
+// and the files that look like secrets, each a section only when the plan
+// has rows for it; one action starts the import and the runtime's events
+// read in the one slot above the footer that was empty until then. The
+// desktop shell gives the folder as a picker row; a browser tab browses the
+// host's own folders under the path input, and a typed path with Enter
+// reads it either way. The path shows as the person picked it; the plan
+// speaks in realpaths, so the destination and the events are matched on
+// that. A consent is for the plan the person read: editing the path drops
+// the plan and its ticks until the folder is read again.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtBytes, importIntoLine, importRequest, repoLine, secretSignalsLine, secretsNote, SESSIONS_NOTE, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
@@ -16,7 +17,9 @@ import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, Dia
 import { errorText } from "../lib/utils.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
+import { FolderBrowser } from "./FolderBrowser.js";
 import { agentState, canTravel, defaultAgents, defaultConsent, importProgress, isImportOf, landedLine, secretOffer } from "./importProject.js";
+import { useLastFolderParent, useLastFolderStore } from "./lastFolderStore.js";
 import { count, refusalOf, slotWords, type Refusal } from "./projectTrip.js";
 import { CachesRow, ConsentRow, FactRow, FolderField, FolderPickerRow, TripSection, TripStatus } from "./ProjectTripRows.js";
 
@@ -39,6 +42,8 @@ const PLACEHOLDER = "/Users/you/code/project";
 export function ImportProjectDialog({ workspace, initialSource, onClose }: { workspace: WorkspaceView; initialSource?: string; onClose: () => void }) {
   const api = useStore(s => s.api);
   const bridge = typeof window === "undefined" ? undefined : window.wsp?.pickFolder;
+  const remember = useLastFolderStore(s => s.remember);
+  const lastFolder = useLastFolderParent();
   const [source, setSource] = useState(initialSource ?? "");
   const [planned, setPlanned] = useState<Planned | null>(null);
   const plan = planned?.plan ?? null;
@@ -87,12 +92,15 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
     if (initialSource !== undefined) void read(initialSource);
   }, [initialSource, read]);
 
-  const pick = async (): Promise<void> => {
+  const pick = (picked: string): void => {
+    setSource(picked);
+    void read(picked);
+  };
+
+  const pickNative = async (): Promise<void> => {
     if (bridge === undefined) return;
     const picked = await bridge();
-    if (picked === undefined) return;
-    setSource(picked);
-    await read(picked);
+    if (picked !== undefined) pick(picked);
   };
 
   const start = async (replace: boolean): Promise<void> => {
@@ -105,6 +113,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
       const landed = await api.importProject({ workspaceId: workspace.id, ...importRequest(plan, source, ticked, tickedAgents, replace) });
       setResult(landed);
       setPhase("done");
+      remember(source.trim());
     } catch (e) {
       setRefusal(refusalOf(e));
       setPhase("idle");
@@ -146,9 +155,12 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
           <DialogPanel className="flex flex-col">
             <TripSection k="folder" label="Folder on this Mac" {...(bridge === undefined ? { htmlFor: "import-source" } : {})}>
               {bridge === undefined ? (
-                <FolderField id="import-source" placeholder={PLACEHOLDER} value={source} disabled={busy} autoFocus={initialSource === undefined} onChange={edit} onEnter={() => void read(source)} />
+                <>
+                  <FolderField id="import-source" placeholder={PLACEHOLDER} value={source} disabled={busy} autoFocus={initialSource === undefined} onChange={edit} onEnter={() => void read(source)} />
+                  <FolderBrowser disabled={busy} start={lastFolder} onPick={pick} />
+                </>
               ) : (
-                <FolderPickerRow path={source} placeholder={PLACEHOLDER} disabled={busy} onPick={() => void pick()} />
+                <FolderPickerRow path={source} placeholder={PLACEHOLDER} disabled={busy} onPick={() => void pickNative()} />
               )}
             </TripSection>
             <TripSection k="summary" label="What travels">

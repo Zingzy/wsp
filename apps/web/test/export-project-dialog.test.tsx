@@ -10,7 +10,7 @@
 // leaves Export as it was.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EXPORT_SESSIONS_NOTE, NO_THREADS_NOTE, NOT_LANDED_WORD, exportFromLine, type EventUnion, type ProjectExportEvent, type ProjectExportResult, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { EXPORT_SESSIONS_NOTE, NO_THREADS_NOTE, NOT_LANDED_WORD, exportFromLine, type EventUnion, type HostFolderListing, type ProjectExportEvent, type ProjectExportResult, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { useRootStore } from "../src/files/root.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -44,6 +44,18 @@ const event = (over: Partial<ProjectExportEvent>): EventUnion => ({
 });
 
 const THREADS = [session("s1", "claude"), session("s2", "codex"), session("s3", "claude")];
+
+/** This Mac's folders as the host lists them, home the only root. */
+const LEVELS: Record<string, string[]> = { "/Users/me": ["/Users/me/code"], "/Users/me/code": ["/Users/me/code/archive"], "/Users/me/code/archive": [] };
+function fakeFolders() {
+  const asked: (string | undefined)[] = [];
+  const hostFolders = async (dir?: string): Promise<HostFolderListing> => {
+    asked.push(dir);
+    const at = dir ?? "/Users/me";
+    return { dir: at, roots: ["/Users/me"], folders: LEVELS[at]!.map(path => ({ path, repo: false })), hidden: 0 };
+  };
+  return { hostFolders, asked };
+}
 
 function fakeApi(sessions: SessionView[] = THREADS) {
   const listeners = new Set<(e: EventUnion) => void>();
@@ -184,6 +196,40 @@ describe("export project dialog", () => {
     expect(value(root, "path")).toBe("/Users/me/code/spoo");
     fireEvent.click(button(root, "Export"));
     expect(api.exportProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/root/work/other", dest: "/Users/me/code/spoo" });
+  });
+
+  it("in a browser tab the destination is browsed instead of picked: the folder lands inside the folder shown, under its own name", async () => {
+    const { api } = fakeApi();
+    const { hostFolders, asked } = fakeFolders();
+    useStore.getState().bind({ ...api, hostFolders });
+    render(<ExportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    const rows = (): string[] => Array.from(root.querySelectorAll<HTMLElement>("[data-k=browse-folder]")).map(el => el.textContent ?? "");
+    await waitFor(() => expect(rows()).toEqual(["code"]));
+    expect(asked).toEqual([undefined]);
+    expect(value(root, "browse-state")).toBe("1 folder in /Users/me.");
+    fireEvent.change(field(root, "Folder on the machine"), { target: { value: "/root/work/spoo" } });
+    fireEvent.click(root.querySelector<HTMLElement>('[data-folder="/Users/me/code"]')!);
+    await waitFor(() => expect(rows()).toEqual(["archive"]));
+    // Walking does not name a destination; the one action does.
+    expect(field(root, "Folder on this Mac").value).toBe("/root/work/spoo");
+    fireEvent.click(button(root, "Use this folder"));
+    expect(field(root, "Folder on this Mac").value).toBe("/Users/me/code/spoo");
+    fireEvent.click(button(root, "Export"));
+    expect(api.exportProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/root/work/spoo", dest: "/Users/me/code/spoo" });
+  });
+
+  it("with the desktop shell's bridge no folder browser is drawn and the host is never asked for a level", async () => {
+    const { api } = fakeApi();
+    const { hostFolders, asked } = fakeFolders();
+    (window as { wsp?: unknown }).wsp = { pickFolder: async () => "/Users/me/code" };
+    useStore.getState().bind({ ...api, hostFolders });
+    render(<ExportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    expect(root.querySelector("[data-k=browse]")).toBeNull();
+    expect(asked).toEqual([]);
+    fireEvent.click(button(root, "Change"));
+    await waitFor(() => expect(value(root, "path")).toBe("/Users/me/code/proj"));
   });
 
   it("an unticked agent narrows the request to the ticked ones; ticking every row again asks for none", async () => {

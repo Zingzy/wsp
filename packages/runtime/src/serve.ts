@@ -9,7 +9,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RuntimeRequest, type ExecEvent, type ForwardEvent, type PortForward } from "@wsp/protocol";
-import type { ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
+import type { HostFolders, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -35,6 +35,9 @@ export interface ServeOptions {
   projects?: (source: string) => ProjectBundler;
   /** How a folder from a machine lands on this computer for project.export; without it the op is refused. */
   landing?: ProjectLander;
+  /** How this computer's own folders are listed for host.folders, the picker a browser tab has instead of the
+   * desktop shell's dialog; without it the op is refused. */
+  folders?: HostFolders;
 }
 
 export interface RuntimeServer {
@@ -67,9 +70,17 @@ function landerFrom(opts: ServeOptions): () => ProjectLander {
   };
 }
 
+function foldersFrom(opts: ServeOptions): () => HostFolders {
+  return () => {
+    if (opts.folders === undefined) throw new Error("this runtime cannot browse the folders on this computer");
+    return opts.folders;
+  };
+}
+
 export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<RuntimeServer> {
   const bundler = bundlerFrom(opts);
   const lander = landerFrom(opts);
+  const folders = foldersFrom(opts);
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
   const now = opts.now ?? Date.now;
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
@@ -321,6 +332,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               })();
               return;
             }
+            case "host.folders":
+              send({ id: msg.id, ok: true, listing: await folders().list({ ...(msg.dir !== undefined ? { dir: msg.dir } : {}), ...(msg.hidden !== undefined ? { hidden: msg.hidden } : {}) }) });
+              return;
             case "project.plan":
               send({ id: msg.id, ok: true, plan: await bundler(msg.source).plan() });
               return;

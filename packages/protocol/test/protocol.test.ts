@@ -23,6 +23,7 @@ import {
   GoldenStageEvent,
   goldenHead,
   HarnessCatalog,
+  HostFolderListing,
   contextWindowsFor,
   effortsFor,
   markedDefault,
@@ -798,6 +799,20 @@ describe("the small recipe", () => {
     expect(Recipe.safeParse({ ...recipe, histories: [{ agent: "claude", state: "read", sessions: -1, calls: 0 }] }).success).toBe(false);
     expect(RecipeSource.parse({ kind: "installed", paths: ["~/.claude/settings.json"], bin: true })).toEqual({ kind: "installed", paths: ["~/.claude/settings.json"], bin: true });
     expect(RecipeSource.safeParse({ kind: "installed", paths: ["~/.claude/settings.json"] }).success).toBe(false);
+  });
+});
+
+describe("this computer's folder listing", () => {
+  it("takes an ask with neither the folder nor the hidden flag, and vouches for a level of folders with its roots beside it", () => {
+    for (const req of [{ id: "r1", op: "host.folders" }, { id: "r1", op: "host.folders", dir: "/Users/dev/code", hidden: true }]) {
+      expect(RuntimeRequest.parse(req)).toEqual(req);
+    }
+    expect(RuntimeRequest.safeParse({ id: "r1", op: "host.folders", hidden: "yes" }).success).toBe(false);
+    const listing = { dir: "/Users/dev/code", roots: ["/Users/dev", "/Volumes/work/api"], folders: [{ path: "/Users/dev/code/spoo", repo: true }], hidden: 3 };
+    expect(HostFolderListing.parse(listing)).toEqual(listing);
+    expect(HostFolderListing.safeParse({ ...listing, folders: [{ path: "/Users/dev/code/spoo" }] }).success).toBe(false);
+    expect(HostFolderListing.safeParse({ ...listing, hidden: 1.5 }).success).toBe(false);
+    expect(HostFolderListing.safeParse({ ...listing, roots: undefined }).success).toBe(false);
   });
 });
 

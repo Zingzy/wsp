@@ -84,6 +84,7 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | `wsp stop <thread>` | `stop` (thread) | ends the thread's running turn, as the app's stop button does; the machine stays up |
 | `wsp exec <workspace> [--cwd <dir>] -- <command...>` | `exec` (workspace, argv, cwd) | runs the command on the machine, each word as given, in the folder named or the workspace's project folder, waking it first when it is paused; output lines, the exit code and the folder it ran in |
 | `wsp snapshot <workspace>` | `snapshot` (workspace) | a project golden: the golden plus the loaded project as it stands |
+| `wsp folders [<folder>] [--hidden]` | `folders` (folder, hidden) | the folders directly inside one folder on this computer, each with whether git tracks it, for naming one to import; the roots are the home folder and every imported project, and a path outside them is refused |
 | `wsp export <workspace> <folder> [--from <path>] [--replace] [--agents <ids>]` | `export` (workspace, folder, from, replace, agents) | the folder and the agent sessions keyed to it come home to this computer |
 | `wsp import <folder> --to <workspace> [--yes] [--keep <path>] [--cut <path>] [--agents <ids>] [--replace]` | `import` (workspace, folder, yes, keep, cut, agents, replace) | the folder lands on the machine at its path here, as the app's import does; without yes, keep or cut it answers with the plan and moves nothing (a person at a terminal is asked once instead) |
 | `wsp recipe scan [--project <folder>] [--json]` | `recipe_scan` (project) | reads this computer and prints every option, writing nothing: the agents, the tools with why and size, what else a package manager here has that the image could take, the commands the agents ran, and the sign-ins, each with what to do about it and why |
@@ -155,6 +156,7 @@ wsp new gate --size 2x8               # a machine at a size the provider offers;
 ### import
 
 ```
+wsp folders /Users/zingzy                        # what is inside, for naming a folder to import
 wsp import /Users/zingzy/wsp --to dev            # the plan; a person is asked once, a pipe or an agent gets the plan and nothing moves
 wsp import /Users/zingzy/wsp --to dev --yes      # the plan's defaults: secret-shaped files cut, rewrites taken, sessions of every listed agent
 wsp import /Users/zingzy/wsp --to dev --keep .env --agents claude

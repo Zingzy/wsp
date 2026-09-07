@@ -16,6 +16,7 @@ import {
   goldenHead,
   type GoldenManifest,
   type GoldenVersion,
+  HostFolderListing,
   type PortProbeView,
   type PortReachView,
   ProjectExportResult,
@@ -287,6 +288,11 @@ export interface Api {
    * asks the binaries on its machine, else its table answers. Optional so fixtures without pickers need not fake it;
    * without it the composer shows none. */
   listHarnesses?(workspaceId?: string): Promise<HarnessCatalog[]>;
+  /** One level of the folders on the computer running the host, for the picker a browser tab has instead of the
+   * desktop shell's dialog. `dir` absent, or a folder inside the roots that is gone, answers with the first root; a
+   * path outside them is refused. Optional so fixtures that never browse need not fake it; without it the folder
+   * field takes a typed path alone. */
+  hostFolders?(dir?: string, hidden?: boolean): Promise<HostFolderListing>;
   /** What importing a folder on this computer would carry; nothing is read into memory or uploaded. Optional so
    * fixtures that never import need not fake it; the sidebar offers no import without it. */
   planProject?(source: string): Promise<ProjectPlan>;
@@ -412,6 +418,9 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: a picker renders only values the wire type vouches for.
     listHarnesses: async workspaceId =>
       HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list", workspaceId !== undefined ? { workspaceId } : {})).harnesses),
+    // Parsed, not trusted: the picker walks and names only paths the wire type vouches for.
+    hostFolders: async (dir, hidden) =>
+      HostFolderListing.parse((await c.request<{ listing?: unknown }>("host.folders", { ...(dir !== undefined ? { dir } : {}), ...(hidden !== undefined ? { hidden } : {}) })).listing),
     // Parsed, not trusted: the consent step renders only what the wire type vouches for.
     planProject: async source => ProjectPlan.parse((await c.request<{ plan?: unknown }>("project.plan", { source })).plan),
     importProject: async opts => ProjectImportResult.parse((await c.request<{ imported?: unknown }>("project.import", { ...opts })).imported),

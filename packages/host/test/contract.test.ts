@@ -98,6 +98,9 @@ describe("the agent contract on the command line and the tool door", () => {
     const created = (await last("new", "new", "alpha")) as { workspace: { id: string } };
     const alpha = created.workspace.id;
     await last("threads", "threads");
+    // One level of this computer's own folders: the home folder this test stubbed, with a folder inside it to list.
+    mkdirSync(join(dir, "user", "code"), { recursive: true });
+    await last("folders", "folders");
     // The streaming verbs: the frames carry a field of the tool's object and the result leaves it out. A plan nobody
     // consented to is the plan frame alone, since nothing is left of the result once the plan is dropped.
     const planned = await run("import", proj, "--to", "alpha", "--json");

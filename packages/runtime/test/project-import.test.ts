@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tarOf } from "@wsp/engine";
-import type { EventUnion, ProjectAgent, ProjectAgentOutcome, ProjectImportEvent, ProjectPlan, ProjectSecret } from "@wsp/protocol";
+import type { EventUnion, HostFolderListing, ProjectAgent, ProjectAgentOutcome, ProjectImportEvent, ProjectPlan, ProjectSecret } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRuntime, type PackedProject, type PackedState, type ProjectBundler, type StateRequest } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -349,6 +349,28 @@ describe("project.import on a workspace", () => {
     await expect(rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", bundler })).rejects.toThrow(/^Workspace is paused; wake it to import$/);
     await expect(rt.projects.import({ workspaceId: "ws_nope", source: SOURCE, dest: "/root/proj", bundler })).rejects.toThrow(/no such workspace/);
     expect(bundler.calls).toEqual([]);
+  });
+
+  it("over the wire the host's folder browser answers host.folders with the level asked for; a server without one refuses it", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    const asked: { dir?: string; hidden?: boolean }[] = [];
+    const listing: HostFolderListing = { dir: SOURCE, roots: ["/Users/dev", "/Volumes/work/api"], folders: [{ path: `${SOURCE}/spoo`, repo: true }], hidden: 3 };
+    srv = await serveRuntime(rt, {
+      port: 0,
+      authToken: "t",
+      folders: {
+        list: async req => {
+          asked.push(req);
+          return listing;
+        },
+      },
+    });
+    expect(await wsRequest(srv.port, "t", { op: "host.folders", dir: SOURCE, hidden: true })).toMatchObject({ ok: true, listing });
+    expect(await wsRequest(srv.port, "t", { op: "host.folders" })).toMatchObject({ ok: true, listing });
+    expect(asked).toEqual([{ dir: SOURCE, hidden: true }, {}]);
+    await srv.close();
+    srv = await serveRuntime(rt, { port: 0, authToken: "t" });
+    expect(await wsRequest(srv.port, "t", { op: "host.folders" })).toMatchObject({ ok: false, error: "this runtime cannot browse the folders on this computer" });
   });
 
   it("over the wire the host's bundler answers project.plan and feeds project.import; a server without one refuses both", async () => {

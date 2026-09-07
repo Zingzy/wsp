@@ -92,6 +92,7 @@ import type {
   GoldenStage,
   GoldenStep,
   HarnessCatalog,
+  HostFolderListing,
   RecipeDigest,
   PortProbeView,
   PortReachView,
@@ -310,6 +311,12 @@ export interface LandRequest {
   /** The stores an agent keeps for every project that the listing on the machine could not read: nothing of theirs is
    * in the archive, so the landing report carries a row for each one saying which store and why. */
   unread?: readonly UnreadStore[];
+}
+
+/** This computer's own folders as a browser tab's picker walks them, one level at a time; the runtime never touches
+ * the disk itself, the host that owns it does. The desktop shell has the system dialog and never asks for this. */
+export interface HostFolders {
+  list(req: { dir?: string; hidden?: boolean }): Promise<HostFolderListing>;
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */

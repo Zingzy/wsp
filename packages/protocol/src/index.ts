@@ -703,6 +703,23 @@ export type ProjectExportEvent = z.infer<typeof ProjectExportEvent>;
 export const ProjectExportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), excluded: z.array(z.string()), agents: z.array(ProjectAgentResult) });
 export type ProjectExportResult = z.infer<typeof ProjectExportResult>;
 
+// --- this computer's own folders, as a browser tab browses them ---------------
+
+/** One folder on the computer running the host. `repo` is a folder git tracks, which a picker marks. */
+export const HostFolder = z.object({ path: z.string(), repo: z.boolean() });
+export type HostFolder = z.infer<typeof HostFolder>;
+/** One level of this computer's disk: the folder listed, the roots every level is browsed from (the home folder and
+ * each imported project's own folder), the folders directly inside it, and how many were left out for being hidden.
+ * No web picker can hand a page a path, so this is what a browser tab has instead of the desktop shell's dialog. */
+export const HostFolderListing = z.object({
+  dir: z.string(),
+  roots: z.array(z.string()),
+  folders: z.array(HostFolder),
+  /** Folders whose name starts with a dot, counted rather than listed unless the ask said to list them. */
+  hidden: z.number().int(),
+});
+export type HostFolderListing = z.infer<typeof HostFolderListing>;
+
 // --- desktop shell bridge (preload to page) -----------------------------------
 
 /** One installed font file the desktop shell hands the page for its terminal, registered under the family the file names. */
@@ -1562,6 +1579,11 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * the reason as its error); nothing else does, there is no deadline. cwd is the folder the command runs in, absolute;
    * absent, the home folder, as a harness turn's is. */
   z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1), cwd: z.string().optional() }),
+  /** Replies with { listing: HostFolderListing }: one level of this computer's own folders, for the picker a browser
+   * tab has instead of the desktop shell's dialog. `dir` absent lists the first root and a folder inside the roots
+   * that is gone does the same; a path outside them is refused. `hidden` lists the dot-named folders too, which are
+   * otherwise only counted. */
+  z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional() }),
   /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the

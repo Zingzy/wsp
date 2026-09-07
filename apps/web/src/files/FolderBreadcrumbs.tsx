@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The one row the Files and Diff panes name their folder in: the root the
-// folder sits in is the first crumb, then one crumb per folder below it, the
-// last being the folder shown. Every crumb goes to its folder, the first one
-// included, so the row reads the same whether the daemon browses one root or
-// two; where it browses two, the chevron beside the first crumb is its own
-// button and is what picks another root. Going up is a key (Backspace,
-// Alt+Up) on the pane, which takes focus as it is shown, so the row holds
-// nothing dead at a root and keeps its height wherever the panes are.
+// The one row a folder is named in, the Files and Diff panes over the
+// machine's roots and the project dialogs over this computer's own: the root
+// the folder sits in is the first crumb, then one crumb per folder below it,
+// the last being the folder shown. Every crumb goes to its folder, the first
+// one included, so the row reads the same over one root or two; over two, the
+// chevron beside the first crumb is its own button and is what picks another
+// root. Going up is a key (Backspace, Alt+Up) on the pane, which takes focus
+// as it is shown, so the row holds nothing dead at a root and keeps its height
+// wherever the panes are.
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { useMemo, type KeyboardEvent } from "react";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
@@ -134,28 +135,32 @@ function RootCrumb(props: { roots: readonly string[]; path: string; current: boo
   );
 }
 
-export function FolderBreadcrumbs({ workspaceId, className }: { workspaceId: string; className?: string }) {
-  const roots = useRoots(workspaceId);
-  const root = useRoot(workspaceId);
-  const pin = useRootStore(s => s.pin);
-  const crumbs = useMemo(() => (root === null ? [] : folderCrumbs(roots, root)), [roots, root]);
-  const pick = (path: string) => pin(workspaceId, path);
-
+/** The row itself, over any roots and any folder inside them: the panes read the workspace's, and the import and
+ * export dialogs the host's own, so both rows are this one. */
+export function FolderCrumbRow({ roots, folder, onPick, className }: { roots: readonly string[]; folder: string | null; onPick: (path: string) => void; className?: string }) {
+  const crumbs = useMemo(() => (folder === null ? [] : folderCrumbs(roots, folder)), [roots, folder]);
   return (
     <CrumbScroller label="Folder path" className={className} data-folder-crumbs>
       {crumbs.map((crumb, index) => {
-        const current = crumb.path === root;
+        const current = crumb.path === folder;
         return (
           <div key={crumb.path} className="flex min-w-0 shrink-0 items-center">
             {index > 0 ? <ChevronRightIcon className="mx-1 size-3.5 shrink-0 text-muted-foreground/60" /> : null}
             {index === 0 ? (
-              <RootCrumb roots={roots} path={crumb.path} current={current} onPick={pick} />
+              <RootCrumb roots={roots} path={crumb.path} current={current} onPick={onPick} />
             ) : (
-              <Crumb path={crumb.path} label={crumb.name} current={current} onPick={current ? null : pick} />
+              <Crumb path={crumb.path} label={crumb.name} current={current} onPick={current ? null : onPick} />
             )}
           </div>
         );
       })}
     </CrumbScroller>
   );
+}
+
+export function FolderBreadcrumbs({ workspaceId, className }: { workspaceId: string; className?: string }) {
+  const roots = useRoots(workspaceId);
+  const root = useRoot(workspaceId);
+  const pin = useRootStore(s => s.pin);
+  return <FolderCrumbRow roots={roots} folder={root} onPick={path => pin(workspaceId, path)} className={className} />;
 }

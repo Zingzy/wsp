@@ -25,6 +25,7 @@ import {
   recordRestoredLine,
   deleteNotice,
   execFolderLine,
+  folderRefusalLine,
   fmtBytes,
   fmtCost,
   fmtDuration,
@@ -507,6 +508,17 @@ describe("nextInsideAgentLine", () => {
   it("names the agent's own command and what to type at its prompt, a slash form as it stands", () => {
     expect(nextInsideAgentLine("claude", "/wsp set up wsp for me")).toBe("Next: run claude in this folder and say: /wsp set up wsp for me");
     expect(nextInsideAgentLine("codex", "set up wsp for me")).toBe("Next: run codex in this folder and say: set up wsp for me");
+  });
+});
+
+describe("folderRefusalLine", () => {
+  it("carries this Mac's own reason after the words that say the level was not read", () => {
+    expect(folderRefusalLine("EACCES: permission denied, scandir '/Users/dev/Documents'")).toBe("No folders read. EACCES: permission denied, scandir '/Users/dev/Documents'");
+    expect(folderRefusalLine("/etc is outside the folders wsp browses on this computer: /Users/dev")).toBe("No folders read. /etc is outside the folders wsp browses on this computer: /Users/dev");
+  });
+
+  it("is one line whatever the host said, so the slot the level line shares keeps its height", () => {
+    expect(folderRefusalLine("  EPERM: operation not permitted\n  scandir '/Users/dev/Desktop'  ")).toBe("No folders read. EPERM: operation not permitted scandir '/Users/dev/Desktop'");
   });
 });
 
