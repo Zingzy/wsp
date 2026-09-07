@@ -113,7 +113,10 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
         cursor++;
       }
       const visible = grouped.filter(e => isVisibleInGroup(e, inActiveRun(e)));
-      if (visible.length > 0) {
+      if (visible.length === 1 && !isToolLike(visible[0]!)) {
+        // A lone row that is not a tool has nothing to fold: it stands as itself.
+        rows.push({ kind: "work", id: entry.id, createdAt: entry.createdAt, groupedEntries: visible, isExpandedToolGroup: false });
+      } else if (visible.length > 0) {
         const id = groupId(entry.id, entry.entry);
         const expanded = input.expandedWorkGroupIds?.has(id) ?? false;
         const activeInProgress = visible.filter(inActiveRun);
@@ -125,10 +128,9 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
           hasActivityRow = true;
         } else {
           const latestTool = findLast(visible, isToolLike);
-          const single = visible.length === 1 ? visible[0]! : undefined;
           rows.push({
             kind: "work-toggle", id: `work-toggle:${entry.id}`, createdAt: entry.createdAt, groupId: id, hiddenCount: visible.length, expanded,
-            summary: single !== undefined && !isToolLike(single) ? single.label : summarizeToolGroup(visible),
+            summary: summarizeToolGroup(visible),
             summaryKind: toolGroupSummaryKind(visible),
             hasFailure: latestTool !== undefined && indicatesFailure(latestTool),
           });
