@@ -7,7 +7,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, ThreadView, markedDefault, unknownAgentLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, ThreadView, markedDefault, notifyLine, unknownAgentLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -720,7 +720,7 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const relative = await run("thread", "new", "--in", "alpha", "--cwd", "packages/host", "look here");
     expect(relative.code).toBe(3);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title] "<task>"']);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach] "<task>"']);
     const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
     expect(forked.code).toBe(3);
     expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute: got "packages\/host"\n\nusage: wsp fork /);
@@ -1002,6 +1002,114 @@ describe("wsp verbs over the host", () => {
     expect(new Set(events.map(e => e.threadId))).toEqual(new Set([first!.threadId]));
     expect(events[1]).toMatchObject({ kind: "text", text: "re: " });
     expect(io.streamed).toBe("");
+  });
+
+  it("thread new --detach and send --detach print the thread id and return the moment the turn is started, before it ends; nothing streams", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const opened = await run("thread", "new", "--in", "alpha", "--detach", "build it");
+    expect(held.starts).toHaveLength(1);
+    const [row] = await rt.sessions.list();
+    expect(row).toMatchObject({ status: "running", startedBy: "cli", prompt: "build it" });
+    expect(opened.code).toBe(0);
+    expect(opened.io.lines).toEqual([`thread ${row!.threadId}`]);
+    expect(opened.io.errors).toEqual([]);
+    expect(opened.io.streamed).toBe("");
+    held.release(0, "first done");
+    expect((await rt.sessions.list())[0]!.status).toBe("completed");
+    const sent = await run("send", row!.threadId!.slice(0, 8), "--detach", "--json", "more");
+    expect(held.starts.map(s => s.prompt)).toEqual(["build it", "more"]);
+    expect(sent.code).toBe(0);
+    expect(json(sent.io)).toEqual([{ threadId: row!.threadId, workspaceId: row!.workspaceId, harness: "claude", outcome: "started" }]);
+    expect((await rt.sessions.list())[0]!.status).toBe("running");
+    held.release(1, "second done");
+    // A detached send that meets a running turn on an agent that cannot steer waits for its own start, as a followed one does, and says so.
+    const third = await run("send", row!.threadId!, "--detach", "third");
+    expect(third.io.lines).toEqual([`thread ${row!.threadId}`]);
+    expect(held.starts).toHaveLength(3);
+    const fourth = run("send", row!.threadId!, "--detach", "fourth");
+    await new Promise(r => setTimeout(r, 30));
+    expect(held.starts).toHaveLength(3);
+    held.release(2, "third done");
+    const queued = await fourth;
+    expect(queued.io.errors).toEqual(["waiting behind the running turn", "queued behind the running turn; it has ended and this turn started"]);
+    expect(queued.io.lines).toEqual([`thread ${row!.threadId}`]);
+    expect(held.starts.map(s => s.prompt)).toEqual(["build it", "more", "third", "fourth"]);
+    held.release(3, "fourth done");
+  });
+
+  it("threads wait returns the first of two threads to finish, in the notify line's words, then the second; a thread already over comes back at once from its transcript; a timeout prints nothing on stdout and says so on stderr", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "--detach", "--notify", "me", "build a");
+    await run("thread", "new", "--in", "alpha", "--detach", "build b");
+    const [a, b] = await rt.sessions.list();
+    const timedOut = await run("threads", "wait", a!.threadId!, b!.threadId!.slice(0, 8), "--timeout", "0.05");
+    expect(timedOut.code).toBe(0);
+    expect(timedOut.io.lines).toEqual([]);
+    expect(timedOut.io.errors).toEqual(["2 threads still running after 50ms"]);
+    const asJson = await run("threads", "wait", a!.threadId!, "--timeout", "0.05", "--json");
+    expect(json(asJson.io)).toEqual([{ timedOut: true }]);
+    expect(asJson.io.errors).toEqual([`thread ${a!.threadId!.slice(0, 8)} still running after 50ms`]);
+
+    const waiting = run("threads", "wait", a!.threadId!, b!.threadId!);
+    await new Promise(r => setTimeout(r, 30));
+    held.release(1, "b is green\nall done for b");
+    const first = await waiting;
+    expect(first.code).toBe(0);
+    expect(first.io.lines).toEqual([`thread ${b!.threadId!.slice(0, 8)} finished (completed): all done for b`]);
+    expect(first.io.errors).toEqual([]);
+    // b is over, so a wait naming both comes back with b at once, read off the transcript; the JSON is the tool's object.
+    const again = await run("threads", "wait", a!.threadId!, b!.threadId!, "--json");
+    expect(again.code).toBe(0);
+    expect(json(again.io)).toEqual([{ finished: { threadId: b!.threadId, status: "completed", reply: "all done for b" } }]);
+
+    const onlyA = run("threads", "wait", a!.threadId!);
+    await new Promise(r => setTimeout(r, 30));
+    held.release(0, "a done");
+    const second = await onlyA;
+    expect(second.io.lines).toEqual([`thread ${a!.threadId!.slice(0, 8)} finished (completed): a done`]);
+    // The words are the one formatter's: the line the runtime recorded for a's --notify me is the line the wait printed.
+    const history = await rt.sessions.history(a!.workspaceId);
+    expect(history.find(e => e.type === "session.notify" && e.threadId === a!.threadId)).toMatchObject({ text: second.io.lines[0] });
+    expect(second.io.lines[0]).toBe(notifyLine(a!.threadId!, { status: "completed", text: "a done" }));
+    expect(held.starts).toHaveLength(2);
+
+    const none = await run("threads", "wait");
+    expect(none.code).toBe(3);
+    expect(none.io.errors[0]).toContain("wsp threads wait takes one thread or more");
+    const soon = await run("threads", "wait", a!.threadId!, "--timeout", "soon");
+    expect(soon.code).toBe(3);
+    expect(soon.io.errors[0]).toContain('--timeout takes seconds, a number above zero, not "soon"');
+    const missing = await run("threads", "wait", a!.threadId!, "nope");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp threads wait: no thread nope"]);
+    const stray = await run("threads", "nope");
+    expect(stray.code).toBe(3);
+    expect(stray.io.errors[0]).toContain("wsp threads takes no positional arguments; wsp threads wait is its one subcommand");
+  });
+
+  it("threads wait on a turn the runtime ended says failed with the runtime's reason, as the notify line would; a turn the transport cut says the cut line", async () => {
+    await restartHost({ claude: stuckAgent() });
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "--detach", "loop forever");
+    const [row] = await rt.sessions.list();
+    const waiting = run("threads", "wait", row!.threadId!);
+    await new Promise(r => setTimeout(r, 30));
+    await run("pause", "alpha");
+    const paused = await waiting;
+    expect(paused.code).toBe(0);
+    expect(paused.io.lines).toEqual([`thread ${row!.threadId!.slice(0, 8)} finished (failed): machine paused while the agent was working`]);
+    const later = await run("threads", "wait", row!.threadId!, "--json");
+    expect(json(later.io)).toEqual([{ finished: { threadId: row!.threadId, status: "failed", reply: "machine paused while the agent was working" } }]);
+
+    await restartHost({ claude: claude.adapter });
+    await run("thread", "new", "--in", "alpha", "--detach", "cut");
+    const cut = (await rt.sessions.list()).find(r => r.prompt === "cut")!;
+    const cutWait = await run("threads", "wait", cut.threadId!);
+    expect(cutWait.io.lines).toEqual([`thread ${cut.threadId!.slice(0, 8)} finished (failed): ${CUT_LINE}`]);
   });
 
   it("thread new, send and fork --send return with the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {
@@ -1493,7 +1601,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("every verb takes --json and --help; a bad flag prints the usage", async () => {
-    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["wake"], ["forget"], ["delete"], ["threads"], ["thread", "new"], ["send"], ["stop"], ["exec"], ["import"], ["export"]]) {
+    for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["wake"], ["forget"], ["delete"], ["threads"], ["threads", "wait"], ["thread", "new"], ["send"], ["stop"], ["exec"], ["import"], ["export"]]) {
       const help = await run(...verb, "--help");
       expect(help.code).toBe(0);
       expect(help.io.lines[0]).toMatch(new RegExp(`^usage: wsp ${verb.join(" ")}`));
@@ -1506,7 +1614,7 @@ describe("wsp verbs over the host", () => {
     // A flag another verb reads is refused naming that verb, so the caller is told where it lives: thread new's --agent on send, threads' --in on stop.
     const foreign = await run("send", "row_1", "--agent", "claude", "hello");
     expect(foreign.code).toBe(3);
-    expect(foreign.io.errors).toEqual(['--agent belongs to wsp fork and wsp thread new; wsp send does not read it\n\nusage: wsp send <thread> [--model, --effort, --access <value>] "<message>"']);
+    expect(foreign.io.errors).toEqual(['--agent belongs to wsp fork and wsp thread new; wsp send does not read it\n\nusage: wsp send <thread> [--model, --effort, --access <value>] [--detach] "<message>"']);
     const within = await run("stop", "row_1", "--in", "alpha");
     expect(within.io.errors[0]).toContain("--in belongs to wsp threads and wsp thread new; wsp stop does not read it");
     // A flag spelled like a prototype member is nobody's: the tables are read as own keys, so it gets the parser's line.
@@ -1516,7 +1624,7 @@ describe("wsp verbs over the host", () => {
     expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(3);
-    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title] "<task>"\nusage: wsp thread rename <thread> "<title>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach] "<task>"\nusage: wsp thread rename <thread> "<title>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {

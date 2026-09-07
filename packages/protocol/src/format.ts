@@ -115,14 +115,27 @@ export function fmtCost(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
-/** The one line a thread's end sends to whoever its start named: the thread's first eight characters, the outcome
- * word with the duration and cost the harness reported, then the last non-empty line of the reply, or the error when
- * there is no reply. A turn that did not complete says its error first, since that is what whoever waits needs. */
+/** What the notify line ends with, and what a wait answers as the reply: the last non-empty line of the reply, or the
+ * error when there is no reply. A turn that did not complete says its error first, since that is what whoever waits
+ * needs. */
+export function notifyTail(result: TurnResult): string | undefined {
+  const reply = lastLine(result.text ?? "");
+  return result.status === "completed" ? reply ?? result.error : result.error ?? reply;
+}
+
+/** The one line a thread's end sends to whoever its start named, and the one a wait on it prints: the thread's first
+ * eight characters, the outcome word with the duration and cost the harness reported, then the tail. */
 export function notifyLine(threadId: string, result: TurnResult): string {
   const facts = [result.status, ...(result.durationMs !== undefined ? [fmtDuration(result.durationMs)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
-  const reply = lastLine(result.text ?? "");
-  const tail = result.status === "completed" ? reply ?? result.error : result.error ?? reply;
+  const tail = notifyTail(result);
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
+}
+
+/** The line a wait prints when its deadline passed with every named thread still running: one thread by its first
+ * eight characters, more by their count. */
+export function waitTimedOutLine(threadIds: readonly string[], ms: number): string {
+  const who = threadIds.length === 1 ? `thread ${threadIds[0]!.slice(0, 8)}` : fmtThreads(threadIds.length);
+  return `${who} still running after ${fmtDuration(ms)}`;
 }
 
 /** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, then

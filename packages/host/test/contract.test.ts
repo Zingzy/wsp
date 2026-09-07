@@ -118,6 +118,8 @@ describe("the agent contract on the command line and the tool door", () => {
     const opened = (await last("thread new", "thread", "new", "--in", "alpha", "hello")) as { threadId: string; text: string };
     expect(opened).toMatchObject({ threadId: expect.any(String), text: "re: hello", outcome: "started" });
     await last("send", "send", opened.threadId, "again");
+    // The turn is over, so the wait answers off the transcript at once.
+    expect(await last("threads wait", "threads", "wait", opened.threadId)).toEqual({ finished: { threadId: opened.threadId, status: "completed", reply: "re: again" } });
     await last("stop", "stop", opened.threadId);
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
     await last("export", "export", "alpha", join(dir, "out", "proj"), "--from", EXPORT_SOURCE);

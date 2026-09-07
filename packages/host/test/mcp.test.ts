@@ -134,15 +134,16 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "recipe", "recipe_scan", "send", "snapshot", "stop", "terminal_config", "thread_new", "thread_rename", "threads", "wake", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "recipe", "recipe_scan", "send", "snapshot", "stop", "terminal_config", "thread_new", "thread_rename", "threads", "threads_wait", "wake", "workspaces"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name", "size"]);
-    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "title", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "model", "notify", "task", "title", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "size", "task", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "effort", "message", "model", "thread"]);
+    expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "detach", "effort", "message", "model", "thread"]);
+    expect(Object.keys((tools.find(t => t.name === "threads_wait")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["threads", "timeout"]);
     expect(Object.keys((tools.find(t => t.name === "exec")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["argv", "cwd", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "add_check", "out", "project", "set", "signin", "tick", "why"]);
@@ -636,6 +637,43 @@ describe("the MCP server over the host", () => {
     expect(sent.text).toBe("re: second");
     expect(agent.starts.map(s => s.prompt)).toEqual(["first", "second"]);
     expect((await rt.sessions.history(row!.workspaceId)).map(e => e.type)).not.toContain("session.end");
+  });
+
+  it("thread_new and send with detach answer with the thread id the moment the turn is started, without the reply; threads_wait then answers with the first named thread to finish, in the notify line's words, and with timedOut when the seconds pass first", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await call("new", { name: "alpha" });
+    const opened = await call("thread_new", { workspace: "alpha", task: "build a", detach: true });
+    expect(held.starts).toHaveLength(1);
+    const [a] = await rt.sessions.list();
+    expect(a).toMatchObject({ status: "running", startedBy: "agent" });
+    expect(opened).toEqual({ text: `thread ${a!.threadId}`, structured: { threadId: a!.threadId, workspaceId: a!.workspaceId, harness: "claude", outcome: "started" }, isError: false });
+    const forked = await call("thread_new", { workspace: "alpha", task: "build b", detach: true });
+    const b = (await rt.sessions.list()).find(r => r.threadId !== a!.threadId)!;
+    expect(forked.structured).toMatchObject({ threadId: b.threadId });
+
+    const timedOut = await call("threads_wait", { threads: [a!.threadId!, b.threadId!.slice(0, 8)], timeout: 0.05 });
+    expect(timedOut).toEqual({ text: "2 threads still running after 50ms", structured: { timedOut: true }, isError: false });
+
+    const waiting = call("threads_wait", { threads: [a!.threadId!, b.threadId!] });
+    await new Promise(r => setTimeout(r, 30));
+    held.release(1, "b: all green\nreport posted");
+    const first = await waiting;
+    expect(first).toEqual({
+      text: `thread ${b.threadId!.slice(0, 8)} finished (completed): report posted`,
+      structured: { finished: { threadId: b.threadId, status: "completed", reply: "report posted" } },
+      isError: false,
+    });
+    // b is over: named again it comes back at once, so the caller drops it and waits on a alone.
+    expect((await call("threads_wait", { threads: [a!.threadId!, b.threadId!], timeout: 5 })).structured).toEqual({ finished: { threadId: b.threadId, status: "completed", reply: "report posted" } });
+    const sent = await call("send", { thread: b.threadId!, message: "and the docs", detach: true });
+    expect(sent).toEqual({ text: `thread ${b.threadId}`, structured: { threadId: b.threadId, workspaceId: b.workspaceId, harness: "claude", outcome: "started" }, isError: false });
+    expect(held.starts.map(s => s.prompt)).toEqual(["build a", "build b", "and the docs"]);
+    held.release(0, "a done");
+    held.release(2, "docs done");
+    expect((await call("threads_wait", { threads: [a!.threadId!] })).text).toBe(`thread ${a!.threadId!.slice(0, 8)} finished (completed): a done`);
+    expect((await call("threads_wait", { threads: [b.threadId!] })).text).toBe(`thread ${b.threadId!.slice(0, 8)} finished (completed): docs done`);
+    expect(await call("threads_wait", { threads: ["nope"] })).toEqual(failedWith("no thread nope"));
   });
 
   it("a failed turn is a tool error carrying the harness's reason", async () => {
