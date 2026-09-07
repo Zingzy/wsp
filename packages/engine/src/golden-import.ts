@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellQuote, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -617,14 +617,25 @@ function homebrewBootstrap(): string {
   return [
     "set -euo pipefail",
     APT_ENV,
-    `if [ ! -x ${BREW_PREFIX}/bin/brew ]; then`,
+    `if [ ! -x ${BREW} ]; then`,
     "  if command -v apt-get >/dev/null 2>&1; then apt-get update -qq >/dev/null 2>&1 || true; apt-get install -y -qq procps curl file git >/dev/null 2>&1 || true; fi",
     "  id -u linuxbrew >/dev/null 2>&1 || useradd -m -s /bin/bash linuxbrew",
-    `  git clone -q --depth 1 --branch ${HOMEBREW.tag} https://github.com/Homebrew/brew ${BREW_PREFIX}/Homebrew`,
-    `  test "$(git -C ${BREW_PREFIX}/Homebrew rev-parse HEAD)" = "${HOMEBREW.commit}"`,
-    `  mkdir -p ${BREW_PREFIX}/bin`,
-    `  ln -sfn ../Homebrew/bin/brew ${BREW_PREFIX}/bin/brew`,
+    `  git clone -q --depth 1 --branch ${HOMEBREW.tag} https://github.com/Homebrew/brew ${BREW_REPO}`,
+    `  test "$(git -C ${BREW_REPO} rev-parse HEAD)" = "${HOMEBREW.commit}"`,
+    // A clone at a tag fetches that tag and nothing else, so brew's update has no branch to compare against and git
+    // prints "Not a valid ref: refs/remotes/origin/main" at every run: the remote gets what a plain clone leaves.
+    `  git -C ${BREW_REPO} remote set-branches origin '*'`,
+    // All the fetch buys update is a 304 in place of a full read, and every formula row waits on this step, so a
+    // network that is gone costs the line and nothing else.
+    `  git -C ${BREW_REPO} fetch -q --depth 1 origin main || echo "origin/main did not fetch: brew update reads the branch in full"`,
+    `  mkdir -p ${BREW_PREFIX}/bin "$(dirname ${BREW_REAL})"`,
+    `  ln -sfn ../Homebrew/bin/brew ${BREW_REAL}`,
     "  chown -R linuxbrew:linuxbrew /home/linuxbrew",
+    // After the chown, so the one file root executes stays root's; the rm is for the dangling link a half-built
+    // machine leaves, which the redirect would otherwise follow into the checkout.
+    `  rm -f ${BREW}`,
+    `  printf '%s\\n' ${shellQuote(LINUXBREW_SHIM)} > ${BREW}`,
+    `  chmod 0755 ${BREW}`,
     "fi",
     `${asLinuxbrew("--version")} >/dev/null`,
   ].join("\n");
@@ -779,9 +790,9 @@ export interface ToolsPlan {
 /** A row an agent added by hand: its id under this prefix, so the lineage names it apart from any catalog road. */
 export const CUSTOM_PREFIX = "tools/custom/";
 
-/** What a custom row runs with: the catalog roads' own PATH and apt environment, and the catalog's brew for a root
- * script, since Homebrew refuses to run as the root a custom row runs as. */
-export const CUSTOM_PRELUDE = [PATH_LINE, APT_ENV, LINUXBREW_SHIM].join("\n");
+/** What a custom row runs with: the catalog roads' own PATH and apt environment, and Homebrew's build environment,
+ * which the shim on that PATH carries through to brew. */
+export const CUSTOM_PRELUDE = [PATH_LINE, APT_ENV, `export ${BREW_ENV}`].join("\n");
 
 /** The rows outside the catalog as installs, in the order the recipe carries them; each runs its own lines as given.
  * `after` is what the plan brings the row's manager by, when the row names one and the plan brings it. */

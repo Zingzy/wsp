@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
 import { withRecordedPins } from "../src/golden-tools.js";
@@ -39,13 +41,15 @@ import {
   toolInstallsFor,
   toolUninstall,
   BREW_HOUSEKEEPING,
+  TOOLS_PATH,
   type BrewTable,
   type DigestedFile,
   type PathInfo,
   type RecipeDigest,
   type RecipeEntry,
 } from "../src/golden-import.js";
-import { KUBECTL, catalogEntry } from "@wsp/catalog";
+import { BREW, BREW_PREFIX, BREW_REAL, BREW_REPO, KUBECTL, LINUXBREW_SHIM, catalogEntry } from "@wsp/catalog";
+import { shellQuote } from "@wsp/protocol";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
   label: over.id,
@@ -55,6 +59,8 @@ const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): Rec
   bring: true,
   ...over,
 });
+
+const homebrewStep = (): string => toolInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" })]).installs.find(i => i.id === "tools/homebrew")!.cmd;
 
 const HOME = "/Users/me";
 const present = new Set([
@@ -738,6 +744,53 @@ describe("toolInstallsFor", () => {
     expect(BREW_HOUSEKEEPING).toHaveLength(2);
     expect(BREW_HOUSEKEEPING[0]).toMatch(/^export PATH=\/root\/\.local\/bin:.*\nsu -s \/bin\/bash linuxbrew -c '.*brew autoremove'$/);
     expect(BREW_HOUSEKEEPING[1]).toMatch(/\nsu -s \/bin\/bash linuxbrew -c '.*brew cleanup -s --prune=all'$/);
+  });
+
+  it("puts the one brew a PATH reaches in the directory Homebrew's own line prepends, and Homebrew's brew where no PATH goes", () => {
+    // A Mac's `eval "$(brew shellenv)"` arrives rewritten to this prefix and prepends its bin directory, so a shim
+    // anywhere else ends up behind it; the only brew on any directory of the tools PATH is the shim.
+    expect(TOOLS_PATH.split(":").filter(d => BREW.startsWith(`${d}/`) || BREW_REAL.startsWith(`${d}/`))).toEqual([`${BREW_PREFIX}/bin`]);
+  });
+
+  it("installs the shim as the brew on PATH, root's own file, and links Homebrew's brew for it to run", () => {
+    const cmd = homebrewStep();
+    expect(cmd).toContain(`ln -sfn ../Homebrew/bin/brew ${BREW_REAL}`);
+    expect(cmd).not.toContain(`ln -sfn ../Homebrew/bin/brew ${BREW}`);
+    expect(cmd).toContain(`rm -f ${BREW}`);
+    expect(cmd).toContain(`printf '%s\\n' ${shellQuote(LINUXBREW_SHIM)} > ${BREW}`);
+    expect(cmd).toContain(`chmod 0755 ${BREW}`);
+    // Written after the chown, so the file root runs with root's own rights is not the linuxbrew user's to rewrite.
+    expect(cmd.indexOf(`> ${BREW}`)).toBeGreaterThan(cmd.indexOf("chown -R linuxbrew:linuxbrew"));
+    expect(LINUXBREW_SHIM).toContain(`su -s /bin/bash linuxbrew -c 'exec "$0" "$@"' -- ${BREW_REAL}`);
+  });
+
+  it("costs a line and not the step when the upstream branch will not fetch: the shim still lands", () => {
+    // The generated step run for real, at a prefix of its own, with every command that would touch this machine
+    // stubbed and the one fetch failing the way a dead network fails it. What it pins is that the rows waiting on
+    // this step still get their Homebrew: the shim is written, the link is made, and the smoke at the end passes.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-brew-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const stub = join(dir, "stub");
+    mkdirSync(stub);
+    writeFileSync(
+      join(stub, "git"),
+      `#!/bin/sh\ncase " $* " in\n  *" clone "*) mkdir -p ${shellQuote(`${dir}/Homebrew/bin`)} && printf '%s\\n' '#!/bin/sh' 'echo Homebrew' > ${shellQuote(`${dir}/Homebrew/bin/brew`)} && chmod 0755 ${shellQuote(`${dir}/Homebrew/bin/brew`)} ;;\n  *"rev-parse HEAD"*) echo ${HOMEBREW.commit} ;;\n  *" fetch "*) echo "fatal: unable to access github.com" >&2; exit 128 ;;\nesac\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    for (const name of ["apt-get", "useradd", "chown"]) writeFileSync(join(stub, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    writeFileSync(join(stub, "su"), '#!/bin/sh\nshell=/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -s) shell="$2"; shift 2 ;; -c) script="$2"; shift 2 ;; --) shift; break ;; *) shift ;; esac; done\nexec "$shell" -c "$script" "$@"\n', { mode: 0o755 });
+    const script = homebrewStep().replaceAll(BREW_PREFIX, dir).replace("export PATH=", `export PATH=${stub}:`);
+    // The chown line names /home/linuxbrew whatever the prefix is, so the stub PATH is what keeps this run off it.
+    expect(script).toContain(`export PATH=${stub}:`);
+    const run = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+    expect({ status: run.status, out: run.stdout.trim() }).toEqual({ status: 0, out: "origin/main did not fetch: brew update reads the branch in full" });
+    expect(readFileSync(join(dir, "bin/brew"), "utf8")).toBe(`${LINUXBREW_SHIM.replaceAll(BREW_PREFIX, dir)}\n`);
+    expect(readFileSync(join(dir, "libexec/brew"), "utf8")).toContain("echo Homebrew");
+  });
+
+  it("leaves the checkout the origin remote a plain clone has, so brew update finds a branch to read", () => {
+    expect(homebrewStep()).toContain(`git -C ${BREW_REPO} remote set-branches origin '*'`);
+    expect(homebrewStep()).toContain(`git -C ${BREW_REPO} fetch -q --depth 1 origin main`);
   });
 
   it("a manager needed only for its rows brings Homebrew along when a formula is the only road to it", () => {

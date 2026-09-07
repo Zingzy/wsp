@@ -6,8 +6,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BREW, LINUXBREW_SHIM } from "@wsp/catalog";
-import { shellQuote, type RecipeCustomRow } from "@wsp/protocol";
+import { BREW_ENV, BREW_REAL, LINUXBREW_SHIM } from "@wsp/catalog";
+import type { RecipeCustomRow } from "@wsp/protocol";
 import { CUSTOM_PREFIX, CUSTOM_PRELUDE, customInstallsFor, recipeDigest, recipeHash, toolInstallsFor, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes } from "../src/golden-diff.js";
 import { installTools } from "../src/golden-tools.js";
@@ -75,24 +75,26 @@ describe("the plan's rows outside the catalog", () => {
     expect(install!.cmd).toBe(`${CUSTOM_PRELUDE}\nbrew install just`);
     expect(CUSTOM_PRELUDE).toContain("export PATH=");
     expect(CUSTOM_PRELUDE).toContain("DEBIAN_FRONTEND=noninteractive");
-    // Homebrew refuses to run as the root a custom row runs as, so brew here is the catalog's own for the linuxbrew user.
-    expect(CUSTOM_PRELUDE).toContain(LINUXBREW_SHIM);
+    // Homebrew's build environment: the shim on that PATH is what drops the row's brew line to the linuxbrew user,
+    // and su carries these through to it.
+    expect(CUSTOM_PRELUDE).toContain(`export ${BREW_ENV}`);
+    expect(CUSTOM_PRELUDE).not.toContain("brew()");
     expect(install!.label).toBe("just");
     expect(install!.check).toBe("command -v just");
   });
 
-  it("keep a hand-written brew line's own quoting: the arguments reach Homebrew as they were typed", () => {
-    // The shim runs for real here, under this machine's bash, with the whole script quoted the way the guard quotes
-    // it. su is a stand-in on PATH (nobody here may run one, and macOS's su takes other flags), reading the same
-    // form the shim writes: -s SHELL USER -c SCRIPT -- ARGS. What it proves is the shim's own doing: the quoting
-    // survives two shells, and each argument arrives whole.
+  it("keep a hand-written brew line's own quoting: the arguments reach Homebrew as they were typed, as linuxbrew", () => {
+    // The shim runs for real here, installed as the file the golden writes and found the way a shell finds it, on
+    // PATH under the name brew. su is a stand-in (nobody here may run one, and macOS's su takes other flags),
+    // reading the same form the shim writes: -s SHELL USER -c SCRIPT -- ARGS. What it proves is the shim's own
+    // doing: the user it drops to, and that each argument arrives whole through two shells.
     const dir = mkdtempSync(join(tmpdir(), "wsp-shim-"));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
-    writeFileSync(join(dir, "su"), '#!/bin/sh\nshell=/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -s) shell="$2"; shift 2 ;; -c) script="$2"; shift 2 ;; --) shift; break ;; *) shift ;; esac; done\nexec "$shell" -c "$script" "$@"\n', { mode: 0o755 });
+    writeFileSync(join(dir, "su"), '#!/bin/sh\nshell=/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -s) shell="$2"; shift 2 ;; -c) script="$2"; shift 2 ;; --) shift; break ;; *) echo "[as $1]"; shift ;; esac; done\nexec "$shell" -c "$script" "$@"\n', { mode: 0o755 });
     writeFileSync(join(dir, "brew-stub"), '#!/bin/sh\nfor a in "$@"; do echo "[$a]"; done\n', { mode: 0o755 });
-    const script = `${LINUXBREW_SHIM.replace(BREW, join(dir, "brew-stub"))}\nbrew install "some formula" --flag`;
-    const out = execFileSync("bash", ["-c", `bash -c ${shellQuote(script)}`], { encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}` } });
-    expect(out.trim().split("\n")).toEqual(["[install]", "[some formula]", "[--flag]"]);
+    writeFileSync(join(dir, "brew"), `${LINUXBREW_SHIM.replaceAll(BREW_REAL, join(dir, "brew-stub"))}\n`, { mode: 0o755 });
+    const out = execFileSync("bash", ["-c", 'brew install "some formula" --flag'], { encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}` } });
+    expect(out.trim().split("\n")).toEqual(["[as linuxbrew]", "[install]", "[some formula]", "[--flag]"]);
   });
 
   it("bring the manager the row's line calls: a brew row brings Homebrew and its toolchain, and waits on them", () => {
