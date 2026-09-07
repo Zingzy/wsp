@@ -63,6 +63,14 @@ export function resetSurfaces(): void {
   useRootStore.setState({ byWorkspaceId: {} });
 }
 
+/** The one breadcrumb row both panes name their folder in: every crumb's label with the folder it goes to. */
+export const folderCrumbRow = (container: HTMLElement): [string, string][] =>
+  Array.from(container.querySelectorAll<HTMLElement>("[data-folder-crumb]")).map(crumb => [crumb.textContent ?? "", crumb.dataset["folderCrumb"] ?? ""]);
+
+/** The folder the row marks as the one shown, which is its last crumb. */
+export const shownFolder = (container: HTMLElement): string | undefined =>
+  container.querySelector<HTMLElement>("[data-folder-crumb][aria-current='page']")?.dataset["folderCrumb"];
+
 const dir = (name: string) => ({ name, type: "dir", size: 0, mtime: 1 });
 const file = (name: string, size = 12) => ({ name, type: "file", size, mtime: 1 });
 const level = (entries: Record<string, unknown>[], extra: Record<string, unknown> = {}) => ({ entries, truncated: false, total: entries.length, ...extra });

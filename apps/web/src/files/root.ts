@@ -9,7 +9,7 @@
 import { useMemo } from "react";
 import { create } from "zustand";
 import { useStore } from "../protocol/store.js";
-import { parentPath } from "./entries.js";
+import { parentPath, pathSegments, type PathSegment } from "./entries.js";
 import { useDaemonRoot } from "./wire.js";
 
 export interface WorkspaceRoot {
@@ -53,6 +53,13 @@ export function rootOf(roots: readonly string[], path: string): string | null {
 export function parentWithin(roots: readonly string[], path: string): string | null {
   const above = parentPath(path);
   return above !== null && rootOf(roots, above) !== null ? above : null;
+}
+
+/** The shown folder as one row of crumbs: the root it sits in first, then one per folder below it, the last being the
+ * folder itself. A folder no root holds is its own single crumb, so the row still names it once. */
+export function folderCrumbs(roots: readonly string[], folder: string): PathSegment[] {
+  const root = rootOf(roots, folder) ?? folder;
+  return [{ name: root, path: root }, ...pathSegments(root, folder)];
 }
 
 export const useRootStore = create<RootStoreState>()(set => ({
