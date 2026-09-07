@@ -867,3 +867,48 @@ describe("unknownAgentLine", () => {
     expect(unknownAgentLine("codx", ["claude", "codex"])).toBe("no agent called codx; the catalog knows claude, codex");
   });
 });
+
+describe("terminalConfigLines", () => {
+  const none = { files: [], fontFamily: [], palette: Array<null>(16).fill(null) };
+  it("with no file says so in one line", () => {
+    expect(format.terminalConfigLines(none)).toEqual(["No Ghostty config on this computer; the terminal pane keeps its defaults."]);
+  });
+  it("names the files read, then one line per key the pane honours, in Ghostty's own words, hex for colors and a count for the palette", () => {
+    expect(
+      format.terminalConfigLines({
+        ...none,
+        files: ["/Users/dev/.config/ghostty/config", "/Applications/Ghostty.app/Contents/Resources/ghostty/themes/Catppuccin Mocha"],
+        fontFamily: ["Berkeley Mono", "Symbols Nerd Font Mono"],
+        fontSize: 13,
+        theme: "Catppuccin Mocha",
+        background: { r: 30, g: 30, b: 46 },
+        foreground: { r: 205, g: 214, b: 244 },
+        palette: [{ r: 69, g: 71, b: 90 }, ...Array<null>(15).fill(null)],
+        selectionBackground: { r: 88, g: 91, b: 112 },
+        cursorColor: { r: 245, g: 224, b: 220 },
+        cursorStyle: "underline",
+        cursorStyleBlink: false,
+        windowPaddingX: { left: 2, right: 4 },
+        windowPaddingY: { top: 6, bottom: 6 },
+        backgroundOpacity: 0.85,
+        backgroundBlur: 20,
+      }),
+    ).toEqual([
+      "Read /Users/dev/.config/ghostty/config, /Applications/Ghostty.app/Contents/Resources/ghostty/themes/Catppuccin Mocha",
+      "font-family = Berkeley Mono, Symbols Nerd Font Mono",
+      "font-size = 13",
+      "theme = Catppuccin Mocha",
+      "background = #1e1e2e",
+      "foreground = #cdd6f4",
+      "palette = 1 of 16 colors",
+      "selection-background = #585b70",
+      "cursor-color = #f5e0dc",
+      "cursor-style = underline",
+      "cursor-style-blink = false",
+      "window-padding-x = 2,4",
+      "window-padding-y = 6",
+      "background-opacity = 0.85",
+      "background-blur = 20",
+    ]);
+  });
+});

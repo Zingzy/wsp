@@ -1160,6 +1160,49 @@ describe("wsp verbs over the host", () => {
     expect(many.io.errors.join("\n")).toContain("takes one folder on this computer at most");
   });
 
+  it("terminal config reads this computer's Ghostty config with its theme, prints it as Ghostty lines or one object, resolves the scheme asked for, and refuses a word outside light and dark", async () => {
+    const home = join(dir, "user");
+    vi.stubEnv("XDG_CONFIG_HOME", join(home, ".config"));
+    mkdirSync(join(home, ".config", "ghostty", "themes"), { recursive: true });
+    writeFileSync(join(home, ".config", "ghostty", "config"), "theme = light:Day,dark:Night\nfont-family = Berkeley Mono\nfont-size = 13\nbackground-opacity = 0.9\n");
+    writeFileSync(join(home, ".config", "ghostty", "themes", "Night"), "background = #1e1e2e\nforeground = #cdd6f4\npalette = 1=#f38ba8\n");
+    writeFileSync(join(home, ".config", "ghostty", "themes", "Day"), "background = #fafafa\n");
+    const { code, io } = await run("terminal", "config");
+    expect(code).toBe(0);
+    expect(io.lines[0]!.split("\n")).toEqual([
+      `Read ${join(home, ".config", "ghostty", "config")}, ${join(home, ".config", "ghostty", "themes", "Night")}`,
+      "font-family = Berkeley Mono",
+      "font-size = 13",
+      "theme = Night",
+      "background = #1e1e2e",
+      "foreground = #cdd6f4",
+      "palette = 1 of 16 colors",
+      "background-opacity = 0.9",
+    ]);
+    const light = await run("terminal", "config", "--scheme", "light", "--json");
+    expect(light.code).toBe(0);
+    expect(json(light.io)).toEqual([
+      expect.objectContaining({ files: [join(home, ".config", "ghostty", "config"), join(home, ".config", "ghostty", "themes", "Day")], theme: "Day", background: { r: 250, g: 250, b: 250 }, fontFamily: ["Berkeley Mono"], fontSize: 13, backgroundOpacity: 0.9 }),
+    ]);
+    // The same answer the app gets over the host's socket, so the line and the pane never disagree.
+    const client = await dialHost(statePath);
+    try {
+      expect(await client.request("host.terminalConfig", { scheme: "light" })).toMatchObject({ config: json(light.io)[0] });
+    } finally {
+      client.close();
+    }
+    const sepia = await run("terminal", "config", "--scheme", "sepia");
+    expect(sepia.code).toBe(3);
+    expect(sepia.io.errors).toEqual(['wsp terminal config: --scheme takes one of light, dark, not "sepia"']);
+    const extra = await run("terminal", "config", "now");
+    expect(extra.code).toBe(3);
+    // No config at all is not a failure: the empty object says the pane keeps its defaults.
+    rmSync(join(home, ".config", "ghostty"), { recursive: true });
+    const none = await run("terminal", "config", "--json");
+    expect(none.code).toBe(0);
+    expect(json(none.io)).toEqual([{ files: [], fontFamily: [], palette: Array<null>(16).fill(null) }]);
+  });
+
   it("a folder inside the roots this Mac will not let the host read comes back as one stderr line at the provider's code, not a usage refusal", async () => {
     const home = join(dir, "user");
     const shut = join(home, "Documents");

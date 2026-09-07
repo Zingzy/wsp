@@ -7,6 +7,7 @@ import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
 import { recordRestoredLine, type BootPayload, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
 import { projectLander } from "./project-export.js";
@@ -248,7 +249,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   });
   let rtServer: RuntimeServer;
   try {
-    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, host: LOOPBACK, authToken, forwards: relay, projects: bundlerFor, landing: projectLander(homes), folders: hostFolders(() => rt.workspaces.list()) });
+    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, host: LOOPBACK, authToken, forwards: relay, projects: bundlerFor, landing: projectLander(homes), folders: hostFolders(() => rt.workspaces.list()), terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) } });
   } catch (e) {
     await relay.close();
     throw e;

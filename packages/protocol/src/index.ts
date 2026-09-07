@@ -720,6 +720,45 @@ export const HostFolderListing = z.object({
 });
 export type HostFolderListing = z.infer<typeof HostFolderListing>;
 
+// --- the person's own terminal config, as the terminal pane applies it --------
+
+export const TerminalScheme = z.enum(["light", "dark"]);
+export type TerminalScheme = z.infer<typeof TerminalScheme>;
+const channel = z.number().int().min(0).max(255);
+export const TerminalRgb = z.object({ r: channel, g: channel, b: channel });
+export type TerminalRgb = z.infer<typeof TerminalRgb>;
+/** Ghostty's cursor-style words, which libghostty takes as its default cursor style. */
+export const TerminalCursorStyle = z.enum(["block", "bar", "underline", "block_hollow"]);
+export type TerminalCursorStyle = z.infer<typeof TerminalCursorStyle>;
+/** The keys of a Ghostty config the terminal pane honours, read off this computer with Ghostty's own lookup order
+ * and its theme resolved for one scheme. Only what the files set is here: an absent key leaves the pane's default.
+ * `files` is every config and theme file read, in load order; empty when the person has no Ghostty config. Every
+ * key but `backgroundBlur` is applied; that one is served for the record, since the blur is the desktop window's
+ * own material and a browser tab has none. */
+export const TerminalConfig = z.object({
+  files: z.array(z.string()),
+  /** The primary face first, then the fallbacks the file names after it. */
+  fontFamily: z.array(z.string()),
+  fontSize: z.number().positive().optional(),
+  /** The theme the file names for the scheme asked for, as it names it. */
+  theme: z.string().optional(),
+  background: TerminalRgb.optional(),
+  foreground: TerminalRgb.optional(),
+  /** Palette entries 0 to 15; null where the files set none. */
+  palette: z.array(TerminalRgb.nullable()).length(16),
+  selectionBackground: TerminalRgb.optional(),
+  cursorColor: TerminalRgb.optional(),
+  cursorStyle: TerminalCursorStyle.optional(),
+  cursorStyleBlink: z.boolean().optional(),
+  windowPaddingX: z.object({ left: z.number().min(0), right: z.number().min(0) }).optional(),
+  windowPaddingY: z.object({ top: z.number().min(0), bottom: z.number().min(0) }).optional(),
+  /** 1 is opaque; under 1 the pane paints its background over whatever sits behind it. */
+  backgroundOpacity: z.number().min(0).max(1).optional(),
+  /** Ghostty's blur intensity; 0 is none, true in the file is 20. Read and served, not applied by the pane. */
+  backgroundBlur: z.number().int().min(0).optional(),
+});
+export type TerminalConfig = z.infer<typeof TerminalConfig>;
+
 // --- desktop shell bridge (preload to page) -----------------------------------
 
 /** One installed font file the desktop shell hands the page for its terminal, registered under the family the file names. */
@@ -1584,6 +1623,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * that is gone does the same; a path outside them is refused. `hidden` lists the dot-named folders too, which are
    * otherwise only counted. */
   z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional() }),
+  /** Replies with { config: TerminalConfig }: the person's Ghostty config on the computer running the host, read
+   * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
+   * light:...,dark:... value and is dark when absent. */
+  z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
   /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the
