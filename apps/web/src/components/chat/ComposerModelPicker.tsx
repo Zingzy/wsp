@@ -2,12 +2,14 @@
 // The model picker in the composer box: the harness's mark and the model on
 // the button; behind it a rail of the harnesses that can run a turn, a search
 // box, the models with favourites first and a jump chip per row, and a footer
-// naming where the list came from. Cmd-1 to cmd-9 pick a listed model while
-// the menu is open. The harness is pinned once the thread has a turn: a
-// thread is one resumed session, so picking another harness changes nothing
-// and the footer says to start a new thread for it.
+// naming where the list came from in that agent's own words, on one line
+// whatever the words are and whole on hover. Cmd-1 to cmd-9 pick a listed
+// model while the menu is open. The harness is pinned once the thread has a
+// turn: a thread is one resumed session, so picking another harness changes
+// nothing and the footer says to start a new thread for it.
 import { ChevronDownIcon, SearchIcon, StarIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { catalogSourceLine, noModelsLine } from "@wsp/protocol";
 import type { HarnessCatalog, HarnessModel } from "@wsp/protocol";
 import { cn, isMacPlatform, normalizeSearchText } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -44,11 +46,6 @@ export function jumpLabel(index: number, platform: string): string | null {
 /** The one line the composer answers a cross-harness pick on a started thread with. */
 export function newThreadNotice(entry: HarnessCatalog): string {
   return `Start a new thread to use ${entry.label} here`;
-}
-
-function sourceLine(catalog: HarnessCatalog): string {
-  if (catalog.source === "harness") return `${catalog.label}${catalog.version !== null ? ` ${catalog.version}` : ""} on this machine`;
-  return `From a table, binary did not answer${catalog.version !== null ? ` · pinned to ${catalog.version}` : ""}`;
 }
 
 export function ComposerModelPicker({ catalogs, catalog, model, pinned, onPickHarness, onPickModel }: ModelPickerProps) {
@@ -168,7 +165,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, onPickHa
             </label>
             <div className="min-h-0 flex-1 overflow-y-auto p-1" role="listbox" aria-label="Models">
               {rows.length === 0 ? (
-                <div className="px-2 py-3 text-center text-xs text-muted-foreground">{catalog.models.length === 0 ? `${catalog.label} reported no models` : "No model matches"}</div>
+                <div className="px-2 py-3 text-center text-xs text-muted-foreground">{catalog.models.length === 0 ? noModelsLine(catalog) : "No model matches"}</div>
               ) : (
                 rows.map((m, index) => {
                   const starred = favourites.includes(favouriteKey(catalog.harness, m.value));
@@ -214,8 +211,13 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, onPickHa
                 })
               )}
             </div>
-            <div className="border-t border-border px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground/70" data-composer-catalog-source={catalog.source} role={notice !== null ? "status" : undefined}>
-              {notice ?? sourceLine(catalog)}
+            <div
+              className="truncate border-t border-border px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground/70"
+              data-composer-catalog-source={catalog.source}
+              role={notice !== null ? "status" : undefined}
+              title={notice ?? catalogSourceLine(catalog)}
+            >
+              {notice ?? catalogSourceLine(catalog)}
             </div>
           </div>
         </div>
