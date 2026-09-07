@@ -8,6 +8,7 @@ import { locateHost, openHost, statePathIn, type HostSession, type Located } fro
 import { fromAppPage } from "./origin.js";
 import type { Retry } from "./preload.js";
 import { checkSetup } from "./setup.js";
+import { appWindowOptions } from "./window.js";
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
 const WEB_DIR = here("../web");
@@ -23,18 +24,7 @@ function envPort(name: string, fallback: number): number {
 }
 
 function newWindow(preload?: string): BrowserWindow {
-  return new BrowserWindow({
-    width: 1280,
-    height: 800,
-    title: "wsp",
-    backgroundColor: "#09090b",
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      ...(preload !== undefined ? { preload } : {}),
-    },
-  });
+  return new BrowserWindow(appWindowOptions(preload));
 }
 
 let session: HostSession | undefined;

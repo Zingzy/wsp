@@ -12,6 +12,7 @@ import type { Api, ConnStatus, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
+import { requestComposerFocus } from "../src/shell/shellRequests.js";
 import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
@@ -93,6 +94,25 @@ describe("composer keys", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]?.prompt).toBe("line one\nline two");
+  });
+
+  it("takes the caret when a workspace switch asks for it, and leaves it alone when another workspace is asked for", async () => {
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(document.activeElement).not.toBe(editor);
+    act(() => requestComposerFocus("ws_chat9999"));
+    expect(document.activeElement).not.toBe(editor);
+    act(() => requestComposerFocus(WS));
+    await waitFor(() => expect(document.activeElement).toBe(editor));
+  });
+
+  it("takes a caret asked for before it mounted", async () => {
+    const { api } = fixtureApi([workspace]);
+    requestComposerFocus(WS);
+    await setup(api);
+    await waitFor(() => expect(document.activeElement).toBe(composerEditor()));
   });
 
   it("escape with no menu leaves the draft", async () => {

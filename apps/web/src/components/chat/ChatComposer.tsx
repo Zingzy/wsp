@@ -38,6 +38,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TURN_IN_FLIGHT, sendNowFailedLine, sendRefusal, stillWorkingRefusal, stopFailedLine, workspaceState, type MachineState, type ReachState, type SendRefusalKind, type WorkspacePhase } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
+import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadFolder } from "../../files/root";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
@@ -189,6 +190,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   useEffect(() => {
     if (thread.fresh && !thread.finishing) editorRef.current?.focus();
   }, [thread.fresh, thread.finishing]);
+
+  useEffect(() => onComposerFocusRequest(workspaceId, () => editorRef.current?.focus()), [workspaceId]);
 
   const onChange = useCallback((value: string, cursor: number) => setDraft(workspaceId, { prompt: value, cursor }), [setDraft, workspaceId]);
 
