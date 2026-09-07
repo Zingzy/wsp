@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, goneRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, goneRefusal, isBilling, needsRebuild, sendRefusal, workspaceState, workspaceWord, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -71,5 +71,15 @@ describe("workspaceState", () => {
     expect(goneRefusal("fork", "machine m1 is gone at the provider: Not found")).toBe("Workspace machine is gone; rebuild it to fork (machine m1 is gone at the provider: Not found)");
     expect(goneRefusal("wake", "")).toBe("Workspace machine is gone; rebuild it to wake");
     expect(sendRefusal("gone", "machine m1 is gone at the provider: Not found")).toBe(goneRefusal("send", "machine m1 is gone at the provider: Not found"));
+  });
+});
+
+describe("isBilling", () => {
+  it("a machine bills while it runs, reachable or not; paused, moving and gone ones bill nothing and have nothing to nap", () => {
+    expect(isBilling("running")).toBe(true);
+    expect(isBilling("unreachable")).toBe(true);
+    for (const state of ["pausing", "paused", "waking", "gone"] as const) expect(isBilling(state)).toBe(false);
+    // The provider's gone word wins over a record that still says running.
+    expect(isBilling(workspaceState({ phase: "running", machineState: "gone", reach: "gone" }))).toBe(false);
   });
 });

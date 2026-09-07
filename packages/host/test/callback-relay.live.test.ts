@@ -4,12 +4,12 @@
 // wsp terminal's road) and taken only as far as the browser open on this
 // computer and the callback reaching the guest listener. No login completes:
 // the callbacks carry a bogus code, and the tools reject it themselves.
-import { DAEMON_PORT, SolariBackend, type PreviewReach } from "@wsp/engine";
+import { DAEMON_PORT, SolariBackend, isReserved, type PreviewReach } from "@wsp/engine";
 import { connectDaemon, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import type { GoldenBuilderView } from "@wsp/protocol";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
-import { GUEST_ENVS, deployDaemon, isReserved } from "../src/doctor.js";
+import { GUEST_ENVS, deployDaemon } from "../src/doctor.js";
 import { startCallbackRelay, systemOpener, type CallbackRelay } from "../src/relay.js";
 
 const LABEL = { wsp: "1", "wsp-test": "callback-relay-live" };

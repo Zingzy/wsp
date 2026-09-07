@@ -10,6 +10,7 @@ import type { WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceTerminalDrawer } from "../src/components/WorkspaceTerminalDrawer.js";
+import { getLive, resetLive } from "../src/machine/live.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
@@ -402,6 +403,7 @@ function setPane(phase: WorkspaceView["phase"], status: Partial<WorkspaceStatus>
   useStore.setState({ api, workspaces: [{ ...PANE_WS, phase }], statuses: { [WS]: paneStatus({ ...status, phase }) } });
 }
 const overlay = () => document.querySelector<HTMLElement>("[data-terminal-overlay]");
+const hints = () => Array.from(overlay()?.querySelectorAll<HTMLElement>("[data-terminal-hint]") ?? []).map(p => p.textContent);
 
 describe("panes on a workspace that is not running", () => {
   afterEach(() => useStore.setState({ api: null, workspaces: [], statuses: {} }));
@@ -506,12 +508,54 @@ describe("panes on a workspace that is not running", () => {
     act(() => setPane("running", { reach: { state: "zombie" }, reason: "silent for 3 min; exec probe failed" }));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("not-answering"));
     expect(overlay()!.textContent).toContain("The machine is not answering");
-    expect(overlay()!.textContent).toContain("Rebuild it from the Machine panel");
+    expect(hints()).toEqual(["Rebuild it from the Machine panel"]);
     act(() => {
       setPane("running", {});
       wt.feedStatus("live");
     });
     await waitFor(() => expect(overlay()).toBeNull());
+  }, 20_000);
+
+  it("a link that drops after the daemon read memory near full says what took the machine and names the next size up ahead of any rebuild", async () => {
+    const GiB = 1024 ** 3;
+    const { wt } = fakeLink();
+    resetLive();
+    setPane("running", {});
+    useStore.setState({ capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }] } });
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    // The same daemon link feeds both: the pane's socket and the live rows' samples.
+    act(() => {
+      getLive(WS).feedStatus("live");
+      getLive(WS).feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
+    });
+    expect(overlay()).toBeNull();
+    act(() => {
+      wt.feedStatus("connecting");
+      getLive(WS).feedStatus("connecting");
+    });
+    await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("reconnecting"));
+    expect(overlay()!.textContent).toMatch(/Reconnecting to the machine\s*for \d+s/);
+    expect(hints()).toEqual([
+      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the machine last answered; the work on it took the memory, not a fault of the machine",
+      "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
+    ]);
+    act(() => setPane("running", { reach: { state: "zombie" }, reason: "silent for 3 min; exec probe failed" }));
+    await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("not-answering"));
+    expect(overlay()!.textContent).not.toContain("The machine is not answering");
+    expect(overlay()!.textContent).toContain("Out of memory (3.6 GB of 3.9 GB used, load 6.4)");
+    expect(hints()).toEqual([
+      "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
+      "Rebuild it from the Machine panel",
+    ]);
+    act(() => {
+      setPane("running", {});
+      wt.feedStatus("live");
+      getLive(WS).feedStatus("live");
+    });
+    await waitFor(() => expect(overlay()).toBeNull());
+    useStore.setState({ capabilities: null });
   }, 20_000);
 
   it("with no terminal open a paused workspace says so and offers the wake; the panel says the same", async () => {

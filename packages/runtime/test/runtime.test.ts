@@ -22,6 +22,9 @@ import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.
 import { fakeClock } from "./fake-clock.js";
 import { WebSocketServer } from "ws";
 
+/** The recipes here set up with "true", which the harness stage runs under its guard like every installer. */
+const setupRan = (cmd: string): boolean => cmd.includes("\ntrue' &");
+
 describe("runtime", () => {
   it("creates a workspace from a golden manifest and emits protocol events", async () => {
     const events: string[] = [];
@@ -1811,13 +1814,15 @@ describe("runtime golden builders", () => {
 
   it("a run reaches the exec listener as one command with its result, whatever carried it", async () => {
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) => (cmd === "install" ? { exitCode: 0, stdout: "harness on\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    const harness = (cmd: string) => cmd.includes("\ninstall' &");
+    backend.execImpl = (_m, cmd) => (harness(cmd) ? { exitCode: 0, stdout: "harness on\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const seen: GoldenExec[] = [];
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, onExec: e => void seen.push(e) } });
     await rt.golden.prepare({ name: "default" });
-    // The base stage's steps and the cache sweeps run under the guard; the harness install is the one bare run.
-    expect(backend.machines[0]!.runLog.filter(s => !s.includes("setsid bash -c"))).toEqual(["install"]);
-    expect(seen.filter(e => e.cmd === "install")).toEqual([expect.objectContaining({ machineId: "m1", exitCode: 0, stdout: "harness on\n" })]);
+    // The base stage's steps, the harness install and the cache sweeps all run under the guard: nothing runs bare.
+    expect(backend.machines[0]!.runLog.filter(s => !s.includes("setsid bash -c"))).toEqual([]);
+    expect(backend.machines[0]!.runLog.filter(harness)).toHaveLength(1);
+    expect(seen.filter(e => harness(e.cmd))).toEqual([expect.objectContaining({ machineId: "m1", exitCode: 0, stdout: "harness on\n" })]);
   });
 
   it("reap keeps a first-life builder left behind by an earlier process, kills one found paused, and keeps this process's own", async () => {
@@ -2047,7 +2052,7 @@ describe("runtime golden builders", () => {
     expect(await rt.reap()).toEqual({
       reaped: [{ id: second.id, builder: true, reason: "recorded" }, expect.objectContaining({ id: orphan.id, reason: "orphan" })],
       spared: [],
-      failed: [{ id: first.id, message: "502 exec failed; stays recorded, retried next sweep" }],
+      failed: [{ id: first.id, message: "could not stop: 502 exec failed; stays recorded, retried next sweep" }],
     });
     expect(backend.machines.map(m => m.killed)).toEqual([false, true, true]);
     expect((await rt.golden.builders()).map(b => b.id)).toEqual([first.id]);
@@ -3009,8 +3014,8 @@ describe("runtime golden import", () => {
     expect(frames.filter(f => !f.startsWith("uploading-files:"))).toEqual([
       "creating:sandbox from base",
       "deploying-daemon",
-      ...["Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"].map((label, i) => `deploying-daemon:${label} (${i + 1}/17)`),
-      "deploying-daemon:17 installed; caches swept; 2.9 GB free",
+      ...["login shell PATH", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"].map((label, i) => `deploying-daemon:${label} (${i + 1}/18)`),
+      "deploying-daemon:18 installed; caches swept; 2.9 GB free",
       // The stub answers the versions read with nothing, so the stage closes on the disk alone.
       "deploying-daemon:2.9 GB free",
       "applying-setup:1 file: shell 1",
@@ -3677,7 +3682,7 @@ describe("runtime golden import", () => {
 
     // A prepare whose stages fail: the engine kills the machine and the placeholder goes with it.
     const failing = stubBackend();
-    failing.execImpl = (x, cmd) => (cmd === "true" ? { exitCode: 1, stdout: "", stderr: "setup broke" } : dfOk(x, cmd));
+    failing.execImpl = (x, cmd) => (setupRan(cmd) ? { exitCode: 1, stdout: "", stderr: "setup broke" } : dfOk(x, cmd));
     const store2 = memoryStore();
     const c = createRuntime({ backend: failing, store: store2, adapters: {}, goldenRecipe: recipeWith(importOf()), killConfirm: { graceMs: 50, pollMs: 5 } });
     await expect(c.golden.prepare()).rejects.toThrow("golden setup failed");
@@ -3768,7 +3773,7 @@ describe("runtime golden import", () => {
     const stored = (await store.get("builders", b.id)) as { import: { applied: string[] } };
     stored.import.applied = stored.import.applied.filter(s => s !== "installing-harness");
     await store.put("builders", b.id, stored);
-    backend.execImpl = (m, cmd) => (cmd === "true" ? { exitCode: 1, stdout: "", stderr: "setup broke" } : dfOk(m, cmd));
+    backend.execImpl = (m, cmd) => (setupRan(cmd) ? { exitCode: 1, stdout: "", stderr: "setup broke" } : dfOk(m, cmd));
 
     const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), killConfirm: { graceMs: 50, pollMs: 5 } });
     const frames: string[] = [];
@@ -4205,7 +4210,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(result.road).toBe("fork");
     // Not even the no-op runs on it, and the person hears why it is still there.
     expect(machine.execLog).toHaveLength(before);
-    expect(frames[0]).toBe(`creating:an earlier kept builder ${b.id} was not stopped (502 Bad Gateway; stays recorded, retried next sweep)`);
+    expect(frames[0]).toBe(`creating:an earlier kept builder ${b.id}: could not stop: 502 Bad Gateway; stays recorded, retried next sweep`);
     expect(frames[1]).toBe("creating:fork of golden v1");
     expect(await first.store.get("builders", b.id)).toMatchObject({ sealed: { version: 1 } });
   });
@@ -5384,23 +5389,26 @@ describe("gone machines", () => {
   it("a stored workspace whose machine the provider no longer knows hydrates as gone with the provider's words, whatever phase it was left at", async () => {
     const { store, rt, a, b } = await hydratedGone();
     const listed = await rt.workspaces.list();
+    // The words name the load that met the 404 and quote the provider's answer to it.
+    const loadSaw = (id: string) => new RegExp(`^machine ${id} is gone at the provider: the record load found it gone at \\S+Z \\(404 gone\\)$`);
     expect(listed.map(w => [w.name, w.phase, w.gone])).toEqual([
-      ["a", "gone", "machine m1 is gone at the provider: gone"],
-      ["b", "gone", "machine m2 is gone at the provider: gone"],
+      ["a", "gone", expect.stringMatching(loadSaw("m1"))],
+      ["b", "gone", expect.stringMatching(loadSaw("m2"))],
     ]);
     // Written back before anything lists it: a second host over the store reads gone without asking the provider.
-    expect(await store.get("workspaces", a.id)).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider: gone" });
+    expect(await store.get("workspaces", a.id)).toMatchObject({ phase: "gone", gone: expect.stringMatching(loadSaw("m1")) });
     expect(await store.get("workspaces", b.id)).toMatchObject({ phase: "gone" });
     const statuses = await rt.status.list();
     const sa = statuses.find(s => s.id === a.id)!;
-    expect(sa).toMatchObject({ phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: "machine m1 is gone at the provider: gone" });
+    expect(sa).toMatchObject({ phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: expect.stringMatching(loadSaw("m1")) });
     expect(sa.idleAt).toBeUndefined();
     await rt.close();
   });
 
   it("a gone workspace refuses wake and sends with the provider's words; nap is a no-op; rebuild is the road out", async () => {
     const { backend, store, rt, a } = await hydratedGone();
-    const words = "machine m1 is gone at the provider: gone";
+    const words = (await rt.workspaces.get(a.id)).gone!;
+    expect(words).toMatch(/^machine m1 is gone at the provider: the record load found it gone at /);
     await expect(rt.workspaces.wake(a.id)).rejects.toThrow(`Workspace machine is gone; rebuild it to wake (${words})`);
     await expect(rt.sessions.start(a.id, { prompt: "hi" })).rejects.toThrow(`Workspace machine is gone; rebuild it to send (${words})`);
     expect(await rt.workspaces.nap(a.id)).toMatchObject({ phase: "gone" });
@@ -5439,9 +5447,10 @@ describe("gone machines", () => {
 
       backend.machines[0]!.killed = true; // deleted through the provider's API under a running host
       await until(() => events.some(e => e.type === "workspace.gone"));
-      expect(events.find(e => e.type === "workspace.gone")).toMatchObject({ workspaceId: ws.id, machineId: "m1", reason: "machine m1 is gone at the provider" });
-      expect(await rt.workspaces.get(ws.id)).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider" });
-      expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider" });
+      const pollSaw = /^machine m1 is gone at the provider: the status poll found it gone at \S+Z$/;
+      expect(events.find(e => e.type === "workspace.gone")).toMatchObject({ workspaceId: ws.id, machineId: "m1", reason: expect.stringMatching(pollSaw) });
+      expect(await rt.workspaces.get(ws.id)).toMatchObject({ phase: "gone", gone: expect.stringMatching(pollSaw) });
+      expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "gone", gone: expect.stringMatching(pollSaw) });
       expect(events.find(e => e.type === "session.end")).toMatchObject({ workspaceId: ws.id, reason: "machine gone at the provider while the agent was working" });
       expect((await rt.sessions.list(ws.id)).map(s => s.status)).toEqual(["failed"]);
 
@@ -5451,7 +5460,7 @@ describe("gone machines", () => {
       expect(ticks[0]).toMatchObject({ rateUsdPerHour: 0 });
       expect(ticks[1]!.awakeMs).toBe(ticks[0]!.awakeMs);
       const last = events.filter((e): e is EventUnion & { type: "workspace.status" } => e.type === "workspace.status").at(-1)!;
-      expect(last.status).toMatchObject({ phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: "machine m1 is gone at the provider" });
+      expect(last.status).toMatchObject({ phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: expect.stringMatching(pollSaw) });
       expect(last.status.idleAt).toBeUndefined();
     } finally {
       stop();

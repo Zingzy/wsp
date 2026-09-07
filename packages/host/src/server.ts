@@ -4,8 +4,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
-import { agentHomes } from "@wsp/engine";
-import type { BootPayload, ProjectImportResult, ProjectPlan } from "@wsp/protocol";
+import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
+import { recordRestoredLine, type BootPayload, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { projectBundler } from "./project-bundle.js";
 import { projectLander } from "./project-export.js";
@@ -133,7 +133,7 @@ function describeCost(rateUsdPerHour: number, ageMs: number | undefined): string
 
 function kindOf(labels: Record<string, string> | undefined, builder: boolean): string {
   if (builder) return "builder";
-  return labels?.["wsp-smoke"] === "1" ? "smoke fork" : "workspace";
+  return labels?.[SMOKE_LABEL] === "1" ? "smoke fork" : "workspace";
 }
 
 function describeReaped(r: ReapedMachine): string {
@@ -154,6 +154,8 @@ function describeSpared(m: SparedMachine): string {
     return `reap: left alone ${m.id}: ${kind} from another wsp setup (owner ${m.owner}), ${describeAge(m.ageMs)}, ${cost}; kill it from the Solari console if it is yours and forgotten`;
   }
   const who = m.whose === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
+  // An own workspace is recorded once its create grace is over; an own builder or smoke fork is killed then.
+  if (m.whose === "own" && kind === "workspace") return `reap: left alone ${m.id}: ${who}, ${describeAge(m.ageMs)}, ${cost}; recorded once it is ${describeAge(m.backstopMs)} unless a record claims it first`;
   const claim = m.whose === "own" ? " unless a record claims it first" : "";
   const then = m.ageMs === undefined ? "never reaped by this host" : `reaped once it is ${describeAge(m.backstopMs)}${claim}`;
   return `reap: left alone ${m.id}: ${who}, ${describeAge(m.ageMs)}, ${cost}; ${then}`;
@@ -176,10 +178,12 @@ function describeSealed(b: GoldenBuilderView, sealed: { at: string; version: num
  * why, and on the first sweep names the running machines it left alone. */
 async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared: boolean): Promise<void> {
   try {
-    const { reaped, spared, failed } = await rt.reap();
+    const { reaped, spared, failed, adopted } = await rt.reap();
+    for (const a of adopted ?? []) log(recordRestoredLine(a.id, a.name, a.workspaceId));
     for (const r of reaped) log(describeReaped(r));
     if (listSpared) for (const m of spared) log(describeSpared(m));
-    for (const f of failed ?? []) log(f.id !== undefined ? `reap: could not stop ${f.id} (${f.message})` : `reap: sweep failed: ${f.message}`);
+    // Each failure names its own verb (could not stop, not recorded); the host adds the machine and nothing else.
+    for (const f of failed ?? []) log(f.id !== undefined ? `reap: ${f.id}: ${f.message}` : `reap: sweep failed: ${f.message}`);
   } catch (e) {
     log(`reap: sweep failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -204,7 +208,7 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
         golden: head.snapshotId,
         name,
         ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
-        labels: { wsp: "1", "wsp-host": "1", createdAt: new Date().toISOString() },
+        labels: { [WSP_LABEL]: "1", [HOST_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
       });
     },
     planProject: source => bundlerFor(source).plan(),

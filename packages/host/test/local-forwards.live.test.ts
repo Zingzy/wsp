@@ -6,13 +6,13 @@
 import { execFile } from "node:child_process";
 import { connect } from "node:net";
 import { promisify } from "node:util";
-import { DAEMON_PORT, SolariBackend, type PreviewReach } from "@wsp/engine";
+import { DAEMON_PORT, SolariBackend, isReserved, type PreviewReach } from "@wsp/engine";
 import type { GoldenBuilderView } from "@wsp/protocol";
 import { connectDaemon, createRuntime, memoryStore, serveRuntime, type Runtime, type RuntimeServer } from "@wsp/runtime";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
 import { WsClient } from "../../runtime/test/ws-client.js";
-import { GUEST_ENVS, deployDaemon, isReserved } from "../src/doctor.js";
+import { GUEST_ENVS, deployDaemon } from "../src/doctor.js";
 import { startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 
 const execFileAsync = promisify(execFile);

@@ -3,13 +3,13 @@
 // every browser or device sign-in has a status that proves it, the agents are
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
-import { APT_INDEX, APT_UPDATE, BASE_FLOOR, BREW_ENV, CURL_NET, NET_READ_S, NET_RETRIES, ROAD_STEPS, CATALOG, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, DEFAULT_AGENT, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, ROADS, ROAD_MODULES, SIGN_IN_ROWS, agentName, baseEntryFor, baseNote, catalogEntry, catalogToolFor, guestEnv, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, sizeBytes, smokeOf, SIZE_METHODS, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { APT_INDEX, APT_UPDATE, BASE_FLOOR, BREW_ENV, CURL_NET, NET_READ_S, NET_RETRIES, ROAD_STEPS, CATALOG, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, DEFAULT_AGENT, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, PLAYWRIGHT, ROADS, ROAD_MODULES, SIGN_IN_ROWS, agentName, baseEntryFor, baseNote, catalogEntry, catalogToolFor, catalogToolForDependency, guestEnv, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, sizeBytes, smokeOf, SIZE_METHODS, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -34,6 +34,9 @@ describe("catalog", () => {
     expect(catalogToolFor("npm")?.id).toBe("node");
     expect(catalogToolFor("openjdk@21")?.id).toBe("java");
     expect(catalogToolFor("cargo")?.id).toBe("rust");
+    // Homebrew's own name for the same toolchain, and the installer's: both are the rust row, so neither plans a second install.
+    expect(catalogToolFor("rustup")?.id).toBe("rust");
+    expect(catalogToolFor("rustup-init")?.id).toBe("rust");
     expect(baseEntryFor("cargo")).toBeUndefined();
     expect(baseEntryFor("npm")?.id).toBe("node");
     expect(catalogToolFor("claude")).toBeUndefined();
@@ -140,7 +143,7 @@ describe("catalog", () => {
     expect(CATALOG_AGENTS.filter(a => a.guestStateHome !== undefined).map(a => [a.id, a.guestStateHome])).toEqual([["claude", "/root/.claude-cfg"]]);
     expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.153.0");
     expect(installLine(catalogEntry("pi")!)).toBe("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4");
-    expect(installLine(catalogEntry("claude")!)).toBe("curl -fsSL https://claude.ai/install.sh | bash");
+    expect(installLine(catalogEntry("claude")!)).toBe(catalog.GOLDEN_SETUP);
     expect(installLine(catalogEntry("hermes")!)).toMatch(/git clone -q --depth 1 --branch v[\d.]+ https:\/\/github\.com\/NousResearch\/hermes-agent\.git/);
     // An agent's npm road is pinned in the data; an unpinned one would install whatever the registry serves that day.
     for (const a of CATALOG_AGENTS) if (a.installRoad.road === "npm") expect(a.installRoad.version, a.id).toMatch(/^\d/);
@@ -165,6 +168,23 @@ describe("catalog", () => {
         "rm -f /tmp/docker-compose",
       ].join("\n"),
     );
+    // Rust comes by rustup, whose installer is pinned to the sha256 rust-lang publishes beside the archived release.
+    // The script road runs every one of these under set -e, so no script carries the line itself.
+    expect(installLine(catalogEntry("rust")!)).toBe(
+      [
+        'arch="$(uname -m)"',
+        'case "$arch" in',
+        "  x86_64) sha=dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71 ;;",
+        "  aarch64) sha=15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433 ;;",
+        '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+        "esac",
+        'curl -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/1.29.1/$arch-unknown-linux-gnu/rustup-init"',
+        'echo "$sha  /tmp/rustup-init" | sha256sum -c - >/dev/null',
+        "chmod +x /tmp/rustup-init",
+        "/tmp/rustup-init -y --no-modify-path --profile default --default-toolchain stable",
+        "rm -f /tmp/rustup-init",
+      ].join("\n"),
+    );
     expect(installLine(catalogEntry("pnpm")!)).toBe("npm install -g pnpm@11.9.0");
     expect(installLine(catalogEntry("wrangler")!)).toBe("npm install -g wrangler");
     expect(installLine(catalogEntry("go")!)).toMatch(/^su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install go'$/);
@@ -174,6 +194,8 @@ describe("catalog", () => {
     expect(gh).toContain(`release="$(curl 'https://api.github.com/repos/cli/cli/releases/latest' || true)"`);
     expect(gh).toContain(`tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"`);
     expect(gh).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
+    // The pick skips sums, signatures, packages for other package managers and archives the road cannot unpack, whatever order the API lists them in.
+    expect(gh).toContain(`grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk|zst|tar\\.zst|json)$' | head -1`);
     // The fall-through installs the entry's main package, not the repository root, which for gh is no package.
     expect(gh).toContain("go install 'github.com/cli/cli/v2/cmd/gh@latest'");
     expect(installLine(catalogEntry("cloudflared")!)).toContain("go install 'github.com/cloudflare/cloudflared/cmd/cloudflared@latest'");
@@ -285,7 +307,10 @@ describe("catalog", () => {
     expect(env("release")).toBe(CURL_NET);
     expect(env("vendor")).toBe(CURL_NET);
     // A script may run any of them, so it gets every line; Homebrew takes its retry count from its own environment.
-    expect(ROAD_STEPS.script.env).toEqual([...ROAD_STEPS.npm.env, ...ROAD_STEPS.pipx.env, ...ROAD_STEPS.uv.env, ...ROAD_STEPS.cargo.env, CURL_NET]);
+    // A script road's step is a whole script whose last line may be a cleanup, so the road runs it under set -e: a
+    // failed download must not read as an install on a machine that already carries the tool.
+    expect(ROAD_STEPS.script.env).toEqual(["set -euo pipefail", ...ROAD_STEPS.npm.env, ...ROAD_STEPS.pipx.env, ...ROAD_STEPS.uv.env, ...ROAD_STEPS.cargo.env, CURL_NET]);
+    for (const road of ROADS) expect(ROAD_STEPS[road].env.includes("set -euo pipefail"), road).toBe(road === "script");
     expect(BREW_ENV).toContain("HOMEBREW_CURL_RETRIES=1");
     for (const road of ["brew", "bun", "go", "apt"] as const) expect(ROAD_STEPS[road].env, road).toEqual([]);
     // Package managers and downloads get a shorter step than anything that may compile; a download that ran the clock out is tried once more, a compile is not.
@@ -305,7 +330,46 @@ describe("catalog", () => {
     expect(out.split("\n").filter(l => l !== "")).toEqual(["--connect-timeout", "15", "--speed-limit", "1", "--speed-time", "60", "--retry", "1", "--fail", "--silent", "--show-error", "--location", "-o", "/tmp/x", "https://example.test/a b"]);
   });
 
-  it("no road line spells curl's flags itself: the function is their one home, and the vendor installer is the one line outside it", () => {
+  it("a vendor installer is downloaded to a file through the curl function, checked to be a shell script, then run from the file: never piped into a shell", () => {
+    const s = catalog.installerScript("https://vendor.test/install.sh");
+    expect(s).toBe([
+      'f="$(mktemp)"',
+      `trap 'rm -f "$f"' EXIT`,
+      `curl -o "$f" 'https://vendor.test/install.sh'`,
+      `test "$(head -c 2 "$f")" = '#!' || { echo 'Error: what https://vendor.test/install.sh served is not a shell script' >&2; exit 1; }`,
+      'bash "$f" </dev/null',
+    ].join("\n"));
+    expect(s).not.toMatch(/\|\s*(bash|sh)\b/);
+    expect(s).not.toMatch(/\bcurl +-[A-Za-z]*[fsSL]\b/);
+    expect(catalog.GOLDEN_SETUP).toBe(catalog.installerScript("https://claude.ai/install.sh"));
+  });
+
+  it("the downloaded installer runs only when what curl saved starts with a shebang; an empty or HTML body fails on its own Error line, runs nothing and leaves no file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-installer-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    // A curl stand-in that saves the body the test hands it where -o points, as the real one saves what the vendor serves.
+    writeFileSync(join(dir, "curl"), '#!/bin/sh\nwhile [ "$1" != "-o" ]; do shift; done\nprintf "%s" "$BODY" > "$2"\n', { mode: 0o755 });
+    const run = (body: string) =>
+      spawnSync("bash", ["-c", `set -euo pipefail\n${CURL_NET}\n${catalog.installerScript("https://vendor.test/install.sh")}`], {
+        encoding: "utf8",
+        env: { ...process.env, BODY: body, TMPDIR: dir, PATH: `${dir}:${process.env["PATH"] ?? ""}` },
+      });
+    for (const body of ["", "<html>signed out</html>"]) {
+      const r = run(body);
+      expect(r.status, body).toBe(1);
+      expect(r.stdout, body).toBe("");
+      expect(r.stderr.trim(), body).toBe("Error: what https://vendor.test/install.sh served is not a shell script");
+      expect(readdirSync(dir), body).toEqual(["curl"]);
+    }
+    // The installer reads nothing from stdin: a pipe would have handed it the rest of its own text.
+    const ran = run('#!/bin/sh\necho "ran with $(cat | wc -c | tr -d \' \') bytes on stdin"\n');
+    expect(ran.stderr).toBe("");
+    expect(ran.status).toBe(0);
+    expect(ran.stdout).toBe("ran with 0 bytes on stdin\n");
+    expect(readdirSync(dir)).toEqual(["curl"]);
+  });
+
+  it("no road line spells curl's flags itself: the function is their one home", () => {
     const own = /\bcurl +-[A-Za-z]*[fsSL]\b/;
     const lines = [
       ...CATALOG.map(e => installLine(e)),
@@ -318,7 +382,6 @@ describe("catalog", () => {
     ];
     for (const line of lines) {
       const text = typeof line === "string" ? line : line.note;
-      if (text === catalog.GOLDEN_SETUP) continue;
       expect(text).not.toMatch(own);
     }
     expect(lines.filter(l => typeof l === "string" && /\bcurl\b/.test(l)).length).toBeGreaterThanOrEqual(8);
@@ -399,6 +462,7 @@ describe("catalog", () => {
       "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "agent-browser",
       "rust", "maven", "bun", "yarn", "ruff", "black", "mypy", "pyright", "pytest", "prettier", "eslint", "typescript",
       "wrangler", "cloudflared", "kubectl", "aws", "vercel", "netlify", "fly", "supabase", "railway", "doppler", "op", "ffmpeg", "yq", "git-lfs", "tmux",
+      "ruby", "php", "postgresql-client", "redis-tools", "golangci-lint", "mise", "git-delta", "shellcheck", "swift", "elixir", "bazel", "llvm", "playwright",
     ]);
     for (const e of CATALOG_AGENTS) expect(e.source.road, e.id).toBe("measured");
   });
@@ -419,12 +483,17 @@ describe("catalog", () => {
     }
     // The rows are the one place a size lives: no table of formula or global sizes beside them.
     expect(Object.keys(catalog).filter(k => /_(MIB|BYTES)$/.test(k))).toEqual([]);
-    // The one row nobody could measure: its package sits in a repository the road does not add yet.
-    expect(CATALOG.filter(e => !("bytes" in e.size)).map(e => e.id)).toEqual(["op"]);
+    // Every row has a number: 1Password's is its one file unpacked from the deb, since its package carries no Installed-Size.
+    expect(CATALOG.filter(e => !("bytes" in e.size)).map(e => e.id)).toEqual([]);
+    expect(catalogEntry("op")!.size).toEqual({ bytes: 42950840, on: "2026-09-07", method: "unpacked" });
     for (const text of Object.values(SIZE_METHODS)) expect(text).not.toMatch(/\u2014/);
+    // The du rows were read on a Debian bookworm host, the node:22-bookworm image among them; the label says the host, not one image.
+    expect(SIZE_METHODS.du).toBe("du over what the install wrote, before and after, on a Debian bookworm host");
     for (const e of CATALOG) expect(`${e.name} ${e.source.note ?? ""}`, e.id).not.toMatch(/\u2014/);
-    // Every brew row counts its Linux runtime dependencies, so Rust carries the LLVM its bottle links against.
-    expect(sizeBytes(catalogEntry("rust")!.size)).toBeGreaterThan(3e9);
+    // Every brew row counts its Linux runtime dependencies, so Java carries the ones its bottle links against.
+    expect(sizeBytes(catalogEntry("java")!.size)).toBe(613280230);
+    // Rust comes by rustup instead of the formula whose Linux bottle pulled llvm@22 in: half the bytes, measured on the machine.
+    expect(catalogEntry("rust")!.size).toEqual({ bytes: 1595346944, on: "2026-09-07", method: "du" });
     expect(sizeBytes(catalogEntry("git")!.size)).toBe(123789312);
     expect(catalogEntry("claude")!.size).toEqual({ bytes: 208 * 1024 * 1024, on: "2026-09-05", method: "df" });
   });
@@ -458,6 +527,88 @@ describe("catalog", () => {
     expect(catalogEntry("typescript")!.bin).toBe("tsc");
     expect(catalogToolFor("tsc")?.id).toBe("typescript");
     expect(catalogToolFor("bunx")?.id).toBe("bun");
+  });
+
+  it("carries the tier 2 and tier 3 rows the lab sandboxes ship and a browser for the web render tests, every one off until asked for", () => {
+    const rows = ["ruby", "php", "postgresql-client", "redis-tools", "golangci-lint", "mise", "git-delta", "shellcheck", "swift", "elixir", "bazel", "llvm", "playwright", "op"];
+    for (const id of rows) {
+      const e = catalogEntry(id) as ToolEntry;
+      expect(e?.kind, id).toBe("tool");
+      expect([e.defaultOn, e.floor], id).toEqual([false, false]);
+      expect(sizeBytes(e.size), id).toBeGreaterThan(0);
+    }
+    // The apt rows, with what each brings along under its own name.
+    expect(installLine(catalogEntry("ruby")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq ruby ruby-dev ruby-bundler");
+    expect(catalogToolFor("bundle")?.id).toBe("ruby");
+    expect(catalogToolFor("bundler")?.id).toBe("ruby");
+    expect(catalogToolFor("gem")?.id).toBe("ruby");
+    expect(installLine(catalogEntry("php")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq php-cli composer php-mbstring php-xml php-curl php-zip");
+    expect(catalogToolFor("composer")?.id).toBe("php");
+    expect(catalogToolFor("psql")?.id).toBe("postgresql-client");
+    expect(catalogToolFor("pg_dump")?.id).toBe("postgresql-client");
+    expect(catalogToolFor("redis-cli")?.id).toBe("redis-tools");
+    expect(catalogToolFor("redis")?.id).toBe("redis-tools");
+    expect(installLine(catalogEntry("shellcheck")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq shellcheck");
+    expect(installLine(catalogEntry("elixir")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq elixir");
+    expect(catalogToolFor("erlang")?.id).toBe("elixir");
+    expect(catalogToolFor("mix")?.id).toBe("elixir");
+    expect(installLine(catalogEntry("llvm")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq clang clang-format clang-tidy");
+    expect(catalogToolFor("clang-tidy")?.id).toBe("llvm");
+    for (const id of ["ruby", "php", "postgresql-client", "redis-tools", "shellcheck", "elixir", "llvm"]) expect(installAfter(catalogEntry(id) as ToolEntry), id).toBe(APT_INDEX);
+    // The release rows: each repository's Linux asset, golangci-lint and bazelisk with a go install to fall back on.
+    expect(installLine(catalogEntry("golangci-lint")!)).toContain(`release="$(curl 'https://api.github.com/repos/golangci/golangci-lint/releases/latest' || true)"`);
+    expect(installLine(catalogEntry("golangci-lint")!)).toContain("go install 'github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest'");
+    expect(installLine(catalogEntry("mise")!)).toContain("'https://api.github.com/repos/jdx/mise/releases/latest'");
+    expect(installLine(catalogEntry("mise")!)).not.toContain("go install");
+    expect(installLine(catalogEntry("git-delta")!)).toContain("name='delta'");
+    expect(installLine(catalogEntry("git-delta")!)).toContain("'https://api.github.com/repos/dandavison/delta/releases/latest'");
+    // bazelisk goes on PATH under the name agents type, and covers the name it is published under.
+    expect(installLine(catalogEntry("bazel")!)).toContain("name='bazel'");
+    expect(installLine(catalogEntry("bazel")!)).toContain("'https://api.github.com/repos/bazelbuild/bazelisk/releases/latest'");
+    expect(catalogToolFor("bazelisk")?.id).toBe("bazel");
+    // Swift from swift.org's Debian 12 tarball, checksummed, under its own prefix, after the apt index its dependencies need.
+    const swift = installLine(catalogEntry("swift")!);
+    expect(swift.split("\n").slice(0, 2)).toEqual(["export DEBIAN_FRONTEND=noninteractive", "apt-get install -y -qq binutils libicu-dev libcurl4-openssl-dev libedit-dev libsqlite3-dev libncurses-dev libpython3-dev libxml2-dev pkg-config uuid-dev tzdata git gcc libstdc++-12-dev"]);
+    expect(swift).toContain('curl -o "/tmp/$pkg" "https://download.swift.org/swift-6.3.3-release/$dir/swift-6.3.3-RELEASE/$pkg"');
+    expect(swift).toContain("  x86_64) dir=debian12 sha=19e0c78cad5418ad48bfa87aa20c53ac9ac9996d1695d04dd94f7c7ea4eb133f ;;");
+    expect(swift).toContain("  aarch64) dir=debian12-aarch64 sha=ecba8ef87b54a5048d466af500f3169c939a6b8a2cb7c600f76b5184457f293a ;;");
+    expect(swift).toContain('echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null');
+    expect(swift).toContain('tar -xzf "/tmp/$pkg" -C /opt/swift --strip-components=1');
+    expect(swift).toContain("ln -sfn /opt/swift/usr/bin/swift /usr/local/bin/swift");
+    expect(installAfter(catalogEntry("swift") as ToolEntry)).toBe(APT_INDEX);
+    expect(catalogToolFor("swiftc")?.id).toBe("swift");
+    // The browser: Playwright's own Chromium at the Playwright the render tests import, on the floor's node; the row
+    // answers to the package names a project depends on.
+    expect(installLine(catalogEntry("playwright")!)).toBe("export DEBIAN_FRONTEND=noninteractive\nnpm install -g playwright@1.62.1\nplaywright install --with-deps chromium");
+    expect(installAfter(catalogEntry("playwright") as ToolEntry)).toBe("node");
+    expect(catalogToolFor("chromium")?.id).toBe("playwright");
+    // A project's npm dependency lands on a row only through the names the row lists for it: the browser's packages
+    // do, a client library named like a server's tools does not, and neither does a command or cover word.
+    for (const pkg of ["playwright", "@playwright/test", "playwright-core"]) expect(catalogToolForDependency("npm", pkg)?.id, pkg).toBe("playwright");
+    for (const pkg of ["redis", "sqlite", "sqlite3", "chromium", "bun", "eslint", "typescript", "pg"]) expect(catalogToolForDependency("npm", pkg), pkg).toBeUndefined();
+    expect(catalogToolForDependency("uv", "playwright")).toBeUndefined();
+    // The pinned Playwright is the one the app manifests pin, so the golden's Chromium is the revision the render tests look for.
+    for (const app of ["web", "desktop"]) {
+      const manifest = JSON.parse(readFileSync(new URL(`../../../apps/${app}/package.json`, import.meta.url), "utf8")) as { devDependencies: Record<string, string> };
+      expect(manifest.devDependencies["playwright"], app).toBe(PLAYWRIGHT.version);
+    }
+    expect(catalogEntry("playwright")!.size).toEqual({ bytes: 1015808000, on: "2026-09-07", method: "du" });
+    // 1Password: its repository under its pinned key, that one index read, then the package; the sum is checked before the key is trusted.
+    const op = installLine(catalogEntry("op")!);
+    expect(op.split("\n")).toEqual([
+      "export DEBIAN_FRONTEND=noninteractive",
+      "curl -o /usr/share/keyrings/1password-archive-keyring.asc https://downloads.1password.com/linux/keys/1password.asc",
+      'echo "f39e7dd9dedc581ced85732832f217e0de5860a3b80279b5af4bc7c6d8157bae  /usr/share/keyrings/1password-archive-keyring.asc" | sha256sum -c - >/dev/null',
+      'arch="$(dpkg --print-architecture)"',
+      'echo "deb [arch=$arch signed-by=/usr/share/keyrings/1password-archive-keyring.asc] https://downloads.1password.com/linux/debian/$arch stable main" > /etc/apt/sources.list.d/1password.list',
+      "apt-get update -qq -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/1password.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0",
+      "apt-get install -y -qq 1password-cli",
+    ]);
+    expect(catalogToolFor("1password-cli")?.id).toBe("op");
+  });
+
+  it("pipes a download into a shell on no road: the harness vendor's own installer is saved to a file first", () => {
+    expect(CATALOG.filter(e => /curl[^\n]*\|\s*(ba)?sh/.test(installLine(e))).map(e => e.id)).toEqual([]);
   });
 
   it("carries no token-looking value", () => {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { BREW_ID_PREFIX } from "@wsp/protocol";
 import { linuxSupport } from "../brew-bottles.js";
 import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
@@ -169,7 +170,7 @@ const GLOBALS: readonly GlobalManager[] = [
 // for starts unticked without a reason, so the row stays open to a tick that tries it.
 function formulaRow(host: Host, name: string): ManifestEntry {
   const linux = host.platform === "linux" ? "yes" : linuxSupport(name);
-  const base = { rung: "tools" as const, id: `tools/brew/${name}`, label: name, group: "Homebrew", linux };
+  const base = { rung: "tools" as const, id: `${BREW_ID_PREFIX}${name}`, label: name, group: "Homebrew", linux };
   if (linux === "no") return item({ ...base, default: "skip", reason: "no Linux bottle" });
   return linux === "unknown" ? item({ ...base, default: "skip" }) : item(base);
 }

@@ -89,7 +89,7 @@ describe("computeRecipe", () => {
     expect(row("gh")).toMatchObject({ on: true, source: { kind: "installed", paths: [], bin: true } });
     // node is installed here too, and the project's own file outranks that.
     expect(row("node")).toMatchObject({ on: true, source: { kind: "project", why: "engines.node >=22" } });
-    expect(scans).toEqual(["node engines.node >=22", "go go.mod needs Go", "candidate ruby"]);
+    expect(scans).toEqual(["node engines.node >=22", "go go.mod needs Go", "ruby Gemfile needs Ruby"]);
     expect(Recipe.parse(JSON.parse(JSON.stringify(recipe)))).toEqual(recipe);
   });
 
