@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXEC_ENV, INLINE_EXEC_MS, MachineUnreached, type ExecResult, type Machine } from "@wsp/engine";
-import { EXEC_BODY_MAX, RUN_GONE_LINE, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
+import { EXEC_BODY_MAX, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
+import type { ExecStream } from "@wsp/protocol";
 import { machineExecStream } from "../src/machine-exec.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
@@ -27,6 +28,10 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
   let step = 0;
   /** The claim directory the launch makes: what says the run is still on the guest, until the reap takes it. */
   let claimed = false;
+  /** What the probe for the claim does instead of answering: throw, or answer something that is not an answer. */
+  let probeFails: Error | undefined;
+  let probeGarbles = false;
+  let probes = 0;
   const kills: string[] = [];
   const writes: string[] = [];
   const calls: string[] = [];
@@ -61,7 +66,12 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
       claimed = true;
       return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
     }
-    if (cmd.includes("WSP_RUN")) return { exitCode: 0, stdout: claimed ? "WSP_RUN\n" : "WSP_GONE\n", stderr: "" };
+    if (cmd.includes("WSP_RUN")) {
+      probes++;
+      if (probeFails !== undefined) throw probeFails;
+      if (probeGarbles) return { exitCode: 1, stdout: "", stderr: "bash: line 1: unexpected" };
+      return { exitCode: 0, stdout: claimed ? "WSP_RUN\n" : "WSP_GONE\n", stderr: "" };
+    }
     if (cmd.includes("kill -KILL") || cmd.includes("kill -TERM")) {
       kills.push(cmd);
       // A signal to the group takes the leader and what it spawned; one to a pid takes that pid alone.
@@ -111,6 +121,11 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
     files: () => [...disk.keys()],
     /** The guest swept the run's files with no reader of its own around, as a reboot or a tmp sweep would. */
     sweep: () => (claimed = false),
+    /** The machine stops answering the one question the attach asks, the way a gateway or a nap does. */
+    refuseProbes: (e: Error) => (probeFails = e),
+    /** The machine answers, but says neither that it holds the run nor that it does not. */
+    garbleProbes: () => (probeGarbles = true),
+    probes: () => probes,
   };
 }
 
@@ -611,33 +626,81 @@ describe("machineExecStream attaching to a run its process did not launch", () =
       { append: '{"type":"system","subtype":"init"}\n{"type":"assistant"}\n' },
       { append: '{"type":"result"}\n', exit: 0 },
     ]);
-    const stream = factory.attach!(run, { input: true });
+    const stream = await factory.attach!(run, { input: true });
+    expect(stream).not.toBe("gone");
     const lines: string[] = [];
-    for await (const line of stream.lines) lines.push(line);
+    for await (const line of (stream as ExecStream).lines) lines.push(line);
     expect(lines).toEqual(['{"type":"system","subtype":"init"}', '{"type":"assistant"}', '{"type":"result"}']);
-    expect(await stream.exited).toBe(0);
+    expect(await (stream as ExecStream).exited).toBe(0);
   });
 
   it("takes a message into the run over the channel the launch left open", async () => {
     const { factory, guest, run } = await abandoned([{ append: "one\n" }, { append: "two\n", exit: 0 }]);
-    const stream = factory.attach!(run, { input: true });
+    const stream = (await factory.attach!(run, { input: true })) as ExecStream;
     expect(await stream.write('{"type":"user"}')).toBe("written");
     expect(guest.getInput()).toBe('go\n{"type":"user"}\n');
     for await (const line of stream.lines) void line;
     expect(await stream.exited).toBe(0);
   });
 
-  it("a run the machine no longer holds ends the stream on those words, with no poll of its own", async () => {
+  it("a machine that answers and no longer holds the run says gone, with no reader and no poll of its own", async () => {
     const { factory, guest, run } = await abandoned([{ append: "never read\n", exit: 0 }]);
     guest.sweep();
-    const stream = factory.attach!(run, { input: true });
-    const failure = await (async () => {
-      for await (const line of stream.lines) void line;
-      throw new Error("the stream ended without a failure");
-    })().catch((e: unknown) => e as Error);
-    expect(failure.message).toBe(RUN_GONE_LINE);
-    expect(await stream.exited).toBeNull();
+    expect(await factory.attach!(run, { input: true })).toBe("gone");
     expect(guest.calls.filter(c => c.includes("__WSP_EOF_"))).toEqual([]);
+  });
+
+  it("a probe nothing answers leaves the run alone: no kill, no rm, and the reach window is what it waits out", async () => {
+    const { factory, guest, run } = await abandoned([{ append: "still working\n" }]);
+    guest.refuseProbes(new Error("gateway said 502"));
+    const failure = await factory.attach!(run, { input: true }).then(
+      () => new Error("the probe answered where it should have failed"),
+      (e: unknown) => e as Error,
+    );
+    expect(failure.message).toBe("gateway said 502");
+    // The turn this attach was sent to save is still running, and its log is still there to be read next time.
+    expect(guest.kills).toEqual([]);
+    expect(guest.childAlive()).toBe(true);
+    expect(guest.files()).toContain(`${run}.sh`);
+  });
+
+  it("a probe whose road is out is asked again over the reach window before it gives up, and still leaves the run alone", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: "still working\n" }]);
+    let clock = 0;
+    const factory = machineExecStream(machine, { pollMs: 5, now: () => clock, sleep: async ms => void (clock += ms) });
+    const launched = factory("claude -p hi", { env: {}, input: ["go"] });
+    await vi.waitFor(() => expect(guest.getLaunch()).not.toBe(""));
+    guest.refuseProbes(Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } }));
+    const failure = await factory.attach!(launched.run!, { input: true }).then(
+      () => new Error("the probe answered where it should have failed"),
+      (e: unknown) => e as Error,
+    );
+    expect(failure).toBeInstanceOf(MachineUnreached);
+    expect(guest.probes()).toBeGreaterThan(1);
+    expect(guest.kills).toEqual([]);
+    expect(guest.childAlive()).toBe(true);
+  });
+
+  it("a machine that answers neither way is not a run to end", async () => {
+    const { factory, guest, run } = await abandoned([{ append: "still working\n" }]);
+    guest.garbleProbes();
+    const failure = await factory.attach!(run, { input: true }).then(
+      () => new Error("the probe answered where it should have failed"),
+      (e: unknown) => e as Error,
+    );
+    expect(failure.message).toContain("did not answer whether it still holds");
+    expect(guest.kills).toEqual([]);
+    expect(guest.childAlive()).toBe(true);
+  });
+
+  it("a handle this host could not have launched is refused before any shell text goes out", async () => {
+    const { factory, guest } = await abandoned([{ append: "still working\n" }]);
+    const before = guest.calls.length;
+    for (const bad of ["/tmp/wsp-run/../../etc/x", "/tmp/wsp-run/$(id)", "/etc/wsp-run/aabbccddeeff", "/tmp/wsp-run/nothex000000", "/tmp/wsp-run/aabbccddeef"]) {
+      await expect(factory.attach!(bad, { input: true })).rejects.toThrow("is not a run this host could have launched");
+    }
+    expect(guest.calls.length).toBe(before);
   });
 });
 

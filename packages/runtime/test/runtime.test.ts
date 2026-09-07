@@ -1367,6 +1367,8 @@ describe("a turn the host comes back to", () => {
     }
     const runs = new Map<string, Run>();
     let minted = 0;
+    /** Set, nothing on the machine answers the question the attach asks, and the run is neither there nor gone. */
+    let unreachable: Error | undefined;
     const deliver = (run: Run, event: AdapterEvent): void => {
       if (event.type === "turn.done") run.result = event.result;
       run.live?.(event);
@@ -1398,17 +1400,11 @@ describe("a turn the host comes back to", () => {
         queueMicrotask(() => emit(handle, { type: "session.start", sessionId: run.sessionId, model: "claude-sonnet-4-5", cwd: o.cwd ?? "/root/work" }));
         return session;
       },
-      attach: o => {
+      attach: async o => {
+        if (unreachable !== undefined) throw unreachable;
         const run = runs.get(o.run);
-        if (run === undefined) {
-          const gone: TurnResult = { status: "failed", error: RUN_GONE_LINE };
-          const finished = Promise.resolve().then(() => {
-            o.onEvent({ type: "turn.done", sessionId: o.sessionId, result: gone });
-            o.onEvent({ type: "session.end", sessionId: o.sessionId, exitCode: null, sawResult: false });
-            return gone;
-          });
-          return { localId: o.sessionId, finished, interrupt: async () => {} };
-        }
+        // A machine that answered and no longer holds the run: no reader, and nothing is ever emitted for it.
+        if (run === undefined) return "gone";
         const session = open(run, o.run, o.onEvent, o.sessionId);
         const replayed = [...run.log];
         queueMicrotask(() => {
@@ -1417,7 +1413,13 @@ describe("a turn the host comes back to", () => {
         return session;
       },
     });
-    return { adapter, emit, handles: () => [...runs.keys()], sweep: (handle: string) => runs.delete(handle) };
+    return {
+      adapter,
+      emit,
+      handles: () => [...runs.keys()],
+      sweep: (handle: string) => runs.delete(handle),
+      unreach: (e: Error) => (unreachable = e),
+    };
   };
 
   /** A workspace with one turn running on the machine, the host stopped under it, and what that turn's run is. */
@@ -1464,13 +1466,81 @@ describe("a turn the host comes back to", () => {
     const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
     await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "failed");
     const history = await rt2.sessions.history(workspaceId);
-    expect(history.filter(e => e.type === "session.done").map(e => e.result.error)).toEqual([RUN_GONE_LINE]);
-    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, sawResult: false });
+    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, sawResult: false, reason: RUN_GONE_LINE });
     await rt2.close();
 
     const rt3 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
     expect((await rt3.sessions.history(workspaceId)).filter(e => e.type === "session.end")).toHaveLength(1);
     await rt3.close();
+  });
+
+  it("a machine that answers nothing about the run leaves the turn running, kills nothing, and the poll that finds the machine gone is what settles it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    h.unreach(new Error("gateway said 502"));
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    // Nothing was told about the turn either way: no end row, and the run is still there to be read next time.
+    expect((await rt2.sessions.history(workspaceId)).some(e => e.type === "session.end")).toBe(false);
+    expect(h.handles()).toContain(run);
+    // The machine really is away, and the road that watches machines can still settle a row this host never opened.
+    const [ws] = await rt2.workspaces.list();
+    await rt2.workspaces.delete(ws!.id);
+    await until(async () => (await rt2.sessions.list(workspaceId)).every(s => s.status !== "running"));
+    await rt2.close();
+  });
+
+  it("a turn whose reply is already written settles completed when the run is gone at boot, and tells its parent nothing more", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt1.sessions.start(ws.id, { prompt: "build it", notify: "me" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const run = h.handles()[0]!;
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.notify"));
+    await rt1.close();
+    h.sweep(run);
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const rows = await rt2.sessions.list(ws.id);
+    expect(rows.map(s => s.status)).toEqual(["completed"]);
+    const history = await rt2.sessions.history(ws.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", sawResult: true, reason: RUN_GONE_LINE });
+    await rt2.close();
+  });
+
+  it("a turn longer than the transcript cap replays without writing a line twice: the count comes off the last row's stamp, not off how many rows survive", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt1.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const run = h.handles()[0]!;
+    const printed = 5200;
+    for (let i = 0; i < printed; i++) h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: `line ${i}` });
+    // A non-delta row is what flushes the transcript, so the capped store is what the next host reads.
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+    const before = (await rt1.sessions.history(ws.id)).filter(e => e.type === "session.delta");
+    expect(before.length).toBeLessThan(printed);
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await rt2.sessions.list(ws.id);
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
+    const deltas = (await rt2.sessions.history(ws.id)).filter(e => e.type === "session.delta");
+    expect(new Set(deltas.map(e => e.text)).size).toBe(deltas.length);
+    expect(deltas.at(-1)).toMatchObject({ text: `line ${printed - 1}`, line: printed });
+    await rt2.close();
   });
 
   it("a host with no adapter for the harness cannot re-open the run, so the turn reads as one the restart cut", async () => {

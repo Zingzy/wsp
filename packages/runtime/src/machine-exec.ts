@@ -24,11 +24,15 @@
 // to one by the handle its stream reported: the log on the guest is the whole
 // turn, and a reader that comes later reads it from its first byte. The claim
 // directory is what says the run is still there; the reap takes it with the
-// rest, so an attach to a swept run answers gone instead of hanging.
+// rest, so an attach to a swept run answers gone instead of hanging. That
+// question travels the launch road's reach window, and only the machine's own
+// answer that the claim is gone may end a run: a probe nothing answered says
+// nothing about the run it was sent to find, and killing that process group
+// would end the very turn the attach exists to save.
 
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, MachineUnreached, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
-import { EXEC_CHUNK_BYTES, RUN_GONE_LINE, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
+import { EXEC_CHUNK_BYTES, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 
 export interface MachineExecOptions {
@@ -49,6 +53,9 @@ export interface MachineExecOptions {
 }
 
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** What a launch mints a run's name from, so a handle read back off the sessions index is checked against the shape
+ * this code writes before it reaches shell text: a value that has been to a file on disk is no longer this code's. */
+const RUN_ID = /^[0-9a-f]{12}$/;
 
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
@@ -58,6 +65,12 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
   const runDir = opts.runDir ?? "/tmp/wsp-run";
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? realRetryClock.sleep;
+
+  /** The one path that says a run is on the machine: the launch makes it, the reap takes it with the rest of the
+   * run's files, and every road that asks whether a run is still there asks about this one. */
+  const claim = (base: string): string => `${base}.d`;
+  /** A handle this factory could have minted: the run directory it launches into and a name of its own shape. */
+  const minted = (run: string): boolean => run.startsWith(`${runDir}/`) && RUN_ID.test(run.slice(runDir.length + 1));
 
   /** The one reader both roads share: a launch that has just posted its script, and an attach to a run an earlier
    * host process left behind. `opened` settles once the run is known to be on the machine and rejects with the words
@@ -209,7 +222,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         // The guest knows the command ended the moment its exit file exists, up to a poll before this side does,
         // and a reap in flight has taken the claim with the rest of the run.
         const res = await putFiles(machine, [{ path: `${base}.in`, text: `${line}\n`, append: true }], {
-          before: [`{ [ -e ${base}.exit ] || [ ! -d ${base}.d ]; } && { echo WSP_GONE; exit 0; }`],
+          before: [`{ [ -e ${base}.exit ] || [ ! -d ${claim(base)} ]; } && { echo WSP_GONE; exit 0; }`],
           after: ["echo WSP_OK"],
           timeoutMs: execTimeoutMs,
         });
@@ -255,7 +268,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       () =>
         putFiles(machine, files, {
           // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
-          before: [`mkdir ${base}.d 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
+          before: [`mkdir ${claim(base)} 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
           after: [...(input === undefined ? [] : [`mkfifo ${base}.fifo`]), `setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`],
           timeoutMs: execTimeoutMs,
         }),
@@ -273,16 +286,16 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     return open(base, input !== undefined, opened);
   };
 
-  // The claim directory is what says a run is still on the machine: the launch makes it and the reap takes it with
-  // the rest of the run's files, so a run swept while no host was listening answers gone rather than silence.
-  factory.attach = (run, { input }) =>
-    open(
-      run,
-      input,
-      machine.exec(`[ -d ${run}.d ] && echo WSP_RUN || echo WSP_GONE`, { timeoutMs: execTimeoutMs }).then(res => {
-        if (!res.stdout.includes("WSP_RUN")) throw new Error(RUN_GONE_LINE);
-      }),
-    );
+  factory.attach = async (run, { input }) => {
+    if (!minted(run)) throw new Error(`${run} is not a run this host could have launched`);
+    const res = await untilReached(() => machine.exec(`[ -d ${claim(run)} ] && echo WSP_RUN || echo WSP_GONE`, { timeoutMs: execTimeoutMs }), { now, sleep });
+    // Only these two answers say anything about the run. Anything else is the machine failing to answer the
+    // question, which is the unreached road, not a run to end: the reader is built and the run swept on WSP_GONE
+    // alone, so nothing here can take a live turn's process group with it.
+    if (res.stdout.includes("WSP_RUN")) return open(run, input, Promise.resolve());
+    if (res.stdout.includes("WSP_GONE")) return "gone";
+    throw new Error(`the machine did not answer whether it still holds ${run}: exit ${res.exitCode}: ${res.stderr}`);
+  };
 
   return factory;
 }

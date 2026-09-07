@@ -74,11 +74,12 @@ export interface ExecStreamFactory {
       input?: readonly string[];
     },
   ): ExecStream;
-  /** Re-opens a run this factory launched in an earlier process, by the handle that run reported, and reads its
-   * output from the first byte: what the run printed while no host was listening is on the machine, so the reader
-   * is where the replay happens. The stream ends with RUN_GONE_LINE when the machine no longer holds the run.
-   * Absent on a factory whose runs die with the process that launched them. */
-  attach?(run: string, options: { input: boolean }): ExecStream;
+  /** Asks the machine whether it still holds a run this factory launched in an earlier process, and reads it from
+   * its first byte when it does: what the run printed while no host was listening is on the machine, so the reader
+   * is where the replay happens. `gone` is the machine's own answer that the run is not there, the one answer that
+   * may take what is left of it. A machine that answers nothing rejects, since silence says nothing about the run
+   * and must leave it running. Absent on a factory whose runs die with the process that launched them. */
+  attach?(run: string, options: { input: boolean }): Promise<ExecStream | "gone">;
 }
 
 /** One model as an adapter reads it off its binary: the values the CLI takes, without the words the runtime's table

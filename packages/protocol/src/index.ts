@@ -482,6 +482,12 @@ export const SessionDeltaEvent = z.object({
   /** The agent's tool shell folder after this tool_use, present only when the call moved it (a cd, or a file written
    * in a folder beside the one followed so far); the panes follow it while the harness folder stays put. */
   cwd: z.string().optional(),
+  /** Where this line sits in its turn, counting from one; not to be confused with `seq`, which the bus stamps on the
+   * wire and the transcript never carries. A host that re-opens a running turn reads the run's output from its first
+   * byte, and this is how it knows how much of it is already written: the transcript is capped per workspace and
+   * drops its oldest rows, so how many of a turn's rows survive says nothing about how many there were. Absent on a
+   * row written before the stamp existed. */
+  line: z.number().int().positive().optional(),
 });
 
 export const SessionDoneEvent = z.object({

@@ -133,7 +133,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, NOTIFY_ME, RECORD_RESTORED, RUN_GONE_LINE, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -190,10 +190,10 @@ export interface HarnessSession {
 export interface HarnessAdapter {
   start(options: HarnessStartOptions): HarnessSession;
   /** Re-opens a turn this harness is still running on the machine, by the run handle a session of an earlier host
-   * process reported. The run's whole output is read again, so the events the host missed reach this one; the
-   * stream ends with RUN_GONE_LINE when the machine no longer holds the run. Absent on an adapter whose runs die
-   * with the host. */
-  attach?(options: AdapterAttachOptions): HarnessSession;
+   * process reported. The run's whole output is read again, so the events the host missed reach this one. `gone` is
+   * the machine's own answer that it no longer holds the run, and no event is emitted for one. A machine that
+   * answers nothing rejects, and the turn is left where it is. Absent on an adapter whose runs die with the host. */
+  attach?(options: AdapterAttachOptions): Promise<HarnessSession | "gone">;
   /** Whether this adapter's sessions carry steer; the catalog tells the composer before a turn runs. */
   readonly steers: boolean;
   /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
@@ -2132,23 +2132,41 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           continue;
         }
         for (const { turnId, notify, reply, run, ...view } of index.sessions) {
-          const row = {
+          const row: {
+            view: SessionView;
+            turnId: string;
+            notify?: string;
+            turnLive?: TurnLive;
+            run?: string;
+            end?: (reason: string) => void;
+          } = {
             view,
             turnId,
             ...(notify !== undefined ? { notify } : {}),
             ...(reply !== undefined ? { turnLive: { reply } } : {}),
             ...(run !== undefined ? { run } : {}),
           };
+          // A row left running because nothing answered about its run has no harness of its own to end, and the poll
+          // that finds its machine gone must still be able to settle it.
+          row.end = reason => {
+            if (row.view.status !== "running") return;
+            settleCut(row, reason, () => reason);
+            void persistSessions(row.view.workspaceId);
+          };
           if (view.status === "running") left.push(row);
           sessions.set(view.id, row);
         }
       }
       // A turn's run belongs to the machine it runs on, not to the host that asked for it, so a host that comes back
-      // re-opens every run the machines still hold and reads the rest of its output; only a run no machine has left
-      // is a turn the restart cut. Both are told once every workspace's rows are in: the parent a cut turn tells may
-      // sit in a workspace read after its own, and a re-opened turn's own end tells it later, when it ends.
-      const cut = (await Promise.all(left.map(async s => ((await reattach(s)) ? undefined : s)))).filter(s => s !== undefined);
-      for (const s of cut) settleCut(s, RESTARTED_REASON, endedAt => restartCutLine(endedAt - (s.view.startedAt ?? endedAt)));
+      // re-opens every run the machines still hold and reads the rest of its output. Only the machine's own answer
+      // that a run is gone ends that turn, and a machine that answered nothing leaves its turn running. The ends are
+      // told once every workspace's rows are in: the parent a settled turn tells may sit in a workspace read after
+      // its own, and a re-opened turn's own end tells it later, when it ends.
+      const answers = await Promise.all(left.map(async s => ({ row: s, answer: await reattach(s) })));
+      for (const { row, answer } of answers) {
+        if (answer === "cannot") settleCut(row, RESTARTED_REASON, endedAt => restartCutLine(endedAt - (row.view.startedAt ?? endedAt)));
+        else if (answer === "gone") settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
+      }
       for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
     })();
@@ -2837,10 +2855,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const { entry, view, threadId, turnId, opening, outcome, notify } = t;
     const workspaceId = entry.record.id;
     const written = transcripts.get(workspaceId) ?? [];
-    let startRecorded = written.some(e => e.type === "session.start" && e.turnId === turnId);
+    /** The last row this turn wrote of a kind: the transcript holds every workspace's rows in the order they were
+     * written, so a live turn's are at its tail. */
+    const lastOf = <T extends SessionEvent["type"]>(type: T): Extract<SessionEvent, { type: T }> | undefined => {
+      for (let i = written.length - 1; i >= 0; i--) {
+        const e = written[i]!;
+        if (e.type === type && e.turnId === turnId) return e as Extract<SessionEvent, { type: T }>;
+      }
+      return undefined;
+    };
+    // How many of this turn's lines are written, from the stamp the last surviving one carries rather than from how
+    // many survive: the transcript is capped per workspace and drops its oldest rows, so counting them would read a
+    // turn whose head has been evicted as shorter than it was and write its tail a second time.
+    const deltasWritten = lastOf("session.delta")?.line ?? 0;
     // The reply and its line to the parent go together, so one gate stands for both.
-    let replyRecorded = written.some(e => e.type === "session.done" && e.turnId === turnId);
-    let replayedDeltas = written.reduce((n, e) => n + (e.type === "session.delta" && e.turnId === turnId ? 1 : 0), 0);
+    const recordedReply = lastOf("session.done")?.result.status;
+    let replyRecorded = recordedReply !== undefined;
+    // A turn with a line or a reply already written had its start written too, whether or not the cap still holds it:
+    // a second start row at the tail of the transcript would sit after the work it opened.
+    let startRecorded = deltasWritten > 0 || replyRecorded || lastOf("session.start") !== undefined;
+    let deltas = deltasWritten;
+    let replaying = deltasWritten;
     let ended = false;
     // The reply's status, held while the process still runs. Shared with this turn's session-map entry so runningOn
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
@@ -2881,8 +2916,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return;
         }
         case "turn.delta":
-          if (replayedDeltas > 0) {
-            replayedDeltas--;
+          if (replaying > 0) {
+            replaying--;
             return;
           }
           record({
@@ -2891,6 +2926,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             sessionId,
             turnId,
             threadId,
+            line: ++deltas,
             kind: event.kind,
             text: event.text,
             ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
@@ -2900,15 +2936,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           });
           return;
         case "turn.done":
+          // A reply already written stands, and the gate comes before the status is taken: what the run says on the
+          // way round again is the reply this turn already gave, and nothing later may overwrite it.
+          if (replyRecorded) {
+            replyRecorded = false;
+            turnLive.reply ??= recordedReply;
+            return;
+          }
           // The reply is in, but the row stays running until session.end (the process exited): the harness can
           // keep working past its result, and a row read as completed here lets a send start a second agent in the
           // same worktree. The result is held and applied at the exit below.
           turnLive.reply = event.result.status;
           void persistSessions(workspaceId);
-          if (replyRecorded) {
-            replyRecorded = false;
-            return;
-          }
           if (notify !== undefined) notifyEnd({ view, turnId }, notify, event.result);
           record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
           return;
@@ -2996,25 +3035,55 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return handle;
   };
 
+  /** What re-opening a turn the store left running came to. `attached` is a reader on the run again and the thread
+   * goes on; `gone` is the machine's own answer that it no longer holds the run, the one answer that ends the turn;
+   * `unreached` is a machine that said nothing for the whole reach window, which says nothing about the run, so the
+   * row is left running for the poll that watches machines to settle if the machine really is away; `cannot` is a
+   * run this host has no road to at all, and the row reads as a turn the restart cut. */
+  type Reopened = "attached" | "gone" | "unreached" | "cannot";
+
   /** A turn the store left running, re-opened where it runs. The machine still holds the run and its whole output,
-   * so the events this host missed reach it as the run's own lines, and the thread goes on running to its reply.
-   * False when there is nothing to re-open and the caller settles the row as a turn the restart cut: a row with no
-   * run recorded (a host from before this road, or a harness whose runs die with it), no workspace or no machine
-   * running under it, or no adapter for its harness in this process. */
-  const reattach = async (s: { view: SessionView; turnId: string; notify?: string; turnLive?: TurnLive; run?: string }): Promise<boolean> => {
+   * so the events this host missed reach it as the run's own lines and the thread goes on running to its reply.
+   * `cannot` covers a row with no run recorded (a host from before this road, or a harness whose runs die with it),
+   * no workspace or no machine running under it, no adapter for its harness in this process, and a handle that is
+   * not one this host could have launched. */
+  const reattach = async (s: { view: SessionView; turnId: string; notify?: string; turnLive?: TurnLive; run?: string }): Promise<Reopened> => {
     const { view, run } = s;
     const threadId = view.threadId;
     const entry = live.get(view.workspaceId);
-    if (run === undefined || threadId === undefined || entry === undefined || entry.record.phase !== "running") return false;
+    if (run === undefined || threadId === undefined || entry === undefined || entry.record.phase !== "running") return "cannot";
+    const cannot = (words: string): "cannot" => {
+      console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} cannot be re-opened: ${words}`);
+      return "cannot";
+    };
     let adapter: HarnessAdapter;
     try {
       adapter = adapterFor(entry, view.harness).adapter;
     } catch (e: unknown) {
-      console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} cannot be re-opened: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
+      return cannot(e instanceof Error ? e.message : String(e));
     }
     const open = adapter.attach?.bind(adapter);
-    if (open === undefined) return false;
+    if (open === undefined) return "cannot";
+    // The harness may start reading the run the moment it is opened, which is before the row that records those
+    // lines exists, so what arrives first is held and handed to the row's own forward in order once it does.
+    const held: AdapterEvent[] = [];
+    let sink: ((event: AdapterEvent) => void) | undefined;
+    let opened: HarnessSession | "gone";
+    try {
+      opened = await open({
+        run,
+        sessionId: view.claudeSessionId ?? view.id,
+        startedAt: view.startedAt ?? Date.now(),
+        ...(view.model !== undefined ? { model: view.model } : {}),
+        ...(view.cwd !== undefined ? { cwd: view.cwd } : {}),
+        onEvent: event => (sink === undefined ? void held.push(event) : sink(event)),
+      });
+    } catch (e: unknown) {
+      // Nothing answered about the run, so nothing is known about it: the turn is left exactly as it was.
+      console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} was left running: ${e instanceof Error ? e.message : String(e)}`);
+      return "unreached";
+    }
+    if (opened === "gone") return "gone";
     try {
       runTurn({
         entry,
@@ -3025,21 +3094,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(s.turnLive !== undefined ? { turnLive: s.turnLive } : {}),
         outcome: "started",
         opening: { prompt: view.prompt ?? "" },
-        open: onEvent =>
-          open({
-            run,
-            sessionId: view.claudeSessionId ?? view.id,
-            startedAt: view.startedAt ?? Date.now(),
-            ...(view.model !== undefined ? { model: view.model } : {}),
-            ...(view.cwd !== undefined ? { cwd: view.cwd } : {}),
-            onEvent,
-          }),
+        open: forward => {
+          sink = forward;
+          for (const event of held.splice(0)) forward(event);
+          return opened as HarnessSession;
+        },
       });
     } catch (e: unknown) {
-      console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} cannot be re-opened: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
+      return cannot(e instanceof Error ? e.message : String(e));
     }
-    return true;
+    return "attached";
   };
 
   const sessionsApi: Runtime["sessions"] = {

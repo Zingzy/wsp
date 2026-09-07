@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
-import { createClaudeAdapter } from "../src/adapter.js";
+import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { userMessageLine } from "../src/landmines.js";
 
 const FIXTURE_SESSION_ID = "e16ed170-8257-4668-879e-fe836341633c";
@@ -154,20 +154,31 @@ describe("ClaudeAdapter over the recorded fixture", () => {
   it("attaches to a run an earlier process launched: the run's own lines settle the turn and no command is launched", async () => {
     const exec = scriptedExec(fixtureLines());
     const attached: { run: string; input: boolean }[] = [];
-    exec.factory.attach = (run, options) => {
+    exec.factory.attach = async (run, options) => {
       attached.push({ run, input: options.input });
       return exec.factory("", { env: {} });
     };
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
     const { events, onEvent } = collect();
-    const session = adapter.attach!({ run: RUN_HANDLE, sessionId: "e16ed170-8257-4668-879e-fe836341633c", startedAt: 1, onEvent });
-    const result = await session.finished;
+    const session = await adapter.attach!({ run: RUN_HANDLE, sessionId: "e16ed170-8257-4668-879e-fe836341633c", startedAt: 1, onEvent });
+    expect(session).not.toBe("gone");
+    const result = await (session as ClaudeSession).finished;
     expect(attached).toEqual([{ run: RUN_HANDLE, input: true }]);
-    expect(session.command).toBeUndefined();
+    expect((session as ClaudeSession).command).toBeUndefined();
     expect(result.status).toBe("completed");
     expect(events[0]).toMatchObject({ type: "session.start", sessionId: "e16ed170-8257-4668-879e-fe836341633c" });
     expect(events.filter(e => e.type === "turn.delta").length).toBeGreaterThan(0);
     expect(events.slice(-2)).toMatchObject([{ type: "turn.done" }, { type: "session.end", exitCode: 0, sawResult: true }]);
+  });
+
+  it("a machine that no longer holds the run is passed through as gone, with no session and no event", async () => {
+    const exec = scriptedExec(fixtureLines());
+    exec.factory.attach = async () => "gone";
+    const { events, onEvent } = collect();
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    expect(await adapter.attach!({ run: RUN_HANDLE, sessionId: "s", startedAt: 1, onEvent })).toBe("gone");
+    expect(events).toEqual([]);
+    expect(exec.calls).toEqual([]);
   });
 
   it("an adapter whose exec cannot attach has no attach of its own", () => {

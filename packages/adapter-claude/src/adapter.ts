@@ -52,9 +52,10 @@ export interface AdapterDeps {
 
 export interface ClaudeAdapter {
   start(options: StartOptions): ClaudeSession;
-  /** Re-opens a turn this CLI is still running on the machine, by the run handle the launch reported; absent when
-   * the exec factory's runs die with the process that launched them. */
-  attach?(options: AdapterAttachOptions): ClaudeSession;
+  /** Re-opens a turn this CLI is still running on the machine, by the run handle the launch reported; `gone` is the
+   * machine's own answer that it no longer holds the run, and nothing is emitted for one. A machine that answers
+   * nothing rejects. Absent when the exec factory's runs die with the process that launched them. */
+  attach?(options: AdapterAttachOptions): Promise<ClaudeSession | "gone">;
   readonly sessions: ReadonlyMap<string, ClaudeSession>;
   /** Sessions take a message mid-turn over the stdin channel. */
   readonly steers: true;
@@ -412,7 +413,12 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   return {
     start,
     ...(attach !== undefined
-      ? { attach: (options: AdapterAttachOptions) => follow({ stream: attach(options.run, { input: true }), localId: options.sessionId, announced: true, onEvent: options.onEvent }) }
+      ? {
+          attach: async (options: AdapterAttachOptions) => {
+            const stream = await attach(options.run, { input: true });
+            return stream === "gone" ? "gone" : follow({ stream, localId: options.sessionId, announced: true, onEvent: options.onEvent });
+          },
+        }
       : {}),
     sessions,
     steers: true,

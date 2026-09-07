@@ -52,8 +52,11 @@ interface Ticket {
   expiresAt: number;
 }
 
-/** How long a stopping host waits for a client to answer its close frame before the socket is cut. */
-const STOP_GRACE_MS = 250;
+/** How long a stopping host waits for a client to answer its close frame before the socket is cut. A client that is
+ * inside a synchronous stretch answers only when its loop turns: measured on a 2 vCPU box with a test run beside it,
+ * a client blocking in 250 ms stretches answered in 161 ms at the median and 289 ms at the worst, so a grace at the
+ * old 250 ms cut the common loaded case and sent it back the words of a host that vanished. */
+const STOP_GRACE_MS = 1_000;
 
 function bundlerFrom(opts: ServeOptions): (source: string) => ProjectBundler {
   return source => {

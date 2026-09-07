@@ -49,9 +49,10 @@ export interface CodexAdapterDeps {
 
 export interface CodexAdapter {
   start(options: CodexStartOptions): CodexSession;
-  /** Re-opens a turn this CLI is still running on the machine, by the run handle the launch reported; absent when
-   * the exec factory's runs die with the process that launched them. */
-  attach?(options: AdapterAttachOptions): CodexSession;
+  /** Re-opens a turn this CLI is still running on the machine, by the run handle the launch reported; `gone` is the
+   * machine's own answer that it no longer holds the run, and nothing is emitted for one. A machine that answers
+   * nothing rejects. Absent when the exec factory's runs die with the process that launched them. */
+  attach?(options: AdapterAttachOptions): Promise<CodexSession | "gone">;
   readonly sessions: ReadonlyMap<string, CodexSession>;
   /** `codex exec` reads its prompt and closes stdin; nothing reaches a running turn. */
   readonly steers: false;
@@ -338,15 +339,19 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     start,
     ...(attach !== undefined
       ? {
-          attach: (options: AdapterAttachOptions) =>
-            follow({
-              stream: attach(options.run, { input: false }),
-              localId: options.sessionId,
-              startedAt: options.startedAt,
-              ...(options.model !== undefined ? { model: options.model } : {}),
-              ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-              onEvent: options.onEvent,
-            }),
+          attach: async (options: AdapterAttachOptions) => {
+            const stream = await attach(options.run, { input: false });
+            return stream === "gone"
+              ? "gone"
+              : follow({
+                  stream,
+                  localId: options.sessionId,
+                  startedAt: options.startedAt,
+                  ...(options.model !== undefined ? { model: options.model } : {}),
+                  ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+                  onEvent: options.onEvent,
+                });
+          },
         }
       : {}),
     sessions,
