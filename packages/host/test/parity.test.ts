@@ -19,6 +19,8 @@ const TOOL_ONLY: Readonly<Record<string, string>> = {
 /** Command lines with no tool, each with why. */
 const CLI_ONLY: Readonly<Record<string, string>> = {
   up: "starts the host on the person's computer; a tool runs against a host that is already up",
+  down: "stops the service holding the host up on the person's computer, which a tool would be cutting the ground from under",
+  status: "reads this computer's lock and service manager; a tool that answers at all is proof a host is up",
   init: "builds the golden and serves for hours; an agent runs it from a shell and relays the sign-ins it prints",
   doctor: "forks a live machine and bills while it runs; a person decides that at a terminal",
   mcp: "is the tool server itself",
