@@ -197,8 +197,10 @@ describe("interactive golden: prepare then seal", () => {
     expect(builder.machine.streamUrl).toBeUndefined();
     expect(daemonOn).toEqual(["m1"]);
     expect(sansBase(stages)).toEqual(["creating:sandbox from base", "deploying-daemon", "installing-harness", "ready"]);
-    // The floor goes on before the daemon: node first, so the daemon's native module compiles against it.
-    expect(ran.filter(r => r.id === "m1").map(r => r.script).findIndex(s => s.includes("nodejs.org/dist"))).toBe(0);
+    // The floor goes on before the daemon: the login shell's PATH, then node, so the daemon's native module compiles against it.
+    const floor = ran.filter(r => r.id === "m1").map(r => r.script);
+    expect(floor.findIndex(s => s.includes("> /etc/profile.d/wsp-golden.sh"))).toBe(0);
+    expect(floor.findIndex(s => s.includes("nodejs.org/dist"))).toBe(1);
     expect(timeline).toEqual(["create m1"]); // alive and waiting for the person
   });
 
@@ -1359,7 +1361,7 @@ describe("golden import stages", () => {
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(sweepsAt[2]!);
     expect(sweepsAt[2]).toBeLessThan(cmds.indexOf("echo ok"));
     // Each closing line carries what the sweep gave back and the df reading the stage left.
-    expect(stages).toContain("deploying-daemon:17 installed; caches swept, 700.0 MB back; 3.6 GB free");
+    expect(stages).toContain("deploying-daemon:18 installed; caches swept, 700.0 MB back; 3.6 GB free");
     expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700.0 MB back; 4.3 GB free");
     expect(stages).toContain("installing-tools:3 installed; caches swept, 700.0 MB back; 5.0 GB free");
     // A sweep that fails is named, and the build goes on to the next stage.

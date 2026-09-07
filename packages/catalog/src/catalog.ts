@@ -11,7 +11,7 @@ import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { APT_INDEX, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
-import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
+import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, PYTHON_INSTALL, RUSTUP_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
@@ -118,7 +118,7 @@ export const SIZE_METHODS = {
   df: "df before and after the install on a Linux machine, caches included",
   apt: "apt Installed-Size summed over the packages the install adds to debian:bookworm",
   brew: "installed_size on the x86_64_linux bottle manifests of the formula and its runtime dependencies",
-  du: "du over what the install wrote, before and after, on node:22-bookworm",
+  du: "du over what the install wrote, before and after, on a Debian bookworm host",
   unpacked: "the Linux x86_64 download, unpacked where it is an archive",
 } as const;
 export type SizeMethod = keyof typeof SIZE_METHODS;
@@ -299,8 +299,7 @@ export const CATALOG: readonly CatalogEntry[] = [
 
   // --- tools on request ---------------------------------------------------------------------------------------------
   { ...tool, id: "go", name: "Go", bin: "go", ...brew("go", 250752891), covers: ["golang"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 9, images: 4, road: "measured" } },
-  // Homebrew's rust bottle links against its llvm bottle, which is 2.5 GB of the total.
-  { ...tool, id: "rust", name: "Rust with cargo", bin: "cargo", ...brew("rust", 3153304814), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 4, images: 3, road: "unmeasured" } },
+  { ...tool, id: "rust", name: "Rust with cargo", bin: "cargo", installRoad: { road: "script", script: RUSTUP_INSTALL }, covers: ["rustup", "rustup-init"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 4, images: 3, road: "unmeasured" }, size: measured("du", 1595346944) },
   { ...tool, id: "java", name: "Java 21", bin: "java", ...brew("openjdk@21", 613280230), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
   { ...tool, id: "maven", name: "Maven", bin: "mvn", ...brew("maven", 677043395), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "unmeasured" } },
   { ...tool, id: "gradle", name: "Gradle", bin: "gradle", ...brew("gradle", 885977407), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },

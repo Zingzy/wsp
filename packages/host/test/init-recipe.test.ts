@@ -365,6 +365,14 @@ describe("the small recipe", () => {
     expect(again.entries.map(e => e.id)).toEqual(["tools/catalog/agent-browser"]);
   });
 
+  it("a Mac's rustup formula is the rust row the recipe ticks, so no bare catalog row lands beside it", () => {
+    const rustup: ManifestEntry = { rung: "tools", id: "tools/brew/rustup", label: "rustup", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "yes" };
+    const recipe: Recipe = { ...RECIPE, rows: [...RECIPE.rows, { id: "rust", kind: "tool", on: true, source: { kind: "used", sessions: 4, calls: 100 } }] };
+    const applied = applyRecipe({ ...FIXTURE, entries: [...FIXTURE.entries, rustup] }, recipe);
+    expect(applied.entries.find(e => e.id === "tools/brew/rustup")?.bring).toBe(true);
+    expect(applied.entries.filter(e => e.id === "tools/catalog/rust")).toEqual([]);
+  });
+
   it("a login's command counts as coming when the catalog's bare row brings it", () => {
     const gh: ManifestEntry = { rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", group: "Catalog", paths: [], bytes: 0, default: "skip", linux: "yes", bring: true };
     expect(loginTool(byId("logins/gh"), { entries: [byId("logins/gh"), gh] }, new Set(["tools/catalog/gh"]))).toEqual({ bin: "gh", row: gh, coming: true });
