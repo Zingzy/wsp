@@ -1252,7 +1252,7 @@ export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
  * can tell what a machine's daemon answers before asking. A hello without one is version 1: every daemon deployed
  * before the field existed, which has the pty, ports, manifest, inbox, fs, git and tunnel ops and no sys or
  * proc ops. Version 3 browses the imported project folders named in DAEMON_ROOTS_PATH beside its home. */
-export const DAEMON_VERSION = 3;
+export const DAEMON_VERSION = 4;
 
 /** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it
  * when a project lands, the daemon reads it on every files and diff op and browses those folders beside its home. */
