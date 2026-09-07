@@ -4,15 +4,20 @@
 // (?theme=light), with a status toast in the footer (?toast=...) and with the
 // runtime replacing the first machine's helper (?helper=1) or the first
 // machine's link dropped after a near-full memory sample (?oom=1), so a test
-// can measure the chrome's geometry, which jsdom cannot lay out.
+// can measure the chrome's geometry, which jsdom cannot lay out. With
+// ?ws=<id> the centre holds that workspace's thread and composer, so the
+// refusal line above the box can be measured for the running, paused and gone
+// workspaces; ?ws=ws_a&linger=1 replays a turn that replied but whose process
+// has not exited.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
 import { AppShell } from "../../src/shell/AppShell";
+import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
 import "../../src/index.css";
 
 const params = new URLSearchParams(window.location.search);
@@ -36,6 +41,13 @@ const sessions: SessionView[] = [
   { id: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
 ];
 
+const linger = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_linger" };
+const lingering: SessionEvent[] = [
+  { type: "session.start", ...linger, prompt: "Start the dev server in the background and reply when it is up." },
+  { type: "session.delta", ...linger, kind: "text", text: "Server is live at :3000." },
+  { type: "session.done", ...linger, result: { status: "completed", durationMs: 900, costUsd: 0.001 } },
+];
+
 const api: Api = {
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
@@ -53,7 +65,7 @@ const api: Api = {
   startSession: async o => ({ id: "s2", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
-  sessionHistory: async () => [],
+  sessionHistory: async id => (id === "ws_a" && params.get("linger") === "1" ? lingering : []),
   listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
   snapshotStorage: async () => null,
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
@@ -63,7 +75,8 @@ const api: Api = {
 };
 
 const toast = params.get("toast");
-useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}) });
+const shown = params.get("ws");
+useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(shown !== null ? { selectedId: shown } : {}) });
 useStore.getState().bind(api);
 if (params.get("oom") === "1") {
   const GiB = 1024 ** 3;
@@ -73,8 +86,6 @@ if (params.get("oom") === "1") {
 }
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
-    <AppShell>
-      <div />
-    </AppShell>
+    <AppShell>{shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
   </TooltipProvider>,
 );

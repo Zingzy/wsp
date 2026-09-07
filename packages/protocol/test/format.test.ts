@@ -10,6 +10,9 @@ import {
   outOfMemoryLine,
   outOfMemoryRowLine,
   stillWorkingRefusal,
+  stopFailedLine,
+  sendNowFailedLine,
+  TURN_IN_FLIGHT,
   foreignFlagLine,
   unknownAgentLine,
   LINEAGE_MARKS,
@@ -553,6 +556,17 @@ describe("stillWorkingRefusal", () => {
     expect(stillWorkingRefusal("5ffc2c96-1111-4222-8333-444455556666")).toBe(
       "thread 5ffc2c96 replied, still working; wait for its turn to finish before sending",
     );
+  });
+});
+
+describe("stopFailedLine and sendNowFailedLine", () => {
+  it("prefix the runtime's own words for a stop or a send-now that did not go, so the composer's line says which click failed", () => {
+    expect(stopFailedLine("the runtime does not know this session")).toBe("Could not stop: the runtime does not know this session");
+    expect(sendNowFailedLine("Workspace is pausing; wake it to send")).toBe("Could not send now: Workspace is pausing; wake it to send");
+  });
+
+  it("the send key's label while a turn runs is one constant", () => {
+    expect(TURN_IN_FLIGHT).toBe("Turn in flight");
   });
 });
 

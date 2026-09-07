@@ -73,10 +73,30 @@ export function actionRefusal(state: WorkspaceState, action: string, goneWords?:
   }
 }
 
-/** Why a turn cannot be sent in this state; null while running. */
-export function sendRefusal(state: WorkspaceState, goneWords?: string): string | null {
-  return actionRefusal(state, "send", goneWords);
+/** What refuses a send before the workspace's state is asked: the socket to wsp, the workspace lookup, the
+ * transcript still loading, the turn a new thread left finishing. */
+export type SendBlock = "connecting" | "reconnecting" | "closed" | "not-found" | "loading" | "finishing";
+
+/** Every kind of send refusal: a block, or a state other than running. */
+export type SendRefusalKind = WorkspaceState | SendBlock;
+
+const BLOCK_WORDS: Record<SendBlock, string> = {
+  connecting: "Connecting to wsp",
+  reconnecting: "wsp is not running, reconnecting",
+  closed: "wsp is not running",
+  "not-found": "Workspace not found",
+  loading: "Loading transcript",
+  finishing: "Finishing the previous turn",
+};
+
+/** Why a turn cannot be sent, one sentence per kind; null while running. The composer draws every row; the runtime
+ * throws the state rows, so the two say the same thing about a machine. A thread whose turn replied but still runs
+ * has stillWorkingRefusal, which names it. */
+export function sendRefusal(kind: SendRefusalKind, goneWords?: string): string | null {
+  return isBlock(kind) ? BLOCK_WORDS[kind] : actionRefusal(kind, "send", goneWords);
 }
+
+const isBlock = (kind: SendRefusalKind): kind is SendBlock => kind in BLOCK_WORDS;
 
 /** Whether the machine is up and billing in this state: running, or running with its edge or daemon dark (the
  * provider bills a machine it cannot be reached on). Paused, moving and gone ones bill nothing, and only a billing
