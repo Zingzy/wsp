@@ -7,8 +7,8 @@
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
-import { changeCounts, describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, retiredBy, rowsToApply, type GoldenDelta, type GoldenImport, type RecipeDiff } from "@wsp/engine";
-import { goldenBuildLine, type GoldenLogin, type GoldenRetired, type RecipeDigest } from "@wsp/protocol";
+import { SnapshotFailedError, changeCounts, describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, retiredBy, rowsToApply, type GoldenDelta, type GoldenImport, type RecipeDiff } from "@wsp/engine";
+import { goldenBuildLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, type GoldenLogin, type GoldenRetired, type RecipeDigest } from "@wsp/protocol";
 import { GRACE_MS, goldenHead, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
 import { cancel, isCancel, log, note, outro, select } from "@clack/prompts";
 import { rebuildEstimate, type BuildTimes } from "./init-times.js";
@@ -183,6 +183,14 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
   const view = await o.stream(UPGRADE_STEPS, () => o.rt.golden.upgrade({ delta, ...(logins !== undefined ? { logins } : {}) }).then(r => (result = r), e => (error = e)));
   if (result === undefined) {
     if (view.failure === undefined) log.error(error instanceof Error ? error.message : String(error), out);
+    // A snapshot the provider refused leaves the machine it ran on as it was; the words follow what the provider says of it.
+    if (error instanceof SnapshotFailedError) {
+      outro(
+        error.builderState === "gone" ? upgradeSealFailedGoneLine(version) : error.builderState === "unread" ? upgradeSealFailedUnreadLine(version, error.machineId) : upgradeSealFailedStaysLine(version, error.machineId, rateUsdPerHour),
+        out,
+      );
+      return 1;
+    }
     // A failed delta on the kept builder kills it, so the retry forks; the person hears that before they retry.
     outro(
       offer.onBuilder

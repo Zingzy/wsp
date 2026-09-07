@@ -2,20 +2,22 @@ export type ErrorKind =
   | "concurrency" | "plan" | "missing" | "conflict"
   | "snapshotUnavailable" | "transient" | "auth" | "unknown";
 
-export interface WspError { kind: ErrorKind; status: number; code?: string; message: string }
+/** requestId is the id the provider's reply carried, when it carried one: what a report to the provider quotes. */
+export interface WspError { kind: ErrorKind; status: number; code?: string; message: string; requestId?: string }
 
-export function classify(status: number, body: { code?: string; error?: string }): WspError {
+export function classify(status: number, body: { code?: string; error?: string }, requestId?: string): WspError {
   const message = body.error ?? "";
-  if (status === 429) return { kind: "concurrency", status, code: body.code, message };
-  if (status === 401) return { kind: "auth", status, code: body.code, message };
-  if (status === 402 || status === 403) return { kind: "plan", status, code: body.code, message };
-  if (status === 404) return { kind: "missing", status, code: body.code, message };
-  if (status === 409) return { kind: "conflict", status, code: body.code, message };
-  // PoC finding: deterministic snapshot failure wears a transient status code.
+  const rest = { status, code: body.code, message, ...(requestId !== undefined ? { requestId } : {}) };
+  if (status === 429) return { kind: "concurrency", ...rest };
+  if (status === 401) return { kind: "auth", ...rest };
+  if (status === 402 || status === 403) return { kind: "plan", ...rest };
+  if (status === 404) return { kind: "missing", ...rest };
+  if (status === 409) return { kind: "conflict", ...rest };
+  // Not retried here: the seal retries this answer on its own clock while the builder still reads running.
   if (status === 502 && message === "Failed to snapshot sandbox")
-    return { kind: "snapshotUnavailable", status, code: body.code, message };
-  if (status >= 502 && status <= 504) return { kind: "transient", status, code: body.code, message };
-  return { kind: "unknown", status, code: body.code, message };
+    return { kind: "snapshotUnavailable", ...rest };
+  if (status >= 502 && status <= 504) return { kind: "transient", ...rest };
+  return { kind: "unknown", ...rest };
 }
 
 export function shouldRetry(e: WspError, attempt: number): boolean {
