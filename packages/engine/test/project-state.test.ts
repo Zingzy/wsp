@@ -9,7 +9,9 @@ import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { ProjectCarry } from "@wsp/protocol";
-import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, parseMergeOutput, resolveProjectPath, stateRoots, underProject, type MergeOutput, type ProjectStateResolver } from "../src/project-state/index.js";
+import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, parseMergeOutput, resolveProjectPath, stateListing, underProject, type MergeOutput, type ProjectStateResolver } from "../src/project-state/index.js";
+import { mergeScript } from "../src/project-state/merge.js";
+import { PY_PREAMBLE } from "../src/project-state/py.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
@@ -567,8 +569,14 @@ describe("moveProjectState", () => {
 
 // --- sessions per agent -----------------------------------------------------------------------------------------------
 
-describe("roots", () => {
-  it("each module names the paths under its home it reads, so a trip pulls those and nothing else from a home; stateRoots joins them onto each agent's home", () => {
+/** Runs one agent's listing the way the machine does: the command stateListing builds, in a shell. */
+function runListing(agent: string, home: string, path: string): { exit: number; paths: string[]; err: string } {
+  const r = spawnSync("bash", ["-c", stateListing({ [agent]: home }, path, [agent])], { encoding: "utf8" });
+  return { exit: r.status ?? -1, paths: r.stdout.split("\n").filter(l => l !== ""), err: r.stderr };
+}
+
+describe("the listing the machine runs", () => {
+  it("each module names the paths under its home it reads, so a trip pulls those and nothing else from a home", () => {
     expect(Object.fromEntries([...PROJECT_STATE_RESOLVERS.values()].map(r => [r.agent, r.roots]))).toEqual({
       claude: ["projects"],
       codex: ["state_5.sqlite", "sessions"],
@@ -578,21 +586,95 @@ describe("roots", () => {
       pi: ["sessions"],
     });
     for (const r of PROJECT_STATE_RESOLVERS.values()) for (const root of r.roots) expect(root, r.agent).not.toMatch(/^\/|\.\./);
-    const homes = guestAgentHomes();
-    expect(stateRoots(homes)).toEqual([
-      "/root/.claude-cfg/projects",
-      "/root/.codex/state_5.sqlite",
-      "/root/.codex/sessions",
-      "/root/.gemini/projects.json",
-      "/root/.gemini/tmp",
-      "/root/.gemini/history",
-      "/root/.local/share/opencode/opencode.db",
-      "/root/.pi/agent/sessions",
-      "/root/.hermes/state.db",
+  });
+
+  it("brings down the project's own entries and the stores read for it, never another project's, from a home holding four", () => {
+    const root = scratch();
+    const claude = claudeHome(root);
+    expect(runListing("claude", claude, FROM)).toEqual({
+      exit: 0,
+      err: "",
+      paths: [join(claude, "projects", "-private-tmp-wsp-r212-proj-b-2-x"), join(claude, "projects", "-private-tmp-wsp-r212-proj-b-2-x-sub")],
+    });
+    const pi = piHome(root);
+    expect(runListing("pi", pi, FROM).paths).toEqual([
+      join(pi, "sessions", "--private-tmp-wsp-r212-proj-b_2.x--"),
+      join(pi, "sessions", "--private-tmp-wsp-r212-proj-b_2.x-sub--"),
     ]);
-    expect(stateRoots(homes, ["pi", "claude"])).toEqual(["/root/.claude-cfg/projects", "/root/.pi/agent/sessions"]);
-    expect(stateRoots({ claude: "/x/.claude" })).toEqual(["/x/.claude/projects"]);
-    expect(() => stateRoots(homes, ["claude", "codx"])).toThrow(`no agent called codx; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
+    const codex = codexHome(root);
+    expect(runListing("codex", codex, FROM).paths).toEqual([
+      join(codex, "state_5.sqlite"),
+      join(codex, "sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl"),
+      join(codex, "sessions", "2026", "09", "05", "rollout-2026-09-05T22-00-00-t3.jsonl"),
+    ]);
+    const gemini = geminiHome(root);
+    expect(runListing("gemini", gemini, FROM).paths).toEqual([
+      join(gemini, "projects.json"),
+      join(gemini, "tmp", "b_2.x"),
+      join(gemini, "history", "b_2.x"),
+      join(gemini, "tmp", "sub"),
+    ]);
+    expect(runListing("hermes", hermesHome(root), FROM).paths).toEqual([join(root, "hermes", "state.db")]);
+    expect(runListing("opencode", opencodeHome(root), FROM).paths).toEqual([join(root, "opencode", "opencode.db")]);
+  });
+
+  it("names nothing but the stores it reads anyway for a path no agent ran in, and nothing at all for a home that is not there", () => {
+    const root = scratch();
+    const claude = claudeHome(root);
+    const never = "/Users/me/never";
+    expect(runListing("claude", claude, never).paths).toEqual([]);
+    expect(runListing("pi", piHome(root), never).paths).toEqual([]);
+    expect(runListing("codex", codexHome(root), never).paths).toEqual([join(root, "codex", "state_5.sqlite")]);
+    expect(runListing("gemini", geminiHome(root), never).paths).toEqual([join(root, "gemini", "projects.json")]);
+    for (const agent of ["claude", "pi", "codex", "gemini"]) expect(runListing(agent, join(root, `${agent}-gone`), FROM).paths, agent).toEqual([]);
+    // The sibling sharing the project's prefix is its own project, named only when it is the one asked for.
+    expect(runListing("claude", claude, DECOY).paths).toEqual([join(claude, "projects", "-private-tmp-wsp-r212-proj-b-2-x-old")]);
+  });
+
+  it("a source spelled with a trailing slash or a dot segment, as the wire carries it, names the same paths", () => {
+    const claude = claudeHome(scratch());
+    const plain = runListing("claude", claude, FROM).paths;
+    expect(plain).toHaveLength(2);
+    expect(runListing("claude", claude, `${FROM}/`).paths).toEqual(plain);
+    expect(runListing("claude", claude, `${FROM}/./`).paths).toEqual(plain);
+  });
+
+  it("a store on the machine it cannot read gives up the module's whole roots, so the trip reports it the way a bad store here is reported", () => {
+    const root = scratch();
+    const codex = codexHome(root);
+    write(join(codex, "state_5.sqlite"), "not a database\n");
+    expect(runListing("codex", codex, FROM)).toEqual({ exit: 0, err: "", paths: [join(codex, "state_5.sqlite"), join(codex, "sessions")] });
+    const gemini = geminiHome(root);
+    write(join(gemini, "projects.json"), "{ not json\n");
+    expect(runListing("gemini", gemini, FROM).paths).toEqual([join(gemini, "projects.json"), join(gemini, "tmp"), join(gemini, "history")]);
+  });
+
+  it("every listing and the merge open with the one preamble, so the rule for a path at the project or under it is defined once", () => {
+    const definitions = (script: string): number => script.split("def under(").length - 1;
+    for (const r of PROJECT_STATE_RESOLVERS.values()) {
+      const script = r.listing?.(join("/root", `.${r.agent}`), FROM);
+      if (script === undefined) continue;
+      expect(script.startsWith(PY_PREAMBLE), r.agent).toBe(true);
+      expect(definitions(script), r.agent).toBe(1);
+    }
+    const merge = mergeScript(FROM, TO, []);
+    expect(merge.startsWith(PY_PREAMBLE)).toBe(true);
+    expect(definitions(merge)).toBe(1);
+  });
+
+  it("stateListing runs one python3 per agent with a home and a module, narrows to the agents named and refuses an id the catalog does not know", () => {
+    const homes = guestAgentHomes();
+    const runs = (command: string): number => command.split("\npython3 -c '").length - 1;
+    const command = stateListing(homes, FROM);
+    expect(command.startsWith("set -e\npython3 -c '")).toBe(true);
+    expect(runs(command)).toBe(PROJECT_STATE_RESOLVERS.size);
+    const carried = (value: string): string => Buffer.from(JSON.stringify(value), "utf8").toString("base64");
+    for (const home of Object.values(homes)) expect(command).toContain(carried(home));
+    expect(command).toContain(carried(FROM));
+    expect(runs(stateListing(homes, FROM, ["pi", "claude"]))).toBe(2);
+    expect(runs(stateListing({ claude: "/x/.claude" }, FROM))).toBe(1);
+    expect(stateListing({}, FROM)).toBe("");
+    expect(() => stateListing(homes, FROM, ["claude", "codx"])).toThrow(`no agent called codx; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
   });
 });
 

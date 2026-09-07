@@ -38,28 +38,27 @@ function filesAt(path: string): { files: number; bytes: number } | undefined {
   return { files, bytes };
 }
 
-/** Extracts a gzipped archive into dir with this computer's tar, the bytes fed on stdin. */
-function extract(tar: Buffer, dir: string): Promise<void> {
+/** Extracts a gzipped archive on disk into dir with this computer's tar; the archive is read from its file, never
+ * held in memory, so a whole project's history costs one temp file and no heap. */
+function extract(archive: string, dir: string): Promise<void> {
   return new Promise((done, fail) => {
-    const child = spawn("tar", ["-xzf", "-", "-C", dir], { stdio: ["pipe", "ignore", "pipe"] });
+    const child = spawn("tar", ["-xzf", archive, "-C", dir], { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     child.stderr.on("data", (c: Buffer) => (stderr += c.toString()));
     child.on("error", fail);
     child.on("close", code => (code === 0 ? done() : fail(new Error(`extracting the archive into ${dir} failed (exit ${code}): ${stderr.trim().slice(-500)}`))));
-    child.stdin.on("error", () => undefined);
-    child.stdin.end(tar);
   });
 }
 
 /** The agents' state, keyed on the machine to `source`, brought into the homes here keyed to `target`, the real path
  * the folder will have: the archive is opened in a scratch directory, each agent's home there is a skeleton holding
- * its state roots alone, the move runs in the skeleton, and the files its module then names for the target are copied
- * over the home here, one by one. A row that lives in a shared store here (an index, a registry) is not written, so
- * that agent is transcript-only. */
+ * what its listing named on the machine alone, the move runs in the skeleton, and the files its module then names for
+ * the target are copied over the home here, one by one. A row that lives in a shared store here (an index, a
+ * registry) is not written, so that agent is transcript-only. */
 async function landState(state: NonNullable<LandRequest["state"]>, source: string, target: string, homes: Readonly<Record<string, string>>): Promise<LandedAgent[]> {
   const scratch = mkdtempSync(join(tmpdir(), "wsp-home-"));
   try {
-    await extract(state.tar, scratch);
+    await extract(state.archive, scratch);
     const skeletons = Object.fromEntries(Object.entries(state.homes).flatMap(([agent, home]) => (existsSync(join(scratch, home)) ? [[agent, join(scratch, home)]] : [])));
     const wanted = CATALOG_AGENTS.filter(a => state.agents === undefined || state.agents.includes(a.id));
     const rows = await countProjectState(source, skeletons, wanted);
@@ -109,7 +108,7 @@ async function land(req: LandRequest, homes: Readonly<Record<string, string>>): 
   const staging = `${dest}.wsp-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   mkdirSync(staging, { recursive: true });
   try {
-    await extract(req.tar, staging);
+    await extract(req.archive, staging);
     const target = join(dirname(realpathSync(staging)), basename(dest));
     const agents = req.state === undefined ? [] : await landState(req.state, req.source, target, homes);
     const now = filesAt(dest);
