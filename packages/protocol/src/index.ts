@@ -955,6 +955,11 @@ export const GoldenStage = z.enum([
 ]);
 export type GoldenStage = z.infer<typeof GoldenStage>;
 
+/** The install step a frame belongs to, within its stage: what the step is called and the one line a person reads
+ * for what it runs. A reader's clock for the step starts at the first frame naming it and stops at the first without. */
+export const GoldenStep = z.object({ label: z.string(), command: z.string() });
+export type GoldenStep = z.infer<typeof GoldenStep>;
+
 /** Progress of a golden prepare or seal, keyed by golden name; `detail` is
  * free text for a progress line (the failure message on `failed`). */
 export const GoldenStageEvent = z.object({
@@ -962,6 +967,7 @@ export const GoldenStageEvent = z.object({
   name: z.string(),
   stage: GoldenStage,
   detail: z.string().optional(),
+  step: GoldenStep.optional(),
 });
 export type GoldenStageEvent = z.infer<typeof GoldenStageEvent>;
 /** The detail a golden.stage frame carries for a step the builder already holds; a reader closes the step at once and charges it no time. */
@@ -1391,6 +1397,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     prompt: z.string(),
     harness: z.string().optional(),
     resume: z.string().optional(),
+    /** The thread the message goes to, by its runtime id: its latest turn is resumed, and a thread whose harness never
+     * announced a session takes the message as a first turn on that same thread. Refused when the workspace has no
+     * thread with that id. */
+    thread: z.string().optional(),
     cwd: z.string().optional(),
     /** Values from the harness's catalog for the workspace (harnesses.list), refused with that list on a miss. A
      * start that opens a thread without a model runs the one the catalog marks default, so the app, the command line
@@ -1476,8 +1486,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * quotes each for the machine's shell, so a word stays one word. Replies { execId } once launched, then pushes
    * ExecEvent frames to this socket only: exec.output per line, exec.exit last. The socket closing ends the
    * command, and so does the machine going away under it (deleted, paused, or unanswering: exec.exit then carries
-   * the reason as its error); nothing else does, there is no deadline. */
-  z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1) }),
+   * the reason as its error); nothing else does, there is no deadline. cwd is the folder the command runs in, absolute;
+   * absent, the home folder, as a harness turn's is. */
+  z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1), cwd: z.string().optional() }),
   /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the
@@ -1621,9 +1632,9 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { actionRefusal, goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, behindGoldenLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, titleLine, turnCutLine, type DurationStyle, type GoldenChange, type TurnCutRule } from "./format.js";
+export { AFTER_CUT_LINE, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, backgroundTasksLine, behindGoldenLine, builderStaysLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, execFolderLine, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, machineUnreachedLine, notifyLine, plural, providerAnswerLine, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, stepRetryLine, timedOutLine, titleLine, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, type BuilderReading, type DurationStyle, type GoldenChange, type ProviderAnswer, type TurnCutRule } from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
-export { shellQuote } from "./shell-quote.js";
+export { inFolder, shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { workspaceFromHash, workspaceHash } from "./app-address.js";

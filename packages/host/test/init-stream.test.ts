@@ -594,3 +594,167 @@ describe("stage stream on a terminal", () => {
     expect(text).not.toContain("Installing the base");
   });
 });
+
+describe("the running step under the current stage", () => {
+  const step = { label: "mongosh", command: "npm install -g mongosh" };
+  const at = (stage: string, when: number, detail?: string, s?: { label: string; command: string }): StageFrame => ({ ...ev(stage, when, detail), ...(s !== undefined ? { step: s } : {}) });
+
+  it("draws one muted row under the stage with the command the step runs and a clock of whole seconds since its first frame, kept across its output lines and reset by the next step", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(2_000);
+      const { output, screen } = terminal(100, 30);
+      const stream = new StageStream(output, true);
+      stream.start();
+      stream.push(ev("creating", 0, "sandbox from base"));
+      stream.push(at("installing-tools", 2_000, "mongosh (24/30)", step));
+      // The rows are what the last tick drew, so the clock is read at a tick.
+      vi.advanceTimersByTime(73_040);
+      let lines = screen.lines();
+      expect(lines).toHaveLength(3);
+      expect(lines[1]).toMatch(/^[◒◐◓◑]  Installing tools\s+mongosh \(24\/30\)$/);
+      expect(lines[2]).toMatch(/^│  npm install -g mongosh\s+1m 13s$/);
+      expect(lines[2]!.length).toBe(99);
+      // A line of the tool's own output lands on the stage row whole; the step's row keeps the command and the clock.
+      stream.push(at("installing-tools", 75_000, "mongosh: npm warn deprecated inflight@1.0.6", step));
+      vi.advanceTimersByTime(5_000);
+      lines = screen.lines();
+      expect(lines[1]).toMatch(/^[◒◐◓◑]  Installing tools\s+mongosh: npm warn deprecated inflight@1.0.6$/);
+      expect(lines[2]).toMatch(/^│  npm install -g mongosh\s+1m 18s$/);
+      // The retry after a timeout is one more such line, in words, whole.
+      stream.push(at("installing-tools", 80_000, "mongosh: timed out after 300s; trying once more", step));
+      vi.advanceTimersByTime(80);
+      lines = screen.lines();
+      expect(lines[1]).toMatch(/^[◒◐◓◑]  Installing tools\s+mongosh: timed out after 300s; trying once more$/);
+      expect(lines[2]).toMatch(/^│  npm install -g mongosh\s+1m 18s$/);
+      // The next step starts its own clock.
+      stream.push(at("installing-tools", 80_080, "bun (25/30)", { label: "bun", command: "npm install -g bun@1.4.0" }));
+      vi.advanceTimersByTime(4_000);
+      lines = screen.lines();
+      expect(lines[1]).toMatch(/^[◒◐◓◑]  Installing tools\s+bun \(25\/30\)$/);
+      expect(lines[2]).toMatch(/^│  npm install -g bun@1.4.0\s+4s$/);
+      // A frame of the stage's own, between steps or closing it, takes the row away.
+      stream.push(ev("installing-tools", 90_000, "25 installed, 1 failed"));
+      vi.advanceTimersByTime(80);
+      lines = screen.lines();
+      expect(lines).toHaveLength(2);
+      expect(lines[1]).toMatch(/^[◒◐◓◑]  Installing tools\s+25 installed, 1 failed$/);
+      expect(count(lines, "Machine created")).toBe(1);
+      expect(screen.scrolled).toBe(0);
+      stream.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a command wider than the row is cut before the clock, so the seconds stay in view and no row wraps", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const { output, screen } = terminal(60, 30);
+      const stream = new StageStream(output, true);
+      stream.start();
+      stream.push(at("installing-tools", 1_000, "just (1/1)", { label: "just", command: `curl -fsSL https://example.test/${"a".repeat(80)} | bash` }));
+      vi.advanceTimersByTime(314_000);
+      const lines = screen.lines();
+      expect(lines).toHaveLength(2);
+      expect(lines[1]).toMatch(/^│  curl -fsSL https:\/\/example\.test\/a+…\s+5m 14s$/);
+      expect(lines[1]!.length).toBe(59);
+      expect(screen.scrolled).toBe(0);
+      stream.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a command carrying newlines or escape sequences is flattened to one row, on the screen and in the --json object, so the block never drifts", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const records: Record<string, unknown>[] = [];
+      const { output, screen } = terminal(100, 30);
+      const stream = new StageStream(output, true, undefined, undefined, undefined, r => records.push(r));
+      stream.start();
+      const raw = { label: "git", command: "export HOME=/root\nexport PATH=/usr/local/bin\n\x1b[32mapt-get install -y -qq git\x1b[0m" };
+      stream.push(at("deploying-daemon", 1_000, "git (2/9)", raw));
+      vi.advanceTimersByTime(5_040);
+      stream.push(at("deploying-daemon", 6_040, "git: Unpacking git", raw));
+      vi.advanceTimersByTime(80);
+      const lines = screen.lines();
+      expect(lines).toHaveLength(2);
+      expect(lines[1]).toMatch(/^│  export HOME=\/root export PATH=\/usr\/local\/bin apt-get install -y -qq git\s+5s$/);
+      expect(screen.scrolled).toBe(0);
+      expect(records.map(r => (r["step"] as { command: string }).command)).toEqual(["export HOME=/root export PATH=/usr/local/bin apt-get install -y -qq git", "export HOME=/root export PATH=/usr/local/bin apt-get install -y -qq git"]);
+      stream.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the clock has fixed cells, so a cut command's ellipsis stays put as the seconds widen", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const { output, screen } = terminal(60, 30);
+      const stream = new StageStream(output, true);
+      stream.start();
+      stream.push(at("installing-tools", 1_000, "just (1/1)", { label: "just", command: `curl -fsSL https://example.test/${"a".repeat(80)} | bash` }));
+      vi.advanceTimersByTime(4_000);
+      const early = screen.lines()[1]!;
+      vi.advanceTimersByTime(3_700_000);
+      const late = screen.lines()[1]!;
+      expect(early).toMatch(/…\s+4s$/);
+      expect(late).toMatch(/…\s+61m 44s$/);
+      expect(early.indexOf("…")).toBe(late.indexOf("…"));
+      expect(late.length).toBe(59);
+      stream.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("every frame is one --json object with the stage, the detail and the step with its seconds so far; another golden's frames are not", () => {
+    const records: Record<string, unknown>[] = [];
+    const stream = new StageStream(new PassThrough(), false, undefined, undefined, undefined, r => records.push(r));
+    stream.start();
+    stream.push(ev("creating", 0, "sandbox from base"));
+    stream.push(ev("installing-tools", 1_000));
+    stream.push(at("installing-tools", 2_000, "mongosh (24/30)", step));
+    stream.push(at("installing-tools", 60_400, "mongosh: npm warn deprecated inflight@1.0.6", step));
+    stream.push(at("installing-tools", 302_000, "mongosh: timed out after 300s; trying once more", step));
+    stream.push({ type: "golden.stage", name: "other", stage: "installing-tools", detail: "nope", at: 303_000 });
+    stream.push(ev("installing-tools", 400_000, "25 installed, 1 failed"));
+    stream.push(ev("failed", 401_000, "an agent did not install"));
+    stream.stop();
+    expect(records).toEqual([
+      { event: "stage", stage: "creating", detail: "sandbox from base" },
+      { event: "stage", stage: "installing-tools" },
+      { event: "stage", stage: "installing-tools", detail: "mongosh (24/30)", step: { ...step, elapsedSeconds: 0 } },
+      { event: "stage", stage: "installing-tools", detail: "mongosh: npm warn deprecated inflight@1.0.6", step: { ...step, elapsedSeconds: 58 } },
+      { event: "stage", stage: "installing-tools", detail: "mongosh: timed out after 300s; trying once more", step: { ...step, elapsedSeconds: 300 } },
+      { event: "stage", stage: "installing-tools", detail: "25 installed, 1 failed" },
+      { event: "stage", stage: "failed", detail: "an agent did not install" },
+    ]);
+  });
+
+  it("off a terminal a step's frames print nothing of their own: the stage's start and end lines are the log", () => {
+    const output = new PassThrough();
+    const written: string[] = [];
+    output.on("data", (c: Buffer) => written.push(c.toString()));
+    const stream = new StageStream(output, false);
+    stream.start();
+    stream.push(ev("creating", 0, "sandbox from base"));
+    stream.push(ev("installing-tools", 1_000));
+    stream.push(at("installing-tools", 2_000, "mongosh (24/30)", step));
+    stream.push(at("installing-tools", 3_000, "mongosh: added 1 package", step));
+    stream.push(ev("installing-mcp", 4_000));
+    stream.stop();
+    const lines = written.join("").split("\n").filter(l => l !== "").map(l => l.replace(/\x1b\[[0-9;]*m/g, ""));
+    expect(lines).toHaveLength(5);
+    expect(lines[0]).toBe("│  Creating the machine");
+    expect(lines[1]).toMatch(/^◇  Machine created\s+sandbox from base  1\.0s$/);
+    expect(lines[2]).toBe("│  Installing tools");
+    expect(lines[3]).toMatch(/^◇  Tools installed\s+mongosh: added 1 package  3\.0s$/);
+    expect(lines[4]).toBe("│  Installing MCP servers");
+  });
+});

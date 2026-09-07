@@ -2,7 +2,7 @@
 // NOTICE; logic only) and measured behavior in solari-poc/RESULTS.md.
 
 import { randomUUID } from "node:crypto";
-import { shellQuote } from "@wsp/protocol";
+import { inFolder, shellQuote } from "@wsp/protocol";
 
 // Inherited CLAUDE_CODE_*/CLAUDECODE mark the child as nested inside another
 // Claude Code run; FORCE_CODE_TERMINAL flips terminal detection (t3code unsets
@@ -114,9 +114,6 @@ function permissionFlags(mode: string | undefined): string[] {
  * caller writes and closes on purpose, never a silent open pipe (solari-poc
  * probes, RESULTS.md P1): the prompt and every later message are user lines
  * on that channel, and EOF ends the process after its current turn.
- * Guest exec carries no HOME (measured on Solari sandboxes), so the default
- * cwd is `~`: tilde expansion falls back to the passwd entry where "$HOME"
- * would expand to nothing.
  */
 export function buildCommand(options: BuildCommandOptions): string {
   const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow } = options;
@@ -138,7 +135,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     ...slugFlag("--effort", "effort", effort),
     idFlag,
   ].join(" ");
-  return `cd ${cwd === undefined ? "~" : shellQuote(cwd)} && ${claude}`;
+  return inFolder(cwd, claude);
 }
 
 /** One line of the stdin channel: a user message in the CLI's stream-json input shape. */

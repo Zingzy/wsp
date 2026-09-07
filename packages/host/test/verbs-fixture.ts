@@ -68,6 +68,39 @@ export function scriptedAgent(reply: (prompt: string) => string) {
   return { adapter, starts };
 }
 
+/** A harness whose first start never reaches the machine: the turn fails with the runtime's unreached line and no
+ * session.start, as a launch the network dropped does; every later start answers like scriptedAgent. */
+export const UNREACHED_LINE = "the machine could not be reached from this computer after 6 attempts over 23s";
+export function bornDeadAgent(reply: (prompt: string) => string) {
+  const starts: HarnessStartOptions[] = [];
+  const adapter: HarnessAdapterFactory = () => ({
+    steers: false,
+    start: o => {
+      starts.push(o);
+      const sessionId = o.resume ?? randomUUID();
+      if (starts.length === 1) {
+        const result: TurnResult = { status: "failed", error: UNREACHED_LINE };
+        const finished = Promise.resolve().then(() => {
+          o.onEvent({ type: "turn.done", sessionId, result });
+          o.onEvent({ type: "session.end", sessionId, exitCode: null, sawResult: false });
+          return result;
+        });
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      }
+      const result: TurnResult = { status: "completed", text: reply(o.prompt) };
+      const finished = Promise.resolve().then(() => {
+        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: result.text ?? "" });
+        o.onEvent({ type: "turn.done", sessionId, result });
+        o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        return result;
+      });
+      return { localId: sessionId, finished, interrupt: async () => {} };
+    },
+  });
+  return { adapter, starts };
+}
+
 /** A harness that answers every prompt with reply(prompt) and then never says its session ended: the done lands, the
  * end does not. What a real turn looks like from the client between the reply and the runtime's late exit read. */
 export function doneOnlyAgent(reply: (prompt: string) => string) {
@@ -214,8 +247,12 @@ export function exportGuest(backend: StubBackend): { sources: string[] } {
   return { sources };
 }
 
-/** The script the launch carried to the machine, decoded. */
+/** Every script a launch carried to the machine, decoded, oldest first. */
+export function launchedScripts(backend: StubBackend): string[] {
+  return backend.machines[0]!.execLog.filter(cmd => cmd.includes("base64 -d")).map(launch => Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8"));
+}
+
+/** The script the first launch carried to the machine, decoded. */
 export function launchedScript(backend: StubBackend): string {
-  const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
-  return Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8");
+  return launchedScripts(backend)[0]!;
 }

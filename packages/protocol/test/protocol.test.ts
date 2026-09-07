@@ -553,6 +553,13 @@ describe("golden wire schemas", () => {
     }
   });
 
+  it("a golden.stage frame may name the install step it belongs to, with the command a person reads for it", () => {
+    const step = { label: "mongosh", command: "npm install -g mongosh" };
+    const e = { type: "golden.stage", name: "default", stage: "installing-tools", detail: "mongosh (24/30)", step };
+    expect(EventUnion.parse(e)).toEqual(e);
+    expect(() => GoldenStageEvent.parse({ ...e, step: { label: "mongosh" } })).toThrow();
+  });
+
   it("a manifest sealed before kind was recorded still parses; new ones carry the kind", () => {
     const old = { version: 1, snapshotId: "snap_a", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } };
     const parsed = GoldenManifest.parse({ head: 2, versions: [old, { ...old, version: 2, kind: "desktop" }] });
@@ -747,6 +754,11 @@ describe("workspaces.exec", () => {
     expect(RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", argv: ["grep", "a b", "f"] })).toMatchObject({ argv: ["grep", "a b", "f"] });
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", argv: [] })).toThrow();
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", cmd: "ls" })).toThrow();
+  });
+
+  it("takes the folder the command runs in as cwd, absent when the command runs in the home", () => {
+    expect(RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", argv: ["git", "status"], cwd: "/root/work/proj" })).toMatchObject({ cwd: "/root/work/proj" });
+    expect(RuntimeRequest.parse({ id: 1, op: "workspaces.exec", workspaceId: "ws_1", argv: ["git", "status"] })).not.toHaveProperty("cwd");
   });
 
   it("pushes output lines and one exit, whose code is null with a reason when the command was ended without one", () => {

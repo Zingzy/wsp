@@ -3,7 +3,7 @@
 // runtime's import events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { TurnResult } from "./index.js";
+import type { MachineState, TurnResult } from "./index.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
 const GIB = MIB * 1024;
@@ -50,18 +50,25 @@ export function fmtDuration(ms: number, style: DurationStyle = "short"): string 
   return hours === 0 ? `${minutes}m ${pad2(seconds)}s` : `${hours}h ${pad2(minutes)}m ${pad2(seconds)}s`;
 }
 
+/** A running clock on a row redrawn every tick: whole seconds, then the short style's minutes and seconds; tenths
+ * would flicker. */
+export function fmtElapsed(ms: number): string {
+  const seconds = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1_000) : 0;
+  return seconds < 60 ? `${seconds}s` : fmtDuration(seconds * 1_000);
+}
+
 /** A turn's cost in dollars: cents, or four places under a cent so a short turn does not read as free. */
 export function fmtCost(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
 /** The one line a thread's end sends to whoever its start named: the thread's first eight characters, the outcome
- * word with the duration and cost the harness reported, and the last non-empty line of the reply, or the error when
- * there is no reply. */
+ * word with the duration and cost the harness reported, then the last non-empty line of the reply, or the error when
+ * there is no reply. A turn that did not complete says its error first, since that is what whoever waits needs. */
 export function notifyLine(threadId: string, result: TurnResult): string {
   const facts = [result.status, ...(result.durationMs !== undefined ? [fmtDuration(result.durationMs)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
   const lines = (result.text ?? "").split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-  const tail = lines.at(-1) ?? result.error;
+  const tail = result.status === "completed" ? lines.at(-1) ?? result.error : result.error ?? lines.at(-1);
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
@@ -110,6 +117,17 @@ export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: numbe
     : `stopped after ${fmtDuration(elapsedMs, "clock")} at the ${fmtLimit(limitMs)} cap on one turn`;
 }
 
+/** An install step the guard ended at its road's limit: the seconds, and that it was the second time when it was. */
+export function timedOutLine(limitS: number, times = 1): string {
+  return `timed out after ${limitS}s${times === 2 ? ", twice" : ""}`;
+}
+
+/** The step's line when its road's limit ended it and the step is run once more: a download that ran the clock out
+ * was a dead read, and the words say so before the second run starts. */
+export function stepRetryLine(limitS: number): string {
+  return `${timedOutLine(limitS)}; trying once more`;
+}
+
 /** The turn's error when the harness process ended before any result. Exit 127 is the shell saying the binary was
  * not on PATH, so the line names the binary and the PATH the launch exported (or that it exported none) instead of a
  * bare code; every other code reads as the code. */
@@ -117,6 +135,26 @@ export function harnessExitLine(bin: string, exitCode: number | null, path: stri
   if (exitCode !== 127) return `${bin} exited with code ${String(exitCode)} before emitting a result`;
   const searched = path === undefined ? "the launch exported no PATH, the machine's own was searched" : `PATH searched: ${path}`;
   return `${bin} was not found on PATH (exit 127); ${searched}`;
+}
+
+/** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
+ * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,
+ * neither of which a person can act on. */
+export function machineUnreachedLine(attempts: number, elapsedMs: number): string {
+  return `the machine could not be reached from this computer after ${plural(attempts, "attempt")} over ${fmtDuration(elapsedMs)}`;
+}
+
+/** The one stderr line the command line shows under a command that exited non-zero, naming the folder it ran in:
+ * the host chose it when none was named, so the person did not see it go by; absent, the runtime ran it in ~. */
+export function execFolderLine(cwd: string | undefined): string {
+  return `ran in ${cwd ?? "the home folder"}`;
+}
+
+/** The turn's error when the harness's result arrived while the agent's own background tasks were still running: the
+ * harness kills them with the turn and nothing wakes the thread when they would have finished, so the turn ended
+ * before the work it started did. */
+export function backgroundTasksLine(running: number): string {
+  return `ended with ${plural(running, "background task")} running`;
 }
 
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
@@ -171,4 +209,78 @@ export function goldenBuildLine(from: number, to: number, changes: readonly Gold
  * a state in words, never a badge. The move is the person's; nothing replaces a machine they are working on. */
 export function behindGoldenLine(on: number, head: number): string {
   return `on image v${on}, v${head} available`;
+}
+
+/** What the provider answered one call with: the status, its message, the request id its reply carried when it
+ * carried one (measured 2026-09-07: Solari's replies carry none), and the UTC time the reply landed. */
+export interface ProviderAnswer {
+  status: number;
+  message: string;
+  requestId?: string;
+  at: string;
+}
+
+/** What the builder read at the provider after the last attempt: a state, or unread when the GET itself failed. */
+export type BuilderReading = MachineState | "unread";
+
+/** The provider's answer as a report to the provider needs it: status, message, and the request id; without one,
+ * that the reply carried none and when it landed, never an empty id. */
+export function providerAnswerLine(a: ProviderAnswer): string {
+  return `${a.status} ${a.message} (${a.requestId !== undefined ? `request ${a.requestId}` : `no request id from the provider, at ${a.at}`})`;
+}
+
+/** The snapshotting stage's line after one refused attempt with another to come: which attempt, what the provider
+ * said, what the builder reads at the provider, and when the next attempt is. */
+export function snapshotAttemptLine(attempt: number, attempts: number, answer: ProviderAnswer, builderState: BuilderReading, retryMs: number): string {
+  return `attempt ${attempt} of ${attempts} answered ${providerAnswerLine(answer)}; the builder reads ${builderState}, next attempt in ${fmtDuration(retryMs)}`;
+}
+
+/** The seal's failure line once the snapshot is given up on: how many attempts, the last answer, and whether the
+ * provider still has the builder. A builder the provider answers 404 for is named gone at the provider's hand. */
+export function snapshotFailedLine(attempts: number, answer: ProviderAnswer, builderState: BuilderReading, readError?: string): string {
+  const head = `the snapshot failed ${plural(attempts, "time")}: the provider answered ${providerAnswerLine(answer)}`;
+  if (builderState === "gone") return `${head} and no longer has the builder (404)`;
+  if (builderState === "unread") return `${head} and could not be read about the builder (${readError ?? "no reason given"})`;
+  return `${head} while the builder read ${builderState}`;
+}
+
+/** The one sentence every road that leaves a builder running says: its id, what it costs, how to attach to it
+ * again, and that the sweep ends it. */
+export function builderStaysLine(builderId: string, rateUsdPerHour: number, attachCommand: string): string {
+  return `Builder ${builderId} stays up at about $${rateUsdPerHour.toFixed(2)}/hr; ${attachCommand} attaches to it again, and the sweep stops it once it is six hours old.`;
+}
+
+/** The wizard's last line when the snapshot failed and the provider still has the builder: nothing on it changed. */
+export function sealFailedBuilderStaysLine(builderId: string, rateUsdPerHour: number, attachCommand: string): string {
+  return `Seal failed; the builder is as you left it. ${builderStaysLine(builderId, rateUsdPerHour, attachCommand)}`;
+}
+
+/** The wizard's last line when the snapshot failed and the provider would not say what became of the builder: it
+ * was not touched, and the attach is offered as when it is known to be up. */
+export function sealFailedBuilderUnreadLine(builderId: string, rateUsdPerHour: number, attachCommand: string): string {
+  return `Seal failed; the provider could not be read about the builder, so nothing on it was touched. ${builderStaysLine(builderId, rateUsdPerHour, attachCommand)}`;
+}
+
+/** The wizard's last line when the seal failed on any road but a refused snapshot: the builder was consumed. */
+export const SEAL_FAILED_LINE = "Seal failed and the builder is gone. Run wsp init again; the recipe is kept.";
+
+/** The wizard's last line when the snapshot failed and the provider answers 404 for the builder: the provider
+ * dropped it, not wsp. */
+export const SEAL_FAILED_BUILDER_GONE_LINE = "Seal failed and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again; the recipe is kept.";
+
+/** The update's last line when the snapshot of the new version failed and the provider still has the machine it
+ * ran on: the golden stands, the machine is as it was, the retry runs on it or the sweep ends it. */
+export function upgradeSealFailedStaysLine(version: number, builderId: string, rateUsdPerHour: number): string {
+  return `Golden v${version} is unchanged. Builder ${builderId} is as it was, up at about $${rateUsdPerHour.toFixed(2)}/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.`;
+}
+
+/** The update's last line when the snapshot failed and the provider would not say what became of the machine it
+ * ran on: nothing on it was touched, the retry runs on it or the sweep ends it. */
+export function upgradeSealFailedUnreadLine(version: number, builderId: string): string {
+  return `Golden v${version} is unchanged. The provider could not be read about builder ${builderId}, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.`;
+}
+
+/** The update's last line when the snapshot failed and the provider answers 404 for the machine it ran on. */
+export function upgradeSealFailedGoneLine(version: number): string {
+  return `Golden v${version} is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.`;
 }

@@ -76,6 +76,17 @@ describe("the base floor's plan", () => {
     expect(BASE_FLOOR.map(e => `base/${e.id}`)).toEqual(plan.filter(t => t.bin !== undefined).map(t => t.id));
   });
 
+  it("every step, the apt index included, names one line a person reads for what it runs, so the Build screen's step row is one row", () => {
+    for (const t of baseInstalls()) {
+      expect(t.shown, t.id).toBeDefined();
+      expect(t.shown, t.id).not.toContain("\n");
+    }
+    const shown = (id: string) => baseInstalls().find(t => t.id === id)!.shown;
+    expect(shown("base/apt-index")).toBe("apt-get update");
+    expect(shown("base/git")).toBe("apt-get install git");
+    expect(shown("base/uv")).toMatch(/^if ! command -v uv >\/dev\/null 2>&1; then; .*; fi$/);
+  });
+
   it("every step runs under set -e with a home and the tools PATH, and each road is the catalog's pinned one", () => {
     const cmd = (id: string) => baseInstalls().find(t => t.id === id)!.cmd;
     for (const t of baseInstalls()) {

@@ -32,6 +32,11 @@ export const SKILL_DESCRIPTION =
 
 export const GUEST_ROOTS: GuestRoots = { etc: "/etc", home: "/root" };
 
+/** The harness runs one turn per message and kills the agent's background tasks when the turn's process exits, so
+ * a command the agent did not wait for never reports back; the turn then reads failed with that reason. */
+const TURN_FACT =
+  "- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.";
+
 /** The short, always-loaded text; the skill beside it carries the full document. */
 export const contextPath = (roots: GuestRoots = GUEST_ROOTS): string => `${roots.etc}/wsp/machine-context.md`;
 export const skillPath = (roots: GuestRoots = GUEST_ROOTS): string => `${roots.etc}/wsp/skills/${SKILL_NAME}/SKILL.md`;
@@ -298,6 +303,7 @@ export function renderMachineContext(input: ContextInput): string {
   else if (containers.length === 0) machine.push("- Docker and Podman are not installed.");
   machine.push(`- wsp-daemon listens on 0.0.0.0:${DAEMON_PORT} with its own token. Do not stop it and do not bind port ${DAEMON_PORT}.`);
   machine.push("- A background process started with a plain & inside a tool call dies when that tool call ends.");
+  machine.push(TURN_FACT);
   machine.push(cdFact(input.agent));
   machine.push("- A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.");
   if (shim) machine.push(`- Sign-ins go through wsp: BROWSER is ${BROWSER_SHIM_PATH} and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.`);
@@ -357,6 +363,7 @@ export function renderShortContext(input: ContextInput): string {
     `This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The ${SKILL_NAME} skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.`,
     "",
     `- A background process started with a plain & inside a tool call dies when that tool call ends. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &${tmux ? ", or tmux new -d -s <name> '<cmd>'" : ""}.`,
+    TURN_FACT,
     cdFact(input.agent),
     "- A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.",
   ];
