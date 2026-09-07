@@ -11,6 +11,7 @@ import { deriveSidebarProjects } from "../../adapt/index.js";
 import { cn } from "../../lib/utils.js";
 import { desktopBridge } from "../../lib/desktopShell.js";
 import { useStore } from "../../protocol/store.js";
+import { ROW_META_CLASS } from "../../sidebar/rowGrammar.js";
 import { capturePagePreview, loadPagePreviews, useWorkspacePreviews } from "../../shell/workspacePreviews.js";
 import { highlightedWorkspaceId, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../../shell/workspaceSwitcher.js";
 import { buildSwitcherCards, type SwitcherCard } from "./switcherCards.js";
@@ -101,7 +102,7 @@ function SwitcherCardView({ card, highlighted }: { card: SwitcherCard; highlight
       <span className="truncate text-foreground text-sm" data-card-name>
         {card.name}
       </span>
-      <span className="truncate font-mono text-[11px] text-muted-foreground/70" data-card-thread>
+      <span className={cn(ROW_META_CLASS, "truncate")} data-card-thread>
         {card.threadTitle ?? "No threads yet"}
       </span>
     </div>

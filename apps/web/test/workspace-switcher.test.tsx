@@ -14,6 +14,7 @@ import { buildSwitcherCards } from "../src/components/switcher/switcherCards.js"
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
+import { ROW_META_CLASS } from "../src/sidebar/rowGrammar.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onComposerFocusRequest } from "../src/shell/shellRequests.js";
 import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
@@ -334,8 +335,7 @@ describe("the workspace switcher overlay", () => {
       // The name is sans at a row's weight; the thread's title is the muted mono line under it.
       expect(cardPartClass("ws_b", "name")).not.toContain("font-mono");
       expect(cardPartClass("ws_b", "name")).not.toContain("font-medium");
-      expect(cardPartClass("ws_b", "thread")).toContain("font-mono");
-      expect(cardPartClass("ws_b", "thread")).toContain("text-muted-foreground/70");
+      expect(cardPartClass("ws_b", "thread")).toContain(ROW_META_CLASS);
       // Two parts here and no third, since this bridge answers for no picture, and the same two on every card.
       expect(cardParts("ws_b")).toEqual(["name", "thread"]);
       expect(document.querySelectorAll("[data-card-meta], [data-card-line]").length).toBe(0);

@@ -3,10 +3,15 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import { isBilling, workspaceState, type ReachState, type SessionOrigin, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
-import type { SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
+import { isBilling, outOfMemoryRowLine, workspaceState, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
+import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
 import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.logic.js";
+
+export const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
+export const NEW_THREAD_TITLE = NEW_THREAD_SHORTCUT ? `New thread (${NEW_THREAD_SHORTCUT})` : "New thread";
 
 /** Countdown to the runtime's auto-nap while the machine bills; "active" when nothing is scheduled. */
 export function idleCountdownLabel(status: WorkspaceStatus | null, nowMs: number): string | null {
@@ -22,27 +27,44 @@ export function reachNote(reach: ReachState | null): string | null {
   return reach === "slow" ? "edge slow" : null;
 }
 
-/** The machine row's second line. What the runtime is doing to the machine's daemon takes the whole line while it
- * is doing anything: it is the one thing on the row a person may be waiting on, and it leaves as soon as it lands. */
-export function workspaceMetaLine(daemonNote: string | undefined, parts: ReadonlyArray<string | null>): string {
-  return daemonNote ?? parts.filter((p): p is string => p !== null).join(" · ");
+export interface WorkspaceMetaInput {
+  readonly project: Pick<SidebarProjectSnapshot, "state" | "status" | "workspace" | "reach">;
+  /** The meter's last tick for this workspace; null before the first. */
+  readonly cost: { readonly rateUsdPerHour: number; readonly accruedUsd: number } | null;
+  /** The last memory sample from a machine whose link then dropped. */
+  readonly outOfMemory: MemoryReading | undefined;
+  readonly nowMs: number;
 }
 
-/** What a workspace has cost since the meter's midnight; the sidebar row and the switcher card read the one rule. */
+/** The machine row's second line, one string in one order: what it cost today, the rate while it bills, the edge
+ * note, the nap countdown last. The cost always leads, an honest zero before the meter's first tick, so no row draws
+ * a blank line. The width cuts it from the right; nothing here decides what to leave out. What the runtime is doing
+ * to the machine's daemon, or a drop with memory near full, takes the whole line while it lasts: it is the one thing
+ * on the row a person may be waiting on. */
+export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
+  const note = project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
+  if (note !== undefined) return note;
+  if (outOfMemory !== undefined) return outOfMemoryRowLine(outOfMemory);
+  return [
+    accruedTodayLabel(cost?.accruedUsd ?? 0),
+    isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null,
+    reachNote(project.reach),
+    idleCountdownLabel(project.status, nowMs),
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+}
+
+/** What a workspace has cost since the meter's midnight, in cents; the sidebar row and the switcher card read the one rule. */
 export function accruedTodayLabel(accruedUsd: number | null): string | null {
-  return accruedUsd === null ? null : `$${accruedUsd.toFixed(4)} today`;
+  return accruedUsd === null ? null : `$${accruedUsd.toFixed(2)} today`;
 }
 
-export function costLabel(input: {
-  readonly state: WorkspaceState;
-  readonly rateUsdPerHour: number | null;
-  readonly accruedUsd: number | null;
-}): string | null {
-  const parts: string[] = [];
-  if (isBilling(input.state) && input.rateUsdPerHour !== null) parts.push(`$${input.rateUsdPerHour.toFixed(3)}/hr`);
-  const today = accruedTodayLabel(input.accruedUsd);
-  if (today !== null) parts.push(today);
-  return parts.length > 0 ? parts.join(" · ") : null;
+const rateLabel = (rateUsdPerHour: number | null): string | null => (rateUsdPerHour === null ? null : `$${rateUsdPerHour.toFixed(3)}/hr`);
+
+/** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. */
+export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "indicator">): string {
+  return project.state === "running" ? "" : project.indicator.label;
 }
 
 const PLAIN = { colorClass: "text-muted-foreground/70", dotClass: "bg-muted-foreground/60" };
@@ -85,20 +107,6 @@ export function dotClassForTone(tone: StatusIndicatorTone): string {
       return "border border-muted-foreground/60 bg-transparent";
     case "neutral":
       return "bg-muted-foreground/60";
-    default: {
-      const _exhaustive: never = tone;
-      return "";
-    }
-  }
-}
-
-export function textClassForTone(tone: StatusIndicatorTone): string {
-  switch (tone) {
-    case "running":
-      return "text-success-foreground";
-    case "paused":
-    case "neutral":
-      return "text-muted-foreground/70";
     default: {
       const _exhaustive: never = tone;
       return "";

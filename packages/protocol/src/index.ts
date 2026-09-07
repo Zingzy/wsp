@@ -205,6 +205,9 @@ export const SessionView = z.object({
   /** The turn that opened this row's thread; a resumed turn keeps it, and its own prompt rides its session.start
    * event, so the title every client derives from a row never follows the latest send. */
   prompt: z.string().optional(),
+  /** What the harness itself calls this row's session, read from the harness's own store on the machine: the title
+   * it generated, or the person's rename inside it. Absent on a harness that keeps none, and until one is read. */
+  harnessTitle: z.string().optional(),
   /** Ms epoch, runtime clock; endedAt is unset while the session runs. */
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
@@ -222,9 +225,10 @@ export const SessionView = z.object({
 export type SessionView = z.infer<typeof SessionView>;
 
 /** One sidebar thread as every client lists it: the turns sharing a threadId (a row stamped none is its own),
- * titled by the opening turn, in the state and times of the latest, with the opening turn's provenance, always
- * filled in. id is the fold key, the runtime's thread id or the lone row's id; sessionId is the latest turn's row
- * id, what a stop interrupts; claudeSessionId is the latest turn's harness id, what a send resumes. */
+ * titled by what the harness calls the latest turn's session and by the opening turn's words where it calls it
+ * nothing, in the state and times of the latest, with the opening turn's provenance, always filled in. id is the
+ * fold key, the runtime's thread id or the lone row's id; sessionId is the latest turn's row id, what a stop
+ * interrupts; claudeSessionId is the latest turn's harness id, what a send resumes. */
 export const ThreadView = z.object({
   id: z.string(),
   threadId: z.string().optional(),
@@ -256,6 +260,9 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
   return [...byThread].map(([id, turns]) => {
     const first = turns[0]!;
     const latest = turns[turns.length - 1]!;
+    // The one title rule every client reads: the harness's own name for the session the next send resumes wins, so
+    // a rename made inside the harness shows here, and the opening turn's words stand until one is read.
+    const words = latest.harnessTitle ?? first.prompt;
     return {
       id,
       ...(first.threadId !== undefined ? { threadId: first.threadId } : {}),
@@ -263,7 +270,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       harness: first.harness,
       startedBy: first.startedBy ?? "person",
       status: latest.status,
-      title: first.prompt !== undefined ? titleLine(first.prompt) : first.claudeSessionId ?? first.id,
+      title: words !== undefined ? titleLine(words) : first.claudeSessionId ?? first.id,
       sessionId: latest.id,
       ...(latest.claudeSessionId !== undefined ? { claudeSessionId: latest.claudeSessionId } : {}),
       ...(latest.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
@@ -1805,4 +1812,4 @@ export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
-export type { AdapterEvent, ExecStream, ExecStreamFactory } from "./adapter-port.js";
+export type { AdapterEvent, ExecStream, ExecStreamFactory, SessionTitleReader } from "./adapter-port.js";

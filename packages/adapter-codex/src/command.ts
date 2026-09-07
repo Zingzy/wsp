@@ -38,7 +38,8 @@ export interface BuildCommandOptions {
   permissionMode?: string;
 }
 
-function slug(name: string, value: string): string {
+/** A value that may ride a codex command line or a SQL literal unquoted; anything else is refused before it does. */
+export function slug(name: string, value: string): string {
   if (!SLUG_RE.test(value)) throw new Error(`${name} must be a plain slug, got "${value}"`);
   return value;
 }
