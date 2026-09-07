@@ -1,5 +1,5 @@
-import { shellLine, type Capabilities } from "@wsp/protocol";
-import { backoffMs, classify, isMissing, shouldRetry, type WspError } from "./errors.js";
+import { providerRoadRetryLine, shellLine, type Capabilities } from "@wsp/protocol";
+import { ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { GUEST_USER_ENV } from "./golden-import.js";
 import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
@@ -11,6 +11,8 @@ export interface SolariBackendOptions {
   apiKey: string;
   baseUrl?: string;
   fetch?: Fetch;
+  /** The clock the retries sleep on; tests hand in one that costs nothing. */
+  clock?: RetryClock;
 }
 
 interface SandboxView {
@@ -92,11 +94,13 @@ export class SolariBackend implements MachineBackend {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetch: Fetch;
+  private readonly clock: RetryClock;
 
   constructor(opts: SolariBackendOptions) {
     this.apiKey = opts.apiKey;
     this.baseUrl = opts.baseUrl ?? "https://api.getsolari.com";
     this.fetch = opts.fetch ?? globalThis.fetch;
+    this.clock = opts.clock ?? realRetryClock;
   }
 
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -109,7 +113,12 @@ export class SolariBackend implements MachineBackend {
     const headers: Record<string, string> = { Authorization: `Bearer ${this.apiKey}`, ...keyed };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     let resent = false;
-    for (let attempt = 1; ; attempt++) {
+    // One budget for the whole request, never reset by an answer: a counter that started over after each one would
+    // let a call ping-pong between a dropped lookup and a gateway status for minutes.
+    let roadRetries = 0;
+    // Attempt counts answers, so a road that flapped before the first one leaves the retries of a gateway status whole.
+    let attempt = 1;
+    for (;;) {
       let res: Response;
       try {
         res = await this.fetch(this.baseUrl + path, {
@@ -118,9 +127,17 @@ export class SolariBackend implements MachineBackend {
           body: body !== undefined ? JSON.stringify(body) : undefined,
         });
       } catch (e) {
+        // A road that failed never carried the request out, so every call is safe to send again, keyed or not.
+        const road = roadCode(e);
+        if (road !== undefined) {
+          if (++roadRetries >= ROAD_TRIES) throw e;
+          console.warn(providerRoadRetryLine(`${method} ${path}`, road, roadRetries + 1, ROAD_TRIES));
+          await this.clock.sleep(roadBackoffMs(roadRetries));
+          continue;
+        }
         if (keyed === undefined || resent) throw e;
         resent = true;
-        await new Promise(r => setTimeout(r, backoffMs(attempt)));
+        await this.clock.sleep(backoffMs(attempt));
         continue;
       }
       if (res.ok) {
@@ -131,7 +148,8 @@ export class SolariBackend implements MachineBackend {
       try { errBody = await res.json() as typeof errBody; } catch { /* non-JSON error body */ }
       const e = classify(res.status, errBody, res.headers.get(REQUEST_ID_HEADER) ?? undefined);
       if (!shouldRetry(e, attempt)) fail(e);
-      await new Promise(r => setTimeout(r, backoffMs(attempt)));
+      await this.clock.sleep(backoffMs(attempt));
+      attempt++;
     }
   }
 

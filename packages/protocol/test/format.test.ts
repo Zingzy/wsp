@@ -60,9 +60,12 @@ import {
   nameList,
   nextInsideAgentLine,
   notifyLine,
+  notifyTail,
   offeredSize,
   plural,
+  PROVIDER_UNREACHED_LINE,
   providerAnswerLine,
+  providerRoadRetryLine,
   SEAL_FAILED_BUILDER_GONE_LINE,
   SEAL_FAILED_LINE,
   sealFailedBuilderStaysLine,
@@ -86,6 +89,7 @@ import {
   stepRetryLine,
   timedOutLine,
   lastLine,
+  waitTimedOutLine,
   generatedTitle,
   GENERATED_TITLE_MAX,
   openingTitle,
@@ -319,6 +323,23 @@ describe("notifyLine", () => {
   it("a turn that did not complete says why over its reply's last line; one that did says its last line", () => {
     expect(notifyLine(THREAD, { status: "failed", durationMs: 12_000, costUsd: 0.02, text: "Waiting for the gate to finish.", error: "ended with 1 background task running" })).toBe("thread c452d1e8 finished (failed, 12s, $0.02): ended with 1 background task running");
     expect(notifyLine(THREAD, { status: "completed", durationMs: 12_000, text: "All green.", error: "[ede_diagnostic] noise" })).toBe("thread c452d1e8 finished (completed, 12s): All green.");
+  });
+
+  it("notifyTail is the line's tail alone, the one rule the wait's reply field reads", () => {
+    expect(notifyTail({ status: "completed", text: "Ran the gate.\n\nAll 12 tests   green.\n" })).toBe("All 12 tests green.");
+    expect(notifyTail({ status: "failed", text: "Waiting for the gate.", error: "ended with 1 background task running" })).toBe("ended with 1 background task running");
+    expect(notifyTail({ status: "completed", text: "All green.", error: "[ede_diagnostic] noise" })).toBe("All green.");
+    expect(notifyTail({ status: "interrupted" })).toBeUndefined();
+  });
+});
+
+describe("waitTimedOutLine", () => {
+  const THREAD = "c452d1e8-7a1b-4f2c-9e3d-000000000001";
+
+  it("names one thread by its first eight characters and counts more, then says how long was waited", () => {
+    expect(waitTimedOutLine([THREAD], 600_000)).toBe("thread c452d1e8 still running after 10m");
+    expect(waitTimedOutLine([THREAD, "5e6f7a8b-0000"], 30_000)).toBe("2 threads still running after 30s");
+    expect(waitTimedOutLine([THREAD], 50)).toBe("thread c452d1e8 still running after 50ms");
   });
 });
 
@@ -677,6 +698,17 @@ describe("backgroundTasksLine", () => {
   it("counts the tasks the harness still had running when its result arrived", () => {
     expect(backgroundTasksLine(1)).toBe("ended with 1 background task running");
     expect(backgroundTasksLine(2)).toBe("ended with 2 background tasks running");
+  });
+});
+
+describe("a provider out of reach from this computer", () => {
+  it("names what could not be reached, not the computer", () => {
+    expect(PROVIDER_UNREACHED_LINE).toBe("Solari cannot be reached from this computer");
+  });
+
+  it("logs one retry per line, naming the call, the road's own code and the try about to go", () => {
+    expect(providerRoadRetryLine("GET /sandboxes/x", "ENOTFOUND", 2, 3)).toBe("GET /sandboxes/x did not leave this computer (ENOTFOUND); try 2 of 3");
+    expect(providerRoadRetryLine("POST /sandboxes", "EAI_AGAIN", 3, 3)).toBe("POST /sandboxes did not leave this computer (EAI_AGAIN); try 3 of 3");
   });
 });
 

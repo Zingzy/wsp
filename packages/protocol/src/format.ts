@@ -115,14 +115,27 @@ export function fmtCost(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
-/** The one line a thread's end sends to whoever its start named: the thread's first eight characters, the outcome
- * word with the duration and cost the harness reported, then the last non-empty line of the reply, or the error when
- * there is no reply. A turn that did not complete says its error first, since that is what whoever waits needs. */
+/** What the notify line ends with, and what a wait answers as the reply: the last non-empty line of the reply, or the
+ * error when there is no reply. A turn that did not complete says its error first, since that is what whoever waits
+ * needs. */
+export function notifyTail(result: TurnResult): string | undefined {
+  const reply = lastLine(result.text ?? "");
+  return result.status === "completed" ? reply ?? result.error : result.error ?? reply;
+}
+
+/** The one line a thread's end sends to whoever its start named, and the one a wait on it prints: the thread's first
+ * eight characters, the outcome word with the duration and cost the harness reported, then the tail. */
 export function notifyLine(threadId: string, result: TurnResult): string {
   const facts = [result.status, ...(result.durationMs !== undefined ? [fmtDuration(result.durationMs)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
-  const reply = lastLine(result.text ?? "");
-  const tail = result.status === "completed" ? reply ?? result.error : result.error ?? reply;
+  const tail = notifyTail(result);
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
+}
+
+/** The line a wait prints when its deadline passed with every named thread still running: one thread by its first
+ * eight characters, more by their count. */
+export function waitTimedOutLine(threadIds: readonly string[], ms: number): string {
+  const who = threadIds.length === 1 ? `thread ${threadIds[0]!.slice(0, 8)}` : fmtThreads(threadIds.length);
+  return `${who} still running after ${fmtDuration(ms)}`;
 }
 
 /** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, then
@@ -518,8 +531,16 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
-/** The one line the sidebar puts above the rows while the probes fail before leaving this computer; the rows keep their last word. */
-export const COMPUTER_OFFLINE_LINE = "This computer is offline";
+/** The one line the sidebar puts above the rows while the probes fail before leaving this computer; the rows keep
+ * their last word. It names what could not be reached, not the computer: the road out was up and every other name
+ * resolved while this one did not (measured 2026-09-07). */
+export const PROVIDER_UNREACHED_LINE = "Solari cannot be reached from this computer";
+
+/** One line per retry of a provider call that never left this computer: which call, the system error the road gave,
+ * and which try of how many is about to go, so a run that still fails carries the whole flap in its log. */
+export function providerRoadRetryLine(call: string, code: string, tryNumber: number, tries: number): string {
+  return `${call} did not leave this computer (${code}); try ${tryNumber} of ${tries}`;
+}
 
 /** When a turn is over, in the one sentence every door the agent reads quotes whole: the skill, the tool
  * descriptions, the command line's help and the machine's own context. The reply comes back at once from a follow;

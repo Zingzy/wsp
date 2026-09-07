@@ -11,7 +11,7 @@
 // paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { COMPUTER_OFFLINE_LINE, computerOffline, goldenHead, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions } from "../actions/registry.js";
 import { threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
@@ -261,7 +261,7 @@ export function WorkspaceSidebar() {
       </div>
       {offline ? (
         <p data-sidebar-offline className={cn(ROW_META_CLASS, "px-2 pt-1 leading-4")}>
-          {COMPUTER_OFFLINE_LINE}
+          {PROVIDER_UNREACHED_LINE}
         </p>
       ) : null}
     </div>

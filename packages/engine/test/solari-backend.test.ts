@@ -301,3 +301,153 @@ describe("SolariBackend idempotency", () => {
     expect(second.id).toBe(first.id);
   });
 });
+
+describe("SolariBackend road retries", () => {
+  /** A fetch that never left this computer, as node throws it: the system error under a TypeError. */
+  const noRoad = (code = "ENOTFOUND"): TypeError =>
+    new TypeError("fetch failed", { cause: Object.assign(new Error(`getaddrinfo ${code} api.getsolari.com`), { code }) });
+
+  /** The retries' own sleeps, recorded instead of waited, so the ten seconds cost the test nothing. */
+  const fakeClock = () => {
+    const waits: number[] = [];
+    return { waits, clock: { now: Date.now, sleep: async (ms: number): Promise<void> => { waits.push(ms); } } };
+  };
+
+  const quietWarn = () => vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  it("tries a call that never left this computer three times over about ten seconds and logs one line per retry", async () => {
+    const { waits, clock } = fakeClock();
+    let calls = 0;
+    const f = vi.fn(async () => {
+      if (++calls <= 2) throw noRoad();
+      return new Response(JSON.stringify({ snapshotId: "snap_1" }), { status: 200 });
+    });
+    const warn = quietWarn();
+    try {
+      const b = new SolariBackend({ apiKey: "k", fetch: f, clock });
+      await expect(b.request("POST", "/sandboxes/x/snapshots", { name: "g" })).resolves.toEqual({ snapshotId: "snap_1" });
+      expect(f).toHaveBeenCalledTimes(3);
+      expect(warn.mock.calls.map(c => String(c[0]))).toEqual([
+        "POST /sandboxes/x/snapshots did not leave this computer (ENOTFOUND); try 2 of 3",
+        "POST /sandboxes/x/snapshots did not leave this computer (ENOTFOUND); try 3 of 3",
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(waits.length).toBe(2);
+    const spanMs = waits.reduce((a, b) => a + b, 0);
+    expect(spanMs).toBeGreaterThanOrEqual(9_000);
+    expect(spanMs).toBeLessThan(11_000);
+  });
+
+  it("gives up after the third try and throws what the road threw", async () => {
+    const { clock } = fakeClock();
+    const f = vi.fn(async () => { throw noRoad("EAI_AGAIN"); });
+    const warn = quietWarn();
+    try {
+      const b = new SolariBackend({ apiKey: "k", fetch: f, clock });
+      await expect(b.request("GET", "/sandboxes/x")).rejects.toThrow("fetch failed");
+      expect(f).toHaveBeenCalledTimes(3);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("reads a road out of an AggregateError, one error per address tried", async () => {
+    const { clock } = fakeClock();
+    let calls = 0;
+    const f = vi.fn(async () => {
+      if (++calls === 1) {
+        throw new TypeError("fetch failed", {
+          cause: new AggregateError([
+            Object.assign(new Error("connect ENETUNREACH"), { code: "ENETUNREACH" }),
+            Object.assign(new Error("connect ENETUNREACH"), { code: "ENETUNREACH" }),
+          ]),
+        });
+      }
+      return new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox", state: "running" }), { status: 200 });
+    });
+    const warn = quietWarn();
+    try {
+      const b = new SolariBackend({ apiKey: "k", fetch: f, clock });
+      await expect(b.get("x")).resolves.toMatchObject({ id: "x" });
+      expect(warn.mock.calls.map(c => String(c[0]))).toEqual(["GET /sandboxes/x did not leave this computer (ENETUNREACH); try 2 of 3"]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a road that flapped before the first answer leaves the gateway retries whole: one drop, then 502, 502, 200 in four sends", async () => {
+    const { clock } = fakeClock();
+    const answers = [502, 502, 200];
+    let calls = 0;
+    const f = vi.fn(async () => {
+      if (++calls === 1) throw noRoad();
+      const status = answers[calls - 2]!;
+      const body = status === 200 ? { sandboxId: "x", kind: "sandbox", state: "running" } : { error: "upstream sad" };
+      return new Response(JSON.stringify(body), { status });
+    });
+    const warn = quietWarn();
+    try {
+      const b = new SolariBackend({ apiKey: "k", fetch: f, clock });
+      await expect(b.get("x")).resolves.toMatchObject({ id: "x" });
+      expect(f).toHaveBeenCalledTimes(4);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("never retries an answer: a 409 is the caller's on the first reply", async () => {
+    const { clock } = fakeClock();
+    const f = fakeFetch({ "POST /sandboxes/x/pause": { status: 409, body: { error: "sandbox is not running" } } });
+    const b = new SolariBackend({ apiKey: "k", fetch: f, clock });
+    await expect(b.request("POST", "/sandboxes/x/pause", {})).rejects.toMatchObject({ kind: "conflict", status: 409 });
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it("never retries a refused, reset or timed out connection: those are the far end's", async () => {
+    for (const code of ["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT"]) {
+      const { clock } = fakeClock();
+      const f = vi.fn(async () => {
+        throw new TypeError("fetch failed", { cause: Object.assign(new Error(`connect ${code}`), { code }) });
+      });
+      const b = new SolariBackend({ apiKey: "k", fetch: f, clock });
+      await expect(b.request("GET", "/sandboxes/x")).rejects.toThrow("fetch failed");
+      expect(f).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("every road takes it: create, snapshot, pause, poll and promote each survive one dropped lookup", async () => {
+    const routes: Record<string, unknown> = {
+      "POST /sandboxes": { sandboxId: "x", kind: "sandbox" },
+      "POST /sandboxes/x/snapshots": { snapshotId: "snap_1" },
+      "POST /sandboxes/x/pause": {},
+      "GET /sandboxes/x": { sandboxId: "x", kind: "sandbox", state: "running" },
+      "POST /snapshots/snap_1/promote": { templateId: "tpl_1" },
+    };
+    const dropped = new Set<string>();
+    const { clock } = fakeClock();
+    const f = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const key = `${init?.method ?? "GET"} ${new URL(String(url)).pathname}`;
+      if (!dropped.has(key)) {
+        dropped.add(key);
+        throw noRoad();
+      }
+      return new Response(JSON.stringify(routes[key]), { status: 200 });
+    });
+    const warn = quietWarn();
+    try {
+      const b = new SolariBackend({ apiKey: "k", fetch: f, clock });
+      const m = await b.create({ kind: "sandbox", template: "base" });
+      expect(await m.snapshot("g")).toBe("snap_1");
+      await m.pause();
+      expect(await m.state()).toBe("running");
+      expect(await b.promoteSnapshot("snap_1", "wsp-default-v1")).toBe("tpl_1");
+      expect(dropped.size).toBe(5);
+      expect(f).toHaveBeenCalledTimes(10);
+      expect(warn).toHaveBeenCalledTimes(5);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

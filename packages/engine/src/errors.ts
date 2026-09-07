@@ -46,6 +46,37 @@ export function isNetworkError(e: unknown): boolean {
   return e.message === "fetch failed" || NETWORK_CODES.has(codeOf(e) ?? "") || NETWORK_CODES.has(codeOf(e.cause) ?? "");
 }
 
+/** The system errors under a failed fetch that mean this computer has no road out: the name would not resolve, or
+ * there is no route to anything. A refused or reset connection and a timeout are the far end's and stay the
+ * machine's miss (a dropped edge request is how the poll finds a machine gone). */
+const OFFLINE_CODES = new Set(["ENOTFOUND", "EAI_AGAIN", "EAI_FAIL", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH", "EHOSTDOWN"]);
+
+/** The code of the road that failed, or undefined when the failure was not this computer's road. fetch rejects with
+ * TypeError "fetch failed" for every failure under HTTP and puts the system error, or an AggregateError of one per
+ * address tried, in its cause. */
+export function roadCode(e: unknown): string | undefined {
+  if (!(e instanceof TypeError) || e.message !== "fetch failed") return undefined;
+  const cause = e.cause as { code?: unknown; errors?: unknown } | undefined;
+  const codes = Array.isArray(cause?.errors) ? cause.errors.map(err => (err as { code?: unknown } | null)?.code) : [cause?.code];
+  const named = codes.filter((code): code is string => typeof code === "string" && OFFLINE_CODES.has(code));
+  return codes.length > 0 && named.length === codes.length ? named[0] : undefined;
+}
+
+/** Whether the request failed before it left this computer. The reach probe's word for a silence and the retry's
+ * word for a road worth trying again are the same one. */
+export function roadFailed(e: unknown): boolean {
+  return roadCode(e) !== undefined;
+}
+
+/** How many times a call that never left this computer is sent, and the waits between the tries. This Mac's resolver
+ * dropped one name for stretches while every other name answered, and answered it again inside the minute (measured
+ * 2026-09-07); ten seconds of retry covers the flaps seen and still ends well inside the status poll's tick. */
+export const ROAD_TRIES = 3;
+
+export function roadBackoffMs(retry: number): number {
+  return retry * 3_000 + Math.floor(Math.random() * 250);
+}
+
 /** How long a call to a machine keeps being retried when nothing answers: a DNS blip on this computer was measured
  * at about a minute, and a turn that waits half of it beats one that fails at once. */
 export const REACH_WINDOW_MS = 30_000;
