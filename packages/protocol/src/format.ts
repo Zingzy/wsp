@@ -454,6 +454,19 @@ export function stillWorkingRefusal(threadId: string): string {
   return `thread ${threadId.slice(0, 8)} replied, still working; wait for its turn to finish before sending`;
 }
 
+/** The send key's label while the thread's turn runs: Enter queues, nothing sends. */
+export const TURN_IN_FLIGHT = "Turn in flight";
+
+/** The composer's line for a stop click the runtime refused or could not place, over the runtime's own words. */
+export function stopFailedLine(error: string): string {
+  return `Could not stop: ${error}`;
+}
+
+/** The composer's line for a send-now into a running turn that did not go, over the runtime's own words. */
+export function sendNowFailedLine(error: string): string {
+  return `Could not send now: ${error}`;
+}
+
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 

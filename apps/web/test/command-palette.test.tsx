@@ -5,6 +5,7 @@
 import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView, WorkspaceView } from "@wsp/protocol";
+import { RECENT_THREAD_LIMIT } from "../src/components/palette/CommandPalette.logic.js";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
 import { compileResolvedKeybindingsConfig } from "../src/keybindingDefaults.js";
 import type { Api } from "../src/protocol/client.js";
@@ -177,6 +178,49 @@ describe("command palette", () => {
     fireEvent.click(screen.getByText("New thread"));
     expect(seen).toEqual(["ws_a"]);
     off();
+  });
+
+  it("the sidebar's search row is the palette's door: focus alone opens nothing, a click opens it, Escape shuts it and it stays shut", async () => {
+    await mountShell();
+    const row = screen.getByRole("button", { name: "Search" });
+    act(() => row.focus());
+    await settle();
+    expect(palette()).toBeNull();
+    expect(document.activeElement).toBe(row);
+    fireEvent.click(row);
+    await waitFor(() => expect(palette()).not.toBeNull());
+    expect(document.querySelector("[data-slot=sidebar] input")).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? window, { key: "Escape" });
+    await waitFor(() => expect(palette()).toBeNull());
+    await settle();
+    expect(palette()).toBeNull();
+  });
+
+  it("a typed title finds a thread beyond the recent cap and opens that thread; workspaces narrow by name alone", async () => {
+    const recent = Array.from({ length: RECENT_THREAD_LIMIT }, (_, i) => ({ ...session(`s${i}`, "ws_a", `recent task ${i}`), threadId: `t${i}`, startedAt: Date.now() - i * 1_000 }));
+    const old = { ...session("s_old", "ws_b", "Archive the old logs"), threadId: "t_old", startedAt: Date.now() - 3_600_000 };
+    await mountShell([...recent, old]);
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    expect(inPalette().getByText("recent task 0")).toBeTruthy();
+    expect(inPalette().queryByText("Archive the old logs")).toBeNull();
+    const input = screen.getByPlaceholderText(/Search commands/);
+    fireEvent.change(input, { target: { value: "archive" } });
+    await waitFor(() => expect(inPalette().getByText("Archive the old logs")).toBeTruthy());
+    expect(inPalette().queryByText("recent task 0")).toBeNull();
+    // A workspace's name finds the workspace and not its threads; its machine id and state find nothing.
+    fireEvent.change(input, { target: { value: "worker" } });
+    await waitFor(() => expect(inPalette().getAllByText("worker")).toHaveLength(1));
+    expect(inPalette().queryByText("Archive the old logs")).toBeNull();
+    fireEvent.change(input, { target: { value: "m_ws_b" } });
+    await waitFor(() => expect(inPalette().queryByText("worker")).toBeNull());
+    fireEvent.change(input, { target: { value: "running" } });
+    await waitFor(() => expect(inPalette().queryByText("worker")).toBeNull());
+    fireEvent.change(input, { target: { value: "old logs" } });
+    fireEvent.click(await inPalette().findByText("Archive the old logs"));
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    expect(useStore.getState().selectedThreadId).toBe("t_old");
   });
 
   it("opens from a focused terminal on macOS, where Command is never the shell's", async () => {
