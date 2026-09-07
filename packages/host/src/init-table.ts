@@ -3,11 +3,10 @@
 // with its tick, why it is here in the words the person's own machine gives,
 // and the size its install downloads. wsp recipe prints it as text; wsp init's
 // agents and tools screens are the same rows as a list.
-import { CATALOG, CATALOG_AGENTS, type CatalogEntry, sizeBytes } from "@wsp/catalog";
+import { CATALOG, CATALOG_AGENTS, THREAD_AGENTS, type CatalogEntry, sizeBytes } from "@wsp/catalog";
 import { HEAVY_USED_FLOOR, USED_FLOOR, type ProjectScan, floorApplies, isHeavy, meetsUsedFloor } from "@wsp/collect";
 import { customRows, fmtBytes, plural, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { GREY, GUTTER, accent, grey } from "./init-layout.js";
-import { THREAD_AGENTS } from "./thread-agents.js";
 import type { Cell } from "./init-select.js";
 
 /** The groups a row falls in, in reading order: what always comes, what this computer's agents ran, what is here

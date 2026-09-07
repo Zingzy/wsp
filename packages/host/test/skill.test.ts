@@ -4,10 +4,9 @@
 // its instructions.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, MCP_AGENT_IDS } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { SessionStartOutcome, backgroundTasksLine, notifyLine } from "@wsp/protocol";
 import { INSTRUCTIONS, SETUP_HEADING, SKILL_NAME, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
-import { THREAD_AGENTS } from "../src/thread-agents.js";
 import { CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 
 describe("the wsp skill", () => {
