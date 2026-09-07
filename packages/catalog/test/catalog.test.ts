@@ -3,9 +3,13 @@
 // every browser or device sign-in has a status that proves it, the agents are
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
-import { APT_INDEX, APT_UPDATE, BASE_FLOOR, CATALOG, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, DEFAULT_AGENT, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, ROADS, ROAD_MODULES, SIGN_IN_ROWS, agentName, baseEntryFor, baseNote, catalogEntry, catalogToolFor, guestEnv, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, sizeBytes, smokeOf, SIZE_METHODS, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { APT_INDEX, APT_UPDATE, BASE_FLOOR, BREW_ENV, CURL_NET, NET_READ_S, NET_RETRIES, ROAD_STEPS, CATALOG, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, DEFAULT_AGENT, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, ROADS, ROAD_MODULES, SIGN_IN_ROWS, agentName, baseEntryFor, baseNote, catalogEntry, catalogToolFor, guestEnv, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, sizeBytes, smokeOf, SIZE_METHODS, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -255,6 +259,49 @@ describe("catalog", () => {
     expect(APT_UPDATE).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get update -qq");
     expect([ROAD_MODULES.brew.after, ROAD_MODULES.npm.after]).toEqual([HOMEBREW_STEP, "node"]);
     expect([line({ road: "script", script: "echo hi" }), off({ road: "script", script: "echo hi" }, "hi")]).toEqual(["echo hi", { note: "hi has no uninstaller; left on the machine" }]);
+  });
+
+  it("each module says the one line a person reads for an install whose script is not that line; the rest read as their command", () => {
+    const shown = (road: InstallRoad, bin = "x") => roadModule(road).shown?.(road, bin);
+    expect(shown({ road: "brew", formula: "gh" })).toBe("brew install gh");
+    expect(shown({ road: "apt", packages: ["neovim", "fd-find"] })).toBe("apt-get install neovim fd-find");
+    expect(shown({ road: "release", repo: "cli/cli" }, "gh")).toBe("the latest release of github.com/cli/cli");
+    expect(shown({ road: "release", repo: "cli/cli", version: "v2.86.0" }, "gh")).toBe("the v2.86.0 release of github.com/cli/cli");
+    expect(shown({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }, "gh")).toBe("the v2.86.0 release of github.com/cli/cli");
+    expect(shown({ road: "vendor", cask: GCLOUD })).toBe(GCLOUD.from);
+    for (const road of ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go", "script"] as const) expect(ROAD_MODULES[road].shown, road).toBeUndefined();
+  });
+
+  it("gives every road a step: how long it may run, whether a run that hit the limit is tried once more, and the lines that clock its network reads", () => {
+    expect(Object.keys(ROAD_STEPS).sort()).toEqual([...ROADS].sort());
+    // A dead read fails in about a minute and is tried once more, on every road whose tool takes the knobs from its environment.
+    expect([NET_READ_S, NET_RETRIES]).toEqual([60, 1]);
+    const env = (road: keyof typeof ROAD_STEPS) => ROAD_STEPS[road].env.join("\n");
+    expect(env("npm")).toBe("export npm_config_fetch_timeout=60000 npm_config_fetch_retries=1 npm_config_fetch_retry_maxtimeout=10000");
+    expect(env("pnpm")).toBe(env("npm"));
+    expect(env("pipx")).toBe("export PIP_TIMEOUT=60 PIP_RETRIES=1");
+    expect(env("uv")).toBe("export UV_HTTP_TIMEOUT=60 UV_HTTP_RETRIES=1");
+    expect(env("cargo")).toBe("export CARGO_HTTP_TIMEOUT=60 CARGO_NET_RETRY=1");
+    expect(env("release")).toBe(CURL_NET);
+    expect(env("vendor")).toBe(CURL_NET);
+    // A script may run any of them, so it gets every line; Homebrew takes its retry count from its own environment.
+    expect(ROAD_STEPS.script.env).toEqual([...ROAD_STEPS.npm.env, ...ROAD_STEPS.pipx.env, ...ROAD_STEPS.uv.env, ...ROAD_STEPS.cargo.env, CURL_NET]);
+    expect(BREW_ENV).toContain("HOMEBREW_CURL_RETRIES=1");
+    for (const road of ["brew", "bun", "go", "apt"] as const) expect(ROAD_STEPS[road].env, road).toEqual([]);
+    // Package managers and downloads get a shorter step than anything that may compile; a download that ran the clock out is tried once more, a compile is not.
+    const downloads = ["npm", "pnpm", "bun", "uv", "pipx", "release", "vendor"] as const;
+    for (const road of downloads) expect(ROAD_STEPS[road], road).toMatchObject({ limitS: 300, retry: true });
+    for (const road of ["brew", "go", "apt", "script"] as const) expect(ROAD_STEPS[road], road).toMatchObject({ limitS: 600, retry: false });
+    expect(ROAD_STEPS.cargo).toMatchObject({ limitS: 1200, retry: false });
+  });
+
+  it("the curl every road script types goes through one function that clocks the connection and a dead read, and tries once more", () => {
+    // The function runs under this machine's bash, ahead of a curl stand-in on PATH that prints what reached it.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-curl-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, "curl"), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+    const out = execFileSync("bash", ["-c", `${CURL_NET}\ncurl -fsSL -o /tmp/x 'https://example.test/a b'`], { encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}` } });
+    expect(out.split("\n").filter(l => l !== "")).toEqual(["--connect-timeout", "15", "--speed-limit", "1", "--speed-time", "60", "--retry", "1", "-fsSL", "-o", "/tmp/x", "https://example.test/a b"]);
   });
 
   it("names the evidence behind every default: sessions on this Mac and lab images that ship it", () => {

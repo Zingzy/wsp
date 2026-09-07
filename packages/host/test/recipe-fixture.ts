@@ -54,3 +54,15 @@ export function fakeHost(laptop: FakeLaptop = {}): Host {
     exec: { which: async bin => which.has(bin), run: async () => undefined },
   };
 }
+
+/** Runs fn with HOME pointed at dir, an empty computer, so a cli path that reads homedir() never reads this one. */
+export async function withHome<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  const was = process.env["HOME"];
+  process.env["HOME"] = dir;
+  try {
+    return await fn();
+  } finally {
+    if (was === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = was;
+  }
+}

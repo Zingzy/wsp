@@ -14,10 +14,10 @@ import { WebSocketServer } from "ws";
 import { HELP, cli, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { PLAN_ONLY, dialHost } from "../src/verbs.js";
+import { PLAN_ONLY, dialHost, messageTo } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScript, launchedScripts, projectBundler, doneOnlyAgent, heldAgent, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -405,6 +405,30 @@ describe("wsp verbs over the host", () => {
     expect(next.io.errors).toEqual([]);
     const asJson = await run("send", row!.threadId!, "and json", "--json");
     expect(json(asJson.io).filter(e => (e as { type: string }).type === "session.start")).toEqual([expect.not.objectContaining({ afterCut: true })]);
+  });
+
+  it("a send into a thread whose launch never reached the machine runs the message as that thread's first turn, on the same thread, instead of refusing", async () => {
+    const agent = bornDeadAgent(prompt => `re: ${prompt}`);
+    await restartHost({ claude: agent.adapter, codex: codex.adapter });
+    await run("new", "alpha");
+    const dead = await run("thread", "new", "--in", "alpha", "hello");
+    expect(dead.code).toBe(1);
+    expect(dead.io.errors).toEqual([UNREACHED_LINE]);
+    const [row] = await rt.sessions.list();
+    expect(row!.claudeSessionId).toBeUndefined();
+    const sent = await run("send", row!.threadId!, "again");
+    expect(sent.code).toBe(0);
+    expect(sent.io.errors).toEqual([]);
+    expect(sent.io.lines).toEqual(["re: again"]);
+    expect(agent.starts.map(s => s.resume)).toEqual([undefined, undefined]);
+    const rows = await rt.sessions.list();
+    expect(rows.map(r => [r.prompt, r.status, r.threadId])).toEqual([
+      ["hello", "failed", row!.threadId],
+      ["again", "completed", row!.threadId],
+    ]);
+    const more = await run("send", row!.threadId!, "once more");
+    expect(more.io.lines).toEqual(["re: once more"]);
+    expect(agent.starts[2]!.resume).toBe(rows[1]!.claudeSessionId);
   });
 
   it("threads is the sidebar's data: one row per thread with agent, state, who opened it and its folder, filtered by --in", async () => {
@@ -1191,6 +1215,16 @@ describe("wsp verbs over the host", () => {
     const { code, io } = await run("threads");
     expect(code).toBe(1);
     expect(io.errors).toEqual(["wsp threads: unauthorized"]);
+  });
+});
+
+describe("messageTo", () => {
+  const row: ThreadView = { id: "row_1", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "hello", sessionId: "row_1", turns: 1 };
+  it("names the thread when the row has one, resumes by session when it has only that, and refuses a row with neither instead of minting a thread in silence", () => {
+    expect(messageTo({ ...row, threadId: "thr_1", claudeSessionId: "sess_1" }, "again")).toEqual({ workspaceId: "ws_1", prompt: "again", harness: "claude", thread: "thr_1" });
+    expect(messageTo({ ...row, threadId: "thr_1" }, "again")).toEqual({ workspaceId: "ws_1", prompt: "again", harness: "claude", thread: "thr_1" });
+    expect(messageTo({ ...row, claudeSessionId: "sess_1" }, "again")).toEqual({ workspaceId: "ws_1", prompt: "again", harness: "claude", resume: "sess_1" });
+    expect(() => messageTo(row, "again")).toThrow("thread row_1 has no session to resume yet");
   });
 });
 
