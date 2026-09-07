@@ -4,6 +4,7 @@
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
 import type { MachineState, TurnResult } from "./index.js";
+import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
 const GIB = MIB * 1024;
@@ -142,6 +143,11 @@ export function harnessExitLine(bin: string, exitCode: number | null, path: stri
  * neither of which a person can act on. */
 export function machineUnreachedLine(attempts: number, elapsedMs: number): string {
   return `the machine could not be reached from this computer after ${plural(attempts, "attempt")} over ${fmtDuration(elapsedMs)}`;
+}
+
+/** The line an MCP install ends on: the command every agent's config now runs, as one shell line. */
+export function mcpServerCommandLine(command: string, args: readonly string[]): string {
+  return `The server command is ${shellLine([command, ...args])}`;
 }
 
 /** The one stderr line the command line shows under a command that exited non-zero, naming the folder it ran in:

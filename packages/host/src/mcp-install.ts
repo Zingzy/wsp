@@ -1,20 +1,76 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Puts the MCP server into a local agent's config, the command that runs this
-// same wsp against this state file, placed by the catalog entry's own config
-// module under the person's home, and the wsp skill into the agent's skills
-// folder. The catalog says where and how; this file only reads and writes.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+// Puts the MCP server into a local agent's config and the wsp skill into its
+// skills folder, under the person's home. This file decides the one command
+// that runs this same wsp against this state file; the catalog entry's own
+// config module says where it goes and in what format.
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { delimiter, dirname, join, sep } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, type AgentEntry, type McpAgent, type McpServerSpec, type Placed } from "@wsp/catalog";
+import { mcpServerCommandLine } from "@wsp/protocol";
 import { SKILL_NAME, WSP_SKILL } from "./skill.js";
+import { VERSION } from "./version.js";
 
 /** The name the server has in every agent's config. */
 export const MCP_SERVER_NAME = "wsp";
 
-/** How the agent runs this same wsp again: the node, the flags and the script this process was started with, then
- * `mcp --state <path>`, so the agent's own cwd never picks another state file. */
-export function mcpServerSpec(statePath: string, proc: Pick<typeof process, "execPath" | "execArgv" | "argv"> = process): McpServerSpec {
-  return { command: proc.execPath, args: [...proc.execArgv, proc.argv[1] ?? "wsp", "mcp", "--state", statePath] };
+/** The package `npx` fetches wsp from. */
+const NPM_PACKAGE = "@zingzy/wsp";
+
+/** The folder under npm's cache where npx keeps what it ran; a path through it dies with a cache sweep. */
+const NPX_CACHE_DIR = "_npx";
+
+/** What the install reads of the process it runs in, to say how an agent starts this same wsp again. */
+export interface RunningWsp {
+  execPath: string;
+  execArgv: readonly string[];
+  argv: readonly string[];
+  version: string;
+  PATH: string | undefined;
+}
+
+export const runningWsp = (): RunningWsp => ({ execPath: process.execPath, execArgv: process.execArgv, argv: process.argv, version: VERSION, PATH: process.env.PATH });
+
+/** The `wsp` a shell would run from PATH: the first folder that holds one. */
+function wspOnPath(PATH: string | undefined): string | undefined {
+  return (PATH ?? "")
+    .split(delimiter)
+    .filter(dir => dir !== "")
+    .map(dir => join(dir, "wsp"))
+    .find(file => existsSync(file));
+}
+
+function sameFile(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
+}
+
+/** The npx that ships beside this node, so the agent's shorter PATH (a GUI launch has less than a shell) never
+ * matters; the bare word only when none sits there. */
+function npxBeside(execPath: string): string {
+  const beside = join(dirname(execPath), "npx");
+  return existsSync(beside) ? beside : "npx";
+}
+
+/** How an agent starts this same wsp again, the one rule for every agent's config. Run out of npx's cache, the
+ * command is npx with this version pinned: the cache path goes with a sweep or a version bump, and the pin brings
+ * the same wsp back. Run as the wsp on PATH, the command is that binary. Any other start (a checkout, a bin folder
+ * PATH does not hold) is this node with the flags and script it was given. */
+function mcpServerCommand(run: RunningWsp): McpServerSpec {
+  const script = run.argv[1];
+  if (script !== undefined && script.split(sep).includes(NPX_CACHE_DIR)) return { command: npxBeside(run.execPath), args: ["-y", `${NPM_PACKAGE}@${run.version}`, "mcp"] };
+  const onPath = wspOnPath(run.PATH);
+  if (script !== undefined && onPath !== undefined && sameFile(script, onPath)) return { command: onPath, args: ["mcp"] };
+  return { command: run.execPath, args: [...run.execArgv, script ?? "wsp", "mcp"] };
+}
+
+/** The server every agent's config gets: the command that runs this same wsp, then `--state <path>`, so the
+ * agent's own cwd never picks another state file. */
+export function mcpServerSpec(statePath: string, run: RunningWsp = runningWsp()): McpServerSpec {
+  const wsp = mcpServerCommand(run);
+  return { command: wsp.command, args: [...wsp.args, "--state", statePath] };
 }
 
 export interface Installed {
@@ -71,6 +127,8 @@ export function installMcp(agentId: string, server: McpServerSpec, home: string)
  * it was asked for, and every one that took neither with the reason, so a caller naming several is not left
  * guessing which of them landed. */
 export interface InstallReport {
+  /** The command every written config now runs. */
+  server: McpServerSpec;
   installed: Array<Installed & { id: string }>;
   failures: Array<{ id: string; error: string }>;
 }
@@ -78,7 +136,7 @@ export interface InstallReport {
 /** Installs for each agent in turn and keeps going past one that fails: an id the catalog does not know must not
  * cost the agents named beside it. */
 export function installEach(agentIds: Iterable<string>, server: McpServerSpec, home: string): InstallReport {
-  const report: InstallReport = { installed: [], failures: [] };
+  const report: InstallReport = { server, installed: [], failures: [] };
   for (const id of agentIds) {
     try {
       report.installed.push({ id, ...installMcp(id, server, home) });
@@ -97,4 +155,9 @@ export function installLines(placed: Installed): string[] {
   if (placed.commentsDropped === true) lines.push("The file held comments; the rewrite is plain JSON, so they are gone.");
   lines.push(`The wsp skill went to ${placed.skill}`);
   return lines;
+}
+
+/** The line after every agent's own: the command their configs now run, once; none when no config took the server. */
+export function registeredLine(report: InstallReport): string | undefined {
+  return report.installed.some(p => p.path !== undefined) ? mcpServerCommandLine(report.server.command, report.server.args) : undefined;
 }

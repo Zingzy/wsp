@@ -1093,6 +1093,9 @@ describe("wsp init, the summary-first screens", () => {
     const written = JSON.parse(readFileSync(join(f.opts.home, ".claude.json"), "utf8")) as { mcpServers: { wsp: { command: string; args: string[] } } };
     expect(written.mcpServers.wsp.command).toBe(process.execPath);
     expect(written.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", f.opts.statePath]);
+    // The command the config now runs, named once after the agents' lines.
+    expect(out).toContain(`The server command is ${process.execPath}`);
+    expect(out).toContain(`mcp --state ${f.opts.statePath}`);
     await f.press("n");
     expect((await run).code).toBe(1);
   });
