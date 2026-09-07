@@ -382,6 +382,12 @@ export function mcpServerCommandLine(command: string, args: readonly string[]): 
   return `The server command is ${shellLine([command, ...args])}`;
 }
 
+/** The very last line an MCP install prints: the thing to do next, which is inside the agent it just gave the tools
+ * to. `open` is the agent's own command and `first` what to type at its prompt, its slash form where it has one. */
+export function nextInsideAgentLine(open: string, first: string): string {
+  return `Next: run ${shellLine([open])} in this folder and say: ${first}`;
+}
+
 /** The one stderr line the command line shows under a command that exited non-zero, naming the folder it ran in:
  * the host chose it when none was named, so the person did not see it go by; absent, the runtime ran it in ~. */
 export function execFolderLine(cwd: string | undefined): string {
@@ -393,6 +399,13 @@ export function execFolderLine(cwd: string | undefined): string {
  * before the work it started did. */
 export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
+}
+
+/** What a send meets when its thread's last turn has replied but its agent process is still running (a child it did
+ * not wait for, a lingering task): the row still reads running and is not free for a new turn, so the caller is told
+ * in words, by thread, instead of starting a second agent in the same worktree. */
+export function stillWorkingRefusal(threadId: string): string {
+  return `thread ${threadId.slice(0, 8)} replied, still working; wait for its turn to finish before sending`;
 }
 
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */

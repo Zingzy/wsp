@@ -6,8 +6,8 @@
 // launch having failed, is named instead, and the runtime runs the message as
 // its first turn. A failed send puts the draft back. Stop
 // sends one sessions.interrupt for the turn on screen and waits, disabled,
-// for the reply or the turn's end; the runtime pushes the interrupted done
-// before it answers, so the composer opens on that event. not-running means
+// for the turn's end; the runtime pushes the interrupted done before it
+// answers, and the composer opens when the process exits. not-running means
 // the turn beat the click and is no error; not-found and a refused request
 // show in the status row. The editor is disabled with the reason while the
 // runtime or the workspace is not live, and the banner names whatever blocks
@@ -35,7 +35,7 @@
 // footer ride every start, so a change mid-thread applies at the next turn.
 import { CircleAlertIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { sendRefusal, workspaceState, type MachineState, type ReachState, type WorkspacePhase } from "@wsp/protocol";
+import { sendRefusal, stillWorkingRefusal, workspaceState, type MachineState, type ReachState, type WorkspacePhase } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
 import { useThreadFolder } from "../../files/root";
@@ -141,6 +141,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const hasText = draft.prompt.trim().length > 0;
 
   const runningTurn = thread.view.running ? thread.view.latestTurn : null;
+  // The reply is in but the process still runs: no new turn can start until it exits, and the note says so in the
+  // runtime's own words, the sentence its refusal of a send would carry.
+  const stillWorking = runningTurn?.replied === true ? stillWorkingRefusal(threadKey) : null;
   // The runtime keys sessions.interrupt by its own session id; the events carry the harness id, which differs after a
   // resume, so the row from sessions.list maps one to the other. Without a row the events' id goes, and the runtime answers.
   const stopTarget = useMemo(() => {
@@ -346,6 +349,11 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
 
   return (
     <div className="w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5">
+      {thread.view.running ? (
+        <div className="mx-auto flex h-5 w-full max-w-3xl items-center px-3" aria-live="polite" data-composer-turn-note>
+          {stillWorking !== null ? <span className="min-w-0 truncate font-mono text-[11px] leading-5 text-muted-foreground">{stillWorking}</span> : null}
+        </div>
+      ) : null}
       <ComposerQueue
         rows={queue}
         steering={stopAttempt?.error ? null : steering}

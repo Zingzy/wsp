@@ -114,6 +114,7 @@ function buildTurn(
     turnId,
     sessionId: "session-1",
     state,
+    replied: state !== "running",
     prompt: null,
     model: null,
     durationMs: null,

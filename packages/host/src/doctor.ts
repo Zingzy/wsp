@@ -24,7 +24,7 @@ const execFileAsync = promisify(execFile);
 // preview edge (it dials eth0), so 0.0.0.0 is the whole point of this file.
 // PATH is set before the daemon loads, never inherited: a relaunch from the
 // guest's side arrives with a bare one (measured after an OOM kill, 2026-09-06).
-const START_MJS = `process.env.PATH = ${JSON.stringify(TOOLS_PATH)};
+export const START_MJS = `process.env.PATH = ${JSON.stringify(TOOLS_PATH)};
 const { OPEN_SOCKET_PATH, startDaemon } = await import("./dist/index.js");
 const d = await startDaemon({ host: "0.0.0.0", openSocketPath: OPEN_SOCKET_PATH });
 console.log(\`wsp-daemon listening on 0.0.0.0:\${d.port}\`);
@@ -420,8 +420,6 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     const { version } = await rt.golden.build({
       setup: GOLDEN_SETUP,
       smoke: GOLDEN_SMOKE,
-      cpu: 2,
-      memMb: 4096,
       envs: opts.envs,
       labels: { [WSP_LABEL]: "1", [DOCTOR_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
     });

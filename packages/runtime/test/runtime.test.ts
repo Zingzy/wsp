@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe, type AdapterEvent, type TurnResult } from "@wsp/adapter-claude";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, SessionEvent, foldThreads, type EventUnion, type RecipeDigest, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, SessionEvent, foldThreads, stillWorkingRefusal, type EventUnion, type RecipeDigest, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -523,6 +523,29 @@ describe("runtime session history", () => {
     expect(ended.endedAt).toBeGreaterThanOrEqual(ended.startedAt!);
     expect(ended.endedAt).toBeLessThanOrEqual(Date.now());
     expect(ended.prompt).toBe("go");
+    await rt.close();
+  });
+
+  it("keeps the row running while the process lives past its reply, refuses a send until it exits, then completes", async () => {
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go" });
+    m.start();
+    m.done("here is the reply");
+    // The reply is recorded, but the process has not exited: the row is still running, not completed.
+    expect(handle.view().status).toBe("running");
+    expect((await rt.sessions.list(ws.id))[0]!.status).toBe("running");
+    expect((await rt.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done"]);
+    const sid = (await rt.sessions.list(ws.id))[0]!.claudeSessionId!;
+    // A send while the process lives is refused in words naming the thread, never run as a second agent.
+    await expect(rt.sessions.start(ws.id, { prompt: "again", resume: sid })).rejects.toThrow(stillWorkingRefusal(handle.view().threadId!));
+
+    m.end();
+    await handle.finished;
+    // The process exited: the row completes and no longer refuses a send.
+    expect((await rt.sessions.list(ws.id))[0]!.status).toBe("completed");
+    await expect(rt.sessions.start(ws.id, { prompt: "again", resume: sid })).resolves.toBeDefined();
     await rt.close();
   });
 
@@ -4797,14 +4820,24 @@ const held = (steers: boolean) => {
       };
     },
   });
-  const end = (turn: number, text: string, more: Partial<TurnResult> = {}): void => {
+  const results: TurnResult[] = [];
+  /** The harness's result lands while its process keeps running. */
+  const reply = (turn: number, text: string, more: Partial<TurnResult> = {}): void => {
     const t = turns[turn]!;
-    const result: TurnResult = { status: "completed", text, ...more };
-    t.onEvent({ type: "turn.done", sessionId: t.sessionId, result });
-    t.onEvent({ type: "session.end", sessionId: t.sessionId, exitCode: 0, sawResult: true });
-    t.finish(result);
+    results[turn] = { status: "completed", text, ...more };
+    t.onEvent({ type: "turn.done", sessionId: t.sessionId, result: results[turn]! });
   };
-  return { adapter, starts, steered, end };
+  /** The process exits, after its reply. */
+  const exit = (turn: number): void => {
+    const t = turns[turn]!;
+    t.onEvent({ type: "session.end", sessionId: t.sessionId, exitCode: 0, sawResult: true });
+    t.finish(results[turn]!);
+  };
+  const end = (turn: number, text: string, more: Partial<TurnResult> = {}): void => {
+    reply(turn, text, more);
+    exit(turn);
+  };
+  return { adapter, starts, steered, reply, exit, end };
 };
 const settle = () => new Promise<void>(r => setTimeout(r, 20));
 
@@ -4954,6 +4987,79 @@ describe("a thread whose start named who to tell", () => {
     expect(history.at(-1)).toMatchObject({ type: "session.start", threadId: parentThread, prompt: line });
     h.end(2, "read it");
     await rt.close();
+  });
+
+  it("a parent that replied while its process still runs is told once that process exits: the line waits for its session.end, then goes as a turn of its own", async () => {
+    const h = held(true);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    const parentThread = parent.view().threadId!;
+    const parentSid = parent.view().claudeSessionId!;
+    h.reply(0, "waiting for the builder");
+    expect(parent.view().status).toBe("running");
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: parentThread });
+    h.end(1, "done", { durationMs: 1_500, costUsd: 0.0042 });
+    const line = `thread ${kid.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): done`;
+    await settle();
+    // The parent's turn has replied, so it takes no steer and is not queued behind; the line waits for its exit.
+    expect(h.steered).toEqual([]);
+    expect(h.starts).toHaveLength(2);
+    expect(events.filter(e => e.type === "session.queued")).toEqual([]);
+    expect((await rt.sessions.history(ws.id)).find(e => e.type === "session.notify")).toMatchObject({ notify: parentThread, text: line });
+
+    h.exit(0);
+    await parent.finished;
+    await vi.waitFor(() => expect(h.starts).toHaveLength(3));
+    expect(h.starts[2]).toMatchObject({ prompt: line, resume: parentSid });
+    expect(h.steered).toEqual([]);
+    const history = await rt.sessions.history(ws.id);
+    expect(history.filter(e => e.threadId === parentThread).map(e => e.type)).toEqual(["session.start", "session.done", "session.end", "session.start"]);
+    h.end(2, "read it");
+    await rt.close();
+  });
+
+  it("a turn that replied and is then ended by a nap keeps its reply's status and tells its parent nothing more", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "orchestrate", notify: "me" });
+    h.reply(0, "the reply", { durationMs: 1_500, costUsd: 0.0042 });
+    const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): the reply`;
+    await rt.workspaces.nap(ws.id);
+    expect(events.filter(e => e.type === "session.notify").map(e => (e as { text: string }).text)).toEqual([line]);
+    expect((await rt.sessions.list(ws.id))[0]!.status).toBe("completed");
+    const history = await rt.sessions.history(ws.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, sawResult: true, reason: "machine paused while the agent was working" });
+    await rt.close();
+  });
+
+  it("a turn that replied and whose host restarts before its process exited settles to its reply's status at load and tells its parent nothing more", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h1 = held(false);
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const turn = await rt1.sessions.start(ws.id, { prompt: "orchestrate", notify: "me" });
+    h1.reply(0, "the reply", { durationMs: 1_500, costUsd: 0.0042 });
+    const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): the reply`;
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: held(false).adapter } });
+    try {
+      const history = await rt2.sessions.history(ws.id);
+      expect(history.map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
+      expect(history.filter(e => e.type === "session.notify").map(e => (e as { text: string }).text)).toEqual([line]);
+      expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, sawResult: true, reason: "host restarted while the agent was working" });
+      expect((await rt2.sessions.list(ws.id))[0]!.status).toBe("completed");
+    } finally {
+      await rt2.close();
+    }
   });
 
   it("a running parent that cannot steer is told once its turn ends: the line waits behind it as a queued send does", async () => {

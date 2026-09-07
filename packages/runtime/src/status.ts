@@ -156,6 +156,8 @@ const RECONCILE_MIN_MS = 5 * 60_000;
 const ZOMBIE_WINDOW_MS = 3 * 60_000;
 /** The zombies' own exec 502'd after 36 to 38 s; a live guest answers echo in under a second. */
 const ZOMBIE_PROBE_TIMEOUT_MS = 20_000;
+/** How often the poller reads the running records; the idle nap that failed is asked again on the same cadence. */
+export const POLL_INTERVAL_MS = 15_000;
 const ZOMBIE_PROBE_CMD = "echo ok";
 
 /** Rejects once ms pass; the underlying promise is left to settle on its own. */
@@ -185,7 +187,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const zombieWindowMs = o.defaults?.zombieWindowMs ?? ZOMBIE_WINDOW_MS;
   const zombieProbeTimeoutMs = o.defaults?.zombieProbeTimeoutMs ?? ZOMBIE_PROBE_TIMEOUT_MS;
   const costIntervalMs = o.defaults?.costIntervalMs ?? 5_000;
-  const pollIntervalMs = o.defaults?.pollIntervalMs ?? 15_000;
+  const pollIntervalMs = o.defaults?.pollIntervalMs ?? POLL_INTERVAL_MS;
   const clock = o.clock ?? realClock;
   const meters = new Map<string, Meter>();
   const histories = new Map<string, WorkspaceCostEvent[]>();

@@ -18,6 +18,7 @@ import {
   jsonFileStore,
   machineExecStream,
   type EventUnion,
+  type GoldenBuildRequest,
   type Runtime,
   type SparedMachine,
   type WorkspaceView,
@@ -112,6 +113,11 @@ class Timings {
   }
 }
 
+/** Names no size, so the create takes the size the backend calls default. */
+export function goldenBuild(envs: Record<string, string>): GoldenBuildRequest {
+  return { setup: CLAUDE_INSTALL, smoke: "claude --version", envs, labels: cliLabels() };
+}
+
 async function ensureGolden(rt: Runtime, envs: Record<string, string>, timings: Timings): Promise<string> {
   const head = goldenHead(await rt.golden.get());
   if (head) {
@@ -120,15 +126,7 @@ async function ensureGolden(rt: Runtime, envs: Record<string, string>, timings: 
   }
   const { version } = await timings.time(
     "golden build",
-    () =>
-      rt.golden.build({
-        setup: CLAUDE_INSTALL,
-        smoke: "claude --version",
-        cpu: 2,
-        memMb: 4096,
-        envs,
-        labels: cliLabels(),
-      }),
+    () => rt.golden.build(goldenBuild(envs)),
     v => `built v${v.version.version} (${v.version.snapshotId})`,
   );
   return version.snapshotId;
@@ -150,14 +148,7 @@ async function createWorkspace(
       } catch (e) {
         if ((e as { kind?: string }).kind !== "missing") throw e;
         log(`golden snapshot ${golden} is gone; rebuilding`);
-        const rebuilt = await rt.golden.build({
-          setup: CLAUDE_INSTALL,
-          smoke: "claude --version",
-          cpu: 2,
-          memMb: 4096,
-          envs,
-          labels: cliLabels(),
-        });
+        const rebuilt = await rt.golden.build(goldenBuild(envs));
         return rt.workspaces.create({ golden: rebuilt.version.snapshotId, name, envs, labels: cliLabels() });
       }
     },
@@ -402,14 +393,7 @@ async function main(): Promise<void> {
     case "golden": {
       if (rest[0] !== "build") throw new Error(`unknown golden subcommand: ${rest[0] ?? ""}`);
       const timings = new Timings();
-      const { version } = await rt.golden.build({
-        setup: CLAUDE_INSTALL,
-        smoke: "claude --version",
-        cpu: 2,
-        memMb: 4096,
-        envs,
-        labels: cliLabels(),
-      });
+      const { version } = await rt.golden.build(goldenBuild(envs));
       timings.add("golden build", 0, `v${version.version} (${version.snapshotId})`);
       log(`golden v${version.version} ready: ${version.snapshotId}`);
       return;

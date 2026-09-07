@@ -246,8 +246,6 @@ describe("goldenRecipeFor", () => {
   it("a ticked Claude Code sets its config dir and the key only when loaded", () => {
     const withKey = goldenRecipeFor(bring("agents/claude", "shell/zshrc"), { anthropic: ANTHROPIC });
     expect(withKey.envs).toMatchObject({ ANTHROPIC_API_KEY: ANTHROPIC, CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
-    expect(withKey.cpu).toBe(2);
-    expect(withKey.memMb).toBe(4096);
 
     const noKey = goldenRecipeFor(bring("agents/claude"), {});
     expect(noKey.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
@@ -259,6 +257,11 @@ describe("goldenRecipeFor", () => {
     expect(codex.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
     expect(codex.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(codex.envs).toEqual(goldenRecipeFor(bring("shell/zshrc"), {}).envs);
+  });
+
+  it("names no size, so the wizard's builder is minted at the size the backend calls default", () => {
+    const recipe = goldenRecipeFor(bring("agents/claude", "shell/zshrc"), { anthropic: ANTHROPIC });
+    expect([recipe.cpu, recipe.memMb]).toEqual([undefined, undefined]);
   });
 
   it("threads the daemon deploy hook through", () => {

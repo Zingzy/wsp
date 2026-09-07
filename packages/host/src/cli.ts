@@ -63,7 +63,7 @@ import {
 } from "./service.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
-import { installEach, installLines, mcpServerSpec, registeredLine } from "./mcp-install.js";
+import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp } from "./mcp-install.js";
 import { COMMON, VERBS, findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
 import { VERSION } from "./version.js";
 
@@ -111,11 +111,13 @@ usage:
   wsp doctor         run the reach loop end to end against one live machine
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
-                     that agent's own MCP config (${MCP_AGENT_IDS})
-                     and the wsp skill in its skills folder. --agent repeats,
-                     and --json prints one line holding what each agent took and
-                     a failures array for the ones that took nothing; both are
-                     read by mcp install alone
+                     that agent's own MCP config (${MCP_AGENT_IDS}),
+                     the wsp skill in its skills folder, and wsp's own section
+                     in this folder's AGENTS.md, which --remove takes back out.
+                     --agent repeats and off a terminal every agent on your PATH
+                     takes it; --json prints one line holding what each agent
+                     took and a failures array for the ones that took nothing;
+                     all three are read by mcp install alone
   wsp --version      print the version
 
 verbs, against the host wsp up started; every one takes --json for the raw
@@ -361,8 +363,6 @@ export function goldenRecipe(
   return {
     setup: GOLDEN_SETUP,
     smoke: GOLDEN_SMOKE,
-    cpu: 2,
-    memMb: 4096,
     envs: claudeEnvs(keys.anthropic),
     deployDaemon: hooks.deployDaemon ?? (async machine => `daemon on node ${(await deployDaemon(machine)).node}`),
   };
@@ -967,11 +967,12 @@ const MCP_COMMAND = "mcp";
 export const MCP_OPTIONS: Options = {
   agent: { type: "string", multiple: true },
   json: { type: "boolean" },
+  remove: { type: "boolean" },
   state: { type: "string" },
   help: { type: "boolean", short: "h" },
 };
 
-const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--json]   (${MCP_AGENT_IDS})`;
+const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
 const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND}\n       ${mcpInstallUsage()}`;
 
 /** The usage of the command a line stopped short of, whether it is a verb, `mcp` or `recipe`; none when no command
@@ -989,7 +990,7 @@ function commandUsage(word: string): string | undefined {
  * `--json` instead of taking it and printing prose. */
 async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string): Promise<number> {
   const usage = mcpUsage();
-  let values: { agent?: string[]; json?: boolean; state?: string; help?: boolean };
+  let values: { agent?: string[]; json?: boolean; remove?: boolean; state?: string; help?: boolean };
   let words: string[];
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
@@ -1010,19 +1011,35 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     io.error(`unknown command: ${MCP_COMMAND} ${words.join(" ")}\n\n${usage}`);
     return 1;
   }
-  const agents = values.agent ?? [];
+  const json = values.json === true;
+  const run = runningWsp();
+  // Nobody named an agent: at a terminal that is a line half typed, but an agent running this has no terminal to be
+  // asked at, so every agent whose own command is on this computer's PATH takes it.
+  const agents = values.agent ?? (io.isTTY === true ? [] : agentsOnPath(run.PATH));
   if (agents.length === 0) {
+    if (io.isTTY !== true) io.error("wsp mcp install: no agent of the catalog's is on this computer's PATH; name one with --agent.");
     io.error(`usage: ${mcpInstallUsage()}`);
     return 1;
   }
-  const json = values.json === true;
-  const report = installEach(agents, mcpServerSpec(statePath), homedir());
+  const project = process.cwd();
+  if (values.remove === true) {
+    const gone = removeEach(agents, project);
+    if (json) io.log(JSON.stringify(gone));
+    else {
+      for (const agent of gone.removed) for (const line of removeLines(agent)) io.log(line);
+      for (const failed of gone.failures) io.error(`wsp mcp install: ${failed.error}`);
+    }
+    return gone.failures.length > 0 ? 1 : 0;
+  }
+  const report = installEach(agents, mcpServerSpec(statePath, run), homedir(), project);
   if (json) io.log(JSON.stringify(report));
   else {
     for (const placed of report.installed) for (const line of installLines(placed)) io.log(line);
     const registered = registeredLine(report);
     if (registered !== undefined) io.log(registered);
     for (const failed of report.failures) io.error(`wsp mcp install: ${failed.error}`);
+    const next = nextLine(report);
+    if (next !== undefined) io.log(next);
   }
   return report.failures.length > 0 ? 1 : 0;
 }
