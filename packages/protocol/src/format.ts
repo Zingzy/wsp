@@ -137,6 +137,12 @@ export function harnessExitLine(bin: string, exitCode: number | null, path: stri
   return `${bin} was not found on PATH (exit 127); ${searched}`;
 }
 
+/** The one stderr line the command line shows under a command that exited non-zero, naming the folder it ran in:
+ * the host chose it when none was named, so the person did not see it go by; absent, the runtime ran it in ~. */
+export function execFolderLine(cwd: string | undefined): string {
+  return `ran in ${cwd ?? "the home folder"}`;
+}
+
 /** The turn's error when the harness's result arrived while the agent's own background tasks were still running: the
  * harness kills them with the turn and nothing wakes the thread when they would have finished, so the turn ended
  * before the work it started did. */

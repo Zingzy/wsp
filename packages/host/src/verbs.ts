@@ -19,6 +19,7 @@ import {
   defaultAgents,
   defaultConsent,
   deleteNotice,
+  execFolderLine,
   fmtBytes,
   plural,
   fmtThreads,
@@ -457,10 +458,10 @@ export function absoluteFolder(cwd: string | undefined): string | undefined {
   return cwd === undefined ? undefined : absolutePath("--cwd is a path on the machine", cwd);
 }
 
-/** The folder a new thread works in: the one named, else the workspace's imported project folder, else none, and the
- * harness starts in its own home. A thread's folder decides which project state its agent loads, so a workspace with
- * a project opens its threads there. */
-export function threadFolder(workspace: WorkspaceView, cwd?: string): string | undefined {
+/** The folder a new thread works in and a command runs in: the one named, else the workspace's imported project
+ * folder, else none, and the harness or the shell starts in its own home. A thread's folder decides which project
+ * state its agent loads; a command's decides what its git or its tests see, so both read the one rule. */
+export function workFolder(workspace: WorkspaceView, cwd?: string): string | undefined {
   return absoluteFolder(cwd) ?? workspace.project?.dest;
 }
 
@@ -489,7 +490,7 @@ export async function checkedPicks(client: HostClient, harness: string | undefin
  * folder or the workspace's own; cwd is the field the app's composer sends. notify is the thread its every turn's end
  * is told to, or NOTIFY_ME. */
 export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: string } = {}): Record<string, unknown> {
-  const cwd = threadFolder(workspace, opts.cwd);
+  const cwd = workFolder(workspace, opts.cwd);
   return {
     workspaceId: workspace.id,
     prompt,
@@ -614,11 +615,11 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
 
 export type ExecExit = Extract<ExecEvent, { type: "exec.exit" }>;
 
-/** Runs argv on the workspace's machine and follows it to its exit; `on` sees each output line and the exit. Fails
- * when the host goes away first. */
-export async function execOn(client: HostClient, workspaceId: string, argv: readonly string[], on: (e: ExecEvent) => void): Promise<ExecExit> {
+/** Runs argv on the workspace's machine, in cwd when given, and follows it to its exit; `on` sees each output line
+ * and the exit. Fails when the host goes away first. */
+export async function execOn(client: HostClient, workspaceId: string, argv: readonly string[], cwd: string | undefined, on: (e: ExecEvent) => void): Promise<ExecExit> {
   const pushed = pushedFrames(client);
-  const { execId } = await client.request<{ execId: string }>("workspaces.exec", { workspaceId, argv });
+  const { execId } = await client.request<{ execId: string }>("workspaces.exec", { workspaceId, argv, ...(cwd !== undefined ? { cwd } : {}) });
   const exited = new Promise<ExecExit>(done => {
     pushed.follow(
       f => (f.type === "exec.output" || f.type === "exec.exit") && f["execId"] === execId,
@@ -924,15 +925,17 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "exec",
-    usage: "wsp exec <workspace> -- <command...>",
-    about: "runs the command on the workspace's machine, each word as given",
-    options: {},
+    usage: "wsp exec <workspace> [--cwd <dir>] -- <command...>",
+    about: "runs the command on the machine, each word as given, in --cwd or the project folder",
+    options: { cwd: { type: "string" } },
     run: async ctx => {
       const [ref, ...words] = ctx.args;
       if (ref === undefined || words.length === 0) throw new Error("wsp exec takes a workspace, then -- and the command");
       const client = await ctx.client();
       const workspace = await awake(client, await workspaceOf(client, ref), "exec", line => ctx.io.error(line));
-      const exit = await execOn(client, workspace.id, words, e => ctx.out.emit(e, e.type === "exec.output" ? e.text : undefined));
+      const folder = workFolder(workspace, flag(ctx.flags, "cwd"));
+      const exit = await execOn(client, workspace.id, words, folder, e => ctx.out.emit(e, e.type === "exec.output" ? e.text : undefined));
+      if (exit.exitCode !== null && exit.exitCode !== 0) ctx.io.error(execFolderLine(folder));
       if (exit.error !== undefined) ctx.io.error(exit.error);
       return exit.exitCode ?? 1;
     },

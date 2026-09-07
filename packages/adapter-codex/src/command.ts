@@ -4,7 +4,7 @@
 // through a quoted heredoc, since a long task as an argument would hit the
 // kernel's per-argument cap, and `-` tells codex to read it there; the heredoc
 // also closes stdin, which codex otherwise waits on when it is not a terminal.
-import { shellQuote } from "@wsp/protocol";
+import { inFolder, shellQuote } from "@wsp/protocol";
 
 const PROMPT_END = "WSP_PROMPT_END";
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -71,7 +71,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     ...(effort === undefined ? [] : [config("model_reasoning_effort", slug("effort", effort))]),
     "-",
   ].join(" ");
-  return `cd ${cwd === undefined ? "~" : shellQuote(cwd)} && ${codex} <<'${PROMPT_END}'\n${prompt}\n${PROMPT_END}`;
+  return inFolder(cwd, `${codex} <<'${PROMPT_END}'\n${prompt}\n${PROMPT_END}`);
 }
 
 /** Interrupt is a hard boundary, as it is for every harness: teardown (SIGTERM), then SIGKILL after this grace window. */
