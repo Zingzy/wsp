@@ -2,9 +2,10 @@
 import { createServer, type Server } from "node:http";
 import { EventUnion, computerOffline, sendRefusal, workspaceState, workspaceWord, type WorkspaceStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { roadFailed } from "@wsp/engine";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { POLL_INTERVAL_MS, createStatusTracker, probeReach, roadFailed, type StatusWatchOptions } from "../src/status.js";
+import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusWatchOptions } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";

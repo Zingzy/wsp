@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { COMPUTER_OFFLINE_LINE, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { getLive, resetLive } from "../src/machine/live.js";
@@ -871,15 +871,15 @@ describe("zombie machines", () => {
   });
 });
 
-describe("the computer offline", () => {
+describe("Solari out of reach from this computer", () => {
   it("a status whose probe never left this computer puts one muted mono line under the search row, leaves every row's word alone, and the line goes when a probe gets out again", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)]), "api");
     await waitFor(() => expect(stateSlot(rowOf("web")).textContent).toBe("Paused"));
     expect(stateSlot(rowOf("api")).textContent).toBe("");
-    expect(screen.queryByText(COMPUTER_OFFLINE_LINE)).toBeNull();
+    expect(screen.queryByText(PROVIDER_UNREACHED_LINE)).toBeNull();
 
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "reachable", offline: true } }) }));
-    const line = await screen.findByText(COMPUTER_OFFLINE_LINE);
+    const line = await screen.findByText(PROVIDER_UNREACHED_LINE);
     expect(line.closest("[data-sidebar-search]")).not.toBeNull();
     expect(line.className).toContain("font-mono");
     expect(line.className).not.toMatch(/border|bg-|badge|chip|destructive|warning|success/);
@@ -888,18 +888,18 @@ describe("the computer offline", () => {
     expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
     // The line reads once, however many rows carry the flag.
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(WEB, { reach: { state: "napping", offline: true } }) }));
-    expect(screen.getAllByText(COMPUTER_OFFLINE_LINE)).toHaveLength(1);
+    expect(screen.getAllByText(PROVIDER_UNREACHED_LINE)).toHaveLength(1);
 
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(WEB) }));
-    await waitFor(() => expect(screen.queryByText(COMPUTER_OFFLINE_LINE)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(PROVIDER_UNREACHED_LINE)).toBeNull());
   });
 
   it("a row that was Unreachable stays Unreachable through the computer's offline spell", async () => {
     await mount(fakeApi([API], [status(API, { reach: { state: "unreachable" } })]), "api");
     await waitFor(() => expect(stateSlot(rowOf("api")).textContent).toBe("Unreachable"));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "unreachable", offline: true } }) }));
-    await screen.findByText(COMPUTER_OFFLINE_LINE);
+    await screen.findByText(PROVIDER_UNREACHED_LINE);
     expect(stateSlot(rowOf("api")).textContent).toBe("Unreachable");
   });
 });

@@ -62,7 +62,9 @@ import {
   notifyLine,
   offeredSize,
   plural,
+  PROVIDER_UNREACHED_LINE,
   providerAnswerLine,
+  providerRoadRetryLine,
   SEAL_FAILED_BUILDER_GONE_LINE,
   SEAL_FAILED_LINE,
   sealFailedBuilderStaysLine,
@@ -645,6 +647,17 @@ describe("backgroundTasksLine", () => {
   it("counts the tasks the harness still had running when its result arrived", () => {
     expect(backgroundTasksLine(1)).toBe("ended with 1 background task running");
     expect(backgroundTasksLine(2)).toBe("ended with 2 background tasks running");
+  });
+});
+
+describe("a provider out of reach from this computer", () => {
+  it("names what could not be reached, not the computer", () => {
+    expect(PROVIDER_UNREACHED_LINE).toBe("Solari cannot be reached from this computer");
+  });
+
+  it("logs one retry per line, naming the call, the road's own code and the try about to go", () => {
+    expect(providerRoadRetryLine("GET /sandboxes/x", "ENOTFOUND", 2, 3)).toBe("GET /sandboxes/x did not leave this computer (ENOTFOUND); try 2 of 3");
+    expect(providerRoadRetryLine("POST /sandboxes", "EAI_AGAIN", 3, 3)).toBe("POST /sandboxes did not leave this computer (EAI_AGAIN); try 3 of 3");
   });
 });
 
