@@ -507,11 +507,14 @@ export async function notifyOf(client: HostClient, ref: string | undefined): Pro
   return thread.threadId ?? thread.id;
 }
 
-/** The start a message to an existing thread makes: its latest turn resumed under the thread's own agent, with any
- * pick named for this turn; the harness takes a new model, effort or mode on a resume. */
-export function resumeOf(thread: ThreadView, prompt: string, picks: Picks = {}): Record<string, unknown> {
-  if (thread.claudeSessionId === undefined) throw new Error(`thread ${thread.id} has no session to resume yet`);
-  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, resume: thread.claudeSessionId, ...picksOf(picks) };
+/** The start a message to an existing thread makes: the thread named to the runtime, which resumes its latest turn
+ * or, on a thread whose harness never announced a session, runs the message as its first turn; under the thread's own
+ * agent, with any pick named for this turn. A row from before threads had ids resumes by its session, and one with
+ * neither is refused: a start naming nothing would open a new thread in silence. */
+export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {}): Record<string, unknown> {
+  if (thread.threadId === undefined && thread.claudeSessionId === undefined) throw new Error(`thread ${thread.id} has no session to resume yet`);
+  const target = thread.threadId !== undefined ? { thread: thread.threadId } : { resume: thread.claudeSessionId };
+  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, ...target, ...picksOf(picks) };
 }
 
 /** A start reply the protocol schema refuses: the host process predates or postdates this command's build. */
@@ -906,7 +909,7 @@ export const VERBS: readonly Verb[] = [
       const picks = pickFlags(ctx.flags);
       const thread = await threadOf(client, ref);
       await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
-      return followVerb(ctx, client, resumeOf(thread, message, picks), false, picks);
+      return followVerb(ctx, client, messageTo(thread, message, picks), false, picks);
     },
   },
   {

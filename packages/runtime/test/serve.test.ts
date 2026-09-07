@@ -296,6 +296,12 @@ describe("serveRuntime session interrupt", () => {
     expect(h.steered).toEqual(["and STEERED"]);
     expect(c.events.filter(e => e.type === "session.start")).toHaveLength(1);
     expect(c.events.filter(e => e.type === "session.steer")).toMatchObject([{ prompt: "and STEERED", requestId: "req_2" }]);
+    // The thread field reaches the runtime: naming the thread lands on its running turn like naming its session did.
+    const byThread = await c.request("sessions.start", { workspaceId, prompt: "and BY THREAD", thread: (first["session"] as { threadId: string }).threadId, requestId: "req_3" });
+    expect(byThread).toMatchObject({ ok: true, outcome: "steered", turnId: first["turnId"] });
+    expect(h.steered).toEqual(["and STEERED", "and BY THREAD"]);
+    const unknown = await c.request("sessions.start", { workspaceId, prompt: "nowhere", thread: "thr_nope" });
+    expect(unknown).toMatchObject({ ok: false, error: "no thread thr_nope on this workspace" });
     h.complete();
     c.close();
   });

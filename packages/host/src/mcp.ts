@@ -15,7 +15,7 @@ import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe
 import { INSTRUCTIONS } from "./skill.js";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, absolutePath, agentsChosen, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, resumeOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, absolutePath, agentsChosen, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, messageTo, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -295,7 +295,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
       const client = await dial();
       const thread = await threadOf(client, ref);
       await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
-      const out = turnOut(await follow(client, resumeOf(thread, message, input), "agent", QUIET_TURN));
+      const out = turnOut(await follow(client, messageTo(thread, message, input), "agent", QUIET_TURN));
       return asText(turnText(out), out);
     },
   );

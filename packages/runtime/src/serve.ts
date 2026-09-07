@@ -213,6 +213,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 prompt: msg.prompt,
                 ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
                 ...(msg.resume !== undefined ? { resume: msg.resume } : {}),
+                ...(msg.thread !== undefined ? { thread: msg.thread } : {}),
                 ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}),
                 ...(msg.model !== undefined ? { model: msg.model } : {}),
                 ...(msg.effort !== undefined ? { effort: msg.effort } : {}),

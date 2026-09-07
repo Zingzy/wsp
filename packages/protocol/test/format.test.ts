@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { behindGoldenLine, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
+import { behindGoldenLine, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, machineUnreachedLine, notifyLine, plural, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -147,6 +147,13 @@ describe("harnessExitLine", () => {
   it("any other exit reads as the code, a null one as null", () => {
     expect(harnessExitLine("claude", 1, "/usr/bin")).toBe("claude exited with code 1 before emitting a result");
     expect(harnessExitLine("claude", null, "/usr/bin")).toBe("claude exited with code null before emitting a result");
+  });
+});
+
+describe("machineUnreachedLine", () => {
+  it("says the machine could not be reached from this computer, with the attempts counted and the time they took", () => {
+    expect(machineUnreachedLine(6, 23_400)).toBe("the machine could not be reached from this computer after 6 attempts over 23s");
+    expect(machineUnreachedLine(1, 800)).toBe("the machine could not be reached from this computer after 1 attempt over 800ms");
   });
 });
 

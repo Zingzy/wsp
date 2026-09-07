@@ -119,6 +119,13 @@ export function harnessExitLine(bin: string, exitCode: number | null, path: stri
   return `${bin} was not found on PATH (exit 127); ${searched}`;
 }
 
+/** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
+ * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,
+ * neither of which a person can act on. */
+export function machineUnreachedLine(attempts: number, elapsedMs: number): string {
+  return `the machine could not be reached from this computer after ${plural(attempts, "attempt")} over ${fmtDuration(elapsedMs)}`;
+}
+
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 

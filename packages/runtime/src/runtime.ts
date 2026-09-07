@@ -650,6 +650,10 @@ export interface Runtime {
         prompt: string;
         harness?: string;
         resume?: string;
+        /** The thread the message goes to, by its runtime id: its latest turn is resumed, and a thread whose harness
+         * never announced a session (a launch that never reached the machine) takes the message as a first turn on
+         * that same thread. Rejects when no thread on the workspace has that id. */
+        thread?: string;
         cwd?: string;
         model?: string;
         effort?: string;
@@ -2286,7 +2290,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
       refuse();
       const { harness, adapter } = adapterFor(entry, o.harness);
-      const threadId = threadOf(workspaceId, o.resume);
+      const named = o.thread === undefined ? undefined : latestOn(o.thread);
+      if (o.thread !== undefined && named?.workspaceId !== workspaceId) throw new Error(`no thread ${o.thread} on this workspace`);
+      const resume = o.resume ?? named?.claudeSessionId;
+      const threadId = named?.threadId ?? threadOf(workspaceId, resume);
       if (o.notify !== undefined && o.notify !== NOTIFY_ME) {
         if (latestOn(o.notify) === undefined) throw new Error(`no thread ${o.notify} to notify`);
         if (o.notify === threadId) throw new Error("a thread cannot notify itself");
@@ -2301,7 +2308,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const notify = o.notify ?? notifyOf(threadId);
       const table = harnessCatalog(harness);
       // Checked against the binary's own lists, the ones the composer shows for this workspace.
-      const picks = startPicks(table === undefined ? undefined : await catalogOn(table, entry.machine, adapter), o, o.resume === undefined);
+      const picks = startPicks(table === undefined ? undefined : await catalogOn(table, entry.machine, adapter), o, resume === undefined);
       let outcome: SessionStartOutcome = "started";
       // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time.
       for (let running = runningOn(threadId); running !== undefined; running = runningOn(threadId)) {
@@ -2315,8 +2322,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         refuse();
       }
       const turnId = randomUUID();
-      const cwd = (o.resume !== undefined ? folderOf(workspaceId, o.resume) : undefined) ?? o.cwd;
-      const afterCut = o.resume !== undefined && cutBefore(workspaceId, threadId);
+      const cwd = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? o.cwd;
+      const afterCut = resume !== undefined && cutBefore(workspaceId, threadId);
       // Created before adapter.start so events that fire synchronously during
       // start() still land on the view. A resume id was announced by the harness
       // in an earlier turn, so the row carries it before this one answers.
@@ -2329,7 +2336,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         threadId,
         prompt: o.prompt,
         startedAt: Date.now(),
-        ...(o.resume !== undefined ? { claudeSessionId: o.resume } : {}),
+        ...(resume !== undefined ? { claudeSessionId: resume } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
         ...picks,
         ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
@@ -2408,7 +2415,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       try {
         started = adapter.start({
           prompt: o.prompt,
-          ...(o.resume !== undefined ? { resume: o.resume } : {}),
+          ...(resume !== undefined ? { resume } : {}),
           ...(cwd !== undefined ? { cwd } : {}),
           ...picks,
           ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
@@ -2426,7 +2433,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       sessionView.id = handleId;
       // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread and
       // with what, since every client titles the thread by the row's prompt. Later turns live in the transcript.
-      const resumed = o.resume !== undefined ? sessions.get(handleId)?.view : undefined;
+      const resumed = resume !== undefined ? sessions.get(handleId)?.view : undefined;
       if (resumed !== undefined) {
         sessionView.startedBy = resumed.startedBy ?? sessionView.startedBy;
         if (resumed.prompt !== undefined) sessionView.prompt = resumed.prompt;
