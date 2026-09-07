@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What the export dialog computes from the wire and the store: the step rows
-// an export passes, which events are its own, the agent rows the workspace's
-// threads give it and the request their ticks become, where a picked parent
-// folder lands the project, and the landed line. No React here.
-import type { ProjectExportEvent, ProjectExportResult, ProjectExportStage, SessionView } from "@wsp/protocol";
-import { folderName, stepRows, type StepRow } from "./projectTrip.js";
+// What the export dialog computes from the wire and the store: which events
+// are its own, the agent rows the workspace's threads give it and the request
+// their ticks become, where a picked parent folder lands the project, and the
+// landed line. The progress line the events fold into is the protocol's. No
+// React here.
+import type { ProjectExportEvent, ProjectExportResult, SessionView } from "@wsp/protocol";
+import { folderName } from "./projectTrip.js";
 
-/** The steps every export passes in order; `failed` is not a step, it is the error line. */
-export const EXPORT_STEPS = ["packing", "downloading", "landing", "done"] as const satisfies readonly ProjectExportStage[];
-export type ExportStep = (typeof EXPORT_STEPS)[number];
-
-export const exportStepRows = (events: readonly ProjectExportEvent[]): StepRow<ExportStep>[] => stepRows(EXPORT_STEPS, events);
+export { exportProgress } from "@wsp/protocol";
 
 /** Whether an event is this export's: the runtime echoes the destination as sent. */
 export function isExportOf(e: ProjectExportEvent, workspaceId: string, dest: string): boolean {
