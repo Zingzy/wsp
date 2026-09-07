@@ -10,6 +10,11 @@ import { fakeHost } from "./fake-host.js";
 const claudeLine = (sessionId: string, command: string): string =>
   JSON.stringify({ type: "assistant", sessionId, message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command } }] } });
 
+const codexLine = (id: string, cmd: string): string =>
+  [JSON.stringify({ type: "session_meta", payload: { id, cwd: "/Users/dev/proj" } }), JSON.stringify({ type: "response_item", payload: { type: "function_call", name: "exec_command", arguments: JSON.stringify({ cmd }) } })].join("\n");
+/** The one agent this host can open a thread on, as the wizard and the recipe verb name it. */
+const CLAUDE_THREADS = { threadAgents: ["claude"] };
+
 const laptop = () =>
   fakeHost({
     which: ["claude", "gh", "node", "git"],
@@ -26,7 +31,7 @@ const laptop = () =>
 
 describe("computeRecipe", () => {
   it("ticks what is installed here first, then what the agents used, and falls back to the catalog's own default", async () => {
-    const recipe = await computeRecipe(laptop(), { now: () => new Date("2026-09-06T03:00:00Z") });
+    const recipe = await computeRecipe(laptop(), { ...CLAUDE_THREADS, now: () => new Date("2026-09-06T03:00:00Z") });
     const row = (id: string) => recipe.rows.find(r => r.id === id)!;
     expect(row("claude")).toEqual({ id: "claude", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.claude/settings.json", "~/.claude/skills"], bin: true }, size: 208 * 1024 * 1024 });
     expect(row("gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true }, size: 42188962 });
@@ -49,10 +54,34 @@ describe("computeRecipe", () => {
     ]);
   });
 
+  it("ticks an agent only when it was used here and wsp can run its threads; installed or used alone is off", async () => {
+    // Claude Code used here, Codex used here without an adapter, OpenCode installed and never run.
+    const host = fakeHost({
+      which: ["claude", "codex", "opencode"],
+      files: {
+        "~/.claude/settings.json": "{}",
+        "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "gh pr list"),
+        "~/.codex/config.toml": "",
+        "~/.codex/sessions/2026/06/01/rollout-2026-06-01T10-00-00-t1.jsonl": codexLine("t1", "cargo build"),
+      },
+    });
+    const recipe = await computeRecipe(host, CLAUDE_THREADS);
+    const row = (id: string) => recipe.rows.find(r => r.id === id)!;
+    expect(recipe.histories.filter(h => h.sessions > 0).map(h => h.agent)).toEqual(["claude", "codex"]);
+    // Every one of the three still reads as installed here: the tick and the source are separate answers.
+    expect(row("claude")).toMatchObject({ on: true, source: { kind: "installed" } });
+    expect(row("codex")).toMatchObject({ on: false, source: { kind: "installed" } });
+    expect(row("opencode")).toMatchObject({ on: false, source: { kind: "installed" } });
+    expect(recipe.rows.filter(r => r.kind === "agent" && r.on).map(r => r.id)).toEqual(["claude"]);
+    // The agent wsp drives is off too when this computer never ran it.
+    const quiet = await computeRecipe(fakeHost({ which: ["claude"], files: { "~/.claude/settings.json": "{}" } }), CLAUDE_THREADS);
+    expect(quiet.rows.find(r => r.id === "claude")).toMatchObject({ on: false, source: { kind: "installed" } });
+  });
+
   it("a project's own files weigh before anything this computer says, and tick the row whatever the catalog thought", async () => {
     const host = laptop();
     const scans: string[] = [];
-    const recipe = await computeRecipe(host, { folders: ["/Users/dev/proj"], onProject: s => scans.push(...s.rows.map(n => `${n.id} ${n.why}`), ...s.candidates.map(n => `candidate ${n.id}`)) });
+    const recipe = await computeRecipe(host, { ...CLAUDE_THREADS, folders: ["/Users/dev/proj"], onProject: s => scans.push(...s.rows.map(n => `${n.id} ${n.why}`), ...s.candidates.map(n => `candidate ${n.id}`)) });
     const row = (id: string) => recipe.rows.find(r => r.id === id)!;
     // go was one session's use and off; the project's go.mod ticks it and says which file asked.
     expect(row("go")).toMatchObject({ on: true, source: { kind: "project", why: "go.mod needs Go" } });
@@ -72,7 +101,7 @@ describe("computeRecipe", () => {
         "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "gh pr list"),
       },
     });
-    const recipe = await computeRecipe(host);
+    const recipe = await computeRecipe(host, CLAUDE_THREADS);
     // The counts are the row's source, so a screen can say "installed here, never used" and mean it.
     expect(recipe.rows.find(r => r.id === "gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 1, calls: 1 }, size: 42188962 });
     expect(recipe.rows.find(r => r.id === "git")).toMatchObject({ on: true, source: { kind: "installed" } });
@@ -82,21 +111,21 @@ describe("computeRecipe", () => {
     // The wizard's screens start from this rule; a tool the catalog ships on that was looked at once stays off.
     const host = fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "jq . package.json") } });
     const row = (r: Awaited<ReturnType<typeof computeRecipe>>, id: string) => r.rows.find(x => x.id === id)!;
-    const blended = await computeRecipe(host);
+    const blended = await computeRecipe(host, CLAUDE_THREADS);
     expect(row(blended, "jq")).toMatchObject({ on: false, source: { kind: "used", sessions: 1, calls: 1 } });
     // A tool the catalog ships on that nothing here touched still follows the catalog.
     expect(row(blended, "curl")).toMatchObject({ on: true, source: { kind: "popular" } });
     // Two sessions and five commands is the floor, and then it is on; two sessions of one command each is still a look.
-    const twice = await computeRecipe(fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "jq ."), "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "jq .") } }));
+    const twice = await computeRecipe(fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "jq ."), "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "jq .") } }), CLAUDE_THREADS);
     expect(row(twice, "jq")).toMatchObject({ on: false, source: { kind: "used", sessions: 2, calls: 2 } });
-    const habit = await computeRecipe(fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "jq . a; jq . b; jq . c; jq . d"), "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "jq .") } }));
+    const habit = await computeRecipe(fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": claudeLine("s1", "jq . a; jq . b; jq . c; jq . d"), "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "jq .") } }), CLAUDE_THREADS);
     expect(row(habit, "jq")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 5 } });
-    // An agent's own store is a use now, so the row says so; an agent is still only ever ticked from this computer.
-    expect(row(blended, "claude")).toMatchObject({ on: false, kind: "agent", source: { kind: "used", sessions: 1 } });
+    // An agent's own store is its use, and its use is what ticks it: one session is enough, with no floor to meet.
+    expect(row(blended, "claude")).toMatchObject({ on: true, kind: "agent", source: { kind: "used", sessions: 1 } });
   });
 
   it("one rule decides every tick when a rule is named, and the row's source says which one it went on", async () => {
-    const used = await computeRecipe(laptop(), { tick: "used" });
+    const used = await computeRecipe(laptop(), { ...CLAUDE_THREADS, tick: "used" });
     const row = (r: Awaited<ReturnType<typeof computeRecipe>>, id: string) => r.rows.find(x => x.id === id)!;
     // Installed here counts for nothing under used: the source is read used first, so an installed row that
     // reaches the table was never run.
@@ -107,12 +136,12 @@ describe("computeRecipe", () => {
     expect(row(used, "pnpm")).toMatchObject({ on: false, source: { kind: "popular" } });
     expect(used.tick).toBe("used");
 
-    const installed = await computeRecipe(laptop(), { tick: "installed" });
+    const installed = await computeRecipe(laptop(), { ...CLAUDE_THREADS, tick: "installed" });
     expect(row(installed, "gh")).toMatchObject({ on: true, source: { kind: "installed" } });
     expect(row(installed, "agent-browser")).toMatchObject({ on: false, source: { kind: "used" } });
     expect(row(installed, "pnpm")).toMatchObject({ on: false });
 
-    const byDefault = await computeRecipe(laptop(), { tick: "default" });
+    const byDefault = await computeRecipe(laptop(), { ...CLAUDE_THREADS, tick: "default" });
     expect(row(byDefault, "pnpm")).toMatchObject({ on: true });
     expect(row(byDefault, "go")).toMatchObject({ on: false });
     expect(row(byDefault, "claude")).toMatchObject({ on: false, kind: "agent" });
@@ -122,7 +151,7 @@ describe("computeRecipe", () => {
     // Session 0 carries what the others do not, so the counts land exactly.
     const ran = (cmd: string, sessions: number, calls: number): Record<string, string> =>
       Object.fromEntries(Array.from({ length: sessions }, (_, s) => [`~/.claude/projects/-Users-dev-proj/${cmd}-${s}.jsonl`, Array.from({ length: s === 0 ? calls - sessions + 1 : 1 }, () => claudeLine(`${cmd}-${s}`, `${cmd} run`)).join("\n")]));
-    const row = async (files: Record<string, string>, id: string) => (await computeRecipe(fakeHost({ files }), { tick: "used" })).rows.find(r => r.id === id)!;
+    const row = async (files: Record<string, string>, id: string) => (await computeRecipe(fakeHost({ files }), { ...CLAUDE_THREADS, tick: "used" })).rows.find(r => r.id === id)!;
     expect(await row(ran("wrangler", 1, 2), "wrangler")).toMatchObject({ on: false, source: { kind: "used", sessions: 1, calls: 2 } });
     expect(await row(ran("wrangler", 2, 6), "wrangler")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 6 } });
     // Java is over 300 MB, so it is weighed against the heavy floor.
@@ -141,20 +170,19 @@ describe("computeRecipe", () => {
   });
 
   it("holds an agent no adapter can open a thread on off under every rule but installed", async () => {
-    const claudeOnly = { threadAgents: ["claude"] };
-    const used = await computeRecipe(laptop(), { tick: "used", ...claudeOnly });
+    const used = await computeRecipe(laptop(), { ...CLAUDE_THREADS, tick: "used" });
     // An agent is placed by whether it is on this computer, so its row still says installed; the use ticks it.
     expect(used.rows.find(r => r.id === "claude")).toMatchObject({ on: true, source: { kind: "installed" } });
     const codexHere = () => fakeHost({ which: ["codex"], files: { "~/.codex/config.toml": "" } });
-    expect((await computeRecipe(codexHere(), { tick: "used", ...claudeOnly })).rows.find(r => r.id === "codex")).toMatchObject({ on: false });
-    expect((await computeRecipe(codexHere(), { tick: "installed", ...claudeOnly })).rows.find(r => r.id === "codex")).toMatchObject({ on: true });
+    expect((await computeRecipe(codexHere(), { ...CLAUDE_THREADS, tick: "used" })).rows.find(r => r.id === "codex")).toMatchObject({ on: false });
+    expect((await computeRecipe(codexHere(), { ...CLAUDE_THREADS, tick: "installed" })).rows.find(r => r.id === "codex")).toMatchObject({ on: true });
   });
 
   it("weighs the histories by the folders it is given, and carries no rule when none was named", async () => {
-    const one = await computeRecipe(laptop(), { tick: "used", folders: ["/Users/dev/nowhere"] });
+    const one = await computeRecipe(laptop(), { ...CLAUDE_THREADS, tick: "used", folders: ["/Users/dev/nowhere"] });
     expect(one.rows.find(r => r.id === "agent-browser")).toMatchObject({ on: false, source: { kind: "popular" } });
     expect(one.histories.find(h => h.agent === "claude")).toMatchObject({ state: "empty", sessions: 0 });
-    expect((await computeRecipe(laptop())).tick).toBeUndefined();
+    expect((await computeRecipe(laptop(), CLAUDE_THREADS)).tick).toBeUndefined();
   });
 
   it("lists the commands the agents ran that no catalog row carries, most-run first, catalog rows and builtins out", async () => {
@@ -172,14 +200,14 @@ describe("computeRecipe", () => {
 
   it("a project's need outside the catalog the caller narrowed to never becomes a row", async () => {
     const only = CATALOG.filter(e => e.id === "node");
-    const recipe = await computeRecipe(laptop(), { catalog: only, folders: ["/Users/dev/proj"] });
+    const recipe = await computeRecipe(laptop(), { ...CLAUDE_THREADS, catalog: only, folders: ["/Users/dev/proj"] });
     // go.mod asked for Go, and Go is outside the catalog this caller handed in: the rows stay the ones it named.
     expect(recipe.rows.map(r => r.id)).toEqual(["node"]);
     expect(recipe.rows[0]).toMatchObject({ on: true, source: { kind: "project", why: "engines.node >=22" } });
   });
 
   it("writes the protocol's shape and never a value it read", async () => {
-    const recipe = await computeRecipe(laptop());
+    const recipe = await computeRecipe(laptop(), CLAUDE_THREADS);
     const text = JSON.stringify(recipe);
     expect(Recipe.parse(JSON.parse(text))).toEqual(recipe);
     expect(text).not.toContain("sk-ant-x");
@@ -189,7 +217,7 @@ describe("computeRecipe", () => {
   it("tells the caller what was found and read as it goes", async () => {
     const present: string[] = [];
     const read: string[] = [];
-    await computeRecipe(laptop(), { onPresent: e => present.push(e.id), onHistory: h => read.push(`${h.agent} ${h.state}`) });
+    await computeRecipe(laptop(), { ...CLAUDE_THREADS, onPresent: e => present.push(e.id), onHistory: h => read.push(`${h.agent} ${h.state}`) });
     expect(present).toEqual(["claude", "node", "git", "gh"]);
     expect(read[0]).toBe("claude read");
     expect(read).toHaveLength(6);

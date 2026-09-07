@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The screens of wsp init on the catalog: the agents (the six, the ones on
-// this Mac ticked), what they need (the whole table of agents and tools, one
-// row each with its size, over the totals and the disk line), and the sign-ins
-// and keys (logins that sign in on the machine after the build listed, keys
-// ticked to copy, and the wsp tools offered to each agent here whose config
-// the catalog knows). The recipe is the state: catalog ids with a tick each;
-// the collector's rows follow it.
+// The screens of wsp init on the catalog: the agents (the six, ticked when
+// used on this Mac and wsp can run their threads), what they need (the whole
+// table of agents and tools, one row each with its size, over the totals and
+// the disk line), and the sign-ins and keys (logins that sign in on the
+// machine after the build listed, keys ticked to copy, and the wsp tools
+// offered to each agent here whose config the catalog knows). The recipe is
+// the state: catalog ids with a tick each; the collector's rows follow it.
 import type { Readable, Writable } from "node:stream";
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type Size, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
 import { withProject, type LoginChoice, type Manifest, type ManifestEntry, type ProjectScan, floorApplies } from "@wsp/collect";
@@ -16,7 +16,7 @@ import { GUTTER, card, colourDepth, isTTY, table, textPrompt } from "./init-layo
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
 import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, scannedTicks, withScanned } from "./init-also.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
-import { BASE_GROUP, FLOOR_LINE, PROJECT_GROUP, candidatesLine, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
+import { BASE_GROUP, FLOOR_LINE, PROJECT_GROUP, agentRows, candidatesLine, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
 import { hasLogin, signInFor, type SignIn } from "./signin-table.js";
 import { SIGN_IN_CHOICES, SIGN_IN_WORDS, signInChoice } from "./signin-words.js";
@@ -107,21 +107,6 @@ function agentDetail(recipe: Recipe, manifest: Manifest, a: AgentEntry): string[
  * measured, or the plan's words for a row nobody measured. */
 function sizeLine(size: Size): string {
   return "bytes" in size ? `about ${fmtBytes(size.bytes)} installed on the machine (measured ${size.on})` : UNKNOWN_SIZE;
-}
-
-const hintOf = (size: Size): { hint?: string } => {
-  const bytes = sizeBytes(size);
-  return bytes !== undefined ? { hint: fmtBytes(bytes) } : {};
-};
-
-/** The six agents: a size beside each, ticked when this Mac has it, the detail saying what comes and what installs. */
-export function agentItems(recipe: Recipe, manifest: Manifest): SelectItem[] {
-  return CATALOG_AGENTS.map(a => ({
-    id: a.id,
-    label: a.name,
-    ...hintOf(a.size),
-    detail: agentDetail(recipe, manifest, a),
-  }));
 }
 
 /** The recipe source in words with its counts, for a tool's detail pane. */
@@ -422,7 +407,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
     };
     switch (screen) {
       case "agents": {
-        const rows = recipeTable(recipe, CATALOG_AGENTS);
+        const rows = agentRows(recipe);
         const r = await tableScreen({
           title: AGENTS_TITLE,
           top: AGENTS_TOP,

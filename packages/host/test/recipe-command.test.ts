@@ -180,7 +180,7 @@ describe("wsp recipe", () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-untagged-"));
     const out = outPath();
     // What the wizard writes: the blended rule, and no tick field at all.
-    const wizard = await computeRecipe(laptop(), { now: at });
+    const wizard = await computeRecipe(laptop(), { threadAgents: ["claude"], now: at });
     expect(wizard.tick).toBeUndefined();
     saveSmallRecipe(out, wizard);
     const flipped = await runRecipe(laptop(), { out, set: ["go=on"] }, quiet, at);

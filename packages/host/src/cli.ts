@@ -26,6 +26,7 @@ import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS } from "@wsp/catalog";
 import { LOGIN_CHOICES, RECIPE_TICKS } from "@wsp/protocol";
 import { assetDir } from "./assets.js";
 import { HARNESS_ADAPTERS } from "./adapters.js";
+import { THREAD_AGENTS } from "./thread-agents.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { readBrewTable } from "./init-brew.js";
@@ -424,7 +425,7 @@ async function init(
       ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
       ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
       collect: collectThisComputer,
-      recipe: (onHistory, onProject) => computeRecipe(nodeHost(), { onHistory, onProject, ...(project !== undefined ? { folders: [project] } : {}) }),
+      recipe: (onHistory, onProject) => computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, ...(project !== undefined ? { folders: [project] } : {}) }),
       scanProject: async folder => {
         const { path, exists } = projectFolder(folder);
         return exists ? scanProject(nodeHost(), path) : undefined;
