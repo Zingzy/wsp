@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import type { WorkspaceStatus } from "@wsp/protocol";
+import { workspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -15,13 +15,13 @@ import {
 } from "../src/sidebar/Sidebar.logic.js";
 import {
   compactTimeLabel,
-  costLabel,
   defaultWorkspaceName,
   idleCountdownLabel,
   dotClassForTone,
+  stateSlotWord,
   threadPill,
-  textClassForTone,
   reachNote,
+  workspaceMetaLine,
 } from "../src/sidebar/workspaceRows.js";
 import { formatRelativeTimeLabel } from "../src/lib/timestampFormat.js";
 
@@ -105,25 +105,53 @@ describe("workspace row labels", () => {
     expect(reachNote(null)).toBeNull();
   });
 
-  it("cost: rate while the machine is up (running or unreachable), never on a paused or gone one, accrued always, nothing before the first tick", () => {
-    expect(costLabel({ state: "running", rateUsdPerHour: 0.11, accruedUsd: 0.0037 })).toBe("$0.110/hr · $0.0037 today");
-    expect(costLabel({ state: "unreachable", rateUsdPerHour: 0.11, accruedUsd: 0.0037 })).toBe("$0.110/hr · $0.0037 today");
-    expect(costLabel({ state: "paused", rateUsdPerHour: 0.11, accruedUsd: 0.0037 })).toBe("$0.0037 today");
-    expect(costLabel({ state: "gone", rateUsdPerHour: 0.11, accruedUsd: 0.0037 })).toBe("$0.0037 today");
-    expect(costLabel({ state: "running", rateUsdPerHour: 0.11, accruedUsd: null })).toBe("$0.110/hr");
-    expect(costLabel({ state: "paused", rateUsdPerHour: null, accruedUsd: null })).toBeNull();
+  /** A project as the adapter folds it from a status, with the record's phase behind it. */
+  const project = (over: Partial<WorkspaceStatus>, view: Partial<WorkspaceView> = {}) => {
+    const st = status(over);
+    return { state: workspaceState({ phase: st.phase, machineState: st.machineState, reach: st.reach.state }), status: st, reach: st.reach.state, workspace: { ...st, ...view } };
+  };
+  const tick = (accruedUsd: number, rateUsdPerHour = 0.11) => ({ rateUsdPerHour, accruedUsd });
+
+  it("the meta line: what it cost today first, the rate while the machine is up (running or unreachable), the edge note, the nap countdown last; nothing before the first tick", () => {
+    const meta = (over: Partial<WorkspaceStatus>, cost: ReturnType<typeof tick> | null) => workspaceMetaLine({ project: project(over), cost, outOfMemory: undefined, nowMs: now });
+    expect(meta({ idleAt: now + 14.5 * 60_000, reach: { state: "slow" } }, tick(0.0037))).toBe("$0.0037 today · $0.110/hr · edge slow · naps in 14m");
+    expect(meta({ idleAt: now + 14.5 * 60_000 }, tick(0.29))).toBe("$0.2900 today · $0.110/hr · naps in 14m");
+    expect(meta({ reach: { state: "unreachable" } }, tick(0.0037))).toBe("$0.0037 today · $0.110/hr · active");
+    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" }, idleAt: now + 60_000 }, tick(0.0037, 0))).toBe("$0.0037 today");
+    expect(meta({ machineState: "gone", reach: { state: "gone" }, idleAt: now + 60_000 }, tick(0.0037))).toBe("$0.0037 today");
+    expect(meta({}, null)).toBe("$0.110/hr · active");
+    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } }, null)).toBe("");
+    // The tick's rate leads the size's: a resize is priced from the meter, not the status.
+    expect(meta({}, tick(0.5, 0.15))).toBe("$0.5000 today · $0.150/hr · active");
   });
 
-  it("thread pills key on the session status, wear the adapter's word, and use tokens: only running is the success colour", () => {
+  it("what the runtime is doing to the machine's helper, or a drop with memory near full, takes the whole line", () => {
+    const GiB = 1024 ** 3;
+    expect(workspaceMetaLine({ project: project({ idleAt: now + 60_000, daemonNote: "updating the helper" }), cost: tick(0.5), outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
+    expect(workspaceMetaLine({ project: project({ idleAt: now + 60_000 }), cost: tick(0.5), outOfMemory: { used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.4 }, nowMs: now })).toBe("out of memory, 3.6 of 3.9 GB");
+    // Before a status arrives the record's own note is the line; a status without one says nothing about the helper.
+    expect(workspaceMetaLine({ project: { ...project({}), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("");
+    expect(workspaceMetaLine({ project: { ...project({}, { daemonNote: "updating the helper" }), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
+    expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.110/hr · active");
+  });
+
+  it("the state slot says nothing while running, since the dot says it, and the state's word otherwise", () => {
+    expect(stateSlotWord({ state: "running", indicator: { label: "Running", tone: "running", pulse: false } })).toBe("");
+    expect(stateSlotWord({ state: "paused", indicator: { label: "Paused", tone: "paused", pulse: false } })).toBe("Paused");
+    expect(stateSlotWord({ state: "gone", indicator: { label: "Gone", tone: "neutral", pulse: false } })).toBe("Gone");
+    expect(stateSlotWord({ state: "waking", indicator: { label: "Waking", tone: "neutral", pulse: true } })).toBe("Waking");
+  });
+
+  it("thread pills key on the session status, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {
     expect(threadPill({ status: "running", indicator: { label: "Working", tone: "neutral", pulse: true } })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("muted-foreground") });
     expect(threadPill({ status: "failed", indicator: { label: "Ended", tone: "neutral", pulse: false } })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("muted-foreground") });
     expect(threadPill({ status: "failed", indicator: { label: "Stopped short", tone: "neutral", pulse: false } })).toMatchObject({ label: "Stopped short" });
     expect(threadPill({ status: "completed", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
     expect(threadPill({ status: "interrupted", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
     expect(threadPill({ status: "running", indicator: null })).toBeNull();
-    for (const cls of [dotClassForTone("running"), textClassForTone("running")]) expect(cls).toContain("success");
-    for (const cls of [dotClassForTone("paused"), dotClassForTone("neutral"), textClassForTone("paused"), textClassForTone("neutral")]) expect(cls).toContain("muted-foreground");
-    for (const cls of [dotClassForTone("running"), dotClassForTone("paused"), dotClassForTone("neutral"), textClassForTone("running"), textClassForTone("neutral")]) {
+    expect(dotClassForTone("running")).toContain("success");
+    for (const cls of [dotClassForTone("paused"), dotClassForTone("neutral")]) expect(cls).toContain("muted-foreground");
+    for (const cls of [dotClassForTone("running"), dotClassForTone("paused"), dotClassForTone("neutral")]) {
       expect(cls).not.toMatch(/emerald|zinc|sky|red/);
     }
   });

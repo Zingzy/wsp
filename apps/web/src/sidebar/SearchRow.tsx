@@ -14,9 +14,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.
 import { cn } from "../lib/utils.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
+import { TOP_ROW_CLASS } from "./rowGrammar.js";
 
-/** The grammar the search row and the section rows share: the workspace rows' inset, a 150 ms hover. */
-export const TOP_ROW_CLASS = "px-2 transition-[background-color,color] duration-150";
 const PALETTE_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle");
 const SEARCH_TITLE = PALETTE_SHORTCUT ? `Search (${PALETTE_SHORTCUT})` : "Search";
 

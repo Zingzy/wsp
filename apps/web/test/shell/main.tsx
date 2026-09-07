@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the app shell over a fake api with three
-// workspaces (running, paused, gone) and two threads, in either theme
+// workspaces (running, paused, gone) and four threads, in either theme
 // (?theme=light), with a status toast in the footer (?toast=...) and with the
 // runtime replacing the first machine's helper (?helper=1) or the first
 // machine's link dropped after a near-full memory sample (?oom=1), so a test
@@ -70,7 +70,7 @@ const api: Api = {
   createFromGoldenHead: async () => workspaces[0]!,
   watchStatuses: async () =>
     workspaces.map(w =>
-      statusOf(w, w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : {}),
+      statusOf(w, w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
     ),
   forget: async () => {},
   nap: async id => workspaces.find(w => w.id === id)!,
@@ -94,6 +94,8 @@ const toast = params.get("toast");
 const shown = params.get("ws");
 useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(shown !== null ? { selectedId: shown } : {}) });
 useStore.getState().bind(api);
+// The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
+useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
 if (params.get("oom") === "1") {
   const GiB = 1024 ** 3;
   getLive("ws_a").feedStatus("live");
