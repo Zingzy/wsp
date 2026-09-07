@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   backgroundTasksLine,
+  stillWorkingRefusal,
   behindGoldenLine,
   builderStaysLine,
   DAEMON_UPDATE_FAILED,
@@ -225,6 +226,14 @@ describe("backgroundTasksLine", () => {
   it("counts the tasks the harness still had running when its result arrived", () => {
     expect(backgroundTasksLine(1)).toBe("ended with 1 background task running");
     expect(backgroundTasksLine(2)).toBe("ended with 2 background tasks running");
+  });
+});
+
+describe("stillWorkingRefusal", () => {
+  it("names the thread by its first eight characters and says the reply is in but the agent is still working", () => {
+    expect(stillWorkingRefusal("5ffc2c96-1111-4222-8333-444455556666")).toBe(
+      "thread 5ffc2c96 replied, still working; wait for its turn to finish before sending",
+    );
   });
 });
 
