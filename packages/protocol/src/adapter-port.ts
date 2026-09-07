@@ -53,3 +53,12 @@ export type ExecStreamFactory = (
     input?: readonly string[];
   },
 ) => ExecStream;
+
+/**
+ * Reads what the harness itself calls one of its sessions, from the harness's own store on the machine: the title
+ * it generated, overridden by whatever the person renamed the session to inside the harness. The id is the session
+ * as that harness keys it, in whatever word it uses for one (Claude Code's session id, Codex's thread id). One
+ * shell line goes to `exec` and its stdout is the answer. Null when the store keeps no title for that id, and when
+ * it holds no such session at all; absent on an adapter whose harness keeps no title.
+ */
+export type SessionTitleReader = (harnessSessionId: string, exec: (command: string) => Promise<string>) => Promise<string | null>;
