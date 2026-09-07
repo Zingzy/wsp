@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { SNAPSHOT_STORAGE } from "@wsp/engine";
-import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow } from "@wsp/engine";
+import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;
@@ -33,7 +33,19 @@ export interface StubBackend extends MachineBackend {
   /** What the next snapshot is listed at; a golden measured 7.8 to 8.5 GB live. */
   snapshotBytes: number;
   listSnapshots(): Promise<SnapshotRow[]>;
+  /** Every template the provider holds by id, with the snapshot each was promoted from; the capability flag is off
+   * until a test turns it on, so every road without templates stays as it was. */
+  templates: Map<string, TemplateRow & { snapshotId: string }>;
+  /** Every promote asked, in order. */
+  promoted: { snapshotId: string; name: string }[];
+  promoteSnapshot(snapshotId: string, name: string): Promise<string>;
+  getTemplate(id: string): Promise<TemplateRow>;
+  listTemplates(): Promise<TemplateRow[]>;
+  deleteTemplate(id: string): Promise<void>;
 }
+
+/** The provider's own images, which every account may name on create. */
+const BUILTIN_TEMPLATES = new Set(["base", "default"]);
 
 // Two zero blocks is a complete empty tar, so downloads are real archives.
 const EMPTY_TGZ = gzipSync(Buffer.alloc(1024));
@@ -69,6 +81,8 @@ export function stubBackend(): StubBackend {
   const snapshots: SnapshotRow[] = [];
   const snapshotsNamed = new Map<string, number>();
   const snapshotAsks = new Map<string, number>();
+  const templates: StubBackend["templates"] = new Map();
+  const promoted: StubBackend["promoted"] = [];
   const puts: StubBackend["puts"] = [];
   const vaultOrigin = vaultServer(puts, () => backend.downloads);
 
@@ -82,6 +96,7 @@ export function stubBackend(): StubBackend {
       containers: true,
       callbackRelay: true,
       snapshotListing: true,
+      templates: false,
       sizes: [{ cpu: 2, memMb: 2048, rateUsdPerHour: 0.09 }, { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }, { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 }],
     },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE },
@@ -89,9 +104,14 @@ export function stubBackend(): StubBackend {
     puts,
     snapshots,
     snapshotBytes: 8_000_000_000,
+    templates,
+    promoted,
     // The machine context probe answers with its markers and nothing found, as a bare guest would.
     execImpl: (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" }),
     async create(spec: MachineSpec): Promise<Machine> {
+      if (spec.template !== undefined && !BUILTIN_TEMPLATES.has(spec.template) && templates.get(spec.template)?.status !== "ready") {
+        throw Object.assign(new Error(`TemplateNotReady ${spec.template}`), { kind: "missing", status: 404 });
+      }
       const m: StubMachine = {
         id: `m${++seq}`,
         kind: spec.kind,
@@ -171,14 +191,35 @@ export function stubBackend(): StubBackend {
           labels: m.spec.labels ?? {},
         }));
     },
-    // Solari refuses a snapshot with live machines forked from it (409 SnapshotHasChildren).
+    // Solari refuses a snapshot with live machines forked from it (409 SnapshotHasChildren) and one a template
+    // stands on (409 SnapshotBacksTemplate); forks from the template hold no such dependency.
     async deleteSnapshot(id: string): Promise<void> {
       if (machines.some(m => !m.killed && m.spec.fromSnapshot === id)) throw Object.assign(new Error("SnapshotHasChildren"), { kind: "conflict", status: 409 });
+      if ([...templates.values()].some(t => t.snapshotId === id)) throw Object.assign(new Error("SnapshotBacksTemplate"), { kind: "conflict", status: 409 });
       const at = snapshots.findIndex(r => r.id === id);
       if (at >= 0) snapshots.splice(at, 1);
     },
     async listSnapshots(): Promise<SnapshotRow[]> {
       return snapshots.map(r => ({ ...r }));
+    },
+    async promoteSnapshot(snapshotId: string, name: string): Promise<string> {
+      if (!snapshots.some(r => r.id === snapshotId)) throw Object.assign(new Error("Not found"), { kind: "missing", status: 404 });
+      promoted.push({ snapshotId, name });
+      const id = `tpl_${name}`;
+      templates.set(id, { id, name, status: "ready", snapshotId });
+      return id;
+    },
+    async getTemplate(id: string): Promise<TemplateRow> {
+      const t = templates.get(id);
+      if (t === undefined) throw Object.assign(new Error("Not found"), { kind: "missing", status: 404 });
+      const { snapshotId: _s, ...row } = t;
+      return row;
+    },
+    async listTemplates(): Promise<TemplateRow[]> {
+      return [...templates.values()].map(({ snapshotId: _s, ...row }) => row);
+    },
+    async deleteTemplate(id: string): Promise<void> {
+      if (!templates.delete(id)) throw Object.assign(new Error("Not found"), { kind: "missing", status: 404 });
     },
   };
   return backend;

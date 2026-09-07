@@ -4026,6 +4026,30 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(await store.get("golden-recipes", "default@v2")).toBeDefined();
   });
 
+  it("keepPrevious false leaves a durable version alone while a workspace stands on it: its template would delete under the workspace's feet", async () => {
+    const { backend, rt } = started();
+    backend.capabilities.templates = true;
+    const b = await rt.golden.prepare();
+    const { version: one } = await rt.golden.seal(b.id);
+    expect(one.templateId).toBe("tpl_wsp-default-v1");
+    const ws = await rt.workspaces.create({ golden: one.snapshotId, name: "on-v1" });
+    expect(backend.machines.find(m => m.id === ws.machineId)!.spec).toMatchObject({ template: "tpl_wsp-default-v1" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const two = await rt.golden.upgrade({ delta: deltaOf("h2"), keepPrevious: false });
+    expect(warn.mock.calls.map(c => String(c[0]))).toEqual(["golden default v1 kept: on-v1 still on it"]);
+    warn.mockRestore();
+    expect(two.previousDropped).toBe(false);
+    expect(two.manifest.versions.map(v => [v.version, v.templateId])).toEqual([[1, "tpl_wsp-default-v1"], [2, "tpl_wsp-default-v2"]]);
+    expect(backend.templates.has("tpl_wsp-default-v1")).toBe(true);
+    expect(backend.snapshots.map(r => r.id)).toContain("snap_golden-v1");
+
+    await rt.workspaces.delete(ws.id);
+    const three = await rt.golden.upgrade({ delta: deltaOf("h3"), keepPrevious: false });
+    expect(three.previousDropped).toBe(true);
+    expect(backend.templates.has("tpl_wsp-default-v2")).toBe(false);
+    expect(backend.snapshots.map(r => r.id)).not.toContain("snap_golden-v2");
+  });
+
   it("dropping the previous version on the fork road ends the fork builder first, since it descends from that snapshot", async () => {
     const { backend, store, rt } = started();
     const b = await rt.golden.prepare();

@@ -3,25 +3,40 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, adoptOrPromote, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, templateName, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import { shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
-import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } from "../src/machine.js";
+import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, TemplateRow } from "../src/machine.js";
 
 /** A fake whose kill() resolves like the provider's DELETE does: a call for
  * which `ignoreKill` answers true is accepted and changes nothing. */
 function recordingBackend(
   execResults: Record<string, ExecResult> = {},
-  opts: { ignoreKill?: (id: string, nth: number) => boolean; built?: (spec: MachineSpec) => MachineShape; exec?: (cmd: string) => ExecResult; stream?: boolean; snapshot?: (id: string, nth: number) => void; state?: (id: string) => void } = {},
+  opts: {
+    ignoreKill?: (id: string, nth: number) => boolean;
+    built?: (spec: MachineSpec) => MachineShape;
+    exec?: (cmd: string) => ExecResult;
+    stream?: boolean;
+    snapshot?: (id: string, nth: number) => void;
+    state?: (id: string) => void;
+    /** The backend promotes snapshots to templates; what each read of a template answers, by how many reads it has had. */
+    templates?: boolean;
+    templateStatus?: (id: string, nth: number) => TemplateRow["status"];
+  } = {},
 ) {
   const created: MachineSpec[] = [];
   const snapshots: string[] = [];
   const killed: string[] = [];
   const deletedSnapshots: string[] = [];
+  /** Every template the provider holds, and every promote asked of it. */
+  const templates = new Map<string, TemplateRow>();
+  const promoted: { snapshotId: string; name: string }[] = [];
+  const deletedTemplates: string[] = [];
+  const templateReads = new Map<string, number>();
   /** Every create/kill/snapshot in order, so sequencing under the machine cap is provable. */
   const timeline: string[] = [];
   const machines = new Map<string, Machine>();
@@ -33,9 +48,10 @@ function recordingBackend(
   const inline: { id: string; cmd: string; timeoutMs: number | undefined }[] = [];
   const answer = (cmd: string): ExecResult => opts.exec?.(cmd) ?? execResults[cmd] ?? (cmd === "echo ok" ? REACH_OK : { exitCode: 0, stdout: "", stderr: "" });
   const backend: MachineBackend = {
-    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: false, sizes: [] },
+    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: false, templates: opts.templates === true, sizes: [] },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" } },
     async create(spec) {
+      if (spec.template !== undefined && spec.template.startsWith("tpl_") && !templates.has(spec.template)) throw Object.assign(new Error(`no template ${spec.template}`), { kind: "missing", status: 404 });
       created.push(spec);
       const id = `m${++nextId}`;
       timeline.push(`create ${id}`);
@@ -81,9 +97,32 @@ function recordingBackend(
       return m;
     },
     async list() { return []; },
-    async deleteSnapshot(id) { deletedSnapshots.push(id); },
+    async deleteSnapshot(id) {
+      if ([...templates.keys()].some(t => t === `tpl_${id}`)) throw Object.assign(new Error("SnapshotBacksTemplate"), { kind: "conflict", status: 409 });
+      deletedSnapshots.push(id);
+    },
+    async promoteSnapshot(snapshotId, name) {
+      timeline.push(`promote ${snapshotId}`);
+      promoted.push({ snapshotId, name });
+      const id = `tpl_${snapshotId}`;
+      templates.set(id, { id, name, status: "ready" });
+      return id;
+    },
+    async getTemplate(id) {
+      const row = templates.get(id);
+      if (row === undefined) throw Object.assign(new Error(`no template ${id}`), { kind: "missing", status: 404 });
+      const nth = (templateReads.get(id) ?? 0) + 1;
+      templateReads.set(id, nth);
+      const status = opts.templateStatus?.(id, nth) ?? row.status;
+      return { ...row, status, ...(status === "failed" ? { error: "restore copy failed" } : {}) };
+    },
+    async listTemplates() { return [{ id: "base", name: "base", status: "ready" }, ...templates.values()]; },
+    async deleteTemplate(id) {
+      deletedTemplates.push(id);
+      templates.delete(id);
+    },
   };
-  return { backend, created, snapshots, killed, deletedSnapshots, timeline, ran, inline, gone };
+  return { backend, created, snapshots, killed, deletedSnapshots, timeline, ran, inline, gone, templates, promoted, deletedTemplates };
 }
 
 /** What the provider's snapshot call answers when it refuses: the 502 the backend maps, with the reply's request id. */
@@ -262,7 +301,9 @@ describe("interactive golden: prepare then seal", () => {
     const { manifest, version } = await sealGolden(builder, { backend, smoke: "claude --version", onStage });
     expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
     expect(created[1]).toMatchObject({ kind: "desktop", fromSnapshot: "snap_golden-v1" });
+    expect(created[1]!.template).toBeUndefined();
     expect(version).toMatchObject({ version: 1, kind: "desktop", baseTemplate: "default", snapshotId: "snap_golden-v1" });
+    expect(version.templateId).toBeUndefined();
     expect(version.setupSha).toBe(builder.setupSha);
     expect(manifest.head).toBe(1);
     expect(sansBase(stages)).toEqual([
@@ -427,6 +468,90 @@ describe("interactive golden: prepare then seal", () => {
     expect(killed).toEqual(["m1", "m2", "m3", "m4"]);
     expect(deletedSnapshots).toEqual(["snap_golden-v2"]);
     expect(stages.at(-1)).toMatch(/^failed:golden smoke failed/);
+  });
+});
+
+describe("golden templates", () => {
+  const FAST_WAIT = { readyMs: 50, pollMs: 1 };
+
+  it("on a backend with templates the seal promotes the snapshot under wsp-<golden>-v<n> after the builder is killed, waits for ready, records the id, and the smoke fork boots from the template", async () => {
+    const { backend, created, timeline, promoted } = recordingBackend({}, { templates: true });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "echo setup", onStage });
+    const { version } = await sealGolden(builder, { backend, smoke: "claude --version", onStage, name: "work", templateWait: FAST_WAIT });
+    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "promote snap_golden-v1", "create m2", "kill m2"]);
+    expect(promoted).toEqual([{ snapshotId: "snap_golden-v1", name: "wsp-work-v1" }]);
+    expect(created[1]).toMatchObject({ kind: "sandbox", template: "tpl_snap_golden-v1" });
+    expect(created[1]!.fromSnapshot).toBeUndefined();
+    expect(version).toMatchObject({ version: 1, snapshotId: "snap_golden-v1", templateId: "tpl_snap_golden-v1" });
+    expect(sansBase(stages).slice(4)).toEqual([
+      "snapshotting:golden-v1", "promoting:wsp-work-v1", "promoting:tpl_snap_golden-v1 is ready", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
+    ]);
+  });
+
+  it("the golden's name defaults to the store's default key, so the template is found under wsp-default-v<n>", async () => {
+    const { backend, promoted } = recordingBackend({}, { templates: true });
+    await buildGolden({ backend, setup: "true", smoke: "true" });
+    expect(promoted.map(p => p.name)).toEqual(["wsp-default-v1"]);
+    expect(templateName("default", 1)).toBe("wsp-default-v1");
+  });
+
+  it("a template still building is read again until ready, each read a promoting line", async () => {
+    const { backend } = recordingBackend({}, { templates: true, templateStatus: (_id, nth) => (nth < 3 ? "building" : "ready") });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    const { version } = await sealGolden(builder, { backend, smoke: "true", onStage, templateWait: FAST_WAIT });
+    expect(version.templateId).toBe("tpl_snap_golden-v1");
+    expect(stages.filter(s => s.startsWith("promoting"))).toEqual([
+      "promoting:wsp-default-v1", "promoting:tpl_snap_golden-v1 is building; asking again", "promoting:tpl_snap_golden-v1 is building; asking again", "promoting:tpl_snap_golden-v1 is ready",
+    ]);
+  });
+
+  it("a template the provider fails ends the seal with its reason before any smoke fork, and the template goes before the snapshot", async () => {
+    const { backend, created, deletedSnapshots, deletedTemplates } = recordingBackend({}, { templates: true, templateStatus: () => "failed" });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    await expect(sealGolden(builder, { backend, smoke: "true", onStage, templateWait: FAST_WAIT })).rejects.toThrow("the provider failed the template tpl_snap_golden-v1: restore copy failed");
+    expect(created).toHaveLength(1);
+    expect(deletedTemplates).toEqual(["tpl_snap_golden-v1"]);
+    expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
+    expect(stages.at(-1)).toBe("failed:the provider failed the template tpl_snap_golden-v1: restore copy failed");
+  });
+
+  it("a template that never reads ready inside the wait ends the seal naming the last status and the wait", async () => {
+    const { backend } = recordingBackend({}, { templates: true, templateStatus: () => "building" });
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    await expect(sealGolden(builder, { backend, smoke: "true", templateWait: { readyMs: 20, pollMs: 1 } })).rejects.toThrow("the template tpl_snap_golden-v1 still reads building after 20ms");
+  });
+
+  it("forkGolden and the update's builder boot a durable version from its template and a version without one from its snapshot", async () => {
+    const { backend, created } = recordingBackend({}, { templates: true });
+    const { manifest, version } = await buildGolden({ backend, setup: "true", smoke: "true" });
+    await forkGolden(backend, manifest);
+    await upgradeBuilder({ backend, head: version, delta: { import: { recipeHash: "h2", tools: [], agents: [] }, retired: [], retiredOnImage: [] }, setup: "true" });
+    expect(created.slice(2).map(c => [c.template, c.fromSnapshot])).toEqual([["tpl_snap_golden-v1", undefined], ["tpl_snap_golden-v1", undefined]]);
+    const { templateId: _t, ...volatile } = version;
+    await forkGolden(backend, { head: 1, versions: [volatile] });
+    await upgradeBuilder({ backend, head: volatile, delta: { import: { recipeHash: "h3", tools: [], agents: [] }, retired: [], retiredOnImage: [] }, setup: "true" });
+    expect(created.slice(4).map(c => [c.template, c.fromSnapshot])).toEqual([[undefined, "snap_golden-v1"], [undefined, "snap_golden-v1"]]);
+  });
+
+  it("a backend whose capabilities lack templates, or that lacks one of the calls, has no template road", async () => {
+    const { backend } = recordingBackend({}, { templates: true });
+    expect(templatesOf(backend)).toBeDefined();
+    expect(templatesOf(recordingBackend().backend)).toBeUndefined();
+    const { deleteTemplate: _d, ...partial } = backend;
+    expect(templatesOf(partial)).toBeUndefined();
+  });
+
+  it("adoptOrPromote records the template the provider already holds under the version's name and promotes only when none does", async () => {
+    const { backend, promoted, templates } = recordingBackend({}, { templates: true });
+    templates.set("tpl_e6f26b64338f4eba", { id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready" });
+    const road = templatesOf(backend)!;
+    expect(await adoptOrPromote(road, "snap_dl8pcs2yj1fu", "wsp-default-v1", FAST_WAIT)).toEqual({ templateId: "tpl_e6f26b64338f4eba", found: true });
+    expect(promoted).toEqual([]);
+    expect(await adoptOrPromote(road, "snap_v2", "wsp-default-v2", FAST_WAIT)).toEqual({ templateId: "tpl_snap_v2", found: false });
+    expect(promoted).toEqual([{ snapshotId: "snap_v2", name: "wsp-default-v2" }]);
   });
 });
 

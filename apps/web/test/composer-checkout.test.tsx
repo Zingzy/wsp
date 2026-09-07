@@ -126,7 +126,7 @@ function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = [], ws: 
     nap: async () => ws,
     wake: async () => ws,
     upgrade: async () => ws,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, sizes: [] }),
+    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] }),
     listSessions: async () => rows,
     watchStatuses: async () => [],
     createFromGoldenHead: async () => ws,

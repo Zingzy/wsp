@@ -22,6 +22,7 @@ import {
   GoldenManifest,
   GoldenStageEvent,
   goldenHead,
+  goldenImage,
   HarnessCatalog,
   HostFolderListing,
   contextWindowsFor,
@@ -368,11 +369,13 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
 });
 
 describe("backend capabilities", () => {
-  it("requires every flag, containers, callbackRelay and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+  it("requires every flag, containers, callbackRelay, templates and the sizes list included, so no backend can leave one unstated", () => {
+    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { containers: _c, ...missing } = full;
     expect(() => Capabilities.parse(missing)).toThrow();
+    const { templates: _t, ...noTemplates } = full;
+    expect(() => Capabilities.parse(noTemplates)).toThrow();
     const { callbackRelay: _r, ...noRelay } = full;
     expect(() => Capabilities.parse(noRelay)).toThrow();
     const { sizes: _s, ...noSizes } = full;
@@ -669,6 +672,20 @@ describe("golden version logins", () => {
     expect(GoldenVersion.parse(base).leftBehind).toBeUndefined();
     expect(() => GoldenVersion.parse({ ...base, leftBehind: [{ id: "agents/claude", note: "hook left behind: x" }] })).toThrow();
     expect(() => GoldenVersion.parse({ ...base, leftBehind: ["hook left behind: x"] })).toThrow();
+  });
+});
+
+describe("goldenImage", () => {
+  it("boots a version from its template once one is recorded and calls it durable; a version with none boots from its snapshot and is volatile", () => {
+    expect(goldenImage({ snapshotId: "snap_a", templateId: "tpl_a" })).toEqual({ spec: { template: "tpl_a" }, mark: "durable" });
+    expect(goldenImage({ snapshotId: "snap_a" })).toEqual({ spec: { fromSnapshot: "snap_a" }, mark: "volatile" });
+  });
+
+  it("a version record takes an optional templateId and parses without one, as every version sealed before templates did", () => {
+    const v = { version: 1, snapshotId: "snap_a", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } };
+    expect(wire.GoldenVersion.parse(v).templateId).toBeUndefined();
+    expect(wire.GoldenVersion.parse({ ...v, templateId: "tpl_a" }).templateId).toBe("tpl_a");
+    expect(wire.GoldenStage.options).toContain("promoting");
   });
 });
 

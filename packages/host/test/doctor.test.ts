@@ -11,7 +11,7 @@ import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { TOOLS_PATH } from "@wsp/engine";
 import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ } from "@wsp/protocol";
-import { rotateDaemonTokenScript, writeDaemonTokenScript } from "@wsp/runtime";
+import { createRuntime, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved } from "@wsp/engine";
 import {
@@ -27,6 +27,7 @@ import {
   OPEN_SHIM_SCRIPT,
   START_MJS,
   packBundle,
+  promoteGoldens,
   stageDaemonBundle,
   tarPackCommand,
   type DaemonSocket,
@@ -44,6 +45,42 @@ describe("isReserved", () => {
     expect(isReserved({ poc: "p1", wsp: "1" })).toBe(true);
     expect(isReserved({ wsp: "1", "wsp-doctor": "1" })).toBe(false);
     expect(isReserved({})).toBe(false);
+  });
+});
+
+describe("promoteGoldens", () => {
+  const version = (n: number, templateId?: string) => ({ version: n, snapshotId: `snap_golden-v${n}`, ...(templateId !== undefined ? { templateId } : {}), baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } });
+  const io = () => {
+    const lines: string[] = [];
+    return { lines, io: { log: (l: string) => void lines.push(l) } };
+  };
+
+  it("records the template the provider holds under a version's name, promotes the rest, says each one, and notes the counts", async () => {
+    const backend = stubBackend();
+    backend.capabilities.templates = true;
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 3, versions: [version(1), version(2), version(3, "tpl_three")] });
+    for (const n of [1, 2, 3]) backend.snapshots.push({ id: `snap_golden-v${n}`, sizeBytes: 8e9 });
+    backend.templates.set("tpl_e6f26b64338f4eba", { id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready", snapshotId: "snap_golden-v1" });
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const { lines, io: cli } = io();
+    expect(await promoteGoldens(rt, cli)).toBe("1 promoted, 1 found by name");
+    expect(lines).toEqual([
+      "golden default v1: template tpl_e6f26b64338f4eba found by name and recorded",
+      "golden default v2: template tpl_wsp-default-v2 promoted and recorded",
+    ]);
+    expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v2", name: "wsp-default-v2" }]);
+    expect(((await store.get("goldens", "default")) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual(["tpl_e6f26b64338f4eba", "tpl_wsp-default-v2", "tpl_three"]);
+    expect(await promoteGoldens(rt, cli)).toBe("every version already has a template");
+  });
+
+  it("says so on a backend without templates and touches nothing", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const { lines, io: cli } = io();
+    expect(await promoteGoldens(rt, cli)).toBe("this backend has no templates; goldens stay as snapshots");
+    expect(lines).toEqual([]);
+    expect(backend.promoted).toEqual([]);
   });
 });
 
