@@ -22,7 +22,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS } from "@wsp/catalog";
-import { LOGIN_CHOICES, RECIPE_TICKS, shellQuote } from "@wsp/protocol";
+import { LOGIN_CHOICES, RECIPE_TICKS, fmtDuration, shellQuote } from "@wsp/protocol";
 import { agentHomes } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { HARNESS_ADAPTERS } from "./adapters.js";
@@ -40,7 +40,26 @@ import { scanTools } from "./scan.js";
 import { colourDepth, confirmPrompt, isTTY, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
+import { addressLines, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
+import {
+  httpProbe,
+  installService,
+  logTail,
+  noManagerLine,
+  runFailureLine,
+  serviceEnv,
+  serviceManagerFor,
+  serviceReading,
+  statusLines,
+  stopService,
+  systemRunner,
+  untilLock,
+  untilServing,
+  type HostProbe,
+  type ServiceAddress,
+  type ServiceManager,
+  type ServiceRunner,
+} from "./service.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
@@ -51,7 +70,14 @@ export const HELP = `wsp - ${TAGLINE}
 
 usage:
   wsp up             start the app and the runtime over the golden you sealed
-                     (plain wsp does the same)
+                     (plain wsp does the same). It serves until you stop it, so
+                     closing that terminal takes the app down with it; --service
+                     hands the same line to this computer's own service manager
+                     instead, which starts it now and again at every login
+  wsp down           stop the service and take it away, so nothing brings the
+                     host back at the next login
+  wsp status         whether a host is serving this state file, on which ports,
+                     and what keeps it there; exit 1 when none does
   wsp init           set up your first golden image in six screens: Agents,
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
                      on this Mac, and Build, then the browser
@@ -136,6 +162,15 @@ options:
                      opens it, then waits for you (this is what a run off a
                      terminal does anyway). The run ends with the golden
                      recorded and never serves the app; wsp up does that
+  --service          up: install the host as a launchd agent on a Mac, or a
+                     systemd user unit on Linux, and wait for it to answer on
+                     its port. The keys are not written into it: the service
+                     reads the same .env a terminal run reads, so they have to
+                     be in a file rather than exported in the shell that
+                     installs it. It does pin the node and the wsp it was run
+                     from by path, so a node that goes away later (an nvm
+                     switch, a brew upgrade) stops the service at the next
+                     login, with its log the only place that says why
   --json             init: print each build stage frame (with the install step
                      it belongs to, the command that step runs and its seconds
                      so far), each sign-in hand-off and its outcome as one JSON
@@ -265,13 +300,24 @@ function writeEnvFile(path: string, set: Record<string, string>): void {
   chmodSync(path, 0o600);
 }
 
+/** Where a key is read from, in the order they win: this process's environment, then ./.env, then the wsp home's. */
+function keyLayers(sources: KeySources): Array<Record<string, string | undefined>> {
+  return [sources.env, parseEnvFile(join(sources.cwd, ".env")), parseEnvFile(join(sources.home, ".env"))];
+}
+
+/** Where a key is read from on this computer: this process's environment, the folder it runs in, and the wsp home.
+ * One answer, so a test can hand a different one through the same field rather than move the process. */
+export function keySources(): KeySources {
+  return { env: process.env, cwd: process.cwd(), home: wspHome() };
+}
+
 export async function loadKeys(
   io: CliIO,
-  sources: KeySources = { env: process.env, cwd: process.cwd(), home: wspHome() },
+  sources: KeySources = keySources(),
   ask: { anthropic: boolean } = { anthropic: true },
 ): Promise<Keys> {
   const homeEnv = join(sources.home, ".env");
-  const layers = [sources.env, parseEnvFile(join(sources.cwd, ".env")), parseEnvFile(homeEnv)];
+  const layers = keyLayers(sources);
   const find = (name: string): string | undefined => layers.map(l => l[name]).find(v => v !== undefined && v !== "");
 
   let solari = find("SOLARI_API_KEY");
@@ -555,9 +601,7 @@ async function hostFor(
     mkdirSync(dirname(pointer), { recursive: true });
     writeFileSync(pointer, `${home}\n`);
 
-    io.log(`app         http://127.0.0.1:${handle.port}`);
-    io.log(`runtime ws  ws://127.0.0.1:${handle.wsPort} (token: ${tokenPath})`);
-    io.log(`state       ${opts.statePath}`);
+    for (const line of addressLines(opts.statePath, handle)) io.log(line);
     if (keys.anthropic === undefined) {
       io.log("note: no ANTHROPIC_API_KEY found; new workspaces fork without claude credentials");
     }
@@ -576,6 +620,164 @@ async function hostFor(
   }
 }
 
+/** What the service commands ask of this computer: which manager writes its units, how a manager's command is run
+ * here, and how long a load or a stop is given before wsp stops waiting and says what it sees. Tests hand a fake
+ * manager and a fake runner through the same three fields. */
+export interface ServiceDeps {
+  platform: string;
+  manager: ServiceManager | undefined;
+  run: ServiceRunner;
+  waitMs: number;
+  /** The layers a key is read from, so what a service can still read once the installing shell is gone is one
+   * answer a test hands over rather than the folder the test runner happens to sit in. */
+  keys: KeySources;
+  /** Whether the host the lock names answers on its port. */
+  answers: HostProbe;
+}
+
+/** A load or a stop is a process starting or ending on this computer, not a network call. */
+const SERVICE_WAIT_MS = 20_000;
+
+export function systemService(): ServiceDeps {
+  const os = platform();
+  return { platform: os, manager: serviceManagerFor(os), run: systemRunner, waitMs: SERVICE_WAIT_MS, keys: keySources(), answers: httpProbe };
+}
+
+/** Which service this is: one per state file, under this person's home and this user. */
+function serviceAddress(statePath: string): ServiceAddress {
+  return { statePath, home: homedir(), uid: process.getuid?.() ?? 0 };
+}
+
+/** The line the service runs: this node and this wsp, serving the same state file and ports the install was given.
+ * Every one is spelled out, since a service has no cwd of the person's to read a default from. */
+function serviceArgv(opts: { port: number; wsPort: number; statePath: string }): string[] {
+  const bin = process.argv[1];
+  if (bin === undefined) throw new Error("wsp up --service needs the path wsp was started from, and this process has none");
+  return [process.execPath, resolve(bin), "up", "--state", opts.statePath, "--port", String(opts.port), "--ws-port", String(opts.wsPort)];
+}
+
+/** A host already holds the state file, so the service would only start a second one that refuses the lock. */
+function serviceRefusal(lock: HostLock, statePath: string): string {
+  return `wsp up --service: a wsp host (pid ${lock.pid}) is already serving ${statePath} on port ${lock.port}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp up --service again.`;
+}
+
+/** Whether a key is in one of the two `.env` files, which is all a service can still read once the shell that
+ * installed it is gone. The environment layer is that shell, so it does not count. */
+function keyInAFile(name: string, sources: KeySources): boolean {
+  return keyLayers(sources)
+    .slice(1)
+    .some(layer => (layer[name] ?? "") !== "");
+}
+
+/** A service starts without the shell that installed it, so a key only that shell exported would be gone by then.
+ * The line that says so, or nothing when a file already holds the key. */
+export function keyOnlyInThisShell(sources: KeySources = keySources()): string | undefined {
+  if (keyInAFile("SOLARI_API_KEY", sources)) return undefined;
+  return `wsp up --service: a service starts without your shell, so it reads the Solari key from a file. SOLARI_API_KEY is only in this shell's environment; put it in ${join(sources.home, ".env")} first.`;
+}
+
+/** The Claude key is not needed to serve, so it is a word rather than a refusal; without it every workspace the
+ * service forks has no claude credentials, and the installing shell is the one place the reading looks complete. */
+export function claudeKeyOnlyInThisShell(sources: KeySources = keySources()): string | undefined {
+  if ((sources.env["ANTHROPIC_API_KEY"] ?? "") === "" || keyInAFile("ANTHROPIC_API_KEY", sources)) return undefined;
+  return `note: ANTHROPIC_API_KEY is only in this shell's environment, so the service starts without it and the workspaces it forks get no claude credentials. Put it in ${join(sources.home, ".env")} to carry it over.`;
+}
+
+export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, deps: ServiceDeps): Promise<number> {
+  const manager = deps.manager;
+  if (manager === undefined) {
+    io.error(noManagerLine(deps.platform));
+    return 1;
+  }
+  const held = servingHost(opts.statePath);
+  if (held !== undefined) {
+    io.error(serviceRefusal(held, opts.statePath));
+    return 1;
+  }
+  const keys = await loadKeys(io, deps.keys, { anthropic: false });
+  const shellOnly = keyOnlyInThisShell(deps.keys);
+  if (shellOnly !== undefined) {
+    io.error(shellOnly);
+    return 1;
+  }
+  if (goldenHead(await makeRuntime(keys, opts.statePath).golden.get()) === undefined) {
+    io.error("no golden yet; run wsp init");
+    return 1;
+  }
+  const claudeOnly = claudeKeyOnlyInThisShell(deps.keys);
+  if (claudeOnly !== undefined) io.log(claudeOnly);
+  const at = serviceAddress(opts.statePath);
+  const logPath = hostLogPath(opts.statePath);
+  const { unit, installed, failure } = await installService(manager, { ...at, argv: serviceArgv(opts), cwd: process.cwd(), env: serviceEnv(process.env), logPath }, deps.run);
+  if (failure !== undefined) {
+    io.error(`wsp up --service: ${runFailureLine(failure)}`);
+    if (installed) io.error(`the ${manager.words} ${unit.name} is still there at ${unit.path}; wsp down takes it away.`);
+    return 1;
+  }
+  const lock = await untilServing(opts.statePath, deps.waitMs, deps.answers);
+  if (lock === undefined) {
+    io.error(
+      `the ${manager.words} ${unit.name} loaded, but nothing answered on port ${opts.port} for ${opts.statePath} within ${fmtDuration(deps.waitMs)}. Its log is ${logPath}, and wsp down takes the service away.`,
+    );
+    for (const line of logTail(logPath)) io.error(line);
+    return 1;
+  }
+  io.log(`${manager.words} ${unit.name} is loaded; it serves again at every login`);
+  for (const line of addressLines(opts.statePath, lock)) io.log(line);
+  io.log(`log         ${logPath}`);
+  const after = manager.afterLoad?.(at);
+  if (after !== undefined) io.log(after);
+  io.log("Stop it with wsp down.");
+  return 0;
+}
+
+export async function downCommand(io: CliIO, opts: { statePath: string }, deps: ServiceDeps): Promise<number> {
+  const manager = deps.manager;
+  if (manager === undefined) {
+    io.error(noManagerLine(deps.platform));
+    return 1;
+  }
+  const at = serviceAddress(opts.statePath);
+  const unit = manager.unit(at);
+  // The manager is asked even with no unit file: a file somebody removed, or an install that took the file back,
+  // still leaves the manager holding the service, and that is the one thing wsp down is for.
+  const installed = existsSync(unit.path);
+  const { held, unsure, failure } = await stopService(manager, at, deps.run);
+  if (unsure !== undefined) {
+    const stands = installed ? `Its unit file is still ${unit.path}; nothing was changed.` : "Nothing was changed.";
+    io.error(`wsp down: ${runFailureLine(unsure)}, so wsp cannot tell whether the ${manager.words} ${unit.name} is still loaded. ${stands}`);
+    return 1;
+  }
+  if (failure !== undefined) {
+    io.error(`wsp down: ${runFailureLine(failure)}`);
+    return 1;
+  }
+  if (!held && !installed) {
+    const byHand = servingHost(opts.statePath);
+    io.error(
+      byHand === undefined
+        ? `wsp down: no ${manager.words} for ${opts.statePath}, and no host is serving it.`
+        : `wsp down: no ${manager.words} for ${opts.statePath}; the host serving it (pid ${byHand.pid}) was started by hand. Stop it with Ctrl-C in its terminal, or kill ${byHand.pid}.`,
+    );
+    return 1;
+  }
+  const lock = await untilLock(opts.statePath, false, deps.waitMs);
+  if (lock !== undefined) {
+    io.error(`the ${manager.words} ${unit.name} is gone, but the host it started (pid ${lock.pid}) is still serving ${opts.statePath}.`);
+    return 1;
+  }
+  io.log(`${manager.words} ${unit.name} stopped; nothing serves ${opts.statePath} now`);
+  return 0;
+}
+
+export async function statusCommand(io: CliIO, opts: { statePath: string }, deps: ServiceDeps): Promise<number> {
+  const reading = await serviceReading(deps.manager, serviceAddress(opts.statePath), deps.run, deps.platform);
+  const lock = servingHost(opts.statePath);
+  const host = lock === undefined ? undefined : { lock, answering: await deps.answers(lock) };
+  for (const line of statusLines(opts.statePath, host, reading)) io.log(line);
+  return host?.answering === true ? 0 : 1;
+}
+
 /** The flags the shared parse reads; a command that answers on its own word (mcp, recipe) parses its own. */
 interface SharedFlags {
   version?: boolean;
@@ -590,6 +792,7 @@ interface SharedFlags {
   project?: string;
   "first-workspace"?: string;
   import?: string;
+  service?: boolean;
 }
 
 interface Command {
@@ -602,12 +805,21 @@ interface Command {
 const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
     json: false,
-    run: async (io, opts) => {
+    run: async (io, opts, values) => {
+      if (values.service === true) return upServiceCommand(io, opts, systemService());
       const handle = await up(io, opts);
       if (handle === undefined) return 1;
       stopOnSignals(handle, io);
       return 0;
     },
+  },
+  down: {
+    json: false,
+    run: (io, opts) => downCommand(io, opts, systemService()),
+  },
+  status: {
+    json: false,
+    run: (io, opts) => statusCommand(io, opts, systemService()),
   },
   init: {
     json: true,
@@ -820,6 +1032,7 @@ export const SHARED_OPTIONS: Options = {
   project: { type: "string" },
   "first-workspace": { type: "string" },
   import: { type: "string" },
+  service: { type: "boolean" },
 };
 
 const without = (options: Options, names: readonly string[]): Options => Object.fromEntries(Object.entries(options).filter(([name]) => !names.includes(name)));
