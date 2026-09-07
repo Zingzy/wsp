@@ -594,7 +594,7 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/brew-tap/zingzy/tap")).toMatch(/su -s \/bin\/bash linuxbrew -c '.*brew tap zingzy\/tap'$/);
     expect(cmd("tools/brew/gh")).toMatch(/su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install gh'$/);
     const shared = cmd("tools/brew-shared");
-    expect(shared).toMatch(/su -s \/bin\/bash linuxbrew -c 'export HOMEBREW_NO_AUTO_UPDATE=1 .*NONINTERACTIVE=1\n/);
+    expect(shared).toMatch(/su -s \/bin\/bash linuxbrew -c 'export HOMEBREW_NO_AUTO_UPDATE=1 .*NONINTERACTIVE=1 HOMEBREW_CURL_RETRIES=1\n/);
     expect(shared).toContain(`brew deps --for-each '\\''gh'\\'' '\\''pipx'\\'' '\\''rust'\\'' '\\''go'\\'' | sed`);
     // Homebrew's own toolchain is never in the shared set: it installed before, on request, and stays that way.
     expect(shared).toContain(`grep -vx -e '\\'''\\'' -e glibc -e gcc | sort | uniq -d`);
@@ -732,6 +732,41 @@ describe("toolInstallsFor", () => {
       row({ rung: "tools", id: "tools/pnpm/x", label: "x" }),
     ]);
     for (const i of t.installs) expect(i.cmd).not.toMatch(/\|\s*(ba)?sh\b/);
+  });
+});
+
+describe("what a step shows while it runs", () => {
+  it("is the manager's own line for a package, the brew line without its su, where a release comes from, and a custom row's lines as typed", () => {
+    const t = toolInstallsFor(
+      [
+        row({ rung: "tools", id: "tools/brew/gh", linux: "yes" }),
+        row({ rung: "tools", id: "tools/brew/yq", linux: "yes" }),
+        row({ rung: "tools", id: "tools/brew-tap/zingzy/tap", linux: "yes" }),
+        row({ rung: "tools", id: "tools/npm/bun", label: "bun@1.4.0", version: "1.4.0" }),
+        row({ rung: "tools", id: "tools/pipx/black", label: "black 24.1.0", version: "24.1.0" }),
+        row({ rung: "tools", id: `${CATALOG_PREFIX}tmux`, label: "tmux", linux: "yes" }),
+        row({ rung: "tools", id: `${CATALOG_PREFIX}gh`, label: "GitHub CLI", linux: "yes" }),
+      ],
+      new Map(),
+      [{ kind: "custom", id: "just", name: "just", install: ["brew install just", "just --version"], check: "command -v just", why: "added by hand" }],
+    );
+    const shown = Object.fromEntries(t.installs.map(i => [i.id, i.shown]));
+    expect(shown).toEqual({
+      "tools/homebrew": "git clone github.com/Homebrew/brew at 6.0.21",
+      "tools/brew-toolchain/glibc": "brew install glibc",
+      "tools/brew-toolchain/gcc": "brew install gcc",
+      "tools/brew-tap/zingzy/tap": "brew tap zingzy/tap",
+      "tools/brew-shared": "brew install the dependencies gh, yq, pipx share",
+      "tools/brew/gh": "brew install gh",
+      "tools/brew/yq": "brew install yq",
+      "tools/npm/bun": "npm install -g bun@1.4.0",
+      "tools/manager/pipx": "brew install pipx",
+      "tools/pipx/black": "pipx install black==24.1.0",
+      "tools/apt-index": "apt-get update",
+      "tools/catalog/tmux": "apt-get install tmux",
+      "tools/catalog/gh": "the latest release of github.com/cli/cli",
+      "tools/custom/just": "brew install just; just --version",
+    });
   });
 });
 

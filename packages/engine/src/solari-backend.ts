@@ -40,6 +40,9 @@ export const SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 10, usdPerGbMo
 /** Prefixed to every exec: the guest runs as root and the exec API hands it no environment beyond PATH. */
 export const EXEC_ENV = "export HOME=/root USER=root";
 
+/** Measured 2026-09-07: Solari's replies carry no request id header, so requestId stays unset; the common name is read should one appear. */
+export const REQUEST_ID_HEADER = "x-request-id";
+
 function fail(e: WspError): never {
   throw Object.assign(new Error(e.message || `${e.kind} (${e.status})`), e);
 }
@@ -106,7 +109,7 @@ export class SolariBackend implements MachineBackend {
       }
       let errBody: { code?: string; error?: string } = {};
       try { errBody = await res.json() as typeof errBody; } catch { /* non-JSON error body */ }
-      const e = classify(res.status, errBody);
+      const e = classify(res.status, errBody, res.headers.get(REQUEST_ID_HEADER) ?? undefined);
       if (!shouldRetry(e, attempt)) fail(e);
       await new Promise(r => setTimeout(r, backoffMs(attempt)));
     }

@@ -8,6 +8,7 @@ import {
   DAEMON_PORT,
   INLINE_EXEC_MS,
   NotFirstLifeError,
+  SnapshotFailedError,
   OWNER_LABEL,
   Workspace,
   buildGolden,
@@ -69,6 +70,7 @@ import type {
   GoldenBuilderView,
   GoldenLogin,
   GoldenStage,
+  GoldenStep,
   HarnessCatalog,
   RecipeDigest,
   PortProbeView,
@@ -95,7 +97,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, notifyLine, sendRefusal, shellQuote, startPicks, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -427,6 +429,8 @@ export interface RuntimeOptions {
   clock?: Clock;
   /** How long a seal waits for a killed machine to read gone (tests shrink it). */
   killConfirm?: KillConfirm;
+  /** How long a seal waits between snapshot attempts the provider refused (tests shrink it). */
+  snapshotRetryMs?: number;
   /** Names this machine and install on the holds it writes, so two machines over one state file never mistake
    * each other's. The entry points pass hostIdentity(); the bare hostname when absent, which touches no disk. */
   hostId?: string;
@@ -623,8 +627,9 @@ export interface Runtime {
     exec(id: string, cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
     /** The command, word by word, launched the way a harness turn is: detached on the machine, each word quoted for
      * its shell, exported with what the default harness's turns get, its output streamed by line, its exit code at
-     * the end. Rejects when the workspace or that harness's adapter is unknown; a launch that fails ends the stream. */
-    execStream(id: string, argv: ReadonlyArray<string>): Promise<ExecStream>;
+     * the end; in cwd when given, else the home folder, as a harness turn does. Rejects when the workspace or that
+     * harness's adapter is unknown; a launch that fails ends the stream. */
+    execStream(id: string, argv: ReadonlyArray<string>, cwd?: string): Promise<ExecStream>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string): Promise<DaemonReachView>;
     /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
@@ -697,10 +702,11 @@ export interface Runtime {
      * keeps its first life, its hold is released and its record stays reusable. */
     prepare(opts?: { name?: string; kind?: MachineKind; signal?: AbortSignal }): Promise<GoldenBuilderView>;
     /** Snapshot, smoke-fork, append a version. A builder built from a recipe is kept running for GRACE_MS after a
-     * successful seal so one more change re-snapshots it; any other builder, and every failed or refused seal, consumes it.
-     * keepBuilder false ends it with the seal instead: a caller with no process left to end the window would otherwise
-     * leave it billing until the next host sweeps it. logins: what each sign-in asked of the builder came to, stamped
-     * on the version. */
+     * successful seal so one more change re-snapshots it; any other builder, and every failed or refused seal, consumes
+     * it, except a snapshot the provider refused: that builder is left as it was and stays recorded for the next init
+     * to attach to while the provider still has it (SnapshotFailedError says which). keepBuilder false ends it with
+     * the seal instead: a caller with no process left to end the window would otherwise leave it billing until the
+     * next host sweeps it. logins: what each sign-in asked of the builder came to, stamped on the version. */
     seal(builderId: string, opts?: { logins?: GoldenLogin[]; keepBuilder?: boolean }): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
     /** The recipe the golden's head was built from, or nothing when it was not built from one. */
     recipe(name?: string): Promise<RecipeDigest | undefined>;
@@ -2122,11 +2128,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return entry.machine.exec(cmd, o);
     },
 
-    async execStream(id, argv) {
+    async execStream(id, argv, cwd) {
       const entry = await entryOf(id);
       const { adapter } = adapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
-      const inner = machineExecStream(entry.machine, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(argv.map(shellQuote).join(" "), { env: { ...adapter.env } });
+      const inner = machineExecStream(entry.machine, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(cwd, argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
       let endWith: (reason: string) => void = () => {};
       const ended = new Promise<{ reason: string }>(resolve => {
         endWith = reason => resolve({ reason });
@@ -2618,8 +2624,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await store.delete(BUILDERS, id);
   };
 
-  const stageOf = (name: string) => (stage: GoldenStage, detail?: string) =>
-    bus.emit({ type: "golden.stage", name, stage, ...(detail !== undefined ? { detail } : {}) });
+  const stageOf = (name: string) => (stage: GoldenStage, detail?: string, step?: GoldenStep) =>
+    bus.emit({ type: "golden.stage", name, stage, ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}) });
 
   const recipeOrThrow = (): GoldenRecipe => {
     if (!opts.goldenRecipe) throw new Error("this runtime has no golden recipe; the host wires one (setup + smoke) before the wizard can run");
@@ -2710,6 +2716,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(prior !== undefined ? { manifest: prior } : {}),
           onStage: stageOf(name),
           ...(opts.killConfirm !== undefined ? { killConfirm: opts.killConfirm } : {}),
+          ...(opts.snapshotRetryMs !== undefined ? { snapshotRetryMs: opts.snapshotRetryMs } : {}),
           ...(logins !== undefined ? { logins } : {}),
           keepBuilder: keep,
         }),
@@ -2727,7 +2734,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       return result;
     } catch (e) {
-      // sealGolden consumes the builder on every road but a refusal; a refused
+      // A builder the provider refused to snapshot and still has is untouched, so its record stays for the next attach.
+      if (e instanceof SnapshotFailedError && e.builderState !== "gone") throw e;
+      // sealGolden consumes the builder on every other road but a refusal; a refused
       // builder can never seal and under a two-machine cap must not outlive it.
       if (e instanceof NotFirstLifeError) await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
       await forgetBuilder(entry.record.id);

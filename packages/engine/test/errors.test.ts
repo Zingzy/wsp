@@ -100,3 +100,10 @@ describe("untilReached", () => {
     expect(f.calls()).toBe(4);
   });
 });
+
+describe("the provider's request id", () => {
+  it("rides on the error when the reply carried one, and is absent, not empty, when it did not", () => {
+    expect(classify(502, { error: "Failed to snapshot sandbox" }, "req_7")).toEqual({ kind: "snapshotUnavailable", status: 502, code: undefined, message: "Failed to snapshot sandbox", requestId: "req_7" });
+    expect(classify(502, { error: "Failed to snapshot sandbox" })).not.toHaveProperty("requestId");
+  });
+});

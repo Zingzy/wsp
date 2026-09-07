@@ -247,8 +247,12 @@ export function exportGuest(backend: StubBackend): { sources: string[] } {
   return { sources };
 }
 
-/** The script the launch carried to the machine, decoded. */
+/** Every script a launch carried to the machine, decoded, oldest first. */
+export function launchedScripts(backend: StubBackend): string[] {
+  return backend.machines[0]!.execLog.filter(cmd => cmd.includes("base64 -d")).map(launch => Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8"));
+}
+
+/** The script the first launch carried to the machine, decoded. */
 export function launchedScript(backend: StubBackend): string {
-  const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
-  return Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8");
+  return launchedScripts(backend)[0]!;
 }

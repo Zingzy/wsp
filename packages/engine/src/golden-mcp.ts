@@ -8,7 +8,7 @@ import type { McpFormat, McpGuestResult } from "@wsp/catalog";
 import { MCP_ID_PREFIX, shellQuote } from "@wsp/protocol";
 import { TOOLS_PATH, UV_INSTALL, WITHHELD_NOTE, withheld, type RecipeEntry } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { TOOL_TIMEOUT_S, type ToolResult, closing, freeNote, guardDeadlineMs, guarded, reasonOf } from "./golden-tools.js";
+import { type ToolResult, closing, freeNote, guardDeadlineMs, guardedRoad, reasonOf, roadLimitS } from "./golden-tools.js";
 import type { ExecResult, Machine } from "./machine.js";
 import type { StageListener } from "./golden.js";
 
@@ -350,13 +350,13 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
   const viaUv = rows.filter(r => r.command !== undefined && ["uv", "uvx"].includes(basename(r.command)) && missing.has(asRun(r.command)));
   if (viaUv.length > 0) {
     stage("installing-mcp", `uv for ${viaUv.map(r => r.name).join(", ")}`);
-    const install = await machine.run(guarded(`set -euo pipefail\n${UV_INSTALL}`, TOOL_TIMEOUT_S), { deadlineMs: guardDeadlineMs(TOOL_TIMEOUT_S), onLine: line => stage("installing-mcp", `uv: ${line}`) }).catch(refused);
+    const install = await machine.run(guardedRoad("release", `set -euo pipefail\n${UV_INSTALL}`), { deadlineMs: guardDeadlineMs(roadLimitS("release")), onLine: line => stage("installing-mcp", `uv: ${line}`) }).catch(refused);
     for (const r of viaUv) {
       if (install.exitCode === 0) {
         r.notes.unshift("uv installed for it");
         r.shorts.unshift("uv installed");
       } else {
-        const short = `uv did not install (${reasonOf(install, TOOL_TIMEOUT_S)})`;
+        const short = `uv did not install (${reasonOf(install, roadLimitS("release"))})`;
         r.shorts.unshift(short);
         r.notes.unshift(`${short}; the server starts once it is installed there`);
       }

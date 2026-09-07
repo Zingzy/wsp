@@ -22,6 +22,9 @@ export interface ToolRow {
 export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
   /** How an install by this road reads beside the tool's name: "by apt", "from its release". */
   words: string;
+  /** The one line a person reads while the install runs, for a road whose install line is not that: the brew line
+   * without its su, where a release comes from. Absent, the install line is its own. */
+  shown?(road: R, bin: string): string;
   /** What the install runs on top of: a floor row by id, the one apt index read, or Homebrew. */
   after?: string;
   /** The road a recipe's tools row under this manager takes; absent for a road no manager row names. */
@@ -37,6 +40,23 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
   /** The road fixed to a version, for a road that pins one; absent for a road that installs what its source serves. */
   at?(road: R, version: string): R;
 }
+
+// --- the network clock every road runs under -------------------------------------
+
+/** A network read that has gone dead fails after this long and is tried this many more times, on every road whose
+ * tool takes the knobs from its environment; the road's step limit below bounds whatever the tool cannot clock. */
+export const NET_READ_S = 60;
+export const NET_RETRIES = 1;
+/** Seconds curl gives a connection to open, and the most npm waits before its one more try. */
+const NET_CONNECT_S = 15;
+const NET_RETRY_WAIT_S = 10;
+const NPM_NET = `export npm_config_fetch_timeout=${NET_READ_S * 1000} npm_config_fetch_retries=${NET_RETRIES} npm_config_fetch_retry_maxtimeout=${NET_RETRY_WAIT_S * 1000}`;
+const PIP_NET = `export PIP_TIMEOUT=${NET_READ_S} PIP_RETRIES=${NET_RETRIES}`;
+const UV_NET = `export UV_HTTP_TIMEOUT=${NET_READ_S} UV_HTTP_RETRIES=${NET_RETRIES}`;
+const CARGO_NET = `export CARGO_HTTP_TIMEOUT=${NET_READ_S} CARGO_NET_RETRY=${NET_RETRIES}`;
+/** curl reads no environment for these, so every curl a road's script types goes through this function; under a
+ * byte a second for the read window is a dead read to it. */
+export const CURL_NET = `curl() { command curl --connect-timeout ${NET_CONNECT_S} --speed-limit 1 --speed-time ${NET_READ_S} --retry ${NET_RETRIES} "$@"; }`;
 
 const atVersion = <R extends { version?: string }>(r: R, version: string): R => ({ ...r, version });
 const pinned = (pkg: string, version: string | undefined, sep: string): string => (version === undefined ? pkg : `${pkg}${sep}${version}`);
@@ -55,7 +75,7 @@ export const APT_UPDATE = `${APT_ENV}\napt-get update -qq`;
 export const HOMEBREW = { tag: "6.0.21", commit: "560147012b9678b42ef5e83b690f0895552d1366" } as const;
 export const BREW_PREFIX = "/home/linuxbrew/.linuxbrew";
 // Install-time cleanup stays on: with it off, one recipe left 2.6 GB of bottles in the download cache on a 20 GB disk.
-export const BREW_ENV = "HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 NONINTERACTIVE=1";
+export const BREW_ENV = `HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 NONINTERACTIVE=1 HOMEBREW_CURL_RETRIES=${NET_RETRIES}`;
 export const BREW = `${BREW_PREFIX}/bin/brew`;
 
 // Homebrew refuses to run as root, so it lives under its own user at the
@@ -76,6 +96,7 @@ const brew: RoadModule<Road<"brew">> = {
   words: "with Homebrew",
   after: HOMEBREW_STEP,
   fromRow: r => ({ road: "brew", formula: r.name }),
+  shown: r => `brew install ${r.formula}`,
   install: r => asLinuxbrew(`install ${r.formula}`),
   uninstall: r => {
     if (!r.formula.includes("/")) return { cmd: asLinuxbrew(`uninstall ${r.formula}`) };
@@ -212,12 +233,17 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
   ].join("\n");
 }
 
+/** The tag a release install fetches: the row's version, else the pinned tag, else the current release. */
+const releaseTag = (r: Road<"release">): string | undefined => r.version ?? r.pin?.tag;
+const NO_RELEASE = "no GitHub release to install from";
+
 const release: RoadModule<Road<"release">> = {
   words: "from its release",
+  shown: r => (r.repo === undefined ? NO_RELEASE : `the ${releaseTag(r) ?? "latest"} release of github.com/${r.repo}`),
   install: (r, bin) => {
-    if (r.repo === undefined) return { note: "no GitHub release to install from" };
+    if (r.repo === undefined) return { note: NO_RELEASE };
     // Without a version the pinned tag stands, as a vendor install does; a first install with neither takes the current release.
-    const tag = r.version ?? r.pin?.tag;
+    const tag = releaseTag(r);
     return releaseInstall(bin, r.repo, tag, pinStateOf(tag, r.pin) === "same" ? r.pin!.sha256 : undefined, r.go);
   },
   uninstall: (_r, bin) => ({ cmd: `rm -f /usr/local/bin/${shellQuote(bin)}` }),
@@ -227,6 +253,7 @@ const release: RoadModule<Road<"release">> = {
 
 const vendor: RoadModule<Road<"vendor">> = {
   words: "from its vendor's release",
+  shown: r => r.cask.from,
   install: r => r.cask.install(r.version, r.pin),
   uninstall: r => ({ cmd: r.cask.uninstall }),
   names: () => [],
@@ -239,6 +266,7 @@ const vendor: RoadModule<Road<"vendor">> = {
 const apt: RoadModule<Road<"apt">> = {
   words: "by apt",
   after: APT_INDEX,
+  shown: r => `apt-get install ${r.packages.join(" ")}`,
   install: r => `${APT_ENV}\napt-get install -y -qq ${r.packages.join(" ")}`,
   uninstall: r => ({ cmd: `${APT_ENV}\napt-get purge -y -qq ${r.packages.join(" ")} && apt-get autoremove -y -qq --purge` }),
   names: r => r.packages,
@@ -264,6 +292,37 @@ export const ROAD_MODULES: { readonly [K in RoadName]: RoadModule<Road<K>> } = {
   vendor,
   apt,
   script,
+};
+
+/** What a road's step gets from the guard that runs it. */
+export interface RoadStep {
+  /** Seconds the step may run before the guard ends it. */
+  limitS: number;
+  /** Whether a step that ran the limit out is run once more: a download that did was a dead read, a compile that did will do it again. */
+  retry: boolean;
+  /** The lines ahead of the install that put the road's own network reads on the clock above. */
+  env: readonly string[];
+}
+
+/** A package manager or a download finishes in a couple of minutes or is stuck; Homebrew, go, apt and a script may
+ * build or configure for longer; cargo compiles every crate from source. Homebrew's retry count rides BREW_ENV; apt
+ * clocks its own reads (two minutes and three tries by default); bun and go expose no knob. */
+const DOWNLOAD_S = 300;
+const MIXED_S = 600;
+const COMPILE_S = 1200;
+export const ROAD_STEPS: { readonly [K in RoadName]: RoadStep } = {
+  brew: { limitS: MIXED_S, retry: false, env: [] },
+  npm: { limitS: DOWNLOAD_S, retry: true, env: [NPM_NET] },
+  pnpm: { limitS: DOWNLOAD_S, retry: true, env: [NPM_NET] },
+  bun: { limitS: DOWNLOAD_S, retry: true, env: [] },
+  uv: { limitS: DOWNLOAD_S, retry: true, env: [UV_NET] },
+  pipx: { limitS: DOWNLOAD_S, retry: true, env: [PIP_NET] },
+  cargo: { limitS: COMPILE_S, retry: false, env: [CARGO_NET] },
+  go: { limitS: MIXED_S, retry: false, env: [] },
+  release: { limitS: DOWNLOAD_S, retry: true, env: [CURL_NET] },
+  vendor: { limitS: DOWNLOAD_S, retry: true, env: [CURL_NET] },
+  apt: { limitS: MIXED_S, retry: false, env: [] },
+  script: { limitS: MIXED_S, retry: false, env: [NPM_NET, PIP_NET, UV_NET, CARGO_NET, CURL_NET] },
 };
 
 /** The module that walks a road, typed to it. */

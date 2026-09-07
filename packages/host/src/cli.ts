@@ -136,9 +136,11 @@ options:
                      opens it, then waits for you (this is what a run off a
                      terminal does anyway). The run ends with the golden
                      recorded and never serves the app; wsp up does that
-  --json             init: print each sign-in hand-off and its outcome as one
-                     JSON object on stdout, then one last object naming the
-                     golden, the recipe, the wsp up to run next and, unless
+  --json             init: print each build stage frame (with the install step
+                     it belongs to, the command that step runs and its seconds
+                     so far), each sign-in hand-off and its outcome as one JSON
+                     object on stdout, then one last object naming the golden,
+                     the recipe, the wsp up to run next and, unless
                      --first-workspace or --import asked for one, the wsp new
                      that forks a workspace; everything else on stderr. Implies
                      --non-interactive, and is refused beside --yes, which skips

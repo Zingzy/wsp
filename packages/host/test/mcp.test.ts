@@ -24,7 +24,7 @@ import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
+import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
 
 interface Called {
   text: string;
@@ -139,6 +139,7 @@ describe("the MCP server over the host", () => {
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "notify", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "effort", "message", "model", "thread"]);
+    expect(Object.keys((tools.find(t => t.name === "exec")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["argv", "cwd", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "add_check", "out", "project", "set", "signin", "tick", "why"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
@@ -620,6 +621,32 @@ describe("the MCP server over the host", () => {
     expect(ran.structured).toEqual({ exitCode: 3, output: ["one", "two"] });
     const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
     expect(Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8")).toContain("'sh' '-c' 'printf '\\''one\\ntwo\\n'\\''; exit 3'\n");
+  });
+
+  it("exec takes cwd, the folder the command runs in; without it the workspace's project folder, else the home; the result says which, and a relative one is refused", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    execGuest(backend, "", 0);
+    const home = await call("exec", { workspace: "alpha", argv: ["git", "status"] });
+    expect(home).toEqual({ text: "", structured: { exitCode: 0, output: [] }, isError: false });
+    expect(launchedScripts(backend).at(-1)).toContain("\ncd ~ && 'git' 'status'\n");
+
+    const named = await call("exec", { workspace: "alpha", argv: ["git", "status"], cwd: "/root/work/else where" });
+    expect(named.structured).toEqual({ exitCode: 0, output: [], cwd: "/root/work/else where" });
+    expect(launchedScripts(backend).at(-1)).toContain("\ncd '/root/work/else where' && 'git' 'status'\n");
+
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
+    execGuest(backend, "fatal: not a git repository\n", 128);
+    const inProject = await call("exec", { workspace: "alpha", argv: ["git", "status"] });
+    expect(inProject).toEqual({ text: "fatal: not a git repository", structured: { exitCode: 128, output: ["fatal: not a git repository"], cwd: "/root/work/proj" }, isError: false });
+    expect(launchedScripts(backend).at(-1)).toContain("\ncd '/root/work/proj' && 'git' 'status'\n");
+
+    await call("pause", { workspace: "alpha" });
+    const launches = launchedScripts(backend).length;
+    const relative = await call("exec", { workspace: "alpha", argv: ["git", "status"], cwd: "packages/host" });
+    expect(relative).toEqual({ text: '--cwd is a path on the machine, absolute: got "packages/host"', structured: undefined, isError: true });
+    expect(launchedScripts(backend)).toHaveLength(launches);
+    expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
   });
 
   it("the workspace going away under a running exec ends the tool with the reason as an error", async () => {

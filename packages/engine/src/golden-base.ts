@@ -3,11 +3,11 @@
 // the catalog's floor rows by each row's own road, and the versions read back
 // once they are on. It runs under the base stage ahead of the daemon, so the
 // daemon's native module compiles against the Node the agents will run.
-import { APT_INDEX, APT_UPDATE, BASE_FLOOR, installAfter, installLine, smokeOf } from "@wsp/catalog";
+import { APT_INDEX, APT_UPDATE, BASE_FLOOR, installAfter, smokeOf } from "@wsp/catalog";
 import { fmtBytes, type GoldenBaseTool, type GoldenStage } from "@wsp/protocol";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { PATH_LINE, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
+import { PATH_LINE, TOOLS_PATH, aptIndexStep, viaRoad, type ToolInstall } from "./golden-import.js";
 import { installTools, type ToolResult } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 
@@ -16,16 +16,19 @@ const BASE_STAGE: GoldenStage = "deploying-daemon";
 const stepId = (id: string): string => `base/${id}`;
 const APT_STEP = stepId(APT_INDEX);
 
-const withEnv = (cmd: string): string => `${PRELUDE}\n${PATH_LINE}\n${cmd}`;
+/** Every base step runs under the dotfiles prelude, ahead of the tools PATH the road helper puts on. */
+const withEnv = (cmd: string): string => `${PRELUDE}\n${cmd}`;
 
-/** The floor as the tools loop runs it: one guarded step per row in catalog order by the catalog's install line, each
- * after the row the catalog says it runs on top of; the apt index is read once, before the first row that waits on it. */
+/** The floor as the tools loop runs it: one guarded step per row in catalog order through the row's road, each after
+ * the row the catalog says it runs on top of; the apt index is read once, before the first row that waits on it. */
 export function baseInstalls(): ToolInstall[] {
   const out: ToolInstall[] = [];
   for (const e of BASE_FLOOR) {
     const dep = installAfter(e);
-    if (dep === APT_INDEX && !out.some(t => t.id === APT_STEP)) out.push({ id: APT_STEP, label: "apt index", manager: "apt", cmd: withEnv(APT_UPDATE) });
-    out.push({ id: stepId(e.id), label: e.name, manager: e.installRoad.road, cmd: withEnv(installLine(e)), ...(dep !== undefined ? { after: stepId(dep) } : {}), bin: e.bin });
+    if (dep === APT_INDEX && !out.some(t => t.id === APT_STEP)) out.push(aptIndexStep(APT_STEP, withEnv(`${PATH_LINE}\n${APT_UPDATE}`)));
+    const step = viaRoad(e.installRoad, e.bin);
+    if (!("cmd" in step)) throw new Error(`${e.id}: ${step.note}`);
+    out.push({ id: stepId(e.id), label: e.name, manager: e.installRoad.road, ...step, cmd: withEnv(step.cmd), ...(dep !== undefined ? { after: stepId(dep) } : {}), bin: e.bin });
   }
   return out;
 }

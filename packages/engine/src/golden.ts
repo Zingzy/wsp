@@ -7,12 +7,12 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, snapshotAttemptLine, snapshotFailedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { MIB, TOOL_TIMEOUT_S, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
+import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
@@ -23,7 +23,7 @@ import { importInto } from "./vault.js";
 
 export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
 
-export type StageListener = (stage: GoldenStage, detail?: string) => void;
+export type StageListener = (stage: GoldenStage, detail?: string, step?: GoldenStep) => void;
 
 /** How long to wait for the provider to report a killed machine gone before
  * killing again; two rounds, then the caller fails. Tests shrink both. */
@@ -47,6 +47,42 @@ export class MachineAliveError extends Error {
 
 const isMissing = (e: unknown): boolean => (e as { kind?: unknown }).kind === "missing";
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** How often the seal asks for the snapshot the provider refused with its 502, and how long it waits between asks. */
+export const SNAPSHOT_ATTEMPTS = 3;
+export const SNAPSHOT_RETRY_MS = 60_000;
+
+/** The snapshot was refused on every attempt the seal was willing to make, or the builder stopped reading running
+ * between them, or the provider would not say. Typed so the wizard's words follow what the provider said: only a
+ * builder it answers 404 for is gone at the provider's hand; every other one is left as it was. */
+export class SnapshotFailedError extends Error {
+  readonly kind = "snapshotFailed" as const;
+  constructor(
+    readonly machineId: string,
+    readonly attempts: number,
+    readonly answer: ProviderAnswer,
+    readonly builderState: BuilderReading,
+    /** Why the builder went unread: the GET's own failure. */
+    readonly readError?: string,
+  ) {
+    super(snapshotFailedLine(attempts, answer, builderState, readError));
+    this.name = "SnapshotFailedError";
+  }
+}
+
+const isSnapshotRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind === "snapshotUnavailable";
+const answerOf = (e: unknown): ProviderAnswer => {
+  const { status, requestId } = e as { status?: number; requestId?: string };
+  return { status: status ?? 502, message: messageOf(e), ...(requestId !== undefined ? { requestId } : {}), at: new Date().toISOString() };
+};
+/** What the provider says the machine is now, one read: a 404 reads as gone, any other failed read as unread with its reason. */
+const readState = async (machine: Machine): Promise<{ state: BuilderReading; readError?: string }> => {
+  try {
+    return { state: await machine.state() };
+  } catch (e) {
+    return isMissing(e) ? { state: "gone" } : { state: "unread", readError: messageOf(e) };
+  }
+};
 
 /** The provider's kill acknowledges the request, not the machine's death: a live
  * wizard run reported its seal done and the builder was still running 25 minutes
@@ -560,6 +596,8 @@ export interface SealGoldenOptions extends MachineSize {
    * change can re-snapshot it. When the account cap refuses the smoke fork beside it, the builder is killed first
    * and the fork tried once more, as a seal without this option does. */
   keepBuilder?: boolean;
+  /** How long the seal waits between snapshot attempts the provider refused (tests shrink it). */
+  snapshotRetryMs?: number;
 }
 
 export interface SealResult {
@@ -688,9 +726,26 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     ...sizeAsked(opts.backend, opts, builder.size),
     ...envSpec(opts),
   });
+  const retryMs = opts.snapshotRetryMs ?? SNAPSHOT_RETRY_MS;
+  // The 502 is asked again only while the provider still reads the builder running; one that reads otherwise is
+  // never snapshotted, so the seal stops at once and says what the provider said.
+  const takeSnapshot = async (): Promise<string> => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await builder.machine.snapshot(`golden-v${versionNum}`);
+      } catch (e) {
+        if (!isSnapshotRefusal(e)) throw e;
+        const answer = answerOf(e);
+        const read = await readState(builder.machine);
+        if (read.state !== "running" || attempt >= SNAPSHOT_ATTEMPTS) throw new SnapshotFailedError(builder.machine.id, attempt, answer, read.state, read.readError);
+        stage("snapshotting", snapshotAttemptLine(attempt, SNAPSHOT_ATTEMPTS, answer, read.state, retryMs));
+        await new Promise(r => setTimeout(r, retryMs));
+      }
+    }
+  };
   try {
     stage("snapshotting", `golden-v${versionNum}`);
-    snapshotId = await builder.machine.snapshot(`golden-v${versionNum}`);
+    snapshotId = await takeSnapshot();
     if (opts.keepBuilder !== true) {
       await kill(builder.machine);
       builderAlive = false;
@@ -750,7 +805,8 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     const leaked = (k: unknown) => {
       detail += `; ${messageOf(k)}`;
     };
-    if (builderAlive && !(e instanceof MachineAliveError)) await kill(builder.machine).catch(leaked);
+    // A refused snapshot changed nothing on the builder: it is left as the person set it up, for the next attach.
+    if (builderAlive && !(e instanceof MachineAliveError) && !(e instanceof SnapshotFailedError)) await kill(builder.machine).catch(leaked);
     if (fork) await kill(fork).catch(leaked);
     if (snapshotId !== undefined) await opts.backend.deleteSnapshot(snapshotId).catch(() => {});
     stage("failed", detail);

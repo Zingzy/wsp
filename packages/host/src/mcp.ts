@@ -15,7 +15,7 @@ import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe
 import { INSTRUCTIONS } from "./skill.js";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, absolutePath, agentsChosen, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, messageTo, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, absolutePath, agentsChosen, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, messageTo, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workFolder, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -95,7 +95,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
   const workspace = z.string().describe("the workspace's name, or its id when two share a name");
   const agent = z.string().optional().describe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
   const notify = z.string().optional().describe("a thread (by id, or a prefix of it) told in one line each time a turn of the new thread ends, as a message into it; or me, for the person's app");
-  const cwd = z.string().optional().describe("the folder on the machine the thread works in, absolute; absent means the workspace's project folder, else the home folder");
+  const cwd = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute; absent means the workspace's project folder, else the home folder");
   const confirmDelete = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");
   /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
   const picks = {
@@ -314,19 +314,21 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
   server.registerTool(
     "exec",
     {
-      description: "Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line) and returns its output lines and exit code. A non-zero exit is a result; the machine going away is an error.",
-      inputSchema: { workspace, argv: Argv },
-      outputSchema: { exitCode: z.number().int().nullable(), output: z.array(z.string()) },
+      description: "Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the workspace's project folder, and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the machine going away is an error.",
+      inputSchema: { workspace, argv: Argv, cwd },
+      outputSchema: { exitCode: z.number().int().nullable(), output: z.array(z.string()), cwd: z.string().optional().describe("the folder the command ran in; absent, the home folder") },
     },
-    async ({ workspace: ref, argv }) => {
+    async ({ workspace: ref, argv, cwd: folder }) => {
+      absoluteFolder(folder);
       const client = await dial();
       const target = await awake(client, await workspaceOf(client, ref), "exec", QUIET_LINE);
+      const ranIn = workFolder(target, folder);
       const output: string[] = [];
-      const exit = await execOn(client, target.id, argv, e => {
+      const exit = await execOn(client, target.id, argv, ranIn, e => {
         if (e.type === "exec.output") output.push(e.text);
       });
       if (exit.error !== undefined) throw new Error(exit.error);
-      return asText(output.join("\n"), { exitCode: exit.exitCode, output });
+      return asText(output.join("\n"), { exitCode: exit.exitCode, output, ...(ranIn !== undefined ? { cwd: ranIn } : {}) });
     },
   );
   server.registerTool(

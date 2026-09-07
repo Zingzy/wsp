@@ -3777,6 +3777,38 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(backend.machines[0]!.killed).toBe(false);
   });
 
+  it("a snapshot the provider refuses leaves the builder as it was and recorded, so the next process attaches to it; a builder the provider no longer has loses its record", async () => {
+    const refused = () => Object.assign(new Error("Failed to snapshot sandbox"), { kind: "snapshotUnavailable", status: 502, requestId: "req_1" });
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    backend.beforeSnapshot = () => { throw refused(); };
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), snapshotRetryMs: 1 });
+    const frames: string[] = [];
+    rt.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });
+    const b = await rt.golden.prepare();
+    await expect(rt.golden.seal(b.id)).rejects.toMatchObject({ kind: "snapshotFailed", attempts: 3, builderState: "running", answer: { status: 502, requestId: "req_1" } });
+    expect(frames.at(-1)).toBe("failed:the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_1) while the builder read running");
+    expect(backend.machines.map(m => m.killed)).toEqual([false]);
+    expect(await rt.golden.get()).toBeUndefined();
+    expect(await rt.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: true })]);
+    expect(await store.get("builders", b.id)).toMatchObject({ firstLife: true, import: { recipeHash: "h1" } });
+    await rt.close();
+    backend.beforeSnapshot = undefined;
+    const again = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), snapshotRetryMs: 1 });
+    expect((await again.golden.prepare()).id).toBe(b.id);
+    expect((await again.golden.seal(b.id)).version.snapshotId).toBe("snap_golden-v1");
+    expect(backend.machines).toHaveLength(2);
+
+    const dropped = stubBackend();
+    dropped.execImpl = dfOk;
+    dropped.beforeSnapshot = m => { m.killed = true; throw refused(); };
+    const lost = createRuntime({ backend: dropped, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith(importOf()), snapshotRetryMs: 1 });
+    const b2 = await lost.golden.prepare();
+    await expect(lost.golden.seal(b2.id)).rejects.toMatchObject({ kind: "snapshotFailed", attempts: 1, builderState: "gone" });
+    expect(await lost.golden.builders()).toEqual([]);
+  });
+
   it("a builder built without a recipe snapshot is consumed by the seal as before, and the golden has no recipe to diff", async () => {
     const backend = stubBackend();
     backend.execImpl = dfOk;

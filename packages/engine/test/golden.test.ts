@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import type { RecipeDigest } from "@wsp/protocol";
@@ -16,7 +16,7 @@ import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } f
  * which `ignoreKill` answers true is accepted and changes nothing. */
 function recordingBackend(
   execResults: Record<string, ExecResult> = {},
-  opts: { ignoreKill?: (id: string, nth: number) => boolean; built?: (spec: MachineSpec) => MachineShape; exec?: (cmd: string) => ExecResult; stream?: boolean } = {},
+  opts: { ignoreKill?: (id: string, nth: number) => boolean; built?: (spec: MachineSpec) => MachineShape; exec?: (cmd: string) => ExecResult; stream?: boolean; snapshot?: (id: string, nth: number) => void; state?: (id: string) => void } = {},
 ) {
   const created: MachineSpec[] = [];
   const snapshots: string[] = [];
@@ -51,7 +51,12 @@ function recordingBackend(
           if (opts.stream) for (const line of res.stdout.split("\n")) if (line !== "") o.onLine?.(line);
           return res;
         },
-        snapshot: async (name) => { snapshots.push(name); timeline.push(`snapshot ${id}`); return `snap_${name}`; },
+        snapshot: async (name) => {
+          timeline.push(`snapshot ${id}`);
+          opts.snapshot?.(id, timeline.filter(t => t === `snapshot ${id}`).length);
+          snapshots.push(name);
+          return `snap_${name}`;
+        },
         pause: async () => {}, resume: async () => {},
         kill: async () => {
           killed.push(id);
@@ -60,7 +65,10 @@ function recordingBackend(
           killCount.set(id, nth);
           if (!opts.ignoreKill?.(id, nth)) gone.add(id);
         },
-        state: async () => (gone.has(id) ? "gone" : "running"),
+        state: async () => {
+          opts.state?.(id);
+          return gone.has(id) ? "gone" : "running";
+        },
         downloadUrl: async () => "https://x", uploadUrl: async () => "https://x",
         ...(opts.built ? { describe: async () => opts.built!(spec) } : {}),
       };
@@ -75,8 +83,11 @@ function recordingBackend(
     async list() { return []; },
     async deleteSnapshot(id) { deletedSnapshots.push(id); },
   };
-  return { backend, created, snapshots, killed, deletedSnapshots, timeline, ran, inline };
+  return { backend, created, snapshots, killed, deletedSnapshots, timeline, ran, inline, gone };
 }
+
+/** What the provider's snapshot call answers when it refuses: the 502 the backend maps, with the reply's request id. */
+const refusedSnapshot = (requestId: string): Error => Object.assign(new Error("Failed to snapshot sandbox"), { kind: "snapshotUnavailable", status: 502, requestId });
 
 const FAST_KILL = { graceMs: 20, pollMs: 1 };
 /** What a machine that still serves answers the reach check with. */
@@ -339,6 +350,63 @@ describe("interactive golden: prepare then seal", () => {
     expect((err as NotFirstLifeError).machineId).toBe("m1");
     expect(snapshots).toEqual([]);
     expect(timeline).toEqual(["create m1"]);
+  });
+
+  it("a snapshot the provider refuses with its 502 is asked for three times while the builder reads running, each attempt a stage line with the provider's answer; then the seal fails typed and the builder is left as it was", async () => {
+    const { backend, killed, timeline } = recordingBackend({}, { snapshot: (_id, nth) => { throw refusedSnapshot(`req_${nth}`); } });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    const err = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(SnapshotFailedError);
+    expect(err).toMatchObject({ kind: "snapshotFailed", machineId: "m1", attempts: 3, builderState: "running", answer: { status: 502, message: "Failed to snapshot sandbox", requestId: "req_3" } });
+    expect(timeline).toEqual(["create m1", "snapshot m1", "snapshot m1", "snapshot m1"]);
+    expect(killed).toEqual([]);
+    expect(sansBase(stages).slice(-4)).toEqual([
+      "snapshotting:golden-v1",
+      "snapshotting:attempt 1 of 3 answered 502 Failed to snapshot sandbox (request req_1); the builder reads running, next attempt in 1ms",
+      "snapshotting:attempt 2 of 3 answered 502 Failed to snapshot sandbox (request req_2); the builder reads running, next attempt in 1ms",
+      "failed:the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_3) while the builder read running",
+    ]);
+  });
+
+  it("a snapshot that lands on the second attempt seals as any other", async () => {
+    const { backend, timeline } = recordingBackend({}, { snapshot: (_id, nth) => { if (nth === 1) throw refusedSnapshot("req_1"); } });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    const { version } = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 });
+    expect(version.snapshotId).toBe("snap_golden-v1");
+    expect(timeline).toEqual(["create m1", "snapshot m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
+    expect(stages.at(-1)).toBe("sealed:v1");
+  });
+
+  it("a refused snapshot on a builder the provider answers 404 for ends at the first attempt: nothing is killed and the error says the provider no longer has it", async () => {
+    const { backend, killed, timeline, gone } = recordingBackend({}, { snapshot: id => { gone.add(id); throw refusedSnapshot("req_1"); } });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    const err = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
+    expect(err).toMatchObject({ kind: "snapshotFailed", attempts: 1, builderState: "gone" });
+    expect(timeline).toEqual(["create m1", "snapshot m1"]);
+    expect(killed).toEqual([]);
+    expect(stages.at(-1)).toBe("failed:the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_1) and no longer has the builder (404)");
+  });
+
+  it("a refused snapshot whose read of the builder fails with anything but 404 ends at once with the builder unread and untouched", async () => {
+    const { backend, killed, timeline } = recordingBackend({}, { snapshot: () => { throw refusedSnapshot("req_1"); }, state: () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); } });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    const err = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
+    expect(err).toMatchObject({ kind: "snapshotFailed", attempts: 1, builderState: "unread", readError: "upstream sad" });
+    expect(timeline).toEqual(["create m1", "snapshot m1"]);
+    expect(killed).toEqual([]);
+    expect(stages.at(-1)).toBe("failed:the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_1) and could not be read about the builder (upstream sad)");
+  });
+
+  it("any other snapshot failure is not asked again and consumes the builder as before", async () => {
+    const { backend, killed, timeline } = recordingBackend({}, { snapshot: () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); } });
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    await expect(sealGolden(builder, { backend, smoke: "true", snapshotRetryMs: 1 })).rejects.toThrow("upstream sad");
+    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1"]);
+    expect(killed).toEqual(["m1"]);
   });
 
   it("a failed seal kills every machine, drops the snapshot, and leaves the prior manifest untouched", async () => {
@@ -1153,6 +1221,64 @@ describe("golden import stages", () => {
     // The guard returns 124 only once the tree is gone, so the next brew never meets a lock the last one still holds.
     expect(guard).toMatch(/kill -KILL[^\n]*\n\s+t=0; while \[ \$t -lt 10 \] && kill -0 \$v[^\n]*\n\s+exit 124\n/);
     expect(guard).not.toMatch(/pkill|killall/);
+  });
+
+  it("a download road that hits its limit is tried once more and the frames say so; the second run's success is an install", async () => {
+    let tries = 0;
+    const { backend, cmds, fetch } = backendFor([["npm install -g bun@1.4.0", () => (++tries === 1 ? { exitCode: 124, stdout: "", stderr: "" } : ok)]]);
+    const results: ImportResult[] = [];
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(tries).toBe(2);
+    expect(results[0]!.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
+      ["tools/homebrew", "installed", undefined],
+      ["tools/brew/gh", "installed", undefined],
+      ["tools/npm/bun", "installed", undefined],
+    ]);
+    expect(stages).toContain("installing-tools:bun@1.4.0: timed out after 300s; trying once more");
+    // The step's script opens with the road's network clock, and the guard's limit is the road's, not one number for every tool.
+    const guards = cmds.filter(c => c.includes("npm install -g bun@1.4.0"));
+    expect(guards).toHaveLength(2);
+    for (const g of guards) {
+      expect(g).toContain("export npm_config_fetch_timeout=60000 npm_config_fetch_retries=1 npm_config_fetch_retry_maxtimeout=10000\nnpm install -g bun@1.4.0");
+      expect(g).toContain("while [ $t -lt 300 ]");
+    }
+    const brew = cmds.find(c => c.includes("brew install gh"))!;
+    expect(brew).toContain("while [ $t -lt 600 ]");
+    expect(brew).not.toContain("npm_config_fetch_timeout");
+  });
+
+  it("a download road that hits its limit twice is recorded failed with both timeouts, and the compile roads are not tried again", async () => {
+    const { backend, cmds, fetch } = backendFor([["npm install -g bun@1.4.0", { exitCode: 124, stdout: "", stderr: "" }]]);
+    const results: ImportResult[] = [];
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(results[0]!.tools.find(t => t.id === "tools/npm/bun")).toMatchObject({ outcome: "failed", note: "timed out after 300s, twice" });
+    expect(stages).toContain("installing-tools:2 installed, 1 failed: bun@1.4.0 (timed out after 300s, twice); caches swept; 2.9 GB free");
+    expect(cmds.filter(c => c.includes("npm install -g bun@1.4.0"))).toHaveLength(2);
+  });
+
+  it("every frame of a step names the step and the line a person reads for it, so a screen can clock the step; the stage's own lines name none", async () => {
+    const frames: { detail?: string; step?: { label: string; command: string } }[] = [];
+    const rb = recordingBackend({}, {
+      stream: true,
+      exec: cmd => (cmd.includes("brew install gh") ? { exitCode: 0, stdout: "==> Downloading gh\n==> Pouring gh\n", stderr: "" } : cmd === FREE_KB_CMD ? { exitCode: 0, stdout: `${mb(3000)}\n`, stderr: "" } : cmd === "echo ok" ? REACH_OK : cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" } : ok),
+    });
+    const fetchStub: typeof fetch = async () => new Response(null, { status: 200 });
+    const onStage = (stage: GoldenStage, detail?: string, step?: { label: string; command: string }) => {
+      if (stage === "installing-tools") frames.push({ ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}) });
+    };
+    await prepareBuilder({ backend: rb.backend, setup: "true", fetch: fetchStub, onStage, import: importOf({ tools: [{ id: "tools/brew/gh", label: "gh", manager: "brew", cmd: "su -c 'brew install gh'", shown: "brew install gh" }, { id: "tools/npm/bun", label: "bun@1.4.0", manager: "npm", cmd: "npm install -g bun@1.4.0" }] }) });
+    const gh = { label: "gh", command: "brew install gh" };
+    expect(frames.slice(0, 3)).toEqual([
+      { detail: "gh (1/2)", step: gh },
+      { detail: "gh: ==> Downloading gh", step: gh },
+      { detail: "gh: ==> Pouring gh", step: gh },
+    ]);
+    // A step with no line of its own is read by its command.
+    expect(frames).toContainEqual({ detail: "bun@1.4.0 (2/2)", step: { label: "bun@1.4.0", command: "npm install -g bun@1.4.0" } });
+    expect(frames.at(-1)!.step).toBeUndefined();
+    expect(frames.at(-1)!.detail).toMatch(/^2 installed/);
   });
 
   it("a cellar lock error waits once for every Homebrew lock to clear, then tries the tool once more", async () => {
