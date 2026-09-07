@@ -85,6 +85,7 @@ import {
   TOOLS_PATH,
 } from "@wsp/engine";
 import type {
+  AdapterAttachOptions,
   AdapterEvent,
   DaemonEvent,
   DaemonReachView,
@@ -176,6 +177,9 @@ export interface HarnessStartOptions {
 export interface HarnessSession {
   readonly localId: string;
   readonly finished: Promise<TurnResult>;
+  /** What a later host process attaches to this turn by, on a harness whose run outlives the host that started it;
+   * absent where it does not, and the row is settled as cut when this process goes. */
+  readonly run?: string;
   /** Stops the process this session owns; finished settles after it, once session.end has been emitted. */
   interrupt(): Promise<void>;
   /** Present on a harness that takes a message mid-turn; absent means it cannot. not-running when the turn had not
@@ -185,6 +189,11 @@ export interface HarnessSession {
 
 export interface HarnessAdapter {
   start(options: HarnessStartOptions): HarnessSession;
+  /** Re-opens a turn this harness is still running on the machine, by the run handle a session of an earlier host
+   * process reported. The run's whole output is read again, so the events the host missed reach this one; the
+   * stream ends with RUN_GONE_LINE when the machine no longer holds the run. Absent on an adapter whose runs die
+   * with the host. */
+  attach?(options: AdapterAttachOptions): HarnessSession;
   /** Whether this adapter's sessions carry steer; the catalog tells the composer before a turn runs. */
   readonly steers: boolean;
   /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
@@ -821,8 +830,9 @@ export interface Runtime {
         title?: string;
       },
     ): Promise<SessionHandle>;
-    /** Every turn this state file knows, the ones before a restart as they were last written; one that was still
-     * running then reads as failed. */
+    /** Every turn this state file knows, the ones before a restart as they were last written. One that was still
+     * running then reads running while its machine still holds its run, since the run is re-opened at load and goes
+     * on to its reply; one whose run no machine has left reads failed. */
     list(workspaceId?: string): Promise<SessionView[]>;
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
     history(workspaceId: string): Promise<SessionEvent[]>;
@@ -953,8 +963,9 @@ interface TurnLive {
 
 interface SessionIndexRecord {
   workspaceId: string;
-  /** reply is the held status of a turn whose result landed while its process still ran, on a row still running. */
-  sessions: (SessionView & { turnId: string; notify?: string; reply?: TurnStatus })[];
+  /** reply is the held status of a turn whose result landed while its process still ran, on a row still running;
+   * run is where that turn is on its machine, so a host that comes back re-opens it rather than failing it. */
+  sessions: (SessionView & { turnId: string; notify?: string; reply?: TurnStatus; run?: string })[];
 }
 
 /** Builders live apart from workspaces: never in the rail, and a record left
@@ -1194,7 +1205,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
   const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
   /** A row read back from the store has no handle: its process died with the runtime that started it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive }>();
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -1257,6 +1268,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         turnId: s.turnId,
         ...(s.notify !== undefined ? { notify: s.notify } : {}),
         ...(s.view.status === "running" && s.turnLive?.reply !== undefined ? { reply: s.turnLive.reply } : {}),
+        ...(s.view.status === "running" && s.run !== undefined ? { run: s.run } : {}),
       }));
     const snapshot: SessionIndexRecord = { workspaceId, sessions: rows };
     const queued = (indexFlushes.get(workspaceId) ?? Promise.resolve())
@@ -2111,7 +2123,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
       }
-      const cut: { view: SessionView; turnId: string; notify?: string; turnLive?: TurnLive }[] = [];
+      const left: { view: SessionView; turnId: string; notify?: string; turnLive?: TurnLive; run?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
@@ -2119,16 +2131,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        for (const { turnId, notify, reply, ...view } of index.sessions) {
-          const row = { view, turnId, ...(notify !== undefined ? { notify } : {}), ...(reply !== undefined ? { turnLive: { reply } } : {}) };
-          if (view.status === "running") cut.push(row);
+        for (const { turnId, notify, reply, run, ...view } of index.sessions) {
+          const row = {
+            view,
+            turnId,
+            ...(notify !== undefined ? { notify } : {}),
+            ...(reply !== undefined ? { turnLive: { reply } } : {}),
+            ...(run !== undefined ? { run } : {}),
+          };
+          if (view.status === "running") left.push(row);
           sessions.set(view.id, row);
         }
       }
-      // The harness process died with the runtime that started it, so a turn still running never settles. Its end
-      // is told once every workspace's rows are in: the parent it tells may sit in a workspace read after its own.
+      // A turn's run belongs to the machine it runs on, not to the host that asked for it, so a host that comes back
+      // re-opens every run the machines still hold and reads the rest of its output; only a run no machine has left
+      // is a turn the restart cut. Both are told once every workspace's rows are in: the parent a cut turn tells may
+      // sit in a workspace read after its own, and a re-opened turn's own end tells it later, when it ends.
+      const cut = (await Promise.all(left.map(async s => ((await reattach(s)) ? undefined : s)))).filter(s => s !== undefined);
       for (const s of cut) settleCut(s, RESTARTED_REASON, endedAt => restartCutLine(endedAt - (s.view.startedAt ?? endedAt)));
-      for (const workspaceId of new Set(cut.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
+      for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
     })();
     return hydrated;
@@ -2792,6 +2813,235 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     });
   };
 
+  /** What a turn is once its harness session exists: the one road from the harness's events to the transcript, the
+   * index, the bus and the row, whether the session was launched here or re-opened on the machine after a restart.
+   * A re-opened turn's run is read from its first byte, so what the transcript already holds for this turn is
+   * counted first and read past in silence: a delta is recorded once however many hosts read the run it came from. */
+  const runTurn = (t: {
+    entry: LiveWorkspace;
+    view: SessionView;
+    /** The thread this turn runs on, which every row the runtime writes carries. */
+    threadId: string;
+    turnId: string;
+    notify?: string;
+    outcome: SessionStartOutcome;
+    /** What this turn's own session.start row carries, for the road that still has to write it. */
+    opening: { prompt: string; requestId?: string; afterCut?: boolean; title?: string };
+    /** The harness session this turn resumes, so the row it takes over keeps who opened the thread and with what. */
+    resume?: string;
+    /** What the row already knows of this turn's reply: a re-opened turn whose result landed before the restart is
+     * still working, and reads as such until the run's own result line comes round again. */
+    turnLive?: TurnLive;
+    open: (onEvent: (event: AdapterEvent) => void) => HarnessSession;
+  }): SessionHandle => {
+    const { entry, view, threadId, turnId, opening, outcome, notify } = t;
+    const workspaceId = entry.record.id;
+    const written = transcripts.get(workspaceId) ?? [];
+    let startRecorded = written.some(e => e.type === "session.start" && e.turnId === turnId);
+    // The reply and its line to the parent go together, so one gate stands for both.
+    let replyRecorded = written.some(e => e.type === "session.done" && e.turnId === turnId);
+    let replayedDeltas = written.reduce((n, e) => n + (e.type === "session.delta" && e.turnId === turnId ? 1 : 0), 0);
+    let ended = false;
+    // The reply's status, held while the process still runs. Shared with this turn's session-map entry so runningOn
+    // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
+    // exists) or later from its stream.
+    const turnLive: TurnLive = t.turnLive ?? {};
+
+    const forward = (event: AdapterEvent): void => {
+      if (ended) return;
+      const sessionId = event.sessionId;
+      switch (event.type) {
+        case "session.start": {
+          view.claudeSessionId = sessionId;
+          if (event.cwd !== undefined) view.cwd = event.cwd;
+          if (event.model !== undefined) view.model = event.model;
+          entry.record.claudeSessionId = sessionId;
+          void persist(entry.record);
+          void persistSessions(workspaceId);
+          // The harness keys its store by the id it just announced, so a name given at the start is written now;
+          // a CLI that already took it at launch is told the same name twice, which is what keeps this one road.
+          if (opening.title !== undefined && !startRecorded) void nameInHarness(view, opening.title);
+          // One turn is one start row however often the harness announces itself.
+          if (startRecorded) return;
+          startRecorded = true;
+          record({
+            type: "session.start",
+            workspaceId,
+            sessionId,
+            turnId,
+            threadId,
+            prompt: opening.prompt,
+            ...(opening.requestId !== undefined ? { requestId: opening.requestId } : {}),
+            ...(opening.afterCut === true ? { afterCut: true } : {}),
+            ...(event.model !== undefined ? { model: event.model } : {}),
+            ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
+            ...(event.tools !== undefined ? { tools: event.tools } : {}),
+            ...(event.harness !== undefined ? { harness: event.harness } : {}),
+          });
+          return;
+        }
+        case "turn.delta":
+          if (replayedDeltas > 0) {
+            replayedDeltas--;
+            return;
+          }
+          record({
+            type: "session.delta",
+            workspaceId,
+            sessionId,
+            turnId,
+            threadId,
+            kind: event.kind,
+            text: event.text,
+            ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
+            ...(event.toolUseId !== undefined ? { toolUseId: event.toolUseId } : {}),
+            ...(event.isError !== undefined ? { isError: event.isError } : {}),
+            ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
+          });
+          return;
+        case "turn.done":
+          // The reply is in, but the row stays running until session.end (the process exited): the harness can
+          // keep working past its result, and a row read as completed here lets a send start a second agent in the
+          // same worktree. The result is held and applied at the exit below.
+          turnLive.reply = event.result.status;
+          void persistSessions(workspaceId);
+          if (replyRecorded) {
+            replyRecorded = false;
+            return;
+          }
+          if (notify !== undefined) notifyEnd({ view, turnId }, notify, event.result);
+          record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
+          return;
+        case "session.end":
+          // The process exited: the turn is over now, so the row takes the reply's status here (synchronously,
+          // before the event is recorded, so a waiter woken by it reads the settled row, not the running one).
+          if (turnLive.reply !== undefined) view.status = turnLive.reply;
+          view.endedAt = Date.now();
+          record({
+            type: "session.end",
+            workspaceId,
+            sessionId,
+            turnId,
+            threadId,
+            exitCode: event.exitCode,
+            sawResult: event.sawResult,
+          });
+          return;
+      }
+    };
+
+    idle.hold(workspaceId);
+    let started: HarnessSession;
+    try {
+      started = t.open(forward);
+    } catch (e) {
+      idle.release(workspaceId);
+      throw e;
+    }
+    started.finished.then(
+      () => idle.release(workspaceId),
+      () => idle.release(workspaceId),
+    );
+    const handleId = started.localId;
+    // A row that already has an id keeps it: a re-opened turn is named by the harness's own session, which is not
+    // always the id the row was keyed by, and a client holding the row must not see it change under a restart.
+    if (view.id === "") view.id = handleId;
+    const rowId = view.id;
+    // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread and
+    // with what, since every client titles the thread by the row's prompt. Later turns live in the transcript.
+    const resumed = t.resume !== undefined ? sessions.get(handleId)?.view : undefined;
+    if (resumed !== undefined) {
+      view.startedBy = resumed.startedBy ?? view.startedBy;
+      if (resumed.prompt !== undefined) view.prompt = resumed.prompt;
+    }
+
+    const handle: SessionHandle = {
+      id: rowId,
+      workspaceId,
+      finished: started.finished,
+      turnId,
+      outcome,
+      view: () => ({ ...view }),
+      interrupt: () => started.interrupt(),
+      ...(started.steer !== undefined ? { steer: (prompt: string) => started.steer!(prompt) } : {}),
+    };
+    const end = (reason: string): void => {
+      if (ended || view.status !== "running") return;
+      ended = true;
+      settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), turnLive }, reason, () => reason);
+      void persistSessions(workspaceId);
+      void started.interrupt().catch(() => {});
+    };
+    sessions.set(rowId, { view, turnId, ...(notify !== undefined ? { notify } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}) });
+    void persistSessions(workspaceId);
+    // The harness writes its own title for the session as the turn settles, so the row is asked again at both
+    // ends; the reload a client runs on session.end shares that read rather than starting a second.
+    started.finished
+      .then(result => {
+        if (!ended) view.status = result.status;
+        view.endedAt ??= Date.now();
+        void persistSessions(workspaceId);
+        // The store is read first and the question asked after: what the harness already calls the session is a
+        // person's, and a thread that has one is never asked for another.
+        void refreshTitle(view, true)
+          .then(() => makeTitle(view, result.text ?? ""))
+          .catch((e: unknown) => console.warn(noMadeTitleLogLine(threadId, workspaceId, e instanceof Error ? e.message : String(e))));
+      })
+      .catch(() => {
+        if (!ended) view.status = "failed";
+        view.endedAt ??= Date.now();
+        void persistSessions(workspaceId);
+        void refreshTitle(view, true);
+      });
+    return handle;
+  };
+
+  /** A turn the store left running, re-opened where it runs. The machine still holds the run and its whole output,
+   * so the events this host missed reach it as the run's own lines, and the thread goes on running to its reply.
+   * False when there is nothing to re-open and the caller settles the row as a turn the restart cut: a row with no
+   * run recorded (a host from before this road, or a harness whose runs die with it), no workspace or no machine
+   * running under it, or no adapter for its harness in this process. */
+  const reattach = async (s: { view: SessionView; turnId: string; notify?: string; turnLive?: TurnLive; run?: string }): Promise<boolean> => {
+    const { view, run } = s;
+    const threadId = view.threadId;
+    const entry = live.get(view.workspaceId);
+    if (run === undefined || threadId === undefined || entry === undefined || entry.record.phase !== "running") return false;
+    let adapter: HarnessAdapter;
+    try {
+      adapter = adapterFor(entry, view.harness).adapter;
+    } catch (e: unknown) {
+      console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} cannot be re-opened: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+    const open = adapter.attach?.bind(adapter);
+    if (open === undefined) return false;
+    try {
+      runTurn({
+        entry,
+        view,
+        threadId,
+        turnId: s.turnId,
+        ...(s.notify !== undefined ? { notify: s.notify } : {}),
+        ...(s.turnLive !== undefined ? { turnLive: s.turnLive } : {}),
+        outcome: "started",
+        opening: { prompt: view.prompt ?? "" },
+        open: onEvent =>
+          open({
+            run,
+            sessionId: view.claudeSessionId ?? view.id,
+            startedAt: view.startedAt ?? Date.now(),
+            ...(view.model !== undefined ? { model: view.model } : {}),
+            ...(view.cwd !== undefined ? { cwd: view.cwd } : {}),
+            onEvent,
+          }),
+      });
+    } catch (e: unknown) {
+      console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} cannot be re-opened: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+    return true;
+  };
+
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, o) {
       const entry = await entryOf(workspaceId);
@@ -2858,156 +3108,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...picks,
         ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
       };
-      let ended = false;
-      let startRecorded = false;
-      // The reply's status, held while the process still runs. Shared with this turn's session-map entry so runningOn
-      // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
-      // exists) or later from its stream.
-      const turnLive: TurnLive = {};
-
-      const forward = (event: AdapterEvent): void => {
-        if (ended) return;
-        const sessionId = event.sessionId;
-        switch (event.type) {
-          case "session.start": {
-            sessionView.claudeSessionId = sessionId;
-            if (event.cwd !== undefined) sessionView.cwd = event.cwd;
-            if (event.model !== undefined) sessionView.model = event.model;
-            entry.record.claudeSessionId = sessionId;
-            void persist(entry.record);
-            void persistSessions(workspaceId);
-            // The harness keys its store by the id it just announced, so a name given at the start is written now;
-            // a CLI that already took it at launch is told the same name twice, which is what keeps this one road.
-            if (title !== undefined && !startRecorded) void nameInHarness(sessionView, title);
-            // One turn is one start row however often the harness announces itself.
-            if (startRecorded) return;
-            startRecorded = true;
-            record({
-              type: "session.start",
-              workspaceId,
-              sessionId,
-              turnId,
-              threadId,
-              prompt: o.prompt,
-              ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
-              ...(afterCut ? { afterCut } : {}),
-              ...(event.model !== undefined ? { model: event.model } : {}),
-              ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
-              ...(event.tools !== undefined ? { tools: event.tools } : {}),
-              ...(event.harness !== undefined ? { harness: event.harness } : {}),
-            });
-            return;
-          }
-          case "turn.delta":
-            record({
-              type: "session.delta",
-              workspaceId,
-              sessionId,
-              turnId,
-              threadId,
-              kind: event.kind,
-              text: event.text,
-              ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
-              ...(event.toolUseId !== undefined ? { toolUseId: event.toolUseId } : {}),
-              ...(event.isError !== undefined ? { isError: event.isError } : {}),
-              ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
-            });
-            return;
-          case "turn.done":
-            // The reply is in, but the row stays running until session.end (the process exited): the harness can
-            // keep working past its result, and a row read as completed here lets a send start a second agent in the
-            // same worktree. The result is held and applied at the exit below.
-            turnLive.reply = event.result.status;
-            void persistSessions(workspaceId);
-            if (notify !== undefined) notifyEnd({ view: sessionView, turnId }, notify, event.result);
-            record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
-            return;
-          case "session.end":
-            // The process exited: the turn is over now, so the row takes the reply's status here (synchronously,
-            // before the event is recorded, so a waiter woken by it reads the settled row, not the running one).
-            if (turnLive.reply !== undefined) sessionView.status = turnLive.reply;
-            sessionView.endedAt = Date.now();
-            record({
-              type: "session.end",
-              workspaceId,
-              sessionId,
-              turnId,
-              threadId,
-              exitCode: event.exitCode,
-              sawResult: event.sawResult,
-            });
-            return;
-        }
-      };
-
-      idle.hold(workspaceId);
-      let started: HarnessSession;
-      try {
-        started = adapter.start({
-          prompt: o.prompt,
-          ...(resume !== undefined ? { resume } : {}),
-          ...(cwd !== undefined ? { cwd } : {}),
-          ...picks,
-          ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
-          ...(title !== undefined ? { title } : {}),
-          onEvent: forward,
-        });
-      } catch (e) {
-        idle.release(workspaceId);
-        throw e;
-      }
-      started.finished.then(
-        () => idle.release(workspaceId),
-        () => idle.release(workspaceId),
-      );
-      const handleId = started.localId;
-      sessionView.id = handleId;
-      // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread and
-      // with what, since every client titles the thread by the row's prompt. Later turns live in the transcript.
-      const resumed = resume !== undefined ? sessions.get(handleId)?.view : undefined;
-      if (resumed !== undefined) {
-        sessionView.startedBy = resumed.startedBy ?? sessionView.startedBy;
-        if (resumed.prompt !== undefined) sessionView.prompt = resumed.prompt;
-      }
-
-      const handle: SessionHandle = {
-        id: handleId,
-        workspaceId,
-        finished: started.finished,
+      const handle = runTurn({
+        entry,
+        view: sessionView,
+        threadId,
         turnId,
+        ...(notify !== undefined ? { notify } : {}),
         outcome,
-        view: () => ({ ...sessionView }),
-        interrupt: () => started.interrupt(),
-        ...(started.steer !== undefined ? { steer: (prompt: string) => started.steer!(prompt) } : {}),
-      };
-      const end = (reason: string): void => {
-        if (ended || sessionView.status !== "running") return;
-        ended = true;
-        settleCut({ view: sessionView, turnId, ...(notify !== undefined ? { notify } : {}), turnLive }, reason, () => reason);
-        void persistSessions(workspaceId);
-        void started.interrupt().catch(() => {});
-      };
-      sessions.set(handleId, { view: sessionView, turnId, ...(notify !== undefined ? { notify } : {}), handle, end, turnLive });
-      void persistSessions(workspaceId);
-      // The harness writes its own title for the session as the turn settles, so the row is asked again at both
-      // ends; the reload a client runs on session.end shares that read rather than starting a second.
-      started.finished
-        .then(result => {
-          if (!ended) sessionView.status = result.status;
-          sessionView.endedAt ??= Date.now();
-          void persistSessions(workspaceId);
-          // The store is read first and the question asked after: what the harness already calls the session is a
-          // person's, and a thread that has one is never asked for another.
-          void refreshTitle(sessionView, true)
-            .then(() => makeTitle(sessionView, result.text ?? ""))
-            .catch((e: unknown) => console.warn(noMadeTitleLogLine(threadId, workspaceId, e instanceof Error ? e.message : String(e))));
-        })
-        .catch(() => {
-          if (!ended) sessionView.status = "failed";
-          sessionView.endedAt ??= Date.now();
-          void persistSessions(workspaceId);
-          void refreshTitle(sessionView, true);
-        });
+        opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}) },
+        ...(resume !== undefined ? { resume } : {}),
+        open: onEvent =>
+          adapter.start({
+            prompt: o.prompt,
+            ...(resume !== undefined ? { resume } : {}),
+            ...(cwd !== undefined ? { cwd } : {}),
+            ...picks,
+            ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
+            ...(title !== undefined ? { title } : {}),
+            onEvent,
+          }),
+      });
       return handle;
     },
 

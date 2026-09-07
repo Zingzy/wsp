@@ -28,6 +28,9 @@ export const EXEC_CHUNK_BYTES = 262_144;
 export const TURN_IDLE_MS = 10 * 60_000;
 /** The longest one turn may run however much it prints, a safety cap only; a per-workspace setting is a follow-up. */
 export const TURN_WALL_MS = 6 * 60 * 60_000;
+/** The close code a host sends the clients on its own socket as it stops: the socket did not break under them, the
+ * host let it go, so a command waiting on a turn says the host is restarting rather than that the turn failed. */
+export const HOST_STOPPING_CLOSE = 4001;
 export function isHttpUrl(url: unknown): url is string {
   if (typeof url !== "string" || url.length > HTTP_URL_MAX || !HTTP_URL_RE.test(url)) return false;
   try {
@@ -1892,4 +1895,4 @@ export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export { catalogRefused } from "./adapter-port.js";
-export type { AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn } from "./adapter-port.js";

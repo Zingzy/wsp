@@ -14,6 +14,9 @@ function fixtureLines(name: string): string[] {
     .filter(line => line.trim().length > 0);
 }
 
+/** What the guest calls the run every scripted stream stands for. */
+const RUN_HANDLE = "/tmp/wsp-run/cd34";
+
 interface ScriptedExec {
   factory: ExecStreamFactory;
   calls: { command: string; env: Record<string, string>; input: readonly string[] | undefined }[];
@@ -31,6 +34,7 @@ function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean
       resolveExit = resolve;
     });
     const stream: ExecStream = {
+      run: RUN_HANDLE,
       lines: (async function* () {
         yield* lines;
         if (opts.hang) await exited;
@@ -86,6 +90,26 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     expect(call.env).toEqual({ CODEX_HOME: "/root/.codex" });
     expect(adapter.env).toEqual({ CODEX_HOME: "/root/.codex" });
     expect(session.command).toBe(call.command);
+  });
+
+  it("a launched session carries the run its stream reported, and an attach re-opens that run with no channel", async () => {
+    const exec = scriptedExec(fixtureLines("exec-turn"));
+    const attached: { run: string; input: boolean }[] = [];
+    exec.factory.attach = (run, options) => {
+      attached.push({ run, input: options.input });
+      return exec.factory("", { env: {} });
+    };
+    const adapter = adapterOver(exec);
+    expect(adapter.start({ prompt: "go", onEvent: () => {} }).run).toBe(RUN_HANDLE);
+    const { events, onEvent } = collect();
+    const session = adapter.attach!({ run: RUN_HANDLE, sessionId: THREAD_ID, startedAt: 1, model: "gpt-5.5", cwd: "/root/app", onEvent });
+    const result = await session.finished;
+    expect(attached).toEqual([{ run: RUN_HANDLE, input: false }]);
+    expect(session.command).toBeUndefined();
+    expect(result.status).toBe("completed");
+    // the CLI names its model and its folder once, so a reader that came later takes both off the row
+    expect(events[0]).toMatchObject({ type: "session.start", sessionId: THREAD_ID, model: "gpt-5.5", cwd: "/root/app" });
+    expect(events.slice(-2)).toMatchObject([{ type: "turn.done" }, { type: "session.end", exitCode: 0, sawResult: true }]);
   });
 
   it("normalizes the stream into session.start, one delta per item, turn.done and session.end", async () => {

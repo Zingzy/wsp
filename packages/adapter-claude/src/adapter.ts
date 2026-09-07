@@ -4,7 +4,7 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { backgroundTasksLine, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
@@ -32,7 +32,10 @@ export interface ClaudeSession {
   readonly localId: string;
   /** The id the CLI reports in system/init; equals localId unless the CLI re-keys. */
   readonly claudeSessionId: string;
-  readonly command: string;
+  /** The line the launch ran; absent on a session attached to a run some earlier process launched. */
+  readonly command?: string;
+  /** What a later host process attaches to this turn by; absent when its run dies with this process. */
+  readonly run?: string;
   readonly finished: Promise<TurnResult>;
   interrupt(): Promise<void>;
   /** Writes a user message into the running turn; not-running before system/init and once result was seen or the process is gone. */
@@ -49,6 +52,9 @@ export interface AdapterDeps {
 
 export interface ClaudeAdapter {
   start(options: StartOptions): ClaudeSession;
+  /** Re-opens a turn this CLI is still running on the machine, by the run handle the launch reported; absent when
+   * the exec factory's runs die with the process that launched them. */
+  attach?(options: AdapterAttachOptions): ClaudeSession;
   readonly sessions: ReadonlyMap<string, ClaudeSession>;
   /** Sessions take a message mid-turn over the stdin channel. */
   readonly steers: true;
@@ -266,21 +272,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   const sessions = new Map<string, ClaudeSession>();
   const env = buildEnv({ base: deps.baseEnv, configDir: deps.configDir, apiKey: deps.apiKey });
 
-  const start = (options: StartOptions): ClaudeSession => {
-    const localId = options.resume ?? newSessionId();
-    const command = buildCommand({
-      ...(options.resume === undefined ? { sessionId: localId } : { resume: options.resume }),
-      cwd: options.cwd,
-      model: options.model,
-      effort: options.effort,
-      permissionMode: options.permissionMode,
-      contextWindow: options.contextWindow,
-      ...(options.title !== undefined ? { name: options.title } : {}),
-    });
-    const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(options.prompt, localId)] });
+  /** Everything a turn is once its stream exists. The launch and the attach differ only in where the stream came
+   * from and in what is already known: an attached turn's CLI announced itself to an earlier host process, so it
+   * takes a message from the first byte rather than waiting for an init line it may have printed long ago. */
+  const follow = (o: { stream: ExecStream; localId: string; announced: boolean; command?: string; onEvent: (event: AdapterEvent) => void }): ClaudeSession => {
+    const { stream, localId, onEvent } = o;
 
     let claudeSessionId = localId;
-    let sawInit = false;
+    let sawInit = o.announced;
     let sawResult = false;
     let exited = false;
     let interruptRequested = false;
@@ -332,7 +331,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               }
               turnResult = normalized.result;
             }
-            options.onEvent(normalized);
+            onEvent(normalized);
           }
         }
       } catch (cause) {
@@ -351,9 +350,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
                   status: "failed",
                   error: streamError ?? harnessExitLine("claude", exitCode, env["PATH"]),
                 };
-        options.onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
+        onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
-      options.onEvent({ type: "session.end", sessionId: claudeSessionId, exitCode, sawResult });
+      onEvent({ type: "session.end", sessionId: claudeSessionId, exitCode, sawResult });
       return turnResult;
     })();
 
@@ -362,7 +361,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       get claudeSessionId() {
         return claudeSessionId;
       },
-      command,
+      ...(o.command !== undefined ? { command: o.command } : {}),
+      ...(stream.run !== undefined ? { run: stream.run } : {}),
       finished,
       steer: async (prompt) => {
         const running = (): boolean => sawInit && !sawResult && !exited && !interruptRequested;
@@ -392,8 +392,28 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     return session;
   };
 
+  const start = (options: StartOptions): ClaudeSession => {
+    const localId = options.resume ?? newSessionId();
+    const command = buildCommand({
+      ...(options.resume === undefined ? { sessionId: localId } : { resume: options.resume }),
+      cwd: options.cwd,
+      model: options.model,
+      effort: options.effort,
+      permissionMode: options.permissionMode,
+      contextWindow: options.contextWindow,
+      ...(options.title !== undefined ? { name: options.title } : {}),
+    });
+    const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(options.prompt, localId)] });
+    return follow({ stream, localId, announced: false, command, onEvent: options.onEvent });
+  };
+
+  const attach = deps.exec.attach?.bind(deps.exec);
+
   return {
     start,
+    ...(attach !== undefined
+      ? { attach: (options: AdapterAttachOptions) => follow({ stream: attach(options.run, { input: true }), localId: options.sessionId, announced: true, onEvent: options.onEvent }) }
+      : {}),
     sessions,
     steers: true,
     probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir, baseEnv: deps.baseEnv })).then(parseCatalogProbe),

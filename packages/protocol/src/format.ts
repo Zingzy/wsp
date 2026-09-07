@@ -465,6 +465,14 @@ export function harnessExitLine(bin: string, exitCode: number | null, path: stri
   return `${bin} was not found on PATH (exit 127); ${searched}`;
 }
 
+/** The turn's error when a host that came back looked for the turn's run on the machine and the machine no longer
+ * holds it: the run's files were swept, so nothing the agent did while the host was away can be read back. */
+export const RUN_GONE_LINE = "the machine no longer holds this turn's run, so nothing of it can be read back";
+
+/** What a command waiting on a turn is told when the host it asked stops: the run is the machine's, not the host's,
+ * so it goes on and its reply lands in the thread whether or not this command is still there to see it. */
+export const HOST_STOPPING_LINE = "the host is restarting; the turn goes on and its reply lands in the thread";
+
 /** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
  * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,
  * neither of which a person can act on. */

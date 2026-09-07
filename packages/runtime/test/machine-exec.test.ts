@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXEC_ENV, INLINE_EXEC_MS, MachineUnreached, type ExecResult, type Machine } from "@wsp/engine";
-import { EXEC_BODY_MAX, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
+import { EXEC_BODY_MAX, RUN_GONE_LINE, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
 import { machineExecStream } from "../src/machine-exec.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
@@ -25,6 +25,8 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
   let child = false;
   let launch = "";
   let step = 0;
+  /** The claim directory the launch makes: what says the run is still on the guest, until the reap takes it. */
+  let claimed = false;
   const kills: string[] = [];
   const writes: string[] = [];
   const calls: string[] = [];
@@ -56,15 +58,20 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
       launch = cmd;
       land(cmd);
       child = true;
+      claimed = true;
       return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
     }
+    if (cmd.includes("WSP_RUN")) return { exitCode: 0, stdout: claimed ? "WSP_RUN\n" : "WSP_GONE\n", stderr: "" };
     if (cmd.includes("kill -KILL") || cmd.includes("kill -TERM")) {
       kills.push(cmd);
       // A signal to the group takes the leader and what it spawned; one to a pid takes that pid alone.
       if (cmd.includes("-- -$P")) child = false;
       if (!cmd.includes(".tail")) alive = false;
       const rm = /rm -rf ([^ ]+)\.\*/.exec(cmd);
-      if (rm) for (const path of [...disk.keys()]) if (path.startsWith(`${rm[1]}.`)) disk.delete(path);
+      if (rm) {
+        claimed = false;
+        for (const path of [...disk.keys()]) if (path.startsWith(`${rm[1]}.`)) disk.delete(path);
+      }
       return { exitCode: 0, stdout: "", stderr: "" };
     }
     if (cmd.includes("echo WSP_OK")) {
@@ -102,6 +109,8 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
     exit: (code: number) => (exitFile = String(code)),
     childAlive: () => child,
     files: () => [...disk.keys()],
+    /** The guest swept the run's files with no reader of its own around, as a reboot or a tmp sweep would. */
+    sweep: () => (claimed = false),
   };
 }
 
@@ -584,6 +593,53 @@ function localGuest(): { machine: Machine; runDir: string } {
   } as unknown as Machine;
   return { machine, runDir: join(dir, "run") };
 }
+
+describe("machineExecStream attaching to a run its process did not launch", () => {
+  /** The run is claimed by the launch alone: nothing iterates the launched stream, as a host that went down under
+   * its own reader did not. */
+  const abandoned = async (steps: Parameters<typeof scriptGuest>[1]) => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, steps);
+    const factory = machineExecStream(machine, { pollMs: 5 });
+    const launched = factory("claude -p hi", { env: {}, input: ["go"] });
+    await vi.waitFor(() => expect(guest.getLaunch()).not.toBe(""));
+    return { factory, guest, run: launched.run! };
+  };
+
+  it("reads the run's whole log from its first byte and ends on the exit the run left", async () => {
+    const { factory, run } = await abandoned([
+      { append: '{"type":"system","subtype":"init"}\n{"type":"assistant"}\n' },
+      { append: '{"type":"result"}\n', exit: 0 },
+    ]);
+    const stream = factory.attach!(run, { input: true });
+    const lines: string[] = [];
+    for await (const line of stream.lines) lines.push(line);
+    expect(lines).toEqual(['{"type":"system","subtype":"init"}', '{"type":"assistant"}', '{"type":"result"}']);
+    expect(await stream.exited).toBe(0);
+  });
+
+  it("takes a message into the run over the channel the launch left open", async () => {
+    const { factory, guest, run } = await abandoned([{ append: "one\n" }, { append: "two\n", exit: 0 }]);
+    const stream = factory.attach!(run, { input: true });
+    expect(await stream.write('{"type":"user"}')).toBe("written");
+    expect(guest.getInput()).toBe('go\n{"type":"user"}\n');
+    for await (const line of stream.lines) void line;
+    expect(await stream.exited).toBe(0);
+  });
+
+  it("a run the machine no longer holds ends the stream on those words, with no poll of its own", async () => {
+    const { factory, guest, run } = await abandoned([{ append: "never read\n", exit: 0 }]);
+    guest.sweep();
+    const stream = factory.attach!(run, { input: true });
+    const failure = await (async () => {
+      for await (const line of stream.lines) void line;
+      throw new Error("the stream ended without a failure");
+    })().catch((e: unknown) => e as Error);
+    expect(failure.message).toBe(RUN_GONE_LINE);
+    expect(await stream.exited).toBeNull();
+    expect(guest.calls.filter(c => c.includes("__WSP_EOF_"))).toEqual([]);
+  });
+});
 
 describe("machineExecStream over this machine's bash", () => {
   it("a launch posted twice under one base, as a retried exec does, starts the script once", async () => {

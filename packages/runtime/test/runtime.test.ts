@@ -7,12 +7,12 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, SessionEvent, foldThreads, stillWorkingRefusal, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, RUN_GONE_LINE, SessionEvent, foldThreads, stillWorkingRefusal, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
-import { CATALOG_TTL_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
+import { CATALOG_TTL_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -1349,6 +1349,163 @@ describe("runtime session index", () => {
     await rt.close();
     const stored = (await store.get("sessions", ws.id)) as { sessions: { prompt: string }[] };
     expect(stored.sessions.map(s => s.prompt)).toEqual(rows.map(s => s.prompt));
+  });
+});
+
+describe("a turn the host comes back to", () => {
+  /** A harness whose run lives on the machine, not in this process: every event it emits is a line of the run's log,
+   * and an attach replays that log from its first line before the rest of it arrives, which is what reading the
+   * guest's own log from byte zero does. Forgetting a run is the machine having swept it. */
+  const machineRuns = () => {
+    interface Run {
+      log: AdapterEvent[];
+      sessionId: string;
+      localId: string;
+      live?: (event: AdapterEvent) => void;
+      settle?: (result: TurnResult) => void;
+      result?: TurnResult;
+    }
+    const runs = new Map<string, Run>();
+    let minted = 0;
+    const deliver = (run: Run, event: AdapterEvent): void => {
+      if (event.type === "turn.done") run.result = event.result;
+      run.live?.(event);
+      if (event.type === "session.end") run.settle?.(run.result ?? { status: "failed" });
+    };
+    const emit = (handle: string, event: AdapterEvent): void => {
+      const run = runs.get(handle)!;
+      run.log.push(event);
+      deliver(run, event);
+    };
+    const open = (run: Run, handle: string, onEvent: (event: AdapterEvent) => void, localId: string): HarnessSession => {
+      let settle!: (result: TurnResult) => void;
+      const finished = new Promise<TurnResult>(resolve => {
+        settle = resolve;
+      });
+      run.settle = settle;
+      run.live = onEvent;
+      return { localId, run: handle, finished, interrupt: async () => {} };
+    };
+    const adapter: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: o => {
+        const handle = `/tmp/wsp-run/${++minted}`;
+        // The CLI keys the session by its own id, not by the one the launch minted, so the row and the harness
+        // session are two different ids across the restart.
+        const run: Run = { log: [], sessionId: `sess-${minted}`, localId: `local-${minted}` };
+        runs.set(handle, run);
+        const session = open(run, handle, o.onEvent, run.localId);
+        queueMicrotask(() => emit(handle, { type: "session.start", sessionId: run.sessionId, model: "claude-sonnet-4-5", cwd: o.cwd ?? "/root/work" }));
+        return session;
+      },
+      attach: o => {
+        const run = runs.get(o.run);
+        if (run === undefined) {
+          const gone: TurnResult = { status: "failed", error: RUN_GONE_LINE };
+          const finished = Promise.resolve().then(() => {
+            o.onEvent({ type: "turn.done", sessionId: o.sessionId, result: gone });
+            o.onEvent({ type: "session.end", sessionId: o.sessionId, exitCode: null, sawResult: false });
+            return gone;
+          });
+          return { localId: o.sessionId, finished, interrupt: async () => {} };
+        }
+        const session = open(run, o.run, o.onEvent, o.sessionId);
+        const replayed = [...run.log];
+        queueMicrotask(() => {
+          for (const event of replayed) deliver(run, event);
+        });
+        return session;
+      },
+    });
+    return { adapter, emit, handles: () => [...runs.keys()], sweep: (handle: string) => runs.delete(handle) };
+  };
+
+  /** A workspace with one turn running on the machine, the host stopped under it, and what that turn's run is. */
+  const hostWentDown = async (h: ReturnType<typeof machineRuns>, store: Store, backend: StubBackend): Promise<{ workspaceId: string; run: string }> => {
+    const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => (await rt.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const run = h.handles()[0]!;
+    h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: "reading the ticket" });
+    await rt.close();
+    return { workspaceId: ws.id, run };
+  };
+
+  it("the run outlives the host: the row keeps its run, stays running across the restart and completes with its reply", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    const stored = (await store.get("sessions", workspaceId)) as { sessions: { status: string; run?: string }[] };
+    expect(stored.sessions.map(s => [s.status, s.run])).toEqual([["running", run]]);
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: "wrote the fix" });
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "completed");
+    const history = await rt2.sessions.history(workspaceId);
+    // the line the old host already wrote is read past, so the replay costs the transcript nothing
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.delta", "session.delta", "session.done", "session.end"]);
+    expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual(["reading the ticket", "wrote the fix"]);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: 0, sawResult: true });
+    await rt2.close();
+  });
+
+  it("a run the machine no longer holds ends the turn on those words, and a second restart does not end it again", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    h.sweep(run);
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "failed");
+    const history = await rt2.sessions.history(workspaceId);
+    expect(history.filter(e => e.type === "session.done").map(e => e.result.error)).toEqual([RUN_GONE_LINE]);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, sawResult: false });
+    await rt2.close();
+
+    const rt3 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt3.sessions.history(workspaceId)).filter(e => e.type === "session.end")).toHaveLength(1);
+    await rt3.close();
+  });
+
+  it("a host with no adapter for the harness cannot re-open the run, so the turn reads as one the restart cut", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId } = await hostWentDown(h, store, backend);
+
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["failed"]);
+    expect((await rt2.sessions.history(workspaceId)).at(-1)).toMatchObject({ type: "session.end", reason: "host restarted while the agent was working" });
+    await rt2.close();
+  });
+
+  it("a turn whose reply landed before the restart has its line recorded once, not again on the replay", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt1.sessions.start(ws.id, { prompt: "build it", notify: "me" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const run = h.handles()[0]!;
+    // the reply landed and the harness process had not exited when the host went down
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.notify"));
+    expect((await rt1.sessions.list(ws.id))[0]).toMatchObject({ status: "running" });
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
+    expect((await rt2.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
+    await rt2.close();
   });
 });
 

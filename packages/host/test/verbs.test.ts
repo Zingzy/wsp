@@ -7,7 +7,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, ThreadView, markedDefault, unknownAgentLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, HOST_STOPPING_LINE, ThreadView, markedDefault, unknownAgentLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -1090,7 +1090,7 @@ describe("wsp verbs over the host", () => {
     expect(io.errors).toEqual(["ran in the home folder"]);
   });
 
-  it("the host going away mid-turn fails the verb in one line with exit 1 instead of hanging", async () => {
+  it("a host that stops under a turn says so and that the turn goes on, in one line with exit 1 instead of hanging", async () => {
     await restartHost({ claude: stuckAgent() });
     await run("new", "alpha");
     execGuest(backend, "", undefined);
@@ -1101,10 +1101,10 @@ describe("wsp verbs over the host", () => {
     handle = undefined;
     const [t, c] = await Promise.all([turn, command]);
     expect(t.code).toBe(1);
-    expect(t.io.errors).toEqual(["wsp thread new: the host closed the connection"]);
+    expect(t.io.errors).toEqual([`wsp thread new: ${HOST_STOPPING_LINE}`]);
     expect(t.io.lines).toHaveLength(1);
     expect(c.code).toBe(1);
-    expect(c.io.errors).toEqual(["wsp exec: the host closed the connection"]);
+    expect(c.io.errors).toEqual([`wsp exec: ${HOST_STOPPING_LINE}`]);
   });
 
   it("the workspace being deleted under a running exec fails the verb with the reason and exit 1", async () => {

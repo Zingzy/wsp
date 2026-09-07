@@ -8,7 +8,7 @@ import { randomBytes } from "node:crypto";
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { RuntimeRequest, type ExecEvent, type ForwardEvent, type PortForward } from "@wsp/protocol";
+import { HOST_STOPPING_CLOSE, RuntimeRequest, type ExecEvent, type ForwardEvent, type PortForward } from "@wsp/protocol";
 import type { HostFolders, HostTerminalConfig, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -51,6 +51,9 @@ interface Ticket {
   purpose: string;
   expiresAt: number;
 }
+
+/** How long a stopping host waits for a client to answer its close frame before the socket is cut. */
+const STOP_GRACE_MS = 250;
 
 function bundlerFrom(opts: ServeOptions): (source: string) => ProjectBundler {
   return source => {
@@ -389,8 +392,17 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   return {
     port,
     close: async () => {
-      for (const client of wss.clients) client.terminate();
-      await new Promise<void>((resolve, reject) => wss.close(err => (err ? reject(err) : resolve())));
+      // The socket did not break under a client, the host let it go: the close code is what tells a command waiting
+      // on a turn that its turn goes on. A client that does not answer the frame is cut, so a stop stays bounded.
+      for (const client of wss.clients) client.close(HOST_STOPPING_CLOSE, "stopping");
+      const cut = setTimeout(() => {
+        for (const client of wss.clients) client.terminate();
+      }, STOP_GRACE_MS);
+      try {
+        await new Promise<void>((resolve, reject) => wss.close(err => (err ? reject(err) : resolve())));
+      } finally {
+        clearTimeout(cut);
+      }
     },
   };
 }
