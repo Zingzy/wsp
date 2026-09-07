@@ -74,8 +74,8 @@ export function actionRefusal(state: WorkspaceState, action: string, goneWords?:
 }
 
 /** What refuses a send before the workspace's state is asked: the socket to wsp, the workspace lookup, the
- * transcript still loading, the turn a new thread left finishing. */
-export type SendBlock = "connecting" | "reconnecting" | "closed" | "not-found" | "loading" | "finishing";
+ * transcript still loading. */
+export type SendBlock = "connecting" | "reconnecting" | "closed" | "not-found" | "loading";
 
 /** Every kind of send refusal: a block, or a state other than running. */
 export type SendRefusalKind = WorkspaceState | SendBlock;
@@ -86,7 +86,6 @@ const BLOCK_WORDS: Record<SendBlock, string> = {
   closed: "wsp is not running",
   "not-found": "Workspace not found",
   loading: "Loading transcript",
-  finishing: "Finishing the previous turn",
 };
 
 /** Why a turn cannot be sent, one sentence per kind; null while running. The composer draws every row; the runtime

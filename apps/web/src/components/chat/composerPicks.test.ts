@@ -14,7 +14,7 @@ const CLAUDE: HarnessCatalog = {
     { value: "claude-haiku-4-5", label: "Haiku", efforts: [], contextWindows: [] },
     { value: "claude-next", label: "Next", efforts: ["high"] },
   ],
-  efforts: [{ value: "low", label: "Low" }, { value: "high", label: "High" }],
+  efforts: [{ value: "low", label: "Low" }, { value: "high", label: "High", isDefault: true }],
   contextWindows: [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }],
   permissionModes: [{ value: "plan", label: "Plan" }, { value: "bypassPermissions", label: "Bypass", isDefault: true }],
   steers: true,
@@ -54,8 +54,11 @@ describe("runningPicks", () => {
 
 describe("effectivePicks and startOptionsFrom", () => {
   it("shows the pick, else the running value, else the default, and drops a pick the model cannot take", () => {
-    const picks = effectivePicks(CLAUDE, { picked: { effort: "high", contextWindow: "1m" }, running: {} });
-    expect(picks).toEqual({ model: "claude-opus-5", effort: "high", contextWindow: "1m", permissionMode: "bypassPermissions" });
+    expect(effectivePicks(CLAUDE, { picked: {}, running: {} })).toEqual({ model: "claude-opus-5", effort: "high", contextWindow: "1m", permissionMode: "bypassPermissions" });
+    const picks = effectivePicks(CLAUDE, { picked: { effort: "low", contextWindow: "200k" }, running: {} });
+    expect(picks).toEqual({ model: "claude-opus-5", effort: "low", contextWindow: "200k", permissionMode: "bypassPermissions" });
+    // Next takes only high, so the catalog's default survives the narrowing; Haiku takes none, so nothing is shown.
+    expect(effectivePicks(CLAUDE, { picked: { model: "claude-next" }, running: {} }).effort).toBe("high");
     const haiku = effectivePicks(CLAUDE, { picked: { model: "claude-haiku-4-5", effort: "high", contextWindow: "1m" }, running: {} });
     expect(haiku).toEqual({ model: "claude-haiku-4-5", effort: null, contextWindow: null, permissionMode: "bypassPermissions" });
     const sonnet = effectivePicks(CLAUDE, { picked: { model: "claude-sonnet-5" }, running: { effort: "low" } });
