@@ -46,6 +46,8 @@ import {
   upgradeSealFailedGoneLine,
   upgradeSealFailedStaysLine,
   upgradeSealFailedUnreadLine,
+  vaultKeptLine,
+  vaultOverCapLine,
 } from "../src/index.js";
 import * as format from "../src/format.js";
 import * as protocol from "../src/index.js";
@@ -360,6 +362,18 @@ describe("DAEMON_UPDATING and DAEMON_UPDATE_FAILED", () => {
       expect(line).not.toContain("daemon");
       expect(line.length).toBeLessThanOrEqual(30);
     }
+  });
+});
+
+describe("the nap's words when its vault was not stored", () => {
+  it("vaultOverCapLine reads the export and the cap in the one byte rule", () => {
+    expect(vaultOverCapLine(797_760_137, 209_715_200)).toBe("the export was 760.8 MB, over the 200.0 MB cap");
+    expect(vaultOverCapLine(6_000, 5_000)).toBe("the export was 5.9 KB, over the 4.9 KB cap");
+  });
+
+  it("vaultKeptLine says the previous vault stands and why, whatever stopped the export", () => {
+    expect(vaultKeptLine(vaultOverCapLine(797_760_137, 209_715_200))).toBe("nap kept the previous vault; the export was 760.8 MB, over the 200.0 MB cap");
+    expect(vaultKeptLine("fetch failed")).toBe("nap kept the previous vault; fetch failed");
   });
 });
 

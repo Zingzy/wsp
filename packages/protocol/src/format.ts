@@ -383,6 +383,17 @@ export function codexReconnectLine(elapsedMs: number): string {
 export const DAEMON_UPDATING = "updating the helper";
 export const DAEMON_UPDATE_FAILED = "could not update the helper";
 
+/** Why a nap's vault export was refused: its size against the cap, both in the one byte rule. */
+export function vaultOverCapLine(bytes: number, capBytes: number): string {
+  return `the export was ${fmtBytes(bytes)}, over the ${fmtBytes(capBytes)} cap`;
+}
+
+/** The napping status's line when the nap could not store a fresh vault and the previous one stands: a wake that has
+ * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
+export function vaultKeptLine(why: string): string {
+  return `nap kept the previous vault; ${why}`;
+}
+
 /** The machine row's line when a record that said paused met a machine the provider was running all along (a nap
  * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
 export const ALREADY_RUNNING = "already running at the provider";

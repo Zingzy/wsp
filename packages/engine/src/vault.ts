@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
-import { shellQuote } from "@wsp/protocol";
+import { shellQuote, vaultOverCapLine } from "@wsp/protocol";
 import { backoffMs, classify, shouldRetry } from "./errors.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { plural } from "./golden-tools.js";
@@ -13,6 +13,8 @@ export interface VaultOptions {
   timeoutMs?: number;
   /** Export only: an archive over this many bytes is removed and refused with kind vaultTooLarge. */
   maxBytes?: number;
+  /** Export only: what the archive leaves behind under each path, judged before the size is read. */
+  exclude?: CacheRule;
   /** Import only: merge into what the destination already holds instead of replacing its directories. */
   overlay?: boolean;
   /** Import only: called as each part lands, with the bytes sent so far. */
@@ -55,51 +57,74 @@ async function download(machine: Machine, path: string, opts: VaultOptions, tota
   return Buffer.concat(chunks);
 }
 
-// Signed-URL transport on both directions (PoC P5: ~1s round trips). exec
-// stdout could carry base64 for small exports but hits response-size limits.
+/** What a folder's archive leaves behind: a directory whose whole name is in dirs, a file whose whole name is in
+ * files, and a directory holding one of the marker files, whatever its name. Names, never substrings, so a source
+ * file or a folder that only holds the word cache stays. */
+export interface CacheRule {
+  dirs: readonly string[];
+  files: readonly string[];
+  markers: readonly string[];
+}
+
+/** The script that archives `targets`, paths relative to `cwd`, into `out` with the rule's caches left behind. One
+ * find names every cache root under the rule on stdout, one per line as find spelled them minus a leading ./ ; a
+ * second lists every entry kept, NUL separated, and tar takes that list with recursion off: both tars' exclude
+ * patterns match a name at any depth, so a file called dist would otherwise go with the dist directory. Nothing under
+ * a .git directory is judged, so a repository travels whole. Only find and tar features both GNU and BSD have. */
+function excludingArchiveScript(cwd: string, targets: readonly string[], rule: CacheRule, out: string): string {
+  const names = (list: readonly string[]): string => list.map(n => `-name ${shellQuote(n)}`).join(" -o ");
+  const named = [
+    ...(rule.dirs.length === 0 ? [] : [`\\( -type d \\( ${names(rule.dirs)} \\) \\)`]),
+    ...(rule.files.length === 0 ? [] : [`\\( -type f \\( ${names(rule.files)} \\) \\)`]),
+    ...rule.markers.map(m => `\\( -type d -exec test -f ${shellQuote(`{}/${m}`)} \\; \\)`),
+  ];
+  const cache = `\\( ${named.length === 0 ? "-false" : named.join(" -o ")} \\)`;
+  const where = targets.map(shellQuote).join(" ");
+  const list = `${out}.list`;
+  const keep = `${out}.keep`;
+  return [
+    "set -eo pipefail",
+    `cd ${shellQuote(cwd)}`,
+    `find ${where} -mindepth 1 -path '*/.git' -prune -o ${cache} -prune -print > ${shellQuote(list)}`,
+    `printf '%s\\0' ${where} > ${shellQuote(keep)}`,
+    `find ${where} -mindepth 1 \\( -path '*/.git' -o -path '*/.git/*' \\) -print0 -o ${cache} -prune -o -print0 >> ${shellQuote(keep)}`,
+    `tar czf ${shellQuote(out)} --no-recursion --null -T ${shellQuote(keep)}`,
+    `sed 's|^\\./||' ${shellQuote(list)}`,
+    `rm -f ${shellQuote(list)} ${shellQuote(keep)}`,
+  ].join("\n");
+}
+
+/** The script that archives a folder on the guest from its own root into `out`, its caches left behind under the rule. */
+export function folderExportScript(dir: string, rule: CacheRule, out: string): string {
+  return excludingArchiveScript(dir, ["."], rule, out);
+}
+
+/** The byte size of a file on the guest, read the one way both GNU and BSD spell it. */
+async function guestFileSize(machine: Machine, path: string): Promise<number> {
+  const size = await machine.exec(`wc -c < ${shellQuote(path)}`, { timeoutMs: INLINE_EXEC_MS });
+  const bytes = Number(size.stdout.trim());
+  if (size.exitCode !== 0 || !Number.isFinite(bytes)) throw new Error(`the archive's size on the machine is unknown: ${size.stderr.slice(-200)}`);
+  return bytes;
+}
+
+// Signed-URL transport on both directions: exec stdout could carry base64 for small exports but hits response-size limits.
 export async function exportPaths(machine: Machine, paths: string[], opts: VaultOptions = {}): Promise<Buffer> {
   const tmp = `/tmp/wsp-vault-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
-  const rel = paths.map(p => shellQuote(p.replace(/^\//, "")));
-  const tar = await machine.run(`tar czf ${shellQuote(tmp)} -C / ${rel.join(" ")}`, { deadlineMs: opts.timeoutMs ?? 120_000 });
+  const rel = paths.map(p => p.replace(/^\//, ""));
+  const script = opts.exclude === undefined ? `tar czf ${shellQuote(tmp)} -C / ${rel.map(shellQuote).join(" ")}` : excludingArchiveScript("/", rel, opts.exclude, tmp);
+  const tar = await machine.run(script, { deadlineMs: opts.timeoutMs ?? 120_000 });
   if (tar.exitCode !== 0) {
     throw new Error(`vault export tar failed (exit ${tar.exitCode}): ${tar.stderr.slice(-500)}`);
   }
   try {
     if (opts.maxBytes !== undefined) {
-      const stat = await machine.exec(`stat -c %s ${shellQuote(tmp)}`, { timeoutMs: INLINE_EXEC_MS });
-      const bytes = Number(stat.stdout.trim());
-      if (stat.exitCode !== 0 || !Number.isFinite(bytes)) throw new Error(`vault export size unknown: ${stat.stderr.slice(-200)}`);
-      if (bytes > opts.maxBytes) {
-        throw Object.assign(new Error(`vault export is ${bytes} bytes, over the ${opts.maxBytes} byte cap`), { kind: "vaultTooLarge", bytes });
-      }
+      const bytes = await guestFileSize(machine, tmp);
+      if (bytes > opts.maxBytes) throw Object.assign(new Error(vaultOverCapLine(bytes, opts.maxBytes)), { kind: "vaultTooLarge", bytes });
     }
     return await download(machine, tmp, opts);
   } finally {
-    await machine.exec(`rm -f ${shellQuote(tmp)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+    await machine.exec(`rm -f ${shellQuote(tmp)} ${shellQuote(`${tmp}.list`)} ${shellQuote(`${tmp}.keep`)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
   }
-}
-
-/** What a folder's archive leaves behind: any entry whose name matches one of the globs (find's -name, so a bracket
- * expression spells a case rule), and any directory holding one of the marker files, whatever its name. */
-export interface CacheRule {
-  globs: readonly string[];
-  markers: readonly string[];
-}
-
-/** The script that archives a folder on the guest from its own root into `out`: find names every cache root under
- * the rule, tar leaves those subtrees behind, and the roots come back on stdout one per line, relative to the folder.
- * Nothing under a .git directory is judged, as on the trip out. Only find and tar features both GNU and BSD have. */
-export function folderExportScript(dir: string, rule: CacheRule, out: string): string {
-  const named = [...rule.globs.map(g => `-name ${shellQuote(g)}`), ...rule.markers.map(m => `\\( -type d -exec test -f ${shellQuote(`{}/${m}`)} \\; \\)`)];
-  const list = `${out}.list`;
-  return [
-    "set -eo pipefail",
-    `cd ${shellQuote(dir)}`,
-    `find . -mindepth 1 \\( -path './.git' -o -path '*/.git' \\) -prune -o \\( ${named.join(" -o ")} \\) -prune -print > ${shellQuote(list)}`,
-    `tar czf ${shellQuote(out)} -X ${shellQuote(list)} .`,
-    `sed 's|^\\./||' ${shellQuote(list)}`,
-    `rm -f ${shellQuote(list)}`,
-  ].join("\n");
 }
 
 /** The refusal an export gives for a destination on this computer that already holds something; kind "exists" is
@@ -116,12 +141,9 @@ export async function exportFolder(machine: Machine, dir: string, rule: CacheRul
     const packed = await machine.run(folderExportScript(dir, rule, tmp), { deadlineMs: opts.timeoutMs ?? 600_000 });
     if (packed.exitCode !== 0) throw new Error(`packing ${dir} on the machine failed (exit ${packed.exitCode}): ${packed.stderr.slice(-500)}`);
     const excluded = packed.stdout.split("\n").filter(l => l !== "").sort();
-    const size = await machine.exec(`wc -c < ${shellQuote(tmp)}`, { timeoutMs: INLINE_EXEC_MS });
-    const total = Number(size.stdout.trim());
-    if (size.exitCode !== 0 || !Number.isFinite(total)) throw new Error(`the archive's size on the machine is unknown: ${size.stderr.slice(-200)}`);
-    return { tar: await download(machine, tmp, opts, total), excluded };
+    return { tar: await download(machine, tmp, opts, await guestFileSize(machine, tmp)), excluded };
   } finally {
-    await machine.exec(`rm -f ${shellQuote(tmp)} ${shellQuote(`${tmp}.list`)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+    await machine.exec(`rm -f ${shellQuote(tmp)} ${shellQuote(`${tmp}.list`)} ${shellQuote(`${tmp}.keep`)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
   }
 }
 
