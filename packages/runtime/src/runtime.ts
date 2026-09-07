@@ -110,7 +110,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -890,6 +890,12 @@ const HELD_TTL_MS = 15 * 60_000;
 const HEARTBEAT_MS = 5 * 60_000;
 
 const isCapRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind === "concurrency";
+/** Whether a workspace still holds one of the account's machine slots: a napped or gone one holds none. Read off
+ * the record's phase alone, since a refusal has no time to ask the provider about every workspace. */
+const holdsSlot = (record: WorkspaceRecord): boolean => {
+  const state = workspaceState({ phase: record.phase });
+  return state !== "paused" && state !== "gone";
+};
 
 function pidAlive(pid: number): boolean {
   try {
@@ -2052,8 +2058,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await fork(record, bind, undefined, report);
     } catch (e) {
       // A slot for work beats a builder kept for one more change: at the cap one kept builder of this setup is
-      // stopped and the fork tried again, the next one only on the next refusal; a refusal with none left to
-      // stop is the caller's to show. A held or foreign builder is never touched.
+      // stopped and the fork tried again, the next one only on the next refusal. A held or foreign builder is
+      // never touched, and a refusal with none left to stop is turned into words that name the slots' holders.
       if (!isCapRefusal(e)) throw e;
       let refusal: unknown = e;
       let made = false;
@@ -2076,7 +2082,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           refusal = again;
         }
       }
-      if (!made) throw refusal;
+      if (!made) {
+        // A create still in flight holds its slot; the one being refused never bound a machine, so it cannot name itself.
+        const holding = [...live.values()].filter(w => holdsSlot(w.record)).map(w => w.record.name);
+        const line = machineCapRefusal(holding, [...builders.values()].map(x => x.record.name));
+        throw Object.assign(new Error(line, { cause: refusal }), { kind: "concurrency", ...(typeof (refusal as WspError).status === "number" ? { status: (refusal as WspError).status } : {}) });
+      }
     }
     const entry = live.get(id)!;
     if (entry.machine.previewUrl) {

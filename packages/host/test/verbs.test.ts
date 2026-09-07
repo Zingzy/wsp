@@ -134,6 +134,20 @@ describe("wsp verbs over the host", () => {
     expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
   });
 
+  it("a fork the provider refuses at the machine cap is one line naming the workspaces holding the slots, never the provider's sentence", async () => {
+    await run("new", "first");
+    await run("new", "t-cap");
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
+      return create(spec);
+    };
+    const refused = await run("fork", "first", "--name", "f2");
+    expect(refused.code).toBe(1);
+    expect(refused.io.errors).toEqual(["wsp fork: both machine slots are in use: first, t-cap. Pause one or wait for a nap."]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["first", "t-cap"]);
+  });
+
   it("new refuses in one line when there is no golden", async () => {
     await restartHost({}, memoryStore());
     const { code, io } = await run("new", "alpha");

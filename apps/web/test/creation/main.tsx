@@ -19,9 +19,12 @@ const MESSAGES = [
   "Daemon reachable; preparing the workspace checkout and the harness configuration directory.",
 ];
 
+// What the runtime refuses a fork with at the machine cap: the failing log line and the detail are one sentence.
+const FAILED = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
+
 const lines: CreationLine[] = Array.from({ length: count }, (_, i) => ({
   stage: i === count - 1 ? "failed" : "machine-booting",
-  message: i === count - 1 ? "Sandbox limit reached (2)" : MESSAGES[i % MESSAGES.length]!,
+  message: i === count - 1 ? FAILED : MESSAGES[i % MESSAGES.length]!,
   at: new Date(Date.UTC(2026, 8, 5, 12, 31, i)).toISOString(),
   elapsedMs: 800 * (i + 1),
 }));
@@ -33,7 +36,7 @@ const creation: Creation = {
   lines,
   failed: {
     title: "The provider refused: machine cap reached",
-    detail: "Your machine provider runs a fixed number of machines at once and every slot is taken. A builder kept after a save and not in use is stopped first to make room; pause or delete a workspace to free one, then try again.",
+    detail: FAILED,
   },
 };
 

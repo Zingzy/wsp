@@ -73,7 +73,7 @@ describe.skipIf(skipped !== undefined)("the creation screen laid out in Chromium
     expect(newest.y).toBeGreaterThanOrEqual(viewport.y);
     expect(newest.y + newest.height).toBeLessThanOrEqual(viewport.y + viewport.height + 0.5);
     expect(first.y + first.height).toBeLessThan(viewport.y);
-    expect(await page!.locator("[data-testid=creation-log] li:last-child").textContent()).toContain("Sandbox limit reached (2)");
+    expect(await page!.locator("[data-testid=creation-log] li:last-child").textContent()).toContain("both machine slots are in use: first, t-cap. Pause one or wait for a nap.");
   }, 30_000);
 
   it("the eyebrow, the name, the wave, the buttons and the box share one centre in both themes", async () => {

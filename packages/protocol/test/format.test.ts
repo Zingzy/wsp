@@ -27,6 +27,7 @@ import {
   goldenBuildLine,
   harnessExitLine,
   isCodeSearchTool,
+  machineCapRefusal,
   machineUnreachedLine,
   mcpServerCommandLine,
   moveTimedOutLine,
@@ -370,6 +371,24 @@ describe("machine size words", () => {
     expect(fmtRate(0.11)).toBe("$0.11/hr");
     expect(sizeRefusal("4x8", offers)).toBe("4x8 is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
     expect(sizeRefusal("big", offers)).toBe("big is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
+  });
+});
+
+describe("machineCapRefusal", () => {
+  it("names the machines holding the slots and the move that frees one, without saying how many slots the plan has", () => {
+    expect(machineCapRefusal(["first", "t-cap"])).toBe("both machine slots are in use: first, t-cap. Pause one or wait for a nap.");
+    // A slot held by a machine this host cannot name is still held, so one holder is no proof of a one-slot plan.
+    expect(machineCapRefusal(["first"])).toBe("a machine slot is in use: first. Pause it or wait for a nap.");
+    expect(machineCapRefusal(["a", "b", "c"])).toBe("machine slots are in use: a, b, c. Pause one or wait for a nap.");
+    expect(machineCapRefusal(["a", "b", "c", "d"])).toBe("machine slots are in use: a, b, c, d. Pause one or wait for a nap.");
+  });
+
+  it("names a builder as one, since the pause on offer is a workspace's move", () => {
+    expect(machineCapRefusal(["first"], ["wsp-golden"])).toBe("both machine slots are in use: first, wsp-golden (builder). Pause one or wait for a nap.");
+  });
+
+  it("says so plainly when nothing of this computer holds a slot, instead of naming an empty list", () => {
+    expect(machineCapRefusal([])).toBe("the provider is at its machine cap and no machine of this computer holds a slot; free one at the provider and try again");
   });
 });
 
