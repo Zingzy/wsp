@@ -10,7 +10,7 @@ import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
-import { isDesktopMac } from "../lib/desktopMac.js";
+import { isDesktopMac } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
 import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout.js";

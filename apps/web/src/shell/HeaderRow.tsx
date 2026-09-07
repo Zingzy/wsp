@@ -2,7 +2,7 @@
 // On macOS the frame row is the window's drag region and leaves room for the traffic lights; every control in it is no-drag.
 import type { ComponentPropsWithoutRef } from "react";
 import { SidebarTrigger } from "../components/ui/sidebar.js";
-import { isDesktopMac } from "../lib/desktopMac.js";
+import { isDesktopMac } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
 
 export function HeaderRow({ frame, className, children, ...props }: ComponentPropsWithoutRef<"div"> & { readonly frame: boolean }) {

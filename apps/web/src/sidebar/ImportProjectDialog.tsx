@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtBytes, importIntoLine, importRequest, repoLine, secretSignalsLine, secretsNote, SESSIONS_NOTE, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
+import { desktopBridge } from "../lib/desktopShell.js";
 import { errorText } from "../lib/utils.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
@@ -41,7 +42,7 @@ const PLACEHOLDER = "/Users/you/code/project";
 
 export function ImportProjectDialog({ workspace, initialSource, onClose }: { workspace: WorkspaceView; initialSource?: string; onClose: () => void }) {
   const api = useStore(s => s.api);
-  const bridge = typeof window === "undefined" ? undefined : window.wsp?.pickFolder;
+  const bridge = desktopBridge()?.pickFolder;
   const remember = useLastFolderStore(s => s.remember);
   const lastFolder = useLastFolderParent();
   const [source, setSource] = useState(initialSource ?? "");

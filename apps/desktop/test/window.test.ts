@@ -28,9 +28,15 @@ describe("windowOptions", () => {
       expect(options).not.toHaveProperty("trafficLightPosition");
       expect(options).not.toHaveProperty("vibrancy");
       expect(options).not.toHaveProperty("visualEffectState");
-      expect(options.webPreferences).not.toHaveProperty("preload");
-      expect(options.webPreferences).not.toHaveProperty("additionalArguments");
+      expect(options.webPreferences).toEqual({ nodeIntegration: false, contextIsolation: true, sandbox: true });
       expect(htmlClassFrom(["/app/electron", "--type=renderer"])).toBeUndefined();
+    }
+  });
+
+  it("enables no native tabs on any platform, so ctrl+tab and the digit chords reach the page", () => {
+    for (const platform of ["darwin", "linux", "win32"] as const) {
+      expect(windowOptions(platform)).not.toHaveProperty("tabbingIdentifier");
+      expect(windowOptions(platform, "/app/preload.cjs")).not.toHaveProperty("tabbingIdentifier");
     }
   });
 });

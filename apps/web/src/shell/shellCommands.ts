@@ -5,14 +5,17 @@
 // drive the drawer under the chat, except that new and split act on the right
 // panel's terminal while one of its terminals has focus; the panel surface
 // itself opens only from its own tab strip. Every pty comes from the link.
+// The workspace switch walks the sidebar's own order and lands in the new
+// workspace's composer.
+import { deriveSidebarProjects } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
-import type { KeybindingCommand } from "../keybindingTypes.js";
+import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, type WorkspaceSelectSlot } from "../keybindingTypes.js";
 import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
 import { useStore } from "../protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
-import { requestNewThread } from "./shellRequests.js";
+import { requestComposerFocus, requestNewThread } from "./shellRequests.js";
 
 export interface ShellCommandTarget {
   readonly workspaceId: string | null;
@@ -77,7 +80,47 @@ export function splitActivePanelTerminal(workspaceId: string, direction: SplitDi
   return splitPanelTerminal(workspaceId, active.id, direction);
 }
 
+/** The workspace ids in sidebar order. The creation rows a fork draws above them are left out: a creation
+    row has no workspace to switch to, and counting one would move every slot under the person's fingers
+    while a fork is in flight. */
+function orderedWorkspaceIds(): string[] {
+  const { workspaces, statuses, sessions } = useStore.getState();
+  return deriveSidebarProjects({ workspaces, statuses, sessions }).map(project => project.id);
+}
+
+/** One step along an order that wraps at both ends, or null where there is nowhere else to go, which is what
+    the palette's disabled rows say. A current id the order does not hold (a creation row) steps in from the
+    end it came from. */
+export function stepWorkspaceId(ids: ReadonlyArray<string>, currentId: string | null, step: 1 | -1): string | null {
+  if (ids.length === 0) return null;
+  const at = currentId === null ? -1 : ids.indexOf(currentId);
+  if (at === -1) return (step === 1 ? ids[0] : ids[ids.length - 1]) ?? null;
+  const next = ids[(at + step + ids.length) % ids.length] ?? null;
+  return next === currentId ? null : next;
+}
+
+/** Selects the workspace and puts the caret in its composer: the chords and the palette's rows land the same way. */
+export function goToWorkspace(workspaceId: string): void {
+  useStore.getState().select(workspaceId);
+  requestComposerFocus(workspaceId);
+}
+
+export function goToAdjacentWorkspace(step: 1 | -1): void {
+  const next = stepWorkspaceId(orderedWorkspaceIds(), useStore.getState().selectedId, step);
+  if (next !== null) goToWorkspace(next);
+}
+
+/** Nothing happens while the sidebar has no row in that slot. */
+export function goToWorkspaceInSlot(slot: WorkspaceSelectSlot): void {
+  const target = orderedWorkspaceIds()[slot - 1];
+  if (target !== undefined) goToWorkspace(target);
+}
+
 export function runShellCommand(command: KeybindingCommand, target: ShellCommandTarget): void {
+  if (isWorkspaceSelectCommand(command)) {
+    goToWorkspaceInSlot(workspaceSelectSlot(command));
+    return;
+  }
   const { workspaceId } = target;
   switch (command) {
     case "sidebar.toggle":
@@ -105,6 +148,12 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       return;
     case "chat.new":
       if (workspaceId) requestNewThread({ workspaceId });
+      return;
+    case "workspace.next":
+      goToAdjacentWorkspace(1);
+      return;
+    case "workspace.previous":
+      goToAdjacentWorkspace(-1);
       return;
     default: {
       const _exhaustive: never = command;

@@ -20,7 +20,7 @@ import {
   Rows3Icon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { REPO_STATE_WORDS, type GitDiffReply, type GitStatusReply } from "@wsp/protocol";
+import { REPO_STATE_WORDS, type GitDiffReply, type GitStatusReply, type RepoStateWord } from "@wsp/protocol";
 import { ChangedFilesTree } from "../components/chat/ChangedFilesTree.js";
 import { DiffStatLabel } from "../components/chat/DiffStatLabel.js";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "../components/diffs/AnnotatableCodeView.js";
@@ -43,15 +43,20 @@ import { gitDiff, gitStatus } from "../terminal/daemon-fs.js";
 import { SCOPE_LABELS, SCOPES, toDiffModel } from "./model.js";
 import { DEFAULT_SCOPE, useDiffStore } from "./store.js";
 
+/** The diff read for one folder: in flight or failed with the last reply it may keep showing, or the reply itself. */
 type LoadState =
-  | { kind: "pending"; last: GitDiffReply | null }
-  | { kind: "ready"; reply: GitDiffReply }
-  | { kind: "error"; message: string; last: GitDiffReply | null };
+  | { kind: "pending"; cwd: string; last: GitDiffReply | null }
+  | { kind: "ready"; cwd: string; reply: GitDiffReply }
+  | { kind: "error"; cwd: string; message: string; absence: RepoStateWord; last: GitDiffReply | null };
 
-/** The repository git resolved for one folder: its top level and branch, or the word that there is none. */
-type RepoState = { kind: "unknown" } | { kind: "repo"; root: string; branch: string } | { kind: "none" } | { kind: "refused" };
+/** The repository git resolved for one folder: its top level and branch, or one of the states the word table names. */
+type RepoState = { kind: RepoStateWord } | { kind: "repo"; root: string; branch: string };
 
 const NO_KEYS: ReadonlySet<string> = new Set();
+/** The git mark beside the crumbs: one box whether it names a branch or a word from the repo-state table. */
+const REPO_MARK_CLASS = "inline-flex h-6 shrink-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground";
+/** A sentence that fills an empty pane body, whatever it says: one muted mono line, centred. */
+const PANE_LINE_CLASS = "flex flex-1 items-center justify-center px-5 text-center font-mono text-[11px] text-muted-foreground";
 
 function lastReply(state: LoadState): GitDiffReply | null {
   return state.kind === "ready" ? state.reply : state.last;
@@ -73,7 +78,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const setScope = useDiffStore(s => s.setScope);
   const setRenderMode = useDiffStore(s => s.setRenderMode);
   const onKeyDown = useUpAFolder(workspaceId);
-  const [load, setLoad] = useState<LoadState>({ kind: "pending", last: null });
+  const [load, setLoad] = useState<LoadState>({ kind: "pending", cwd, last: null });
   const [repo, setRepo] = useState<{ cwd: string; state: RepoState }>({ cwd, state: { kind: "unknown" } });
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NO_KEYS);
   const [treeOpen, setTreeOpen] = useState(true);
@@ -84,15 +89,18 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const fetchDiff = useCallback(() => {
     if (!wire || cwd === "") return;
     let gone = false;
-    setLoad(current => ({ kind: "pending", last: lastReply(current) }));
-    // The repository label stays through a refresh of the same folder and resets only for a new one.
+    // The last diff and the repository label stay through a refresh of the same folder and reset for a new one.
+    setLoad(current => ({ kind: "pending", cwd, last: current.cwd === cwd ? lastReply(current) : null }));
     setRepo(current => (current.cwd === cwd ? current : { cwd, state: { kind: "unknown" } }));
     gitDiff(wire, cwd, scope).then(
       reply => {
-        if (!gone) setLoad({ kind: "ready", reply });
+        if (!gone) setLoad({ kind: "ready", cwd, reply });
       },
       (e: unknown) => {
-        if (!gone) setLoad(current => ({ kind: "error", message: e instanceof Error ? e.message : String(e), last: lastReply(current) }));
+        if (gone) return;
+        const absence = repoAbsence(e);
+        // A state whose pane line replaces the diff has none to keep; a refused read keeps the last one through the failure.
+        setLoad(current => ({ kind: "error", cwd, message: e instanceof Error ? e.message : String(e), absence, last: REPO_STATE_WORDS[absence].pane === "" ? lastReply(current) : null }));
       },
     );
     gitStatus(wire, cwd).then(
@@ -151,7 +159,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const scopeLabel = SCOPE_LABELS[scope];
   const shown = repo.cwd === cwd ? repo.state : { kind: "unknown" as const };
   const folderLabel = shown.kind === "repo" ? shown.root : cwd;
-  const said = shown.kind !== "repo" && REPO_STATE_WORDS[shown.kind].word !== "" ? REPO_STATE_WORDS[shown.kind] : null;
+  const paneLine = load.kind === "error" ? REPO_STATE_WORDS[load.absence].pane : "";
 
   return (
     <div
@@ -189,26 +197,20 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
             </MenuPopup>
           </Menu>
           <FolderBreadcrumbs workspaceId={workspaceId} className="flex-initial" />
-          {shown.kind === "unknown" ? null : (
-            <span
-              className="inline-flex h-6 shrink-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground"
-              title={said !== null ? undefined : shown.kind === "repo" ? `git: ${shown.root}` : `no repository at or above ${cwd}`}
-              data-diff-repo={shown.kind === "repo" ? shown.root : undefined}
-              data-diff-repo-state={shown.kind}
-            >
-              <FolderGitIcon className={cn("size-3.5 shrink-0", shown.kind === "repo" ? "opacity-70" : "opacity-40")} />
-              {shown.kind === "repo" ? (
-                <span className="max-w-40 truncate">{shown.branch}</span>
-              ) : said === null ? (
-                <span>no git</span>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger render={<span className="max-w-40 truncate" tabIndex={0} />}>{said.word}</TooltipTrigger>
-                  <TooltipPopup side="top" className="max-w-72">
-                    {said.note}
-                  </TooltipPopup>
-                </Tooltip>
-              )}
+          {shown.kind === "repo" ? (
+            <span className={REPO_MARK_CLASS} title={`git: ${shown.root}`} data-diff-repo={shown.root} data-diff-repo-state={shown.kind}>
+              <FolderGitIcon className="size-3.5 shrink-0 opacity-70" />
+              <span className="max-w-40 truncate">{shown.branch}</span>
+            </span>
+          ) : REPO_STATE_WORDS[shown.kind].word === "" ? null : (
+            <span className={REPO_MARK_CLASS} data-diff-repo-state={shown.kind}>
+              <FolderGitIcon className="size-3.5 shrink-0 opacity-40" />
+              <Tooltip>
+                <TooltipTrigger render={<span className="max-w-40 truncate" tabIndex={0} />}>{REPO_STATE_WORDS[shown.kind].word}</TooltipTrigger>
+                <TooltipPopup side="top" className="max-w-72">
+                  {REPO_STATE_WORDS[shown.kind].note}
+                </TooltipPopup>
+              </Tooltip>
             </span>
           )}
           <Tooltip>
@@ -294,7 +296,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
             This diff was cut at the daemon's 2 MB budget. Files listed without a patch changed too.
           </p>
         ) : null}
-        {load.kind === "error" ? (
+        {load.kind === "error" && paneLine === "" ? (
           <p className="shrink-0 border-b border-border/70 px-3 py-2 text-[11px] text-destructive" role="alert">
             {load.message}
           </p>
@@ -304,16 +306,18 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
             <div className="flex flex-1 items-center justify-center text-muted-foreground" role="status" aria-label="Loading diff">
               <Spinner className="size-5" />
             </div>
-          ) : null
+          ) : paneLine === "" ? null : (
+            <p className={PANE_LINE_CLASS}>{paneLine}</p>
+          )
         ) : model.raw ? (
           <div className="min-h-0 flex-1 overflow-auto p-2">
             <p className="mb-2 text-[11px] text-muted-foreground/75">{model.raw.reason}</p>
             <pre className="rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90">{model.raw.text}</pre>
           </div>
         ) : model.changedFiles.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+          <p className={PANE_LINE_CLASS}>
             No changes in {scopeLabel.toLowerCase()} at {folderLabel}.
-          </div>
+          </p>
         ) : (
           <>
             <div className="shrink-0 border-b border-border/60" data-changed-files>
@@ -409,9 +413,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
                 />
               </div>
             ) : (
-              <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-                Every changed file was over the patch budget; nothing to render.
-              </div>
+              <p className={PANE_LINE_CLASS}>Every changed file was over the patch budget; nothing to render.</p>
             )}
           </>
         )}

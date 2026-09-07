@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The shell's chrome in a real Chromium: the sidebar's brand lockup starts
 // where the search row does, the two top rows are one height and start
-// where the workspace rows do, a thread row's title keeps its room at the
+// where the workspace rows do, the search row opens the palette without
+// moving a row, a thread row's title keeps its room at the
 // default width, a status toast holds a long token inside its box, the line
 // the runtime puts on a machine's row takes that row's second line whole,
-// uncut and without growing the row, and collapsing the sidebar leaves the
-// page header's left padding alone. Vite
+// uncut and without growing the row, collapsing the sidebar leaves the
+// page header's left padding alone, and a send refusal above the composer is
+// one muted mono line in a slot the composer keeps at one height whether or
+// not a line is in it. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -15,6 +18,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "../src/keybindingDefaults";
+import { shortcutLabelForCommand } from "../src/keybindings";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,7 +76,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       await open(theme);
       const toggle = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
       const lockup = await box("[data-slot=sidebar-header] [role=img][aria-label=wsp]");
-      const search = await box("button[aria-label='Search threads']");
+      const search = await box("button[aria-label='Search']");
       expect(Math.abs(toggle.x - search.x)).toBeLessThan(1);
       expect(Math.abs(lockup.x - (toggle.x + toggle.width + (await rowGap("[data-slot=sidebar-header]"))))).toBeLessThan(1);
       const path = join(SHOTS_DIR, `sidebar-header-${theme}.png`);
@@ -79,7 +85,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 30_000);
 
-  it("the search row and the Workspaces row are one height, start where the workspace rows do, paint nothing at rest, and the field takes the row's place without moving anything", async () => {
+  it("the search row and the Workspaces row are one height, start where the workspace rows do, paint nothing at rest, carry the chord at the right edge, and open the palette without moving anything", async () => {
     const shot = async (name: string, theme: string): Promise<void> => {
       const path = join(SHOTS_DIR, `sidebar-top-${name}-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -92,32 +98,56 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       });
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
-      const search = await box("button[aria-label='Search threads']");
+      const search = await box("button[aria-label='Search']");
       const section = await box("button[aria-label='Workspaces']");
       const workspace = await box("[data-row-id='ws:ws_a']");
       const firstThread = await box("[data-row-id^='thread:']");
       expect(search.height).toBe(section.height);
       expect(Math.abs(search.x - section.x)).toBeLessThan(1);
       expect(Math.abs(search.x - workspace.x)).toBeLessThan(1);
-      expect(await transparent("button[aria-label='Search threads']")).toBe(true);
+      expect(await transparent("button[aria-label='Search']")).toBe(true);
       expect(await transparent("button[aria-label='Workspaces']")).toBe(true);
+      expect(await page!.locator("[data-slot=sidebar] input").count()).toBe(0);
+      const chord = await box("button[aria-label='Search'] kbd");
+      const platform = await page!.evaluate(() => navigator.platform);
+      expect(await page!.locator("button[aria-label='Search'] kbd").textContent()).toBe(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle", platform));
+      expect(chord.x + chord.width).toBeLessThanOrEqual(search.x + search.width);
+      expect(chord.x).toBeGreaterThan(search.x + search.width / 2);
+      expect(Math.abs(chord.y + chord.height / 2 - (search.y + search.height / 2))).toBeLessThan(1.5);
       const glyph = await box("button[aria-label='New workspace']");
       expect(glyph.x + glyph.width).toBeLessThanOrEqual(section.x + section.width);
       expect(Math.abs(glyph.y + glyph.height / 2 - (section.y + section.height / 2))).toBeLessThan(1);
       await shot("rest", theme);
 
-      await page!.locator("button[aria-label='Search threads']").click();
-      const field = page!.locator("input[aria-label='Search threads']");
-      await field.waitFor();
-      expect(await field.evaluate(el => document.activeElement === el)).toBe(true);
-      const fieldRow = await box("[data-sidebar-search]");
-      expect(fieldRow.height).toBe(search.height);
-      expect(Math.abs(fieldRow.y - search.y)).toBeLessThan(1);
+      await page!.locator("button[aria-label='Search']").click();
+      await page!.waitForSelector("[data-command-palette]");
+      expect(await page!.locator("[data-command-palette] input[placeholder]").first().evaluate(el => document.activeElement === el)).toBe(true);
+      expect(await page!.locator("[data-slot=sidebar] input").count()).toBe(0);
+      expect(await box("button[aria-label='Search']")).toEqual(search);
       expect(await box("[data-row-id='ws:ws_a']")).toEqual(workspace);
       expect(await box("[data-row-id^='thread:']")).toEqual(firstThread);
-      await shot("focused", theme);
+      // The dialog fades in; the shot waits for the popup to be drawn at full opacity.
+      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-command-palette]")!).opacity === "1");
+      await page!.screenshot({ path: join(SHOTS_DIR, `sidebar-top-palette-${theme}.png`) });
+      console.info(`sidebar palette screenshot: ${join(SHOTS_DIR, `sidebar-top-palette-${theme}.png`)}`);
       await page!.keyboard.press("Escape");
-      await page!.locator("button[aria-label='Search threads']").waitFor();
+      await page!.waitForSelector("[data-command-palette]", { state: "detached" });
+      await page!.waitForTimeout(300);
+      expect(await page!.locator("[data-command-palette]").count()).toBe(0);
+      // Keyboard: focus alone opens nothing; Enter and Space, the button's own activation, do.
+      await page!.locator("button[aria-label='Search']").focus();
+      await page!.waitForTimeout(300);
+      expect(await page!.locator("[data-command-palette]").count()).toBe(0);
+      expect(await page!.locator("button[aria-label='Search']").evaluate(el => document.activeElement === el)).toBe(true);
+      for (const key of ["Enter", "Space"]) {
+        await page!.keyboard.press(key);
+        await page!.waitForSelector("[data-command-palette]");
+        await page!.keyboard.press("Escape");
+        await page!.waitForSelector("[data-command-palette]", { state: "detached" });
+        await page!.locator("button[aria-label='Search']").focus();
+      }
+      await page!.waitForTimeout(300);
+      expect(await page!.locator("[data-command-palette]").count()).toBe(0);
 
       await page!.locator("button[aria-label='Workspaces']").click();
       await page!.waitForSelector("[data-sidebar-row]", { state: "detached" });
@@ -282,6 +312,57 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       console.info(`sidebar out-of-memory line screenshot: ${oomPath}`);
     }
   }, 30_000);
+
+  it("a send refusal is one muted mono line, no panel, in a slot the composer keeps at one height, in both themes", async () => {
+    interface Composer {
+      shell: Box;
+      slot: Box;
+      box: Box;
+      text: string;
+      /** The line's paint, or null when the slot is empty. */
+      line: { mono: boolean; background: string; border: string; icons: number } | null;
+      panels: number;
+    }
+    const composerAt = async (query: string, theme: string, name: string): Promise<Composer> => {
+      await page!.goto(`${base}?theme=${theme}&${query}`);
+      await page!.waitForSelector("[data-composer-refusal]");
+      // The transcript is fetched after mount; the line for a lingering turn exists only once it is in.
+      await page!.waitForSelector("text=loading transcript", { state: "detached" });
+      const read = await page!.locator("[data-chat-composer]").evaluate(el => {
+        const line = el.querySelector<HTMLElement>("[data-composer-refusal] [role=status]");
+        const s = line === null ? null : getComputedStyle(line);
+        return {
+          text: el.querySelector("[data-composer-refusal]")?.textContent ?? "",
+          line: s === null || line === null ? null : { mono: /mono/i.test(s.fontFamily), background: s.backgroundColor, border: `${s.borderTopWidth} ${s.borderLeftWidth}`, icons: line.getElementsByTagName("svg").length },
+          panels: el.querySelectorAll("[data-composer-banner-surface]").length,
+        };
+      });
+      const path = join(SHOTS_DIR, `composer-${name}-${theme}.png`);
+      await page!.locator("[data-chat-composer]").screenshot({ path });
+      console.info(`composer ${name} screenshot: ${path}`);
+      return { shell: await box("[data-chat-composer]"), slot: await box("[data-composer-refusal]"), box: await box("[data-slot=composer-shell]"), ...read };
+    };
+    for (const theme of ["dark", "light"] as const) {
+      const idle = await composerAt("ws=ws_a", theme, "idle");
+      expect(idle.text).toBe("");
+      expect(idle.line).toBeNull();
+      const paused = await composerAt("ws=ws_b", theme, "paused");
+      const gone = await composerAt("ws=ws_c", theme, "gone");
+      const working = await composerAt("ws=ws_a&linger=1", theme, "working");
+      expect(paused.text).toBe(sendRefusal("paused"));
+      expect(gone.text).toBe(sendRefusal("gone"));
+      expect(working.text).toBe(stillWorkingRefusal("thr_linger"));
+      for (const state of [paused, gone, working]) {
+        // The words in mono, painted on nothing: no fill, no border, no icon, no panel anywhere in the composer.
+        expect(state.line).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0 });
+        expect(state.panels).toBe(0);
+        // The slot and the box sit where they sit for the idle composer: the line moves nothing.
+        expect(state.slot).toEqual(idle.slot);
+        expect(state.box).toEqual(idle.box);
+        expect(state.shell).toEqual(idle.shell);
+      }
+    }
+  }, 60_000);
 
   it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it", async () => {
     await open("dark");

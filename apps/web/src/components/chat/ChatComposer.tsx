@@ -9,40 +9,40 @@
 // for the turn's end; the runtime pushes the interrupted done before it
 // answers, and the composer opens when the process exits. not-running means
 // the turn beat the click and is no error; not-found and a refused request
-// show in the status row. The editor is disabled with the reason while the
-// runtime or the workspace is not live, and the banner names whatever blocks
-// a send, so Enter never fails silently. A running turn blocks nothing: Enter
-// then queues the message under the thread's key in the draft store, the rows
-// stack above the box, and when the turn ends the head row starts the next
-// turn; a fresh thread's rows wait under the workspace id until its own first
-// start names it, then move under that id, whichever thread is on screen when
-// that start lands. Every send holds the thread's rows
-// until its start lands, so a start the runtime refuses or a harness that
-// dies before init drains nothing behind it. Rows read back from storage are
-// held too. Held rows go only after the person's next Enter or send-now here,
-// never on their own, and a row typed during a turn goes ahead of the held
-// ones it releases. Send-now on a row puts it at the head; when the harness's
-// catalog says it steers, the row goes into the running turn through
-// sessions.steer and leaves the queue once the runtime took it (the thread
-// shows it from the session.steer event), while not-running leaves it at the
-// head for the turn's end. A harness that does not steer gets the turn stopped
-// first, with the one-line notice. The editor is also
-// disabled while the turn a new thread left behind is still finishing: stop
-// reaches only the visible turn, so a second session must not start until
-// that one ends. The checkout row under the composer picks the folder a fresh
-// thread starts in; a resumed one is started where its harness last said it
-// was. The model, effort, context window and access picks in the box's
-// footer ride every start, so a change mid-thread applies at the next turn.
-import { CircleAlertIcon } from "lucide-react";
+// show in the line above the box. The editor is disabled with the reason
+// while the runtime or the workspace is not live, and the same line, one
+// muted mono sentence in a slot that is laid out whether or not it holds one,
+// names whatever blocks a send, so Enter never fails silently. A running turn
+// blocks nothing: Enter then queues the message under the thread's key in the
+// draft store, the rows stack above the box, and when the turn ends the head
+// row starts the next turn; a fresh thread's rows wait under the workspace id
+// until its own first start names it, then move under that id, whichever
+// thread is on screen when that start lands. Every send holds the thread's
+// rows until its start lands, so a start the runtime refuses or a harness
+// that dies before init drains nothing behind it. Rows read back from storage
+// are held too. Held rows go only after the person's next Enter or send-now
+// here, never on their own, and a row typed during a turn goes ahead of the
+// held ones it releases. Send-now on a row puts it at the head; when the
+// harness's catalog says it steers, the row goes into the running turn
+// through sessions.steer and leaves the queue once the runtime took it (the
+// thread shows it from the session.steer event), while not-running leaves it
+// at the head for the turn's end. A harness that does not steer gets the turn
+// stopped first, with the one-line notice. The editor is also disabled while
+// the turn a new thread left behind is still finishing: stop reaches only the
+// visible turn, so a second session must not start until that one ends. The
+// checkout row under the composer picks the folder a fresh thread starts in;
+// a resumed one is started where its harness last said it was. The model,
+// effort, context window and access picks in the box's footer ride every
+// start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { sendRefusal, stillWorkingRefusal, workspaceState, type MachineState, type ReachState, type WorkspacePhase } from "@wsp/protocol";
+import { TURN_IN_FLIGHT, sendNowFailedLine, sendRefusal, stillWorkingRefusal, stopFailedLine, workspaceState, type MachineState, type ReachState, type SendRefusalKind, type WorkspacePhase } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
+import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadFolder } from "../../files/root";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { catalogFromHarness } from "./adapt";
-import { ComposerBanner } from "./ComposerBanner";
 import { ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
@@ -58,8 +58,9 @@ import type { ChatThreadHandle } from "./useChatThread";
 const PLACEHOLDER = "Ask anything, or / for commands";
 const noop = () => {};
 
-/** Why nothing can be sent right now, or null. The socket comes first: with it down every other reading is stale. */
-export function composerUnavailableReason(input: {
+/** What blocks a send right now, or null; the refusal table gives its words. The socket comes first: with it down
+ * every other reading is stale. */
+export function composerSendBlock(input: {
   conn: ConnStatus;
   hasApi: boolean;
   phase: WorkspacePhase | null;
@@ -67,15 +68,15 @@ export function composerUnavailableReason(input: {
   reach: ReachState | null;
   hydrated: boolean;
   finishing: boolean;
-}): string | null {
-  if (!input.hasApi || input.conn === "connecting") return "Connecting to wsp";
-  if (input.conn === "reconnecting") return "wsp is not running, reconnecting";
-  if (input.conn === "closed") return "wsp is not running";
-  if (input.phase === null) return "Workspace not found";
-  const refusal = sendRefusal(workspaceState({ phase: input.phase, machineState: input.machineState, reach: input.reach }));
-  if (refusal !== null) return refusal;
-  if (!input.hydrated) return "Loading transcript";
-  if (input.finishing) return "Finishing the previous turn";
+}): SendRefusalKind | null {
+  if (!input.hasApi || input.conn === "connecting") return "connecting";
+  if (input.conn === "reconnecting") return "reconnecting";
+  if (input.conn === "closed") return "closed";
+  if (input.phase === null) return "not-found";
+  const state = workspaceState({ phase: input.phase, machineState: input.machineState, reach: input.reach });
+  if (state !== "running") return state;
+  if (!input.hydrated) return "loading";
+  if (input.finishing) return "finishing";
   return null;
 }
 
@@ -128,7 +129,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [highlightedSearchKey, setHighlightedSearchKey] = useState<string | null>(null);
   const [dismissedSearchKey, setDismissedSearchKey] = useState<string | null>(null);
 
-  const unavailable = composerUnavailableReason({
+  const blocked = composerSendBlock({
     conn,
     hasApi: api !== null,
     phase: status?.phase ?? workspace?.phase ?? null,
@@ -137,13 +138,11 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     hydrated: thread.hydrated,
     finishing: thread.finishing,
   });
-  const sendDisabledReason = unavailable ?? (thread.busy ? "Turn in flight" : null);
+  const unavailable = blocked === null ? null : sendRefusal(blocked);
+  const sendDisabledReason = unavailable ?? (thread.busy ? TURN_IN_FLIGHT : null);
   const hasText = draft.prompt.trim().length > 0;
 
   const runningTurn = thread.view.running ? thread.view.latestTurn : null;
-  // The reply is in but the process still runs: no new turn can start until it exits, and the note says so in the
-  // runtime's own words, the sentence its refusal of a send would carry.
-  const stillWorking = runningTurn?.replied === true ? stillWorkingRefusal(threadKey) : null;
   // The runtime keys sessions.interrupt by its own session id; the events carry the harness id, which differs after a
   // resume, so the row from sessions.list maps one to the other. Without a row the events' id goes, and the runtime answers.
   const stopTarget = useMemo(() => {
@@ -156,14 +155,18 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other gets the turn stopped.
   const canSteer = canStop && harnessCatalog?.steers === true && api?.steerSession !== undefined;
-  const banner =
+  // One line in the slot above the box: the newest failure, else what blocks a send, else the turn that replied but
+  // still runs, in the runtime's own words, since no new turn can start until its process exits.
+  const line =
     stopAttempt !== null && stopAttempt.error !== null
-      ? { text: `Could not stop: ${stopAttempt.error}`, variant: "error" as const }
+      ? stopFailedLine(stopAttempt.error)
       : steerAttempt !== null && steerAttempt.error !== null
-        ? { text: `Could not send now: ${steerAttempt.error}`, variant: "error" as const }
+        ? sendNowFailedLine(steerAttempt.error)
         : unavailable !== null
-          ? { text: unavailable, variant: "warning" as const }
-          : null;
+          ? unavailable
+          : runningTurn?.replied === true
+            ? stillWorkingRefusal(threadKey)
+            : null;
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
@@ -187,6 +190,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   useEffect(() => {
     if (thread.fresh && !thread.finishing) editorRef.current?.focus();
   }, [thread.fresh, thread.finishing]);
+
+  useEffect(() => onComposerFocusRequest(workspaceId, () => editorRef.current?.focus()), [workspaceId]);
 
   const onChange = useCallback((value: string, cursor: number) => setDraft(workspaceId, { prompt: value, cursor }), [setDraft, workspaceId]);
 
@@ -348,12 +353,14 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   );
 
   return (
-    <div className="w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5">
-      {thread.view.running ? (
-        <div className="mx-auto flex h-5 w-full max-w-3xl items-center px-3" aria-live="polite" data-composer-turn-note>
-          {stillWorking !== null ? <span className="min-w-0 truncate font-mono text-[11px] leading-5 text-muted-foreground">{stillWorking}</span> : null}
-        </div>
-      ) : null}
+    <div className="w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
+      <div className="mx-auto flex h-5 w-full max-w-3xl items-center px-3" aria-live="polite" data-composer-refusal>
+        {line !== null ? (
+          <span role="status" className="min-w-0 truncate font-mono text-[11px] leading-5 text-muted-foreground" title={line}>
+            {line}
+          </span>
+        ) : null}
+      </div>
       <ComposerQueue
         rows={queue}
         steering={stopAttempt?.error ? null : steering}
@@ -372,24 +379,6 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
               send();
             }}
           >
-            <ComposerBanner.Dock>
-              <ComposerBanner.Column>
-                {banner !== null ? (
-                  <ComposerBanner.Attachment>
-                    <ComposerBanner.Root variant={banner.variant} role="status">
-                      <ComposerBanner.Row>
-                        <ComposerBanner.Icon>
-                          <CircleAlertIcon />
-                        </ComposerBanner.Icon>
-                        <ComposerBanner.Content>
-                          <span className="truncate">{banner.text}</span>
-                        </ComposerBanner.Content>
-                      </ComposerBanner.Row>
-                    </ComposerBanner.Root>
-                  </ComposerBanner.Attachment>
-                ) : null}
-              </ComposerBanner.Column>
-            </ComposerBanner.Dock>
             <div className="relative">
               <ComposerSurface.Main>
                 <div data-chat-composer-surface="true" className="rounded-[20px] transition-[background-color] duration-200">

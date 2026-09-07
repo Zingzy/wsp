@@ -4,14 +4,15 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { EventUnion, SessionEvent, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { sendRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ConnStatus, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
-import { composerUnavailableReason } from "../src/components/chat/ChatComposer.js";
+import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
+import { requestComposerFocus } from "../src/shell/shellRequests.js";
 import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
@@ -93,6 +94,25 @@ describe("composer keys", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]?.prompt).toBe("line one\nline two");
+  });
+
+  it("takes the caret when a workspace switch asks for it, and leaves it alone when another workspace is asked for", async () => {
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(document.activeElement).not.toBe(editor);
+    act(() => requestComposerFocus("ws_chat9999"));
+    expect(document.activeElement).not.toBe(editor);
+    act(() => requestComposerFocus(WS));
+    await waitFor(() => expect(document.activeElement).toBe(editor));
+  });
+
+  it("takes a caret asked for before it mounted", async () => {
+    const { api } = fixtureApi([workspace]);
+    requestComposerFocus(WS);
+    await setup(api);
+    await waitFor(() => expect(document.activeElement).toBe(composerEditor()));
   });
 
   it("escape with no menu leaves the draft", async () => {
@@ -223,14 +243,54 @@ describe("composer slash menu", () => {
   });
 });
 
+/** The reserved slot above the composer's box: laid out at one height whether or not a line is in it. */
+const slot = () => document.querySelector<HTMLElement>("[data-composer-refusal]");
+/** The refusal is one muted mono line in the slot: no panel, no border, no fill, no icon, no caution colour. */
+function expectPlainLine(words: string): void {
+  const line = screen.getByRole("status");
+  expect(line.textContent).toBe(words);
+  expect(slot()?.contains(line)).toBe(true);
+  expect(line.className).toContain("font-mono");
+  expect(line.className).toContain("text-muted-foreground");
+  expect(line.className).not.toMatch(/border|bg-|warning|destructive|error/);
+  expect(line.querySelector("svg")).toBeNull();
+  expect(document.querySelector("[data-composer-banner-surface]")).toBeNull();
+}
+
 describe("composer while the workspace is not live", () => {
-  it("disables the editor with the reason while the workspace naps", async () => {
+  it("disables the editor while the workspace naps, the reason one muted mono line in the reserved slot", async () => {
     const { api } = fixtureApi([{ ...workspace, phase: "napping" }]);
     await setup(api);
     expect(isEditable(composerEditor())).toBe(false);
-    expect(screen.getByRole("status").textContent).toContain("Workspace is paused; wake it to send");
+    expectPlainLine(sendRefusal("paused")!);
     expect(sendButton().getAttribute("aria-label")).toBe("Workspace is paused; wake it to send");
     expect(sendButton().disabled).toBe(true);
+  });
+
+  it("a gone machine reads the same way: the gone sentence, one line, no panel", async () => {
+    const { api } = fixtureApi([{ ...workspace, phase: "gone" }]);
+    await setup(api);
+    expect(isEditable(composerEditor())).toBe(false);
+    expectPlainLine(sendRefusal("gone")!);
+    expect(sendButton().getAttribute("aria-label")).toBe("Workspace machine is gone; rebuild it to send");
+    expect(sendButton().disabled).toBe(true);
+  });
+
+  it("the slot is laid out at one height with or without a line, so the composer does not move when a refusal lands", async () => {
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
+    const empty = slot();
+    expect(empty).not.toBeNull();
+    expect(empty!.className).toContain("h-5");
+    expect(empty!.className).toContain("max-w-3xl");
+    // The slot is the live region, present before any words land, so a screen reader hears the line when it does.
+    expect(empty!.getAttribute("aria-live")).toBe("polite");
+    expect(screen.queryByRole("status")).toBeNull();
+    emit({ type: "workspace.status", status: { ...workspace, phase: "napping", machineState: "paused", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
+    expectPlainLine(sendRefusal("paused")!);
+    expect(slot()!.className).toBe(empty!.className);
   });
 
   it("a pushed pausing status disables the send while the view still says running", async () => {
@@ -274,25 +334,25 @@ describe("composer while the workspace is not live", () => {
   });
 });
 
-describe("composerUnavailableReason", () => {
+describe("composerSendBlock", () => {
   const live = { conn: "live" as const, hasApi: true, phase: "running" as const, machineState: "running" as const, reach: "reachable" as const, hydrated: true, finishing: false };
-  it("names the first thing in the way, socket first", () => {
-    expect(composerUnavailableReason(live)).toBeNull();
-    expect(composerUnavailableReason({ ...live, hasApi: false })).toBe("Connecting to wsp");
-    expect(composerUnavailableReason({ ...live, conn: "connecting" })).toBe("Connecting to wsp");
-    expect(composerUnavailableReason({ ...live, conn: "reconnecting", phase: "napping" })).toBe("wsp is not running, reconnecting");
-    expect(composerUnavailableReason({ ...live, conn: "closed" })).toBe("wsp is not running");
-    expect(composerUnavailableReason({ ...live, phase: null })).toBe("Workspace not found");
-    expect(composerUnavailableReason({ ...live, machineState: "gone" })).toBe("Workspace machine is gone; rebuild it to send");
-    expect(composerUnavailableReason({ ...live, phase: "napping" })).toBe("Workspace is paused; wake it to send");
-    expect(composerUnavailableReason({ ...live, phase: "pausing" })).toBe("Workspace is pausing; wake it to send");
-    expect(composerUnavailableReason({ ...live, machineState: "paused" })).toBe("Workspace is paused; wake it to send");
-    expect(composerUnavailableReason({ ...live, phase: "waking" })).toBe("Workspace is waking; sends open when it is running");
-    expect(composerUnavailableReason({ ...live, reach: "unreachable" })).toBe("Workspace is unreachable; sends open when the machine answers");
-    expect(composerUnavailableReason({ ...live, reach: "slow" })).toBeNull();
-    expect(composerUnavailableReason({ ...live, hydrated: false })).toBe("Loading transcript");
-    expect(composerUnavailableReason({ ...live, finishing: true })).toBe("Finishing the previous turn");
-    expect(composerUnavailableReason({ ...live, hydrated: false, finishing: true })).toBe("Loading transcript");
-    expect(composerUnavailableReason({ ...live, machineState: null, reach: null })).toBeNull();
+  it("names the first thing in the way, socket first, as the kind the refusal table gives words for", () => {
+    expect(composerSendBlock(live)).toBeNull();
+    expect(composerSendBlock({ ...live, hasApi: false })).toBe("connecting");
+    expect(composerSendBlock({ ...live, conn: "connecting" })).toBe("connecting");
+    expect(composerSendBlock({ ...live, conn: "reconnecting", phase: "napping" })).toBe("reconnecting");
+    expect(composerSendBlock({ ...live, conn: "closed" })).toBe("closed");
+    expect(composerSendBlock({ ...live, phase: null })).toBe("not-found");
+    expect(composerSendBlock({ ...live, machineState: "gone" })).toBe("gone");
+    expect(composerSendBlock({ ...live, phase: "napping" })).toBe("paused");
+    expect(composerSendBlock({ ...live, phase: "pausing" })).toBe("pausing");
+    expect(composerSendBlock({ ...live, machineState: "paused" })).toBe("paused");
+    expect(composerSendBlock({ ...live, phase: "waking" })).toBe("waking");
+    expect(composerSendBlock({ ...live, reach: "unreachable" })).toBe("unreachable");
+    expect(composerSendBlock({ ...live, reach: "slow" })).toBeNull();
+    expect(composerSendBlock({ ...live, hydrated: false })).toBe("loading");
+    expect(composerSendBlock({ ...live, finishing: true })).toBe("finishing");
+    expect(composerSendBlock({ ...live, hydrated: false, finishing: true })).toBe("loading");
+    expect(composerSendBlock({ ...live, machineState: null, reach: null })).toBeNull();
   });
 });

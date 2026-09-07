@@ -9,7 +9,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
 import { useSelectedWorkspaceId, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
-import { showTerminal } from "../../shell/shellCommands.js";
+import { goToAdjacentWorkspace, goToWorkspace, showTerminal } from "../../shell/shellCommands.js";
 import { requestNewThread, requestNewWorkspace } from "../../shell/shellRequests.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
 import { useSidebar } from "../ui/sidebar.js";
@@ -59,7 +59,8 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
   const handlers = useMemo<PaletteHandlers>(
     () => ({
-      selectWorkspace: select,
+      selectWorkspace: goToWorkspace,
+      selectThread: select,
       newWorkspace: requestNewWorkspace,
       newThread: workspaceId => {
         select(workspaceId);
@@ -75,12 +76,14 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       },
       toggleSidebar,
       toggleRightPanel,
+      nextWorkspace: () => goToAdjacentWorkspace(1),
+      previousWorkspace: () => goToAdjacentWorkspace(-1),
     }),
     [api, openSurface, select, toggleRightPanel, togglePhase, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, canCreate: api !== null, canRebuild: api?.rebuild !== undefined, handlers }),
-    [api, handlers, projects, selectedId],
+    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, canRebuild: api?.rebuild !== undefined, handlers }),
+    [api, handlers, projects, query, selectedId],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {

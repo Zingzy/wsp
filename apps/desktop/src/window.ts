@@ -12,7 +12,9 @@ interface WindowFrame {
 
 const STOCK: WindowFrame = { options: { backgroundColor: "#09090b" } };
 
-// The lights are 12px tall and the header row 52px; y 20 centres them in it, x 16 is where Finder puts them.
+// The lights are 12px tall and the header row 52px; y 20 centres them in it, x 16 is where Finder puts them. No
+// tabbingIdentifier: native tabs would take ctrl+tab and the digit chords at the window level, and the page switches
+// workspaces with them.
 const MAC: WindowFrame = {
   options: {
     titleBarStyle: "hiddenInset",

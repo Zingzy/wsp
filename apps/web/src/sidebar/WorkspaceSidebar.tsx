@@ -48,7 +48,6 @@ import {
   isThreadWorking,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
-  searchSidebarThreadsByTitle,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
 } from "./Sidebar.logic.js";
@@ -90,19 +89,13 @@ interface VisibleProject {
   readonly settled: ReadonlyArray<SidebarThreadSnapshot>;
 }
 
-/** Search flattens: matching threads under any workspace whose name or threads match; no shelf. */
-function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>, query: string): VisibleProject[] {
-  const searching = query.trim().length > 0;
-  const needle = query.trim().toLowerCase();
-  const out: VisibleProject[] = [];
-  for (const project of projects) {
-    const threads = searching ? searchSidebarThreadsByTitle(project.threads, query) : project.threads;
-    if (searching && threads.length === 0 && !project.displayName.toLowerCase().includes(needle)) continue;
-    const active = sortThreadsForSidebar(threads.filter(t => isThreadWorking(t)));
-    const settled = sortSettledThreadsForSidebar(threads.filter(t => !isThreadWorking(t)));
-    out.push({ project, active, settled });
-  }
-  return out;
+/** Each workspace's threads split into the working ones and the settled shelf. */
+function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>): VisibleProject[] {
+  return projects.map(project => ({
+    project,
+    active: sortThreadsForSidebar(project.threads.filter(t => isThreadWorking(t))),
+    settled: sortSettledThreadsForSidebar(project.threads.filter(t => !isThreadWorking(t))),
+  }));
 }
 
 interface DialogState {
@@ -145,7 +138,6 @@ export function WorkspaceSidebar() {
   // One clock sample per minute tick so every idle countdown reads the same now.
   const nowMs = useMemo(() => Date.now(), [nowMinute]);
 
-  const [query, setQuery] = useState("");
   const [settledCollapsed, setSettledCollapsed] = useLocalStorage(SETTLED_COLLAPSED_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [allCollapsed, setAllCollapsed] = useState(false);
@@ -160,8 +152,7 @@ export function WorkspaceSidebar() {
   const rootRef = useRef<HTMLDivElement>(null);
 
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
-  const searching = query.trim().length > 0;
-  const visible = useMemo(() => visibleProjects(projects, query), [projects, query]);
+  const visible = useMemo(() => visibleProjects(projects), [projects]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const importTarget = importing === null ? undefined : workspaces.find(w => w.id === importing.workspaceId);
   const exportTarget = exporting === null ? undefined : workspaces.find(w => w.id === exporting.workspaceId);
@@ -249,8 +240,6 @@ export function WorkspaceSidebar() {
     <div className="px-[var(--sidebar-content-inset)] pt-3 pb-1" data-sidebar-search>
       <div className="relative">
         <SearchRow
-          query={query}
-          onQueryChange={setQuery}
           action={
             selectedWorkspace !== null ? (
               <Tooltip>
@@ -282,7 +271,7 @@ export function WorkspaceSidebar() {
           <SidebarGroup className="pt-0">
             <SectionRow
               label="Workspaces"
-              count={visible.length + creations.length}
+              count={projects.length + creations.length}
               collapsed={allCollapsed}
               onToggle={() => setAllCollapsed(c => !c)}
               action={
@@ -303,7 +292,7 @@ export function WorkspaceSidebar() {
                 </Tooltip>
               }
             />
-            {allCollapsed && !searching ? null : (
+            {allCollapsed ? null : (
               <SidebarGroupContent>
                 <SidebarMenu>
                   {creations.map(creation => (
@@ -329,7 +318,7 @@ export function WorkspaceSidebar() {
                       reachNote(project.reach),
                     ]);
                     const showThreads = !isCollapsed && active.length + settled.length > 0;
-                    const collapsible = project.threads.length > 0 && !searching;
+                    const collapsible = project.threads.length > 0;
                     const actions = Number(collapsible) + Number(canImport) + Number(canExport);
                     const slots = [...ACTION_SLOTS].slice(0, actions);
                     const slotOf = (): string => slots.shift() ?? "";
@@ -440,7 +429,7 @@ export function WorkspaceSidebar() {
                             </Tooltip>
                           </>
                         )}
-                        {!dead && project.threads.length === 0 && !searching ? (
+                        {!dead && project.threads.length === 0 ? (
                           <SidebarMenuSub>
                             <SidebarMenuSubItem data-thread-selection-safe>
                               <span className="block min-h-8 px-2 py-2 text-[11px] leading-4 text-muted-foreground">
@@ -467,7 +456,7 @@ export function WorkspaceSidebar() {
                                 onSelect={() => select(thread.workspaceId, thread.threadId)}
                               />
                             ))}
-                            {settled.length > 0 && !searching ? (
+                            {settled.length > 0 ? (
                               <SidebarMenuSubItem data-thread-selection-safe>
                                 <button
                                   type="button"
@@ -485,7 +474,7 @@ export function WorkspaceSidebar() {
                                 </button>
                               </SidebarMenuSubItem>
                             ) : null}
-                            {settledOpen || searching
+                            {settledOpen
                               ? settled.map(thread => (
                                   <ThreadRow
                                     key={thread.id}
@@ -505,10 +494,8 @@ export function WorkspaceSidebar() {
                 {visible.length === 0 && creations.length === 0 ? (
                   <Empty className="py-8">
                     <EmptyHeader>
-                      <EmptyTitle>{searching ? "No matches" : "No workspaces yet"}</EmptyTitle>
-                      <EmptyDescription>
-                        {searching ? "No workspace or thread title contains that." : "Create one to fork a machine from your golden image."}
-                      </EmptyDescription>
+                      <EmptyTitle>No workspaces yet</EmptyTitle>
+                      <EmptyDescription>Create one to fork a machine from your golden image.</EmptyDescription>
                     </EmptyHeader>
                   </Empty>
                 ) : null}

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The palette's item list over the sidebar's project snapshots: actions for
-// the selected workspace, one row per workspace to switch to, recent threads.
-// Pure apart from the callbacks it is handed, so the list is testable without
-// the dialog.
+// the selected workspace, one row per workspace to switch to, recent threads
+// at rest and every thread whose title holds the typed query. Pure apart from
+// the callbacks it is handed, so the list is testable without the dialog.
 import {
+  ArrowDownIcon,
+  ArrowUpIcon,
   GlobeIcon,
   MessageSquareIcon,
   MessageSquarePlusIcon,
@@ -18,12 +20,15 @@ import {
 } from "lucide-react";
 import { needsRebuild } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
+import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
 import { cn } from "../../lib/utils.js";
+import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
 import { compactTimeLabel, dotClassForTone } from "../../sidebar/workspaceRows.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
 
 export interface PaletteHandlers {
   readonly selectWorkspace: (workspaceId: string) => void;
+  readonly selectThread: (workspaceId: string, threadId: string | null) => void;
   readonly newWorkspace: () => void;
   readonly newThread: (workspaceId: string) => void;
   readonly openTerminal: (workspaceId: string) => Promise<void>;
@@ -34,11 +39,16 @@ export interface PaletteHandlers {
   readonly rebuild: (workspaceId: string) => Promise<void>;
   readonly toggleSidebar: () => void;
   readonly toggleRightPanel: (workspaceId: string) => void;
+  /** One step down the sidebar's workspaces, and back up; both wrap. */
+  readonly nextWorkspace: () => void;
+  readonly previousWorkspace: () => void;
 }
 
 export interface PaletteItemsInput {
   readonly projects: ReadonlyArray<SidebarProjectSnapshot>;
   readonly selectedId: string | null;
+  /** What the person typed; the thread search runs over it, the at-rest list ignores it. */
+  readonly query: string;
   readonly canCreate: boolean;
   readonly canRebuild: boolean;
   readonly handlers: PaletteHandlers;
@@ -144,7 +154,28 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     });
   }
 
+  const oneWorkspace = input.projects.length < 2;
   items.push(
+    {
+      kind: "action",
+      value: "action:next-workspace",
+      searchTerms: ["next workspace", "switch workspace", "cycle workspaces"],
+      icon: <ArrowDownIcon className={ITEM_ICON_CLASS} />,
+      title: "Next workspace",
+      shortcutCommand: "workspace.next",
+      ...(oneWorkspace ? { disabled: true, description: "Only one workspace" } : {}),
+      run: sync(handlers.nextWorkspace),
+    },
+    {
+      kind: "action",
+      value: "action:previous-workspace",
+      searchTerms: ["previous workspace", "switch workspace", "cycle workspaces"],
+      icon: <ArrowUpIcon className={ITEM_ICON_CLASS} />,
+      title: "Previous workspace",
+      shortcutCommand: "workspace.previous",
+      ...(oneWorkspace ? { disabled: true, description: "Only one workspace" } : {}),
+      run: sync(handlers.previousWorkspace),
+    },
     {
       kind: "action",
       value: "action:toggle-sidebar",
@@ -167,14 +198,16 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
 }
 
 function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
-  return input.projects.map(project => {
+  return input.projects.map((project, index) => {
     const machineId = project.status?.machineId ?? project.workspace.machineId;
     const parts = [project.indicator.label, machineId];
     if (project.id === input.selectedId) parts.push("Current workspace");
+    // The projects arrive in sidebar order, so a row's index is the slot its chord jumps to.
+    const slot = WORKSPACE_SELECT_SLOTS[index];
     return {
       kind: "action",
       value: `workspace:${project.id}`,
-      searchTerms: [project.displayName, project.id, machineId, project.indicator.label],
+      searchTerms: [project.displayName],
       icon: (
         <span
           aria-hidden
@@ -183,6 +216,7 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       ),
       title: project.displayName,
       description: parts.join(" · "),
+      ...(slot === undefined ? {} : { shortcutCommand: workspaceSelectCommand(slot) }),
       run: sync(() => input.handlers.selectWorkspace(project.id)),
     };
   });
@@ -192,24 +226,24 @@ function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapsh
   return {
     kind: "action",
     value: `thread:${thread.id}`,
-    searchTerms: [thread.title, project.displayName, thread.id],
+    searchTerms: [thread.title],
     icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
     title: thread.title,
     description: project.displayName,
     timestamp: compactTimeLabel(thread.startedAt),
-    run: sync(() => handlers.selectWorkspace(thread.workspaceId)),
+    run: sync(() => handlers.selectThread(thread.workspaceId, thread.threadId)),
   };
 }
 
 export function buildPaletteItems(input: PaletteItemsInput): PaletteItems {
   const threads = input.projects
-    .flatMap(project => project.threads.map(thread => ({ thread, project })))
-    .sort((a, b) => (b.thread.startedAt ?? "").localeCompare(a.thread.startedAt ?? ""))
-    .map(({ thread, project }) => threadItem(thread, project, input.handlers));
+    .flatMap(project => project.threads.map(thread => ({ ...thread, project })))
+    .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+  const item = (thread: (typeof threads)[number]) => threadItem(thread, thread.project, input.handlers);
   return {
     actionItems: actionItems(input),
     workspaceItems: workspaceItems(input),
-    recentThreadItems: threads.slice(0, RECENT_THREAD_LIMIT),
-    threadSearchItems: threads,
+    recentThreadItems: threads.slice(0, RECENT_THREAD_LIMIT).map(item),
+    threadSearchItems: searchSidebarThreadsByTitle(threads, input.query).map(item),
   };
 }
