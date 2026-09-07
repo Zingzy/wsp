@@ -5,21 +5,37 @@
 // their checksummed releases, Hermes by a git checkout at a commit, Claude Code
 // by its vendor's installer. Every pin here is checked on the machine before
 // anything runs.
+import { SUM_SHOWN, pinMismatchLine, shellQuote, shortSum, type ToolPin } from "@wsp/protocol";
 import type { LinuxCask } from "./linux-casks.js";
 
-export const MIB = 1024 * 1024;
+export type { ToolPin };
 
-/** What the first install of a release recorded: the tag it fetched and the asset's sha256. */
-export interface ToolPin {
-  tag: string;
-  sha256: string;
-}
+export const MIB = 1024 * 1024;
 
 /** How an install stands against the recipe's pin: nothing recorded, the same version (checked), or a version the
  * source has since moved to (a first install again, re-recorded). Without a version the pin's own stands. */
 export function pinStateOf(version: string | undefined, pin: ToolPin | undefined): "none" | "same" | "moved" {
   if (pin === undefined) return "none";
   return version === undefined || version === pin.tag ? "same" : "moved";
+}
+
+/** The pin an install is fixed to: the recorded one while the road's version is its tag or names none; nothing once
+ * the version moved past it, since that install is a first one again. */
+export function standingPin(road: InstallRoad): ToolPin | undefined {
+  return "pin" in road && pinStateOf(road.version, road.pin) === "same" ? road.pin : undefined;
+}
+
+/** The road without the pin a build recorded on it: what a first run of it installs. */
+export function unpinned<R extends InstallRoad>(road: R): R {
+  if (!("pin" in road)) return road;
+  const { pin: _pin, ...rest } = road;
+  return rest as R;
+}
+
+/** The line that fails a pinned download whose sum is not the recorded one. `what` and `tag` are bash words the
+ * script has set by then; the served sum is read from the script's own `sum`. */
+export function pinCheckLine(what: string, tag: string, sha256: string): string {
+  return `[ "$sum" = ${shellQuote(sha256)} ] || { echo "Error: ${pinMismatchLine(what, tag, shortSum(sha256), `\${sum:0:${SUM_SHOWN}}`)}" >&2; exit 1; }`;
 }
 
 /** A package manager's global; `version` absent means the current one, or the laptop's when a row mirrors one. */

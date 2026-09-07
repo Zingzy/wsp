@@ -13,7 +13,7 @@ import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
+import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, withRecordedPins, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
@@ -469,6 +469,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         const tools = await installTools(machine, imp.tools, stage);
         result.tools.push(...tools.tools);
         if (tools.homebrew !== undefined) result.homebrew = tools.homebrew;
+        if (ledger.recipe !== undefined) ledger.recipe = withRecordedPins(ledger.recipe, tools.tools);
       }
       const missing = missingToolsOf([...(result.base ?? []), ...result.tools]);
       if (missing.length > 0) ledger.missingTools = missing;

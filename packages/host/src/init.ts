@@ -12,13 +12,13 @@ import { stripVTControlCharacters, styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type HistoryProgress, type Manifest, type ManifestEntry, type ProjectScan, type Rung } from "@wsp/collect";
 import { SnapshotFailedError, describeAge, type BackendPricing } from "@wsp/engine";
-import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory } from "@wsp/protocol";
+import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory, ToolPin } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, plural, shownOf, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
+import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, plural, recordedPins, shownOf, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -36,6 +36,11 @@ import {
   recipeChanges,
   recipePath,
   recipeWithAnswers,
+  pinsOf,
+  withPins,
+  withSavedPins,
+  readSavedManifest,
+  catalogIdOf,
   saveRecipe,
   saveSmallRecipe,
   smallRecipePath,
@@ -794,7 +799,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     );
     // The rows outside the catalog are the file's, not this computer's: a plain run keeps what wsp recipe --add
     // wrote into the recipe beside the state, which is the same file this run ends by writing.
-    catalogRecipe = given === undefined ? { ...here, ...carriedOver(smallRecipePath(opts.statePath), line => notes.push(line)) } : withTicksOf(here, given);
+    const carried = carriedOver(smallRecipePath(opts.statePath), line => notes.push(line));
+    const base = given === undefined ? { ...here, ...(carried.custom === undefined ? {} : { custom: carried.custom }) } : withTicksOf(here, given);
+    // The pins this setup's builds recorded stand under the file's own: the file says what to install, the state what was installed.
+    catalogRecipe = withPins(base, new Map([...carried.pins, ...pinsOf(given?.rows)]));
   } catch (e) {
     histories.stop();
     log.error(e instanceof Error ? e.message : String(e), out);
@@ -835,7 +843,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   manifest = { ...manifest, entries: withoutAgentTools(manifest.entries) };
   // The card counts what the collector found; the catalog's bare rows join the manifest after it.
   const found = manifest;
-  manifest = applyRecipe(withCatalogAgents(manifest), catalogRecipe);
+  manifest = applyRecipe(withCatalogAgents(withSavedPins(manifest, readSavedManifest(recipePath(opts.statePath)))), catalogRecipe);
   if (notes.length > 0) log.warn(notes.join("\n"), out);
   card("Found on this computer", detectionNote(found, source), io.output);
   // The folder named on the command line gets the card the wizard's own question leaves, so both paths say the same.
@@ -865,7 +873,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     catalogRecipe = picked.recipe;
     wspTools = picked.wspTools;
     manifest = applyRecipe(manifest, catalogRecipe);
-    answers = defaultAnswers(manifest);
+    answers = defaultAnswers(manifest, brew);
     // The screens' own answers on the login rows: a ticked keys row is the copy, the listed sign-ins run on the machine.
     for (const [id, choice] of picked.logins) {
       answers.choices.set(id, choice);
@@ -874,8 +882,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     }
   } else {
     // A run that asks nothing answers every screen with the word it would have opened on, read from the screens' own defaults.
-    answers = defaultAnswers(manifest);
-    for (const [id, choice] of signInItems(manifest).initial) {
+    answers = defaultAnswers(manifest, brew);
+    for (const [id, choice] of signInItems(manifest, brew).initial) {
       answers.choices.set(id, choice);
       if (choice === "copy") answers.ticks.add(id);
       else answers.ticks.delete(id);
@@ -893,7 +901,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       answers.choices.set(s.id, "machine");
       answers.ticks.delete(s.id);
     }
-    const added = tickLoginTools(manifest, answers.choices, answers.ticks);
+    const added = tickLoginTools(manifest, answers.choices, answers.ticks, brew);
     if (added.length > 0) log.message(dim(`${TICKED_FOR_LOGINS}${added.join(", ")}`), { output: io.output, symbol: dim(S_BAR) });
   }
   const { ticks, choices } = answers;
@@ -907,6 +915,11 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // Read before the first write of the file; every result written this run carries it until a seal measures anew.
   const lastBuild = readBuildTimes(resultsPath);
   const path = recipePath(opts.statePath);
+  // The small recipe beside it: the catalog ids with the ticks and answers as the screens left them, the form wsp init --recipe reads.
+  const small = { path: smallRecipePath(opts.statePath), recipe: catalogRecipe };
+  // The pins this run's installs record, by catalog id; written on the small recipe with each result, so the next run installs the same release.
+  const pins = new Map<string, ToolPin>();
+  const smallRecipeNow = (): Recipe => withPins(recipeWithAnswers(small.recipe, choices), pins);
   let landed: ImportResult | undefined;
   const importOf = (rows: readonly ManifestEntry[]) =>
     importFor(rows, {
@@ -919,12 +932,17 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       onResult: r => {
         writeFileSync(resultsPath, `${JSON.stringify({ ...r, ...(lastBuild !== undefined ? { build: lastBuild } : {}) }, null, 2)}\n`);
         landed = r;
-        // The first install of a release tag pins its asset: the tag and the checksum the guest read go into the recipe for later installs of that tag.
-        const pins = new Map(r.tools.filter(t => t.outcome === "installed" && t.road?.sha256 !== undefined && t.road.tag !== undefined).map(t => [t.id, { tag: t.road!.tag!, sha256: t.road!.sha256! }]));
-        const stale = (e: ManifestEntry): boolean => pins.has(e.id) && e.pin?.tag !== pins.get(e.id)!.tag;
+        // The first install of a release tag pins its asset: the tag and the checksum the guest read go into both recipes for later installs of that tag.
+        const recorded = recordedPins(r.tools);
+        const stale = (e: ManifestEntry): boolean => recorded.has(e.id) && e.pin?.tag !== recorded.get(e.id)!.tag;
         if (manifest.entries.some(stale)) {
-          manifest = { ...manifest, entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: pins.get(e.id)! } : e)) };
+          for (const e of manifest.entries.filter(stale)) {
+            const id = catalogIdOf(e);
+            if (id !== undefined) pins.set(id, recorded.get(e.id)!);
+          }
+          manifest = { ...manifest, entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: recorded.get(e.id)! } : e)) };
           saveRecipe(path, manifest, ticks, choices);
+          saveSmallRecipe(small.path, smallRecipeNow());
         }
       },
       // An attach reports no result, so the build's file stands; the retried write's outcome replaces the failure it recorded.
@@ -936,10 +954,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const uploadBytes = imp.files?.bytes ?? 0;
   card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output), uploadBytes, brew, customRows(catalogRecipe)), io.output);
   saveRecipe(path, manifest, ticks, choices);
-  // The small recipe beside it: the catalog ids with the ticks and answers as the screens left them, the form wsp init --recipe reads.
-  const small = { path: smallRecipePath(opts.statePath), recipe: catalogRecipe };
   const attachCommand = `wsp init --recipe ${shellQuote(small.path)}`;
-  saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
+  saveSmallRecipe(small.path, smallRecipeNow());
   log.step(`Recipe saved to ${path} and ${small.path}`, out);
   const wspToolsPlaced = installEach(wspTools, mcpServerSpec(opts.statePath), opts.home);
   for (const placed of wspToolsPlaced.installed) log.step(installLines(placed).join("\n"), out);
@@ -1053,7 +1069,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     }
     log.warn(read.refused.map(r => `${label(r.id)}: ${r.command !== undefined ? `the ${r.service} helper failed` : "Keychain read failed"} (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
     saveRecipe(path, manifest, ticks, choices);
-    saveSmallRecipe(small.path, recipeWithAnswers(small.recipe, choices));
+    saveSmallRecipe(small.path, smallRecipeNow());
     // The flipped rows change the recipe hash; the builder must carry the hash the saved recipe now has,
     // so the next wsp init on the same answers attaches to it.
     bring = bringing();

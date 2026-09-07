@@ -92,6 +92,21 @@ describe("wsp recipe", () => {
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8")))).toMatchObject({ tick: "installed" });
   });
 
+  it("a pin a build recorded on the file stands through a flip and through a run that names a rule: it is a fact about the golden, not a tick", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-pin-"));
+    const out = outPath();
+    await runRecipe(laptop(), { out }, quiet, at);
+    const pin = { tag: "v2.86.0", sha256: "b".repeat(64) };
+    const saved = Recipe.parse(JSON.parse(readFileSync(out, "utf8")));
+    saveSmallRecipe(out, { ...saved, rows: saved.rows.map(r => (r.id === "gh" ? { ...r, pin } : r)) });
+    const written = () => Recipe.parse(JSON.parse(readFileSync(out, "utf8")));
+    await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
+    expect(rowOf(written(), "gh")?.pin).toEqual(pin);
+    await runRecipe(laptop(), { out, tick: "installed" }, quiet, at);
+    expect(rowOf(written(), "gh")?.pin).toEqual(pin);
+    expect(written().rows.filter(r => r.pin !== undefined).map(r => r.id)).toEqual(["gh"]);
+  });
+
   it("re-decides every row when a rule input is named and lets the file stand otherwise", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-carry-"));
     const out = outPath();
@@ -226,7 +241,7 @@ describe("wsp recipe", () => {
     expect(custom()?.find(r => r.id === "ruff")?.check).toBe("ruff --version");
     // The install is the whole row: no catalog row appears for it and no sign-in is ever offered.
     expect(custom()?.every(r => !("signIn" in r))).toBe(true);
-    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [] }), Recipe.parse(JSON.parse(readFileSync(out, "utf8"))))).items.map(i => i.id)).not.toContain("logins/just");
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [] }), Recipe.parse(JSON.parse(readFileSync(out, "utf8")))), new Map()).items.map(i => i.id)).not.toContain("logins/just");
     await expect(runRecipe(laptop(), { out, add: ["just"] }, quiet, at)).rejects.toThrow('--add takes <id>=<command>, not "just"');
   });
 

@@ -6,7 +6,7 @@
 // and the wizard ask a module through roadModule(); nothing outside this file
 // decides by a road's name. Every line is text: nothing here runs a command.
 import { shellQuote } from "@wsp/protocol";
-import { APT_ENV, type InstallRoad, type PackageRoad, type RoadName, pinStateOf } from "./roads.js";
+import { APT_ENV, type InstallRoad, type PackageRoad, type RoadName, pinCheckLine, standingPin } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
 
@@ -186,9 +186,9 @@ const go: RoadModule<Road<"go">> = {
 /** A tool from its repository: the release asset built for this arch, unpacked and its binary put in
  * /usr/local/bin; with no Linux asset, a main package named and go on the machine, `go install` of that package
  * at the tag (or at the version it carries), moved to the row's command when its name differs. The asset's sha256
- * is checked against the pin when the recipe has one for this tag, and printed with the tag on the WSP_ROAD line
- * the stage reads either way, so the first install of a tag records it. Without a tag the current release is
- * fetched and its tag read. */
+ * is checked against `pin`, the recorded sum for this tag when the recipe has one, and printed with the tag on the
+ * WSP_ROAD line the stage reads either way, so the first install of a tag records it. Without a tag the current
+ * release is fetched and its tag read. */
 function releaseInstall(name: string, repo: string, tag: string | undefined, pin: string | undefined, go: string | undefined): string {
   const api = tag === undefined ? `https://api.github.com/repos/${repo}/releases/latest` : `https://api.github.com/repos/${repo}/releases/tags/${tag}`;
   const goAt = go === undefined || go.includes("@") ? go : `${go}@${tag ?? "latest"}`;
@@ -200,14 +200,14 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
     'tmp="$(mktemp -d /tmp/wsp-road-XXXXXX)"',
     "trap 'rm -rf \"$tmp\"' EXIT",
     `release="$(curl ${shellQuote(api)} || true)"`,
-    ...(tag === undefined ? [`tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"`] : []),
+    tag === undefined ? `tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"` : `tag=${shellQuote(tag)}`,
     `urls="$(printf '%s\\n' "$release" | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
     `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk)$' | head -1 || true)"`,
     'if [ -n "$url" ]; then',
     '  asset="${url##*/}"',
     '  curl -o "$tmp/$asset" "$url"',
     `  sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`,
-    ...(pin !== undefined && tag !== undefined ? [`  [ "$sum" = ${shellQuote(pin)} ] || { echo "Error: $asset does not match the checksum recorded on the first install of "${shellQuote(tag)} >&2; exit 1; }`] : []),
+    ...(pin !== undefined ? [`  ${pinCheckLine("$asset", "$tag", pin)}`] : []),
     '  case "$asset" in',
     '    *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" ;;',
     '    *.tar.xz) tar -xJf "$tmp/$asset" -C "$tmp" ;;',
@@ -218,7 +218,7 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
     `  [ -n "$bin" ] || bin="$(find "$tmp" -type f -perm -u+x ! -name "\${asset:-.}" ! -name '*.md' ! -name '*.txt' -printf '%s %p\\n' | sort -rn | head -1 | cut -d' ' -f2-)"`,
     '  [ -n "$bin" ] || { echo "Error: no binary in ${asset:-the release}" >&2; exit 1; }',
     '  install -m 0755 "$bin" "/usr/local/bin/$name"',
-    tag === undefined ? '  echo "WSP_ROAD release ${asset:-$url} $sum $tag"' : `  echo "WSP_ROAD release \${asset:-$url} $sum "${shellQuote(tag)}`,
+    '  echo "WSP_ROAD release ${asset:-$url} $sum $tag"',
     ...(goAt === undefined
       ? []
       : [
@@ -244,8 +244,7 @@ const release: RoadModule<Road<"release">> = {
   install: (r, bin) => {
     if (r.repo === undefined) return { note: NO_RELEASE };
     // Without a version the pinned tag stands, as a vendor install does; a first install with neither takes the current release.
-    const tag = releaseTag(r);
-    return releaseInstall(bin, r.repo, tag, pinStateOf(tag, r.pin) === "same" ? r.pin!.sha256 : undefined, r.go);
+    return releaseInstall(bin, r.repo, releaseTag(r), standingPin(r)?.sha256, r.go);
   },
   uninstall: (_r, bin) => ({ cmd: `rm -f /usr/local/bin/${shellQuote(bin)}` }),
   names: () => [],
@@ -255,7 +254,7 @@ const release: RoadModule<Road<"release">> = {
 const vendor: RoadModule<Road<"vendor">> = {
   words: "from its vendor's release",
   shown: r => r.cask.from,
-  install: r => r.cask.install(r.version, r.pin),
+  install: r => r.cask.install(r.version, standingPin(r)),
   uninstall: r => ({ cmd: r.cask.uninstall }),
   names: () => [],
   bin: r => r.cask.bin,

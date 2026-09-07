@@ -6,7 +6,7 @@
 // of that version checks it. The vendor's current version is fetched once and
 // the pin holds it from then on.
 import { shellQuote } from "@wsp/protocol";
-import { type ToolPin, pinStateOf } from "./roads.js";
+import { type ToolPin, pinCheckLine } from "./roads.js";
 
 export interface LinuxCask {
   /** The command the install puts on PATH. */
@@ -15,7 +15,7 @@ export interface LinuxCask {
   from: string;
   /** The row's detail line, under 76 columns: what lands on the machine. */
   detail: string;
-  /** One bash script; version is the road's when it names one, pin what a first install recorded. */
+  /** One bash script; version is the road's when it names one, pin the recorded one that stands for it. */
   install(version: string | undefined, pin: ToolPin | undefined): string;
   uninstall: string;
 }
@@ -26,10 +26,9 @@ function versionLines(version: string | undefined, pin: ToolPin | undefined, lat
   return fixed !== undefined ? [`ver=${shellQuote(fixed)}`] : [`ver="$(${latest})"`, '[ -n "$ver" ] || { echo "Error: could not read the current version" >&2; exit 1; }'];
 }
 
-/** The checksum check, only when the version installed is the one the pin recorded. */
-function pinLines(version: string | undefined, pin: ToolPin | undefined, what: string): string[] {
-  if (pinStateOf(version, pin) !== "same") return [];
-  return [`[ "$sum" = ${shellQuote(pin!.sha256)} ] || { echo "Error: ${what} does not match the checksum recorded on the first install of $ver" >&2; exit 1; }`];
+/** The checksum check, when a recorded pin stands for the version installed. */
+function pinLines(pin: ToolPin | undefined, what: string): string[] {
+  return pin === undefined ? [] : [pinCheckLine(what, "$ver", pin.sha256)];
 }
 
 const PRELUDE = ["set -euo pipefail", 'arch="$(uname -m)"', 'tmp="$(mktemp -d /tmp/wsp-cask-XXXXXX)"', "trap 'rm -rf \"$tmp\"' EXIT"];
@@ -53,7 +52,7 @@ export const GCLOUD: LinuxCask = {
       'pkg="google-cloud-cli-$ver-linux-$a.tar.gz"',
       'curl -o "$tmp/$pkg" "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$pkg"',
       `sum="$(sha256sum "$tmp/$pkg" | cut -d' ' -f1)"`,
-      ...pinLines(version, pin, "$pkg"),
+      ...pinLines(pin, "$pkg"),
       `rm -rf ${GCLOUD_HOME}`,
       'tar -xzf "$tmp/$pkg" -C /opt',
       ...GCLOUD_BINS.map(b => `ln -sf ${GCLOUD_HOME}/bin/${b} /usr/local/bin/${b}`),
@@ -77,7 +76,7 @@ export const KUBECTL: LinuxCask = {
       'curl -o "$tmp/kubectl.sha256" "$url.sha256"',
       'echo "$(cat "$tmp/kubectl.sha256")  $tmp/kubectl" | sha256sum -c - >/dev/null',
       `sum="$(sha256sum "$tmp/kubectl" | cut -d' ' -f1)"`,
-      ...pinLines(version, pin, "kubectl $ver"),
+      ...pinLines(pin, "kubectl"),
       'install -m 0755 "$tmp/kubectl" /usr/local/bin/kubectl',
       'echo "WSP_ROAD release kubectl-$ver-linux-$a $sum $ver"',
     ].join("\n"),

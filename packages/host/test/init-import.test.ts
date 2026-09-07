@@ -1043,7 +1043,7 @@ describe("importFor", () => {
     utimesSync(join(home, ".gitconfig"), later, later);
     expect(ticks(home).recipeHash).toBe(before);
     expect(ticks(home).recipe).toMatchObject({
-      ticks: expect.arrayContaining([{ id: "identity/git-user" }, { id: "logins/gh", choice: "copy" }, { id: "tools/npm/bun", version: "1.4.0" }]),
+      ticks: expect.arrayContaining([{ id: "identity/git-user" }, { id: "logins/gh", choice: "copy" }, expect.objectContaining({ id: "tools/npm/bun", version: "1.4.0", road: "npm" })]),
       files: expect.arrayContaining([{ id: "identity/git-user", path: "~/.gitconfig", dest: ".gitconfig", digest: expect.stringMatching(/^[0-9a-f]{64}$/) }]),
     });
     // Same length, one byte different: the size in the digest line cannot carry this.

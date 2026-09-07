@@ -2,7 +2,9 @@
 // The recipe diff: what a golden was built from (the digest its seal wrote)
 // against the recipe now, as rows to apply on top and rows the recipe stopped
 // asking for. Pure; golden.ts runs the result on a fork or on the kept builder.
-import { MCP_ID_PREFIX, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
+import { ROAD_MODULES } from "@wsp/catalog";
+import { INSTALLER_MOVED_LINE, MCP_ID_PREFIX, NO_ROAD_WORDS, pinMovedLine, roadMovedLine, versionMovedLine, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
+import { isRoad } from "./tool-sizes.js";
 
 type Tick = RecipeDigest["ticks"][number];
 type DigestFile = RecipeDigest["files"][number];
@@ -21,9 +23,11 @@ export interface ToolChange {
   id: string;
   label: string;
   change: Change;
-  /** Pins, when the row carries one; a changed pin is a reinstall. */
+  /** Versions, when the row carries one; a changed version is a reinstall. */
   from?: string;
   to?: string;
+  /** Why the row installs differently under the same version: its road, its pin or its install lines moved. */
+  why?: string;
 }
 
 export interface AgentChange {
@@ -52,6 +56,18 @@ export const rungOf = (id: string): string => id.slice(0, id.indexOf("/"));
 export const nameOf = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
 const byRung = (ticks: readonly Tick[], rung: string): Map<string, Tick> => new Map(ticks.filter(t => rungOf(t.id) === rung).map(t => [t.id, t]));
 const fileKey = (f: DigestFile): string => `${f.id}\0${f.dest}`;
+const roadWords = (name: string | undefined): string => (isRoad(name) ? ROAD_MODULES[name].words : NO_ROAD_WORDS);
+
+/** Why a ticked tool installs differently now, its version aside: the road moved, the release it is fixed to moved,
+ * or the lines the road runs did. A tick sealed before the digest carried a road says nothing of it, so nothing
+ * moves on its account alone. */
+export function toolMove(was: Tick, now: Tick): string | undefined {
+  if (was.road === undefined) return undefined;
+  if (was.road !== now.road) return roadMovedLine(roadWords(was.road), roadWords(now.road));
+  if (was.pin?.tag !== now.pin?.tag || was.pin?.sha256 !== now.pin?.sha256) return pinMovedLine(was.pin, now.pin);
+  if (was.installer !== now.installer) return INSTALLER_MOVED_LINE;
+  return undefined;
+}
 
 /** `labelOf` gives the person's words for a row; the id's last segment when the caller has none. */
 export function diffRecipes(from: RecipeDigest, to: RecipeDigest, labelOf: (id: string) => string = nameOf): RecipeDiff {
@@ -79,8 +95,12 @@ export function diffRecipes(from: RecipeDigest, to: RecipeDigest, labelOf: (id: 
   for (const [id, t] of toolsAfter) {
     const was = toolsBefore.get(id);
     const pins = { ...(was?.version !== undefined ? { from: was.version } : {}), ...(t.version !== undefined ? { to: t.version } : {}) };
-    if (was === undefined) diff.tools.push({ id, label: labelOf(id), change: "added", ...pins });
-    else if (was.version !== t.version) diff.tools.push({ id, label: labelOf(id), change: "changed", ...pins });
+    if (was === undefined) {
+      diff.tools.push({ id, label: labelOf(id), change: "added", ...pins });
+      continue;
+    }
+    const why = was.version === t.version ? toolMove(was, t) : undefined;
+    if (was.version !== t.version || why !== undefined) diff.tools.push({ id, label: labelOf(id), change: "changed", ...pins, ...(why !== undefined ? { why } : {}) });
   }
   for (const [id, t] of toolsBefore) if (!toolsAfter.has(id)) diff.tools.push({ id, label: labelOf(id), change: "removed", ...(t.version !== undefined ? { from: t.version } : {}) });
 
@@ -165,7 +185,7 @@ export function describeDiff(d: RecipeDiff): string[] {
   for (const change of ["added", "changed", "removed"] as const) {
     group(change, d.files.filter(f => f.change === change).map(f => `~/${f.dest}`), "file");
     if (change === "changed") for (const f of d.files.filter(x => x.change === "missing")) lines.push(`kept on the golden, no longer on this computer: ~/${f.dest}`);
-    group(change, d.tools.filter(t => t.change === change).map(t => (change === "changed" ? `${t.label} (${t.from ?? "unpinned"} to ${t.to ?? "unpinned"})` : t.label)), "tool");
+    group(change, d.tools.filter(t => t.change === change).map(t => (change === "changed" ? `${t.label} (${t.why ?? versionMovedLine(t.from, t.to)})` : t.label)), "tool");
     if (change !== "changed") {
       const agents = d.agents.filter(a => a.change === change);
       group(change, agents.filter(a => !a.id.startsWith(MCP_ID_PREFIX)).map(a => a.label), "agent");
