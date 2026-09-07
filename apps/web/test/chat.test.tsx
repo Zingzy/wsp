@@ -291,13 +291,14 @@ describe("chat tab composer", () => {
 });
 
 describe("chat tab send after a harness died before its init", () => {
-  // The runtime stamps the thread it minted on every event of a turn, the done and end of one whose harness died before init included; no session.start ever carries this id.
+  // The runtime stamps the thread it minted on every event of a turn, the done and end of one whose harness died before init included; no session.start carries this id until a send names the thread and its first turn runs.
   const dead = { workspaceId: WS, sessionId: "9b2a7c1e-0d4f-4a6b-8e3c-5f7a9d1b2c3e", turnId: "turn_dead", threadId: "thr_dead" };
   const DEATH: SessionEvent[] = [
     { type: "session.done", ...dead, result: { status: "failed", error: "claude exited before init (exit code 1)" } },
     { type: "session.end", ...dead, exitCode: 1, sawResult: true },
   ];
-  const retry = { workspaceId: WS, sessionId: "sess_retry", turnId: "turn_retry", threadId: "thr_retry" };
+  // The first turn a send naming the dead thread runs: the runtime keeps the thread and opens a session on it.
+  const retry = { workspaceId: WS, sessionId: "sess_retry", turnId: "turn_retry", threadId: "thr_dead" };
   const RETRY: SessionEvent[] = [
     { type: "session.start", ...retry, prompt: "again" },
     { type: "session.delta", ...retry, kind: "text", text: "Second time lucky." },
@@ -306,7 +307,7 @@ describe("chat tab send after a harness died before its init", () => {
   ];
   const STARTED: SessionEvent[] = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
   // Another client's send on the same workspace at the same moment, with the same text as the person's: a thread this
-  // tab never queued a row in, told apart from the person's own start only by the request id the runtime stamps.
+  // tab never queued a row in, told apart from the person's own retry by the thread it runs on.
   const other = { workspaceId: WS, sessionId: "sess_other", turnId: "turn_other", threadId: "thr_other" };
   const otherSend = (prompt: string): SessionEvent[] => [
     { type: "session.start", ...other, prompt, requestId: "req_other" },
@@ -320,8 +321,9 @@ describe("chat tab send after a harness died before its init", () => {
     return { ...start, requestId: send.requestId! };
   };
   const queueOf = (key: string) => (useComposerDraftStore.getState().queues[key] ?? []).map(r => r.prompt);
+  const deadRow: SessionView = { id: dead.sessionId, workspaceId: WS, harness: "claude", status: "failed", threadId: "thr_dead", prompt: "hello", startedAt: T0 };
 
-  it("on a workspace with no thread yet, the next send carries no resume, and the thread the runtime mints for it lands in the view", async () => {
+  it("on a workspace with no thread yet, the first send names no thread and the runtime mints one; once its harness died before init, the next send names that thread and the retry renders under it, the failed row kept above", async () => {
     const bare: WorkspaceView = { ...workspace, claudeSessionId: undefined };
     const { api, started, emit } = fixtureApi([bare]);
     await setup(api);
@@ -339,15 +341,18 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "again");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", cwd: "/root" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_dead", cwd: "/root" });
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
+    expect(screen.getByText(/exited before init/)).toBeDefined();
 
     for (const e of RETRY) emit(e);
     expect(screen.getByText("Second time lucky.")).toBeDefined();
+    expect(screen.getByText(/exited before init/)).toBeDefined();
+    expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
   });
 
-  it("a dead new thread read back from history starts fresh: the workspace's remembered session is not resumed into it", async () => {
+  it("a dead new thread read back from history is named on the next send, with no resume: the workspace's remembered session is not resumed into it", async () => {
     const { api, started } = fixtureApi([workspace], { [WS]: [...STARTED, ...DEATH] });
     await setup(api);
     await screen.findByText(/exited before init/);
@@ -357,15 +362,14 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "again");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_dead", cwd: "/root" });
   });
 
-  it("pinned from the sidebar, a dead thread's next send carries no resume; the view and the pin follow the thread the runtime mints, and a reload after the follow keeps it, its queued row included", async () => {
+  it("pinned from the sidebar, a dead thread's next send names it with no resume; the retry lands under the pin, which stays, its queued row released there, and a reload keeps both", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: [...DEATH, ...STARTED] };
     // The runtime stamps a row's session id only when the harness announces one, so the dead row has none to resume.
-    const deadRow: SessionView = { id: dead.sessionId, workspaceId: WS, harness: "claude", status: "failed", threadId: "thr_dead", prompt: "hello", startedAt: T0 };
     const { api, started, emit } = fixtureApi([workspace], history, [deadRow]);
-    // The runtime records an event before it pushes it, so a reload after the follow finds the retry in the reply.
+    // The runtime records an event before it pushes it, so a reload finds the retry in the reply.
     const record = (e: SessionEvent) => { history[WS] = [...history[WS]!, e]; emit(e); };
     const queued = () => (screen.getByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement).value;
     await setup(api, "thr_dead");
@@ -376,25 +380,27 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "again");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_dead", cwd: "/root" });
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
     await typeInto(editor, "and then this");
     await press(editor, "Enter");
-    expect(useComposerDraftStore.getState().queues["thr_dead"]?.map(r => r.prompt)).toEqual(["and then this"]);
+    expect(queueOf("thr_dead")).toEqual(["and then this"]);
+    expect(useComposerDraftStore.getState().held["thr_dead"]).toBe(true);
 
     record(RETRY[0]!);
-    expect(useStore.getState().selectedThreadId).toBe("thr_retry");
-    await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
+    expect(useStore.getState().selectedThreadId).toBe("thr_dead");
     expect(stopButton()).toBeDefined();
-    expect(useComposerDraftStore.getState().queues["thr_retry"]?.map(r => r.prompt)).toEqual(["and then this"]);
+    expect(queueOf("thr_dead")).toEqual(["and then this"]);
+    expect(useComposerDraftStore.getState().held["thr_dead"]).toBeUndefined();
     expect(queued()).toBe("and then this");
     record(RETRY[1]!);
     expect(screen.getByText("Second time lucky.")).toBeDefined();
+    expect(screen.getByText(/exited before init/)).toBeDefined();
 
     act(() => useStore.getState().noteGap());
     await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
     expect(screen.getByText("Second time lucky.")).toBeDefined();
-    expect(screen.queryByText(/exited before init/)).toBeNull();
+    expect(screen.getByText(/exited before init/)).toBeDefined();
     expect(stopButton()).toBeDefined();
     expect(queued()).toBe("and then this");
 
@@ -403,7 +409,7 @@ describe("chat tab send after a harness died before its init", () => {
     expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry", cwd: "/root" });
   });
 
-  it("on the latest view of a dead thread, another client's start with the same text during the send is kept out; the start carrying the send's request id is the person's own and takes the queued row", async () => {
+  it("on the latest view of a dead thread, another client's start with the same text during the send is kept out; the send's start under the dead thread takes the queued row from the workspace id", async () => {
     const { api, started, emit } = fixtureApi([workspace], { [WS]: [...STARTED, ...DEATH] });
     const OTHER = otherSend("again");
     await setup(api);
@@ -413,6 +419,7 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "again");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toMatchObject({ prompt: "again", thread: "thr_dead" });
     await typeInto(editor, "and then this");
     await press(editor, "Enter");
     expect(queueOf(WS)).toEqual(["and then this"]);
@@ -428,7 +435,8 @@ describe("chat tab send after a harness died before its init", () => {
     emit(RETRY[1]!);
     expect(stopButton()).toBeDefined();
     expect(screen.getByText("Second time lucky.")).toBeDefined();
-    expect(queueOf("thr_retry")).toEqual(["and then this"]);
+    expect(queueOf("thr_dead")).toEqual(["and then this"]);
+    expect(queueOf(WS)).toEqual([]);
 
     for (const e of OTHER.slice(2)) emit(e);
     expect(stopButton()).toBeDefined();
@@ -439,9 +447,8 @@ describe("chat tab send after a harness died before its init", () => {
     expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry", cwd: "/root" });
   });
 
-  it("pinned to a dead thread, another client's start with the same text during the send moves neither the pin nor the queued row; the start carrying the send's request id moves both", async () => {
+  it("pinned to a dead thread, another client's start with the same text during the send moves neither the pin nor the queued row; the send's start under the pin keeps both there and releases the row", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: [...DEATH, ...STARTED] };
-    const deadRow: SessionView = { id: dead.sessionId, workspaceId: WS, harness: "claude", status: "failed", threadId: "thr_dead", prompt: "hello", startedAt: T0 };
     const { api, started, emit } = fixtureApi([workspace], history, [deadRow]);
     const OTHER = otherSend("again");
     const record = (e: SessionEvent) => { history[WS] = [...history[WS]!, e]; emit(e); };
@@ -452,6 +459,7 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "again");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toMatchObject({ prompt: "again", thread: "thr_dead" });
     await typeInto(editor, "and then this");
     await press(editor, "Enter");
     expect(queueOf("thr_dead")).toEqual(["and then this"]);
@@ -462,12 +470,13 @@ describe("chat tab send after a harness died before its init", () => {
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
     expect(queueOf("thr_dead")).toEqual(["and then this"]);
     expect(queueOf("thr_other")).toEqual([]);
+    expect(useComposerDraftStore.getState().held["thr_dead"]).toBe(true);
 
     record(stamped(RETRY[0]!, started[0]!));
-    expect(useStore.getState().selectedThreadId).toBe("thr_retry");
-    await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
+    expect(useStore.getState().selectedThreadId).toBe("thr_dead");
     expect(stopButton()).toBeDefined();
-    expect(queueOf("thr_retry")).toEqual(["and then this"]);
+    expect(queueOf("thr_dead")).toEqual(["and then this"]);
+    expect(useComposerDraftStore.getState().held["thr_dead"]).toBeUndefined();
     record(RETRY[1]!);
     expect(screen.getByText("Second time lucky.")).toBeDefined();
 
@@ -481,9 +490,8 @@ describe("chat tab send after a harness died before its init", () => {
     expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry", cwd: "/root" });
   });
 
-  it("pinned to a dead thread and left mid-send for another thread, the retry's start re-homes the queued row under the thread it opened past another client's same-text start; the pin stays where the person went, and the row goes when they open that thread", async () => {
+  it("pinned to a dead thread and left mid-send for another thread, the retry's start under the dead thread releases the queued row there, past another client's same-text start; the pin stays where the person went, and the row goes when they come back", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: [...DEATH, ...STARTED] };
-    const deadRow: SessionView = { id: dead.sessionId, workspaceId: WS, harness: "claude", status: "failed", threadId: "thr_dead", prompt: "hello", startedAt: T0 };
     const { api, started, emit } = fixtureApi([workspace], history, [deadRow]);
     const OTHER = otherSend("again");
     const record = (e: SessionEvent) => { history[WS] = [...history[WS]!, e]; emit(e); };
@@ -494,6 +502,7 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "again");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toMatchObject({ prompt: "again", thread: "thr_dead" });
     await typeInto(editor, "and then this");
     await press(editor, "Enter");
     expect(queueOf("thr_dead")).toEqual(["and then this"]);
@@ -506,23 +515,22 @@ describe("chat tab send after a harness died before its init", () => {
     for (const e of OTHER.slice(0, 2)) record(e);
     expect(queueOf("thr_dead")).toEqual(["and then this"]);
     expect(queueOf("thr_other")).toEqual([]);
+    expect(useComposerDraftStore.getState().held["thr_dead"]).toBe(true);
 
     record(stamped(RETRY[0]!, started[0]!));
     expect(useStore.getState().selectedThreadId).toBe("thr_a");
-    expect(queueOf("thr_retry")).toEqual(["and then this"]);
-    expect(queueOf("thr_dead")).toEqual([]);
-    expect(useComposerDraftStore.getState().held).toEqual({});
+    expect(queueOf("thr_dead")).toEqual(["and then this"]);
+    expect(useComposerDraftStore.getState().held["thr_dead"]).toBeUndefined();
     for (const e of [...RETRY.slice(1), ...OTHER.slice(2)]) record(e);
     expect(screen.queryByText("Second time lucky.")).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
     expect(started.length).toBe(1);
 
-    act(() => useStore.getState().select(WS, "thr_retry"));
+    act(() => useStore.getState().select(WS, "thr_dead"));
     await screen.findByText("Second time lucky.");
     await waitFor(() => expect(started.length).toBe(2));
     expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry", cwd: "/root" });
   });
-
   it("on a fresh thread, another client's start with the same text during the send stays out; the start carrying the send's request id opens the thread and takes the queued row", async () => {
     const { api, started, emit } = fixtureApi([workspace], { [WS]: STARTED });
     const OTHER = otherSend("start over");
