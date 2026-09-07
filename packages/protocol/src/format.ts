@@ -395,6 +395,13 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
+/** What a send meets when its thread's last turn has replied but its agent process is still running (a child it did
+ * not wait for, a lingering task): the row still reads running and is not free for a new turn, so the caller is told
+ * in words, by thread, instead of starting a second agent in the same worktree. */
+export function stillWorkingRefusal(threadId: string): string {
+  return `thread ${threadId.slice(0, 8)} replied, still working; wait for its turn to finish before sending`;
+}
+
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 

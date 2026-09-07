@@ -454,6 +454,35 @@ describe("steer over the stdin channel", () => {
   });
 });
 
+describe("a reply while the process keeps running", () => {
+  it("emits the reply at the result but leaves the turn open until the process exits, and a later line lands in the same turn", async () => {
+    const m = manualExec();
+    const adapter = createClaudeAdapter({ exec: m.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    const session = adapter.start({ prompt: "x", onEvent });
+    let settled = false;
+    void session.finished.then(() => {
+      settled = true;
+    });
+
+    m.push(`{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`);
+    m.push(`{"type":"result","subtype":"success","result":"the reply","duration_ms":1000,"usage":{"output_tokens":5},"session_id":"${FIXTURE_SESSION_ID}"}`);
+    await until(() => events.some((e) => e.type === "turn.done"));
+    // The reply is in, but the process has not exited: finished waits for it.
+    expect(settled).toBe(false);
+
+    // A line the harness prints after its result lands as a delta of the same turn, not a new one.
+    m.push(`{"type":"assistant","message":{"content":[{"type":"text","text":"still tidying up"}]},"session_id":"${FIXTURE_SESSION_ID}"}`);
+    await until(() => events.some((e) => e.type === "turn.delta" && e.text === "still tidying up"));
+    expect(settled).toBe(false);
+
+    m.end(0);
+    const result = await session.finished;
+    expect(result).toMatchObject({ status: "completed", text: "the reply" });
+    expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+  });
+});
+
 describe("result classification", () => {
   function resultRun(resultLine: string): Promise<{ events: AdapterEvent[]; result: import("../src/adapter.js").TurnResult }> {
     const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
