@@ -2,13 +2,13 @@
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { currentHome, type CliIO } from "@wsp/host";
-import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, nativeTheme, shell } from "electron";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
 import { fromAppPage } from "./origin.js";
 import type { Retry } from "./preload.js";
 import { checkSetup } from "./setup.js";
-import { appWindowOptions } from "./window.js";
+import { windowOptions } from "./window.js";
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
 const WEB_DIR = here("../web");
@@ -23,9 +23,7 @@ function envPort(name: string, fallback: number): number {
   return raw === undefined || raw === "" ? fallback : Number(raw);
 }
 
-function newWindow(preload?: string): BrowserWindow {
-  return new BrowserWindow(appWindowOptions(preload));
-}
+const newWindow = (preload?: string): BrowserWindow => new BrowserWindow(windowOptions(process.platform, preload));
 
 let session: HostSession | undefined;
 
@@ -130,6 +128,8 @@ app.on("window-all-closed", () => app.quit());
 app
   .whenReady()
   .then(async () => {
+    // The window's chrome and the frosted sidebar follow the page's one theme, dark, not the system; a light theme moves this pin with it.
+    nativeTheme.themeSource = "dark";
     const located = await locate();
     if (!(await showApp(located))) await showSetup(located);
   })

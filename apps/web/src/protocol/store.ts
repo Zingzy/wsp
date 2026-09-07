@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Zustand store fed by one ProtocolClient + typed React hooks: the stable
 // contract components code against.
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, foldThreads, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
@@ -444,6 +444,15 @@ export function useHarnessCatalogs(workspaceId: string | null): HarnessCatalog[]
 }
 export function useHarnessCatalog(harness: string, workspaceId: string | null = null): HarnessCatalog | null {
   return useStore(s => ((workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? s.harnesses).find(c => c.harness === harness) ?? null);
+}
+/** The thread the centre shows for a workspace: the one picked in the sidebar, else the workspace's latest; null with no threads yet. */
+export function useOpenThread(workspaceId: string | null): ThreadView | null {
+  const sessions = useStore(s => (workspaceId !== null ? s.sessions[workspaceId] : undefined) ?? NO_SESSIONS);
+  const threadId = useSelectedThreadId();
+  return useMemo(() => {
+    const threads = foldThreads(sessions);
+    return (threadId !== null ? threads.find(t => t.threadId === threadId) : threads.at(-1)) ?? null;
+  }, [sessions, threadId]);
 }
 /** The workspace's most recent session row, running or not; null before its first session this runtime remembers. */
 export function useLatestSession(id: string | null): SessionView | null {

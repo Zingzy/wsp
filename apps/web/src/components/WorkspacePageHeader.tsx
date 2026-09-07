@@ -2,26 +2,20 @@
 import type { ComponentPropsWithoutRef } from "react";
 
 import { cn } from "../lib/utils";
+import { HeaderRow } from "../shell/HeaderRow";
+import { useSidebarVisibility } from "./ui/sidebar";
 
-/** Shared workspace top-bar geometry. */
-export function WorkspacePageHeader({
-  electron = false,
-  reserveNativeControls = electron,
-  className,
-  ...props
-}: ComponentPropsWithoutRef<"header"> & {
-  readonly electron?: boolean;
-  readonly reserveNativeControls?: boolean;
-}) {
+/** Shared workspace top-bar geometry: the frame row itself while the sidebar is away, a plain row beside it otherwise. */
+export function WorkspacePageHeader({ className, children, ...props }: ComponentPropsWithoutRef<"header">) {
+  const sidebarOpen = useSidebarVisibility();
   return (
     <header
-      className={cn(
-        "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-3 pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]",
-        electron && "drag-region",
-        reserveNativeControls && "wco:pr-[var(--workspace-native-controls-inset)]",
-        className,
-      )}
+      className={cn("flex shrink-0 items-center pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]", className)}
       {...props}
-    />
+    >
+      <HeaderRow frame={!sidebarOpen} className="flex-1">
+        {children}
+      </HeaderRow>
+    </header>
   );
 }
