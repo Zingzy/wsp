@@ -123,18 +123,20 @@ export type SessionRenameWrite = { kind: "written" } | { kind: "no-session" } | 
  */
 export type SessionRenamer = (harnessSessionId: string, title: string, exec: (command: string) => Promise<string>) => Promise<SessionRenameWrite>;
 
-/** What a thread's title is asked for from: its opening turn's words and the reply that ended its first turn, and the
- * model the question runs on, the cheapest the harness's catalog lists; absent leaves the CLI's own. */
+/** What a thread's title is asked for from: its opening turn's words, the reply where the caller has one (the runtime
+ * asks at the turn's start and has none), and the model the question runs on, the cheapest the harness's catalog
+ * lists; absent leaves the CLI's own. */
 export interface TitleTurn {
   opening: string;
-  reply: string;
+  reply?: string;
   model?: string;
 }
 
 /**
- * Asks the harness itself, on the machine, for a name for a thread it has just replied in: one shell line to `exec`
- * running the harness's own CLI on the question protocol's titlePrompt asks, and its stdout parsed back to a title.
- * Null when the CLI refused, answered nothing or answered something that is not a title, and the thread keeps the
- * words its opening turn seeded it with. Absent on an adapter whose CLI cannot answer a question without a thread.
+ * Asks the harness itself, on the machine, for a name for a thread whose first turn has just started: one shell line
+ * to `exec` running the harness's own CLI on the question protocol's titlePrompt asks, and its stdout parsed back to
+ * a title. Null when the CLI refused, answered nothing or answered something that is not a title, and the thread
+ * keeps the words its opening turn seeded it with. Absent on an adapter whose CLI cannot answer a question without a
+ * thread.
  */
 export type SessionTitleMaker = (turn: TitleTurn, exec: (command: string) => Promise<string>) => Promise<string | null>;

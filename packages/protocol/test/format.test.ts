@@ -93,6 +93,7 @@ import {
   generatedTitle,
   GENERATED_TITLE_MAX,
   openingTitle,
+  storedTitleSource,
   titlePrompt,
   titleLine,
   toolActivityLine,
@@ -516,13 +517,19 @@ describe("openingTitle", () => {
 });
 
 describe("titlePrompt", () => {
-  it("asks for a short title in words and carries the opening turn and the reply, both cut so a brief never rides whole", () => {
-    const prompt = titlePrompt("a".repeat(900), "b".repeat(900));
+  it("asks for a short title in words from the opening turn alone, cut so a brief never rides whole", () => {
+    const prompt = titlePrompt("a".repeat(900));
     expect(prompt).toContain("3 to 6 words");
     expect(prompt).toContain("The opening turn:");
-    expect(prompt).toContain("The reply:");
+    expect(prompt).not.toContain("The reply:");
     expect(prompt).toContain(`${"a".repeat(600)}\u2026`);
     expect(prompt).not.toContain("a".repeat(601));
+  });
+
+  it("carries the reply too when the caller has one, cut the same way", () => {
+    const prompt = titlePrompt("a".repeat(900), "b".repeat(900));
+    expect(prompt).toContain("The reply:");
+    expect(prompt).toContain(`${"b".repeat(600)}\u2026`);
     expect(prompt).not.toContain("b".repeat(601));
   });
 });
@@ -535,12 +542,37 @@ describe("generatedTitle", () => {
     expect(generatedTitle("Thread titles through the harness.")).toBe("Thread titles through the harness");
   });
 
+  it("cuts an over-long one-line answer to its first words under the cap rather than refusing it", () => {
+    // 45 characters, the longest a claude-sonnet-5 answer ran when asked for 34 (measured over 80 threads).
+    const long = "Wire the sidebar rows to the daemon's streams";
+    expect(long).toHaveLength(45);
+    expect(generatedTitle(long)).toBe("Wire the sidebar rows to the daemon's");
+    expect(generatedTitle(long)!.length).toBeLessThanOrEqual(GENERATED_TITLE_MAX);
+    // A word that ends exactly at the cap is kept whole, and a comma left at the cut comes off with it.
+    expect(generatedTitle(`${"a".repeat(GENERATED_TITLE_MAX)} tail`)).toBe("a".repeat(GENERATED_TITLE_MAX));
+    expect(generatedTitle(`${"a".repeat(GENERATED_TITLE_MAX - 2)}, and then some`)).toBe("a".repeat(GENERATED_TITLE_MAX - 2));
+    expect(generatedTitle("a".repeat(GENERATED_TITLE_MAX))).toBe("a".repeat(GENERATED_TITLE_MAX));
+  });
+
   it("refuses an answer that is not a title, so the thread keeps the words its opening turn seeded it with", () => {
     expect(generatedTitle("Sure! Here is a title:\nThread titles through the harness")).toBeNull();
+    expect(generatedTitle("Thread titles\nthrough the harness")).toBeNull();
+    // One word longer than the cap has no boundary to cut at, and its head would be no title.
     expect(generatedTitle("a".repeat(GENERATED_TITLE_MAX + 1))).toBeNull();
-    expect(generatedTitle("a".repeat(GENERATED_TITLE_MAX))).toBe("a".repeat(GENERATED_TITLE_MAX));
     expect(generatedTitle("   ")).toBeNull();
     expect(generatedTitle('"."')).toBeNull();
+  });
+});
+
+describe("storedTitleSource", () => {
+  it("reads a store title that is the opening words, or their head, as the seed, and any other as a person's", () => {
+    const opening = "make a server, and its tests\nwith a health route";
+    expect(storedTitleSource("make a server, and its tests", opening)).toBe("seed");
+    expect(storedTitleSource("make a server", opening)).toBe("seed");
+    expect(storedTitleSource("  make   a server,  ", opening)).toBe("seed");
+    expect(storedTitleSource("Building the server", opening)).toBe("person");
+    expect(storedTitleSource("make a server, and its tests, please", opening)).toBe("person");
+    expect(storedTitleSource("make a server", undefined)).toBe("person");
   });
 });
 
