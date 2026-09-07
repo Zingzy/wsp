@@ -245,6 +245,7 @@ export const PREPARE_STEPS: readonly StageWords[] = [
 /** The seal, run from this terminal once the person says so. */
 export const SEAL_STEPS: readonly StageWords[] = [
   { stage: "snapshotting", start: "Taking the snapshot", end: "Snapshot taken", fail: "Snapshot failed" },
+  { stage: "promoting", start: "Saving it as a durable template", end: "Saved as a durable template", fail: "Saving the template failed" },
   { stage: "smoke-forking", start: "Booting a fork to prove it", end: "Fork booted and checked", fail: "The fork failed its check" },
   { stage: "sealed", start: "Sealing", end: "Sealed", fail: "Seal failed" },
 ];

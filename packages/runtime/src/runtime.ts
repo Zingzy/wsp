@@ -40,7 +40,10 @@ import {
   prepareBuilder,
   reap,
   refreshPreviewToken,
+  promoteVersion,
   sealGolden,
+  templateName,
+  templatesOf,
   applyDelta,
   applyGoldenImport,
   upgradeBuilder,
@@ -124,7 +127,8 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { templateHost } from "./host-id.js";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -677,10 +681,15 @@ async function setHostname(machine: Machine, name: string): Promise<{ host: stri
   return { host, refused };
 }
 
-export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" | "manifest"> {
+export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" | "manifest" | "hostId"> {
   /** Store key; several goldens can coexist. */
   name?: string;
 }
+
+/** One version the promote road visited: recorded with the template promoted for it, with how many templates
+ * already carried the name when the listing was given, or left as it was with the reason, a lost snapshot in the
+ * row's own words. */
+export type GoldenPromotion = { golden: string; version: number } & ({ templateId: string; sharing?: number } | { error: string });
 
 export interface GoldenUpgradeResult {
   manifest: GoldenManifest;
@@ -838,6 +847,10 @@ export interface Runtime {
     kill(builderId: string): Promise<void>;
     /** Moves the golden's head; new forks follow it, workspaces already forked keep their image. */
     rollback(version: number, name?: string): Promise<GoldenManifest>;
+    /** Makes every version of the golden durable: one with no template gets a fresh promotion of its snapshot and
+     * forks boot from it from then on; one whose snapshot the provider has lost is a row saying so and nothing is
+     * written. Undefined on a backend without templates; empty when every version already has one. */
+    promote(name?: string): Promise<GoldenPromotion[] | undefined>;
     /** Every project golden this runtime took, oldest first. */
     projects(): Promise<ProjectGolden[]>;
     /** Every snapshot on the account by count, size and monthly cost past the free GB, sized from the provider's
@@ -1127,6 +1140,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
   const hostId = opts.hostId ?? hostname();
+  /** What names this host's templates: the id's hex alone, in the class the provider's name field has taken. */
+  const templateHostId = templateHost(hostId);
 
   const vaultPathsOf = async (m: Machine): Promise<string[]> => {
     if (opts.vaultPaths) return opts.vaultPaths;
@@ -1527,9 +1542,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** Size is always explicit: a create that names none gets the provider's own
    * default (2048 MB on Solari), not the size the record and the rate assume. */
-  const forkSpec = (r: WorkspaceRecord, kind: MachineKind, override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
+  const forkSpec = (r: WorkspaceRecord, kind: MachineKind, image: ReturnType<typeof goldenImage>["spec"], override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
+    ...image,
     kind,
-    fromSnapshot: r.golden,
     cpu: override?.cpu ?? r.size.cpu,
     memMb: override?.memMb ?? r.size.memMb,
     ...(r.spec.envs !== undefined || override?.envs !== undefined
@@ -1590,6 +1605,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       get: id => backend.get(id),
       list: labels => backend.list(labels),
       deleteSnapshot: id => backend.deleteSnapshot(id),
+      // The seal promotes through this handle, so the template calls ride along when the provider has them.
+      ...(backend.promoteSnapshot !== undefined ? { promoteSnapshot: backend.promoteSnapshot.bind(backend) } : {}),
+      ...(backend.getTemplate !== undefined ? { getTemplate: backend.getTemplate.bind(backend) } : {}),
+      ...(backend.listTemplates !== undefined ? { listTemplates: backend.listTemplates.bind(backend) } : {}),
+      ...(backend.deleteTemplate !== undefined ? { deleteTemplate: backend.deleteTemplate.bind(backend) } : {}),
       create: async spec => {
         const m = await keyedCreate(purpose, spec);
         inflight.add(m.id);
@@ -1643,8 +1663,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * versions sealed before it was recorded were all sandbox. */
   const fork = (record: WorkspaceRecord, bind: (machine: Machine) => void, override?: WorkspaceSpec, report?: StageReport): Promise<Machine> =>
     claiming(`workspace/${record.id}`, async b => {
-      const golden = (await imageOf(record.golden)).version;
-      const spec = forkSpec(record, golden?.kind ?? "sandbox", override);
+      const image = await imageOf(record.golden);
+      const golden = image.version;
+      // A project golden's snapshot is the image; only a version's own snapshot may stand behind a template.
+      const spec = forkSpec(record, golden?.kind ?? "sandbox", goldenImage(image.project === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, override);
       const machine = await b.create(spec);
       // Named by its record before the claim is released, so no sweep sees it unclaimed.
       bind(machine);
@@ -3102,6 +3124,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(opts.snapshotRetryMs !== undefined ? { snapshotRetryMs: opts.snapshotRetryMs } : {}),
           ...(logins !== undefined ? { logins } : {}),
           keepBuilder: keep,
+          name,
+          hostId: templateHostId,
         }),
       );
       await store.put(GOLDENS, name, result.manifest);
@@ -3127,6 +3151,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
   };
 
+  /** Deletes what a version's forks boot from. The template goes first: the provider refuses to delete a snapshot
+   * while a template stands on it, and a template already gone is no failure. */
+  const dropImage = async (v: GoldenVersion): Promise<void> => {
+    if (v.templateId !== undefined) {
+      await templatesOf(backend)?.delete(v.templateId).catch((e: unknown) => {
+        if (!isMissing(e)) throw e;
+      });
+    }
+    await backend.deleteSnapshot(v.snapshotId);
+  };
+
   const golden: Runtime["golden"] = {
     async build(o) {
       await ready();
@@ -3137,6 +3172,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         buildGolden({
           ...build,
           backend: b,
+          name: key,
+          hostId: templateHostId,
           labels: { ...build.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
         }),
@@ -3376,24 +3413,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let manifest = sealed.manifest;
       let previousDropped = false;
       let builderKept = sealed.builderKept;
+      // A version with workspaces still on it stays for them: a rebuild boots them from its image, which the provider
+      // would delete under a template's forks (they hold no dependency on it).
+      const standing = forkedFrom(head.snapshotId);
       if (o.keepPrevious === false) {
-        // A snapshot with live forks under it cannot be deleted (409 on Solari): the builder forked from it goes
-        // first, window or not; a version with workspaces still on it stays for them.
-        if (road === "fork" && builderKept) {
-          graceTimers.get(entry.record.id)?.();
-          graceTimers.delete(entry.record.id);
-          await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
-          await forgetBuilder(entry.record.id);
-          builderKept = false;
-        }
-        try {
-          await backend.deleteSnapshot(head.snapshotId);
-          manifest = { ...manifest, versions: manifest.versions.filter(v => v.version !== head.version) };
-          await store.put(GOLDENS, name, manifest);
-          await store.delete(GOLDEN_RECIPES, recipeKey(name, head.version));
-          previousDropped = true;
-        } catch (e) {
-          console.warn(`golden ${name} v${head.version} kept: its snapshot was not deleted (${e instanceof Error ? e.message : String(e)})`);
+        if (standing.length > 0) {
+          console.warn(`golden ${name} v${head.version} kept: ${standing.join(", ")} still on it`);
+        } else {
+          // A snapshot with live forks under it cannot be deleted (409 on Solari): the builder forked from it goes
+          // first, window or not.
+          if (road === "fork" && builderKept) {
+            graceTimers.get(entry.record.id)?.();
+            graceTimers.delete(entry.record.id);
+            await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
+            await forgetBuilder(entry.record.id);
+            builderKept = false;
+          }
+          try {
+            await dropImage(head);
+            manifest = { ...manifest, versions: manifest.versions.filter(v => v.version !== head.version) };
+            await store.put(GOLDENS, name, manifest);
+            await store.delete(GOLDEN_RECIPES, recipeKey(name, head.version));
+            previousDropped = true;
+          } catch (e) {
+            console.warn(`golden ${name} v${head.version} kept: its snapshot was not deleted (${e instanceof Error ? e.message : String(e)})`);
+          }
         }
       }
       return { manifest, version: sealed.version, road, previousDropped, builderKept };
@@ -3448,7 +3492,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (plan === undefined) return { dropped, failed };
       for (const v of plan.drop) {
         try {
-          await backend.deleteSnapshot(v.snapshotId);
+          await dropImage(v);
         } catch (e) {
           // A snapshot the provider already lost is gone either way; its version goes with it.
           if (!isMissing(e)) {
@@ -3477,6 +3521,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       await store.put(GOLDENS, key, next);
       return next;
+    },
+
+    async promote(name) {
+      await ready();
+      const templates = templatesOf(backend);
+      if (templates === undefined) return undefined;
+      const key = name ?? "default";
+      const manifest = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
+      const rows: GoldenPromotion[] = [];
+      for (const v of manifest?.versions ?? []) {
+        if (v.templateId !== undefined) continue;
+        try {
+          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, templateName(templateHostId, key, v.version));
+          const current = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
+          if (current === undefined) throw new Error(`golden ${key} was dropped while its versions were being promoted`);
+          await store.put(GOLDENS, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });
+          rows.push({ golden: key, version: v.version, templateId, ...(sharing !== undefined ? { sharing } : {}) });
+        } catch (e) {
+          rows.push({ golden: key, version: v.version, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      return rows;
     },
 
     async projects() {

@@ -743,7 +743,7 @@ export function behindGoldenLine(on: number, head: number): string {
 
 /** The states a lineage row can be in, each as the muted mono word the row's marks column shows: state is text there,
  * never a badge, and a missing tool's outcome indexes this table as it is. */
-export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" } as const;
+export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", volatile: "volatile" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
 
 /** What is said for each folder git named no branch for, by door: the word the composer's branch slot and the diff
@@ -796,6 +796,42 @@ export function snapshotFailedLine(attempts: number, answer: ProviderAnswer, bui
   if (builderState === "unread") return `${head} and could not be read about the builder (${readError ?? "no reason given"})`;
   return `${head} while the builder read ${builderState}`;
 }
+
+/** The promoting stage's line for one read of the template: what the provider says it is, and whether the seal asks
+ * again. Ready is the last line the stage writes. */
+export function templateStatusLine(templateId: string, status: string): string {
+  return status === "ready" ? `${templateId} is ready` : `${templateId} is ${status}; asking again`;
+}
+
+/** The seal's failure line when the provider marks the template failed: forks would have nothing to boot from. */
+export function templateFailedLine(templateId: string, reason: string | undefined): string {
+  return `the provider failed the template ${templateId}: ${reason ?? "no reason given"}`;
+}
+
+/** The seal's failure line when the template never read ready inside the wait. */
+export function templateWaitedLine(templateId: string, status: string, waitedMs: number): string {
+  return `the template ${templateId} still reads ${status} after ${fmtDuration(waitedMs)}`;
+}
+
+/** The doctor's line per version it made durable: the golden and version, the template it promoted, and when other
+ * templates already carry the name (another host's, or a run that recorded nothing), how many; none when the count
+ * is zero or the listing was not given. */
+export function templateRecordedLine(golden: string, version: number, templateId: string, sharing: number | undefined): string {
+  const head = `golden ${golden} v${version}: template ${templateId} promoted and recorded`;
+  return sharing === undefined || sharing === 0 ? head : `${head}; ${sharing} other ${sharing === 1 ? "template carries" : "templates carry"} its name`;
+}
+
+/** The doctor's line per version it could not make durable and why: a lost snapshot in the provider's own words is
+ * left to the doctor's rebuild road below it. */
+export function templateSkippedLine(golden: string, version: number, reason: string): string {
+  return `golden ${golden} v${version}: no template recorded, ${reason}`;
+}
+
+/** What a version's row says when the provider answers 404 for its snapshot: the vanish the templates exist to outlive. */
+export const SNAPSHOT_GONE_REASON = "its snapshot is gone at the provider";
+
+/** The doctor's line on a backend whose capabilities lack templates: nothing to promote, nothing wrong. */
+export const NO_TEMPLATES_LINE = "this backend has no templates; goldens stay as snapshots";
 
 /** The one sentence every road that leaves a builder running says: its id, what it costs, how to attach to it
  * again, and that the sweep ends it. */

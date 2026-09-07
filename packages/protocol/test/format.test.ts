@@ -19,6 +19,12 @@ import {
   foreignFlagLine,
   unknownAgentLine,
   LINEAGE_MARKS,
+  NO_TEMPLATES_LINE,
+  templateFailedLine,
+  templateRecordedLine,
+  templateSkippedLine,
+  templateStatusLine,
+  templateWaitedLine,
   REPO_STATE_WORDS,
   missingToolRow,
   behindGoldenLine,
@@ -719,11 +725,33 @@ describe("LINEAGE_MARKS", () => {
   it("names every outcome a missing tool can carry and every state a lineage row shows, each as one short lowercase word or two", () => {
     const outcomes: GoldenMissingTool["outcome"][] = ["skipped", "failed"];
     for (const o of outcomes) expect(LINEAGE_MARKS[o]).toBe(o);
-    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" });
+    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", volatile: "volatile" });
     for (const word of Object.values(LINEAGE_MARKS)) {
       expect(word).toMatch(/^[a-z]+( [a-z]+)?$/);
       expect(word.length).toBeLessThanOrEqual(9);
     }
+  });
+});
+
+describe("template words", () => {
+  it("says what the provider reads the template as and whether the seal asks again; ready is final", () => {
+    expect(templateStatusLine("tpl_a", "building")).toBe("tpl_a is building; asking again");
+    expect(templateStatusLine("tpl_a", "ready")).toBe("tpl_a is ready");
+  });
+
+  it("names a failed template with the provider's reason, or that none was given, and a wait that ran out with the last status and the time", () => {
+    expect(templateFailedLine("tpl_a", "restore copy failed")).toBe("the provider failed the template tpl_a: restore copy failed");
+    expect(templateFailedLine("tpl_a", undefined)).toBe("the provider failed the template tpl_a: no reason given");
+    expect(templateWaitedLine("tpl_a", "building", 300_000)).toBe("the template tpl_a still reads building after 5m");
+  });
+
+  it("the doctor's line per version names the template it promoted and, when other templates already carry the name, how many", () => {
+    expect(templateRecordedLine("default", 2, "tpl_0f1e", 0)).toBe("golden default v2: template tpl_0f1e promoted and recorded");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", 1)).toBe("golden default v1: template tpl_0f1e promoted and recorded; 1 other template carries its name");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", 2)).toBe("golden default v1: template tpl_0f1e promoted and recorded; 2 other templates carry its name");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", undefined)).toBe("golden default v1: template tpl_0f1e promoted and recorded");
+    expect(templateSkippedLine("default", 1, "its snapshot is gone at the provider")).toBe("golden default v1: no template recorded, its snapshot is gone at the provider");
+    expect(NO_TEMPLATES_LINE).toBe("this backend has no templates; goldens stay as snapshots");
   });
 });
 

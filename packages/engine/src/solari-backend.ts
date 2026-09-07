@@ -1,7 +1,7 @@
 import type { Capabilities } from "@wsp/protocol";
 import { backoffMs, classify, isMissing, shouldRetry, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
-import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing } from "./machine.js";
+import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { previewTokenExpiry } from "./preview.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -24,6 +24,16 @@ interface SandboxView {
   diskGb?: number;
   createdAt?: string;
 }
+
+interface TemplateView {
+  templateId: string;
+  name: string;
+  status: TemplateRow["status"];
+  /** Null, not absent, on a custom template that has not failed (the reference's own listing example). */
+  error?: string | null;
+}
+
+const templateRowOf = (t: TemplateView): TemplateRow => ({ id: t.templateId, name: t.name, status: t.status, ...(t.error !== undefined && t.error !== null ? { error: t.error } : {}) });
 
 const STATE_MAP: Record<SandboxView["state"], MachineState> = {
   starting: "starting",
@@ -67,6 +77,7 @@ export class SolariBackend implements MachineBackend {
     containers: false, // guest kernel 6.6.30 lacks overlayfs and netfilter: dockerd falls back to vfs with no bridge and runc fails (measured)
     callbackRelay: true, // the daemon link rides previewUrls
     snapshotListing: true,
+    templates: true,
     sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: rateUsdPerHour(size) })),
   };
 
@@ -182,6 +193,25 @@ export class SolariBackend implements MachineBackend {
 
   async deleteSnapshot(id: string): Promise<void> {
     await this.request("DELETE", `/snapshots/${encodeURIComponent(id)}`);
+  }
+
+  async promoteSnapshot(id: string, name: string): Promise<string> {
+    const res = await this.request<{ templateId: string }>("POST", `/snapshots/${encodeURIComponent(id)}/promote`, { name });
+    return res.templateId;
+  }
+
+  async getTemplate(id: string): Promise<TemplateRow> {
+    return templateRowOf(await this.request<TemplateView>("GET", `/templates/${encodeURIComponent(id)}`));
+  }
+
+  async listTemplates(): Promise<TemplateRow[]> {
+    const page = await this.request<{ templates?: unknown }>("GET", "/templates");
+    if (!Array.isArray(page.templates)) throw new Error("GET /templates answered without a templates array");
+    return (page.templates as TemplateView[]).map(templateRowOf);
+  }
+
+  async deleteTemplate(id: string): Promise<void> {
+    await this.request("DELETE", `/templates/${encodeURIComponent(id)}`);
   }
 
   async listSnapshots(): Promise<SnapshotRow[]> {

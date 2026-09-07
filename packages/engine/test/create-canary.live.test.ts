@@ -153,6 +153,7 @@ describe.runIf(LIVE)("create canary, live", () => {
     const { result, create } = await posted(() =>
       sealGolden(builder, {
         backend,
+        hostId: "live",
         smoke: "true",
         ...SIZE,
         envs: ENVS,

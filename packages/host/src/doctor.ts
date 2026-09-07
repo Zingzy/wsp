@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, type Machine } from "@wsp/engine";
-import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ } from "@wsp/protocol";
+import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_TEMPLATES_LINE, templateRecordedLine, templateSkippedLine } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir } from "./assets.js";
@@ -417,6 +417,26 @@ export function claudeEnvs(anthropicKey?: string, golden?: Pick<GoldenVersion, "
   };
 }
 
+/** The doctor's first check: every version of the golden is made durable, so a gateway restart at the provider
+ * cannot take the image a person built. Each version is a line, recorded or not; the note is the counts. It never
+ * fails the doctor: a version whose snapshot is gone is one line here and the rebuild road below deals with it. */
+export async function promoteGoldens(rt: Runtime, io: Pick<CliIO, "log">): Promise<string> {
+  let rows: Awaited<ReturnType<Runtime["golden"]["promote"]>>;
+  try {
+    rows = await rt.golden.promote();
+  } catch (e) {
+    return `not made durable: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  if (rows === undefined) return NO_TEMPLATES_LINE;
+  for (const r of rows) io.log("error" in r ? templateSkippedLine(r.golden, r.version, r.error) : templateRecordedLine(r.golden, r.version, r.templateId, r.sharing));
+  if (rows.length === 0) return (await rt.golden.get()) === undefined ? "no golden to make durable" : "every version already has a template";
+  const counts = [
+    [rows.filter(r => !("error" in r)).length, "promoted"],
+    [rows.filter(r => "error" in r).length, "not made durable"],
+  ] as const;
+  return counts.filter(([n]) => n > 0).map(([n, word]) => `${n} ${word}`).join(", ");
+}
+
 export interface DoctorOptions {
   /** Envs baked into golden builds and forks (claude credentials). */
   envs?: Record<string, string>;
@@ -445,6 +465,8 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
 
   try {
     io.log("doctor: proving the reach loop against one live machine");
+
+    await timings.time("durable goldens", () => promoteGoldens(rt, io), note => note);
 
     let golden = "";
     const head = goldenHead(await rt.golden.get());

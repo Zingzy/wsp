@@ -25,7 +25,7 @@ describe.runIf(LIVE)("vault (live: P8 replay, cross-machine claude resume)", () 
 
   it("moves a session between machines: export cfg, fresh fork, --resume recalls", { timeout: 600_000 }, async () => {
     const { manifest, version } = await buildGolden({
-      backend, baseTemplate: "base", cpu: 2, memMb: 4096,
+      backend, hostId: "live", baseTemplate: "base", cpu: 2, memMb: 4096,
       envs: claudeEnvs(env), labels: TEST_LABEL,
       setup: GOLDEN_SETUP, smoke: "claude --version",
     });

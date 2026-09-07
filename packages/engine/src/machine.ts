@@ -94,6 +94,15 @@ export interface SnapshotRow {
   parent?: string | null;
 }
 
+/** One template as the provider reports it: a promoted snapshot reads ready at once, a built one moves from building
+ * to ready or failed, with the provider's reason only on failed. */
+export interface TemplateRow {
+  id: string;
+  name: string;
+  status: "building" | "ready" | "failed";
+  error?: string;
+}
+
 /** How the provider bills snapshot storage: the free GB shared by every snapshot on the account, the price of
  * each GB-month past them, and the day billing starts. */
 export interface SnapshotStoragePricing {
@@ -120,4 +129,12 @@ export interface MachineBackend {
   deleteSnapshot(id: string): Promise<void>;
   /** Optional: only backends whose capabilities include snapshotListing have it. Every snapshot on the account, with its size. */
   listSnapshots?(): Promise<SnapshotRow[]>;
+  /** Optional, the four together: only backends whose capabilities include templates have them. Promotes a snapshot
+   * to a durable template under the name and answers the template's id; the snapshot stays and cannot be deleted
+   * while the template exists. */
+  promoteSnapshot?(snapshotId: string, name: string): Promise<string>;
+  getTemplate?(id: string): Promise<TemplateRow>;
+  /** Every template the account can boot from, the provider's built-ins included. */
+  listTemplates?(): Promise<TemplateRow[]>;
+  deleteTemplate?(id: string): Promise<void>;
 }
