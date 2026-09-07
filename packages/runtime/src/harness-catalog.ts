@@ -3,10 +3,10 @@
 // composer's pickers offer only values the CLI will take. This table is the
 // fallback: an adapter that probes reads its lists from the binary on the
 // workspace's machine when it answers (catalogFromProbe), and the table lends
-// it the labels and descriptions the binary has no words for. Codex, Gemini
-// CLI, OpenCode, Pi and Hermes have no adapter yet; their catalogs name the
-// flags their CLIs document so the pickers are right the day one lands. A
-// list is empty where the CLI has no such flag or takes open values.
+// it the labels and descriptions the binary has no words for. Gemini CLI,
+// OpenCode, Pi and Hermes have no adapter yet; their catalogs name the flags
+// their CLIs document so the pickers are right the day one lands. A list is
+// empty where the CLI has no such flag or takes open values.
 import type { HarnessCatalog, HarnessModel, HarnessOption } from "@wsp/protocol";
 
 /** What an adapter reads off its binary: the values it takes, without the words the table lends them. */
@@ -77,7 +77,7 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     permissionModes: [
       option("read-only", "Read only", "No edits, no commands that write"),
       option("workspace-write", "Workspace write", "Edits and commands inside the working folder"),
-      option("danger-full-access", "Full access", "No sandbox"),
+      { ...option("danger-full-access", "Full access", "No sandbox, as every turn on a throwaway machine runs"), isDefault: true },
     ],
   }),
   fromTable({

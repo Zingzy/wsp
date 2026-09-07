@@ -4,6 +4,7 @@
 // install writes cannot drift apart.
 /// <reference path="./markdown.d.ts" />
 import text from "../../../skills/wsp/SKILL.md";
+import { THREAD_AGENTS } from "./thread-agents.js";
 
 /** The skill's folder name under every agent's skills directory, and its frontmatter name. */
 export const SKILL_NAME = "wsp";
@@ -34,9 +35,15 @@ function paragraph(lines: readonly string[], from: number): string {
   return body.join(" ");
 }
 
-/** The MCP server's instructions: the skill's opening paragraph, then the setup walkthrough's, then the line that
- * points back at the skill and the command line. The frontmatter and the title line are not part of it. */
-export function instructionsOf(skill: string): string {
+/** The agents a thread runs on, from the adapter registry, so the instructions promise no agent the host refuses. */
+export function agentsLine(agents: readonly string[]): string {
+  return `The agents this host runs threads on, the only values thread_new and fork take as agent: ${agents.join(", ")}.`;
+}
+
+/** The MCP server's instructions: the skill's opening paragraph, then the setup walkthrough's, the agents the host
+ * has adapters for, and the line that points back at the skill and the command line. The frontmatter and the title
+ * line are not part of it. */
+export function instructionsOf(skill: string, agents: readonly string[]): string {
   const lines = skill.split("\n");
   let start = 0;
   if (lines[0] === "---") {
@@ -50,7 +57,7 @@ export function instructionsOf(skill: string): string {
   if (heading === -1) throw new Error(`the skill has no ${SETUP_HEADING} section`);
   const walkthrough = paragraph(lines, heading + 1);
   if (walkthrough === "") throw new Error(`${SETUP_HEADING} has no opening paragraph`);
-  return [opening, walkthrough, BEYOND_THE_TOOLS].join(" ");
+  return [opening, walkthrough, agentsLine(agents), BEYOND_THE_TOOLS].join(" ");
 }
 
-export const INSTRUCTIONS: string = instructionsOf(WSP_SKILL);
+export const INSTRUCTIONS: string = instructionsOf(WSP_SKILL, THREAD_AGENTS);

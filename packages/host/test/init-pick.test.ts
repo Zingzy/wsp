@@ -62,7 +62,8 @@ describe("the agents screen", () => {
     ]);
     // No groups on this screen, and nothing locked: the six are one list.
     expect(items.every(i => i.group === undefined && i.lock === undefined)).toBe(true);
-    expect(items.find(i => i.label === "Codex")!.detail[0]).toBe("installs, but wsp cannot run its threads yet");
+    expect(items.find(i => i.label === "Codex")!.detail[0]).not.toBe("installs, but wsp cannot run its threads yet");
+    expect(items.find(i => i.label === "OpenCode")!.detail[0]).toBe("installs, but wsp cannot run its threads yet");
     expect(items.find(i => i.label === "Claude Code")!.detail).toEqual(["on this Mac; its config (39.1 KB) comes along", "about 208.0 MB installed on the machine (measured 2026-09-05)"]);
   });
 
@@ -283,21 +284,25 @@ describe("the agents screen drawn", () => {
     expect(t).toContain(`┃  ${AGENTS_TOP}`);
     expect(t).toContain(`┃  ${LATER_LINE}`);
     expect(t).toMatch(/● Claude Code\s+used\s+used here, 1 session\s+208\.0 MB\n/);
-    expect(t).toMatch(/○ Codex\s+used\s+used here, 1 session\s+455\.0 MB\n/);
+    expect(t).toMatch(/● Codex\s+used\s+used here, 1 session\s+455\.0 MB\n/);
     expect(t).toMatch(/○ OpenCode\s+installed\s+installed here, never used\s+673\.0 MB\n/);
     expect(t).toMatch(/○ Hermes Agent\s+catalog\s+not installed here/);
-    expect(t).toContain("On: 1 agent, 208.0 MB");
-    // Claude Code, the one ticked, is the first row and the cursor starts on it, so its detail has no note yet.
-    expect(t.indexOf("● Claude Code")).toBeLessThan(t.indexOf("○ Codex"));
+    expect(t).toContain("On: 2 agents, 663.0 MB");
+    // The ticked two come first, the heavy one on top as the table orders them, and the cursor starts there, so no
+    // frame carries a note yet.
+    expect(t.indexOf("● Codex")).toBeLessThan(t.indexOf("● Claude Code"));
+    expect(t.indexOf("● Claude Code")).toBeLessThan(t.indexOf("○ OpenCode"));
     expect(t).not.toContain("installs, but wsp cannot run its threads yet");
-    // Down lands on Codex, and only the frame drawn after the keypress carries its note.
+    // Down twice lands on OpenCode, and only the frame drawn after that keypress carries its note.
+    o.input.write(KEY.down);
+    await settle();
     const before = o.raw().length;
     o.input.write(KEY.down);
     await settle();
     expect(stripVTControlCharacters(o.raw().slice(before))).toContain("installs, but wsp cannot run its threads yet");
     o.input.write(KEY.enter);
     const r = await p;
-    expect(r.kind === "next" && [...r.ticks]).toEqual(["claude"]);
+    expect(r.kind === "next" && [...r.ticks].sort()).toEqual(["claude", "codex"]);
   });
 });
 

@@ -2158,7 +2158,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const adapterFor = (entry: LiveWorkspace, named?: string): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
-    if (!factory) throw new Error(`no adapter registered for harness "${harness}"`);
+    if (!factory) throw new Error(`no adapter registered for harness "${harness}"; agents on this host: ${Object.keys(adapters).join(", ") || "none"}`);
     return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id }) };
   };
 

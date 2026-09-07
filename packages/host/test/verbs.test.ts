@@ -348,7 +348,7 @@ describe("wsp verbs over the host", () => {
     expect((await rt.sessions.list())[0]).toMatchObject({ harness: "claude", startedBy: "cli" });
     const refused = await run("thread", "new", "--in", "alpha", "--agent", "gemini", "hello");
     expect(refused.code).toBe(1);
-    expect(refused.io.errors).toEqual(['wsp thread new: no adapter registered for harness "gemini"']);
+    expect(refused.io.errors).toEqual(['wsp thread new: no adapter registered for harness "gemini"; agents on this host: claude, codex']);
   });
 
   it("a failed turn exits 1 with the error on stderr and no last message", async () => {

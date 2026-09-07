@@ -113,6 +113,22 @@ export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: numbe
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 
+/** The one line a codex turn fails with when its provider wants an OpenAI login the machine has not got: the CLI
+ * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. */
+export function codexNotSignedInLine(login: string): string {
+  return `Codex is not signed in on this machine; run ${login} there`;
+}
+
+/** The line when codex's provider reads its key from an environment variable the machine does not set. */
+export function codexMissingEnvLine(name: string): string {
+  return `Codex's model provider reads its key from the environment variable ${name}, which is not set on this machine`;
+}
+
+/** The line when codex kept reconnecting to its provider and nothing ever answered: the CLI itself never gives up. */
+export function codexReconnectLine(elapsedMs: number): string {
+  return `stopped after ${fmtDuration(elapsedMs, "clock")} of Codex reconnecting to its model provider with no answer`;
+}
+
 /** The machine row's line while the runtime replaces a daemon older than this wsp, and the line it shows instead
  * when the replacement failed. A person is never told the helper is called a daemon: they did not install it and
  * cannot run it, so its name would only be one more thing to know. Neither line carries the reason a deploy gave:
