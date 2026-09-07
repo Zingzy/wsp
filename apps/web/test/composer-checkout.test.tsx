@@ -151,7 +151,12 @@ async function setup(api: Api, threadId: string | null = null) {
 
 const row = () => document.querySelector<HTMLElement>("[data-composer-checkout]");
 const folder = () => document.querySelector<HTMLElement>("[data-composer-folder]")?.dataset["composerFolder"];
-const branch = () => document.querySelector<HTMLElement>("[data-composer-branch]")?.dataset["composerBranch"];
+const branchSlot = () => document.querySelector<HTMLElement>("[data-composer-branch]");
+const branch = () => branchSlot()?.dataset["composerBranch"];
+const BRANCH_NOTE = "The folder's branch as the machine reports it. Nothing here switches it; check out another branch from the terminal.";
+/** The height pair the folder label and the size-xs picker button carry; an empty slot with it keeps the row from moving. */
+const SLOT_HEIGHT = ["h-7", "sm:h-6"];
+const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, [DAEMON_ROOT]);
 const menuEntry = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-entry="${path}"]`);
 const menuPick = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-pick="${path}"]`);
@@ -187,6 +192,47 @@ describe("composer checkout row", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ prompt: "build it here", cwd: "/root/app" });
+  });
+
+  it("names a repository's branch with the glyph beside it and says on hover that it is read, not switched", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    const { api } = fixtureApi();
+    await setup(api);
+    await waitFor(() => expect(branch()).toBe("feature/panes"));
+    const slot = branchSlot()!;
+    expect(slot.querySelector("svg")).not.toBeNull();
+    expect(slot.textContent).toBe("feature/panes");
+    expect(screen.getByText(BRANCH_NOTE).getAttribute("role")).toBe("tooltip");
+  });
+
+  it("leaves the branch slot empty, no glyph and no words, while the daemon could not read the branch", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": () => new Error("outside the browsable roots") });
+    provideDaemonWire(WS, wire);
+    const { api } = fixtureApi();
+    await setup(api);
+    await waitFor(() => expect(wire.calls.some(([op]) => op === "git.status")).toBe(true));
+    await settle();
+    const slot = branchSlot()!;
+    expect(branch()).toBe("unknown");
+    expect(slot.querySelector("svg")).toBeNull();
+    expect(slot.textContent).toBe("");
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
+    expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
+    expect(folder()).toBe("/root");
+  });
+
+  it("leaves the branch slot empty for a folder outside any repository", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": () => Object.assign(new Error("not a git repository"), { code: "not-a-git-repo" }) });
+    provideDaemonWire(WS, wire);
+    const { api } = fixtureApi();
+    await setup(api);
+    await waitFor(() => expect(branch()).toBe("none"));
+    const slot = branchSlot()!;
+    expect(slot.querySelector("svg")).toBeNull();
+    expect(slot.textContent).toBe("");
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
+    expect(screen.queryByText("no repository")).toBeNull();
+    expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
   });
 
   it("offers home and the imported project as roots, and browses and picks inside the project", async () => {

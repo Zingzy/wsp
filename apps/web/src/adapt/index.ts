@@ -41,4 +41,5 @@ export { deriveSidebarProjects, workspaceIndicator, threadIndicator, turnWait, t
 export { terminalPaneState, terminalPaneTitle, terminalPaneHints, terminalEmptyLine, terminalInputRefusal, type TerminalPaneState, type TerminalPaneInput } from "./terminal-pane.js";
 export { toTerminalAttachEvent, isPtyEvent } from "./terminal.js";
 export { catalogFor, catalogFromHarness } from "./catalog.js";
+export { repoAbsence } from "./git.js";
 export { HARNESS_CLIENTS, harnessClient, type HarnessClient, type HarnessGlyph } from "./harnesses.js";
