@@ -47,7 +47,7 @@ type LoadState =
   | { kind: "error"; message: string; last: GitDiffReply | null };
 
 /** The repository git resolved for one folder: its top level and branch, or the word that there is none. */
-type RepoState = { kind: "unknown" } | { kind: "repo"; root: string; branch: string } | { kind: "none" };
+type RepoState = { kind: "unknown" } | { kind: "repo"; root: string; branch: string } | { kind: "none" } | { kind: "refused" };
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 

@@ -10,7 +10,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, createContext, useContext, useState, type ReactElement, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import { REPO_STATE_WORDS, type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -77,6 +77,7 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
+import type { TerminalWire } from "../src/terminal/link.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
@@ -205,12 +206,42 @@ describe("composer checkout row", () => {
     expect(screen.getByText(BRANCH_NOTE).getAttribute("role")).toBe("tooltip");
   });
 
-  it("leaves the branch slot empty, no glyph and no words, while the daemon could not read the branch", async () => {
-    const wire = fakeWire({ "fs.list": LISTING, "git.status": () => new Error("outside the browsable roots") });
+  it("says in the branch slot that the machine could not read the folder's git state, before the first message, and nothing shifts", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" }) });
     provideDaemonWire(WS, wire);
     const { api } = fixtureApi();
     await setup(api);
-    await waitFor(() => expect(wire.calls.some(([op]) => op === "git.status")).toBe(true));
+    await waitFor(() => expect(branch()).toBe("refused"));
+    expect(screen.getByRole("button", { name: "Working folder: /root" })).toBeTruthy();
+    const slot = branchSlot()!;
+    expect(slot.querySelector("svg")).toBeNull();
+    expect(slot.textContent).toBe(REPO_STATE_WORDS.refused.word);
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(["font-mono", "text-muted-foreground/70"]));
+    expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
+    expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
+    expect(folder()).toBe("/root");
+  });
+
+  it("says the same word beside the locked label once a turn exists: a dropped wire is a read that failed too", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": () => new Error("socket closed") }));
+    const { api } = fixtureApi(CHAT_STREAM.slice());
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    expect(row()?.dataset["pickable"]).toBeUndefined();
+    await waitFor(() => expect(branch()).toBe("refused"));
+    const slot = branchSlot()!;
+    expect(slot.textContent).toBe(REPO_STATE_WORDS.refused.word);
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
+    expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
+  });
+
+  it("leaves the branch slot empty, no glyph and no words, while the ask is still out", async () => {
+    const inner = fakeWire({ "fs.list": LISTING });
+    const wire: TerminalWire = { request: (op, params) => (op === "git.status" ? new Promise(() => {}) : inner.request(op, params)) };
+    provideDaemonWire(WS, wire);
+    const { api } = fixtureApi();
+    await setup(api);
     await settle();
     const slot = branchSlot()!;
     expect(branch()).toBe("unknown");
@@ -218,6 +249,7 @@ describe("composer checkout row", () => {
     expect(slot.textContent).toBe("");
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
     expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
+    expect(screen.queryByText(REPO_STATE_WORDS.refused.note)).toBeNull();
     expect(folder()).toBe("/root");
   });
 
@@ -233,6 +265,7 @@ describe("composer checkout row", () => {
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
     expect(screen.queryByText("no repository")).toBeNull();
     expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
+    expect(screen.queryByText(REPO_STATE_WORDS.refused.note)).toBeNull();
   });
 
   it("offers home and the imported project as roots, and browses and picks inside the project", async () => {
