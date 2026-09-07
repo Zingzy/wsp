@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Installing the MCP server into a local agent's config: the command that
 // runs this same wsp against this state file, placed by the catalog entry's
-// own config module under the person's home.
+// own config module under the person's home, the skill beside it, and wsp's
+// own section in the instructions the folder the command ran in keeps.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mcpServerCommandLine } from "@wsp/protocol";
+import { CATALOG_AGENTS } from "@wsp/catalog";
+import { mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, cli, type CliIO } from "../src/cli.js";
-import { installEach, installLines, installMcp, mcpServerSpec, runningWsp, type RunningWsp } from "../src/mcp-install.js";
-import { WSP_SKILL } from "../src/skill.js";
+import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
+import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, removeLines, runningWsp, type RunningWsp } from "../src/mcp-install.js";
+import { SKILL_NAME, WSP_SKILL } from "../src/skill.js";
 import { VERSION } from "../src/version.js";
 
 /** wsp run from a checkout: node given the bundle's path, and no wsp on PATH is that file. */
@@ -33,15 +36,21 @@ function io(): CliIO & { lines: string[]; errors: string[] } {
 describe("installing the MCP server for a local agent", () => {
   let home: string;
   let statePath: string;
+  /** The folder the command line runs in, which is the project whose instructions take wsp's section. */
+  let project: string;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "wsp-mcp-home-"));
     statePath = join(home, ".wsp", "state.json");
+    project = mkdtempSync(join(tmpdir(), "wsp-mcp-project-"));
     vi.stubEnv("HOME", home);
+    vi.spyOn(process, "cwd").mockReturnValue(project);
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
   });
 
   it("run out of npx's cache, the server's command is the npx beside this node with this version pinned, never the cache path, whatever wsp PATH holds; bare npx only when none sits there", () => {
@@ -156,8 +165,8 @@ describe("installing the MCP server for a local agent", () => {
     expect(JSON.parse(out.lines[0]!)).toEqual({
       server: mcpServerSpec(statePath),
       installed: [
-        { id: "claude", agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" },
-        { id: "codex", agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false, skill: "~/.codex/skills/wsp/SKILL.md" },
+        { id: "claude", agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md", docs: [join(project, "AGENTS.md"), join(project, "CLAUDE.md")] },
+        { id: "codex", agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false, skill: "~/.codex/skills/wsp/SKILL.md", docs: [join(project, "AGENTS.md")] },
       ],
       failures: [],
     });
@@ -194,7 +203,7 @@ describe("installing the MCP server for a local agent", () => {
     expect(agented.errors[0]).toContain("Unknown option '--agent'");
     const help = io();
     expect(await cli(["mcp", "--help", "--state", statePath], help)).toBe(0);
-    expect(help.lines).toEqual(["usage: wsp mcp\n       wsp mcp install --agent <id> [--agent <id>] [--json]   (claude, codex, gemini, opencode)"]);
+    expect(help.lines).toEqual(["usage: wsp mcp\n       wsp mcp install --agent <id> [--agent <id>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
     const stray = io();
     expect(await cli(["mcp", "install", "--nope", "--state", statePath], stray)).toBe(1);
     expect(stray.errors[0]).toContain("Unknown option '--nope'");
@@ -211,7 +220,7 @@ describe("installing the MCP server for a local agent", () => {
   it("a line that puts a flag before the word gets mcp's own usage, the way a verb's line gets its verb's", async () => {
     const flagFirst = io();
     expect(await cli(["--state", statePath, "mcp"], flagFirst)).toBe(1);
-    expect(flagFirst.errors).toEqual(["usage: wsp mcp\n       wsp mcp install --agent <id> [--agent <id>] [--json]   (claude, codex, gemini, opencode)"]);
+    expect(flagFirst.errors).toEqual(["usage: wsp mcp\n       wsp mcp install --agent <id> [--agent <id>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
     expect(flagFirst.lines).toEqual([]);
     const verbLine = io();
     expect(await cli(["--state", statePath, "threads"], verbLine)).toBe(1);
@@ -225,6 +234,9 @@ describe("installing the MCP server for a local agent", () => {
     expect(installLines({ agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" })).toEqual(["Claude Code now has the wsp tools: ~/.claude.json", "The wsp skill went to ~/.claude/skills/wsp/SKILL.md"]);
     expect(installLines({ agent: "Gemini CLI", path: "~/.gemini/settings.json", commentsDropped: true, skill: "~/.gemini/skills/wsp/SKILL.md" })).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone.", "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md"]);
     expect(installLines({ agent: "Pi", skill: "~/.pi/agent/skills/wsp/SKILL.md" })).toEqual(["Pi: the catalog has no MCP config for it yet, so the server was not written; add it by hand.", "The wsp skill went to ~/.pi/agent/skills/wsp/SKILL.md"]);
+    expect(installLines({ agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false, skill: "~/.codex/skills/wsp/SKILL.md", docs: ["/p/AGENTS.md"] }).at(-1)).toBe("The wsp section is in /p/AGENTS.md");
+    expect(removeLines({ agent: "Claude Code", docs: ["/p/AGENTS.md", "/p/CLAUDE.md"] })).toEqual(["Claude Code: the wsp section is out of /p/AGENTS.md and /p/CLAUDE.md"]);
+    expect(removeLines({ agent: "Codex", docs: [] })).toEqual(["Codex: no wsp section in this folder; nothing was changed."]);
   });
 
   it("wsp mcp install --agent <id> writes the config for this state file and prints its lines and the command it registered; without --agent it prints the usage", async () => {
@@ -232,28 +244,111 @@ describe("installing the MCP server for a local agent", () => {
     expect(await cli(["mcp", "install", "--agent", "claude", "--state", statePath], out)).toBe(0);
     const registered = mcpServerSpec(statePath);
     expect(registered.command).toBe(process.execPath);
-    expect(out.lines).toEqual(["Claude Code now has the wsp tools: ~/.claude.json", "The wsp skill went to ~/.claude/skills/wsp/SKILL.md", commandLine(registered)]);
-    expect(out.lines[2]).toContain(`mcp --state ${statePath}`);
+    expect(out.lines).toEqual([
+      "Claude Code now has the wsp tools: ~/.claude.json",
+      "The wsp skill went to ~/.claude/skills/wsp/SKILL.md",
+      `The wsp section is in ${join(project, "AGENTS.md")} and ${join(project, "CLAUDE.md")}`,
+      commandLine(registered),
+      "Next: run claude in this folder and say: /wsp set up wsp for me",
+    ]);
+    expect(out.lines[3]).toContain(`mcp --state ${statePath}`);
+    expect(out.lines.at(-1)).toBe(nextInsideAgentLine("claude", `/${SKILL_NAME} set up wsp for me`));
     expect(readFileSync(join(home, ".claude", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
     const written = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")) as { mcpServers: { wsp: { command: string; args: string[] } } };
     expect(written.mcpServers.wsp.command).toBe(process.execPath);
     expect(written.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", statePath]);
-    const bare = io();
+    const bare = { ...io(), isTTY: true };
     expect(await cli(["mcp", "install", "--state", statePath], bare)).toBe(1);
-    expect(bare.errors).toEqual(["usage: wsp mcp install --agent <id> [--agent <id>] [--json]   (claude, codex, gemini, opencode)"]);
+    expect(bare.errors).toEqual(["usage: wsp mcp install --agent <id> [--agent <id>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
     mkdirSync(join(home, ".gemini"), { recursive: true });
     writeFileSync(join(home, ".gemini", "settings.json"), '{\n  // the look\n  "theme": "dark"\n}\n');
     const commented = io();
     expect(await cli(["mcp", "install", "--agent", "gemini", "--state", statePath], commented)).toBe(0);
-    expect(commented.lines).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone.", "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md", commandLine(registered)]);
+    expect(commented.lines).toEqual([
+      "Gemini CLI now has the wsp tools: ~/.gemini/settings.json",
+      "The file held comments; the rewrite is plain JSON, so they are gone.",
+      "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md",
+      `The wsp section is in ${join(project, "AGENTS.md")}`,
+      commandLine(registered),
+      "Next: run gemini in this folder and say: set up wsp for me",
+    ]);
     // No config took the server, so there is no registered command to name.
     const none = io();
     expect(await cli(["mcp", "install", "--agent", "pi", "--state", statePath], none)).toBe(0);
-    expect(none.lines).toEqual(["Pi: the catalog has no MCP config for it yet, so the server was not written; add it by hand.", "The wsp skill went to ~/.pi/agent/skills/wsp/SKILL.md"]);
+    expect(none.lines).toEqual([
+      "Pi: the catalog has no MCP config for it yet, so the server was not written; add it by hand.",
+      "The wsp skill went to ~/.pi/agent/skills/wsp/SKILL.md",
+      `The wsp section is in ${join(project, "AGENTS.md")}`,
+      "Next: run pi in this folder and say: set up wsp for me",
+    ]);
     expect(none.errors).toEqual([]);
     const unknown = io();
     expect(await cli(["mcp", "install", "--agent", "emacs", "--state", statePath], unknown)).toBe(1);
     expect(unknown.errors).toEqual(["wsp mcp install: no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode"]);
     expect(HELP).toContain("wsp mcp");
+  });
+
+  it("the section goes into the folder the command ran in, a second install leaves one, and --remove gives the file back byte for byte", async () => {
+    const mine = "# myrepo\n\nRun the gate before you push.\n";
+    const agents = join(project, "AGENTS.md");
+    writeFileSync(agents, mine);
+    expect(await cli(["mcp", "install", "--agent", "claude", "--state", statePath], io())).toBe(0);
+    const once = readFileSync(agents, "utf8");
+    expect(once).toBe(`${mine}${sectionText()}\n`);
+    expect(await cli(["mcp", "install", "--agent", "claude", "--state", statePath], io())).toBe(0);
+    expect(readFileSync(agents, "utf8")).toBe(once);
+    expect(once.split(SECTION_BEGIN)).toHaveLength(2);
+    const gone = io();
+    expect(await cli(["mcp", "install", "--agent", "claude", "--remove", "--state", statePath], gone)).toBe(0);
+    expect(gone.lines).toEqual([`Claude Code: the wsp section is out of ${agents} and ${join(project, "CLAUDE.md")}`]);
+    expect(readFileSync(agents, "utf8")).toBe(mine);
+    expect(existsSync(join(project, "CLAUDE.md"))).toBe(false);
+    // --remove is the section's alone: the server and the skill stay where the install put them.
+    expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")).mcpServers.wsp).toBeDefined();
+    expect(readFileSync(join(home, ".claude", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
+    const removeJson = io();
+    expect(await cli(["mcp", "install", "--agent", "claude", "--agent", "emacs", "--remove", "--json", "--state", statePath], removeJson)).toBe(1);
+    expect(JSON.parse(removeJson.lines[0]!)).toEqual({
+      removed: [{ id: "claude", agent: "Claude Code", docs: [] }],
+      failures: [{ id: "emacs", error: "no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode" }],
+    });
+  });
+
+  it("two agents installed into the same AGENTS.md leave one section, true for both, naming neither one's skill path", async () => {
+    const agents = join(project, "AGENTS.md");
+    expect(await cli(["mcp", "install", "--agent", "claude", "--agent", "codex", "--state", statePath], io())).toBe(0);
+    const shared = readFileSync(agents, "utf8");
+    expect(shared.split(SECTION_BEGIN)).toHaveLength(2);
+    // The file codex also reads must not send it to ~/.claude/skills, and the file only Claude Code reads says the same.
+    expect(shared).not.toContain("~/");
+    expect(shared).toBe(readFileSync(join(project, "CLAUDE.md"), "utf8"));
+  });
+
+  it("nobody named an agent and there is no terminal to ask at: every agent whose own command is on PATH takes the install, and none there is said in one line", async () => {
+    const bin = join(home, "bin");
+    mkdirSync(bin, { recursive: true });
+    for (const agent of ["codex", "pi"]) writeFileSync(join(bin, agent), "#!/bin/sh\n");
+    expect(agentsOnPath(`${bin}:/nowhere`)).toEqual(["codex", "pi"]);
+    expect(agentsOnPath(undefined)).toEqual([]);
+    vi.stubEnv("PATH", `${bin}:/nowhere`);
+    const found = io();
+    expect(await cli(["mcp", "install", "--state", statePath], found)).toBe(0);
+    expect(found.lines[0]).toBe("Codex now has the wsp tools: ~/.codex/config.toml");
+    expect(found.lines.at(-1)).toBe("Next: run codex in this folder and say: set up wsp for me");
+    expect(readFileSync(join(project, "AGENTS.md"), "utf8")).toContain(SECTION_BEGIN);
+    expect(readFileSync(join(home, ".pi", "agent", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
+    vi.stubEnv("PATH", "/nowhere");
+    const none = io();
+    expect(await cli(["mcp", "install", "--state", statePath], none)).toBe(1);
+    expect(none.errors).toEqual([
+      "wsp mcp install: no agent of the catalog's is on this computer's PATH; name one with --agent.",
+      "usage: wsp mcp install --agent <id> [--agent <id>] [--json] [--remove]   (claude, codex, gemini, opencode)",
+    ]);
+  });
+
+  it("an agent's own slash form for the wsp skill is the skill's own folder name, so the two cannot drift", () => {
+    const slashes = CATALOG_AGENTS.filter(a => a.firstMove.startsWith("/"));
+    expect(slashes.map(a => a.id)).toEqual(["claude"]);
+    for (const agent of slashes) expect(agent.firstMove.split(" ")[0], agent.id).toBe(`/${SKILL_NAME}`);
   });
 });

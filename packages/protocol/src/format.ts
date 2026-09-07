@@ -150,6 +150,12 @@ export function mcpServerCommandLine(command: string, args: readonly string[]): 
   return `The server command is ${shellLine([command, ...args])}`;
 }
 
+/** The very last line an MCP install prints: the thing to do next, which is inside the agent it just gave the tools
+ * to. `open` is the agent's own command and `first` what to type at its prompt, its slash form where it has one. */
+export function nextInsideAgentLine(open: string, first: string): string {
+  return `Next: run ${shellLine([open])} in this folder and say: ${first}`;
+}
+
 /** The one stderr line the command line shows under a command that exited non-zero, naming the folder it ran in:
  * the host chose it when none was named, so the person did not see it go by; absent, the runtime ran it in ~. */
 export function execFolderLine(cwd: string | undefined): string {
