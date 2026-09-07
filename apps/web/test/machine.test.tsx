@@ -63,6 +63,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     nap: ReturnType<typeof vi.fn<(id: string) => Promise<WorkspaceView>>>;
     wake: ReturnType<typeof vi.fn<(id: string) => Promise<WorkspaceView>>>;
     upgrade: ReturnType<typeof vi.fn<(id: string, size: WorkspaceSize) => Promise<WorkspaceView>>>;
+    updateImage: ReturnType<typeof vi.fn<(id: string) => Promise<WorkspaceView>>>;
     rollbackSnapshot: ReturnType<typeof vi.fn<(version: number, name?: string) => Promise<SnapshotRollbackResult>>>;
     listSnapshots: ReturnType<typeof vi.fn<() => Promise<SnapshotLineage>>>;
     listProjectGoldens: ReturnType<typeof vi.fn<() => Promise<ProjectGolden[]>>>;
@@ -76,6 +77,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
       return taken;
     }),
     upgrade: vi.fn(async (id: string, _size: WorkspaceSize) => view(id, "?", "running")),
+    updateImage: vi.fn(async (id: string) => ({ ...view(id, "?", "running"), golden: `snap_golden-v${current.head ?? 0}` })),
     capabilities: vi.fn(async () => capabilities),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
@@ -517,6 +519,97 @@ describe("lineage", () => {
     act(() => api.emit({ type: "golden.stage", name: "default", stage: "sealed" }));
     await waitFor(() => expect(fact("v13")).toBe("v13head"));
     expect(api.listSnapshots).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a workspace behind the golden's head", () => {
+  const onV11 = (): WorkspaceView => ({ ...view("ws_a", "api"), golden: "snap_golden-v11" });
+
+  it("says which version it is on and which is available, on its own row, and offers the move there instead of a rollback", async () => {
+    const api = await mount([onV11()], CAPS, twoVersions);
+    await waitFor(() => expect(fact("v11")).toBe("v11this fork"));
+    const row = document.querySelector("[data-k='v11']")!.closest("li")!;
+    expect(row.textContent).toContain("on image v11, v12 available");
+    // Two different actions, both on that row: Update moves this workspace, Roll back moves the head for every
+    // fork after it. Neither may take the other's place.
+    expect(within(row as HTMLElement).getByRole("button", { name: "update api to v12" })).toBeDefined();
+    expect(within(row as HTMLElement).getByRole("button", { name: "roll back to v11" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
+    await waitFor(() => expect(fact("lineage-note")).toBe("api is on v12. Its files came across; anything running in it stopped with the old machine."));
+    expect(api.updateImage.mock.calls).toEqual([["ws_a"]]);
+  });
+
+  it("the moved workspace is the one the rail holds: the row follows to the head and the offer goes", async () => {
+    await mount([onV11()], CAPS, twoVersions);
+    await waitFor(() => expect(fact("v11")).toBe("v11this fork"));
+    fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    expect(fact("v11")).toBe("v11");
+    expect(useStore.getState().workspaces[0]!.golden).toBe("snap_golden-v12");
+    expect(screen.queryByRole("button", { name: /^update api to/ })).toBeNull();
+  });
+
+  it.each([
+    ["napping" as const, "api is paused; wake it to move it to a newer image"],
+    ["gone" as const, "api's machine is gone; rebuild it to move it to a newer image"],
+  ])("a %s workspace is not moved: the button is dead and the row says why, since the move replaces the machine", async (phase, why) => {
+    await mount([{ ...onV11(), phase }], CAPS, twoVersions);
+    await waitFor(() => expect(fact("v11")).toBe("v11this fork"));
+    expect(screen.getByRole("button", { name: "update api to v12" })).toHaveProperty("disabled", true);
+    expect(fact("lineage-note")).toBe(why);
+    // Roll back is the golden's action, not this workspace's, so a stopped machine never takes it away.
+    expect(screen.getByRole("button", { name: "roll back to v11" })).toHaveProperty("disabled", false);
+  });
+
+  it("a workspace forked from a project image is not moved, and one that imported a project onto a plain fork still is", async () => {
+    const onProject = { ...view("ws_a", "api"), golden: "snap_taken" };
+    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), gv(12)] };
+    await mount([onProject], CAPS, lineage, undefined, [pg("snap_taken", "snap_golden-v11")]);
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^update api to/ })).toBeNull());
+
+    cleanup();
+    // The runtime looks at the image it forked from, not at what was imported into it afterwards; so does this.
+    await mount([{ ...onV11(), project: PROJECT }], CAPS, twoVersions);
+    await waitFor(() => expect(fact("v11")).toBe("v11this fork"));
+    expect(screen.getByRole("button", { name: "update api to v12" })).toHaveProperty("disabled", false);
+  });
+
+  it("a workspace on the head is offered nothing to move to", async () => {
+    await mount([onV12()], CAPS, twoVersions);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    expect(screen.queryByRole("button", { name: /^update api to/ })).toBeNull();
+    expect(document.body.textContent).not.toContain("available");
+  });
+
+  it("a client that cannot move a workspace shows the state and no button", async () => {
+    // The op is gone before the first render, so no render ever offers a button whose call would throw.
+    const api = fakeApi([onV11()], CAPS, twoVersions);
+    delete (api as { updateImage?: unknown }).updateImage;
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_a" />);
+    await waitFor(() => expect(fact("v11")).toBe("v11this fork"));
+    expect(document.querySelector("[data-k='v11']")!.closest("li")!.textContent).toContain("on image v11, v12 available");
+    expect(screen.queryByRole("button", { name: /^update api to/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "roll back to v11" })).toBeDefined();
+  });
+
+  it("a failed move leaves the note with the reason and the workspace where it was", async () => {
+    const api = await mount([onV11()], CAPS, twoVersions);
+    api.updateImage.mockRejectedValueOnce(new Error("at cap"));
+    await waitFor(() => expect(fact("v11")).toBe("v11this fork"));
+    fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
+    await waitFor(() => expect(fact("lineage-note")).toBe("at cap"));
+  });
+
+  it("lists what a version retired under a micro-label, under the forked version alone", async () => {
+    const retired = [{ id: "tools/brew/yq", name: "yq" }, { id: "shell/zshrc", name: "~/.zshrc" }];
+    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), { ...gv(12), retired }] };
+    await mount([onV12()], CAPS, lineage);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    const lists = document.querySelectorAll("[data-k='retired-rows']");
+    expect(lists).toHaveLength(1);
+    expect(lists[0]!.querySelector("p")?.textContent).toBe("retired, still on this image");
+    expect([...lists[0]!.querySelectorAll("[data-k='retired-row']")].map(el => el.textContent)).toEqual(["yq", "~/.zshrc"]);
   });
 });
 

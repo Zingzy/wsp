@@ -133,7 +133,7 @@ describe("runtime golden retention", () => {
     expect(rolledBack.keep.map(v => v.version)).toEqual([2, 1]);
     expect(rolledBack.drop).toEqual([]);
     expect(rolledBack.abandoned).toEqual([]);
-    const result = await updating.golden.upgrade({ delta: { import: { ...imp, recipeHash: "h2" }, removals: [] } });
+    const result = await updating.golden.upgrade({ delta: { import: { ...imp, recipeHash: "h2" }, retired: [], retiredOnImage: [] } });
     expect(result.road).toBe("fork");
     expect(result.version).toMatchObject({ version: 5, snapshotId: "snap_golden-v5", parentSnapshotId: "snap_golden-v2" });
     // The stub sizes the new snapshot like a golden.

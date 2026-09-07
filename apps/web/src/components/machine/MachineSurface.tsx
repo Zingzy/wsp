@@ -4,7 +4,7 @@
 // workspace's machine.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { foldThreads, needsRebuild, type GoldenLeftBehind, type GoldenMissingTool, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { behindGoldenLine, foldThreads, imageMoveRefusal, needsRebuild, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type ProjectGolden, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -402,12 +402,13 @@ function Usage({ workspace, status, series }: { workspace: WorkspaceView; status
 function Lineage({ workspace }: { workspace: WorkspaceView }) {
   const api = useStore(s => s.api);
   const createWorkspace = useStore(s => s.createWorkspace);
+  const applyWorkspace = useStore(s => s.applyWorkspace);
   const [lineage, setLineage] = useState<SnapshotLineage | null>(null);
   const [projects, setProjects] = useState<ProjectGolden[]>([]);
   /** Version whose rollback awaits the confirm dialog. */
   const [armed, setArmed] = useState<GoldenVersion | null>(null);
-  /** The action in flight, so the two buttons wait for each other and the note names it. */
-  const [busy, setBusy] = useState<"rollback" | "snapshot" | null>(null);
+  /** The action in flight, so the buttons wait for each other and the note names it. */
+  const [busy, setBusy] = useState<"rollback" | "snapshot" | "image" | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -471,6 +472,19 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
     }
   };
 
+  const updateImage = async (to: number): Promise<void> => {
+    if (!api?.updateImage) return;
+    setBusy("image");
+    try {
+      applyWorkspace(await api.updateImage(workspace.id));
+      setNote(`${workspace.name} is on v${to}. Its files came across; anything running in it stopped with the old machine.`);
+    } catch (e) {
+      setNote(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const fork = (g: ProjectGolden): void => {
     void createWorkspace(`${g.project.name}-fork`, g.snapshotId);
   };
@@ -478,6 +492,16 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
   const under = (snapshotId: string): ReactNode => <ProjectGoldens goldens={projects.filter(p => p.golden === snapshotId)} forkOf={workspace.golden} busy={busy !== null} onFork={fork} />;
   const versions = lineage ? [...lineage.versions].sort((a, b) => b.version - a.version) : [];
   const project = workspace.project;
+  // The head version, when this workspace is forked from an older one: what the offer moves it to.
+  const onVersion = versions.find(v => v.snapshotId === workspace.golden);
+  const behind = onVersion !== undefined && lineage?.head !== null && lineage?.head !== undefined && onVersion.version !== lineage.head ? lineage.head : null;
+  // The runtime's rule, read here from the same facts, so the button is offered exactly when the move would be
+  // taken: a project image, an image no golden knows, or a machine that is not running refuse it in both places.
+  const moveRefusal = imageMoveRefusal(workspace.name, workspaceState({ phase: workspace.phase }), {
+    knownVersion: onVersion !== undefined,
+    projectImage: projects.some(p => p.snapshotId === workspace.golden),
+  });
+  const offered = api?.updateImage !== undefined;
   return (
     <Section label="Lineage" aside={lineage?.head !== null && lineage?.head !== undefined ? `head v${lineage.head}` : undefined}>
       <ul className="mt-1 divide-y divide-border/40">
@@ -530,20 +554,30 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
                     )}
                   </span>
                 }
-                detail={`built ${v.createdAt.slice(0, 10)}`}
+                detail={`built ${v.createdAt.slice(0, 10)}${fork && behind !== null ? ` · ${behindGoldenLine(v.version, behind)}` : ""}`}
                 below={
                   <>
                     {fork && v.missingTools !== undefined && v.missingTools.length > 0 && <MissingTools tools={v.missingTools} />}
                     {fork && v.leftBehind !== undefined && v.leftBehind.length > 0 && <LeftBehind rows={v.leftBehind} />}
+                    {fork && v.retired !== undefined && v.retired.length > 0 && <RetiredRows rows={v.retired} />}
                     {under(v.snapshotId)}
                   </>
                 }
                 aside={
-                  !head && (
-                    <Button size="xs" variant="outline" disabled={busy !== null} aria-label={`roll back to v${v.version}`} onClick={() => setArmed(v)}>
-                      Roll back
-                    </Button>
-                  )
+                  // Two different actions on one row: Update moves this workspace onto the head, Roll back moves the
+                  // golden's head for every fork after it. Neither stands in for the other.
+                  <span className="flex items-center gap-1.5">
+                    {fork && behind !== null && offered && (
+                      <Button size="xs" variant="outline" disabled={busy !== null || moveRefusal !== null} aria-label={`update ${workspace.name} to v${behind}`} onClick={() => void updateImage(behind)}>
+                        Update
+                      </Button>
+                    )}
+                    {!head && (
+                      <Button size="xs" variant="outline" disabled={busy !== null} aria-label={`roll back to v${v.version}`} onClick={() => setArmed(v)}>
+                        Roll back
+                      </Button>
+                    )}
+                  </span>
                 }
               />
             );
@@ -551,7 +585,7 @@ function Lineage({ workspace }: { workspace: WorkspaceView }) {
         )}
       </ul>
       <p className="min-h-4 text-[11px] text-muted-foreground" data-k="lineage-note">
-        {busy === "rollback" ? "Rolling back…" : busy === "snapshot" ? "Taking the snapshot…" : note}
+        {busy === "rollback" ? "Rolling back…" : busy === "snapshot" ? "Taking the snapshot…" : busy === "image" ? "Moving to the newer image…" : (note ?? (behind !== null && moveRefusal !== null ? moveRefusal : null))}
       </p>
       <AlertDialog open={armed !== null} onOpenChange={open => !open && setArmed(null)}>
         <AlertDialogPopup>
@@ -620,11 +654,21 @@ function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGol
   );
 }
 
-/** A micro-label over rows of name and note under a version; `keys` are the data-k of the list, the name and the note. */
+/** A list under one lineage row, behind a micro-label: what the version is missing, what it left behind, what it
+ * retired. One wrapper so they read as one thing and only their rows differ. */
+function UnderVersion({ label, k, children }: { label: string; k: string; children: ReactNode }) {
+  return (
+    <div className="mt-1.5 ml-3.5" data-k={k}>
+      <p className="text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+/** Rows of name and note under a version; `keys` are the data-k of the list, the name and the note. */
 function VersionNotes({ label, aria, keys, rows }: { label: string; aria: string; keys: [string, string, string]; rows: { key: string; name: string; note: string }[] }) {
   return (
-    <div className="mt-1.5 ml-3.5" data-k={keys[0]}>
-      <p className="text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+    <UnderVersion label={label} k={keys[0]}>
       <ul className="mt-0.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted-foreground" aria-label={aria}>
         {rows.map(r => (
           <li key={r.key} className="contents">
@@ -635,7 +679,23 @@ function VersionNotes({ label, aria, keys, rows }: { label: string; aria: string
           </li>
         ))}
       </ul>
-    </div>
+    </UnderVersion>
+  );
+}
+
+/** What a version's image carries that its recipe no longer asks for: an update leaves the bytes where they are, so
+ * a fork still has them and nothing says they are missing. */
+function RetiredRows({ rows }: { rows: GoldenRetired[] }) {
+  return (
+    <UnderVersion label="retired, still on this image" k="retired-rows">
+      <ul className="mt-0.5 font-mono text-[11px] text-muted-foreground" aria-label="rows retired from this image">
+        {rows.map(r => (
+          <li key={r.id} data-k="retired-row">
+            {r.name}
+          </li>
+        ))}
+      </ul>
+    </UnderVersion>
   );
 }
 

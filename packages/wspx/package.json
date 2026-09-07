@@ -1,6 +1,6 @@
 {
   "name": "@zingzy/wsp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Your setup, on cloud machines, for coding agents. Installs the wsp command.",
   "type": "module",
   "bin": {

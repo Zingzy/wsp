@@ -3678,7 +3678,8 @@ describe("runtime golden update and the post-seal grace", () => {
       tools: [{ id: "tools/npm/cowsay", label: "cowsay", manager: "npm", cmd: "npm install -g cowsay" }],
       agents: [],
     },
-    removals: [{ what: "file", id: "shell/bashrc", label: "~/.bashrc", cmd: "rm -rf -- '/root/.bashrc'" }],
+    retired: [{ id: "shell/bashrc", name: "~/.bashrc" }],
+    retiredOnImage: [{ id: "shell/bashrc", name: "~/.bashrc" }],
   });
   const started = () => {
     const backend = stubBackend();
@@ -3718,7 +3719,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(await rt.golden.recipe()).toBeUndefined();
   });
 
-  it("an update during the grace lands on the kept builder: removals and the delta's stages run there, one smoke fork boots, v2 is sealed and current, and the window starts over", async () => {
+  it("an update during the grace lands on the kept builder: the delta's stages run there, the dropped row is retired on v2 and never taken off, one smoke fork boots, v2 is sealed and current, and the window starts over", async () => {
     const { backend, store, rt, advance, clock } = started();
     const b = await rt.golden.prepare();
     await rt.golden.seal(b.id);
@@ -3731,13 +3732,12 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(result.road).toBe("builder");
     expect(result.previousDropped).toBe(false);
     // The kept builder was sealed as v1, so v2 records v1's snapshot as its parent.
-    expect(result.version).toMatchObject({ version: 2, snapshotId: "snap_golden-v2", parentSnapshotId: "snap_golden-v1", smoke: { cmd: "codex --version", exitCode: 0 } });
+    expect(result.version).toMatchObject({ version: 2, snapshotId: "snap_golden-v2", parentSnapshotId: "snap_golden-v1", smoke: { cmd: "codex --version", exitCode: 0 }, retired: [{ id: "shell/bashrc", name: "~/.bashrc" }] });
     expect(result.manifest).toMatchObject({ head: 2, versions: [{ version: 1 }, { version: 2 }] });
     expect(await rt.golden.get()).toEqual(result.manifest);
     expect(frames).toEqual([
       "creating:your builder from v1, kept since the save",
-      "applying-setup:removing 1 item",
-      "applying-setup:removed ~/.bashrc",
+      "applying-setup:1 row left on the image, retired: ~/.bashrc",
       "applying-setup:1 file: shell 1",
       "applying-setup:5 B packed",
       "uploading-files:5 B",
@@ -3756,7 +3756,7 @@ describe("runtime golden update and the post-seal grace", () => {
     ]);
     const ran = builder.execLog.slice(before);
     expect(ran[0]).toBe("true");
-    expect(ran.some(c => c.includes("rm -rf -- '\\''/root/.bashrc'\\''"))).toBe(true);
+    expect(ran.some(c => c.includes("rm -rf -- '\\''/root/.bashrc'\\''"))).toBe(false);
     expect(ran.some(c => c.includes("npm install -g cowsay"))).toBe(true);
     expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v2", true]]);
     expect(await store.get("builders", b.id)).toMatchObject({ sealed: { at: new Date(clock.now()).toISOString(), version: 2 }, import: { recipeHash: "h2", recipe: snapshot("h2", [".zshrc", ".config/starship.toml"]) } });
@@ -3815,7 +3815,7 @@ describe("runtime golden update and the post-seal grace", () => {
     await next.close();
   });
 
-  it("with the builder gone the update forks the head at its size: the delta runs on the fork, v2 is sealed and current, the fork is kept for its own window, and v1 stays for rollback", async () => {
+  it("with the builder gone the update forks the head at its size: the delta runs on the fork and takes nothing off it, v2 is sealed and current, the fork is kept for its own window, and v1 stays for rollback", async () => {
     const { backend, store, rt } = started();
     const b = await rt.golden.prepare();
     await rt.golden.seal(b.id);
@@ -3830,7 +3830,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(frames[0]).toBe("creating:fork of golden v1");
     const fork = backend.machines[2]!;
     expect(fork.spec).toMatchObject({ kind: "sandbox", fromSnapshot: "snap_golden-v1", cpu: 2, memMb: 4096, onIdle: "kill", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": expect.stringMatching(/^h_/) } });
-    expect(fork.execLog.some(c => c.includes("rm -rf -- '\\''/root/.bashrc'\\''"))).toBe(true);
+    expect(fork.execLog.some(c => c.includes("rm -rf -- '\\''/root/.bashrc'\\''"))).toBe(false);
     expect(fork.execLog.some(c => c.includes("npm install -g cowsay"))).toBe(true);
     expect(fork.killed).toBe(false);
     expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], ["snap_golden-v1", false], ["snap_golden-v2", true]]);
@@ -5153,5 +5153,101 @@ describe("gone machines", () => {
       stop();
       await rt.close();
     }
+  });
+});
+
+describe("a workspace behind the golden's head", () => {
+  const version = (n: number) => ({ version: n, snapshotId: `snap_golden-v${n}`, baseTemplate: "base", setupSha: `s${n}`, createdAt: `2026-09-0${n}T00:00:00.000Z`, smoke: { cmd: "true", exitCode: 0 } });
+  const seeded = async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 2, versions: [version(1), version(2)] });
+    return { backend, store, rt: createRuntime({ backend, store, adapters: {} }) };
+  };
+
+  it("moves onto the head: a fork of the newer image replaces the machine, the record names it, and the status says which version it came from", async () => {
+    const { backend, store, rt } = await seeded();
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const moved = await rt.workspaces.updateImage(ws.id);
+    expect(moved.golden).toBe("snap_golden-v2");
+    expect(moved.machineId).toBe("m2");
+    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([["snap_golden-v1", true], ["snap_golden-v2", false]]);
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ golden: "snap_golden-v2", machineId: "m2" });
+    expect(events.filter(e => e.type === "workspace.upgraded")).toMatchObject([{ workspaceId: ws.id, machineId: "m2" }]);
+    const last = events.filter((e): e is EventUnion & { type: "workspace.status" } => e.type === "workspace.status").at(-1)!;
+    expect(last.status.reason).toBe("moved from image v1 to v2");
+  });
+
+  it("one already on the head is handed back untouched: no machine is replaced", async () => {
+    const { backend, rt } = await seeded();
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v2", name: "api" });
+    expect(await rt.workspaces.updateImage(ws.id)).toMatchObject({ golden: "snap_golden-v2", machineId: "m1" });
+    expect(backend.machines).toHaveLength(1);
+    expect(backend.machines[0]!.killed).toBe(false);
+  });
+
+  it.each([
+    ["napping" as const, "api is paused; wake it to move it to a newer image"],
+    ["gone" as const, "api's machine is gone; rebuild it to move it to a newer image"],
+  ])("a %s workspace is refused with the sentence the app shows: the move replaces the machine, so only a running one takes it", async (phase, why) => {
+    const { backend, store, rt } = await seeded();
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const record = (await store.get("workspaces", ws.id)) as { phase: string };
+    await store.put("workspaces", ws.id, { ...record, phase });
+    await rt.close();
+    const later = createRuntime({ backend, store, adapters: {} });
+    try {
+      await expect(later.workspaces.updateImage(ws.id)).rejects.toMatchObject({ kind: "conflict", message: why });
+      expect(backend.machines).toHaveLength(1);
+      expect(backend.machines[0]!.killed).toBe(false);
+    } finally {
+      await later.close();
+    }
+  });
+
+  it("one forked from a project image is refused, since the move would throw its project disk away", async () => {
+    const { backend, store, rt } = await seeded();
+    await store.put("project-goldens", "snap_project", {
+      snapshotId: "snap_project",
+      project: { name: "spoo", path: "/root/spoo", importedAt: "2026-09-02T00:00:00.000Z" },
+      golden: "snap_golden-v1",
+      workspaceId: "ws_old",
+      workspaceName: "old",
+      createdAt: "2026-09-02T00:00:00.000Z",
+    });
+    const ws = await rt.workspaces.create({ golden: "snap_project", name: "api" });
+    await expect(rt.workspaces.updateImage(ws.id)).rejects.toMatchObject({ kind: "conflict" });
+    expect(backend.machines).toHaveLength(1);
+    expect(backend.machines[0]!.killed).toBe(false);
+  });
+
+  // The move replaces the machine the way a resize does, and that kills before it forks: a create the provider
+  // refuses leaves the workspace machineless whichever of the two asked for it. What the move owes is the record:
+  // the image it names must be the one the workspace is on, so the rebuild that follows restores that version.
+  it("a move that fails leaves the record on the image the workspace came from, so the rebuild after it forks that one", async () => {
+    const { backend, store, rt } = await seeded();
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const create = backend.create.bind(backend);
+    let refused = true;
+    backend.create = async spec => {
+      if (refused && spec.fromSnapshot === "snap_golden-v2") {
+        refused = false;
+        throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency" });
+      }
+      return create(spec);
+    };
+    await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow("Too many concurrent sessions");
+    expect((await rt.workspaces.get(ws.id)).golden).toBe("snap_golden-v1");
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ golden: "snap_golden-v1" });
+    await rt.workspaces.rebuild(ws.id);
+    expect(backend.machines.map(m => m.spec.fromSnapshot)).toEqual(["snap_golden-v1", "snap_golden-v1"]);
+  });
+
+  it("one forked from a snapshot no golden of this host knows is refused by name", async () => {
+    const { rt } = await seeded();
+    const ws = await rt.workspaces.create({ golden: "snap_elsewhere", name: "api" });
+    await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow("api's image is not a version of any golden this host knows");
   });
 });
