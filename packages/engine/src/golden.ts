@@ -20,6 +20,7 @@ import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
+import { isMissing } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { importInto } from "./vault.js";
 
@@ -47,7 +48,6 @@ export class MachineAliveError extends Error {
   }
 }
 
-const isMissing = (e: unknown): boolean => (e as { kind?: unknown }).kind === "missing";
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** How often the seal asks for the snapshot the provider refused with its 502, and how long it waits between asks. */

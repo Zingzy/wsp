@@ -510,6 +510,28 @@ export function vaultKeptLine(why: string): string {
   return `nap kept the previous vault; ${why}`;
 }
 
+/** Which call found the provider no longer knew a record's machine: the status poll's read, a pause, a wake's read,
+ * the sweep's read of a machine its listing lacked, or the record load at host start. */
+export type GoneSeenBy = "status poll" | "pause" | "wake" | "sweep" | "record load";
+
+/** One sighting of a machine gone at the provider: who saw it, when (epoch ms), and the provider's answer to that
+ * call when it answered in words (its status and message); a state read that came back gone carries none. */
+export interface GoneSighting {
+  by: GoneSeenBy;
+  at: number;
+  answer?: string;
+}
+
+/** What a record says about a machine the provider stopped knowing: which call found it gone and the second it did,
+ * quoting the provider where it said anything. Without a sighting, only that it is gone. */
+export function goneWords(machineId: string, seen?: GoneSighting): string {
+  const base = `machine ${machineId} is gone at the provider`;
+  if (seen === undefined) return base;
+  const at = new Date(seen.at).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const answer = seen.answer === undefined || seen.answer === "" ? "" : ` (${seen.answer})`;
+  return `${base}: the ${seen.by} found it gone at ${at}${answer}`;
+}
+
 /** The machine row's line when a record that said paused met a machine the provider was running all along (a nap
  * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
 export const ALREADY_RUNNING = "already running at the provider";

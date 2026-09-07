@@ -78,6 +78,13 @@ export function sendRefusal(state: WorkspaceState, goneWords?: string): string |
   return actionRefusal(state, "send", goneWords);
 }
 
+/** Whether the machine is up and billing in this state: running, or running with its edge or daemon dark (the
+ * provider bills a machine it cannot be reached on). Paused, moving and gone ones bill nothing, and only a billing
+ * machine has anything to nap, so the rate and the nap countdown on every surface read this one rule. */
+export function isBilling(state: WorkspaceState): boolean {
+  return state === "running" || state === "unreachable";
+}
+
 /** Rebuild is the one action left: the machine is gone, or a zombie the provider still calls running. Every
  * surface that offers the rebuild (sidebar row, palette, Machine tab) asks this and nothing else. */
 export function needsRebuild(input: WorkspaceStateInput): boolean {

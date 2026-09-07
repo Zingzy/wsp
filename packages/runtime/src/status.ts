@@ -9,8 +9,8 @@
 // Solari's idle timer, so a poller that asked per tick kept every workspace
 // awake and billing forever.
 
-import type { ExecResult, MachineState, PreviewReach } from "@wsp/engine";
-import { appendCostPoint, type EventUnion, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { isMissing, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
+import { appendCostPoint, goneWords, type EventUnion, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import type { Store } from "./store.js";
 
@@ -33,10 +33,11 @@ export function machineStateOf(phase: WorkspacePhase): MachineState {
   }
 }
 
-/** What a record says about a machine the provider stopped knowing, quoting the provider where it said anything. */
-export function goneWords(machineId: string, providerWords?: string): string {
-  const base = `machine ${machineId} is gone at the provider`;
-  return providerWords === undefined || providerWords === "" ? base : `${base}: ${providerWords}`;
+/** The provider's answer as a row or a log line quotes it: its status and message when the call answered with both. */
+export function providerSaid(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e);
+  const status = (e as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? `${status} ${message}` : message;
 }
 
 export interface ProbeOptions {
@@ -281,17 +282,17 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
    * reason to report a running workspace as anything else). */
   const askProvider = async (r: StatusRecord): Promise<MachineState> => {
     let state: MachineState;
-    let words: string | undefined;
+    let answer: string | undefined;
     try {
       state = await r.providerState();
     } catch (e) {
-      if ((e as { kind?: string }).kind !== "missing") return machineStateOf(r.phase);
+      if (!isMissing(e)) return machineStateOf(r.phase);
       state = "gone";
-      words = e instanceof Error ? e.message : String(e);
+      answer = providerSaid(e);
     }
     reconciled.set(r.id, { state, at: clock.now() });
     if (state === "running") sawAwake(r.id);
-    if (state === "gone") goneReasons.set(r.id, goneWords(r.machineId, words));
+    if (state === "gone") goneReasons.set(r.id, goneWords(r.machineId, { by: "status poll", at: clock.now(), ...(answer !== undefined ? { answer } : {}) }));
     return state;
   };
 
@@ -467,13 +468,14 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     }
   };
 
-  // A tick at every event that opens or re-prices a stretch: the rate a tick carries then holds until the next one,
-  // so a size change an hour after an unwatched wake still bills that hour at the size it woke at.
+  // A tick at every event that opens, re-prices or ends a stretch for good: the rate a tick carries then holds until
+  // the next one, so a size change an hour after an unwatched wake still bills that hour at the size it woke at, and
+  // a machine found gone reads rate 0 from that instant rather than from the timer's next tick.
   const eventTick = (id: string): void => guarded("cost", () => costTick(id))();
   o.on("workspace.created", e => {
     if (e.type === "workspace.created") eventTick(e.workspace.id);
   });
-  for (const type of ["workspace.woken", "workspace.upgraded"] as const) {
+  for (const type of ["workspace.woken", "workspace.upgraded", "workspace.gone"] as const) {
     o.on(type, e => {
       if (e.type === type) eventTick(e.workspaceId);
     });

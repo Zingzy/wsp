@@ -32,6 +32,7 @@ import {
   fmtThreads,
   forgetNotice,
   goldenBuildLine,
+  goneWords,
   harnessExitLine,
   isCodeSearchTool,
   machineCapRefusal,
@@ -433,6 +434,19 @@ describe("machineCapRefusal", () => {
 
   it("says so plainly when nothing of this computer holds a slot, instead of naming an empty list", () => {
     expect(machineCapRefusal([])).toBe("the provider is at its machine cap and no machine of this computer holds a slot; free one at the provider and try again");
+  });
+});
+
+describe("goneWords", () => {
+  it("names the machine alone when nobody saw the provider lose it", () => {
+    expect(goneWords("m1")).toBe("machine m1 is gone at the provider");
+  });
+
+  it("names the call that found it gone and the second it did, quoting the provider's answer when the call had one", () => {
+    const at = Date.parse("2026-09-07T01:21:10.500Z");
+    expect(goneWords("sb_1", { by: "pause", at, answer: "404 Not found" })).toBe("machine sb_1 is gone at the provider: the pause found it gone at 2026-09-07T01:21:10Z (404 Not found)");
+    expect(goneWords("sb_1", { by: "status poll", at })).toBe("machine sb_1 is gone at the provider: the status poll found it gone at 2026-09-07T01:21:10Z");
+    expect(goneWords("sb_1", { by: "sweep", at, answer: "" })).toBe("machine sb_1 is gone at the provider: the sweep found it gone at 2026-09-07T01:21:10Z");
   });
 });
 
