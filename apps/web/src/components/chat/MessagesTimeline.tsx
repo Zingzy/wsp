@@ -10,12 +10,12 @@ import {
   type TimelineEntry,
   type TimestampFormat,
   toolGroupAction,
+  type ToolGroupSummaryKind,
   type TurnDiffSummary,
   type TurnId,
   type TurnSummary,
   type WorkLogTone,
 } from "./adapt";
-import { resolveWorkEntryToolPresentation } from "../../work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "../../work-log/scrollAnchor";
 import { resolveChatListAnchoredEndSpace } from "../../lib/chatList";
 import {
@@ -44,12 +44,12 @@ import {
   GlobeIcon,
   HammerIcon,
   InfoIcon,
+  type LucideIcon,
   SearchIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
   WrenchIcon,
-  XIcon,
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
@@ -1144,7 +1144,7 @@ function ThinkingTimelineRow() {
   // Reserve the activity row during setup so the handoff keeps the same height; nothing thinks on a machine that is not running.
   return (
     <div className="min-h-7">
-      {isPreparingWorktree || machineWait !== null ? null : <LiveActivityRow label={THINKING_LABEL} tone="thinking" iconName="brain" />}
+      {isPreparingWorktree || machineWait !== null ? null : <LiveActivityRow label={THINKING_LABEL} tone="thinking" glyph={WORK_TONES.thinking.Glyph} />}
     </div>
   );
 }
@@ -1392,12 +1392,12 @@ function WorkEntryLabelText({ label }: { label: WorkEntryLabel }) {
 function LiveActivityRow({
   label,
   tone,
-  iconName,
+  glyph,
   failed = false,
 }: {
   label: WorkEntryLabel;
   tone: WorkLogTone;
-  iconName?: WorkEntryIconName;
+  glyph: LucideIcon;
   failed?: boolean;
 }) {
   return (
@@ -1405,12 +1405,12 @@ function LiveActivityRow({
       <LiveActivityContent
         label={label}
         tone={tone}
-        iconName={iconName}
+        glyph={glyph}
         failed={failed}
         announceFailure={failed}
       />
       <ActivityShimmerOverlay>
-        <LiveActivityContent label={label} tone={tone} iconName={iconName} failed={failed} highlighted />
+        <LiveActivityContent label={label} tone={tone} glyph={glyph} failed={failed} highlighted />
       </ActivityShimmerOverlay>
     </div>
   );
@@ -1419,46 +1419,38 @@ function LiveActivityRow({
 function LiveActivityContent({
   label,
   tone,
-  iconName,
+  glyph,
   failed = false,
   announceFailure = false,
   highlighted = false,
 }: {
   label: WorkEntryLabel;
   tone: WorkLogTone;
-  iconName: WorkEntryIconName | undefined;
+  glyph: LucideIcon;
   failed?: boolean;
   announceFailure?: boolean;
   highlighted?: boolean;
 }) {
-  const isSpecialToolIcon = iconName === "browser";
-  const resolvedIconName = failed && !isSpecialToolIcon ? "circle-alert" : iconName;
+  const Glyph = failed ? WORK_TONES.error.Glyph : glyph;
 
   return (
     <span
       className={cn(
-        "flex min-h-6 min-w-0 items-center gap-1.5 py-0.5",
-        resolvedIconName ? "px-0.5" : "px-1",
+        "flex min-h-6 min-w-0 items-center gap-1.5 py-0.5 px-0.5",
         highlighted ? "text-foreground" : WORK_TONES[tone].labelClass,
       )}
     >
-      {resolvedIconName ? (
-        <span
-          className={cn(
-            "flex size-6 shrink-0 items-center justify-center",
-            highlighted ? "text-foreground" : WORK_TONES[tone].iconClass,
-          )}
-          role={announceFailure ? "img" : undefined}
-          aria-label={announceFailure ? "Tool call failed" : undefined}
-        >
-          <WorkEntryIcon
-            name={resolvedIconName}
-            className={cn("block size-4 shrink-0 stroke-[1.8]", !highlighted && "opacity-70")}
-          />
-        </span>
-      ) : null}
+      <span
+        className={cn(
+          "flex size-6 shrink-0 items-center justify-center",
+          highlighted ? "text-foreground" : WORK_TONES[tone].iconClass,
+        )}
+        role={announceFailure ? "img" : undefined}
+        aria-label={announceFailure ? "Tool call failed" : undefined}
+      >
+        <Glyph className={cn("block size-4 shrink-0 stroke-[1.8]", !highlighted && "opacity-70")} aria-hidden />
+      </span>
       <span className="min-w-0 flex-1 truncate"><WorkEntryLabelText label={label} /></span>
-      {failed && isSpecialToolIcon ? <XIcon aria-hidden className="size-3 shrink-0" /> : null}
     </span>
   );
 }
@@ -1477,13 +1469,13 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
     >
       {row.active ? (
-        <LiveActivityRow label={label} tone={row.entry.tone} iconName={workEntryIconName(row.entry)} failed={failed} />
+        <LiveActivityRow label={label} tone={row.entry.tone} glyph={workEntryGlyph(row.entry)} failed={failed} />
       ) : (
         <div className="min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed">
           <LiveActivityContent
             label={label}
             tone={row.entry.tone}
-            iconName={workEntryIconName(row.entry)}
+            glyph={workEntryGlyph(row.entry)}
             failed={failed}
             announceFailure={failed}
           />
@@ -1493,35 +1485,20 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
   );
 }
 
-function toolGroupSummaryIconName(
-  kind: Extract<TimelineRow, { kind: "work-toggle" }>["summaryKind"],
-): WorkEntryIconName {
-  switch (kind) {
-    case "read":
-      return "eye";
-    case "edit":
-      return "square-pen";
-    case "command":
-      return "terminal";
-    case "browser":
-      return "browser";
-    case "search":
-      return "globe";
-    case "code-search":
-      return "search";
-    case "other":
-      return "wrench";
-    case "dynamic-tool":
-      return "hammer";
-    case "agent-tool":
-      return "bot";
-    case "tone-tool":
-      return "zap";
-    case "update":
-    case "mixed":
-      return "hammer";
-  }
-}
+const TOOL_GROUP_GLYPHS: Record<ToolGroupSummaryKind, LucideIcon> = {
+  read: EyeIcon,
+  edit: SquarePenIcon,
+  command: TerminalIcon,
+  browser: GlobeIcon,
+  search: GlobeIcon,
+  "code-search": SearchIcon,
+  other: WrenchIcon,
+  "dynamic-tool": HammerIcon,
+  "agent-tool": BotIcon,
+  "tone-tool": ZapIcon,
+  update: HammerIcon,
+  mixed: HammerIcon,
+};
 
 function WorkGroupToggleTimelineRow({
   row,
@@ -1529,6 +1506,7 @@ function WorkGroupToggleTimelineRow({
   row: Extract<TimelineRow, { kind: "work-toggle" }>;
 }) {
   const ctx = use(TimelineRowCtx);
+  const Glyph = TOOL_GROUP_GLYPHS[row.summaryKind];
   return (
     <button
       type="button"
@@ -1538,10 +1516,7 @@ function WorkGroupToggleTimelineRow({
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
     >
       <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
-        <WorkEntryIcon
-          name={toolGroupSummaryIconName(row.summaryKind)}
-          className="size-4 shrink-0 stroke-[1.8] opacity-70"
-        />
+        <Glyph className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
       </span>
       <span className="min-w-0 flex-1 truncate text-secondary-label">{row.summary}</span>
     </button>
@@ -1767,67 +1742,18 @@ function formatWorkingTimerNow(startIso: string): string {
   return formatWorkingTimer(startIso, new Date().toISOString()) ?? "0s";
 }
 
-type WorkEntryIconName =
-  | "bot"
-  | "brain"
-  | "browser"
-  | "circle-alert"
-  | "eye"
-  | "globe"
-  | "hammer"
-  | "info"
-  | "search"
-  | "square-pen"
-  | "terminal"
-  | "wrench"
-  | "x"
-  | "zap";
-
-function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className: string }) {
-  switch (name) {
-    case "bot":
-      return <BotIcon className={className} aria-hidden />;
-    case "brain":
-      return <BrainIcon className={className} aria-hidden />;
-    case "browser":
-      return <GlobeIcon className={className} aria-hidden />;
-    case "circle-alert":
-      return <CircleAlertIcon className={className} aria-hidden />;
-    case "eye":
-      return <EyeIcon className={className} aria-hidden />;
-    case "globe":
-      return <GlobeIcon className={className} aria-hidden />;
-    case "hammer":
-      return <HammerIcon className={className} aria-hidden />;
-    case "info":
-      return <InfoIcon className={className} aria-hidden />;
-    case "search":
-      return <SearchIcon className={className} aria-hidden />;
-    case "square-pen":
-      return <SquarePenIcon className={className} aria-hidden />;
-    case "terminal":
-      return <TerminalIcon className={className} aria-hidden />;
-    case "wrench":
-      return <WrenchIcon className={className} aria-hidden />;
-    case "x":
-      return <XIcon className={className} aria-hidden />;
-    case "zap":
-      return <ZapIcon className={className} aria-hidden />;
-  }
-}
-
 interface WorkToneStyle {
-  readonly icon: WorkEntryIconName;
+  readonly Glyph: LucideIcon;
   readonly iconClass: string;
   readonly labelClass: string;
 }
 
-// The one table a work row's tone is drawn from. A notice states a fact, so it draws neither a check nor a cross.
-const WORK_TONES: Record<WorkLogTone, WorkToneStyle> = {
-  thinking: { icon: "brain", iconClass: "text-foreground", labelClass: "text-secondary-label" },
-  tool: { icon: "zap", iconClass: "text-icon-muted", labelClass: "text-secondary-label" },
-  notice: { icon: "info", iconClass: "text-icon-muted", labelClass: "font-mono text-muted-foreground" },
-  error: { icon: "circle-alert", iconClass: "text-foreground", labelClass: "text-secondary-label" },
+// The one table a work row's tone is drawn from, the failed row's glyph included. A notice states a fact, so it draws neither a check nor a cross.
+export const WORK_TONES: Record<WorkLogTone, WorkToneStyle> = {
+  thinking: { Glyph: BrainIcon, iconClass: "text-foreground", labelClass: "text-secondary-label" },
+  tool: { Glyph: ZapIcon, iconClass: "text-icon-muted", labelClass: "text-secondary-label" },
+  notice: { Glyph: InfoIcon, iconClass: "text-icon-muted", labelClass: "font-mono text-muted-foreground" },
+  error: { Glyph: CircleAlertIcon, iconClass: "text-foreground", labelClass: "text-secondary-label" },
 };
 
 function buildToolCallExpandedBody(
@@ -1855,23 +1781,21 @@ function buildToolCallExpandedBody(
 const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,0.6875rem)] leading-relaxed select-text";
 
-function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
-  const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
-  if (toolPresentation) return toolPresentation.icon;
-  if (!isToolLike(workEntry)) return WORK_TONES[workEntry.tone].icon;
+function workEntryGlyph(workEntry: TimelineWorkEntry): LucideIcon {
+  if (!isToolLike(workEntry)) return WORK_TONES[workEntry.tone].Glyph;
   const action = toolGroupAction(workEntry);
-  if (action !== "other") return toolGroupSummaryIconName(action);
+  if (action !== "other") return TOOL_GROUP_GLYPHS[action];
 
   switch (workEntry.itemType) {
     case "mcp_tool_call":
-      return "wrench";
+      return WrenchIcon;
     case "dynamic_tool_call":
-      return "hammer";
+      return HammerIcon;
     case "collab_agent_tool_call":
-      return "bot";
+      return BotIcon;
   }
 
-  return WORK_TONES[workEntry.tone].icon;
+  return WORK_TONES[workEntry.tone].Glyph;
 }
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
@@ -1912,13 +1836,11 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   };
   const tone = WORK_TONES[workEntry.tone];
   const showFailedIndicator = indicatesFailure(workEntry);
-  const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
-  const entryIconName =
-    showFailedIndicator && !toolPresentation ? "circle-alert" : workEntryIconName(workEntry);
+  const Glyph = showFailedIndicator ? WORK_TONES.error.Glyph : workEntryGlyph(workEntry);
   const preview = workEntryDisplayLabel(workEntry, workspaceRoot);
   const previewText = workEntryLabelText(preview);
   const display: WorkEntryLabel =
-    !toolPresentation && expanded && workEntry.command?.trim() ? { verb: null, text: "Command", mono: false } : preview;
+    expanded && workEntry.command?.trim() ? { verb: null, text: "Command", mono: false } : preview;
   const detailText = workEntry.detail?.trim();
   const canExpand = Boolean(
     workEntry.command?.trim() ||
@@ -1971,10 +1893,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           role={showFailedIndicator ? "img" : undefined}
           aria-label={showFailedIndicator ? "Tool call failed" : undefined}
         >
-          <WorkEntryIcon
-            name={entryIconName}
-            className="block size-4 shrink-0 stroke-[1.8] opacity-70"
-          />
+          <Glyph className="block size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
         </span>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
@@ -1982,9 +1901,6 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
               <span className={cn("min-w-0 flex-1 truncate", headingClass)}><WorkEntryLabelText label={display} /></span>
             </p>
           </div>
-          {showFailedIndicator && toolPresentation ? (
-            <XIcon aria-hidden className="size-3 shrink-0 text-icon-muted" />
-          ) : null}
           <span
             className={cn(
               "flex size-4 shrink-0 items-center justify-center",
