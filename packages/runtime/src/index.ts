@@ -7,6 +7,7 @@ export * from "./machine-exec.js";
 export * from "./reach.js";
 export * from "./daemon-token.js";
 export * from "./harness-catalog.js";
+export * from "./adapters.js";
 // Re-exported so clients (wspx) can wire a backend without importing the
 // engine directly; the runtime is the only layer that drives it.
 export {

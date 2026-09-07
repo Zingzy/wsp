@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One adapter factory per agent wsp can drive, keyed by catalog id. Adding an
-// agent is its id in THREAD_AGENTS and its factory here; the type ties the two
-// together. Each adapter gets its agent's words from the catalog: its home on
-// the guest, the folder the golden's sign-in wrote into, and the command that
-// signs in on a machine; the adapter packages carry no catalog rows of their own.
+// One adapter factory per agent wsp can drive, keyed by catalog id, for every
+// client that embeds the runtime: the app and the dev CLI read this table
+// rather than wiring adapters of their own. Adding an agent is its id in
+// THREAD_AGENTS and its factory here; the type ties the two together. Each
+// adapter gets its agent's words from the catalog: its home on the guest, the
+// folder the golden's sign-in wrote into, and the command that signs in on a
+// machine; the adapter packages carry no catalog rows of their own.
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { createCodexAdapter } from "@wsp/adapter-codex";
-import { CATALOG_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, type ThreadAgent } from "@wsp/catalog";
 import { guestAgentHomes } from "@wsp/engine";
-import { machineExecStream, type HarnessAdapterFactory } from "@wsp/runtime";
-import type { ThreadAgent } from "./thread-agents.js";
+import { machineExecStream } from "./machine-exec.js";
+import type { HarnessAdapterFactory } from "./runtime.js";
 
 const guestHome = (id: ThreadAgent): string => {
   const home = guestAgentHomes()[id];

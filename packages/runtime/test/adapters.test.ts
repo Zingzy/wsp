@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Which agents wsp can open a thread on: one list, the adapter registry keyed
 // by exactly it, and every id a catalog agent.
-import { CATALOG_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, THREAD_AGENTS } from "@wsp/catalog";
 import type { Machine } from "@wsp/engine";
 import { describe, expect, it } from "vitest";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
-import { THREAD_AGENTS } from "../src/thread-agents.js";
 
 describe("the agents wsp can open a thread on", () => {
   it("is one list, the adapter registry is keyed by it, and every id is a catalog agent", () => {

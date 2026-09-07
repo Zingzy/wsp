@@ -15,6 +15,7 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
+import { THREAD_AGENTS } from "@wsp/catalog";
 import { nodeHost } from "@wsp/collect";
 import {
   AFTER_CUT_LINE,
@@ -84,7 +85,6 @@ import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { isRecipeTick, runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { historyCache, smallRecipePath } from "./recipe-file.js";
-import { THREAD_AGENTS } from "./thread-agents.js";
 
 type Frame = Record<string, unknown> & { id?: string | number | null; ok?: boolean; type?: string };
 
