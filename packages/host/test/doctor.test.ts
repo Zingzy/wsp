@@ -6,11 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
+import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { TOOLS_PATH } from "@wsp/engine";
 import { rotateDaemonTokenScript, writeDaemonTokenScript } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
+import { isReserved } from "@wsp/engine";
 import {
   connectDaemonSocket,
   deployDaemon,
@@ -22,7 +24,6 @@ import {
   GUEST_NODE,
   claudeEnvs,
   OPEN_SHIM_SCRIPT,
-  isReserved,
   packBundle,
   stageDaemonBundle,
   tarPackCommand,
@@ -189,6 +190,10 @@ describe("deployScript", () => {
     expect(script).toContain(`node-v${GUEST_NODE.version}-linux-arm64.tar.gz sha=${GUEST_NODE.sha256.aarch64}`);
     expect(script).toContain("sha256sum -c");
     expect(script).toContain("-C /usr/local --strip-components=1");
+    // The download goes through the catalog's one curl function, defined ahead of it, and types no flags of its own.
+    expect(script.indexOf(CURL_NET)).toBeGreaterThan(-1);
+    expect(script.indexOf(CURL_NET)).toBeLessThan(script.indexOf("curl -o"));
+    expect(script).not.toMatch(/\bcurl +-[A-Za-z]*[fsSL]\b/);
     expect(script).not.toMatch(/apt|nvm|\| *sh\b|\| *bash\b/);
     expect(GUEST_NODE.sha256.x86_64).toMatch(/^[0-9a-f]{64}$/);
     expect(GUEST_NODE.sha256.aarch64).toMatch(/^[0-9a-f]{64}$/);

@@ -141,13 +141,11 @@ describe("new workspace helpers", () => {
     expect(defaultWorkspaceName(["workspace-1", "workspace-2"])).toBe("workspace-3");
   });
 
-  it("a concurrency refusal explains the provider's machine cap; the raw message is the log's failing line, not repeated here", () => {
-    const explained = explainCreateRefusal(new RequestError("Sandbox limit reached (2)", "concurrency"));
+  it("a concurrency refusal keeps the runtime's words, which name the machines holding the slots, under the cap title", () => {
+    const line = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
+    const explained = explainCreateRefusal(new RequestError(line, "concurrency"));
     expect(explained.title).toMatch(/machine cap/i);
-    expect(explained.detail).toMatch(/pause or delete a workspace/i);
-    // The runtime stops a builder kept after a save before this refusal can reach the app; the message says so.
-    expect(explained.detail).toContain("every slot is taken. A builder kept after a save and not in use is stopped first to make room; pause or delete a workspace to free one, then try again.");
-    expect(explained.detail).not.toContain("Sandbox limit reached");
+    expect(explained.detail).toBe(line);
   });
 
   it("other failures keep their message under a plain title", () => {

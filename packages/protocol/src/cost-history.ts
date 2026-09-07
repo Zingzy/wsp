@@ -9,7 +9,7 @@ export const COST_HISTORY_CAP = 4096;
 
 /** The series with `tick` appended: a tick that continues the rate of the two before it replaces the newest, so the
  * series holds the first tick, the last tick of each rate, the first tick of the next and the newest. Equal rates
- * stand for one straight run because the runtime's accrued total is its rate times awake time, never a step. */
+ * stand for one straight run because the accrued total grows at the tick's rate for as long as that rate holds. */
 export function appendCostPoint(points: readonly WorkspaceCostEvent[], tick: WorkspaceCostEvent): WorkspaceCostEvent[] {
   const last = points[points.length - 1];
   const prev = points[points.length - 2];

@@ -11,6 +11,10 @@ import {
   builderStaysLine,
   DAEMON_UPDATE_FAILED,
   DAEMON_UPDATING,
+  RECORD_RESTORED,
+  nameDeletingRefusal,
+  nameTakenRefusal,
+  recordRestoredLine,
   deleteNotice,
   execFolderLine,
   fmtBytes,
@@ -25,6 +29,7 @@ import {
   goldenBuildLine,
   harnessExitLine,
   isCodeSearchTool,
+  machineCapRefusal,
   machineUnreachedLine,
   mcpServerCommandLine,
   moveTimedOutLine,
@@ -372,6 +377,24 @@ describe("machine size words", () => {
   });
 });
 
+describe("machineCapRefusal", () => {
+  it("names the machines holding the slots and the move that frees one, without saying how many slots the plan has", () => {
+    expect(machineCapRefusal(["first", "t-cap"])).toBe("both machine slots are in use: first, t-cap. Pause one or wait for a nap.");
+    // A slot held by a machine this host cannot name is still held, so one holder is no proof of a one-slot plan.
+    expect(machineCapRefusal(["first"])).toBe("a machine slot is in use: first. Pause it or wait for a nap.");
+    expect(machineCapRefusal(["a", "b", "c"])).toBe("machine slots are in use: a, b, c. Pause one or wait for a nap.");
+    expect(machineCapRefusal(["a", "b", "c", "d"])).toBe("machine slots are in use: a, b, c, d. Pause one or wait for a nap.");
+  });
+
+  it("names a builder as one, since the pause on offer is a workspace's move", () => {
+    expect(machineCapRefusal(["first"], ["wsp-golden"])).toBe("both machine slots are in use: first, wsp-golden (builder). Pause one or wait for a nap.");
+  });
+
+  it("says so plainly when nothing of this computer holds a slot, instead of naming an empty list", () => {
+    expect(machineCapRefusal([])).toBe("the provider is at its machine cap and no machine of this computer holds a slot; free one at the provider and try again");
+  });
+});
+
 describe("mcpServerCommandLine", () => {
   it("names the command every agent's config now runs, as one shell line a person can paste", () => {
     expect(mcpServerCommandLine("npx", ["-y", "@zingzy/wsp@0.1.2", "mcp", "--state", "/Users/p/.wsp/state.json"])).toBe("The server command is npx -y @zingzy/wsp@0.1.2 mcp --state /Users/p/.wsp/state.json");
@@ -397,6 +420,18 @@ describe("backgroundTasksLine", () => {
   it("counts the tasks the harness still had running when its result arrived", () => {
     expect(backgroundTasksLine(1)).toBe("ended with 1 background task running");
     expect(backgroundTasksLine(2)).toBe("ended with 2 background tasks running");
+  });
+});
+
+describe("a record the sweep restored, and a name a fork cannot take", () => {
+  it("names the machine, the workspace and the verb that removes it", () => {
+    expect(RECORD_RESTORED).toBe("record restored from the provider's listing");
+    expect(recordRestoredLine("sbx_1", "first", "ws_1")).toBe("reap: recorded sbx_1 as workspace first (ws_1): a machine from this setup that no record claimed; it bills until wsp delete first");
+  });
+
+  it("refuses a taken name and a name being deleted in words a person can act on", () => {
+    expect(nameTakenRefusal("first")).toBe("first is already a workspace; pick another name, or delete it first");
+    expect(nameDeletingRefusal("first")).toBe("first is being deleted; wait for the delete to finish, then fork it again");
   });
 });
 

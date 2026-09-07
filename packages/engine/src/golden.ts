@@ -7,6 +7,7 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
+import { ROAD_STEPS } from "@wsp/catalog";
 import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, snapshotAttemptLine, snapshotFailedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
@@ -19,6 +20,7 @@ import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
+import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { importInto } from "./vault.js";
 
 export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
@@ -292,6 +294,9 @@ const UPLOAD_HEADROOM = 256 * MIB;
 const AGENTS_DISK_FLOOR = 800 * MIB;
 const AGENT_TIMEOUT_S = 900;
 const SHELL_TIMEOUT_S = 300;
+/** A harness-stage install under the guard, with every road's network lines ahead of it: the Node floor and the
+ * agents' installers type the bare curl the road table's function defines, and may type any manager. */
+const guardedHarness = (script: string): string => guarded(["set -euo pipefail", ...ROAD_STEPS.script.env, script].join("\n"), AGENT_TIMEOUT_S);
 const SHELL_CHECK_S = 60;
 
 /** One start of the login shell the way the app's pty runs it, a login shell (profile.d puts the tools on PATH before
@@ -428,7 +433,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
           continue;
         }
         stage("installing-harness", `${agent.name} (${i + 1}/${imp.agents.length})`);
-        const install = await machine.run(guarded(`set -euo pipefail\n${NODE_PATH_LINE}\n${agent.install}`, AGENT_TIMEOUT_S), { deadlineMs: guardDeadlineMs(AGENT_TIMEOUT_S), onLine: line => stage("installing-harness", `${agent.name}: ${line}`) });
+        const install = await machine.run(guardedHarness(`${NODE_PATH_LINE}\n${agent.install}`), { deadlineMs: guardDeadlineMs(AGENT_TIMEOUT_S), onLine: line => stage("installing-harness", `${agent.name}: ${line}`) });
         const check = install.exitCode === 0 ? await machine.run(`${NODE_PATH_LINE}\n${agent.smoke}`, { deadlineMs: 60_000 }) : install;
         const ms = Date.now() - t0;
         if (check.exitCode === 0) result.agents.push({ id: agent.id, name: agent.name, outcome: "installed", ms });
@@ -529,7 +534,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
  * agents whose floor the guest's Node does not meet. */
 async function installNode(machine: Machine, node: NodeInstall, stage: StageListener): Promise<{ haveMajor: number; failed?: string }> {
   stage("installing-harness", `Node for ${node.agents.join(", ")}`);
-  const res = await machine.run(guarded(`set -euo pipefail\n${node.cmd}`, AGENT_TIMEOUT_S), { deadlineMs: guardDeadlineMs(AGENT_TIMEOUT_S), onLine: line => stage("installing-harness", `Node: ${line}`) });
+  const res = await machine.run(guardedHarness(node.cmd), { deadlineMs: guardDeadlineMs(AGENT_TIMEOUT_S), onLine: line => stage("installing-harness", `Node: ${line}`) });
   const have = /NODE_HAVE v(\d+)/.exec(res.stdout)?.[1];
   const haveMajor = have === undefined ? 0 : Number(have);
   const kept = /NODE_KEPT (v\S+)/.exec(res.stdout)?.[1];
@@ -1012,7 +1017,7 @@ export async function buildGolden(
     backend,
     setup,
     ...size,
-    labels: { ...labels, "wsp-builder": "1" },
+    labels: { ...labels, [BUILDER_LABEL]: "1" },
     ...(kind !== undefined ? { kind } : {}),
     ...(baseTemplate !== undefined ? { baseTemplate } : {}),
     ...(setupTimeoutMs !== undefined ? { setupTimeoutMs } : {}),
@@ -1022,7 +1027,7 @@ export async function buildGolden(
     backend,
     smoke,
     ...size,
-    labels: { ...labels, "wsp-smoke": "1", createdAt: new Date().toISOString() },
+    labels: { ...labels, [SMOKE_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
     ...(manifest !== undefined ? { manifest } : {}),
     ...(smokeTimeoutMs !== undefined ? { smokeTimeoutMs } : {}),
     ...(onStage !== undefined ? { onStage } : {}),

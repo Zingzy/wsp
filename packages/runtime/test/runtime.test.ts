@@ -2047,7 +2047,7 @@ describe("runtime golden builders", () => {
     expect(await rt.reap()).toEqual({
       reaped: [{ id: second.id, builder: true, reason: "recorded" }, expect.objectContaining({ id: orphan.id, reason: "orphan" })],
       spared: [],
-      failed: [{ id: first.id, message: "502 exec failed; stays recorded, retried next sweep" }],
+      failed: [{ id: first.id, message: "could not stop: 502 exec failed; stays recorded, retried next sweep" }],
     });
     expect(backend.machines.map(m => m.killed)).toEqual([false, true, true]);
     expect((await rt.golden.builders()).map(b => b.id)).toEqual([first.id]);
@@ -4205,7 +4205,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(result.road).toBe("fork");
     // Not even the no-op runs on it, and the person hears why it is still there.
     expect(machine.execLog).toHaveLength(before);
-    expect(frames[0]).toBe(`creating:an earlier kept builder ${b.id} was not stopped (502 Bad Gateway; stays recorded, retried next sweep)`);
+    expect(frames[0]).toBe(`creating:an earlier kept builder ${b.id}: could not stop: 502 Bad Gateway; stays recorded, retried next sweep`);
     expect(frames[1]).toBe("creating:fork of golden v1");
     expect(await first.store.get("builders", b.id)).toMatchObject({ sealed: { version: 1 } });
   });
@@ -4268,6 +4268,67 @@ describe("runtime golden update and the post-seal grace", () => {
     // Nothing left to stop: the refusal reaches the caller with its kind, and nothing of ours is killed.
     await expect(rt.workspaces.create({ golden: version.snapshotId, name: "two" })).rejects.toMatchObject({ kind: "concurrency" });
     expect(backend.machines.filter(m => m.killed).map(m => m.id)).toEqual([backend.machines[0]!.id, backend.machines[1]!.id]);
+  });
+
+  it("a create at the cap with nothing left to stop is refused in words naming the workspaces holding the slots, not the provider's sentence", async () => {
+    const { backend, rt } = started();
+    const b = await rt.golden.prepare();
+    const { version } = await rt.golden.seal(b.id);
+    await rt.golden.kill(b.id);
+    const first = await rt.workspaces.create({ golden: version.snapshotId, name: "first" });
+    await rt.workspaces.create({ golden: version.snapshotId, name: "t-cap" });
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
+      return create(spec);
+    };
+    const stages: EventUnion[] = [];
+    rt.events.on("workspace.creating", e => stages.push(e));
+    const refused = await rt.workspaces.create({ golden: version.snapshotId, name: "f2" }).catch((e: unknown) => e);
+    expect(refused).toMatchObject({ kind: "concurrency", status: 429, message: "both machine slots are in use: first, t-cap. Pause one or wait for a nap." });
+    // The provider's own sentence is kept for whoever reads the log, never as the answer.
+    expect((refused as { cause?: Error }).cause?.message).toBe("Too many concurrent sessions");
+    // The app's creation log reads the failed stage, so the same words land there.
+    expect(stages.at(-1)).toMatchObject({ stage: "failed", message: "both machine slots are in use: first, t-cap. Pause one or wait for a nap." });
+
+    // A napped workspace holds no slot, so it is not named; the builder that is up is, as a builder.
+    await rt.workspaces.nap(first.id);
+    const kept = await rt.golden.prepare({ name: "wsp-golden" }).catch((e: unknown) => e);
+    expect(kept).toMatchObject({ id: expect.any(String) });
+    const again = await rt.workspaces.create({ golden: version.snapshotId, name: "f3" }).catch((e: unknown) => e);
+    expect((again as Error).message).toBe("both machine slots are in use: t-cap, wsp-golden (builder). Pause one or wait for a nap.");
+  });
+
+  it("a create at the cap names a workspace whose own create is still in flight: its machine is up and holds a slot", async () => {
+    const { backend, store, rt } = started();
+    const b = await rt.golden.prepare();
+    const { version } = await rt.golden.seal(b.id);
+    await rt.golden.kill(b.id);
+    // A record reaches the store only once its machine is bound, so holding that write holds a create in flight.
+    const put = store.put.bind(store);
+    let bound = (): void => {};
+    let land = (): void => {};
+    const inFlight = new Promise<void>(resolve => { bound = resolve; });
+    const held = new Promise<void>(resolve => { land = resolve; });
+    store.put = async (collection, id, value) => {
+      const r = value as { name?: string; machineId?: string };
+      if (r.name === "slow" && (r.machineId ?? "") !== "") {
+        bound();
+        await held;
+      }
+      await put(collection, id, value);
+    };
+    const slow = rt.workspaces.create({ golden: version.snapshotId, name: "slow" });
+    await inFlight;
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
+      return create(spec);
+    };
+    const refused = await rt.workspaces.create({ golden: version.snapshotId, name: "f2" }).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe("a machine slot is in use: slow. Pause it or wait for a nap.");
+    land();
+    expect(await slow).toMatchObject({ name: "slow" });
   });
 
   it("a create that made room reports the fork twice, the second time with the builder it stopped as the notice", async () => {

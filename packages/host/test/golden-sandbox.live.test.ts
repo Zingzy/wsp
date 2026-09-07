@@ -3,12 +3,11 @@
 // ready with the real recipe, dial the builder's daemon through its reach and
 // open one pty, read the disk, seal. Nothing but poc-labelled machines may be
 // left on the account afterwards.
-import { SolariBackend, type GoldenStage } from "@wsp/engine";
+import { SolariBackend, isReserved, type GoldenStage } from "@wsp/engine";
 import { connectDaemon, createRuntime, memoryStore } from "@wsp/runtime";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
 import { goldenRecipe } from "../src/cli.js";
-import { isReserved } from "../src/doctor.js";
 
 const LABEL = { wsp: "1", "wsp-test": "golden-sandbox-live" };
 

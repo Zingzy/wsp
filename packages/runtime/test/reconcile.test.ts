@@ -1,0 +1,293 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// A record never leaves the store while its machine exists at the provider,
+// and the other way round: a workspace machine of this setup's that no record
+// claims is recorded again at the sweep, never killed, so it can be seen and
+// deleted. A name names at most one workspace, and a fork of a name whose
+// workspace is being deleted is refused in words, so the two never interleave.
+import { describe, expect, it, vi } from "vitest";
+import { RECORD_RESTORED, nameDeletingRefusal, nameTakenRefusal, type EventUnion } from "@wsp/protocol";
+import { createRuntime } from "../src/runtime.js";
+import { memoryStore, type Store } from "../src/store.js";
+import { stubBackend } from "./stub-backend.js";
+
+const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+
+/** A workspace forked by one process whose record the store then lost, seen by a fresh runtime over the same store. */
+async function lostRecord(paused = false) {
+  const backend = stubBackend();
+  const store = memoryStore();
+  const first = createRuntime({ backend, store, adapters: {} });
+  const ws = await first.workspaces.create({ golden: "snap_g", name: "first" });
+  await first.close();
+  const machine = backend.machines[0]!;
+  machine.spec.labels!["createdAt"] = ago(2 * 60_000);
+  machine.paused = paused;
+  await store.delete("workspaces", ws.id);
+  const rt = createRuntime({ backend, store, adapters: {} });
+  const events: EventUnion[] = [];
+  rt.events.on("*", e => events.push(e));
+  return { backend, store, rt, ws, machine, events };
+}
+
+describe("the sweep records a machine of this setup that no record claims", () => {
+  it("stamps the record's id, name and golden on the fork, so a lost record can be rebuilt from the machine", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "first" });
+    expect(backend.machines[0]!.spec.labels).toMatchObject({ wsp: "1", "wsp-workspace": ws.id, "wsp-name": "first", "wsp-golden": "snap_g", "wsp-owner": expect.stringMatching(/^h_/) });
+  });
+
+  it("a running machine with the owner label and no record becomes a running record under its own id and name, is listed, says so once, and is not killed", async () => {
+    const { backend, store, rt, ws, machine, events } = await lostRecord();
+
+    const result = await rt.reap();
+
+    expect(result).toEqual({ reaped: [], spared: [], adopted: [{ id: machine.id, workspaceId: ws.id, name: "first", phase: "running" }] });
+    expect(machine.killed).toBe(false);
+    expect(await rt.workspaces.list()).toMatchObject([{ id: ws.id, name: "first", machineId: machine.id, phase: "running", golden: "snap_g" }]);
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ id: ws.id, name: "first", machineId: machine.id, phase: "running", firstLife: false });
+    expect(events.filter(e => e.type === "workspace.created")).toMatchObject([{ workspace: { id: ws.id, name: "first" } }]);
+    expect(events.filter(e => e.type === "workspace.status")).toMatchObject([{ status: { id: ws.id, phase: "running", reason: RECORD_RESTORED } }]);
+
+    // The second sweep finds it claimed; the delete road then works as for any workspace.
+    expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
+    await rt.workspaces.delete(ws.id);
+    expect(machine.killed).toBe(true);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+
+  it("a paused one hydrates napping with the same words", async () => {
+    const { rt, ws, machine, events } = await lostRecord(true);
+    const result = await rt.reap();
+    expect(result.adopted).toEqual([{ id: machine.id, workspaceId: ws.id, name: "first", phase: "napping" }]);
+    expect(await rt.workspaces.list()).toMatchObject([{ id: ws.id, phase: "napping" }]);
+    expect(events.filter(e => e.type === "workspace.status")).toMatchObject([{ status: { id: ws.id, phase: "napping", machineState: "paused", reason: RECORD_RESTORED } }]);
+  });
+
+  it("a machine forked before the stamps is recorded under its machine id as its name and the golden head as its image", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [{ version: 1, snapshotId: "snap_head", baseTemplate: "base", setupSha: "x", createdAt: ago(3_600_000), smoke: { cmd: "true", exitCode: 0 } }] });
+    const rt = createRuntime({ backend, store, adapters: {} });
+    await rt.workspaces.list();
+    const { id: owner } = (await store.get("owner", "id")) as { id: string };
+    const old = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-host": "1", "wsp-owner": owner, createdAt: ago(2 * 60_000) } });
+
+    const result = await rt.reap();
+
+    expect(result.adopted).toMatchObject([{ id: old.id, workspaceId: expect.stringMatching(/^ws_[0-9a-f]{8}$/), name: old.id, phase: "running" }]);
+    expect(await rt.workspaces.list()).toMatchObject([{ name: old.id, machineId: old.id, golden: "snap_head" }]);
+  });
+
+  it("leaves a machine inside its create minute for the next sweep, and one the provider no longer knows to the listing's lag", async () => {
+    const { backend, rt, ws, machine } = await lostRecord();
+    machine.spec.labels!["createdAt"] = ago(30_000);
+    const young = await rt.reap();
+    expect(young.adopted).toBeUndefined();
+    expect(young.spared).toMatchObject([{ id: machine.id, whose: "own" }]);
+    expect(await rt.workspaces.list()).toEqual([]);
+
+    machine.spec.labels!["createdAt"] = ago(2 * 60_000);
+    const realGet = backend.get.bind(backend);
+    backend.get = async id => {
+      if (id === machine.id) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
+      return realGet(id);
+    };
+    expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
+    expect((await rt.workspaces.list()).map(w => w.id)).not.toContain(ws.id);
+  });
+
+  it("a body a rebuild or a wake replaced and failed to stop is not recorded twice: its record lives on the new machine, so the engine kills it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "first" });
+    const { id: owner } = (await store.get("owner", "id")) as { id: string };
+    const body = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": owner, "wsp-workspace": ws.id, "wsp-name": "first", "wsp-golden": "snap_g", createdAt: ago(2 * 60_000) } });
+
+    const result = await rt.reap();
+
+    expect(result.adopted).toBeUndefined();
+    expect((await rt.workspaces.list()).map(w => [w.id, w.machineId])).toEqual([[ws.id, "m1"]]);
+    expect(result.reaped).toMatchObject([{ id: body.id, reason: "own" }]);
+    expect(backend.machines.map(m => m.killed)).toEqual([false, true]);
+  });
+
+  it("a name a live workspace already holds is not taken twice: the recovered record is named by its machine", async () => {
+    const { backend, rt, ws, machine } = await lostRecord();
+    const again = await rt.workspaces.create({ golden: "snap_g", name: "first" });
+    backend.machines[1]!.spec.labels!["createdAt"] = ago(2 * 60_000);
+
+    const result = await rt.reap();
+
+    expect(result.adopted).toEqual([{ id: machine.id, workspaceId: ws.id, name: machine.id, phase: "running" }]);
+    expect((await rt.workspaces.list()).map(w => [w.id, w.name]).sort()).toEqual([[again.id, "first"], [ws.id, machine.id]].sort());
+  });
+
+  it("a confirming read the provider refuses leaves the machine for the next sweep: not recorded, not killed, its own words in failed", async () => {
+    const { backend, rt, ws, machine } = await lostRecord();
+    const realGet = backend.get.bind(backend);
+    let refused = false;
+    backend.get = async id => {
+      if (id === machine.id && !refused) {
+        refused = true;
+        throw Object.assign(new Error("Bad Gateway"), { status: 502 });
+      }
+      return realGet(id);
+    };
+
+    const first = await rt.reap();
+
+    expect(first.adopted).toBeUndefined();
+    expect(first.reaped).toEqual([]);
+    expect(first.failed).toEqual([{ id: machine.id, message: "not recorded: Bad Gateway; retried next sweep" }]);
+    expect(machine.killed).toBe(false);
+    expect(await rt.workspaces.list()).toEqual([]);
+
+    const second = await rt.reap();
+    expect(second.adopted).toEqual([{ id: machine.id, workspaceId: ws.id, name: "first", phase: "running" }]);
+    expect(machine.killed).toBe(false);
+  });
+
+  it("builders, smoke forks, another setup's machines and reserved experiments are never recorded as workspaces", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    await rt.workspaces.list();
+    const { id: owner } = (await store.get("owner", "id")) as { id: string };
+    const at = ago(2 * 60_000);
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": owner, createdAt: at } });
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-smoke": "1", "wsp-owner": owner, createdAt: at } });
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": "h_other", createdAt: at } });
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": owner, poc: "ttl-test", createdAt: at } });
+
+    const result = await rt.reap();
+
+    expect(result.adopted).toBeUndefined();
+    expect(await rt.workspaces.list()).toEqual([]);
+    expect(result.reaped.map(r => r.id)).toEqual(["m1", "m2"]);
+  });
+});
+
+describe("a name names one workspace", () => {
+  it("a fork of a name whose workspace is being deleted is refused in words, mints no machine, and lands once the delete is done", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "first" });
+    const machine = backend.machines[0]!;
+    let release: (() => void) | undefined;
+    machine.kill = () =>
+      new Promise<void>(done => {
+        release = () => {
+          machine.killed = true;
+          done();
+        };
+      });
+
+    const deleting = rt.workspaces.delete(ws.id);
+    // The delete holds the name once it has reached the machine; a fork asked for before that meets the plain refusal.
+    await vi.waitFor(() => expect(release).toBeDefined());
+    await expect(rt.workspaces.create({ golden: "snap_g", name: "first" })).rejects.toMatchObject({ message: nameDeletingRefusal("first"), kind: "conflict" });
+    expect(backend.machines).toHaveLength(1);
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
+
+    release!();
+    await deleting;
+    const again = await rt.workspaces.create({ golden: "snap_g", name: "first" });
+    expect(again.id).not.toBe(ws.id);
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([again.id]);
+    expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
+  });
+
+  it("a second delete of the same workspace joins the first: one kill, one drop", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "first" });
+    let kills = 0;
+    backend.machines[0]!.kill = async () => {
+      kills++;
+      backend.machines[0]!.killed = true;
+    };
+    await Promise.all([rt.workspaces.delete(ws.id), rt.workspaces.delete(ws.id)]);
+    expect(kills).toBe(1);
+    expect(events.filter(e => e.type === "workspace.deleted")).toHaveLength(1);
+  });
+
+  it("two forks of one name asked for together: one lands, the other is refused in words, one machine", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const settled = await Promise.allSettled([rt.workspaces.create({ golden: "snap_g", name: "first" }), rt.workspaces.create({ golden: "snap_g", name: "first" })]);
+    expect(settled.map(r => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const refused = settled.find(r => r.status === "rejected") as PromiseRejectedResult;
+    expect(refused.reason).toMatchObject({ message: nameTakenRefusal("first"), kind: "conflict" });
+    expect(backend.machines).toHaveLength(1);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["first"]);
+  });
+
+  it("a fork of a name another workspace holds is refused in words and mints no machine", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await expect(rt.workspaces.create({ golden: "snap_g", name: "a" })).rejects.toMatchObject({ message: nameTakenRefusal("a"), kind: "conflict" });
+    expect(backend.machines).toHaveLength(1);
+    expect(await rt.workspaces.create({ golden: "snap_g", name: "b" })).toMatchObject({ name: "b" });
+  });
+});
+
+describe("a create that fails after its fork", () => {
+  /** A store whose first write of a workspace record fails, as a full disk would. */
+  const refusingOnce = (inner: Store): Store => {
+    let refused = false;
+    return {
+      ...inner,
+      put: async (collection, id, value) => {
+        if (collection === "workspaces" && !refused) {
+          refused = true;
+          throw new Error("ENOSPC: no space left on device, write");
+        }
+        return inner.put(collection, id, value);
+      },
+    };
+  };
+
+  it("kills the machine and forgets the record when the provider parts with it", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: refusingOnce(memoryStore()), adapters: {} });
+    await expect(rt.workspaces.create({ golden: "snap_g", name: "first" })).rejects.toThrow("ENOSPC");
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+
+  it("keeps the record, listed and deletable, when the machine will not die", async () => {
+    const backend = stubBackend();
+    const store = refusingOnce(memoryStore());
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const realCreate = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = await realCreate(spec);
+      m.kill = async () => {
+        throw new Error("Bad Gateway");
+      };
+      return m;
+    };
+
+    await expect(rt.workspaces.create({ golden: "snap_g", name: "first" })).rejects.toThrow("ENOSPC");
+
+    const listed = await rt.workspaces.list();
+    expect(listed).toMatchObject([{ name: "first", machineId: "m1", phase: "running" }]);
+    expect(await store.get("workspaces", listed[0]!.id)).toMatchObject({ name: "first", machineId: "m1" });
+    expect(events.filter(e => e.type === "workspace.created")).toMatchObject([{ workspace: { name: "first" } }]);
+    expect(backend.machines[0]!.killed).toBe(false);
+
+    backend.machines[0]!.kill = async () => {
+      backend.machines[0]!.killed = true;
+    };
+    await rt.workspaces.delete(listed[0]!.id);
+    expect(backend.machines[0]!.killed).toBe(true);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+});
