@@ -55,8 +55,7 @@ import {
   isThreadWorking,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
-  sortSettledThreadsForSidebar,
-  sortThreadsForSidebar,
+  splitSidebarThreads,
 } from "./Sidebar.logic.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { ThreadRowLeadingStatus } from "./ThreadStatusIndicators.js";
@@ -98,11 +97,7 @@ interface VisibleProject {
 
 /** Each workspace's threads split into the working ones and the settled shelf. */
 function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>): VisibleProject[] {
-  return projects.map(project => ({
-    project,
-    active: sortThreadsForSidebar(project.threads.filter(t => isThreadWorking(t))),
-    settled: sortSettledThreadsForSidebar(project.threads.filter(t => !isThreadWorking(t))),
-  }));
+  return projects.map(project => ({ project, ...splitSidebarThreads(project.threads) }));
 }
 
 interface DialogState {

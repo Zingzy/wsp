@@ -89,6 +89,14 @@ async function bootOf(page: Page): Promise<{ wsPort: number; token: string }> {
   return page.evaluate(() => (window as unknown as { __WSP__: { wsPort: number; token: string } }).__WSP__);
 }
 
+interface DesktopWindow {
+  wsp: { capturePreview(workspaceId: string): Promise<void>; workspacePreview(workspaceId: string): Promise<string | undefined> };
+}
+
+function readPreview(page: Page, workspaceId: string): Promise<string | undefined> {
+  return page.evaluate(id => (window as unknown as DesktopWindow).wsp.workspacePreview(id), workspaceId);
+}
+
 async function refused(url: string): Promise<boolean> {
   try {
     await fetch(url);
@@ -127,6 +135,56 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(launched.app.windows()).toHaveLength(1);
     await launched.app.close();
     expect(await refused(url)).toBe(true);
+  });
+
+  it("photographs its own page for a workspace and hands the picture back to the page", async () => {
+    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
+    const win = await launched.app.firstWindow();
+    await bootOf(win);
+    expect(await readPreview(win, "ws_a")).toBeUndefined();
+    await win.evaluate(id => (window as unknown as DesktopWindow).wsp.capturePreview(id), "ws_a");
+    expect(await readPreview(win, "ws_a")).toMatch(/^data:image\/png;base64,\w/);
+    expect(await readPreview(win, "ws_b")).toBeUndefined();
+  });
+
+  it("puts the picture of the workspace the person left on that workspace's switcher card", async () => {
+    // A host over the stub backend with two workspaces, serving the built web app, so the switcher has cards to
+    // draw. The app attaches to it rather than starting its own, so nothing here needs a provider key or a golden
+    // on disk, and the workspaces are made through the runtime's own road instead of written into the store.
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    const api = await existing.createWorkspace("api");
+    const web = await existing.createWorkspace("web");
+    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    const win = await launched.app.firstWindow();
+    await win.waitForSelector(`[data-row-id='ws:${api.id}']`);
+    await win.waitForSelector(`[data-row-id='ws:${web.id}']`);
+
+    // A tap: the chord's step and its release, which is what asks for a picture of the workspace being left.
+    await win.keyboard.down("Control");
+    await win.keyboard.press("Tab");
+    await win.keyboard.up("Control");
+    await win.waitForSelector("[data-workspace-switcher]", { state: "detached" });
+    // The capture is an ipc round trip the tap only started, and the overlay reads the pictures once, when it
+    // opens. Which workspace the tap left is the sidebar's order to decide, so the picture names it.
+    const photographed = await win.waitForFunction(
+      async ids => {
+        const bridge = (window as unknown as DesktopWindow).wsp;
+        for (const id of ids) if ((await bridge.workspacePreview(id)) !== undefined) return id;
+        return null;
+      },
+      [api.id, web.id],
+    );
+    const left = await photographed.jsonValue();
+    expect([api.id, web.id]).toContain(left);
+
+    await win.keyboard.down("Control");
+    await win.keyboard.press("Tab");
+    await win.waitForSelector("[data-workspace-switcher]");
+    const shot = win.locator(`[data-workspace-card='${left}'] [data-card-preview] img`);
+    await shot.waitFor();
+    expect(await shot.getAttribute("src")).toMatch(/^data:image\/png;base64,\w/);
+    expect(await shot.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+    await win.keyboard.up("Control");
   });
 
   it("shows the setup screen without a key or golden, and opens the app once retry finds both", async () => {

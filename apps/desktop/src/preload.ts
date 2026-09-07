@@ -14,6 +14,8 @@ const bridge: DesktopBridge & { retry(): Promise<Retry> } = {
   localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("folder:pick"),
   contextMenu: (items: ContextMenuItem[]): Promise<string | null> => ipcRenderer.invoke("menu:context", items),
+  capturePreview: (workspaceId: string): Promise<void> => ipcRenderer.invoke("preview:capture", workspaceId),
+  workspacePreview: (workspaceId: string): Promise<string | undefined> => ipcRenderer.invoke("preview:read", workspaceId),
 };
 
 contextBridge.exposeInMainWorld("wsp", bridge);

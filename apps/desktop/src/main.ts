@@ -8,6 +8,7 @@ import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js"
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
 import { fromAppPage } from "./origin.js";
 import type { Retry } from "./preload.js";
+import { pagePreviews } from "./previews.js";
 import { checkSetup } from "./setup.js";
 import { windowOptions } from "./window.js";
 
@@ -35,6 +36,17 @@ const fonts = (): Promise<FontFile[]> => (fontIndex ??= indexFonts(fontDirs(proc
 ipcMain.handle("fonts:local", (event, family: unknown) => {
   if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("fonts:local: not the app's page");
   return localFontFaces(typeof family === "string" ? family : "", fonts);
+});
+
+const previews = pagePreviews();
+// A picture of the page can hold anything the page shows, so only the host's own page may ask for one or read one.
+ipcMain.handle("preview:capture", (event, workspaceId: unknown) => {
+  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("preview:capture: not the app's page");
+  return previews.capture(typeof workspaceId === "string" ? workspaceId : "", event.sender);
+});
+ipcMain.handle("preview:read", (event, workspaceId: unknown) => {
+  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("preview:read: not the app's page");
+  return previews.get(typeof workspaceId === "string" ? workspaceId : "");
 });
 
 // The picker returns a path on this computer, so only the host's own page may open it.

@@ -224,6 +224,27 @@ export function sortSettledThreadsForSidebar<T extends ThreadTimestamps & { read
   );
 }
 
+/** A thread as both sidebar sorts read it. */
+type SidebarThreadRow = SidebarThreadStatusInput &
+  ThreadTimestamps & { readonly id: string; readonly unsettledAt?: string | null | undefined };
+
+/** A workspace's threads as the sidebar orders them: the working ones on top, then the settled shelf. The sidebar
+    draws the two as its own sections and the switcher card takes the first row of them, so both name one thread. */
+export function splitSidebarThreads<T extends SidebarThreadRow>(
+  threads: readonly T[],
+): { active: T[]; settled: T[] } {
+  return {
+    active: sortThreadsForSidebar(threads.filter(thread => isThreadWorking(thread))),
+    settled: sortSettledThreadsForSidebar(threads.filter(thread => !isThreadWorking(thread))),
+  };
+}
+
+/** The thread the sidebar draws at the top of a workspace, which is the one its centre opens; null with no threads. */
+export function topSidebarThread<T extends SidebarThreadRow>(threads: readonly T[]): T | null {
+  const { active, settled } = splitSidebarThreads(threads);
+  return active[0] ?? settled[0] ?? null;
+}
+
 export function formatWorkingDurationLabel(elapsedMs: number): string {
   const seconds = Number.isFinite(elapsedMs) ? Math.max(0, Math.floor(elapsedMs / 1000)) : 0;
   if (seconds < 60) return `${seconds}s`;

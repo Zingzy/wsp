@@ -9,7 +9,8 @@
 // refusal line above the box can be measured for the running, paused and gone
 // workspaces and the model picker's agent marks for their size and colour;
 // ?ws=ws_a&linger=1 replays a turn that replied but whose process has not
-// exited.
+// exited; ?shell=desktop puts a desktop bridge on the page so the workspace
+// switch chord reaches it.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, type HarnessCatalog, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -23,6 +24,12 @@ import "../../src/index.css";
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
+// The bridge alone tells the page which shell holds it; with ?shell=desktop the chords a browser tab keeps for its
+// own tabs reach the page, which is what the switcher's chord needs. It carries the two picture calls, which is what
+// the switcher's well reads, and neither answers with a picture, so the wells draw empty.
+if (params.get("shell") === "desktop") {
+  window.wsp = { capturePreview: async () => undefined, workspacePreview: async () => undefined };
+}
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,

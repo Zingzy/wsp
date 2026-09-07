@@ -5,6 +5,7 @@
 import type { ReactNode } from "react";
 import { ContextMenuHost } from "../actions/ContextMenuHost.js";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
+import { WorkspaceSwitcher } from "../components/switcher/WorkspaceSwitcher.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "../components/ui/sidebar.js";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
@@ -64,6 +65,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <KeybindingDispatcher />
       <CommandPalette />
       <ContextMenuHost />
+      <WorkspaceSwitcher />
       <Sidebar
         side="left"
         collapsible="offcanvas"

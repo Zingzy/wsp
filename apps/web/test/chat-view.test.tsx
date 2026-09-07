@@ -13,6 +13,7 @@ import { ChatView } from "../src/components/chat/ChatView.js";
 import type { ChatThreadHandle } from "../src/components/chat/useChatThread.js";
 import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
+import { useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
 import { getSyntaxHighlighterPromise } from "../src/lib/syntaxHighlighting.js";
 
 let restoreLayout: () => void = () => {};
@@ -93,6 +94,17 @@ const settledTurn = (ws: string, prompt: string, text: string, n = 1): SessionEv
     { type: "session.end", ...sc, at: start + 950, exitCode: 0, sawResult: true },
   ];
 };
+
+const THREAD = "thr_lastline";
+const THREADED_SCOPE = { workspaceId: WS, sessionId: "sess_lastline", turnId: "turn_lastline", threadId: THREAD };
+
+/** One settled turn stamped with a runtime thread id, which is what a switcher card matches a recorded line on. */
+const threaded = (text: string): SessionEvent[] => [
+  { type: "session.start", ...THREADED_SCOPE, at: T0, model: "claude-sonnet-4-5", prompt: "add a health route" },
+  { type: "session.delta", ...THREADED_SCOPE, at: T0 + 300, kind: "text", text },
+  { type: "session.done", ...THREADED_SCOPE, at: T0 + 900, result: { status: "completed", durationMs: 900, costUsd: 0.001 } },
+  { type: "session.end", ...THREADED_SCOPE, at: T0 + 950, exitCode: 0, sawResult: true },
+];
 
 describe("ChatView", () => {
   it("shows the empty-thread headline with the workspace name before any turn", async () => {
@@ -317,6 +329,30 @@ describe("ChatView", () => {
     emit({ type: "session.end", ...beta, at: T0 + 950, exitCode: 0, sawResult: true });
     expect(screen.getByTestId("finishing").textContent).toBe("false");
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
+  });
+
+  it("records the thread's last line for the switcher card, under the runtime thread id the card matches on", async () => {
+    useWorkspacePreviews.setState({ lines: {}, images: {} });
+    const { api, emit } = fixtureApi([workspace], { [WS]: threaded("Ran the gate.\n\nAll 12 tests green.\n") });
+    await setup(api);
+    await screen.findByText(/All 12 tests green\./);
+    await waitFor(() => expect(useWorkspacePreviews.getState().lines[WS]).toEqual({ threadKey: THREAD, text: "All 12 tests green." }));
+
+    // What the thread says next replaces it, whitespace collapsed the way the notify line collapses it.
+    emit({ type: "session.delta", ...THREADED_SCOPE, at: T0 + 120_000, kind: "text", text: "\n  Bumped  the\tlockfile.  \n" });
+    await waitFor(() => expect(useWorkspacePreviews.getState().lines[WS]?.text).toBe("Bumped the lockfile."));
+  });
+
+  it("writes nothing when a delta leaves the thread's last line saying what it already said", async () => {
+    useWorkspacePreviews.setState({ lines: {}, images: {} });
+    const { api, emit } = fixtureApi([workspace], { [WS]: threaded("Added GET /health.") });
+    await setup(api);
+    await waitFor(() => expect(useWorkspacePreviews.getState().lines[WS]?.text).toBe("Added GET /health."));
+    const held = useWorkspacePreviews.getState().lines;
+    // The same words again, as a redraw of one streaming line: same text, so the same record object must come back.
+    emit({ type: "session.delta", ...THREADED_SCOPE, at: T0 + 121_000, kind: "text", text: "\nAdded GET /health." });
+    await waitFor(() => expect(screen.getAllByText(/Added GET \/health\./).length).toBeGreaterThan(0));
+    expect(useWorkspacePreviews.getState().lines).toBe(held);
   });
 
   it("virtualizes a long transcript instead of mounting every row", async () => {

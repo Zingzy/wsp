@@ -28,6 +28,11 @@ export function workspaceMetaLine(daemonNote: string | undefined, parts: Readonl
   return daemonNote ?? parts.filter((p): p is string => p !== null).join(" · ");
 }
 
+/** What a workspace has cost since the meter's midnight; the sidebar row and the switcher card read the one rule. */
+export function accruedTodayLabel(accruedUsd: number | null): string | null {
+  return accruedUsd === null ? null : `$${accruedUsd.toFixed(4)} today`;
+}
+
 export function costLabel(input: {
   readonly state: WorkspaceState;
   readonly rateUsdPerHour: number | null;
@@ -35,7 +40,8 @@ export function costLabel(input: {
 }): string | null {
   const parts: string[] = [];
   if (isBilling(input.state) && input.rateUsdPerHour !== null) parts.push(`$${input.rateUsdPerHour.toFixed(3)}/hr`);
-  if (input.accruedUsd !== null) parts.push(`$${input.accruedUsd.toFixed(4)} today`);
+  const today = accruedTodayLabel(input.accruedUsd);
+  if (today !== null) parts.push(today);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 

@@ -319,6 +319,31 @@ export function formatShortcutLabel(
   return parts.join("+");
 }
 
+/** The modifier keys a chord holds down, as KeyboardEvent.key spells them, in the label's order. */
+function shortcutModifierKeyNames(shortcut: KeybindingShortcut, platform: string): string[] {
+  const { metaKey, ctrlKey } = effectiveModifiers(shortcut, platform);
+  const names: string[] = [];
+  if (ctrlKey) names.push("Control");
+  if (shortcut.altKey) names.push("Alt");
+  if (shortcut.shiftKey) names.push("Shift");
+  if (metaKey) names.push("Meta");
+  return names;
+}
+
+/**
+ * The modifier keys the command's chord holds down, empty when no rule for it reaches this shell. A listener that
+ * waits for a chord to be let go reads the hold from the table here instead of naming a key of its own, so a
+ * rebound chord moves its hold with it.
+ */
+export function shortcutHoldKeysForCommand(
+  keybindings: ResolvedKeybindingsConfig,
+  command: KeybindingCommand,
+  options?: ShortcutMatchOptions,
+): string[] {
+  const shortcut = findEffectiveShortcutForCommand(keybindings, command, options);
+  return shortcut === null ? [] : shortcutModifierKeyNames(shortcut, resolvePlatform(options));
+}
+
 export function shortcutLabelForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,

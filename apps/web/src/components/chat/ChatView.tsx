@@ -9,11 +9,12 @@
 // started runs as that thread's first turn, so the pin stays where it is.
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { turnSettledParts, workspaceState } from "@wsp/protocol";
+import { lastLine, turnSettledParts, workspaceState } from "@wsp/protocol";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
 import { useRightPanelStore } from "../../rightPanelStore";
+import { useWorkspacePreviews } from "../../shell/workspacePreviews";
 import { cn } from "../../lib/utils";
-import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
+import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type TimelineEntry, type TimestampFormat, type TurnSummary } from "./adapt";
 import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
@@ -69,6 +70,15 @@ export function ChatView({
     return useNewThreadRequests.subscribe(consume);
   }, [hydrated, select, startNewThread, threadId, workspaceId]);
 
+  // The switcher's card for a workspace shows what its thread last said, and only the view that drew it knows: a
+  // transcript is fetched for the workspace on screen, never for the others.
+  const noteLine = useWorkspacePreviews(s => s.noteLine);
+  const threadKey = thread.threadKey;
+  const spokenLine = useMemo(() => timelineLastLine(view.entries), [view.entries]);
+  useEffect(() => {
+    if (spokenLine !== null) noteLine(workspaceId, { threadKey, text: spokenLine });
+  }, [noteLine, spokenLine, threadKey, workspaceId]);
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
       <div className="relative min-h-0 flex-1">
@@ -98,6 +108,17 @@ export function ChatView({
       {children?.(thread)}
     </div>
   );
+}
+
+/** The last thing the thread said, cut to one line: the newest message with words in it, whoever wrote it. */
+function timelineLastLine(entries: ReadonlyArray<TimelineEntry>): string | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.kind !== "message") continue;
+    const line = lastLine(entry.message.text);
+    if (line !== undefined && line.length > 0) return line;
+  }
+  return null;
 }
 
 function EmptyThread({ workspaceName }: { workspaceName: string }) {

@@ -86,6 +86,8 @@ const mod = (key: string, mods: { shiftKey?: boolean; altKey?: boolean } = {}, t
   fireEvent.keyDown(target, { key, code: `Key${key.toUpperCase()}`, metaKey: true, ...mods });
 
 const ctrlTab = (mods: { shiftKey?: boolean } = {}) => fireEvent.keyDown(window, { key: "Tab", code: "Tab", ctrlKey: true, ...mods });
+/** The hold let go, which is what commits the switch; the walk itself only moves the overlay's highlight. */
+const ctrlUp = () => fireEvent.keyUp(window, { key: "Control" });
 const digit = (n: number) => fireEvent.keyDown(window, { key: String(n), code: `Digit${n}`, metaKey: true });
 /** The desktop shell, told apart by the bridge its preload puts on the page. */
 const asDesktopShell = (): (() => void) => {
@@ -403,16 +405,19 @@ describe("default shortcuts", () => {
     term.remove();
   });
 
-  it("ctrl+tab walks the sidebar's workspaces and wraps, and ctrl+shift+tab walks back", async () => {
+  it("a ctrl+tab tap walks the sidebar's workspaces and wraps, and ctrl+shift+tab walks back", async () => {
     await mountShell();
     const restore = asDesktopShell();
     try {
       expect(useStore.getState().selectedId).toBe("ws_a");
       ctrlTab();
+      ctrlUp();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
       ctrlTab();
+      ctrlUp();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
       ctrlTab({ shiftKey: true });
+      ctrlUp();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
     } finally {
       restore();
@@ -441,7 +446,9 @@ describe("default shortcuts", () => {
   it("in a browser tab the switch chords belong to the browser and move nothing", async () => {
     await mountShell();
     ctrlTab();
+    ctrlUp();
     ctrlTab({ shiftKey: true });
+    ctrlUp();
     digit(2);
     await settle();
     expect(useStore.getState().selectedId).toBe("ws_a");
