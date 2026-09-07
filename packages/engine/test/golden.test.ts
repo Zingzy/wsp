@@ -1739,6 +1739,14 @@ describe("golden import stages", () => {
     expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual(want);
   });
 
+  it("a base floor row that failed reaches the ledger and the sealed version with its name, outcome and reason, one shape with the tools stage", async () => {
+    const { backend, fetch } = backendFor([["apt-get install -y -qq docker.io", { exitCode: 100, stdout: "", stderr: "E: Unable to locate package docker-compose-v2" }]]);
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    const docker = { id: "base/docker", name: "Docker engine and compose", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" };
+    expect(builder.import?.missingTools).toEqual([docker]);
+    expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual([docker]);
+  });
+
   it("the rc calls the pack silenced land on the ledger and the seal stamps them on the version, with the stage line naming them; a pack that silenced nothing leaves both without", async () => {
     const { backend, fetch } = backendFor();
     const { stages, onStage } = stageRecorder();

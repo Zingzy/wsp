@@ -6,6 +6,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
+import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
@@ -680,6 +681,25 @@ describe("gone machines", () => {
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Forget" }));
     await waitFor(() => expect(screen.getByText(reason)).toBeDefined());
     expect(rowOf("old").textContent).toContain("Gone");
+  });
+});
+
+describe("a machine that stopped answering with memory near full", () => {
+  it("the row's second line is the short form with the last figures, and clears when the link is back", async () => {
+    const GiB = 1024 ** 3;
+    resetLive();
+    await mount(fakeApi([API], [status(API, { reach: { state: "unreachable" } })]), "api");
+    act(() => {
+      getLive("ws_a").feedStatus("live");
+      getLive("ws_a").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
+    });
+    const meta = () => rowOf("api").querySelector("[data-workspace-meta]")?.textContent ?? "";
+    expect(meta()).not.toContain("Out of memory");
+    act(() => getLive("ws_a").feedStatus("connecting"));
+    await waitFor(() => expect(meta()).toBe("out of memory, 3.6 of 3.9 GB"));
+    expect(rowOf("api").textContent).toContain("Unreachable");
+    act(() => getLive("ws_a").feedStatus("live"));
+    await waitFor(() => expect(meta()).not.toContain("Out of memory"));
   });
 });
 
