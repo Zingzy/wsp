@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AdapterEvent, TurnResult } from "@wsp/adapter-claude";
 import type { EventUnion, WorkspaceStatus } from "@wsp/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { IDLE_OFF_BACKSTOP_MS, createIdlePolicy, type IdlePolicy } from "../src/idle.js";
 import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -13,10 +13,15 @@ import { WsClient } from "./ws-client.js";
 
 /** Minutes, not milliseconds: the clock is fake, so a long window costs nothing and scheduling jitter cannot reach it. */
 const WINDOW = 5 * 60_000;
+const RETRY = 15_000;
+
+/** The policy hears a nap's outcome one microtask after the nap settles. */
+const settled = (): Promise<void> => new Promise(r => setImmediate(r));
 
 describe("idle policy mechanics", () => {
   const windows = new Map<string, number | null>();
   let fired: { id: string; windowMs: number }[] = [];
+  let failing = false;
   let policy: IdlePolicy | undefined;
   let fc = fakeClock();
   const make = (): IdlePolicy =>
@@ -24,7 +29,9 @@ describe("idle policy mechanics", () => {
       windowOf: id => (windows.has(id) ? windows.get(id)! : WINDOW),
       onIdle: async (id, windowMs) => {
         fired.push({ id, windowMs });
+        if (failing) throw new Error("fetch failed");
       },
+      retryMs: RETRY,
       clock: fc.clock,
     }));
   afterEach(() => {
@@ -32,10 +39,11 @@ describe("idle policy mechanics", () => {
     policy = undefined;
     windows.clear();
     fired = [];
+    failing = false;
     fc = fakeClock();
   });
 
-  it("fires once after the window with the window it used, then waits for the next touch", () => {
+  it("fires once after the window with the window it used, then waits for the next touch", async () => {
     const p = make();
     p.touch("a");
     expect(p.idleAt("a")).toBe(fc.clock.now() + WINDOW);
@@ -45,6 +53,7 @@ describe("idle policy mechanics", () => {
     expect(fired).toEqual([]);
     fc.advance(1);
     expect(fired).toEqual([{ id: "a", windowMs: WINDOW }]);
+    await settled();
     expect(p.idleAt("a")).toBeUndefined();
     fc.advance(WINDOW * 2);
     expect(fired).toHaveLength(1);
@@ -123,6 +132,62 @@ describe("idle policy mechanics", () => {
     expect(fired).toEqual([{ id: "fast", windowMs: WINDOW / 4 }]);
     fc.advance((WINDOW * 3) / 4);
     expect(fired.map(f => f.id)).toEqual(["fast", "slow"]);
+  });
+
+  it("a nap that fails keeps its deadline and is asked again every retry interval until one lands", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      failing = true;
+      const p = make();
+      p.touch("a");
+      const deadline = p.idleAt("a")!;
+      fc.advance(WINDOW);
+      await settled();
+      expect(fired).toHaveLength(1);
+      expect(p.idleAt("a")).toBe(deadline);
+      expect(fc.holding()).toBe(0);
+      fc.advance(RETRY - 1);
+      expect(fired).toHaveLength(1);
+      fc.advance(1);
+      await settled();
+      expect(fired).toEqual([{ id: "a", windowMs: WINDOW }, { id: "a", windowMs: WINDOW }]);
+      expect(p.idleAt("a")).toBe(deadline);
+      expect(warn).toHaveBeenCalledTimes(2);
+      failing = false;
+      fc.advance(RETRY);
+      await settled();
+      expect(fired).toHaveLength(3);
+      expect(p.idleAt("a")).toBeUndefined();
+      fc.advance(RETRY * 4);
+      expect(fired).toHaveLength(3);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a touch or a forget during the retries ends them: the person acted, or the nap landed another way", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      failing = true;
+      const p = make();
+      p.touch("a");
+      p.touch("b");
+      fc.advance(WINDOW);
+      await settled();
+      expect(fired.map(f => f.id)).toEqual(["a", "b"]);
+      p.touch("a");
+      expect(p.idleAt("a")).toBe(fc.clock.now() + WINDOW);
+      p.forget("b");
+      expect(p.idleAt("b")).toBeUndefined();
+      fc.advance(RETRY * 3);
+      await settled();
+      expect(fired).toHaveLength(2);
+      fc.advance(WINDOW - RETRY * 3);
+      await settled();
+      expect(fired.map(f => f.id)).toEqual(["a", "b", "a"]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -278,6 +343,151 @@ describe("idle policy in the runtime", () => {
     expect(await phaseOf(rt2, ws.id)).toBe("running");
     fc.advance(WINDOW);
     await napping(rt2, ws.id);
+  });
+  /** The provider is unreachable from this computer: the call and the read both fail the way Node's fetch does. */
+  const blip = (m: { pause(): Promise<void>; state(): Promise<unknown> }, o: { pauses: number; readable: boolean }): { calls: number } => {
+    const pause = m.pause.bind(m);
+    const state = m.state.bind(m);
+    const seen = { calls: 0 };
+    m.pause = async () => {
+      seen.calls++;
+      if (seen.calls <= o.pauses) throw new Error("fetch failed");
+      await pause();
+    };
+    m.state = async () => {
+      if (!o.readable && seen.calls <= o.pauses) throw new Error("fetch failed");
+      return state();
+    };
+    return seen;
+  };
+  const running = (statuses: WorkspaceStatus[]) => statuses.filter(s => s.phase === "running");
+
+  it("an idle nap whose pause fails once on a network error lands on the move's own retry: two calls, one nap, the row never reads active", async () => {
+    const { rt, backend, fc } = testRuntime();
+    const statuses: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const seen = blip(backend.machines[0]!, { pauses: 1, readable: true });
+    const since = statuses.length;
+    fc.advance(WINDOW);
+    await napping(rt, ws.id);
+    expect(seen.calls).toBe(2);
+    expect(backend.machines[0]!.paused).toBe(true);
+    expect(statuses.at(-1)).toMatchObject({ phase: "napping", reason: "idle 5 min" });
+    expect(running(statuses.slice(since))).toEqual([]);
+    const [status] = await rt.status.list();
+    expect(status!.idleAt).toBeUndefined();
+  });
+
+  it("an idle nap during a blip that hides the provider fails with the words, keeps the idle deadline on the row, and lands at the next tick", async () => {
+    const { rt, backend, fc } = testRuntime();
+    const statuses: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const [before] = await rt.status.list();
+    const deadline = before!.idleAt!;
+    const seen = blip(backend.machines[0]!, { pauses: 2, readable: false });
+    const since = statuses.length;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      fc.advance(WINDOW);
+      await until(() => running(statuses.slice(since)).length > 0);
+      const failed = running(statuses.slice(since));
+      expect(failed).toHaveLength(1);
+      expect(failed[0]!.reason).toMatch(/^pause did not complete in \d+ms; the provider did not answer and could not be read about the machine; try again$/);
+      expect(failed[0]!.idleAt).toBe(deadline);
+      expect(seen.calls).toBe(1);
+      expect(await phaseOf(rt, ws.id)).toBe("running");
+      const [after] = await rt.status.list();
+      expect(after!.idleAt).toBe(deadline);
+      expect(warn.mock.calls.map(c => c[0])).toContainEqual(expect.stringMatching(/^idle nap of ws_\w+ failed: pause did not complete/));
+      fc.advance(60_000 - 1);
+      expect(seen.calls).toBe(1);
+      fc.advance(1);
+      await until(() => running(statuses.slice(since)).length > 1);
+      expect(running(statuses.slice(since)).at(-1)!.idleAt).toBe(deadline);
+      expect(seen.calls).toBe(2);
+      fc.advance(60_000);
+      await napping(rt, ws.id);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(seen.calls).toBe(3);
+    expect(statuses.at(-1)).toMatchObject({ phase: "napping", reason: "idle 5 min" });
+    expect(running(statuses.slice(since)).every(s => s.idleAt === deadline)).toBe(true);
+    fc.advance(WINDOW * 2);
+    expect(seen.calls).toBe(3);
+  });
+  it("an idle nap the provider refuses is not asked again at the cadence: the row keeps the words and one full window starts from the answer", async () => {
+    const { rt, backend, fc } = testRuntime();
+    const statuses: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const m = backend.machines[0]!;
+    const pause = m.pause.bind(m);
+    let calls = 0;
+    let refusing = true;
+    m.pause = async () => {
+      calls++;
+      if (refusing) throw new Error("upstream request timeout");
+      await pause();
+    };
+    const since = statuses.length;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      fc.advance(WINDOW);
+      await until(() => running(statuses.slice(since)).some(s => s.idleAt === fc.clock.now() + WINDOW));
+    } finally {
+      warn.mockRestore();
+    }
+    const answered = fc.clock.now();
+    expect(calls).toBe(1);
+    const last = running(statuses.slice(since)).at(-1)!;
+    expect(last.reason).toBe("upstream request timeout");
+    expect(last.idleAt).toBe(answered + WINDOW);
+    expect((await rt.status.list())[0]!.idleAt).toBe(answered + WINDOW);
+    fc.advance(WINDOW - 1);
+    await settled();
+    expect(calls).toBe(1);
+    refusing = false;
+    fc.advance(1);
+    await napping(rt, ws.id);
+    expect(calls).toBe(2);
+    expect(statuses.at(-1)).toMatchObject({ phase: "napping", reason: "idle 5 min" });
+  });
+
+  it("an idle nap whose pause hangs past its budget keeps the deadline and is asked again at the cadence, as a dropped call is", async () => {
+    const { rt, backend, fc } = testRuntime({ nap: { pauseDeadlineMs: 20 } });
+    const statuses: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const deadline = (await rt.status.list())[0]!.idleAt!;
+    const m = backend.machines[0]!;
+    const pause = m.pause.bind(m);
+    let calls = 0;
+    let hanging = true;
+    m.pause = async () => {
+      calls++;
+      if (hanging) await new Promise<never>(() => {});
+      await pause();
+    };
+    const since = statuses.length;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      fc.advance(WINDOW);
+      await until(() => running(statuses.slice(since)).length > 0);
+      const failed = running(statuses.slice(since)).at(-1)!;
+      expect(failed.reason).toMatch(/^pause did not complete in \d+ms; the provider did not answer and reads the machine running; try again$/);
+      expect(failed.idleAt).toBe(deadline);
+      expect(calls).toBe(2);
+      hanging = false;
+      fc.advance(60_000);
+      await napping(rt, ws.id);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(calls).toBe(3);
+    expect(running(statuses.slice(since)).every(s => s.idleAt === deadline)).toBe(true);
   });
 });
 
