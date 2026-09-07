@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { inFolder, shellQuote } from "../src/index.js";
+import { inFolder, shellLine, shellQuote } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 const TABLE: [string, string][] = [
@@ -37,6 +37,20 @@ describe("shellQuote", () => {
     const argv = ["don't", "", "-n", "$x y"];
     const out = execFileSync("/bin/sh", ["-c", `printf '%s\\n' ${argv.map(shellQuote).join(" ")}`], { encoding: "utf8" });
     expect(out).toBe("don't\n\n-n\n$x y\n");
+  });
+});
+
+describe("shellLine", () => {
+  it("leaves a word sh reads as itself bare and quotes every other, so the line reads as typed and runs as given", () => {
+    expect(shellLine(["npx", "-y", "@zingzy/wsp@0.1.2", "mcp", "--state", "/Users/p/.wsp/state.json"])).toBe("npx -y @zingzy/wsp@0.1.2 mcp --state /Users/p/.wsp/state.json");
+    expect(shellLine(["/opt/node/bin/node", "--disable-warning=ExperimentalWarning", "/opt/wsp/dist/bin.js", "mcp"])).toBe("/opt/node/bin/node --disable-warning=ExperimentalWarning /opt/wsp/dist/bin.js mcp");
+    expect(shellLine(["wsp", "mcp", "--state", "/Users/p/my dir/state.json", "", "$HOME", "~/x", "a*"])).toBe(String.raw`wsp mcp --state '/Users/p/my dir/state.json' '' '$HOME' '~/x' 'a*'`);
+  });
+
+  it("sh reads the line back as the same argv", () => {
+    const argv = ["/opt/node/bin/node", "--state", "/Users/p/my dir/state.json", "don't", "", "$x y", "@zingzy/wsp@0.1.2"];
+    const out = execFileSync("/bin/sh", ["-c", `printf '%s\\n' ${shellLine(argv)}`], { encoding: "utf8" });
+    expect(out).toBe(`${argv.join("\n")}\n`);
   });
 });
 
