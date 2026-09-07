@@ -122,6 +122,15 @@ describe("ForwardsList", () => {
     render(<SidebarProvider defaultOpen><ForwardsList /></SidebarProvider>);
     const list = await screen.findByTestId("forwards-list");
     expect(within(list).getByText("Forwarded ports")).toBeDefined();
+    // The one section row the sidebar has: a caps mono label on a row that shuts its group.
+    const header = within(list).getByRole("button", { name: "Forwarded ports" });
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(within(header).getByText("Forwarded ports").className).toContain("font-mono");
+    expect(header.querySelector("svg.lucide-chevron-down")).not.toBeNull();
+    fireEvent.click(header);
+    expect(within(list).queryByText("localhost:8123")).toBeNull();
+    expect(header.textContent).toBe("Forwarded ports2");
+    fireEvent.click(header);
 
     const rowA = within(list).getByText("localhost:8123").closest<HTMLElement>("[data-sidebar-row]")!;
     expect(rowA.tagName).toBe("A");

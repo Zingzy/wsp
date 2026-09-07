@@ -65,22 +65,12 @@ function SidebarUtilityItem({ icon, label, onClick, disabled = false }: SidebarU
 }
 
 export const SidebarUtilityMenu = memo(function SidebarUtilityMenu({
-  primary,
   items,
 }: {
-  primary?: SidebarUtilityAction | undefined;
   items: ReadonlyArray<SidebarUtilityAction>;
 }) {
   return (
     <SidebarMenu className="flex-row items-center">
-      {primary ? (
-        <SidebarMenuItem className="min-w-0 flex-1">
-          <SidebarMenuButton onClick={primary.onClick} disabled={primary.disabled ?? false}>
-            {primary.icon}
-            <span>{primary.label}</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ) : null}
       {items.map((item) => (
         <SidebarUtilityItem key={item.label} {...item} />
       ))}
