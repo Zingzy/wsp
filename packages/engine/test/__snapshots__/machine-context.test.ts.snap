@@ -16,6 +16,7 @@ wsp writes this file when a workspace is forked; edits are overwritten.
 This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The wsp-machine skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.
 
 - A background process started with a plain & inside a tool call dies when that tool call ends. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder unless you pinned the panes.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
@@ -42,6 +43,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that tool call ends.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder unless you pinned the panes.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
@@ -77,6 +79,7 @@ wsp writes this file when a workspace is forked; edits are overwritten.
 This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The wsp-machine skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.
 
 - A background process started with a plain & inside a tool call dies when that tool call ends. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
@@ -104,6 +107,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that tool call ends.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
@@ -148,6 +152,7 @@ wsp writes this file when a workspace is forked; edits are overwritten.
 This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The wsp-machine skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.
 
 - A background process started with a plain & inside a tool call dies when that tool call ends. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
@@ -174,6 +179,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that tool call ends.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
@@ -229,6 +235,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that tool call ends.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
@@ -282,6 +289,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that tool call ends.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
@@ -315,6 +323,7 @@ wsp writes this file when a workspace is forked; edits are overwritten.
 This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The wsp-machine skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.
 
 - A background process started with a plain & inside a tool call dies when that tool call ends. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
@@ -341,6 +350,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that tool call ends.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
@@ -378,6 +388,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Docker and Podman are not installed.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that tool call ends.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Secrets are exported by /etc/profile.d/wsp-secrets.sh. They are never printed, logged or committed, and that file is never read or copied. .env files, .netrc and private keys were never copied from the person's computer.
@@ -415,6 +426,7 @@ This is a Linux machine in the cloud that wsp set up from the recipe of the pers
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
 - wsp-daemon listens on 0.0.0.0:7070 with its own token. Do not stop it and do not bind port 7070.
 - A background process started with a plain & inside a tool call dies when that tool call ends.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.
 - Sign-ins go through wsp: BROWSER is /usr/local/bin/wsp-open and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.
@@ -447,6 +459,7 @@ exports[`the document > the short always-loaded text carries the facts an agent 
 This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The wsp-machine skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.
 
 - A background process started with a plain & inside a tool call dies when that tool call ends. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.
+- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.
 - Every agent session starts in the thread's folder; terminal panes open in the home folder.
 - A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.
 - Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed. Install services natively.
