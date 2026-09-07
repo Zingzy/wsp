@@ -38,6 +38,10 @@ export interface ProjectStateResolver {
   /** The files under home holding state for `path` and the folders under it alone, absolute; a store shared with
    * other projects (an index, a registry) is never one. */
   entries(home: string, path: string): Promise<string[]>;
+  /** The listing the machine runs to name the paths under `home` there holding `path`'s state, so a trip pulls those
+   * and not the whole of `roots`: a python3 script printing one absolute path per line. Absent on a module whose
+   * roots are already the answer (a store shared with every project). */
+  listing?(home: string, path: string): string;
   /** The merge the machine runs once the files have landed, for an agent whose rows for the project sit in a store
    * shared with other projects: a python3 script that puts this home's rows for `from`, keyed to `to`, into the store
    * under the agent's home on the machine and prints a MergeOutput as its last line. Nothing when this home holds no

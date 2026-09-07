@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { existsSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { gzipSync } from "node:zlib";
-import { guestAgentHomes, tarOf } from "@wsp/engine";
+import { guestAgentHomes, stateListing, tarOf } from "@wsp/engine";
 import type { EventUnion, ProjectExportEvent } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRuntime, type LandRequest, type LandedProject, type ProjectLander } from "../src/runtime.js";
@@ -20,15 +22,25 @@ const DEST = "/Users/dev/code/proj";
 const FOLDER_TGZ = tarOf([{ path: "./src/index.ts", mode: 0o644, content: "export const a = 1;\n" }]);
 const STATE_TGZ = tarOf([{ path: "root/.claude-cfg/projects/-root-work-proj/S1.jsonl", mode: 0o644, content: `{"cwd":"${SOURCE}"}\n` }]);
 const EXCLUDED = "node_modules\ndist\n";
-const ROOTS = ["/root/.claude-cfg/projects", "/root/.codex/state_5.sqlite", "/root/.codex/sessions", "/root/.gemini/projects.json", "/root/.gemini/tmp", "/root/.gemini/history", "/root/.local/share/opencode/opencode.db", "/root/.pi/agent/sessions", "/root/.hermes/state.db"];
+/** What the modules' listings print on a machine holding this project and another: the project's own keyed directory
+ * and rollout, and the stores read for it whole; never the other project's directory beside them. */
+const LISTED = [
+  "/root/.claude-cfg/projects/-root-work-proj",
+  "/root/.codex/state_5.sqlite",
+  "/root/.codex/sessions/2026/09/06/rollout-t1.jsonl",
+  "/root/.hermes/state.db",
+];
 
-/** What the host would do on this computer: remember the probe and the landing, answer with a small result. */
-function fakeLander(existing?: number): ProjectLander & { probes: string[]; landings: LandRequest[] } {
+/** What the host would do on this computer: remember the probe, the landing and the archives as they were on disk
+ * when it was asked to land them, answer with a small result. */
+function fakeLander(existing?: number): ProjectLander & { probes: string[]; landings: LandRequest[]; seen: { archive: Buffer; state?: Buffer }[] } {
   const probes: string[] = [];
   const landings: LandRequest[] = [];
+  const seen: { archive: Buffer; state?: Buffer }[] = [];
   return {
     probes,
     landings,
+    seen,
     caches: { dirs: ["node_modules", "dist"], files: [], markers: ["pyvenv.cfg"] },
     probe: async dest => {
       probes.push(dest);
@@ -36,6 +48,7 @@ function fakeLander(existing?: number): ProjectLander & { probes: string[]; land
     },
     land: async (req): Promise<LandedProject> => {
       landings.push(req);
+      seen.push({ archive: readFileSync(req.archive), ...(req.state !== undefined ? { state: readFileSync(req.state.archive) } : {}) });
       const agents = req.state === undefined ? [] : [
         { agent: "claude", name: "Claude Code", files: 3, bytes: 300, outcome: "moved" as const, sessions: 2 },
         { agent: "codex", name: "Codex", files: 1, bytes: 100, outcome: "transcript-only" as const, sessions: 2, skipped: 1 },
@@ -46,14 +59,15 @@ function fakeLander(existing?: number): ProjectLander & { probes: string[]; land
   };
 }
 
-/** The machine: the folder is there, the archives it packs are served for download, and the agent state roots named exist. */
+/** The machine: the folder is there, the archives it packs are served for download, and the modules' listings print
+ * the paths given. */
 function machineWith(backend: StubBackend, present: readonly string[]): void {
   const base = backend.execImpl;
   const tars = new Map<string, Buffer>();
   backend.downloads = path => tars.get(path) ?? gzipSync(Buffer.alloc(1024));
   backend.execImpl = (m, cmd) => {
     if (cmd.startsWith("test -d ")) return { exitCode: 0, stdout: "yes\n", stderr: "" };
-    if (cmd.startsWith("for p in ")) return { exitCode: 0, stdout: present.map(p => `${p}\n`).join(""), stderr: "" };
+    if (cmd.startsWith("set -e\npython3 -c ")) return { exitCode: 0, stdout: present.map(p => `${p}\n`).join(""), stderr: "" };
     const out = /tar czf '([^']+)'/.exec(cmd)?.[1];
     if (out !== undefined && cmd.includes("find '.'")) {
       tars.set(out, FOLDER_TGZ);
@@ -72,9 +86,9 @@ function machineWith(backend: StubBackend, present: readonly string[]): void {
 const exports = (events: EventUnion[]): ProjectExportEvent[] => events.filter((e): e is ProjectExportEvent => e.type === "project.export");
 
 describe("project.export on a workspace", () => {
-  it("packs the folder on the machine under the lander's cache rule, brings it and the agents' state roots home, lands both through the lander and reports each stage and every agent", async () => {
+  it("packs the folder on the machine under the lander's cache rule, brings it and only the paths the modules' listings name home, lands both as files through the lander and reports each stage and every agent", async () => {
     const backend = stubBackend();
-    machineWith(backend, ["/root/.claude-cfg/projects", "/root/.codex/state_5.sqlite", "/root/.codex/sessions", "/root/.hermes/state.db"]);
+    machineWith(backend, LISTED);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
@@ -96,8 +110,8 @@ describe("project.export on a workspace", () => {
     expect(lander.landings).toHaveLength(1);
     const landing = lander.landings[0]!;
     expect(landing).toMatchObject({ source: SOURCE, dest: DEST, replace: false });
-    expect(landing.tar.equals(FOLDER_TGZ)).toBe(true);
-    expect(landing.state?.tar.equals(STATE_TGZ)).toBe(true);
+    expect(lander.seen[0]!.archive.equals(FOLDER_TGZ)).toBe(true);
+    expect(lander.seen[0]!.state?.equals(STATE_TGZ)).toBe(true);
     expect(landing.state?.homes).toEqual(guestAgentHomes());
     expect(landing.state?.agents).toBeUndefined();
     const stages = exports(events);
@@ -116,11 +130,13 @@ describe("project.export on a workspace", () => {
     expect(pack).toContain(`cd '${SOURCE}'`);
     expect(pack).toContain("\\( -type d \\( -name 'node_modules' -o -name 'dist' \\) \\) -o \\( -type d -exec test -f '{}/pyvenv.cfg' \\; \\)");
     expect(pack).toMatch(/tar czf '\/tmp\/wsp-out-[^']+\.tgz' --no-recursion --null -T '\/tmp\/wsp-out-[^']+\.tgz\.keep'$/m);
-    const probe = machine.execLog.find(c => c.startsWith("for p in "))!;
-    expect(probe).toBe(`for p in ${ROOTS.map(r => `'${r}'`).join(" ")}; do test -e "$p" && echo "$p"; done; true`);
+    expect(machine.runLog.find(c => c.startsWith("set -e\npython3 -c "))).toBe(stateListing(guestAgentHomes(), SOURCE));
     const state = machine.runLog.find(s => s.startsWith("tar czf") && s.includes("-C /"))!;
-    expect(state).toMatch(/^tar czf '\/tmp\/wsp-vault-[^']+\.tgz' -C \/ 'root\/.claude-cfg\/projects' 'root\/.codex\/state_5.sqlite' 'root\/.codex\/sessions' 'root\/.hermes\/state.db'$/);
+    expect(state).toBe(`tar czf ${/tar czf ('[^']+')/.exec(state)![1]} -C / ${LISTED.map(p => `'${p.slice(1)}'`).join(" ")}`);
     expect(machine.execLog.filter(c => c.startsWith("rm -f '/tmp/wsp-"))).toHaveLength(2);
+    expect(existsSync(landing.archive)).toBe(false);
+    expect(existsSync(landing.state!.archive)).toBe(false);
+    expect(existsSync(dirname(landing.archive))).toBe(false);
   });
 
   it("an existing destination is refused with kind exists before anything is asked of the machine, and replaced when asked", async () => {
@@ -147,13 +163,14 @@ describe("project.export on a workspace", () => {
 
   it("agents named narrow the roots looked for on the machine and reach the lander", async () => {
     const backend = stubBackend();
-    machineWith(backend, ["/root/.claude-cfg/projects"]);
+    machineWith(backend, ["/root/.claude-cfg/projects/-root-work-proj"]);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     const lander = fakeLander();
     const result = await rt.projects.export({ workspaceId: ws.id, source: SOURCE, dest: DEST, agents: ["claude", "pi"], lander });
-    const probe = backend.machines[0]!.execLog.find(c => c.startsWith("for p in "))!;
-    expect(probe).toContain("for p in '/root/.claude-cfg/projects' '/root/.pi/agent/sessions'; do");
+    const listing = backend.machines[0]!.runLog.find(c => c.startsWith("set -e\npython3 -c "))!;
+    expect(listing).toBe(stateListing(guestAgentHomes(), SOURCE, ["claude", "pi"]));
+    expect(listing.split("\npython3 -c '")).toHaveLength(3);
     expect(lander.landings[0]!.state?.agents).toEqual(["claude", "pi"]);
     expect(result.agents.map(a => a.agent)).toEqual(["claude"]);
   });

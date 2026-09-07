@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { createWriteStream } from "node:fs";
+import { rm, stat } from "node:fs/promises";
+import { Writable } from "node:stream";
+import { finished } from "node:stream/promises";
 import { gzipSync } from "node:zlib";
 import { shellQuote, vaultOverCapLine } from "@wsp/protocol";
 import { backoffMs, classify, shouldRetry } from "./errors.js";
@@ -35,26 +40,52 @@ export interface UploadProgress {
   total: number;
 }
 
-/** The archive at path on the guest, brought down over its signed URL; total is the size read on the guest when
- * the caller has it, else the archive's own length once it is here. */
-async function download(machine: Machine, path: string, opts: VaultOptions, total?: number): Promise<Buffer> {
+const feed = async (sink: Writable, chunk: Buffer): Promise<void> => {
+  if (!sink.write(chunk)) await once(sink, "drain");
+};
+
+/** The archive at path on the guest, brought down over its signed URL into `sink` as it arrives; total is the size
+ * read on the guest when the caller has it, else the bytes seen so far. */
+async function download(machine: Machine, path: string, sink: Writable, opts: VaultOptions, total?: number): Promise<void> {
   const doFetch = opts.fetch ?? globalThis.fetch;
   const url = await machine.downloadUrl(path);
   const res = await doFetch(url);
   if (!res.ok) throw new Error(`vault export download failed: HTTP ${res.status}`);
-  if (opts.onProgress === undefined || res.body === null) return Buffer.from(await res.arrayBuffer());
   const length = Number(res.headers.get("content-length"));
   const known = total ?? (Number.isFinite(length) && length > 0 ? length : undefined);
-  opts.onProgress({ bytes: 0, total: known ?? 0 });
-  const chunks: Buffer[] = [];
+  // A 200 off the wire always carries a body, empty archive or not, so a missing one is a download that gave nothing.
+  if (res.body === null) throw new Error(`vault export download failed: HTTP ${res.status} with no body`);
+  opts.onProgress?.({ bytes: 0, total: known ?? 0 });
   let bytes = 0;
   const reader = res.body.getReader();
   for (let next = await reader.read(); !next.done; next = await reader.read()) {
-    chunks.push(Buffer.from(next.value));
+    await feed(sink, Buffer.from(next.value));
     bytes += next.value.length;
-    opts.onProgress({ bytes, total: known ?? bytes });
+    opts.onProgress?.({ bytes, total: known ?? bytes });
   }
+}
+
+/** A download held in memory: the road for an archive a caller keeps as bytes, like the vault a wake stores. */
+async function downloadBuffer(machine: Machine, path: string, opts: VaultOptions, total?: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  await download(machine, path, new Writable({ write: (chunk: Buffer, _enc, done) => { chunks.push(chunk); done(); } }), opts, total);
   return Buffer.concat(chunks);
+}
+
+/** A download streamed into a file on this computer, so an archive of a whole project never sits in memory; a
+ * download that fails leaves no file behind. Returns the bytes written. */
+async function downloadFile(machine: Machine, path: string, into: string, opts: VaultOptions, total?: number): Promise<number> {
+  const out = createWriteStream(into);
+  try {
+    await download(machine, path, out, opts, total);
+    out.end();
+    await finished(out);
+  } catch (e) {
+    out.destroy();
+    await rm(into, { force: true });
+    throw e;
+  }
+  return (await stat(into)).size;
 }
 
 /** What a folder's archive leaves behind: a directory whose whole name is in dirs, a file whose whole name is in
@@ -107,8 +138,9 @@ async function guestFileSize(machine: Machine, path: string): Promise<number> {
   return bytes;
 }
 
-// Signed-URL transport on both directions: exec stdout could carry base64 for small exports but hits response-size limits.
-export async function exportPaths(machine: Machine, paths: string[], opts: VaultOptions = {}): Promise<Buffer> {
+/** Archives the paths on the guest under the options' cache rule, refuses one over the cap, hands the archive's
+ * guest path to `bring`, and removes it from the guest whatever happens. */
+async function archiveOf<T>(machine: Machine, paths: string[], opts: VaultOptions, bring: (tmp: string) => Promise<T>): Promise<T> {
   const tmp = `/tmp/wsp-vault-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
   const rel = paths.map(p => p.replace(/^\//, ""));
   const script = opts.exclude === undefined ? `tar czf ${shellQuote(tmp)} -C / ${rel.map(shellQuote).join(" ")}` : excludingArchiveScript("/", rel, opts.exclude, tmp);
@@ -121,19 +153,29 @@ export async function exportPaths(machine: Machine, paths: string[], opts: Vault
       const bytes = await guestFileSize(machine, tmp);
       if (bytes > opts.maxBytes) throw Object.assign(new Error(vaultOverCapLine(bytes, opts.maxBytes)), { kind: "vaultTooLarge", bytes });
     }
-    return await download(machine, tmp, opts);
+    return await bring(tmp);
   } finally {
     await machine.exec(`rm -f ${shellQuote(tmp)} ${shellQuote(`${tmp}.list`)} ${shellQuote(`${tmp}.keep`)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
   }
 }
 
+// Signed-URL transport on both directions: exec stdout could carry base64 for small exports but hits response-size limits.
+export const exportPaths = (machine: Machine, paths: string[], opts: VaultOptions = {}): Promise<Buffer> =>
+  archiveOf(machine, paths, opts, tmp => downloadBuffer(machine, tmp, opts));
+
+/** The same paths into a file on this computer instead of into memory, for a caller that hands the archive on as a
+ * path: the export road, where the agents' state can be a whole history. Returns the bytes written. */
+export const exportPathsInto = (machine: Machine, paths: string[], into: string, opts: VaultOptions = {}): Promise<number> =>
+  archiveOf(machine, paths, opts, tmp => downloadFile(machine, tmp, into, opts));
+
 /** The refusal an export gives for a destination on this computer that already holds something; kind "exists" is
  * what a caller reads to offer replace. */
 export const destExists = (dest: string, files: number): Error => Object.assign(new Error(`${dest} already exists on this computer with ${plural(files, "file")}; export with replace to overwrite it`), { kind: "exists" });
 
-/** A folder on the guest as an archive rooted at the folder, its caches left behind under the rule and named; the
- * folder is checked first so a wrong path costs one command, and the guest keeps nothing afterwards. */
-export async function exportFolder(machine: Machine, dir: string, rule: CacheRule, opts: VaultOptions = {}): Promise<{ tar: Buffer; excluded: string[] }> {
+/** A folder on the guest streamed into a file on this computer, rooted at the folder, its caches left behind under
+ * the rule and named; the folder is checked first so a wrong path costs one command, and the guest keeps nothing
+ * afterwards. */
+export async function exportFolder(machine: Machine, dir: string, rule: CacheRule, into: string, opts: VaultOptions = {}): Promise<{ bytes: number; excluded: string[] }> {
   const probe = await machine.exec(`test -d ${shellQuote(dir)} && echo yes || echo no`, { timeoutMs: INLINE_EXEC_MS });
   if (probe.exitCode !== 0 || probe.stdout.trim() !== "yes") throw new Error(`${dir} is not a folder on the machine`);
   const tmp = `/tmp/wsp-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tgz`;
@@ -141,7 +183,7 @@ export async function exportFolder(machine: Machine, dir: string, rule: CacheRul
     const packed = await machine.run(folderExportScript(dir, rule, tmp), { deadlineMs: opts.timeoutMs ?? 600_000 });
     if (packed.exitCode !== 0) throw new Error(`packing ${dir} on the machine failed (exit ${packed.exitCode}): ${packed.stderr.slice(-500)}`);
     const excluded = packed.stdout.split("\n").filter(l => l !== "").sort();
-    return { tar: await download(machine, tmp, opts, await guestFileSize(machine, tmp)), excluded };
+    return { bytes: await downloadFile(machine, tmp, into, opts, await guestFileSize(machine, tmp)), excluded };
   } finally {
     await machine.exec(`rm -f ${shellQuote(tmp)} ${shellQuote(`${tmp}.list`)} ${shellQuote(`${tmp}.keep`)}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
   }
