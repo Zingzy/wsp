@@ -7,13 +7,13 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { THREAD_AGENTS } from "@wsp/catalog";
 import { nodeHost } from "@wsp/collect";
 import { AFTER_CUT_LINE, LOGIN_CHOICES, ProjectExportResult, ProjectGolden, ProjectImportResult, ProjectPlan, RECIPE_TICKS, RecipeTick, SessionInterruptOutcome, SessionStartOutcome, ThreadView, WorkspaceView, actionRefusal, deleteNotice, importConsented, importRequest, NOTIFY_WORDS, TURN_END_WORDS, stillWorkingRefusal, workspaceState } from "@wsp/protocol";
 import { historyCache, smallRecipePath } from "./recipe-file.js";
 import { runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { INSTRUCTIONS } from "./skill.js";
-import { THREAD_AGENTS } from "./thread-agents.js";
 import { VERSION } from "./version.js";
 import { absoluteFolder, absolutePath, agentsChosen, awake, checkedStart, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, messageTo, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workFolder, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 

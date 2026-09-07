@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
-import { CATALOG, CATALOG_AGENTS, CATALOG_TOOLS, type CatalogEntry } from "@wsp/catalog";
+import { CATALOG, CATALOG_AGENTS, CATALOG_TOOLS, THREAD_AGENTS, type CatalogEntry } from "@wsp/catalog";
 import { computeRecipe, type ManifestEntry } from "@wsp/collect";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -38,7 +38,6 @@ import {
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { LATER_LINE, answerOf } from "../src/init-select.js";
 import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, HERE_GROUP, PROJECT_GROUP, USED_GROUP, agentRows, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
-import { THREAD_AGENTS } from "../src/thread-agents.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { HOME, claudeLine, fakeHost } from "./recipe-fixture.js";
 

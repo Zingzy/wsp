@@ -11,6 +11,7 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import { isCancel } from "@clack/prompts";
 import { collect, computeRecipe, expand, nodeHost, scanProject, type Manifest, type Rung } from "@wsp/collect";
 import {
+  HARNESS_ADAPTERS,
   SolariBackend,
   createRuntime,
   goldenHead,
@@ -21,12 +22,10 @@ import {
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
-import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS } from "@wsp/catalog";
+import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { LOGIN_CHOICES, RECIPE_TICKS, TURN_END_WORDS, fmtDuration, shellQuote } from "@wsp/protocol";
 import { agentHomes } from "@wsp/engine";
 import { assetDir } from "./assets.js";
-import { HARNESS_ADAPTERS } from "./adapters.js";
-import { THREAD_AGENTS } from "./thread-agents.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { CACHE_RULE } from "./project-bundle.js";
