@@ -41,8 +41,10 @@ const DIFF = { base: null, files: [{ path: "src/a.ts", patch: patch("src/a.ts", 
 const STATUS = { branch: { oid: "abc", head: "main", ahead: 0, behind: 0 }, entries: [], root: "/root/app" };
 const NOT_A_REPO = () => Object.assign(new Error("not inside a git repository"), { code: "not-a-git-repo" });
 const OUTSIDE_ROOT = () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" });
-/** The git mark's classes: the same box whether it names a branch, no git, or a read the machine refused. */
+/** The git mark's classes: the same box whether it names a branch or a read the machine refused. */
 const LABEL_CLASSES = ["inline-flex", "h-6", "shrink-0", "items-center", "gap-1", "px-1", "font-mono", "text-[11px]", "text-muted-foreground"];
+/** The one grammar for a sentence that fills an empty pane body: a muted mono line, centred, whatever it says. */
+const SENTENCE_CLASSES = ["flex", "flex-1", "items-center", "justify-center", "px-5", "text-center", "font-mono", "text-[11px]", "text-muted-foreground"];
 
 beforeEach(() => {
   resetSurfaces();
@@ -129,14 +131,73 @@ describe("diff surface", () => {
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe(PROJECT_DEST));
   });
 
-  it("says when the root is outside any repository", async () => {
+  it("says once, in one muted mono sentence from the repo-state table, that the root is outside any repository", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": NOT_A_REPO, "git.status": NOT_A_REPO }));
     act(() => useRootStore.getState().follow(WS, "/root/scratch"));
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
-    await waitFor(() => expect(container.querySelector("[data-diff-repo]")).toBeNull());
+    const line = await screen.findByText(REPO_STATE_WORDS.none.pane);
+    expect(line.className.split(" ")).toEqual(SENTENCE_CLASSES);
     expect(folderCrumbRow(container)).toEqual([["/root", "/root"], ["scratch", "/root/scratch"]]);
-    expect(container.querySelector("[data-surface-subheader]")?.textContent).toContain("no git");
-    expect(screen.getByRole("alert").textContent).toBe("not inside a git repository");
+    // The sentence is the one place the pane says it: no mark beside the crumbs, no alert, no path said twice.
+    await settle();
+    expect(container.querySelector("[data-diff-repo-state]")).toBeNull();
+    expect(container.querySelector("[data-diff-repo]")).toBeNull();
+    expect(container.querySelector("[data-surface-subheader]")?.textContent).not.toContain("no git");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(line.textContent).not.toContain("/root/scratch");
+  });
+
+  it("keeps the last diff through a refused refresh, and drops it for a folder outside any repository", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
+    provideDaemonWire(WS, wire);
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+
+    wire.replies["git.diff"] = OUTSIDE_ROOT;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh diff" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("outside the browsable roots"));
+    expect(items(container)).toHaveLength(2);
+    expect(screen.queryByText(REPO_STATE_WORDS.none.pane)).toBeNull();
+
+    wire.replies["git.diff"] = NOT_A_REPO;
+    wire.replies["git.status"] = NOT_A_REPO;
+    act(() => useRootStore.getState().follow(WS, "/root/scratch"));
+    await screen.findByText(REPO_STATE_WORDS.none.pane);
+    expect(items(container)).toHaveLength(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("group", { name: "2 additions, 2 deletions" })).toBeNull();
+  });
+
+  it("drops the kept diff on a folder change into a refused read, so the old folder's files never sit under the new crumbs", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
+    provideDaemonWire(WS, wire);
+    act(() => useRootStore.getState().follow(WS, "/root/app"));
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+
+    wire.replies["git.diff"] = OUTSIDE_ROOT;
+    wire.replies["git.status"] = OUTSIDE_ROOT;
+    act(() => useRootStore.getState().follow(WS, "/root/scratch"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("outside the browsable roots"));
+    expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-cwd")).toBe("/root/scratch");
+    expect(items(container)).toHaveLength(0);
+    expect(screen.queryByRole("group", { name: "2 additions, 2 deletions" })).toBeNull();
+    await waitFor(() => expect(container.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("refused"));
+  });
+
+  it("gives every sentence that fills an empty pane the one muted mono line: no changes, and every file over the budget", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": { base: null, files: [], truncated: false } });
+    provideDaemonWire(WS, wire);
+    act(() => useRootStore.getState().follow(WS, "/root/app"));
+    render(<DiffSurface workspaceId={WS} theme="dark" />);
+    const none = await screen.findByText("No changes in working tree at /root/app.");
+    expect(none.className.split(" ")).toEqual(SENTENCE_CLASSES);
+
+    wire.replies["git.diff"] = { base: null, files: [{ path: "huge.log", patch: "" }], truncated: true };
+    fireEvent.click(screen.getByRole("button", { name: "Refresh diff" }));
+    const over = await screen.findByText("Every changed file was over the patch budget; nothing to render.");
+    expect(over.className.split(" ")).toEqual(SENTENCE_CLASSES);
   });
 
   it("says git went unread when the machine refused the read, not that there is no repository", async () => {
@@ -259,7 +320,7 @@ describe("diff surface", () => {
     expect(container.querySelector("[data-changed-files]")?.textContent).toContain("huge.log");
   });
 
-  it("shows the daemon's refusal when the folder is not a repository", async () => {
+  it("shows the daemon's message as an alert when git fails without a code", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": () => { throw new Error("git diff failed (128): fatal: bad revision"); } }));
     render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("git diff failed (128): fatal: bad revision"));
