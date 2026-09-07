@@ -22,6 +22,7 @@ import {
   goldenBuildLine,
   harnessExitLine,
   machineUnreachedLine,
+  mcpServerCommandLine,
   notifyLine,
   offeredSize,
   plural,
@@ -247,6 +248,13 @@ describe("machine size words", () => {
     expect(fmtRate(0.11)).toBe("$0.11/hr");
     expect(sizeRefusal("4x8", offers)).toBe("4x8 is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
     expect(sizeRefusal("big", offers)).toBe("big is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
+  });
+});
+
+describe("mcpServerCommandLine", () => {
+  it("names the command every agent's config now runs, as one shell line a person can paste", () => {
+    expect(mcpServerCommandLine("npx", ["-y", "@zingzy/wsp@0.1.2", "mcp", "--state", "/Users/p/.wsp/state.json"])).toBe("The server command is npx -y @zingzy/wsp@0.1.2 mcp --state /Users/p/.wsp/state.json");
+    expect(mcpServerCommandLine("/Users/p/.local/bin/wsp", ["mcp", "--state", "/Users/p/my wsp/state.json"])).toBe("The server command is /Users/p/.local/bin/wsp mcp --state '/Users/p/my wsp/state.json'");
   });
 });
 
