@@ -162,7 +162,7 @@ describe("catalog", () => {
         "  aarch64) sha=732e3a84c1a0f67256ce80bc2598a24546b10ca05f9faa97efceb1171ece2ef7 ;;",
         '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
         "esac",
-        'curl -fSsL -o /tmp/docker-compose "https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-linux-$arch"',
+        'curl -o /tmp/docker-compose "https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-linux-$arch"',
         'echo "$sha  /tmp/docker-compose" | sha256sum -c - >/dev/null',
         "install -D -m 0755 /tmp/docker-compose /usr/libexec/docker/cli-plugins/docker-compose",
         "rm -f /tmp/docker-compose",
@@ -191,7 +191,7 @@ describe("catalog", () => {
     const gh = installLine(catalogEntry("gh")!);
     expect(gh).toContain("name='gh'");
     // A failed API call (the rate limit, a network blip) leaves the release empty and falls through to go install.
-    expect(gh).toContain(`release="$(curl -fsSL 'https://api.github.com/repos/cli/cli/releases/latest' || true)"`);
+    expect(gh).toContain(`release="$(curl 'https://api.github.com/repos/cli/cli/releases/latest' || true)"`);
     expect(gh).toContain(`tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"`);
     expect(gh).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
     // The fall-through installs the entry's main package, not the repository root, which for gh is no package.
@@ -244,7 +244,7 @@ describe("catalog", () => {
     expect(off({ road: "brew", formula: "zingzy/tap/diskbloom" })).toEqual({ cmd: expect.stringMatching(/^if \[ -x \/home\/linuxbrew\/.linuxbrew\/bin\/brew \] && su .*brew list --formula zingzy\/tap\/diskbloom.* >\/dev\/null 2>&1; then su .*brew uninstall zingzy\/tap\/diskbloom.*; else rm -f \/usr\/local\/bin\/'diskbloom'; fi$/) });
     // A release at a tag fetches that tag and prints it; with a pin for the same tag the sum is checked; a row that names no repository only comes off.
     const tagged = line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", go: "github.com/spoo-me/spoo-cli" }, "spoo");
-    expect(tagged).toContain(`release="$(curl -fsSL 'https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1' || true)"`);
+    expect(tagged).toContain(`release="$(curl 'https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1' || true)"`);
     expect(tagged).not.toContain("tag=\"$(");
     expect(tagged).toContain(`echo "WSP_ROAD release \${asset:-$url} $sum "'v0.4.1'`);
     // A bare module goes in at the tag; one that carries its own version keeps it; a road with none has no go branch.
@@ -318,13 +318,33 @@ describe("catalog", () => {
     expect(ROAD_STEPS.cargo).toMatchObject({ limitS: 1200, retry: false });
   });
 
-  it("the curl every road script types goes through one function that clocks the connection and a dead read, and tries once more", () => {
+  it("the curl every road script types goes through one function that clocks the connection and a dead read, tries once more, and fails loud on an HTTP error", () => {
     // The function runs under this machine's bash, ahead of a curl stand-in on PATH that prints what reached it.
     const dir = mkdtempSync(join(tmpdir(), "wsp-curl-"));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
     writeFileSync(join(dir, "curl"), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
-    const out = execFileSync("bash", ["-c", `${CURL_NET}\ncurl -fsSL -o /tmp/x 'https://example.test/a b'`], { encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}` } });
-    expect(out.split("\n").filter(l => l !== "")).toEqual(["--connect-timeout", "15", "--speed-limit", "1", "--speed-time", "60", "--retry", "1", "-fsSL", "-o", "/tmp/x", "https://example.test/a b"]);
+    const out = execFileSync("bash", ["-c", `${CURL_NET}\ncurl -o /tmp/x 'https://example.test/a b'`], { encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}` } });
+    // --silent drops the progress meter from stderr; --show-error keeps the one error line the reason rule reads.
+    expect(out.split("\n").filter(l => l !== "")).toEqual(["--connect-timeout", "15", "--speed-limit", "1", "--speed-time", "60", "--retry", "1", "--fail", "--silent", "--show-error", "--location", "-o", "/tmp/x", "https://example.test/a b"]);
+  });
+
+  it("no road line spells curl's flags itself: the function is their one home, and the vendor installer is the one line outside it", () => {
+    const own = /\bcurl +-[A-Za-z]*[fsSL]\b/;
+    const lines = [
+      ...CATALOG.map(e => installLine(e)),
+      ...LINUX_CASKS.flatMap(c => [c.install(undefined, undefined), c.install("1.0.0", { tag: "1.0.0", sha256: "a".repeat(64) })]),
+      ROAD_MODULES.release.install({ road: "release", repo: "cli/cli", go: "github.com/cli/cli/v2/cmd/gh" }, "gh"),
+      ROAD_MODULES.release.install({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.1", sha256: "b".repeat(64) } }, "spoo"),
+      catalog.UV_INSTALL,
+      catalog.nodeInstallScript(22, catalog.NODE_RELEASES[22]),
+      catalog.DOCKER_INSTALL,
+    ];
+    for (const line of lines) {
+      const text = typeof line === "string" ? line : line.note;
+      if (text === catalog.GOLDEN_SETUP) continue;
+      expect(text).not.toMatch(own);
+    }
+    expect(lines.filter(l => typeof l === "string" && /\bcurl\b/.test(l)).length).toBeGreaterThanOrEqual(8);
   });
 
   it("names the evidence behind every default: sessions on this Mac and lab images that ship it", () => {

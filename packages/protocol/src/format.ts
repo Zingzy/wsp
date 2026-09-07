@@ -61,6 +61,19 @@ export function sizeRefusal(word: string, sizes: readonly MachineSizeOffer[]): s
   return `${word} is not a size this provider offers; the sizes are ${offered}`;
 }
 
+/** The one refusal a create or a fork gives when the provider is at its machine cap and no builder was left to stop
+ * for room: the machines this host knows hold the slots, and the two moves that free one. The provider's own
+ * sentence ("Too many concurrent sessions") names nothing a person can act on. A builder is named as one, since
+ * the pause it is offered beside is a workspace's move; the runtime stops the builders it may before it asks here.
+ * Only the holders are claimed: the plan's cap is nowhere in Capabilities, and a slot held by a machine this host
+ * cannot name still counts against it, so no branch but the two-holder line the ticket wrote totals the slots. */
+export function machineCapRefusal(workspaces: readonly string[], builders: readonly string[] = []): string {
+  const holders = [...workspaces, ...builders.map(name => `${name} (builder)`)];
+  if (holders.length === 0) return "the provider is at its machine cap and no machine of this computer holds a slot; free one at the provider and try again";
+  const slots = holders.length === 1 ? "a machine slot is" : holders.length === 2 ? "both machine slots are" : "machine slots are";
+  return `${slots} in use: ${holders.join(", ")}. Pause ${holders.length === 1 ? "it" : "one"} or wait for a nap.`;
+}
+
 /** How a duration reads: short is the chat footer's and the notify line's ("1.5s", "8m 12s"), clock is the cut
  * line's ("15m 00s", "1h 00m 00s"). */
 export type DurationStyle = "short" | "clock";

@@ -300,7 +300,8 @@ describe("tap formulae without a Linux bottle", () => {
     const road = toolInstallsFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE).installs.at(-1)!;
     expect(road.cmd).toContain(`[ "$sum" = '${pin.sha256}' ] || { echo "Error: $asset does not match the checksum recorded on the first install of "'v0.1.0' >&2; exit 1; }`);
     // The check sits between the download and the unpack; the line the stage reads carries the checksum and the tag.
-    expect(road.cmd.indexOf("curl -fsSL -o")).toBeLessThan(road.cmd.indexOf('[ "$sum" ='));
+    expect(road.cmd.indexOf("curl -o")).toBeGreaterThan(0);
+    expect(road.cmd.indexOf("curl -o")).toBeLessThan(road.cmd.indexOf('[ "$sum" ='));
     expect(road.cmd.indexOf('[ "$sum" =')).toBeLessThan(road.cmd.indexOf('case "$asset" in'));
     expect(road.cmd).toContain(`echo "WSP_ROAD release \${asset:-$url} $sum "'v0.1.0'`);
   });

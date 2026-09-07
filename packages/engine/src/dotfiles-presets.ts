@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { APT_ENV } from "@wsp/catalog";
+import { APT_ENV, CURL_NET } from "@wsp/catalog";
 
 // Guest exec is bash -c with no HOME in the environment (measured live on
 // Solari sandboxes); under set -u the first "$HOME" would abort the script.
@@ -16,14 +16,15 @@ export interface PinnedBinary {
 // Release binaries are pinned and checksum-verified; curl|sh installers are
 // banned here because they execute unpinned remote code as root.
 export function pinnedBinaryInstall(bin: PinnedBinary): string {
-  return `if ! command -v ${bin.name} >/dev/null 2>&1; then
+  return `${CURL_NET}
+if ! command -v ${bin.name} >/dev/null 2>&1; then
   arch="$(uname -m)"
   case "$arch" in
     x86_64) pkg=${bin.assets.x86_64.file} sha=${bin.assets.x86_64.sha256} ;;
     aarch64) pkg=${bin.assets.aarch64.file} sha=${bin.assets.aarch64.sha256} ;;
     *) echo "unsupported arch: $arch" >&2; exit 1 ;;
   esac
-  curl -fsSL -o "/tmp/$pkg" "${bin.urlBase}/$pkg"
+  curl -o "/tmp/$pkg" "${bin.urlBase}/$pkg"
   echo "$sha  /tmp/$pkg" | sha256sum -c -
   tar -xzf "/tmp/$pkg" -C /tmp ${bin.name}
   install -m 0755 /tmp/${bin.name} /usr/local/bin/${bin.name}

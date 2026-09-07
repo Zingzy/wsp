@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, expect, it } from "vitest";
-import { BASE_FLOOR, NODE_RELEASES } from "@wsp/catalog";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, onTestFinished } from "vitest";
+import { BASE_FLOOR, CURL_NET, NODE_RELEASES, ROAD_STEPS, UV_INSTALL } from "@wsp/catalog";
+import { PRELUDE } from "../src/dotfiles-presets.js";
 import { BASE_VERSIONS_CMD, baseInstalls, installBase, parseVersions, versionsLine } from "../src/golden-base.js";
 import { TOOLS_PATH } from "../src/golden-import.js";
-import { FREE_KB_CMD } from "../src/golden-tools.js";
+import { FREE_KB_CMD, guardedRoad, reasonOf, roadLimitS } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import type { GoldenStage } from "../src/golden.js";
 
@@ -115,9 +120,35 @@ describe("the base floor's plan", () => {
     expect(cmd("base/jq")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq jq$/);
     const docker = cmd("base/docker");
     expect(docker).toContain("\nexport DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq docker.io\n");
-    expect(docker).toContain('curl -fSsL -o /tmp/docker-compose "https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-linux-$arch"');
+    expect(docker).toContain('curl -o /tmp/docker-compose "https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-linux-$arch"');
     expect(docker).toContain('echo "$sha  /tmp/docker-compose" | sha256sum -c - >/dev/null');
     expect(docker).toMatch(/\ninstall -D -m 0755 \/tmp\/docker-compose \/usr\/libexec\/docker\/cli-plugins\/docker-compose\nrm -f \/tmp\/docker-compose$/);
+  });
+});
+
+describe("a download that fails", () => {
+  it("every base step that downloads runs under the one curl function, which fails loud on an HTTP error, and types no flags of its own", () => {
+    const downloads = baseInstalls().filter(t => /\bcurl +-/.test(t.cmd));
+    expect(downloads.map(t => t.id)).toEqual(["base/node", "base/uv", "base/python", "base/docker"]);
+    for (const t of downloads) {
+      const run = guardedRoad(t.manager, t.cmd);
+      expect(run, t.id).toContain(CURL_NET);
+      expect(CURL_NET).toContain("--fail --silent --show-error --location");
+      expect(run.indexOf(CURL_NET), t.id).toBeLessThan(run.indexOf("curl -o"));
+      expect(t.cmd, t.id).not.toMatch(/\bcurl +-[A-Za-z]*[fsSL]\b/);
+    }
+  });
+
+  it("leaves curl's own error as the step's reason: the uv script under bash, with a curl on PATH that fails the way a 404 does", () => {
+    // uname answers x86_64 so the script reaches its download on this Mac; the curl stand-in fails as curl 7.88 does on a 404.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-base-curl-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, "uname"), "#!/bin/sh\necho x86_64\n", { mode: 0o755 });
+    writeFileSync(join(dir, "curl"), '#!/bin/sh\necho "curl: (22) The requested URL returned error: 404" >&2\nexit 22\n', { mode: 0o755 });
+    const script = [PRELUDE, ...ROAD_STEPS.script.env, UV_INSTALL].join("\n");
+    const res = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { HOME: dir, PATH: `${dir}:/usr/bin:/bin` } });
+    expect(res.status).toBe(22);
+    expect(reasonOf({ exitCode: res.status ?? -1, stdout: res.stdout, stderr: res.stderr }, roadLimitS("script"))).toBe("curl: (22) The requested URL returned error: 404");
   });
 });
 

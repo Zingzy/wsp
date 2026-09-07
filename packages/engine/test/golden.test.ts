@@ -5,10 +5,10 @@ import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
 import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
-import { MCP_SERVERS_JSON } from "@wsp/catalog";
+import { CURL_NET, MCP_SERVERS_JSON, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import type { RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
-import { HOMEBREW, type ToolInstall } from "../src/golden-import.js";
+import { AGENT_INSTALLERS, HOMEBREW, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } from "../src/machine.js";
 
@@ -728,7 +728,8 @@ describe("golden import stages", () => {
     expect(tool).toMatch(/while \[ \$t -lt 600 \]/);
     expect(cmds.filter(c => c.includes("brew install gh") || c.includes("brew-bootstrap") || c.includes("bun@1.4.0"))).toHaveLength(3);
     const agent = cmds.find(c => c.includes("codex-install"))!;
-    expect(agent).toMatch(/\nsetsid bash -c 'set -euo pipefail\nexport PATH="\/usr\/local\/bin:\$PATH"\n/);
+    expect(agent).toMatch(/\nsetsid bash -c 'set -euo pipefail\nexport npm_config_fetch_timeout=/);
+    expect(agent).toContain(`${CURL_NET}\nexport PATH="/usr/local/bin:$PATH"\ncodex-install`);
     expect(agent).toMatch(/while \[ \$t -lt 900 \]/);
     // Agents and their checks run with the Node the golden installed ahead of any the image shipped.
     expect(cmds).toContain('export PATH="/usr/local/bin:$PATH"\nclaude --version');
@@ -1148,6 +1149,25 @@ describe("golden import stages", () => {
       { id: "agents/codex", name: "Codex", outcome: "installed", ms: expect.any(Number) },
       { id: "agents/pi", name: "Pi", outcome: "failed", note: "Node 22.23.2 did not install: curl: (22) The requested URL returned error: 404", ms: 0 },
     ]);
+  });
+
+  it("the Node floor and every agent installer run under the road table's network lines, so the bare curl their scripts type gets the function's flags", async () => {
+    const node = { floor: 22, version: "22.23.2", agents: ["Pi"], cmd: "node-step" };
+    const agents = [{ id: "agents/pi", name: "Pi", install: "pi-install", smoke: "pi --version", node: 22 }];
+    const { backend, cmds, fetch } = backendFor([["node-step", { exitCode: 0, stdout: "NODE_HAVE v22.1.0\nNODE_KEPT v22.1.0\n", stderr: "" }]]);
+    await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ node, agents }) });
+    for (const needle of ["node-step", "pi-install"]) {
+      const run = cmds.find(c => c.includes(needle))!;
+      expect(run, needle).toBeDefined();
+      for (const line of ROAD_STEPS.script.env) expect(run, needle).toContain(line);
+      expect(run.indexOf(CURL_NET), needle).toBeLessThan(run.indexOf(needle));
+      expect(run.indexOf("set -euo pipefail"), needle).toBeLessThan(run.indexOf(needle));
+    }
+    // The two scripts that reach this path type curl with no flags of their own.
+    for (const script of [nodeInstallScript(22, NODE_RELEASES[22]), AGENT_INSTALLERS["aider"]!.install]) {
+      expect(script).toContain("curl -o");
+      expect(script).not.toMatch(/\bcurl +-[A-Za-z]*[fsSL]\b/);
+    }
   });
 
   it("a failure's reason is Homebrew's Error: line, not the advice line that follows it", async () => {
