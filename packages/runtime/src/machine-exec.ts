@@ -24,7 +24,7 @@
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, MachineUnreached, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
 import type { ExecStream, ExecStreamFactory } from "@wsp/adapter-claude";
-import { EXEC_CHUNK_BYTES, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine } from "@wsp/protocol";
+import { EXEC_CHUNK_BYTES, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 
 export interface MachineExecOptions {
   /** Delay between log polls. */
@@ -69,7 +69,9 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       input === undefined
         ? `${command}\necho $? > ${base}.exit\n`
         : `( tail -n +1 -f ${base}.in > ${base}.fifo & echo $! > ${base}.tail )\n{ ${command}\n} < ${base}.fifo\necho $? > ${base}.exit\nkill $(cat ${base}.tail) 2>/dev/null\n`;
-    const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${exports}\n${run}` }];
+    // The turn's processes are what the kernel takes first when memory runs out: the work outgrew the machine, and
+    // the daemon and the guest agent are how anyone hears of it.
+    const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${workScoreLine()}\n${exports}\n${run}` }];
     if (input !== undefined) files.push({ path: `${base}.in`, text: input.map(line => `${line}\n`).join("") });
 
     let killed = false;

@@ -11,7 +11,7 @@ import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DAEMON_CONTENT_SHA, DAEMON_ROOTS_PATH, DAEMON_VERSION } from "@wsp/protocol";
+import { DAEMON_CONTENT_SHA, DAEMON_ROOTS_PATH, DAEMON_VERSION, workScoreLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { OPEN_SHIM_SCRIPT, START_MJS, deployScript } from "../src/doctor.js";
 
@@ -29,8 +29,8 @@ function srcRelPaths(dir: string, prefix = ""): string[] {
 
 /** What a deploy leaves on a guest and this can hash: the daemon's sources, which its dist is built from; the
  * dependency pins the bundle's package.json copies out of the daemon's, which the guest's npm install reads; the
- * scripts the host writes beside them, whose content outlives the deploy that wrote it; and DAEMON_ROOTS_PATH,
- * which the daemon reads from the protocol and its dist bundles in. Left out, and on the guest anyway inside that
+ * scripts the host writes beside them, whose content outlives the deploy that wrote it; and DAEMON_ROOTS_PATH and
+ * the work-score line, which the daemon reads from the protocol and its dist bundles in. Left out, and on the guest anyway inside that
  * same bundle: the rest of the protocol, the DaemonAuthRequest schema the daemon reads, and zod. Hashing the
  * protocol whole would make every edit to it a redeploy of every machine, so those change under an unchanged
  * version and only the op set the version stands for holds them. */
@@ -43,6 +43,7 @@ function daemonContentSha(daemonPkgDir: string, scripts: string[]): string {
   };
   h.update(`${JSON.stringify(pkg.dependencies)}\n`);
   h.update(`${DAEMON_ROOTS_PATH}\n`);
+  h.update(`${workScoreLine()}\n`);
   for (const s of scripts) h.update(`${s}\n`);
   return h.digest("hex");
 }

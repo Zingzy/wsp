@@ -1273,6 +1273,7 @@ const DAEMON_CONTENTS = [
   UNRECORDED,
   "b749121a659b9c45b07285ee0f4e95f15aae26ddbc1bcba75745e83c2ae032c6",
   "b0b88a03c649769e0676ca38eaa5035825b71302c97a2858dcf8eb57131288be",
+  "cae44a68bd72d81717b52a71c3890da918025cbd0d071db884102936e5cf4345",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -1282,7 +1283,8 @@ const DAEMON_CONTENTS = [
  * deployed before the field existed, which has the pty, ports, manifest, inbox, fs, git and tunnel ops and no sys
  * or proc ops. Version 3 browses the imported project folders named in DAEMON_ROOTS_PATH beside its home.
  * Version 4 starts from a script that sets the guest PATH itself. Version 5 fetches its Node through the catalog's
- * curl function. */
+ * curl function. Version 6 puts itself last for the kernel's memory killer and starts every shell it opens at the
+ * work score instead. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -1667,6 +1669,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { actionRefusal, goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
 export * from "./format.js";
+export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";

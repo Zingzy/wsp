@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { workScoreLine } from "@wsp/protocol";
 import { PtyManager, ptyEnv, ptyLaunch } from "../src/pty-manager.js";
 
 /** Above the 10 s wait budget, so the helper's error with the transcript is what a red run shows. */
@@ -89,6 +90,8 @@ describe("ptyEnv", () => {
 
 describe("ptyLaunch", () => {
   const me = { homedir: "/root", username: "root", shell: "/usr/bin/zsh" };
+  // Every shell starts behind this sh line: off the daemon's memory-killer score and priority, then exec'd into, so the pid is the shell's.
+  const WRAP = `${workScoreLine()}; exec "$0" "$@"`;
   const saved = process.env["SHELL"];
   afterEach(() => {
     if (saved === undefined) delete process.env["SHELL"];
@@ -98,21 +101,21 @@ describe("ptyLaunch", () => {
   it("with no shell named, runs the passwd row's shell as a login shell, and SHELL names it for what that shell spawns", () => {
     process.env["SHELL"] = "/bin/bash";
     const launch = ptyLaunch({}, me);
-    expect(launch).toMatchObject({ file: "/usr/bin/zsh", args: ["-l"] });
+    expect(launch).toMatchObject({ file: "/bin/sh", args: ["-c", WRAP, "/usr/bin/zsh", "-l"] });
     expect(launch.env["SHELL"]).toBe("/usr/bin/zsh");
   });
 
   it("a row that names no shell falls back to bash as a login shell and leaves SHELL alone", () => {
     delete process.env["SHELL"];
     const launch = ptyLaunch({}, { ...me, shell: "" });
-    expect(launch).toMatchObject({ file: "bash", args: ["-l"] });
+    expect(launch).toMatchObject({ file: "/bin/sh", args: ["-c", WRAP, "bash", "-l"] });
     expect(launch.env).not.toHaveProperty("SHELL");
   });
 
   it("a shell the request names runs as asked, not as a login shell, with SHELL as inherited", () => {
     process.env["SHELL"] = "/inherited/sh";
-    const launch = ptyLaunch({ shell: "/bin/sh", env: { PS1: "" } }, me);
-    expect(launch).toMatchObject({ file: "/bin/sh", args: [] });
+    const launch = ptyLaunch({ shell: "/bin/dash", env: { PS1: "" } }, me);
+    expect(launch).toMatchObject({ file: "/bin/sh", args: ["-c", WRAP, "/bin/dash"] });
     expect(launch.env).toMatchObject({ SHELL: "/inherited/sh", PS1: "" });
   });
 
