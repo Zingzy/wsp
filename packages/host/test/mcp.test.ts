@@ -800,8 +800,10 @@ describe("the MCP server never talks to the provider", () => {
       return seen;
     };
     const walked = closure("mcp.ts");
-    // The collector reads this computer for the recipe tool; it depends on the catalog and the protocol and nothing else.
-    expect(walked.get("mcp.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/collect", "@wsp/protocol"]);
+    // The tools are the verb table's; the collector reads this computer for the recipe verbs and depends on the
+    // catalog and the protocol and nothing else.
+    expect(walked.get("mcp.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual([]);
+    expect(walked.get("verbs.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/collect", "@wsp/protocol"]);
     expect([...walked.keys()].sort()).toContain("recipe-answer.ts");
     expect([...walked.keys()].sort()).toContain("init-layout.ts");
     for (const [file, imports] of walked) {

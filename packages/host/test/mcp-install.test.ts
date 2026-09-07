@@ -207,10 +207,10 @@ describe("installing the MCP server for a local agent", () => {
     const stray = io();
     expect(await cli(["mcp", "install", "--nope", "--state", statePath], stray)).toBe(1);
     expect(stray.errors[0]).toContain("Unknown option '--nope'");
-    // recipe parses its own flags for the same reason, so --json reaches it and --agent never does.
+    // recipe is a verb with its own flags, so --json reaches it and --agent is refused naming the verbs that read it.
     const recipeAgent = io();
     expect(await cli(["recipe", "--agent", "claude", "--state", statePath], recipeAgent)).toBe(1);
-    expect(recipeAgent.errors[0]).toContain("Unknown option '--agent'");
+    expect(recipeAgent.errors[0]).toContain("--agent belongs to wsp fork and wsp thread new; wsp recipe does not read it");
     expect(recipeAgent.errors[0]).toContain("usage: wsp recipe");
     const recipeHelp = io();
     expect(await cli(["recipe", "--help", "--state", statePath], recipeHelp)).toBe(0);

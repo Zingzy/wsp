@@ -10,7 +10,9 @@ import {
   outOfMemoryLine,
   outOfMemoryRowLine,
   stillWorkingRefusal,
+  foreignFlagLine,
   LINEAGE_MARKS,
+  REPO_STATE_WORDS,
   missingToolRow,
   behindGoldenLine,
   builderStaysLine,
@@ -526,6 +528,13 @@ describe("stillWorkingRefusal", () => {
   });
 });
 
+describe("foreignFlagLine", () => {
+  it("names the verb or verbs that read the flag, then the one that does not", () => {
+    expect(foreignFlagLine("--tick", ["wsp recipe"], "wsp recipe scan")).toBe("--tick belongs to wsp recipe; wsp recipe scan does not read it");
+    expect(foreignFlagLine("--agent", ["wsp fork", "wsp thread new"], "wsp send")).toBe("--agent belongs to wsp fork and wsp thread new; wsp send does not read it");
+  });
+});
+
 describe("DAEMON_UPDATING and DAEMON_UPDATE_FAILED", () => {
   it("says what is being done and that it failed, in fixed words: no daemon named, no reason quoted, and short enough for the row", () => {
     expect(DAEMON_UPDATING).toBe("updating the helper");
@@ -575,6 +584,21 @@ describe("goldenBuildLine", () => {
   it("a build with no version under it names no version to build on, and a build that changes nothing says only what it makes", () => {
     expect(goldenBuildLine(0, 1, [{ count: 4, noun: "tool", word: "added" }])).toBe("Builds version 1: 4 tools added");
     expect(goldenBuildLine(2, 3, [{ count: 0, noun: "tool", word: "added" }])).toBe("Builds version 3 on top of version 2");
+  });
+});
+
+describe("REPO_STATE_WORDS", () => {
+  it("says nothing for a folder outside any repository or one not yet asked, and one short lowercase word or two for a read the machine refused", () => {
+    expect(REPO_STATE_WORDS.unknown).toEqual({ word: "", note: "" });
+    expect(REPO_STATE_WORDS.none).toEqual({ word: "", note: "" });
+    expect(REPO_STATE_WORDS.refused.word).toBe("git unread");
+    expect(REPO_STATE_WORDS.refused.word).toMatch(/^[a-z]+( [a-z]+)?$/);
+    expect(REPO_STATE_WORDS.refused.word.length).toBeLessThanOrEqual(12);
+  });
+
+  it("explains the word beside it in one dry sentence about the machine and this folder's git state", () => {
+    expect(REPO_STATE_WORDS.refused.note).toBe("The machine could not read this folder's git state, so no branch is shown.");
+    expect(REPO_STATE_WORDS.refused.note).toMatch(/^[^.]+\.$/);
   });
 });
 

@@ -8,7 +8,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentEntry } from "@wsp/catalog";
 import { SKILL_NAME } from "./skill.js";
-import { VERBS } from "./verbs.js";
+import { CLI_VERBS } from "./verbs.js";
 
 /** The lines that bound wsp's own section; an HTML comment, so every markdown reader shows the text and not these. */
 export const SECTION_BEGIN = "<!-- wsp:begin -->";
@@ -22,7 +22,7 @@ const FIRST_VERBS = ["threads", "thread new", "send"] as const;
  * three verbs. One file holds this section and several agents read it, so it names no agent's own skill path. */
 export function sectionText(): string {
   const verbs = FIRST_VERBS.map(name => {
-    const verb = VERBS.find(v => v.name === name);
+    const verb = CLI_VERBS.find(v => v.name === name);
     if (verb === undefined) throw new Error(`no wsp verb ${name} for the ${SECTION_BEGIN} section`);
     return `- \`wsp ${verb.name}\` ${verb.about}`;
   });

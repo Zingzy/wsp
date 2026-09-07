@@ -443,6 +443,13 @@ export function stillWorkingRefusal(threadId: string): string {
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 
+/** The refusal of a flag another verb reads: the verbs it belongs to, then the one that does not read it, so the
+ * caller is told where the flag lives rather than left with the parser's bare unknown-option line. */
+export function foreignFlagLine(flag: string, readers: readonly string[], here: string): string {
+  const owners = readers.length > 1 ? `${readers.slice(0, -1).join(", ")} and ${readers.at(-1)}` : readers[0];
+  return `${flag} belongs to ${owners}; ${here} does not read it`;
+}
+
 /** The refusal of a start naming an agent the host has no adapter for, listing the ones it has. */
 export function noAdapterLine(harness: string, agents: readonly string[]): string {
   return `no adapter registered for harness "${harness}"; agents on this host: ${agents.join(", ") || "none"}`;
@@ -643,6 +650,16 @@ export function behindGoldenLine(on: number, head: number): string {
  * never a badge, and a missing tool's outcome indexes this table as it is. */
 export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
+
+/** What the composer's branch slot says for each folder git named no branch for, and what the word explains on
+ * hover: nothing for a folder outside any repository or one not yet asked, both ordinary; a word and one sentence for
+ * a read the machine refused or failed, an outside cause the person should see rather than an empty slot. */
+export const REPO_STATE_WORDS = {
+  unknown: { word: "", note: "" },
+  none: { word: "", note: "" },
+  refused: { word: "git unread", note: "The machine could not read this folder's git state, so no branch is shown." },
+} as const;
+export type RepoStateWord = keyof typeof REPO_STATE_WORDS;
 
 /** A missing tool's row as the lineage shows it. A record sealed before the name and outcome were recorded still
  * carries its id, so it reads by that and as failed rather than as a blank row. */
