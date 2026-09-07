@@ -11,7 +11,7 @@ import type { TerminalConfig } from "@wsp/protocol";
 import { TerminalViewport } from "../src/components/ThreadTerminalDrawer.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { GhosttyTerminalSurface } from "../src/terminal/ghostty/surface.js";
+import { appTerminalFontSize, GhosttyTerminalSurface } from "../src/terminal/ghostty/surface.js";
 import type { TerminalIo } from "../src/terminal/pty-io.js";
 
 vi.setConfig({ testTimeout: 20_000 });
@@ -39,11 +39,14 @@ async function open(read: Api["hostTerminalConfig"] | undefined, config: Paramet
   const create = vi.spyOn(GhosttyTerminalSurface, "create");
   useStore.setState({ api: (read === undefined ? {} : { hostTerminalConfig: read }) as unknown as Api });
   const io: TerminalIo = { attach: () => () => {}, write: () => {}, resize: () => {} };
-  render(<TerminalViewport terminalId="pty1" io={io} config={config} focusRequestId={0} autoFocus={false} resizeEpoch={0} drawerHeight={300} />);
+  const view = (next: Parameters<typeof TerminalViewport>[0]["config"]) => (
+    <TerminalViewport terminalId="pty1" io={io} config={next} focusRequestId={0} autoFocus={false} resizeEpoch={0} drawerHeight={300} />
+  );
+  const { rerender } = render(view(config));
   await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1), { timeout: 10_000 });
   const surface = await create.mock.results[0]!.value;
   const mount = document.querySelector<HTMLElement>("[data-terminal-viewport]")!;
-  return { options: create.mock.calls[0]![1], surface, mount, create };
+  return { options: create.mock.calls[0]![1], surface, mount, create, setConfig: (next: Parameters<typeof TerminalViewport>[0]["config"]) => rerender(view(next)) };
 }
 
 describe("the viewport with the person's Ghostty config", () => {
@@ -56,7 +59,7 @@ describe("the viewport with the person's Ghostty config", () => {
     });
     expect(asked).toEqual(["dark"]);
     expect(options.theme).toMatchObject({ background: { r: 30, g: 30, b: 46 }, palette: FILE.palette });
-    expect(options.font).toEqual({ family: "Berkeley Mono", fallbacks: ["Symbols Nerd Font Mono"], size: 13 });
+    expect(options.font).toEqual({ family: "Berkeley Mono", fallbacks: ["Symbols Nerd Font Mono"], size: appTerminalFontSize() });
     expect(options.cursor).toEqual({ style: "underline" });
     expect(options.padding).toEqual({ left: 2, right: 4, top: 4, bottom: 4 });
     expect(options.backgroundOpacity).toBe(0.85);
@@ -64,14 +67,24 @@ describe("the viewport with the person's Ghostty config", () => {
     expect(mount.className).not.toContain("bg-[var(--terminal-background)]");
   });
 
-  it("a file naming only a size, with no family typed or detected, opens the surface at that size in css px, the unit Ghostty's points are on a Mac", async () => {
-    const { options } = await open(async () => ({ ...FILE, fontFamily: [], fontSize: 16 }));
-    expect(options.font).toEqual({ size: 16 });
+  it("a file naming a size draws at the app's own text size, not the file's: the size is on the wire and the pane ignores it", async () => {
+    const { options, surface } = await open(async () => ({ ...FILE, fontFamily: [], fontSize: 16 }));
+    expect(options.font).toEqual({ size: appTerminalFontSize() });
+    expect(surface.textSize).toBe(appTerminalFontSize());
+  });
+
+  it("the pane's own size opens the surface at it, and a step of it reaches the surface without a remount", async () => {
+    const { options, surface, create, setConfig } = await open(async () => ({ ...FILE, fontFamily: [], fontSize: 16 }), { font: { size: 12 } });
+    expect(options.font).toEqual({ size: 12 });
+    const setFont = vi.spyOn(surface, "setFont");
+    setConfig({ font: { size: 13 } });
+    await vi.waitFor(() => expect(setFont).toHaveBeenCalledWith({ size: 13 }));
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it("a family the viewer typed beats the file's; an opaque file leaves the mount painting its background", async () => {
     const { options, mount } = await open(async () => ({ ...FILE, backgroundOpacity: 1 }), { font: { family: "Hack" }, chosenFont: true });
-    expect(options.font).toEqual({ family: "Hack", size: 13 });
+    expect(options.font).toEqual({ family: "Hack", size: appTerminalFontSize() });
     expect(mount.hasAttribute("data-terminal-translucent")).toBe(false);
     expect(mount.className).toContain("bg-[var(--terminal-background)]");
   });
@@ -98,7 +111,7 @@ describe("the viewport with the person's Ghostty config", () => {
     await vi.waitFor(() => expect(setTheme).toHaveBeenLastCalledWith(expect.objectContaining({ background: { r: 250, g: 250, b: 250 } })));
   });
 
-  it("a pane mounted while the socket is down draws the defaults and says so once; when the socket comes up it takes the file's size, colours, padding and opacity without a remount", async () => {
+  it("a pane mounted while the socket is down draws the defaults and says so once; when the socket comes up it takes the file's colours, padding and opacity without a remount, and keeps the app's own text size", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     let up = false;
     const read = async (): Promise<TerminalConfig> => {
@@ -107,7 +120,7 @@ describe("the viewport with the person's Ghostty config", () => {
     };
     useStore.setState({ conn: "connecting" });
     const { options, surface, mount, create } = await open(read);
-    expect(options.font).toBeUndefined();
+    expect(options.font).toEqual({ size: appTerminalFontSize() });
     expect(options.theme.palette).toBeUndefined();
     expect(options.backgroundOpacity).toBe(1);
     expect(mount.hasAttribute("data-terminal-translucent")).toBe(false);
@@ -119,11 +132,11 @@ describe("the viewport with the person's Ghostty config", () => {
     const setOpacity = vi.spyOn(surface, "setBackgroundOpacity");
     up = true;
     useStore.setState({ conn: "live" });
-    await vi.waitFor(() => expect(setFont).toHaveBeenCalledWith({ size: 16 }));
+    await vi.waitFor(() => expect(setFont).toHaveBeenCalledWith({ size: appTerminalFontSize() }));
     expect(setTheme).toHaveBeenLastCalledWith(expect.objectContaining({ background: { r: 30, g: 30, b: 46 }, palette: FILE.palette }));
     expect(setPadding).toHaveBeenCalledWith({ left: 2, right: 4, top: 4, bottom: 4 });
     expect(setOpacity).toHaveBeenCalledWith(0.85);
-    expect(surface.textSize).toBe(16);
+    expect(surface.textSize).toBe(appTerminalFontSize());
     expect(surface.translucent).toBe(true);
     await vi.waitFor(() => expect(mount.hasAttribute("data-terminal-translucent")).toBe(true));
     expect(mount.className).not.toContain("bg-[var(--terminal-background)]");
@@ -133,7 +146,7 @@ describe("the viewport with the person's Ghostty config", () => {
 
   it("no host, or a host that fails to answer, opens the surface on the defaults", async () => {
     const none = await open(undefined, { font: { family: "Hack" } });
-    expect(none.options.font).toEqual({ family: "Hack" });
+    expect(none.options.font).toEqual({ family: "Hack", size: appTerminalFontSize() });
     expect(none.options.backgroundOpacity).toBe(1);
     expect(none.options.padding).toEqual({ left: 4, right: 4, top: 4, bottom: 4 });
     document.body.innerHTML = "";

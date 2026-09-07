@@ -6,11 +6,11 @@
 import type { TerminalConfig, TerminalRgb, TerminalScheme } from "@wsp/protocol";
 import type { GhosttyCursorDefaults, GhosttyTheme } from "./ghostty/core";
 import type { TerminalPadding } from "./ghostty/renderer";
-import { DEFAULT_TERMINAL_PADDING, type GhosttyTerminalFont } from "./ghostty/surface";
+import { DEFAULT_TERMINAL_PADDING, appTerminalFontSize, type GhosttyTerminalFont } from "./ghostty/surface";
 
 export interface TerminalSurfaceSettings {
   readonly theme: GhosttyTheme;
-  readonly font?: GhosttyTerminalFont;
+  readonly font: GhosttyTerminalFont;
   readonly cursor?: GhosttyCursorDefaults;
   readonly padding: TerminalPadding;
   readonly backgroundOpacity: number;
@@ -34,13 +34,13 @@ export function terminalThemeWith(file: TerminalConfig | null, app: GhosttyTheme
   };
 }
 
-/** The face the pane draws with: the viewer's choice, else the file's family and fallbacks, else the viewport's own; the
- * file's size rides along either way, since the pane offers no choice of size. */
-export function terminalFontWith(file: TerminalConfig | null, viewport: GhosttyTerminalFont | undefined, chosen: boolean): GhosttyTerminalFont | undefined {
-  const size = file?.fontSize;
+/** The face the pane draws with: the viewer's choice, else the file's family and fallbacks, else the viewport's own.
+ * The size is the pane's, the app's own text size until the pane's zoom moves it; the file's size stays on the wire,
+ * read by nothing here. */
+export function terminalFontWith(file: TerminalConfig | null, viewport: GhosttyTerminalFont | undefined, chosen: boolean): GhosttyTerminalFont {
+  const size = viewport?.size ?? appTerminalFontSize();
   const [family, ...fallbacks] = !chosen && file !== null ? file.fontFamily : [];
   const base: GhosttyTerminalFont | undefined = family !== undefined ? { family, ...(fallbacks.length > 0 ? { fallbacks } : {}) } : viewport;
-  if (size === undefined) return base;
   return { ...base, size };
 }
 
@@ -52,7 +52,7 @@ export function terminalSurfaceSettings(file: TerminalConfig | null, app: Ghostt
   };
   return {
     theme: terminalThemeWith(file, app),
-    ...(font !== undefined ? { font } : {}),
+    font,
     ...(Object.keys(cursor).length > 0 ? { cursor } : {}),
     padding: {
       left: file?.windowPaddingX?.left ?? DEFAULT_TERMINAL_PADDING.left,

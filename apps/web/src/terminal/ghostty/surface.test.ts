@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { GhosttyCell, GhosttyRow } from "./core";
 import {
   DEFAULT_TERMINAL_FONT_FAMILY,
-  DEFAULT_TERMINAL_FONT_SIZE,
   advanceTerminalSelectionClickSequence,
+  appTerminalFontSize,
   applyTerminalCopyEvent,
   clearPrimedTerminalCopyInput,
   ghosttyMouseButton,
@@ -506,9 +506,18 @@ describe("terminal font resolution", () => {
     expect(terminalFontFamily(" , ")).toBe(DEFAULT_TERMINAL_FONT_FAMILY);
   });
 
+  it("takes the size the app's own token names, and falls back to that number on a page without it", () => {
+    expect(appTerminalFontSize()).toBe(14);
+    document.documentElement.style.setProperty("--font-size-terminal", "18px");
+    expect(appTerminalFontSize()).toBe(18);
+    expect(terminalFontSize()).toBe(18);
+    document.documentElement.style.removeProperty("--font-size-terminal");
+    expect(appTerminalFontSize()).toBe(14);
+  });
+
   it("clamps requested font sizes to the supported range", () => {
-    expect(terminalFontSize()).toBe(DEFAULT_TERMINAL_FONT_SIZE);
-    expect(terminalFontSize(Number.NaN)).toBe(DEFAULT_TERMINAL_FONT_SIZE);
+    expect(terminalFontSize()).toBe(appTerminalFontSize());
+    expect(terminalFontSize(Number.NaN)).toBe(appTerminalFontSize());
     expect(terminalFontSize(13.4)).toBe(13);
     expect(terminalFontSize(2)).toBe(6);
     expect(terminalFontSize(90)).toBe(32);

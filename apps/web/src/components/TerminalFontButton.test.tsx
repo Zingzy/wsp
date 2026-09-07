@@ -8,7 +8,7 @@ import { TerminalFontButton, TerminalFontCard } from "./TerminalFontButton";
 /** The button and the card wired the way the terminal pane wires them, next to what the pane would draw with. */
 function Harness() {
   const [open, setOpen] = useState(false);
-  const config = useTerminalViewportConfig();
+  const config = useTerminalViewportConfig("ws_a");
   return (
     <>
       <TerminalFontButton className="btn" open={open} onToggle={() => setOpen(o => !o)} />

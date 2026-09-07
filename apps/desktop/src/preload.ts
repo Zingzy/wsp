@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { ContextMenuItem, DesktopBridge, LocalFontFace } from "@wsp/protocol";
+import type { ContextMenuItem, DesktopBridge, LocalFontFace, ShellChord } from "@wsp/protocol";
 import { contextBridge, ipcRenderer } from "electron";
 import { htmlClassFrom } from "./html-class.js";
 
@@ -16,6 +16,12 @@ const bridge: DesktopBridge & { retry(): Promise<Retry> } = {
   contextMenu: (items: ContextMenuItem[]): Promise<string | null> => ipcRenderer.invoke("menu:context", items),
   capturePreview: (workspaceId: string): Promise<void> => ipcRenderer.invoke("preview:capture", workspaceId),
   workspacePreview: (workspaceId: string): Promise<string | undefined> => ipcRenderer.invoke("preview:read", workspaceId),
+  setTerminalFocus: (focused: boolean): void => ipcRenderer.send("terminal:focus", focused),
+  onShellChord: (handler: (chord: ShellChord) => void): (() => void) => {
+    const listen = (_event: unknown, chord: ShellChord): void => handler(chord);
+    ipcRenderer.on("shell:chord", listen);
+    return () => ipcRenderer.off("shell:chord", listen);
+  },
 };
 
 contextBridge.exposeInMainWorld("wsp", bridge);

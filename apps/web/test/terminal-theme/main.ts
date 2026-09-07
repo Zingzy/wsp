@@ -4,8 +4,9 @@
 // translucent background over a page that has something behind it to show,
 // and a probe that reads the canvas back so a test can check the paint.
 import type { TerminalConfig } from "@wsp/protocol";
+import "../../src/index.css";
 import type { GhosttyTheme } from "../../src/terminal/ghostty/core";
-import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
+import { appTerminalFontSize, GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { terminalSurfaceSettings } from "../../src/terminal/ghosttyConfig";
 
 const rgb = (hex: string) => ({ r: parseInt(hex.slice(0, 2), 16), g: parseInt(hex.slice(2, 4), 16), b: parseInt(hex.slice(4, 6), 16) });
@@ -84,6 +85,12 @@ export interface Probe {
   underline: boolean;
   cols: number;
   rows: number;
+  /** The size the text draws at and the cell it fits: the app's own text size, never the file's. */
+  textSize: number;
+  cellHeight: number;
+  /** The cell the meta-label size would fit, which the pane is no longer read at. */
+  metaSize: number;
+  metaCellHeight: number;
 }
 
 async function probe(): Promise<Probe> {
@@ -119,7 +126,15 @@ async function probe(): Promise<Probe> {
   }
   const dpr = window.devicePixelRatio;
   const underline = box.right >= 0 && box.bottom - box.top + 1 <= 2 * dpr + 1 && box.right - box.left + 1 >= 4 * dpr;
-  return { corner: at(2, 2), paletteOne, underline, cols: s.cols, rows: s.rows };
+  const textSize = s.textSize;
+  const cellHeight = s.cellHeight;
+  // Both sizes come off the stylesheet the app ships; the pane is drawn at the meta one only to measure its cell,
+  // then put back, so the shot is of the app's text size again.
+  const metaSize = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--font-size-mono"));
+  await s.setFont({ size: metaSize });
+  const metaCellHeight = s.cellHeight;
+  await s.setFont({});
+  return { corner: at(2, 2), paletteOne, underline, cols: s.cols, rows: s.rows, textSize, cellHeight, metaSize, metaCellHeight };
 }
 
 Object.assign(window, { probe });

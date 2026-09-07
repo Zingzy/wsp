@@ -81,7 +81,7 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
   const lost = useMemo(() => lostTerminals(tabs), [tabs]);
   const { pane, hints, onWake } = useTerminalPane(workspaceId, status);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
-  const terminalConfig = useTerminalViewportConfig();
+  const terminalConfig = useTerminalViewportConfig(workspaceId);
   const store = useTerminalDrawerStore;
 
   // Until the link is live its tab list is not the daemon's: the stored arrangement is kept as is and only ptys the link knows get a viewport.

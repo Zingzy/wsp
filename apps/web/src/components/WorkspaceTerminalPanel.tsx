@@ -69,7 +69,7 @@ function LinkedPanel({
   const lost = useMemo(() => lostTerminals(tabs), [tabs]);
   const { pane, hints, onWake } = useTerminalPane(workspaceId, status);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
-  const terminalConfig = useTerminalViewportConfig();
+  const terminalConfig = useTerminalViewportConfig(workspaceId);
   const activateTerminal = useRightPanelStore(s => s.activateTerminal);
   const closeTerminal = useRightPanelStore(s => s.closeTerminal);
   // Only ptys the link knows get a viewport; a surface persisted across a reload waits for the link to adopt its ptys.

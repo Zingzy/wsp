@@ -68,6 +68,8 @@ const EVENT_CODE_KEY_ALIASES: Readonly<Record<string, readonly string[]>> = {
   Digit7: ["7"],
   Digit8: ["8"],
   Digit9: ["9"],
+  // The plus of a zoom chord is the shifted equals on most layouts, and the rule names the unshifted key.
+  Equal: ["=", "+"],
 };
 
 function normalizeEventKey(key: string): string {
