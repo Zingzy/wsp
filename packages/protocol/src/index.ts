@@ -861,8 +861,11 @@ export const RecipeSource = z.discriminatedUnion("kind", [
 export type RecipeSource = z.infer<typeof RecipeSource>;
 
 /** One catalog entry in a recipe: ticked or not, why, its size on the machine when the catalog measured one, and
- * the sign-in answer the person or the agent that wrote the recipe gave; absent, the wizard's default stands. */
+ * the sign-in answer the person or the agent that wrote the recipe gave; absent, the wizard's default stands. A tools
+ * row this computer has that the catalog does not carry (a formula, a manager's global) is a row too, under the
+ * collector's own id (`tools/<manager>/<package>`), so the file and the screens tick it like any other. */
 export const RecipeRow = z.object({
+  /** The catalog id, or the collector's row id for a tools row outside the catalog. */
   id: z.string().min(1),
   kind: z.enum(["agent", "tool"]),
   on: z.boolean(),
@@ -913,8 +916,9 @@ export type RecipeCustomRow = z.infer<typeof RecipeCustomRow>;
 
 /** The small recipe: catalog ids with a tick each and the source of that tick, written by wsp recipe from this
  * computer (or by hand, or by a local agent), read by wsp init --recipe, the app's pick screen and the import
- * of a project. Beside them, the rows an agent added for tools the catalog has none for. Names, ticks and install
- * lines only: never a path's content, never a key. */
+ * of a project. Among them this computer's own tools rows the catalog does not carry, under the collector's ids, and
+ * beside them the rows an agent added for tools the catalog has none for. Names, ticks and install lines only: never
+ * a path's content, never a key. */
 export const Recipe = z.object({
   version: z.literal(1),
   /** When it was written, ISO 8601. */
@@ -1007,6 +1011,12 @@ export const ALREADY_APPLIED = "already applied";
 export const MCP_ID_PREFIX = "agents/mcp/";
 /** Recipe rows under the tools rung that name a Homebrew formula. It lives here, not beside the engine's other row prefixes, because the collector writes these ids and cannot import the engine. */
 export const BREW_ID_PREFIX = "tools/brew/";
+/** The package a tools row names: what follows its manager in the id (a tap formula keeps its slashes). Beside the
+ * prefix above for the same reason: the collector writes these ids and cannot import the engine. */
+export const packageOf = (e: { id: string }): string => e.id.split("/").slice(2).join("/");
+/** The id of a tools row a manager lists, the one spelling of it: what the collector writes for one, and what a scan
+ * row of the same manager and package stands for. */
+export const toolRowId = (manager: string, pkg: string): string => `tools/${manager}/${pkg}`;
 
 /** Where the event sits in its runtime's stream: one counter per runtime process, monotonic from 1, so a client that
  * lost its socket can ask events.subscribe for everything after the last one it saw. Absent on events from an older

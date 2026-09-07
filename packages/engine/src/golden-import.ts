@@ -6,11 +6,12 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { BREW_ID_PREFIX, MCP_ID_PREFIX, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
+import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellQuote, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
 import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_PREFIX, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, HOMEBREW, HOMEBREW_STEP, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
+export { packageOf } from "@wsp/protocol";
 
 export type { RecipeDigest };
 
@@ -537,9 +538,6 @@ export const CATALOG_PREFIX = "tools/catalog/";
 /** The note beside a catalog road's install when no golden build has proven the road yet. */
 export const UNMEASURED_ROAD = "by an unmeasured road";
 
-/** The package a tools row names: what follows its manager in the id (a tap formula keeps its slashes). */
-export const packageOf = (e: RecipeEntry): string => e.id.split("/").slice(2).join("/");
-
 /** The base row a tools row stands for, when the base stage installs the same tool on every golden. The Mac's
  * version is the row's, or the brew table's for a formula. */
 export function baseRowFor(e: RecipeEntry, brew: BrewTable = new Map()): BaseRow | undefined {
@@ -634,7 +632,7 @@ function homebrewBootstrap(): string {
 
 const TAP_PREFIX = "tools/brew-tap/";
 /** A tap row: the tap it names, not a formula or a command. */
-const isTap = (e: Pick<RecipeEntry, "id">): boolean => e.id.startsWith(TAP_PREFIX);
+export const isTap = (e: Pick<RecipeEntry, "id">): boolean => e.id.startsWith(TAP_PREFIX);
 const tapOf = (e: Pick<RecipeEntry, "id">): string => e.id.slice(TAP_PREFIX.length);
 
 /** The formula a Homebrew row names; nothing for a tap or any other row. */
