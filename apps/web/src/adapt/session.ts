@@ -50,6 +50,8 @@ interface TurnBuild {
   tools: Map<string, ToolCall>;
   /** Tool calls without an id resolve to the newest open one, as the CLI streams them in order. */
   openAnonymousTool: number | null;
+  /** The reply's result once session.done landed; the turn stays running until session.end applies its status. */
+  reply: TurnResult | null;
 }
 
 export function deriveSession(events: ReadonlyArray<SessionEvent>, options: DeriveSessionOptions = {}): SessionModel {
@@ -91,7 +93,9 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     const m: ChatMessage = { id: `${t.summary.turnId}:m${t.ordinal}`, role, text, turnId: t.summary.turnId, streaming, createdAt: at, updatedAt: at, ...(steered ? { steered } : {}) };
     return push(messageEntry(m));
   };
-  const finishTurn = (t: TurnBuild, result: TurnResult, at: string): void => {
+  // The reply's content and cost, applied once at session.done; the state is set separately, so a turn whose process
+  // lives past its reply keeps running until session.end.
+  const applyResult = (t: TurnBuild, result: TurnResult, at: string): void => {
     closeOpenMessage(t);
     for (const call of t.tools.values()) {
       const w = work(call.entryIndex);
@@ -108,13 +112,34 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     }
     t.summary = {
       ...t.summary,
-      state: turnState(result.status),
       durationMs: result.durationMs ?? null,
       costUsd: result.costUsd ?? null,
       error: result.error ?? null,
       completedAt: at || null,
     };
     turns[turns.length - 1] = t.summary;
+  };
+  const setState = (t: TurnBuild, status: TurnResult["status"]): void => {
+    t.summary = { ...t.summary, state: turnState(status) };
+    turns[turns.length - 1] = t.summary;
+  };
+  // A turn cut by the runtime (a restart, an exit with no reply): its result is both the reply and the end at once.
+  const finishTurn = (t: TurnBuild, result: TurnResult, at: string): void => {
+    applyResult(t, result, at);
+    setState(t, result.status);
+  };
+  // session.done: the reply is in, the process may still be working, so record it and keep the turn running.
+  const recordReply = (t: TurnBuild, result: TurnResult, at: string): void => {
+    applyResult(t, result, at);
+    t.reply = result;
+    t.summary = { ...t.summary, replied: true };
+    turns[turns.length - 1] = t.summary;
+  };
+  // A running turn a new start supersedes: one that already replied ended between here (its session.end unseen in a cut
+  // transcript) and keeps its reply's status; one still working when it was cut is a failure.
+  const endRunningTurn = (t: TurnBuild, at: string): void => {
+    if (t.reply !== null) setState(t, t.reply.status);
+    else finishTurn(t, { status: "failed", error: "session restarted before it finished" }, at);
   };
 
   const openTurn = (event: SessionEvent, turnId: string, count: number, at: string): TurnBuild => {
@@ -123,6 +148,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       turnId,
       sessionId: event.sessionId,
       state: "running",
+      replied: false,
       prompt: start?.prompt ?? null,
       model: start?.model ?? null,
       durationMs: null,
@@ -132,12 +158,12 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       completedAt: null,
     };
     turns.push(summary);
-    return { summary, startCount: count, ordinal: 0, openMessage: null, sawText: false, tools: new Map(), openAnonymousTool: null };
+    return { summary, startCount: count, ordinal: 0, openMessage: null, sawText: false, tools: new Map(), openAnonymousTool: null, reply: null };
   };
   /** A delta, done or end whose turn never started here (history capped mid-turn) still needs a turn to hang on. */
   const turnFor = (event: SessionEvent, at: string): TurnBuild => {
     if (turn !== null && (event.turnId === undefined || event.turnId === turn.summary.turnId)) return turn;
-    if (turn !== null && turn.summary.state === "running") finishTurn(turn, { status: "failed", error: "session restarted before it finished" }, at);
+    if (turn !== null && turn.summary.state === "running") endRunningTurn(turn, at);
     turn = openTurn(event, event.turnId ?? `${event.sessionId}#0`, 0, at);
     return turn;
   };
@@ -146,9 +172,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     const at = event.at !== undefined ? new Date(event.at).toISOString() : options.at?.(event, index) ?? "";
     switch (event.type) {
       case "session.start": {
-        if (turn && turn.summary.state === "running") {
-          finishTurn(turn, { status: "failed", error: "session restarted before it finished" }, at);
-        }
+        if (turn && turn.summary.state === "running") endRunningTurn(turn, at);
         const count = (startsBySession.get(event.sessionId) ?? 0) + 1;
         startsBySession.set(event.sessionId, count);
         model = event.model ?? model;
@@ -176,12 +200,15 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         continue;
       }
       case "session.done": {
-        finishTurn(turnFor(event, at), event.result, at);
+        recordReply(turnFor(event, at), event.result, at);
         continue;
       }
       case "session.end": {
         const t = turnFor(event, at);
-        if (t.summary.state === "running") {
+        if (t.summary.state !== "running") continue;
+        if (t.reply !== null) {
+          setState(t, t.reply.status);
+        } else {
           const error = event.reason ?? (event.sawResult
             ? "session exited without a result"
             : `session exited without a result (exit code ${event.exitCode ?? "unknown"})`);

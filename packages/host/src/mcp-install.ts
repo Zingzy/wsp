@@ -6,7 +6,8 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, sep } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, type AgentEntry, type McpAgent, type McpServerSpec, type Placed } from "@wsp/catalog";
-import { mcpServerCommandLine } from "@wsp/protocol";
+import { mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
+import { placeSections, removeSections } from "./agents-md.js";
 import { SKILL_NAME, WSP_SKILL } from "./skill.js";
 import { VERSION } from "./version.js";
 
@@ -30,13 +31,19 @@ export interface RunningWsp {
 
 export const runningWsp = (): RunningWsp => ({ execPath: process.execPath, execArgv: process.execArgv, argv: process.argv, version: VERSION, PATH: process.env.PATH });
 
-/** The `wsp` a shell would run from PATH: the first folder that holds one. */
-function wspOnPath(PATH: string | undefined): string | undefined {
+/** The command a shell would run from PATH: the first folder that holds one. */
+function onPath(bin: string, PATH: string | undefined): string | undefined {
   return (PATH ?? "")
     .split(delimiter)
     .filter(dir => dir !== "")
-    .map(dir => join(dir, "wsp"))
+    .map(dir => join(dir, bin))
     .find(file => existsSync(file));
+}
+
+/** The agents this computer has, in catalog order: the ones whose own command a shell would find on PATH. What an
+ * install takes when nobody named one and there is no terminal to ask at. */
+export function agentsOnPath(PATH: string | undefined): string[] {
+  return CATALOG_AGENTS.filter(a => onPath(a.bin, PATH) !== undefined).map(a => a.id);
 }
 
 function sameFile(a: string, b: string): boolean {
@@ -61,8 +68,8 @@ function npxBeside(execPath: string): string {
 function mcpServerCommand(run: RunningWsp): McpServerSpec {
   const script = run.argv[1];
   if (script !== undefined && script.split(sep).includes(NPX_CACHE_DIR)) return { command: npxBeside(run.execPath), args: ["-y", `${NPM_PACKAGE}@${run.version}`, "mcp"] };
-  const onPath = wspOnPath(run.PATH);
-  if (script !== undefined && onPath !== undefined && sameFile(script, onPath)) return { command: onPath, args: ["mcp"] };
+  const wsp = onPath("wsp", run.PATH);
+  if (script !== undefined && wsp !== undefined && sameFile(script, wsp)) return { command: wsp, args: ["mcp"] };
   return { command: run.execPath, args: [...run.execArgv, script ?? "wsp", "mcp"] };
 }
 
@@ -81,6 +88,8 @@ export interface Installed {
   commentsDropped?: boolean;
   /** The skill's file, `~/`-relative. */
   skill: string;
+  /** The project's own instruction files the wsp section now sits in, absolute; absent when no project was named. */
+  docs?: string[];
 }
 
 /** The config the server goes into under `home`: the first of the agent's files that exists, else the first. */
@@ -103,13 +112,24 @@ function installSkill(agent: AgentEntry, home: string): string {
   return file.tilde;
 }
 
-/** Writes the server into the agent's config under `home`, created with its folder when it is not there, and the
- * skill into its skills folder. Says which agent and which files, and whether the config's comments were lost. */
-export function installMcp(agentId: string, server: McpServerSpec, home: string): Installed {
+/** The catalog's agent under this id; an id it does not know is refused with the ids that do have an MCP config. */
+function agentEntry(agentId: string): AgentEntry {
   const entry = CATALOG_AGENTS.find(a => a.id === agentId);
   if (entry === undefined) throw new Error(`no agent ${agentId} in the catalog; agents with an MCP config: ${MCP_AGENT_IDS}`);
+  return entry;
+}
+
+/** Writes the server into the agent's config under `home`, created with its folder when it is not there, the skill
+ * into its skills folder, and with a project named, the wsp section into that project's own instruction files. Says
+ * which agent and which files, and whether the config's comments were lost. */
+export function installMcp(agentId: string, server: McpServerSpec, home: string, project?: string): Installed {
+  const entry = agentEntry(agentId);
+  const landed = (): Pick<Installed, "skill" | "docs"> => {
+    const skill = installSkill(entry, home);
+    return { skill, ...(project === undefined ? {} : { docs: placeSections(entry, project) }) };
+  };
   const agent = MCP_AGENTS.find(a => a.id === agentId);
-  if (agent === undefined) return { agent: entry.name, skill: installSkill(entry, home) };
+  if (agent === undefined) return { agent: entry.name, ...landed() };
   const file = mcpConfigFile(agent, home);
   const text = existsSync(file.abs) ? readFileSync(file.abs, "utf8") : undefined;
   let placed: Placed;
@@ -120,7 +140,20 @@ export function installMcp(agentId: string, server: McpServerSpec, home: string)
   }
   mkdirSync(dirname(file.abs), { recursive: true });
   writeFileSync(file.abs, placed.text);
-  return { agent: entry.name, path: file.tilde, commentsDropped: placed.commentsDropped, skill: installSkill(entry, home) };
+  return { agent: entry.name, path: file.tilde, commentsDropped: placed.commentsDropped, ...landed() };
+}
+
+/** One agent as `--remove` leaves it: the project's instruction files the wsp section came out of, absolute, empty
+ * when none of them held one. The agent's own config and the skill are not touched. */
+export interface Removed {
+  agent: string;
+  docs: string[];
+}
+
+/** Takes the wsp section out of the agent's instruction files under `project`. */
+export function removeMcp(agentId: string, project: string): Removed {
+  const entry = agentEntry(agentId);
+  return { agent: entry.name, docs: removeSections(entry, project) };
 }
 
 /** One `wsp mcp install` as a machine reads it: every agent that took the server or the skill under the catalog id
@@ -133,18 +166,38 @@ export interface InstallReport {
   failures: Array<{ id: string; error: string }>;
 }
 
-/** Installs for each agent in turn and keeps going past one that fails: an id the catalog does not know must not
+/** One `wsp mcp install --remove` as a machine reads it. */
+export interface RemoveReport {
+  removed: Array<Removed & { id: string }>;
+  failures: Array<{ id: string; error: string }>;
+}
+
+/** Runs one road per agent in turn and keeps going past one that fails: an id the catalog does not know must not
  * cost the agents named beside it. */
-export function installEach(agentIds: Iterable<string>, server: McpServerSpec, home: string): InstallReport {
-  const report: InstallReport = { server, installed: [], failures: [] };
+function eachAgent<T>(agentIds: Iterable<string>, road: (id: string) => T): { done: Array<T & { id: string }>; failures: Array<{ id: string; error: string }> } {
+  const done: Array<T & { id: string }> = [];
+  const failures: Array<{ id: string; error: string }> = [];
   for (const id of agentIds) {
     try {
-      report.installed.push({ id, ...installMcp(id, server, home) });
+      done.push({ id, ...road(id) });
     } catch (e) {
-      report.failures.push({ id, error: e instanceof Error ? e.message : String(e) });
+      failures.push({ id, error: e instanceof Error ? e.message : String(e) });
     }
   }
-  return report;
+  return { done, failures };
+}
+
+/** Installs for each agent in turn: the server, the skill, and with a project named, the section in its own
+ * instruction files. */
+export function installEach(agentIds: Iterable<string>, server: McpServerSpec, home: string, project?: string): InstallReport {
+  const { done, failures } = eachAgent(agentIds, id => installMcp(id, server, home, project));
+  return { server, installed: done, failures };
+}
+
+/** Takes the wsp section out of each agent's instruction files under `project`; nothing else of an install goes. */
+export function removeEach(agentIds: Iterable<string>, project: string): RemoveReport {
+  const { done, failures } = eachAgent(agentIds, id => removeMcp(id, project));
+  return { removed: done, failures };
 }
 
 /** What an install says, for the command and the wizard alike: the agent and its file, then the comments line
@@ -154,10 +207,27 @@ export function installLines(placed: Installed): string[] {
   const lines = placed.path === undefined ? [`${placed.agent}: the catalog has no MCP config for it yet, so the server was not written; add it by hand.`] : [`${placed.agent} now has the wsp tools: ${placed.path}`];
   if (placed.commentsDropped === true) lines.push("The file held comments; the rewrite is plain JSON, so they are gone.");
   lines.push(`The wsp skill went to ${placed.skill}`);
+  if (placed.docs !== undefined && placed.docs.length > 0) lines.push(`The wsp section is in ${placed.docs.join(" and ")}`);
   return lines;
+}
+
+/** What a `--remove` says for one agent: the files the section came out of, or that none of them held one. */
+export function removeLines(removed: Removed): string[] {
+  return removed.docs.length === 0
+    ? [`${removed.agent}: no wsp section in this folder; nothing was changed.`]
+    : [`${removed.agent}: the wsp section is out of ${removed.docs.join(" and ")}`];
 }
 
 /** The line after every agent's own: the command their configs now run, once; none when no config took the server. */
 export function registeredLine(report: InstallReport): string | undefined {
   return report.installed.some(p => p.path !== undefined) ? mcpServerCommandLine(report.server.command, report.server.args) : undefined;
+}
+
+/** The last line an install prints: what to do next inside the first agent that took it, which is where the work
+ * happens from here. None when no agent took anything. */
+export function nextLine(report: InstallReport): string | undefined {
+  const first = report.installed[0];
+  if (first === undefined) return undefined;
+  const entry = agentEntry(first.id);
+  return nextInsideAgentLine(entry.bin, entry.firstMove);
 }

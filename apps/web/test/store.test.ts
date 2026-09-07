@@ -279,7 +279,7 @@ describe("store sessions", () => {
     expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
   });
 
-  it("session.done patches the row's status without a round trip; session.end refetches", async () => {
+  it("session.done keeps the row running with no round trip; session.end refetches it to the settled status", async () => {
     const sessions: SessionView[] = [
       { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1" },
     ];
@@ -288,15 +288,16 @@ describe("store sessions", () => {
     await flush();
     listCalls.length = 0;
 
-    emit({ type: "session.done", workspaceId: "ws_a", sessionId: "c1", result: { status: "interrupted" } });
-    expect(useStore.getState().sessions["ws_a"]![0]!.status).toBe("interrupted");
+    // The reply is in, but the row stays running until the process exits; a send that met it would be refused.
+    emit({ type: "session.done", workspaceId: "ws_a", sessionId: "c1", result: { status: "completed" } });
+    expect(useStore.getState().sessions["ws_a"]![0]!.status).toBe("running");
     expect(listCalls).toEqual([]);
 
-    sessions[0]!.status = "failed";
-    emit({ type: "session.end", workspaceId: "ws_a", sessionId: "c1", exitCode: 1, sawResult: false });
+    sessions[0]!.status = "completed";
+    emit({ type: "session.end", workspaceId: "ws_a", sessionId: "c1", exitCode: 0, sawResult: true });
     await flush();
     expect(listCalls).toEqual(["ws_a"]);
-    expect(useStore.getState().sessions["ws_a"]![0]!.status).toBe("failed");
+    expect(useStore.getState().sessions["ws_a"]![0]!.status).toBe("completed");
   });
 
   it("workspace.deleted drops the workspace's rows", async () => {

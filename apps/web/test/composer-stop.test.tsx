@@ -100,7 +100,7 @@ const done = (status: "completed" | "interrupted"): EventUnion => ({ type: "sess
 const end: EventUnion = { type: "session.end", ...scope, exitCode: 0, sawResult: true };
 
 describe("composer stop", () => {
-  it("stop mid-turn sends one sessions.interrupt for the runtime's session; the interrupted done opens the composer", async () => {
+  it("stop mid-turn sends one sessions.interrupt for the runtime's session; the composer opens when the interrupted turn ends", async () => {
     rows = [runningRow];
     const { sock, deliver, push } = await setup();
     await streamTurn(push);

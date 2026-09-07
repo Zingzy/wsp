@@ -393,14 +393,8 @@ export const useStore = create<State>((set, get) => {
           return;
         }
         case "session.done":
-          set(s => ({
-            sessions: {
-              ...s.sessions,
-              [e.workspaceId]: (s.sessions[e.workspaceId] ?? NO_SESSIONS).map(r =>
-                r.claudeSessionId === e.sessionId || r.id === e.sessionId ? { ...r, status: e.result.status } : r,
-              ),
-            },
-          }));
+          // The reply is in, but the row stays running until the process exits (session.end): a turn is not over while
+          // its agent keeps working, and a send that met a done-but-running row would be one the runtime refuses.
           return;
         case "session.end":
           set(s => ({ spending: { ...s.spending, [e.workspaceId]: Math.max(0, (s.spending[e.workspaceId] ?? 0) - 1) } }));
