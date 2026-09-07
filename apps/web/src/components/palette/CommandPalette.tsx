@@ -60,6 +60,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const handlers = useMemo<PaletteHandlers>(
     () => ({
       selectWorkspace: select,
+      selectThread: select,
       newWorkspace: requestNewWorkspace,
       newThread: workspaceId => {
         select(workspaceId);
@@ -79,8 +80,8 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
     [api, openSurface, select, toggleRightPanel, togglePhase, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, canCreate: api !== null, canRebuild: api?.rebuild !== undefined, handlers }),
-    [api, handlers, projects, selectedId],
+    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, canRebuild: api?.rebuild !== undefined, handlers }),
+    [api, handlers, projects, query, selectedId],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {

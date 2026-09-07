@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The palette's item list over the sidebar's project snapshots: actions for
-// the selected workspace, one row per workspace to switch to, recent threads.
-// Pure apart from the callbacks it is handed, so the list is testable without
-// the dialog.
+// the selected workspace, one row per workspace to switch to, recent threads
+// at rest and every thread whose title holds the typed query. Pure apart from
+// the callbacks it is handed, so the list is testable without the dialog.
 import {
   GlobeIcon,
   MessageSquareIcon,
@@ -19,11 +19,13 @@ import {
 import { needsRebuild } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
 import { cn } from "../../lib/utils.js";
+import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
 import { compactTimeLabel, dotClassForTone } from "../../sidebar/workspaceRows.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
 
 export interface PaletteHandlers {
   readonly selectWorkspace: (workspaceId: string) => void;
+  readonly selectThread: (workspaceId: string, threadId: string | null) => void;
   readonly newWorkspace: () => void;
   readonly newThread: (workspaceId: string) => void;
   readonly openTerminal: (workspaceId: string) => Promise<void>;
@@ -39,6 +41,8 @@ export interface PaletteHandlers {
 export interface PaletteItemsInput {
   readonly projects: ReadonlyArray<SidebarProjectSnapshot>;
   readonly selectedId: string | null;
+  /** What the person typed; the thread search runs over it, the at-rest list ignores it. */
+  readonly query: string;
   readonly canCreate: boolean;
   readonly canRebuild: boolean;
   readonly handlers: PaletteHandlers;
@@ -174,7 +178,7 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     return {
       kind: "action",
       value: `workspace:${project.id}`,
-      searchTerms: [project.displayName, project.id, machineId, project.indicator.label],
+      searchTerms: [project.displayName],
       icon: (
         <span
           aria-hidden
@@ -192,24 +196,24 @@ function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapsh
   return {
     kind: "action",
     value: `thread:${thread.id}`,
-    searchTerms: [thread.title, project.displayName, thread.id],
+    searchTerms: [thread.title],
     icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
     title: thread.title,
     description: project.displayName,
     timestamp: compactTimeLabel(thread.startedAt),
-    run: sync(() => handlers.selectWorkspace(thread.workspaceId)),
+    run: sync(() => handlers.selectThread(thread.workspaceId, thread.threadId)),
   };
 }
 
 export function buildPaletteItems(input: PaletteItemsInput): PaletteItems {
   const threads = input.projects
-    .flatMap(project => project.threads.map(thread => ({ thread, project })))
-    .sort((a, b) => (b.thread.startedAt ?? "").localeCompare(a.thread.startedAt ?? ""))
-    .map(({ thread, project }) => threadItem(thread, project, input.handlers));
+    .flatMap(project => project.threads.map(thread => ({ ...thread, project })))
+    .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+  const item = (thread: (typeof threads)[number]) => threadItem(thread, thread.project, input.handlers);
   return {
     actionItems: actionItems(input),
     workspaceItems: workspaceItems(input),
-    recentThreadItems: threads.slice(0, RECENT_THREAD_LIMIT),
-    threadSearchItems: threads,
+    recentThreadItems: threads.slice(0, RECENT_THREAD_LIMIT).map(item),
+    threadSearchItems: searchSidebarThreadsByTitle(threads, input.query).map(item),
   };
 }
