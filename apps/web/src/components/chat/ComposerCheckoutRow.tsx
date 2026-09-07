@@ -11,6 +11,7 @@
 // not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, GitBranchIcon, LoaderCircleIcon, MessageSquarePlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { REPO_STATE_WORDS, type RepoStateWord } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { useWorkspaceListing } from "../../files/listing";
 import { parentWithin, rootOf, useRoots, useRootStore, useThreadFolder } from "../../files/root";
@@ -25,8 +26,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerSurface } from "./ComposerSurface";
 import type { ChatThreadHandle } from "./useChatThread";
 
-/** What git said about the folder; "none" is a folder outside any repository, "unknown" a failed or unsent ask. */
-type Branch = { readonly kind: "unknown" } | { readonly kind: "none" } | { readonly kind: "repo"; readonly head: string };
+/** What git said about the folder: a branch, or one of the states the slot has a word (or none) for. */
+type Branch = { readonly kind: RepoStateWord } | { readonly kind: "repo"; readonly head: string };
 
 function useBranch(wire: TerminalWire | null, folder: string | null, running: boolean): Branch {
   const [state, setState] = useState<{ folder: string | null; branch: Branch }>({ folder, branch: { kind: "unknown" } });
@@ -217,8 +218,17 @@ export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: stri
             {BRANCH_NOTE}
           </TooltipPopup>
         </Tooltip>
-      ) : (
+      ) : REPO_STATE_WORDS[branch.kind].word === "" ? (
         <span className={branchSlotClass} data-composer-branch={branch.kind} />
+      ) : (
+        <Tooltip>
+          <TooltipTrigger render={<span className={branchSlotClass} tabIndex={0} data-composer-branch={branch.kind} />}>
+            {REPO_STATE_WORDS[branch.kind].word}
+          </TooltipTrigger>
+          <TooltipPopup side="top" align="end" className="max-w-72">
+            {REPO_STATE_WORDS[branch.kind].note}
+          </TooltipPopup>
+        </Tooltip>
       )}
     </ComposerSurface.ContextStrip>
   );

@@ -633,6 +633,28 @@ export function pinMovedLine(from: ToolPin | undefined, to: ToolPin | undefined)
 /** Why a tool installs differently now when its road and pin stand: the lines the road runs are not the golden's. */
 export const INSTALLER_MOVED_LINE = "its install lines changed";
 
+/** The detail of a tools row the catalog does not carry: it is on this Mac, at the version this Mac runs when the
+ * collector read one. */
+export function installedOnMacLine(version: string | undefined): string {
+  return version === undefined ? "installed on this Mac" : `installed on this Mac, ${version}`;
+}
+
+/** What the build does with a tools row it installs: the road in its own words, then the line the step runs. */
+export function installsByLine(words: string, shown: string): string {
+  return `installs ${words}: ${shown}`;
+}
+
+/** What the build does with a ticked tools row it sets aside, with the plan's reason. */
+export function leftOutLine(note: string): string {
+  return `left out of the build: ${note}`;
+}
+
+/** A recipe file's tick on a tool outside the catalog that this Mac has no row for: nothing here says how to install
+ * it, so the tick is said and left out rather than dropped in silence. */
+export function notHereLine(name: string, file: string): string {
+  return `${name} is ticked in ${file}, but this Mac has no row that installs it; it is left out.`;
+}
+
 /** The app's line for a workspace still forked from an older golden version, offered the way the helper update is:
  * a state in words, never a badge. The move is the person's; nothing replaces a machine they are working on. */
 export function behindGoldenLine(on: number, head: number): string {
@@ -643,6 +665,16 @@ export function behindGoldenLine(on: number, head: number): string {
  * never a badge, and a missing tool's outcome indexes this table as it is. */
 export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
+
+/** What the composer's branch slot says for each folder git named no branch for, and what the word explains on
+ * hover: nothing for a folder outside any repository or one not yet asked, both ordinary; a word and one sentence for
+ * a read the machine refused or failed, an outside cause the person should see rather than an empty slot. */
+export const REPO_STATE_WORDS = {
+  unknown: { word: "", note: "" },
+  none: { word: "", note: "" },
+  refused: { word: "git unread", note: "The machine could not read this folder's git state, so no branch is shown." },
+} as const;
+export type RepoStateWord = keyof typeof REPO_STATE_WORDS;
 
 /** A missing tool's row as the lineage shows it. A record sealed before the name and outcome were recorded still
  * carries its id, so it reads by that and as failed rather than as a blank row. */

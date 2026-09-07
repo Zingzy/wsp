@@ -11,6 +11,7 @@ import {
   outOfMemoryRowLine,
   stillWorkingRefusal,
   LINEAGE_MARKS,
+  REPO_STATE_WORDS,
   missingToolRow,
   behindGoldenLine,
   builderStaysLine,
@@ -52,6 +53,10 @@ import {
   sealFailedBuilderUnreadLine,
   INSTALLER_MOVED_LINE,
   NO_ROAD_WORDS,
+  installedOnMacLine,
+  installsByLine,
+  leftOutLine,
+  notHereLine,
   SUM_SHOWN,
   pinMismatchLine,
   pinMovedLine,
@@ -578,6 +583,21 @@ describe("goldenBuildLine", () => {
   });
 });
 
+describe("REPO_STATE_WORDS", () => {
+  it("says nothing for a folder outside any repository or one not yet asked, and one short lowercase word or two for a read the machine refused", () => {
+    expect(REPO_STATE_WORDS.unknown).toEqual({ word: "", note: "" });
+    expect(REPO_STATE_WORDS.none).toEqual({ word: "", note: "" });
+    expect(REPO_STATE_WORDS.refused.word).toBe("git unread");
+    expect(REPO_STATE_WORDS.refused.word).toMatch(/^[a-z]+( [a-z]+)?$/);
+    expect(REPO_STATE_WORDS.refused.word.length).toBeLessThanOrEqual(12);
+  });
+
+  it("explains the word beside it in one dry sentence about the machine and this folder's git state", () => {
+    expect(REPO_STATE_WORDS.refused.note).toBe("The machine could not read this folder's git state, so no branch is shown.");
+    expect(REPO_STATE_WORDS.refused.note).toMatch(/^[^.]+\.$/);
+  });
+});
+
 describe("LINEAGE_MARKS", () => {
   it("names every outcome a missing tool can carry and every state a lineage row shows, each as one short lowercase word or two", () => {
     const outcomes: GoldenMissingTool["outcome"][] = ["skipped", "failed"];
@@ -662,5 +682,15 @@ describe("a pinned release that moved", () => {
     expect(pinMovedLine(v1, undefined)).toBe("no longer fixed to release v2.86.0");
     expect(INSTALLER_MOVED_LINE).toBe("its install lines changed");
     expect(roadMovedLine("with Homebrew", NO_ROAD_WORDS)).toBe("now by no road, was with Homebrew");
+  });
+});
+
+describe("a tools row outside the catalog", () => {
+  it("says it is on this Mac, what the build does with it, and when a file's tick has no row on this Mac", () => {
+    expect(installedOnMacLine(undefined)).toBe("installed on this Mac");
+    expect(installedOnMacLine("0.1.0")).toBe("installed on this Mac, 0.1.0");
+    expect(installsByLine("from its release", "the v0.1.0 release of github.com/Zingzy/diskbloom")).toBe("installs from its release: the v0.1.0 release of github.com/Zingzy/diskbloom");
+    expect(leftOutLine("no Linux bottle known")).toBe("left out of the build: no Linux bottle known");
+    expect(notHereLine("zingzy/tap/diskbloom", "/tmp/given.json")).toBe("zingzy/tap/diskbloom is ticked in /tmp/given.json, but this Mac has no row that installs it; it is left out.");
   });
 });

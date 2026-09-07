@@ -14,7 +14,8 @@ import { customRows, fmtBytes, type Recipe, type RecipeCustomRow, type RecipeRow
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, card, colourDepth, isTTY, table, textPrompt } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
-import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, scannedTicks, withScanned } from "./init-also.js";
+import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, buildLine, scannedTicks, withScanned } from "./init-also.js";
+import { outsideCatalog } from "./recipe-file.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
 import { BASE_GROUP, FLOOR_LINE, PROJECT_GROUP, agentRows, candidatesLine, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
@@ -42,10 +43,11 @@ const rowOf = (recipe: Recipe, id: string): RecipeRow | undefined => recipe.rows
 /** Whether the recipe found the entry on this Mac. */
 const onThisMac = (recipe: Recipe, id: string): boolean => rowOf(recipe, id)?.source.kind === "installed";
 
-/** The recipe with one kind's rows ticked as a screen left them: a row the recipe had keeps its source, an entry it
- * never named gets a row on the catalog's own evidence, so a tick on a fresh Mac is kept. */
+/** The recipe with one kind's catalog rows ticked as a screen left them: a row the recipe had keeps its source, an
+ * entry it never named gets a row on the catalog's own evidence, so a tick on a fresh Mac is kept. This computer's
+ * tools rows outside the catalog are the Also on this Mac screen's, so neither table screen touches their ticks. */
 function withTicks(recipe: Recipe, kind: RecipeRow["kind"], entries: readonly CatalogEntry[], on: (id: string) => boolean): Recipe {
-  const rows = recipe.rows.map(r => (r.kind === kind ? { ...r, on: on(r.id) } : r));
+  const rows = recipe.rows.map(r => (r.kind === kind && !outsideCatalog(r) ? { ...r, on: on(r.id) } : r));
   const missing = entries.filter(e => !rows.some(r => r.id === e.id)).map((e): RecipeRow => {
     const bytes = sizeBytes(e.size);
     return { id: e.id, kind: e.kind, on: on(e.id), source: { kind: "popular", sessions: e.source.sessions, images: e.source.images }, ...(bytes !== undefined ? { size: bytes } : {}) };
@@ -450,7 +452,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
           title: ALSO_TITLE,
           top: scan.length > 0 ? ALSO_TOP : ALSO_EMPTY_TOP,
           counter,
-          items: alsoItems(scan),
+          items: alsoItems(scan, recipe, row => buildLine(o.manifest, row, o.brew)),
           initial: scannedTicks(recipe, scan),
           empty: ALSO_EMPTY,
           groupLine: alsoGroupLine(scan),
