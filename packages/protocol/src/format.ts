@@ -805,6 +805,12 @@ export function templateSkippedLine(golden: string, version: number, reason: str
   return `golden ${golden} v${version}: no template recorded, ${reason}`;
 }
 
+/** What a version's row says when more than one template carries its name: the provider allows the duplicates and
+ * a template names no source snapshot, so none is the version's to record. */
+export function templatesCarryNameReason(count: number): string {
+  return `${count} templates carry its name`;
+}
+
 /** What a version's row says when the provider answers 404 for its snapshot: the vanish the templates exist to outlive. */
 export const SNAPSHOT_GONE_REASON = "its snapshot is gone at the provider";
 

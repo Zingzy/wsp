@@ -27,7 +27,7 @@ async function seeded(versions: ReturnType<typeof version>[], head = versions.at
     backend.snapshots.push({ id: v.snapshotId, sizeBytes: (7 + v.version) * GB, createdAt: v.createdAt });
     await store.put("golden-recipes", `default@v${v.version}`, { ticks: [], files: [] });
   }
-  const rt = createRuntime({ backend, store, adapters: {} });
+  const rt = createRuntime({ backend, store, adapters: {}, hostId: "h1" });
   return { store, backend, rt };
 }
 
@@ -35,15 +35,15 @@ describe("golden templates", () => {
   it("a build on a backend with templates seals the version with the template promoted under wsp-default-v<n>, and the smoke fork boots from it", async () => {
     const backend = stubBackend();
     backend.capabilities.templates = true;
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, hostId: "h1" });
     const frames: string[] = [];
     const { version: sealed } = await rt.golden.build({ setup: "true", smoke: "true", onStage: (stage, detail) => frames.push(detail === undefined ? stage : `${stage}:${detail}`) });
-    expect(sealed).toMatchObject({ version: 1, snapshotId: "snap_golden-v1", templateId: "tpl_wsp-default-v1" });
-    expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v1", name: "wsp-default-v1" }]);
-    expect(backend.machines[1]!.spec).toMatchObject({ template: "tpl_wsp-default-v1" });
+    expect(sealed).toMatchObject({ version: 1, snapshotId: "snap_golden-v1", templateId: "tpl_wsp-h1-default-v1" });
+    expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v1", name: "wsp-h1-default-v1" }]);
+    expect(backend.machines[1]!.spec).toMatchObject({ template: "tpl_wsp-h1-default-v1" });
     expect(backend.machines[1]!.spec.fromSnapshot).toBeUndefined();
-    expect(frames.filter(f => f.startsWith("promoting"))).toEqual(["promoting:wsp-default-v1", "promoting:tpl_wsp-default-v1 is ready"]);
-    expect((await rt.golden.get())!.versions[0]!.templateId).toBe("tpl_wsp-default-v1");
+    expect(frames.filter(f => f.startsWith("promoting"))).toEqual(["promoting:wsp-h1-default-v1", "promoting:tpl_wsp-h1-default-v1 is ready"]);
+    expect((await rt.golden.get())!.versions[0]!.templateId).toBe("tpl_wsp-h1-default-v1");
   });
 
   it("a workspace forks from the version's template when it has one and from the snapshot when it has none; a project golden forks from its own snapshot", async () => {
@@ -67,7 +67,7 @@ describe("golden templates", () => {
     const store2 = memoryStore();
     await store2.put("goldens", "default", { head: 2, versions: [version(1), version(2, "tpl_two")] });
     await store2.put("project-goldens", "snap_project", { snapshotId: "snap_project", golden: "snap_golden-v2", version: 2, workspaceName: "new", createdAt: "2026-09-07T00:00:00Z", project: { name: "app", path: "/root/app", importedAt: "2026-09-07T00:00:00Z" } });
-    const rt2 = createRuntime({ backend, store: store2, adapters: {} });
+    const rt2 = createRuntime({ backend, store: store2, adapters: {}, hostId: "h1" });
     const task = await rt2.workspaces.create({ golden: "snap_project", name: "task" });
     expect(specOf(task.machineId)).toEqual({ template: undefined, fromSnapshot: "snap_project" });
   });
@@ -78,10 +78,10 @@ describe("golden templates", () => {
     backend.templates.set("tpl_three", { id: "tpl_three", name: "wsp-default-v3", status: "ready", snapshotId: "snap_golden-v3" });
     expect(await rt.golden.promote()).toEqual([
       { golden: "default", version: 1, templateId: "tpl_e6f26b64338f4eba", found: true },
-      { golden: "default", version: 2, templateId: "tpl_wsp-default-v2", found: false },
+      { golden: "default", version: 2, templateId: "tpl_wsp-h1-default-v2", found: false },
     ]);
-    expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v2", name: "wsp-default-v2" }]);
-    expect((await rt.golden.get())!.versions.map(v => v.templateId)).toEqual(["tpl_e6f26b64338f4eba", "tpl_wsp-default-v2", "tpl_three"]);
+    expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v2", name: "wsp-h1-default-v2" }]);
+    expect((await rt.golden.get())!.versions.map(v => v.templateId)).toEqual(["tpl_e6f26b64338f4eba", "tpl_wsp-h1-default-v2", "tpl_three"]);
     expect(await rt.golden.promote()).toEqual([]);
     expect(backend.promoted).toHaveLength(1);
   });
@@ -91,9 +91,21 @@ describe("golden templates", () => {
     backend.snapshots.splice(0, 1);
     expect(await rt.golden.promote()).toEqual([
       { golden: "default", version: 1, error: "its snapshot is gone at the provider" },
-      { golden: "default", version: 2, templateId: "tpl_wsp-default-v2", found: false },
+      { golden: "default", version: 2, templateId: "tpl_wsp-h1-default-v2", found: false },
     ]);
-    expect((await rt.golden.get())!.versions.map(v => v.templateId)).toEqual([undefined, "tpl_wsp-default-v2"]);
+    expect((await rt.golden.get())!.versions.map(v => v.templateId)).toEqual([undefined, "tpl_wsp-h1-default-v2"]);
+  });
+
+  it("promote records nothing for a version whose name more than one template carries, says how many in the row, and promotes nothing", async () => {
+    const { backend, rt } = await seeded([version(1), version(2)]);
+    backend.templates.set("tpl_his", { id: "tpl_his", name: "wsp-default-v1", status: "ready", snapshotId: "snap_other" });
+    backend.templates.set("tpl_throwaway", { id: "tpl_throwaway", name: "wsp-default-v1", status: "ready", snapshotId: "snap_other2" });
+    expect(await rt.golden.promote()).toEqual([
+      { golden: "default", version: 1, error: "2 templates carry its name" },
+      { golden: "default", version: 2, templateId: "tpl_wsp-h1-default-v2", found: false },
+    ]);
+    expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v2", name: "wsp-h1-default-v2" }]);
+    expect((await rt.golden.get())!.versions.map(v => v.templateId)).toEqual([undefined, "tpl_wsp-h1-default-v2"]);
   });
 
   it("promote is undefined on a backend without templates, and a golden that does not exist has nothing to promote", async () => {

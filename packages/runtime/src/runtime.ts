@@ -42,6 +42,7 @@ import {
   reap,
   refreshPreviewToken,
   sealGolden,
+  legacyTemplateName,
   templateName,
   templatesOf,
   applyDelta,
@@ -126,7 +127,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, SNAPSHOT_GONE_REASON, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, SNAPSHOT_GONE_REASON, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, templatesCarryNameReason, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -3118,6 +3119,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(logins !== undefined ? { logins } : {}),
           keepBuilder: keep,
           name,
+          hostId,
         }),
       );
       await store.put(GOLDENS, name, result.manifest);
@@ -3165,6 +3167,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...build,
           backend: b,
           name: key,
+          hostId,
           labels: { ...build.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
         }),
@@ -3523,7 +3526,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const v of manifest?.versions ?? []) {
         if (v.templateId !== undefined) continue;
         try {
-          const { templateId, found } = await adoptOrPromote(templates, v.snapshotId, templateName(key, v.version));
+          const adopted = await adoptOrPromote(templates, v.snapshotId, { name: templateName(hostId, key, v.version), legacy: legacyTemplateName(key, v.version) });
+          if ("carrying" in adopted) {
+            rows.push({ golden: key, version: v.version, error: templatesCarryNameReason(adopted.carrying) });
+            continue;
+          }
+          const { templateId, found } = adopted;
           const current = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
           if (current === undefined) throw new Error(`golden ${key} was dropped while its versions were being promoted`);
           await store.put(GOLDENS, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });

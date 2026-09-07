@@ -7,6 +7,7 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
+import { hostname } from "node:os";
 import { ROAD_STEPS } from "@wsp/catalog";
 import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, goldenImage, snapshotAttemptLine, snapshotFailedLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
@@ -132,8 +133,19 @@ export interface Templates {
 }
 
 /** The name a version's template is promoted under and found by: one rule, so a version promoted by hand under it
- * is recognised and never promoted twice. */
-export const templateName = (golden: string, version: number): string => `wsp-${golden}-v${version}`;
+ * is recognised and never promoted twice. The host is in it because the provider lets two templates share a name
+ * and a template names no source snapshot: two hosts on one account with the same golden name would otherwise
+ * adopt each other's. */
+export const templateName = (hostId: string, golden: string, version: number): string => `wsp-${hostId}-${golden}-v${version}`;
+
+/** The name the first seals promoted under, before the host was in it; accepted for adoption on the same rule. */
+export const legacyTemplateName = (golden: string, version: number): string => `wsp-${golden}-v${version}`;
+
+/** The names a version's template may carry: this host's shape, and the first seals' shape. */
+export interface TemplateNames {
+  name: string;
+  legacy: string;
+}
 
 /** How long a promoted template may read building before the seal gives up (a promotion reads ready at once per the
  * provider's reference; the wait covers a slower day), and how often it is read. Tests shrink both. */
@@ -162,13 +174,16 @@ export async function awaitTemplate(templates: Templates, templateId: string, wa
   }
 }
 
-/** The template a version should be recorded with: the one the provider already holds under the version's name
- * (a promotion done by hand, or a run that recorded nothing), else a fresh promotion of its snapshot; ready either way. */
-export async function adoptOrPromote(templates: Templates, snapshotId: string, name: string, wait: TemplateWait = {}): Promise<{ templateId: string; found: boolean }> {
-  const held = (await templates.list()).find(t => t.name === name);
-  const templateId = held?.id ?? (await templates.promote(snapshotId, name));
+/** The template a version should be recorded with: the one template the provider holds under either of the
+ * version's names (a promotion done by hand, or a run that recorded nothing), else a fresh promotion of its snapshot
+ * under this host's name; ready either way. More than one under the names is nobody's to pick, since a template
+ * names no source snapshot: nothing is recorded or promoted, and the count is answered. */
+export async function adoptOrPromote(templates: Templates, snapshotId: string, names: TemplateNames, wait: TemplateWait = {}): Promise<{ templateId: string; found: boolean } | { carrying: number }> {
+  const held = (await templates.list()).filter(t => t.name === names.name || t.name === names.legacy);
+  if (held.length > 1) return { carrying: held.length };
+  const templateId = held[0]?.id ?? (await templates.promote(snapshotId, names.name));
   await awaitTemplate(templates, templateId, wait);
-  return { templateId, found: held !== undefined };
+  return { templateId, found: held.length === 1 };
 }
 
 /** Solari's built-in templates are kind-specific (TemplateKindMismatch otherwise). */
@@ -663,6 +678,8 @@ export interface SealGoldenOptions extends MachineSize {
   snapshotRetryMs?: number;
   /** The golden the version belongs to, which names its template; the store's default key when absent. */
   name?: string;
+  /** The host sealing it, which names its template too; the bare hostname when absent. */
+  hostId?: string;
   /** How long the seal waits for the promoted template to read ready, and how often it reads (tests shrink both). */
   templateWait?: Pick<TemplateWait, "readyMs" | "pollMs">;
 }
@@ -685,6 +702,8 @@ export interface BuildGoldenOptions extends MachineSize {
   onStage?: StageListener;
   /** The golden being built, which names the version's template; the store's default key when absent. */
   name?: string;
+  /** The host building it, which names the template too; the bare hostname when absent. */
+  hostId?: string;
 }
 
 export interface ForkOverrides extends MachineSize {
@@ -821,7 +840,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     }
     // The template is what forks boot from, so the smoke proves it and not the snapshot behind it.
     if (templates !== undefined) {
-      const name = templateName(opts.name ?? "default", versionNum);
+      const name = templateName(opts.hostId ?? hostname(), opts.name ?? "default", versionNum);
       stage("promoting", name);
       // Held before the wait, so a template the provider fails is deleted with the snapshot below.
       templateId = await templates.promote(snapshotId, name);
@@ -1083,7 +1102,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
 export async function buildGolden(
   opts: BuildGoldenOptions,
 ): Promise<{ manifest: GoldenManifest; version: GoldenVersion }> {
-  const { backend, setup, smoke, kind, baseTemplate, manifest, smokeTimeoutMs, onStage, labels, name, ...size } = opts;
+  const { backend, setup, smoke, kind, baseTemplate, manifest, smokeTimeoutMs, onStage, labels, name, hostId, ...size } = opts;
   const builder = await prepareBuilder({
     backend,
     setup,
@@ -1102,6 +1121,7 @@ export async function buildGolden(
     ...(smokeTimeoutMs !== undefined ? { smokeTimeoutMs } : {}),
     ...(onStage !== undefined ? { onStage } : {}),
     ...(name !== undefined ? { name } : {}),
+    ...(hostId !== undefined ? { hostId } : {}),
   });
 }
 
