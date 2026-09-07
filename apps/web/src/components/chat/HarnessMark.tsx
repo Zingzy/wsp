@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The mark of the harness a model belongs to, next to it in the composer and
-// on the picker's rail: the glyph its client module registers, else its
-// initials.
+// The mark of the harness a model or thread belongs to, next to it in the
+// composer, on the picker's rail and on the sidebar's thread rows: the glyph
+// its client module registers, bare, in the brand's own hue where it has one
+// and otherwise in the colour of whatever it sits in, like the initials it
+// falls back to.
 import { harnessClient } from "../../adapt/harnesses";
 import { cn } from "../../lib/utils";
 
@@ -19,8 +21,10 @@ export function HarnessMark({ harness, label, className }: { harness: string; la
   const mark = harnessClient(harness)?.mark;
   if (mark !== undefined) {
     return (
-      <svg preserveAspectRatio="xMidYMid" viewBox={mark.viewBox} className={cn("size-3.5 shrink-0 fill-current", className)} data-harness-mark={harness} aria-hidden>
-        <path d={mark.path} />
+      <svg preserveAspectRatio="xMidYMid" viewBox={mark.viewBox} className={cn("size-3.5 shrink-0 fill-current", mark.tone, className)} data-harness-mark={harness} aria-hidden>
+        {mark.paths.map(path => (
+          <path key={path.d} d={path.d} fillRule={path.fillRule} />
+        ))}
       </svg>
     );
   }

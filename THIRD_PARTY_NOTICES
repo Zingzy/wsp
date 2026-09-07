@@ -399,3 +399,38 @@ here are included or relied upon under their own licenses, reproduced below.
    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    SOFTWARE.
+
+------------------------------------------------------------------------
+
+8. Agent marks under apps/web/src/assets/agents
+
+   Each file is one agent's published mark, kept path for path and read by
+   apps/web/src/adapt/harnesses.ts so the app can draw it in the agent's
+   colour. The marks identify the agents they belong to and remain their
+   owners' trademarks; no licence below grants trademark rights.
+
+   claude.svg: Anthropic's Claude mark, taken from pingdotgg/t3code
+   apps/web/src/components/Icons.tsx (ClaudeAI) at be7796d. MIT License,
+   Copyright (c) 2026 T3 Tools Inc.; the MIT text is under item 1.
+
+   codex.svg: OpenAI's mark, drawn for Codex, taken from pingdotgg/t3code
+   apps/web/src/components/Icons.tsx (OpenAI) at 57a66608b. MIT License,
+   Copyright (c) 2026 T3 Tools Inc.; the MIT text is under item 1.
+
+   gemini.svg: Google Gemini's spark, from simple-icons/simple-icons
+   icons/googlegemini.svg (https://github.com/simple-icons/simple-icons).
+   CC0 1.0 Universal.
+
+   opencode.svg: OpenCode's mark, from simple-icons/simple-icons
+   icons/opencode.svg, which traces it to anomalyco/opencode
+   packages/identity/mark.svg. CC0 1.0 Universal.
+
+   pi.svg: Pi's mark from the press kit at https://pi.dev/press-kit
+   (https://pi.dev/logo-auto.svg, its two paths and fill rule). MIT License,
+   Earendil Inc. and contributors.
+
+   CC0 1.0 Universal (simple-icons): the contributors have waived all
+   copyright and related rights to the icon paths to the extent possible
+   under law; the full text is at
+   https://creativecommons.org/publicdomain/zero/1.0/legalcode. simple-icons
+   notes that the brand marks themselves belong to their owners.

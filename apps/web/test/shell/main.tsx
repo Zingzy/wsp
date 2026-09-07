@@ -7,10 +7,11 @@
 // can measure the chrome's geometry, which jsdom cannot lay out. With
 // ?ws=<id> the centre holds that workspace's thread and composer, so the
 // refusal line above the box can be measured for the running, paused and gone
-// workspaces; ?ws=ws_a&linger=1 replays a turn that replied but whose process
-// has not exited.
+// workspaces and the model picker's agent marks for their size and colour;
+// ?ws=ws_a&linger=1 replays a turn that replied but whose process has not
+// exited.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, type HarnessCatalog, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
@@ -33,12 +34,19 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
 });
 const workspaces = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" }];
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
-// one; ws_b has only idle ones, the shape that used to draw no Idle header at all.
+// one; ws_b has only idle ones, the shape that used to draw no Idle header at all, one of them on Codex so both a
+// coloured and a monochrome agent mark sit in the shots.
 const sessions: SessionView[] = [
   { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000 },
   { id: "s2", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Reply with exactly the word hi.", startedBy: "cli", startedAt: Date.now() - 30 * 60_000, endedAt: Date.now() - 24 * 60_000 },
-  { id: "s3", workspaceId: "ws_b", harness: "claude", status: "completed", prompt: "Bump the lockfile and run the gate.", startedBy: "cli", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 },
+  { id: "s3", workspaceId: "ws_b", harness: "codex", status: "completed", prompt: "Bump the lockfile and run the gate.", startedBy: "cli", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 },
   { id: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
+];
+
+// Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one.
+const catalogs: HarnessCatalog[] = [
+  { harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }], efforts: [], contextWindows: [], permissionModes: [], steers: true },
+  { harness: "codex", label: "Codex", source: "table", version: null, models: [{ value: "gpt-6-astra", label: "GPT-6 Astra" }], efforts: [], contextWindows: [], permissionModes: [], steers: false },
 ];
 
 const linger = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_linger" };
@@ -70,6 +78,7 @@ const api: Api = {
   snapshotStorage: async () => null,
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
   listSessions: async () => sessions,
+  listHarnesses: async () => catalogs,
   subscribe: () => () => {},
   getGolden: async () => undefined,
 };
