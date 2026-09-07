@@ -11,7 +11,7 @@ import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { TOOLS_PATH } from "@wsp/engine";
 import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ } from "@wsp/protocol";
-import { rotateDaemonTokenScript, writeDaemonTokenScript } from "@wsp/runtime";
+import { createRuntime, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved } from "@wsp/engine";
 import {
@@ -27,6 +27,7 @@ import {
   OPEN_SHIM_SCRIPT,
   START_MJS,
   packBundle,
+  promoteGoldens,
   stageDaemonBundle,
   tarPackCommand,
   type DaemonSocket,
@@ -44,6 +45,80 @@ describe("isReserved", () => {
     expect(isReserved({ poc: "p1", wsp: "1" })).toBe(true);
     expect(isReserved({ wsp: "1", "wsp-doctor": "1" })).toBe(false);
     expect(isReserved({})).toBe(false);
+  });
+});
+
+describe("promoteGoldens", () => {
+  const version = (n: number, templateId?: string) => ({ version: n, snapshotId: `snap_golden-v${n}`, ...(templateId !== undefined ? { templateId } : {}), baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } });
+  const io = () => {
+    const lines: string[] = [];
+    return { lines, io: { log: (l: string) => void lines.push(l) } };
+  };
+
+  it("promotes a fresh template for every version without one, says each one with how many templates already carry its name, and notes the count", async () => {
+    const backend = stubBackend();
+    backend.capabilities.templates = true;
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 3, versions: [version(1), version(2), version(3, "tpl_three")] });
+    for (const n of [1, 2, 3]) backend.snapshots.push({ id: `snap_golden-v${n}`, sizeBytes: 8e9 });
+    // A template already under this version's own name, from a run that recorded nothing: counted, never adopted.
+    backend.templates.set("tpl_stale", { id: "tpl_stale", name: "wsp-h1-default-v1", status: "ready", snapshotId: "snap_golden-v1" });
+    const rt = createRuntime({ backend, store, adapters: {}, hostId: "h1" });
+    const { lines, io: cli } = io();
+    expect(await promoteGoldens(rt, cli)).toBe("2 promoted");
+    expect(lines).toEqual([
+      "golden default v1: template tpl_wsp-h1-default-v1 promoted and recorded; 1 other template carries its name",
+      "golden default v2: template tpl_wsp-h1-default-v2 promoted and recorded",
+    ]);
+    expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v1", name: "wsp-h1-default-v1" }, { snapshotId: "snap_golden-v2", name: "wsp-h1-default-v2" }]);
+    expect(((await store.get("goldens", "default")) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual(["tpl_wsp-h1-default-v1", "tpl_wsp-h1-default-v2", "tpl_three"]);
+    expect(await promoteGoldens(rt, cli)).toBe("every version already has a template");
+  });
+
+  it("never fails the doctor: a version whose snapshot the provider lost is one line and the rest are still recorded, a provider error on the template road is one line, and the reach loop below gets its turn", async () => {
+    const backend = stubBackend();
+    backend.capabilities.templates = true;
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 2, versions: [version(1), version(2)] });
+    // v1's snapshot is not in the provider's listing: the vanish the ticket is about.
+    backend.snapshots.push({ id: "snap_golden-v2", sizeBytes: 8e9 });
+    const rt = createRuntime({ backend, store, adapters: {}, hostId: "h1" });
+    const { lines, io: cli } = io();
+    await expect(promoteGoldens(rt, cli)).resolves.toBe("1 promoted, 1 not made durable");
+    expect(lines).toEqual([
+      "golden default v1: no template recorded, its snapshot is gone at the provider",
+      "golden default v2: template tpl_wsp-h1-default-v2 promoted and recorded",
+    ]);
+    expect(((await store.get("goldens", "default")) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual([undefined, "tpl_wsp-h1-default-v2"]);
+
+    backend.promoteSnapshot = async () => {
+      throw Object.assign(new Error("upstream unavailable"), { kind: "unavailable", status: 502 });
+    };
+    backend.snapshots.push({ id: "snap_golden-v1", sizeBytes: 8e9 });
+    const again = io();
+    await expect(promoteGoldens(rt, again.io)).resolves.toBe("1 not made durable");
+    expect(again.lines).toEqual(["golden default v1: no template recorded, upstream unavailable"]);
+
+    const broken = { golden: { promote: async () => Promise.reject(new Error("state file unreadable")) } } as unknown as Runtime;
+    await expect(promoteGoldens(broken, again.io)).resolves.toBe("not made durable: state file unreadable");
+  });
+
+  it("on a store with no golden yet the note says there is none", async () => {
+    const backend = stubBackend();
+    backend.capabilities.templates = true;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, hostId: "h1" });
+    const { lines, io: cli } = io();
+    expect(await promoteGoldens(rt, cli)).toBe("no golden to make durable");
+    expect(lines).toEqual([]);
+  });
+
+  it("says so on a backend without templates and touches nothing", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const { lines, io: cli } = io();
+    expect(await promoteGoldens(rt, cli)).toBe("this backend has no templates; goldens stay as snapshots");
+    expect(lines).toEqual([]);
+    expect(backend.promoted).toEqual([]);
   });
 });
 

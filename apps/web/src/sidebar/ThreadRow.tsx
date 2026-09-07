@@ -69,7 +69,7 @@ export function ThreadRow({
                 {thread.title}
               </span>
             )}
-            <span className={cn(ROW_META_CLASS, "min-w-[3ch] shrink-0 text-right")}>{time}</span>
+            <span className={cn(ROW_META_CLASS, "w-[3ch] shrink-0 text-right")}>{time}</span>
           </span>
           <span data-thread-meta className={cn(ROW_META_CLASS, "flex min-w-0 items-center gap-1.5")}>
             <ThreadRowLeadingStatus status={pill} />

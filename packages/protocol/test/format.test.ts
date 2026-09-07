@@ -19,6 +19,12 @@ import {
   foreignFlagLine,
   unknownAgentLine,
   LINEAGE_MARKS,
+  NO_TEMPLATES_LINE,
+  templateFailedLine,
+  templateRecordedLine,
+  templateSkippedLine,
+  templateStatusLine,
+  templateWaitedLine,
   REPO_STATE_WORDS,
   missingToolRow,
   behindGoldenLine,
@@ -44,6 +50,7 @@ import {
   goldenBuildLine,
   goneWords,
   harnessExitLine,
+  hostLostAnswer,
   isCodeSearchTool,
   listedName,
   machineCapRefusal,
@@ -79,6 +86,7 @@ import {
   stepRetryLine,
   timedOutLine,
   lastLine,
+  openingTitle,
   titleLine,
   toolActivityLine,
   toolCallFacts,
@@ -455,6 +463,34 @@ describe("titleLine", () => {
   });
 });
 
+describe("openingTitle", () => {
+  const brief = "You are a builder for the wsp repo, which is at /Users/dev/wsp on this Mac: read the ticket, then run `pnpm test` and report.\n\nTicket: Zingzy/wsp-map#408.";
+
+  it("is the opening turn's first sentence, so a brief that starts with a whole paragraph never titles a thread with all of it", () => {
+    expect(openingTitle("Bump the lockfile. Then run the gate.")).toBe("Bump the lockfile.");
+    expect(openingTitle("Is the gate green? Say so.")).toBe("Is the gate green?");
+    expect(openingTitle("You are a builder for the wsp repo.\n\nTicket: Zingzy/wsp-map#292.")).toBe("You are a builder for the wsp repo.");
+    expect(openingTitle("\r\n  \n\tReply  with\texactly   the word pong.  \r\n")).toBe("Reply with exactly the word pong.");
+    expect(openingTitle("Bump to 1.2.3 and run the gate")).toBe("Bump to 1.2.3 and run the gate");
+  });
+
+  it("cuts a long first sentence at a word boundary to at most 48 characters with the ellipsis counted, and only then", () => {
+    expect(openingTitle(brief)).toBe("You are a builder for the wsp repo, which is at\u2026");
+    expect(openingTitle(brief).length).toBeLessThanOrEqual(48);
+    const exact = "Rename the thread by its opening words and stop.";
+    expect(exact).toHaveLength(48);
+    expect(openingTitle(exact)).toBe(exact);
+    expect(openingTitle(`${exact.slice(0, -1)} now.`)).toBe("Rename the thread by its opening words and stop\u2026");
+    expect(openingTitle("Ticket: wsp-map#408, four fixes in one round, the header glyph first.")).toBe("Ticket: wsp-map#408, four fixes in one round\u2026");
+  });
+
+  it("cuts one word longer than the room inside it, and an empty turn is an empty title", () => {
+    const token = "a".repeat(60);
+    expect(openingTitle(token)).toBe(`${"a".repeat(47)}\u2026`);
+    expect(openingTitle("\n \n")).toBe("");
+  });
+});
+
 describe("lastLine", () => {
   it("is the text's last non-empty line with its whitespace collapsed, which is what a notify line ends with", () => {
     expect(lastLine("Ran the gate.\n\nAll 12 tests green.\n")).toBe("All 12 tests green.");
@@ -562,6 +598,14 @@ describe("goneWords", () => {
     expect(goneWords("sb_1", { by: "pause", at, answer: "404 Not found" })).toBe("machine sb_1 is gone at the provider: the pause found it gone at 2026-09-07T01:21:10Z (404 Not found)");
     expect(goneWords("sb_1", { by: "status poll", at })).toBe("machine sb_1 is gone at the provider: the status poll found it gone at 2026-09-07T01:21:10Z");
     expect(goneWords("sb_1", { by: "sweep", at, answer: "" })).toBe("machine sb_1 is gone at the provider: the sweep found it gone at 2026-09-07T01:21:10Z");
+  });
+
+  it("quotes the host's metrics answer when it, not the state read, gave the machine away", () => {
+    const at = Date.parse("2026-09-07T01:21:10Z");
+    expect(hostLostAnswer("404 Sandbox not found")).toBe("metrics 404 Sandbox not found; the state read still said running");
+    expect(goneWords("sb_1", { by: "status poll", at, answer: hostLostAnswer("404 Sandbox not found") })).toBe(
+      "machine sb_1 is gone at the provider: the status poll found it gone at 2026-09-07T01:21:10Z (metrics 404 Sandbox not found; the state read still said running)",
+    );
   });
 });
 
@@ -720,11 +764,33 @@ describe("LINEAGE_MARKS", () => {
   it("names every outcome a missing tool can carry and every state a lineage row shows, each as one short lowercase word or two", () => {
     const outcomes: GoldenMissingTool["outcome"][] = ["skipped", "failed"];
     for (const o of outcomes) expect(LINEAGE_MARKS[o]).toBe(o);
-    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" });
+    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", volatile: "volatile" });
     for (const word of Object.values(LINEAGE_MARKS)) {
       expect(word).toMatch(/^[a-z]+( [a-z]+)?$/);
       expect(word.length).toBeLessThanOrEqual(9);
     }
+  });
+});
+
+describe("template words", () => {
+  it("says what the provider reads the template as and whether the seal asks again; ready is final", () => {
+    expect(templateStatusLine("tpl_a", "building")).toBe("tpl_a is building; asking again");
+    expect(templateStatusLine("tpl_a", "ready")).toBe("tpl_a is ready");
+  });
+
+  it("names a failed template with the provider's reason, or that none was given, and a wait that ran out with the last status and the time", () => {
+    expect(templateFailedLine("tpl_a", "restore copy failed")).toBe("the provider failed the template tpl_a: restore copy failed");
+    expect(templateFailedLine("tpl_a", undefined)).toBe("the provider failed the template tpl_a: no reason given");
+    expect(templateWaitedLine("tpl_a", "building", 300_000)).toBe("the template tpl_a still reads building after 5m");
+  });
+
+  it("the doctor's line per version names the template it promoted and, when other templates already carry the name, how many", () => {
+    expect(templateRecordedLine("default", 2, "tpl_0f1e", 0)).toBe("golden default v2: template tpl_0f1e promoted and recorded");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", 1)).toBe("golden default v1: template tpl_0f1e promoted and recorded; 1 other template carries its name");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", 2)).toBe("golden default v1: template tpl_0f1e promoted and recorded; 2 other templates carry its name");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", undefined)).toBe("golden default v1: template tpl_0f1e promoted and recorded");
+    expect(templateSkippedLine("default", 1, "its snapshot is gone at the provider")).toBe("golden default v1: no template recorded, its snapshot is gone at the provider");
+    expect(NO_TEMPLATES_LINE).toBe("this backend has no templates; goldens stay as snapshots");
   });
 });
 

@@ -22,6 +22,7 @@ import {
   GoldenManifest,
   GoldenStageEvent,
   goldenHead,
+  goldenImage,
   HarnessCatalog,
   HostFolderListing,
   contextWindowsFor,
@@ -369,11 +370,13 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
 });
 
 describe("backend capabilities", () => {
-  it("requires every flag, containers, callbackRelay and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+  it("requires every flag, containers, callbackRelay, templates and the sizes list included, so no backend can leave one unstated", () => {
+    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { containers: _c, ...missing } = full;
     expect(() => Capabilities.parse(missing)).toThrow();
+    const { templates: _t, ...noTemplates } = full;
+    expect(() => Capabilities.parse(noTemplates)).toThrow();
     const { callbackRelay: _r, ...noRelay } = full;
     expect(() => Capabilities.parse(noRelay)).toThrow();
     const { sizes: _s, ...noSizes } = full;
@@ -701,6 +704,20 @@ describe("golden version logins", () => {
   });
 });
 
+describe("goldenImage", () => {
+  it("boots a version from its template once one is recorded and gives it no word; a version with none boots from its snapshot and is volatile", () => {
+    expect(goldenImage({ snapshotId: "snap_a", templateId: "tpl_a" })).toEqual({ spec: { template: "tpl_a" }, marks: [] });
+    expect(goldenImage({ snapshotId: "snap_a" })).toEqual({ spec: { fromSnapshot: "snap_a" }, marks: ["volatile"] });
+  });
+
+  it("a version record takes an optional templateId and parses without one, as every version sealed before templates did", () => {
+    const v = { version: 1, snapshotId: "snap_a", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } };
+    expect(wire.GoldenVersion.parse(v).templateId).toBeUndefined();
+    expect(wire.GoldenVersion.parse({ ...v, templateId: "tpl_a" }).templateId).toBe("tpl_a");
+    expect(wire.GoldenStage.options).toContain("promoting");
+  });
+});
+
 describe("goldenHead", () => {
   const v1: GoldenVersion = { version: 1, snapshotId: "snap_1", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } };
 
@@ -787,6 +804,14 @@ describe("thread provenance", () => {
   it("foldThreads titles a thread by its opening prompt's first line, so the CLI's table and the sidebar show one line for a multi-paragraph brief", () => {
     const [t] = foldThreads([{ ...row, prompt: "You are a builder.\n\nTicket: Zingzy/wsp-map#292.\nBuild: the fix." }]);
     expect(t!.title).toBe("You are a builder.");
+  });
+
+  it("foldThreads titles a thread with no harness title by its opening turn's first sentence, cut to 48 characters, so a brief-shaped turn never shows whole in the row, the breadcrumb, the switcher card or the CLI's table", () => {
+    const brief = "You are a builder for the wsp repo, which is at /Users/dev/wsp on this Mac: read the ticket, then run `pnpm test` and report.\n\nTicket: Zingzy/wsp-map#408.";
+    const [t] = foldThreads([{ ...row, prompt: brief }]);
+    expect(t!.title).toBe("You are a builder for the wsp repo, which is at\u2026");
+    const [two] = foldThreads([{ ...row, prompt: "Bump the lockfile. Then run the gate." }]);
+    expect(two!.title).toBe("Bump the lockfile.");
   });
 
   it("foldThreads titles a thread by what the harness calls the session the next send resumes, so a rename made inside the harness shows everywhere", () => {

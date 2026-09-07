@@ -75,9 +75,17 @@ export const APT_UPDATE = `${APT_ENV}\napt-get update -qq`;
  * before anything runs (https://docs.brew.sh/Homebrew-on-Linux#alternative-installation). */
 export const HOMEBREW = { tag: "6.0.21", commit: "560147012b9678b42ef5e83b690f0895552d1366" } as const;
 export const BREW_PREFIX = "/home/linuxbrew/.linuxbrew";
+/** Homebrew's own checkout, where its Linux install puts it. */
+export const BREW_REPO = `${BREW_PREFIX}/Homebrew`;
 // Install-time cleanup stays on: with it off, one recipe left 2.6 GB of bottles in the download cache on a 20 GB disk.
 export const BREW_ENV = `HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 NONINTERACTIVE=1 HOMEBREW_CURL_RETRIES=${NET_RETRIES}`;
+/** The one brew anything on this machine types, a person's shell included: the shim below, in the directory Homebrew
+ * puts its own on, so a dotfiles line that prepends that directory (`brew shellenv` does) still lands on the shim. */
 export const BREW = `${BREW_PREFIX}/bin/brew`;
+/** What the shim runs: brew reads its prefix off the path it was called by, two directories up, so calling the
+ * checkout's own bin/brew would make the checkout the prefix and every keg with it. This link is at that depth and
+ * in a directory no PATH carries and no keg links into, so it is the shim's alone. */
+export const BREW_REAL = `${BREW_PREFIX}/libexec/brew`;
 
 // Homebrew refuses to run as root, so it lives under its own user at the
 // prefix its Linux bottles are built for; anything else compiles from source.
@@ -89,9 +97,11 @@ export function asLinuxbrew(cmd: string): string {
   return `su -s /bin/bash linuxbrew -c ${shellQuote(`${BREW_ENV} ${BREW} ${cmd}`)}`;
 }
 
-/** A `brew` for a script that runs as root and types its own formula line: the two above take the whole command as
- * one quoted word, this one takes the arguments as they were typed and hands them on with their quoting intact. */
-export const LINUXBREW_SHIM = `brew() { su -s /bin/bash linuxbrew -c ${shellQuote(`export ${BREW_ENV}; exec "$0" "$@"`)} -- ${BREW} "$@"; }`;
+/** The file that sits at BREW, so every brew on the machine runs as the user that owns the tree however it was
+ * reached. Root running Homebrew's own brew writes root-owned files into that tree and git then refuses to read it,
+ * which reads as "No remote origin, skipping update". It sets no Homebrew environment: a person's brew is meant to
+ * update, and a caller that wants otherwise exports it, which su carries through. */
+export const LINUXBREW_SHIM = ["#!/bin/sh", `if [ "$(id -un)" = linuxbrew ]; then exec ${BREW_REAL} "$@"; fi`, `exec su -s /bin/bash linuxbrew -c ${shellQuote(`exec "$0" "$@"`)} -- ${BREW_REAL} "$@"`].join("\n");
 
 const brew: RoadModule<Road<"brew">> = {
   words: "with Homebrew",

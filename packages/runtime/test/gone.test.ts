@@ -7,7 +7,7 @@
 // refuses in words (Not pausable) is a refusal, not a vanish.
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { goneRefusal, goneWords, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
+import { goneRefusal, goneWords, hostLostAnswer, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
 import { createRuntime, type RuntimeOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -57,14 +57,16 @@ afterEach(async () => {
 
 /** The edge answers for the machine, not the daemon, and only when the test says: a probe waits in `held` until the test
  * answers it (404) or drops it (a failed reach); either way the poll goes on to ask the provider, in the order the test picks. */
-async function edgeHolding(m: StubMachine): Promise<{ held: ServerResponse[]; answer: (res: ServerResponse) => void; drop: (res: ServerResponse) => void }> {
+async function edgeHolding(m: StubMachine): Promise<{ held: ServerResponse[]; fromDaemon: boolean; answer: (res: ServerResponse) => void; drop: (res: ServerResponse) => void }> {
   const held: ServerResponse[] = [];
   const server = createServer((_req, res) => void held.push(res));
   await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
   openServers.push(server);
   const port = (server.address() as { port: number }).port;
   m.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
-  return { held, answer: res => void res.writeHead(404).end(), drop: res => void res.destroy() };
+  // fromDaemon set, the answer is the daemon's own (426), which sends nobody to the provider.
+  const edge = { held, fromDaemon: false, answer: (res: ServerResponse) => void res.writeHead(edge.fromDaemon ? 426 : 404).end(), drop: (res: ServerResponse) => void res.destroy() };
+  return edge;
 }
 
 const countReads = (m: StubMachine): { n: number } => {
@@ -241,6 +243,184 @@ describe("a 404 settles the record gone through one road", () => {
       const readsA = countReads(ma);
       await rt.reap();
       expect(readsA.n).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("the host's metrics as the early warning", () => {
+  /** How many times the provider was asked for the machine's state and for the host's metrics. */
+  const countAsks = (m: StubMachine): { state: number; metrics: number } => {
+    const asks = { state: 0, metrics: 0 };
+    const state = m.state.bind(m);
+    const metrics = m.metrics.bind(m);
+    m.state = async () => {
+      asks.state++;
+      return state();
+    };
+    m.metrics = async () => {
+      asks.metrics++;
+      return metrics();
+    };
+    return asks;
+  };
+  const doubtLines = (warn: ReturnType<typeof vi.spyOn>) => warn.mock.calls.map(c => String(c[0])).filter(l => /^host metrics for/.test(l));
+  /** One status pass over the edge the test controls: the pass is awaited, so what it asked is known when it returns. */
+  const pass = async (rt: ReturnType<typeof testRuntime>["rt"], edge: Awaited<ReturnType<typeof edgeHolding>>, reconcile: "always" | "on-failure"): Promise<WorkspaceStatus> => {
+    const rows = rt.status.list({ reconcile });
+    await until(() => edge.held.length >= 1);
+    edge.answer(edge.held.shift()!);
+    return (await rows)[0]!;
+  };
+
+  it("a metrics 404 with the daemon's probe missed on the same pass settles the record gone through the poll's road, with words that name the metrics read, and the idle window is dropped", async () => {
+    const { rt, backend, fc, statuses, costs } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const edge = await edgeHolding(m);
+      const asks = countAsks(m);
+      const stop = rt.status.watch();
+      try {
+        await until(() => edge.held.length >= 1);
+        edge.answer(edge.held.shift()!);
+        await until(() => asks.state >= 1 && asks.metrics >= 1);
+        expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+
+        m.hostLost = true;
+        fc.advance(POLL);
+        const seenAt = fc.clock.now();
+        await until(() => edge.held.length >= 1);
+        edge.drop(edge.held.shift()!);
+        await until(async () => (await rt.workspaces.get(ws.id)).phase === "gone" && costs.at(-1)!.phase === "gone");
+
+        const record = await rt.workspaces.get(ws.id);
+        // The gateway's own record never moved: the state read said running both times.
+        expect(m.killed).toBe(false);
+        expect(record.gone).toBe(goneWords("m1", { by: "status poll", at: seenAt, answer: hostLostAnswer("404 host no longer knows this VM") }));
+        expect(record.gone).toBe("machine m1 is gone at the provider: the status poll found it gone at 2026-09-07T01:20:15Z (metrics 404 host no longer knows this VM; the state read still said running)");
+        expect(statuses.at(-1)).toMatchObject({ id: ws.id, phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: record.gone });
+        expect(statuses.at(-1)!.idleAt).toBeUndefined();
+        expect((await rt.status.list())[0]!.idleAt).toBeUndefined();
+        expect(costs.at(-1)).toMatchObject({ phase: "gone", rateUsdPerHour: 0, at: new Date(seenAt).toISOString() });
+        expect(goneLines(warn)).toEqual([`workspace ${ws.id} is gone: ${record.gone}`]);
+        expect(doubtLines(warn)).toEqual([]);
+        expect(asks).toEqual({ state: 2, metrics: 2 });
+      } finally {
+        stop();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a metrics 404 while the daemon answers on the same pass is one logged line and nothing else, on an explicit refresh too", async () => {
+    const { rt, backend, statuses } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const edge = await edgeHolding(m);
+      edge.fromDaemon = true;
+      const asks = countAsks(m);
+      m.hostLost = true;
+
+      const first = await pass(rt, edge, "always");
+      expect(first).toMatchObject({ phase: "running", machineState: "running", reach: { state: "reachable" } });
+      expect(first.reason).toBeUndefined();
+      expect(asks).toEqual({ state: 1, metrics: 1 });
+      expect(doubtLines(warn)).toEqual([`host metrics for m1 (workspace ${ws.id}) answered 404 host no longer knows this VM while the guest answered; the record stays running until the guest misses too`]);
+
+      const second = await pass(rt, edge, "always");
+      expect(second).toMatchObject({ machineState: "running", reach: { state: "reachable" } });
+      expect(asks).toEqual({ state: 2, metrics: 2 });
+      expect(doubtLines(warn)).toHaveLength(1);
+      expect(goneLines(warn)).toEqual([]);
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+      expect(statuses.filter(s => s.machineState === "gone")).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the edge speaking for the machine is not the daemon missing: a metrics 404 there leaves the record running while the guest still answers exec", async () => {
+    const { rt, backend, fc, statuses } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const edge = await edgeHolding(m);
+      const asks = countAsks(m);
+      m.hostLost = true;
+      const stop = rt.status.watch();
+      try {
+        await until(() => edge.held.length >= 1);
+        edge.answer(edge.held.shift()!);
+        await until(() => doubtLines(warn).length === 1);
+        fc.advance(POLL);
+        await until(() => edge.held.length >= 1);
+        edge.answer(edge.held.shift()!);
+        await until(() => asks.state >= 2);
+      } finally {
+        stop();
+      }
+      // A full pass after the poll's: anything the poll settled has landed by now.
+      const row = await pass(rt, edge, "on-failure");
+      expect(row).toMatchObject({ phase: "running", machineState: "running" });
+      expect(asks).toEqual({ state: 3, metrics: 3 });
+      expect(doubtLines(warn)).toHaveLength(1);
+      expect(goneLines(warn)).toEqual([]);
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+      expect(statuses.filter(s => s.machineState === "gone")).toEqual([]);
+      expect(await m.exec("echo ok")).toMatchObject({ exitCode: 0 });
+
+      // The guest missing on a later pass is the second witness the 404 was waiting for.
+      const gone = rt.status.list({ reconcile: "on-failure" });
+      await until(() => edge.held.length >= 1);
+      edge.drop(edge.held.shift()!);
+      expect((await gone)[0]).toMatchObject({ machineState: "gone", reach: { state: "gone" } });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a metrics read that fails any other way changes nothing, and metrics ride only the passes that ask the provider", async () => {
+    const { rt, backend, statuses } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const edge = await edgeHolding(m);
+      const metrics = m.metrics.bind(m);
+      const asks = countAsks(m);
+      let failing = true;
+      m.metrics = async () => {
+        asks.metrics++;
+        if (failing) throw Object.assign(new Error("Bad Gateway"), { kind: "transient", status: 502 });
+        return metrics();
+      };
+      const stop = rt.status.watch();
+      try {
+        await until(() => edge.held.length >= 1);
+        edge.answer(edge.held.shift()!);
+        await until(() => asks.metrics >= 1 && statuses.length >= 1);
+        expect(asks).toEqual({ state: 1, metrics: 1 });
+        expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+        expect(statuses.at(-1)).toMatchObject({ phase: "running", machineState: "running" });
+        expect(warn.mock.calls).toEqual([]);
+      } finally {
+        stop();
+      }
+
+      // The guest answers the next passes itself: the provider is not asked, so neither are its metrics.
+      failing = false;
+      edge.fromDaemon = true;
+      expect(await pass(rt, edge, "on-failure")).toMatchObject({ machineState: "running", reach: { state: "reachable" } });
+      expect(await pass(rt, edge, "on-failure")).toMatchObject({ machineState: "running", reach: { state: "reachable" } });
+      expect(asks).toEqual({ state: 1, metrics: 1 });
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
     } finally {
       warn.mockRestore();
     }

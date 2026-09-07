@@ -5,7 +5,7 @@
 // handlers are the reference implementation they mirror.
 
 import { z } from "zod";
-import { titleLine } from "./format.js";
+import { openingTitle, titleLine } from "./format.js";
 import { shellQuote } from "./shell-quote.js";
 
 /** The one rule for a URL a guest may hand to the laptop: http or https in any
@@ -83,6 +83,9 @@ export const Capabilities = z.object({
   callbackRelay: z.boolean(),
   /** The provider lists every snapshot on the account with its size, so storage can be counted and priced. */
   snapshotListing: z.boolean(),
+  /** The provider promotes a snapshot to a template that survives its own restarts, so a sealed version is recorded
+   * as one and forked from it; false keeps every version on its snapshot. */
+  templates: z.boolean(),
   /** Every size a create may ask for; a create that names another is refused with this list. A create that names
    * none takes the golden's size, which need not be on it. */
   sizes: z.array(MachineSizeOffer),
@@ -264,8 +267,8 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
     const first = turns[0]!;
     const latest = turns[turns.length - 1]!;
     // The one title rule every client reads: the harness's own name for the session the next send resumes wins, so
-    // a rename made inside the harness shows here, and the opening turn's words stand until one is read.
-    const words = latest.harnessTitle ?? first.prompt;
+    // a rename made inside the harness shows here, and the opening turn's first sentence stands until one is read.
+    const title = latest.harnessTitle !== undefined ? titleLine(latest.harnessTitle) : first.prompt !== undefined ? openingTitle(first.prompt) : first.claudeSessionId ?? first.id;
     return {
       id,
       ...(first.threadId !== undefined ? { threadId: first.threadId } : {}),
@@ -273,7 +276,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       harness: first.harness,
       startedBy: first.startedBy ?? "person",
       status: latest.status,
-      title: words !== undefined ? titleLine(words) : first.claudeSessionId ?? first.id,
+      title,
       sessionId: latest.id,
       ...(latest.claudeSessionId !== undefined ? { claudeSessionId: latest.claudeSessionId } : {}),
       ...(latest.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
@@ -872,6 +875,10 @@ export type GoldenRetired = z.infer<typeof GoldenRetired>;
 export const GoldenVersion = z.object({
   version: z.number(),
   snapshotId: z.string(),
+  /** The durable template the seal, or wsp doctor after it, promoted the snapshot to; forks boot from it. Absent on
+   * a backend without templates and on versions sealed before templates were recorded, whose forks boot from the
+   * snapshot, which the provider may lose. */
+  templateId: z.string().optional(),
   baseTemplate: z.string(),
   kind: MachineKind.optional(),
   setupSha: z.string(),
@@ -913,6 +920,14 @@ export type GoldenManifest = z.infer<typeof GoldenManifest>;
 /** The sealed version a manifest's head names, or nothing: a manifest without one has no golden to serve or fork. */
 export function goldenHead(manifest: GoldenManifest | undefined): GoldenVersion | undefined {
   return manifest?.versions.find(v => v.version === manifest.head);
+}
+
+/** What a fork of a version boots from and the lineage's word for it: the durable template once one is recorded,
+ * the snapshot until then. The one rule for every road that creates from a version and every row that says whether
+ * the version survives the provider losing its snapshot store; a durable version gets no word, since a word every
+ * row wears says nothing. */
+export function goldenImage(v: Pick<GoldenVersion, "snapshotId" | "templateId">): { spec: { template: string } | { fromSnapshot: string }; marks: readonly "volatile"[] } {
+  return v.templateId !== undefined ? { spec: { template: v.templateId }, marks: [] } : { spec: { fromSnapshot: v.snapshotId }, marks: ["volatile"] };
 }
 
 /** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an
@@ -1091,6 +1106,7 @@ export const GoldenStage = z.enum([
   "installing-mcp",
   "ready",
   "snapshotting",
+  "promoting",
   "smoke-forking",
   "sealed",
   "failed",

@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { SEAL_STEPS, StageStream, streamStages, type StageFrame } from "../src/init.js";
+import { UPGRADE_STEPS } from "../src/init-upgrade.js";
 
 const SPINNERS = /[◒◐◓◑]/;
 const ev = (stage: string, at: number, detail?: string): StageFrame => ({ type: "golden.stage", name: "default", stage, at, ...(detail !== undefined ? { detail } : {}) });
@@ -174,6 +175,16 @@ function terminal(cols: number, rows: number) {
 const NODE_WARNING = "(node:72935) MaxListenersExceededWarning: Possible EventTarget memory leak detected. 11 abort listeners added to [AbortSignal]. MaxListeners is 10. Use events.setMaxListeners() to increase limit\n(Use `node --trace-warnings ...` to show where the warning was created)\n";
 
 const count = (lines: string[], text: string): number => lines.filter(l => l.includes(text)).length;
+
+describe("seal and upgrade steps", () => {
+  it("both name the promoting stage between the snapshot and the fork, in the seal's own words", () => {
+    for (const steps of [SEAL_STEPS, UPGRADE_STEPS]) {
+      const stages = steps.map(s => s.stage);
+      expect(stages.slice(stages.indexOf("snapshotting"))).toEqual(["snapshotting", "promoting", "smoke-forking", "sealed"]);
+      expect(steps.find(s => s.stage === "promoting")).toEqual({ stage: "promoting", start: "Saving it as a durable template", end: "Saved as a durable template", fail: "Saving the template failed" });
+    }
+  });
+});
 
 describe("stage stream on a terminal", () => {
   it("a long detail under a failed step is cut to the row, so the block never drifts and every step shows once", () => {

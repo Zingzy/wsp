@@ -21,7 +21,7 @@ import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePr
 import { stepSwitcherAt, SWITCHER_PAINT_DELAY_MS, switchHoldKeys, useWorkspaceSwitcher } from "../src/shell/workspaceSwitcher.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, sizes: [] };
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] };
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running", createdAt = "2026-09-01T00:00:00Z"): WorkspaceView => ({
   id,

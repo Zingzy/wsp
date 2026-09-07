@@ -225,6 +225,31 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
+  it("in the desktop window the terminal draws at the Ghostty file's font-size: a file saying 16 gives cells a 16 px monospace line fits, not the app's 11 px mono", async () => {
+    await page!.goto(`${base}?theme=dark&ws=ws_a&mac=1&panel=terminal`);
+    await page!.waitForSelector("[data-terminal-translucent] canvas");
+    await page!.waitForFunction(() => (window as unknown as { surfaces: unknown[] }).surfaces.length > 0);
+    const read = await page!.evaluate(() => {
+      const [surface] = (window as unknown as { surfaces: { textSize: number; cellHeight: number }[] }).surfaces;
+      // A monospace line at the file's size and at the app's mono size, as the page lays them out.
+      const lineOf = (px: number): number => {
+        const span = document.createElement("span");
+        span.style.cssText = `position:absolute;font:400 ${px}px monospace;line-height:normal;white-space:pre`;
+        span.textContent = "Mg";
+        document.body.append(span);
+        const height = span.getBoundingClientRect().height;
+        span.remove();
+        return height;
+      };
+      return { textSize: surface!.textSize, cellHeight: surface!.cellHeight, line16: lineOf(16), line11: lineOf(11) };
+    });
+    console.info(`terminal size from a font-size 16 file: ${JSON.stringify(read)}`);
+    expect(read.textSize).toBe(16);
+    expect(read.cellHeight).toBeGreaterThanOrEqual(read.line16);
+    expect(read.cellHeight).toBeLessThan(read.line16 + 5);
+    expect(read.cellHeight).toBeGreaterThan(read.line11 + 4);
+  }, 60_000);
+
   it("holding the switch chord puts the switcher up over the shell, one card per workspace of three parts, and the highlight moves nothing", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&shell=desktop`);
@@ -408,6 +433,8 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       timeWidth: number;
       rowX: number;
       rowRight: number;
+      /** The row's own right edge, before its padding. */
+      rowEdge: number;
       mono: boolean;
     }
     const readRows = () =>
@@ -447,20 +474,24 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
             timeWidth: time.getBoundingClientRect().width,
             rowX: box.x + parseFloat(padding.paddingLeft),
             rowRight: box.right - parseFloat(padding.paddingRight),
+            rowEdge: box.right,
             mono: /mono/i.test(getComputedStyle(time).fontFamily),
           } satisfies ThreadRead;
         });
+        const plus = document.querySelector<HTMLElement>("[data-row-id='ws:ws_a'] ~ [data-sidebar=menu-action][aria-label='New thread in api']")!;
+        const plusRight = plus.getBoundingClientRect().right;
         const idle = Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='settled:']")).map(row => row.getBoundingClientRect().height);
         const trips = document.querySelectorAll("[data-slot=sidebar] svg.lucide-folder-input, [data-slot=sidebar] svg.lucide-folder-output").length;
-        return { workspaces, threads, idle, trips };
+        return { workspaces, threads, idle, trips, plusRight };
       });
-    for (const width of [240, 300, 360]) {
+    // Three remembered widths and the width the shell opens at with nothing remembered.
+    for (const width of [240, 300, 360, null]) {
       for (const theme of ["dark", "light"] as const) {
-        await page!.goto(`${base}?theme=${theme}&sidebar=${width}`);
+        await page!.goto(`${base}?theme=${theme}${width === null ? "" : `&sidebar=${width}`}`);
         await page!.waitForSelector("[data-sidebar-row]");
-        await page!.waitForFunction(w => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - w) < 1, width);
+        if (width !== null) await page!.waitForFunction(w => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - w) < 1, width);
         const rows = await readRows();
-        console.info(`rows at ${width}px ${theme}: ${JSON.stringify(rows)}`);
+        console.info(`rows at ${width ?? "default"} ${theme}: ${JSON.stringify(rows)}`);
         expect(rows.workspaces.map(r => r.id)).toEqual(["ws:ws_a", "ws:ws_b", "ws:ws_c"]);
         // Two-line rows are 44 px, the Idle rows the kit's 32 px row, whatever the state or the width.
         expect(rows.workspaces.map(r => r.height)).toEqual([44, 44, 44]);
@@ -488,7 +519,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
           const b = el.getBoundingClientRect();
           return { opacity: getComputedStyle(el).opacity, inside: b.x >= slot.x - 1 && b.right <= slot.right + 1 && b.y >= slot.y - 8 && b.bottom <= slot.bottom + 8, box: b.toJSON() as unknown };
         }), { x: before.x, right: before.x + before.width, y: before.y, bottom: before.y + before.height });
-        console.info(`hovered glyphs at ${width}px ${theme}: ${JSON.stringify({ hovered, slot: before })}`);
+        console.info(`hovered glyphs at ${width ?? "default"} ${theme}: ${JSON.stringify({ hovered, slot: before })}`);
         expect(hovered.map(g => ({ opacity: g.opacity, inside: g.inside }))).toEqual([{ opacity: "1", inside: true }, { opacity: "1", inside: true }]);
         await page!.mouse.move(600, 700);
         // The meta line in its one order, whole in the title, cut from the right when the width asks.
@@ -502,9 +533,13 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         // No import or export glyph anywhere; a live row's glyphs are its chevron and plus, a gone row's forget and rebuild.
         expect(rows.trips).toBe(0);
         expect(rows.workspaces.map(r => r.glyphs)).toEqual([["Collapse api", "New thread in api"], ["Collapse web", "New thread in web"], ["Forget old", "Rebuild old"]]);
-        // The thread title runs to one row gap before a mono time column three characters wide at the content's right edge.
+        // The thread row ends where the workspace row ends, and its mono time column, three characters wide, ends where the
+        // workspace row's plus glyph does; the title runs to one row gap before the column.
+        expect(Math.abs(rows.plusRight - live.slotRight)).toBeLessThan(1);
         for (const row of rows.threads) {
           expect(row.mono).toBe(true);
+          expect(Math.abs(row.rowEdge - (rowBox.x + rowBox.width))).toBeLessThan(1);
+          expect(Math.abs(row.timeRight - rows.plusRight)).toBeLessThan(1);
           expect(Math.abs(row.timeRight - row.rowRight)).toBeLessThan(1);
           expect(Math.abs(row.titleRight + 8 - row.timeX)).toBeLessThan(1);
           expect(row.timeWidth).toBeGreaterThanOrEqual(3 * 6);
@@ -525,7 +560,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         // The thread title sits at the same inset from its row's edge as the workspace name from its own.
         const inset = rows.workspaces[0]!.nameX - (await box("[data-row-id='ws:ws_a']")).x;
         for (const row of rows.threads) expect(Math.abs(row.titleX - row.rowX - (inset - 8))).toBeLessThan(1);
-        const path = join(SHOTS_DIR, `sidebar-rows-${width}-${theme}.png`);
+        const path = join(SHOTS_DIR, `sidebar-rows-${width ?? "default"}-${theme}.png`);
         await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
         console.info(`sidebar rows screenshot: ${path}`);
       }

@@ -359,6 +359,25 @@ export function titleLine(text: string): string {
   return first.replace(/\s+/g, " ").trim();
 }
 
+/** The most characters a thread title made from its opening turn takes, the ellipsis counted. */
+const OPENING_TITLE_MAX = 48;
+const ELLIPSIS = "\u2026";
+
+/** A thread's title from its opening turn when the harness has no name for it: the turn's first sentence, cut at a
+ * word boundary to at most 48 characters with an ellipsis only when cut, so a brief-shaped turn never titles the row,
+ * the breadcrumb, the switcher card or the CLI's table with its whole opening words. */
+export function openingTitle(text: string): string {
+  const line = titleLine(text);
+  const sentence = /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
+  if (sentence.length <= OPENING_TITLE_MAX) return sentence;
+  const room = OPENING_TITLE_MAX - ELLIPSIS.length;
+  // One character past the room, so a word that ends exactly at the room's edge is kept whole.
+  const head = sentence.slice(0, room + 1);
+  const boundary = head.lastIndexOf(" ");
+  const kept = (boundary > 0 ? head.slice(0, boundary) : head.slice(0, room)).replace(/[\s,;:]+$/, "");
+  return `${kept}${ELLIPSIS}`;
+}
+
 /** Text cut to its last line: the last non-empty line with the whitespace collapsed, or nothing when the text has
  * none. The notify line ends with it and a switcher card shows it under the thread's title, so both read one rule. */
 export function lastLine(text: string): string | undefined {
@@ -627,6 +646,12 @@ export function goneWords(machineId: string, seen?: GoneSighting): string {
   return `${base}: the ${seen.by} found it gone at ${at}${answer}`;
 }
 
+/** The answer a sighting quotes when the host's metrics read came back missing while the state read still said
+ * running: the host lost the VM before the gateway's record followed, so a pause or snapshot would have failed next. */
+export function hostLostAnswer(said: string): string {
+  return `metrics ${said}; the state read still said running`;
+}
+
 /** The machine row's line when a record that said paused met a machine the provider was running all along (a nap
  * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
 export const ALREADY_RUNNING = "already running at the provider";
@@ -746,7 +771,7 @@ export function behindGoldenLine(on: number, head: number): string {
 
 /** The states a lineage row can be in, each as the muted mono word the row's marks column shows: state is text there,
  * never a badge, and a missing tool's outcome indexes this table as it is. */
-export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" } as const;
+export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", volatile: "volatile" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
 
 /** What is said for each folder git named no branch for, by door: the word the composer's branch slot and the diff
@@ -799,6 +824,42 @@ export function snapshotFailedLine(attempts: number, answer: ProviderAnswer, bui
   if (builderState === "unread") return `${head} and could not be read about the builder (${readError ?? "no reason given"})`;
   return `${head} while the builder read ${builderState}`;
 }
+
+/** The promoting stage's line for one read of the template: what the provider says it is, and whether the seal asks
+ * again. Ready is the last line the stage writes. */
+export function templateStatusLine(templateId: string, status: string): string {
+  return status === "ready" ? `${templateId} is ready` : `${templateId} is ${status}; asking again`;
+}
+
+/** The seal's failure line when the provider marks the template failed: forks would have nothing to boot from. */
+export function templateFailedLine(templateId: string, reason: string | undefined): string {
+  return `the provider failed the template ${templateId}: ${reason ?? "no reason given"}`;
+}
+
+/** The seal's failure line when the template never read ready inside the wait. */
+export function templateWaitedLine(templateId: string, status: string, waitedMs: number): string {
+  return `the template ${templateId} still reads ${status} after ${fmtDuration(waitedMs)}`;
+}
+
+/** The doctor's line per version it made durable: the golden and version, the template it promoted, and when other
+ * templates already carry the name (another host's, or a run that recorded nothing), how many; none when the count
+ * is zero or the listing was not given. */
+export function templateRecordedLine(golden: string, version: number, templateId: string, sharing: number | undefined): string {
+  const head = `golden ${golden} v${version}: template ${templateId} promoted and recorded`;
+  return sharing === undefined || sharing === 0 ? head : `${head}; ${sharing} other ${sharing === 1 ? "template carries" : "templates carry"} its name`;
+}
+
+/** The doctor's line per version it could not make durable and why: a lost snapshot in the provider's own words is
+ * left to the doctor's rebuild road below it. */
+export function templateSkippedLine(golden: string, version: number, reason: string): string {
+  return `golden ${golden} v${version}: no template recorded, ${reason}`;
+}
+
+/** What a version's row says when the provider answers 404 for its snapshot: the vanish the templates exist to outlive. */
+export const SNAPSHOT_GONE_REASON = "its snapshot is gone at the provider";
+
+/** The doctor's line on a backend whose capabilities lack templates: nothing to promote, nothing wrong. */
+export const NO_TEMPLATES_LINE = "this backend has no templates; goldens stay as snapshots";
 
 /** The one sentence every road that leaves a builder running says: its id, what it costs, how to attach to it
  * again, and that the sweep ends it. */

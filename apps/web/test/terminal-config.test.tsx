@@ -30,7 +30,7 @@ const FILE: TerminalConfig = {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  useStore.setState({ api: null });
+  useStore.setState({ api: null, conn: "connecting" });
   document.documentElement.classList.remove("dark");
   document.body.innerHTML = "";
 });
@@ -43,7 +43,7 @@ async function open(read: Api["hostTerminalConfig"] | undefined, config: Paramet
   await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1), { timeout: 10_000 });
   const surface = await create.mock.results[0]!.value;
   const mount = document.querySelector<HTMLElement>("[data-terminal-viewport]")!;
-  return { options: create.mock.calls[0]![1], surface, mount };
+  return { options: create.mock.calls[0]![1], surface, mount, create };
 }
 
 describe("the viewport with the person's Ghostty config", () => {
@@ -62,6 +62,11 @@ describe("the viewport with the person's Ghostty config", () => {
     expect(options.backgroundOpacity).toBe(0.85);
     await vi.waitFor(() => expect(mount.hasAttribute("data-terminal-translucent")).toBe(true));
     expect(mount.className).not.toContain("bg-[var(--terminal-background)]");
+  });
+
+  it("a file naming only a size, with no family typed or detected, opens the surface at that size in css px, the unit Ghostty's points are on a Mac", async () => {
+    const { options } = await open(async () => ({ ...FILE, fontFamily: [], fontSize: 16 }));
+    expect(options.font).toEqual({ size: 16 });
   });
 
   it("a family the viewer typed beats the file's; an opaque file leaves the mount painting its background", async () => {
@@ -91,6 +96,39 @@ describe("the viewport with the person's Ghostty config", () => {
     document.documentElement.classList.remove("dark");
     await vi.waitFor(() => expect(asked).toEqual(["light", "dark", "light"]));
     await vi.waitFor(() => expect(setTheme).toHaveBeenLastCalledWith(expect.objectContaining({ background: { r: 250, g: 250, b: 250 } })));
+  });
+
+  it("a pane mounted while the socket is down draws the defaults and says so once; when the socket comes up it takes the file's size, colours, padding and opacity without a remount", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let up = false;
+    const read = async (): Promise<TerminalConfig> => {
+      if (!up) throw new Error("lost");
+      return { ...FILE, fontFamily: [], fontSize: 16 };
+    };
+    useStore.setState({ conn: "connecting" });
+    const { options, surface, mount, create } = await open(read);
+    expect(options.font).toBeUndefined();
+    expect(options.theme.palette).toBeUndefined();
+    expect(options.backgroundOpacity).toBe(1);
+    expect(mount.hasAttribute("data-terminal-translucent")).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toContain("lost");
+    const setFont = vi.spyOn(surface, "setFont");
+    const setTheme = vi.spyOn(surface, "setTheme");
+    const setPadding = vi.spyOn(surface, "setPadding");
+    const setOpacity = vi.spyOn(surface, "setBackgroundOpacity");
+    up = true;
+    useStore.setState({ conn: "live" });
+    await vi.waitFor(() => expect(setFont).toHaveBeenCalledWith({ size: 16 }));
+    expect(setTheme).toHaveBeenLastCalledWith(expect.objectContaining({ background: { r: 30, g: 30, b: 46 }, palette: FILE.palette }));
+    expect(setPadding).toHaveBeenCalledWith({ left: 2, right: 4, top: 4, bottom: 4 });
+    expect(setOpacity).toHaveBeenCalledWith(0.85);
+    expect(surface.textSize).toBe(16);
+    expect(surface.translucent).toBe(true);
+    await vi.waitFor(() => expect(mount.hasAttribute("data-terminal-translucent")).toBe(true));
+    expect(mount.className).not.toContain("bg-[var(--terminal-background)]");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   it("no host, or a host that fails to answer, opens the surface on the defaults", async () => {

@@ -1,7 +1,8 @@
-import type { Capabilities } from "@wsp/protocol";
+import { shellLine, type Capabilities } from "@wsp/protocol";
 import { backoffMs, classify, isMissing, shouldRetry, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
-import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing } from "./machine.js";
+import { GUEST_USER_ENV } from "./golden-import.js";
+import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { previewTokenExpiry } from "./preview.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -25,6 +26,16 @@ interface SandboxView {
   createdAt?: string;
 }
 
+interface TemplateView {
+  templateId: string;
+  name: string;
+  status: TemplateRow["status"];
+  /** Null, not absent, on a custom template that has not failed (the reference's own listing example). */
+  error?: string | null;
+}
+
+const templateRowOf = (t: TemplateView): TemplateRow => ({ id: t.templateId, name: t.name, status: t.status, ...(t.error !== undefined && t.error !== null ? { error: t.error } : {}) });
+
 const STATE_MAP: Record<SandboxView["state"], MachineState> = {
   starting: "starting",
   running: "running",
@@ -37,8 +48,8 @@ const STATE_MAP: Record<SandboxView["state"], MachineState> = {
 /** Solari changelog 2026-09-04: snapshot storage is billed from 2026-10-01, 10 GB free per organization, then $0.05 per GB-month pro-rated daily. */
 export const SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" };
 
-/** Prefixed to every exec: the guest runs as root and the exec API hands it no environment beyond PATH. */
-export const EXEC_ENV = "export HOME=/root USER=root";
+/** Prefixed to every exec: the exec API hands the guest no environment beyond PATH. */
+export const EXEC_ENV = `export ${shellLine(Object.entries(GUEST_USER_ENV).map(([name, value]) => `${name}=${value}`))}`;
 
 /** Measured 2026-09-07: Solari's replies carry no request id header, so requestId stays unset; the common name is read should one appear. */
 export const REQUEST_ID_HEADER = "x-request-id";
@@ -67,6 +78,7 @@ export class SolariBackend implements MachineBackend {
     containers: false, // guest kernel 6.6.30 lacks overlayfs and netfilter: dockerd falls back to vfs with no bridge and runc fails (measured)
     callbackRelay: true, // the daemon link rides previewUrls
     snapshotListing: true,
+    templates: true,
     sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: rateUsdPerHour(size) })),
   };
 
@@ -184,6 +196,25 @@ export class SolariBackend implements MachineBackend {
     await this.request("DELETE", `/snapshots/${encodeURIComponent(id)}`);
   }
 
+  async promoteSnapshot(id: string, name: string): Promise<string> {
+    const res = await this.request<{ templateId: string }>("POST", `/snapshots/${encodeURIComponent(id)}/promote`, { name });
+    return res.templateId;
+  }
+
+  async getTemplate(id: string): Promise<TemplateRow> {
+    return templateRowOf(await this.request<TemplateView>("GET", `/templates/${encodeURIComponent(id)}`));
+  }
+
+  async listTemplates(): Promise<TemplateRow[]> {
+    const page = await this.request<{ templates?: unknown }>("GET", "/templates");
+    if (!Array.isArray(page.templates)) throw new Error("GET /templates answered without a templates array");
+    return (page.templates as TemplateView[]).map(templateRowOf);
+  }
+
+  async deleteTemplate(id: string): Promise<void> {
+    await this.request("DELETE", `/templates/${encodeURIComponent(id)}`);
+  }
+
   async listSnapshots(): Promise<SnapshotRow[]> {
     const page = await this.request<{ snapshots?: unknown }>("GET", "/snapshots");
     if (!Array.isArray(page.snapshots)) throw new Error("GET /snapshots answered without a snapshots array");
@@ -261,6 +292,10 @@ class SolariMachine implements Machine {
       ...(view.diskGb !== undefined ? { diskGb: view.diskGb } : {}),
       ...(view.createdAt !== undefined ? { createdAt: view.createdAt } : {}),
     };
+  }
+
+  async metrics(): Promise<void> {
+    await this.backend.request("GET", this.path("/metrics"));
   }
 
   async previewUrl(port: number): Promise<PreviewReach> {

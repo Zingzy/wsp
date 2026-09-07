@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { isMissing } from "../src/errors.js";
 import { EXEC_ENV, REQUEST_ID_HEADER, SolariBackend } from "../src/solari-backend.js";
 
 function fakeFetch(routes: Record<string, { status: number; body: unknown; headers?: Record<string, string> }>) {
@@ -21,6 +22,7 @@ describe("SolariBackend", () => {
       containers: false,
       callbackRelay: true,
       snapshotListing: true,
+      templates: true,
       sizes: [
         { cpu: 2, memMb: 4096, rateUsdPerHour: expect.closeTo(0.11, 10) },
         { cpu: 2, memMb: 8192, rateUsdPerHour: expect.closeTo(0.15, 10) },
@@ -44,6 +46,41 @@ describe("SolariBackend", () => {
       { id: "snap_b", sizeBytes: 8_500_000_000, createdAt: "2026-09-04T10:00:00Z", parent: null },
     ]);
     expect(f.mock.calls.map(c => `${c[1]?.method} ${new URL(String(c[0])).pathname}`)).toEqual(["GET /snapshots"]);
+  });
+
+  it("promotes a snapshot to a template by name and answers the minted id; reads, lists and deletes templates on their own routes", async () => {
+    const f = fakeFetch({
+      "POST /snapshots/snap_dl8pcs2yj1fu/promote": { status: 200, body: { templateId: "tpl_e6f26b64338f4eba", name: "wsp-default-v1" } },
+      "GET /templates/tpl_e6f26b64338f4eba": { status: 200, body: { templateId: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", kind: "sandbox", status: "ready", builtin: false, cpu: 2, memMb: 4096, createdAt: "2026-09-07T17:31:00Z" } },
+      "GET /templates/tpl_bad": { status: 200, body: { templateId: "tpl_bad", name: "x", kind: "sandbox", status: "failed", builtin: false, error: "restore copy failed" } },
+      "GET /templates": {
+        status: 200,
+        body: { templates: [{ templateId: "base", name: "base", kind: "sandbox", status: "ready", builtin: true, description: "Ubuntu base" }, { templateId: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", kind: "sandbox", status: "ready", builtin: false, cpu: 2, memMb: 4096, error: null, createdAt: "2026-09-07T17:31:00Z" }] },
+      },
+      "DELETE /templates/tpl_e6f26b64338f4eba": { status: 200, body: { ok: true } },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    expect(await b.promoteSnapshot("snap_dl8pcs2yj1fu", "wsp-default-v1")).toBe("tpl_e6f26b64338f4eba");
+    expect(JSON.parse(String(f.mock.calls[0]![1]!.body))).toEqual({ name: "wsp-default-v1" });
+    expect(await b.getTemplate("tpl_e6f26b64338f4eba")).toEqual({ id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready" });
+    expect(await b.getTemplate("tpl_bad")).toEqual({ id: "tpl_bad", name: "x", status: "failed", error: "restore copy failed" });
+    expect(await b.listTemplates()).toEqual([
+      { id: "base", name: "base", status: "ready" },
+      { id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready" },
+    ]);
+    await b.deleteTemplate("tpl_e6f26b64338f4eba");
+    expect(f.mock.calls.map(c => `${c[1]?.method} ${new URL(String(c[0])).pathname}`)).toEqual([
+      "POST /snapshots/snap_dl8pcs2yj1fu/promote",
+      "GET /templates/tpl_e6f26b64338f4eba",
+      "GET /templates/tpl_bad",
+      "GET /templates",
+      "DELETE /templates/tpl_e6f26b64338f4eba",
+    ]);
+  });
+
+  it("a templates reply of another shape is a failure, never an empty registry", async () => {
+    const b = new SolariBackend({ apiKey: "k", fetch: fakeFetch({ "GET /templates": { status: 200, body: { items: [] } } }) });
+    await expect(b.listTemplates()).rejects.toThrow("GET /templates answered without a templates array");
   });
 
   it("a listing reply of another shape is a failure, never an empty account", async () => {
@@ -100,6 +137,31 @@ describe("SolariBackend", () => {
     expect(EXEC_ENV).toBe("export HOME=/root USER=root");
     expect(body.args[1]).not.toContain("SHELL");
     expect(body.args[0]).toBe("-c");
+  });
+  it("passes the spec's envs through as the create body's envs, and sends none when the spec names none", async () => {
+    const f = fakeFetch({ "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } } });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    await b.create({ kind: "sandbox", fromSnapshot: "snap_1", envs: { HOME: "/root", USER: "root", PATH: "/usr/bin:/bin" } });
+    await b.create({ kind: "sandbox", fromSnapshot: "snap_1" });
+    const bodies = f.mock.calls.map(c => JSON.parse(String(c[1]?.body)) as Record<string, unknown>);
+    expect(bodies[0]).toMatchObject({ fromSnapshot: "snap_1", envs: { HOME: "/root", USER: "root", PATH: "/usr/bin:/bin" } });
+    expect(bodies[1]).not.toHaveProperty("envs");
+  });
+  it("reads GET /sandboxes/:id/metrics for the host's answer, and a 404 there is the machine missing", async () => {
+    const f = fakeFetch({
+      "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } },
+      "GET /sandboxes/x/metrics": { status: 200, body: { cpuPct: 12.5, memBytes: 734003200, memTotalBytes: 8589934592, diskBytes: 2147483648 } },
+      "GET /sandboxes/lost": { status: 200, body: { sandboxId: "lost", kind: "sandbox", state: "running" } },
+      "GET /sandboxes/lost/metrics": { status: 404, body: { error: "Sandbox not found" } },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox" });
+    await expect(m.metrics!()).resolves.toBeUndefined();
+    const lost = await b.get("lost");
+    expect(await lost.state()).toBe("running");
+    const refused = await lost.metrics!().then(() => undefined, (e: unknown) => e);
+    expect(isMissing(refused)).toBe(true);
+    expect(f.mock.calls.map(c => `${c[1]?.method} ${new URL(String(c[0])).pathname}`)).toEqual(["POST /sandboxes", "GET /sandboxes/x/metrics", "GET /sandboxes/lost", "GET /sandboxes/lost", "GET /sandboxes/lost/metrics"]);
   });
   it("a refused call's error carries the request id the reply's header named", async () => {
     const id = "vm_1";

@@ -51,7 +51,7 @@ function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], r
     nap: async () => workspace,
     wake: async () => workspace,
     upgrade: async () => workspace,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, sizes: [] }),
+    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] }),
     startSession: async o => {
       started.push(o);
       return { id: "s_x", workspaceId: o.workspaceId, harness: "claude", status: "running" };

@@ -13,7 +13,7 @@ import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 const view = (id: string, name: string): WorkspaceView => ({ id, name, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
 const iso = (offsetMs: number): string => new Date(Date.now() + offsetMs).toISOString();
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, sizes: [] };
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] };
 
 function fakeApi(workspaces: WorkspaceView[], forwards: PortForward[], opts: { listFails?: string } = {}) {
   const listeners = new Set<(e: ProtocolEvent) => void>();

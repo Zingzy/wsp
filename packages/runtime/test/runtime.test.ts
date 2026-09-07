@@ -12,7 +12,7 @@ import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
-import { CATALOG_TTL_MS, GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
+import { CATALOG_TTL_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -69,6 +69,16 @@ describe("runtime", () => {
     await srv.close();
   });
 
+  it("every fork carries HOME, USER and the golden's PATH in its envs, under the workspace's own", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    expect(GUEST_LOGIN_ENV).toEqual({ HOME: "/root", USER: "root", PATH: TOOLS_PATH });
+    await rt.workspaces.create({ golden: "snap_g", name: "plain" });
+    await rt.workspaces.create({ golden: "snap_g", name: "own", envs: { FOO: "1", HOME: "/home/dev" } });
+    expect(backend.machines[0]!.spec.envs).toEqual(GUEST_LOGIN_ENV);
+    expect(backend.machines[1]!.spec.envs).toEqual({ HOME: "/home/dev", USER: "root", PATH: TOOLS_PATH, FOO: "1" });
+  });
+
   it("wake after the paused machine vanished resurrects a fresh golden fork", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
@@ -80,7 +90,7 @@ describe("runtime", () => {
     const woken = await rt.workspaces.wake(ws.id);
     expect(woken.machineId).toBe("m2");
     expect(backend.machines[1]!.spec.fromSnapshot).toBe("snap_g");
-    expect(backend.machines[1]!.spec.envs).toEqual({ FOO: "1" });
+    expect(backend.machines[1]!.spec.envs).toEqual({ ...GUEST_LOGIN_ENV, FOO: "1" });
     const wokeEvent = events.find(e => e.type === "workspace.woken");
     expect(wokeEvent).toMatchObject({ machineId: "m2", resurrected: true });
   });
@@ -132,10 +142,10 @@ describe("runtime", () => {
     const session = await rt.sessions.start(ws.id, { prompt: "say hi" });
     const result = await session.finished;
     expect(result.status).toBe("completed");
-    // The adapter is handed the golden's login PATH: a launch served by a bare-PATH exec must still find the binary.
+    // The adapter is handed the machine's login environment: who the guest runs as and the golden's PATH, so a launch served by a bare-PATH exec still finds the binary.
     // Every context, not the first alone: a turn is not the only road that asks a harness something on the machine.
     expect(contexts.length).toBeGreaterThan(0);
-    for (const ctx of contexts) expect(ctx.env).toEqual({ PATH: TOOLS_PATH });
+    for (const ctx of contexts) expect(ctx.env).toEqual(GUEST_LOGIN_ENV);
     const types = events.map(e => e.type);
     expect(types).toContain("session.start");
     expect(types).toContain("session.delta");
@@ -3831,7 +3841,7 @@ describe("runtime golden update and the post-seal grace", () => {
     backend.execImpl = dfOk;
     const store = memoryStore();
     const { clock, advance } = fakeClock();
-    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock });
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock, hostId: "h1" });
     return { backend, store, clock, advance, rt };
   };
 
@@ -3989,7 +3999,7 @@ describe("runtime golden update and the post-seal grace", () => {
     await rt.close();
     // The second process runs no base stage and reads no versions: the floor v2 records is the record's alone.
     backend.execImpl = dfOk;
-    const next = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock });
+    const next = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock, hostId: "h1" });
     const result = await next.golden.upgrade({ delta: deltaOf() });
     expect(result.road).toBe("builder");
     expect(result.version.base).toEqual(floor);
@@ -4042,6 +4052,30 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(three.previousDropped).toBe(false);
     expect(three.manifest).toMatchObject({ head: 3, versions: [{ version: 2 }, { version: 3 }] });
     expect(await store.get("golden-recipes", "default@v2")).toBeDefined();
+  });
+
+  it("keepPrevious false leaves a durable version alone while a workspace stands on it: its template would delete under the workspace's feet", async () => {
+    const { backend, rt } = started();
+    backend.capabilities.templates = true;
+    const b = await rt.golden.prepare();
+    const { version: one } = await rt.golden.seal(b.id);
+    expect(one.templateId).toBe("tpl_wsp-h1-default-v1");
+    const ws = await rt.workspaces.create({ golden: one.snapshotId, name: "on-v1" });
+    expect(backend.machines.find(m => m.id === ws.machineId)!.spec).toMatchObject({ template: "tpl_wsp-h1-default-v1" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const two = await rt.golden.upgrade({ delta: deltaOf("h2"), keepPrevious: false });
+    expect(warn.mock.calls.map(c => String(c[0]))).toEqual(["golden default v1 kept: on-v1 still on it"]);
+    warn.mockRestore();
+    expect(two.previousDropped).toBe(false);
+    expect(two.manifest.versions.map(v => [v.version, v.templateId])).toEqual([[1, "tpl_wsp-h1-default-v1"], [2, "tpl_wsp-h1-default-v2"]]);
+    expect(backend.templates.has("tpl_wsp-h1-default-v1")).toBe(true);
+    expect(backend.snapshots.map(r => r.id)).toContain("snap_golden-v1");
+
+    await rt.workspaces.delete(ws.id);
+    const three = await rt.golden.upgrade({ delta: deltaOf("h3"), keepPrevious: false });
+    expect(three.previousDropped).toBe(true);
+    expect(backend.templates.has("tpl_wsp-h1-default-v2")).toBe(false);
+    expect(backend.snapshots.map(r => r.id)).not.toContain("snap_golden-v2");
   });
 
   it("dropping the previous version on the fork road ends the fork builder first, since it descends from that snapshot", async () => {
@@ -4148,7 +4182,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(await first.store.get("builders", b.id)).not.toHaveProperty("sealed");
     // The process died here; another one, past the window, reads the record.
     const late = fakeClock(first.clock.now() + GRACE_MS + 1000);
-    const next = createRuntime({ backend: first.backend, store: first.store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock: late.clock });
+    const next = createRuntime({ backend: first.backend, store: first.store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock: late.clock, hostId: "h1" });
     expect(await next.golden.builders()).toEqual([expect.objectContaining({ id: b.id, building: true })]);
     expect(await next.reap()).toEqual({ reaped: [{ id: b.id, builder: true, reason: "unfinished" }], spared: [] });
     expect(first.backend.machines[0]!.killed).toBe(true);
@@ -4201,7 +4235,7 @@ describe("runtime golden update and the post-seal grace", () => {
     await first.rt.golden.seal(b.id);
     await first.rt.close();
     const late = fakeClock(first.clock.now() + GRACE_MS + 1000);
-    const next = createRuntime({ backend: first.backend, store: first.store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock: late.clock });
+    const next = createRuntime({ backend: first.backend, store: first.store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock: late.clock, hostId: "h1" });
     expect(await next.golden.builders()).toEqual([expect.objectContaining({ id: b.id, sealed: expect.objectContaining({ version: 1 }) })]);
     const result = await next.golden.upgrade({ delta: deltaOf() });
     expect(result.road).toBe("fork");
@@ -4220,7 +4254,7 @@ describe("runtime golden update and the post-seal grace", () => {
       throw new Error("502 Bad Gateway");
     };
     const late = fakeClock(first.clock.now() + GRACE_MS + 1000);
-    const next = createRuntime({ backend: first.backend, store: first.store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock: late.clock });
+    const next = createRuntime({ backend: first.backend, store: first.store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock: late.clock, hostId: "h1" });
     const before = machine.execLog.length;
     const frames: string[] = [];
     next.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });

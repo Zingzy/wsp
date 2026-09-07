@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { ROAD_STEPS } from "@wsp/catalog";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, snapshotAttemptLine, snapshotFailedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, snapshotAttemptLine, snapshotFailedLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
@@ -19,7 +19,7 @@ import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
-import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
+import type { Machine, MachineBackend, MachineKind, MachineState, TemplateRow } from "./machine.js";
 import { isMissing } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { importInto } from "./vault.js";
@@ -108,6 +108,82 @@ export async function killUntilGone(backend: MachineBackend, machine: Machine, c
     } while (Date.now() < deadline);
   }
   throw new MachineAliveError(machine.id, state);
+}
+
+/** The template calls of a backend whose capabilities say it has them, or nothing: the one read of that flag, so a
+ * backend without templates keeps every version on its snapshot on every road. */
+export function templatesOf(backend: MachineBackend): Templates | undefined {
+  if (!backend.capabilities.templates) return undefined;
+  const { promoteSnapshot, getTemplate, listTemplates, deleteTemplate } = backend;
+  if (promoteSnapshot === undefined || getTemplate === undefined || listTemplates === undefined || deleteTemplate === undefined) return undefined;
+  return {
+    promote: (snapshotId, name) => promoteSnapshot.call(backend, snapshotId, name),
+    get: id => getTemplate.call(backend, id),
+    list: () => listTemplates.call(backend),
+    delete: id => deleteTemplate.call(backend, id),
+  };
+}
+
+export interface Templates {
+  promote(snapshotId: string, name: string): Promise<string>;
+  get(id: string): Promise<TemplateRow>;
+  list(): Promise<TemplateRow[]>;
+  delete(id: string): Promise<void>;
+}
+
+/** The name a version's template is promoted under: one rule. The host is in it because the provider lets two
+ * templates share a name, so two hosts on one account with the same golden name would otherwise read as one; the
+ * caller hands the host's id in lowercase letters and digits, the class the provider has taken. */
+export const templateName = (host: string, golden: string, version: number): string => `wsp-${host}-${golden}-v${version}`;
+
+/** How long a promoted template may read building before the seal gives up (a promotion reads ready at once per the
+ * provider's reference; the wait covers a slower day), and how often it is read. Tests shrink both. */
+export const TEMPLATE_READY_MS = 5 * 60_000;
+export const TEMPLATE_POLL_MS = 3_000;
+
+export interface TemplateWait {
+  readyMs?: number;
+  pollMs?: number;
+  /** Each read of the template, in the promoting stage's words. */
+  onStatus?: (line: string) => void;
+}
+
+/** Reads the template until the provider says ready. A failed template or one still building at the deadline is an
+ * error with the provider's words: forks would have nothing durable to boot from. */
+export async function awaitTemplate(templates: Templates, templateId: string, wait: TemplateWait): Promise<void> {
+  const readyMs = wait.readyMs ?? TEMPLATE_READY_MS;
+  const start = Date.now();
+  for (;;) {
+    const row = await templates.get(templateId);
+    wait.onStatus?.(templateStatusLine(templateId, row.status));
+    if (row.status === "ready") return;
+    if (row.status === "failed") throw new Error(templateFailedLine(templateId, row.error));
+    if (Date.now() - start >= readyMs) throw new Error(templateWaitedLine(templateId, row.status, readyMs));
+    await new Promise(r => setTimeout(r, wait.pollMs ?? TEMPLATE_POLL_MS));
+  }
+}
+
+/** A fresh template for a version, promoted from its snapshot and ready: the one promote road, for the seal and the
+ * doctor alike. A template names no source snapshot, so none the provider already holds under the name is ever taken
+ * as this version's; the listing is read only to say how many carry the name already, and a listing the provider
+ * will not give leaves the count out. The provider's 404 on the promote is its word that the snapshot is gone. A
+ * template whose wait fails or runs out is deleted before the failure is thrown, so nothing stands on the snapshot
+ * unrecorded. */
+export async function promoteVersion(templates: Templates, snapshotId: string, name: string, wait: TemplateWait = {}): Promise<{ templateId: string; sharing?: number }> {
+  const sharing = await templates.list().then(rows => rows.filter(t => t.name === name).length, () => undefined);
+  let templateId: string;
+  try {
+    templateId = await templates.promote(snapshotId, name);
+  } catch (e) {
+    throw isMissing(e) ? new Error(SNAPSHOT_GONE_REASON) : e;
+  }
+  try {
+    await awaitTemplate(templates, templateId, wait);
+  } catch (e) {
+    await templates.delete(templateId).catch(() => {});
+    throw e;
+  }
+  return { templateId, ...(sharing !== undefined ? { sharing } : {}) };
 }
 
 /** Solari's built-in templates are kind-specific (TemplateKindMismatch otherwise). */
@@ -600,6 +676,12 @@ export interface SealGoldenOptions extends MachineSize {
   keepBuilder?: boolean;
   /** How long the seal waits between snapshot attempts the provider refused (tests shrink it). */
   snapshotRetryMs?: number;
+  /** The golden the version belongs to, which names its template; the store's default key when absent. */
+  name?: string;
+  /** The host sealing it, in lowercase letters and digits, which names its template too. */
+  hostId: string;
+  /** How long the seal waits for the promoted template to read ready, and how often it reads (tests shrink both). */
+  templateWait?: Pick<TemplateWait, "readyMs" | "pollMs">;
 }
 
 export interface SealResult {
@@ -618,6 +700,10 @@ export interface BuildGoldenOptions extends MachineSize {
   manifest?: GoldenManifest;
   smokeTimeoutMs?: number;
   onStage?: StageListener;
+  /** The golden being built, which names the version's template; the store's default key when absent. */
+  name?: string;
+  /** The host building it, in lowercase letters and digits, which names the template too. */
+  hostId: string;
 }
 
 export interface ForkOverrides extends MachineSize {
@@ -716,12 +802,14 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
   const prior = opts.manifest?.versions ?? [];
   const versionNum = (prior[prior.length - 1]?.version ?? 0) + 1;
   let snapshotId: string | undefined;
+  let templateId: string | undefined;
   let builderAlive = true;
   let fork: Machine | undefined;
+  const templates = templatesOf(opts.backend);
   const kill = (m: Machine) => killUntilGone(opts.backend, m, opts.killConfirm);
   const forkSpec = () => ({
     kind: builder.kind,
-    fromSnapshot: snapshotId!,
+    ...goldenImage({ snapshotId: snapshotId!, ...(templateId !== undefined ? { templateId } : {}) }).spec,
     diskGb: BUILDER_DISK_GB,
     ...sizeAsked(opts.backend, opts, builder.size),
     ...envSpec(opts),
@@ -749,6 +837,12 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     if (opts.keepBuilder !== true) {
       await kill(builder.machine);
       builderAlive = false;
+    }
+    // The template is what forks boot from, so the smoke proves it and not the snapshot behind it.
+    if (templates !== undefined) {
+      const name = templateName(opts.hostId, opts.name ?? "default", versionNum);
+      stage("promoting", name);
+      templateId = (await promoteVersion(templates, snapshotId, name, { ...opts.templateWait, onStatus: line => stage("promoting", line) })).templateId;
     }
 
     stage("smoke-forking", smoke);
@@ -781,6 +875,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     const version: GoldenVersion = {
       version: versionNum,
       snapshotId,
+      ...(templateId !== undefined ? { templateId } : {}),
       baseTemplate: builder.baseTemplate,
       kind: builder.kind,
       setupSha: builder.setupSha,
@@ -808,6 +903,9 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     // A refused snapshot changed nothing on the builder: it is left as the person set it up, for the next attach.
     if (builderAlive && !(e instanceof MachineAliveError) && !(e instanceof SnapshotFailedError)) await kill(builder.machine).catch(leaked);
     if (fork) await kill(fork).catch(leaked);
+    // A template that read ready and then lost its smoke goes first: the provider refuses to delete a snapshot while
+    // a template stands on it.
+    if (templateId !== undefined) await templates?.delete(templateId).catch(() => {});
     if (snapshotId !== undefined) await opts.backend.deleteSnapshot(snapshotId).catch(() => {});
     stage("failed", detail);
     throw e;
@@ -937,7 +1035,7 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
 
 export interface UpgradeBuilderOptions extends MachineSize {
   backend: MachineBackend;
-  /** The version being updated; the fork boots from its snapshot at its size and kind. */
+  /** The version being updated; the fork boots from its image at its size and kind. */
   head: GoldenVersion;
   delta: GoldenDelta;
   setup: string;
@@ -957,7 +1055,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
   const createdAt = new Date().toISOString();
   const machine = await opts.backend.create({
     kind,
-    fromSnapshot: opts.head.snapshotId,
+    ...goldenImage(opts.head).spec,
     onIdle: "kill",
     idleTimeoutMs: BUILDER_IDLE_MS,
     diskGb: BUILDER_DISK_GB,
@@ -1003,7 +1101,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
 export async function buildGolden(
   opts: BuildGoldenOptions,
 ): Promise<{ manifest: GoldenManifest; version: GoldenVersion }> {
-  const { backend, setup, smoke, kind, baseTemplate, manifest, smokeTimeoutMs, onStage, labels, ...size } = opts;
+  const { backend, setup, smoke, kind, baseTemplate, manifest, smokeTimeoutMs, onStage, labels, name, hostId, ...size } = opts;
   const builder = await prepareBuilder({
     backend,
     setup,
@@ -1021,6 +1119,8 @@ export async function buildGolden(
     ...(manifest !== undefined ? { manifest } : {}),
     ...(smokeTimeoutMs !== undefined ? { smokeTimeoutMs } : {}),
     ...(onStage !== undefined ? { onStage } : {}),
+    ...(name !== undefined ? { name } : {}),
+    hostId,
   });
 }
 
@@ -1033,7 +1133,7 @@ export async function forkGolden(
   if (!head) throw new Error(`manifest head ${manifest.head} has no version entry`);
   return backend.create({
     kind: overrides.kind ?? head.kind ?? "sandbox",
-    fromSnapshot: head.snapshotId,
+    ...goldenImage(head).spec,
     diskGb: BUILDER_DISK_GB,
     ...sizeAsked(backend, overrides, head.size),
     ...envSpec(overrides),
