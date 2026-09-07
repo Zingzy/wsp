@@ -94,7 +94,7 @@ describe("the tools screen", () => {
     expect(text(by("go").why)).toBe("used       below the floor, 2 commands in 1 session");
     expect(text(by("wrangler").why)).toBe("used       40 commands in 3 sessions");
     expect(text(by("gh").hint)).toBe("40.2 MB");
-    expect(text(by("op").hint)).toBe("size unknown");
+    expect(text(by("op").hint)).toBe("41.0 MB");
     expect(by("node").detail).toEqual(["ships in 5 lab images; on by default in the catalog; on every machine", "part of the base on every machine"]);
     expect(by("go").detail).toEqual(["your agents used it in 1 session (2 calls)", "about 239.1 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
     expect(by("java").detail[0]).toBe("ships in 4 lab images; on request");
@@ -136,7 +136,7 @@ describe("the sign-ins screen", () => {
   const words = (s: { items: { id: string; choices?: readonly { value: string }[] }[] }, id: string): string[] => s.items.find(i => i.id === id)!.choices!.map(c => c.value);
 
   it("the agents first, then the developer CLIs, then the MCP servers; every row has its choice and nothing has a bare tick", () => {
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe));
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map());
     expect([...new Set(s.items.map(i => i.group))]).toEqual([AGENT_LOGINS, CLI_LOGINS]);
     expect(s.items.filter(i => i.group === AGENT_LOGINS).map(i => i.label)).toEqual(["Claude Code login", "Codex login", "Hermes Agent login", "Hermes Agent API keys"]);
     expect(s.items.filter(i => i.group === CLI_LOGINS).map(i => i.label)).toEqual(["GitHub CLI login", "kubectl config", "1Password CLI"]);
@@ -159,11 +159,11 @@ describe("the sign-ins screen", () => {
 
   it("a saved answer is where the row starts, and an answer the row cannot take falls back to its first", () => {
     const saved: Recipe = { ...recipe, rows: recipe.rows.map(r => (r.id === "gh" ? { ...r, signIn: "copy" as const } : r)) };
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), saved));
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), saved), new Map());
     expect(s.initial.get("logins/gh")).toBe("copy");
     const key: Recipe = { ...recipe, rows: recipe.rows.map(r => (r.id === "hermes" ? { ...r, signIn: "key" as const } : r)) };
     // Hermes takes no API key, so the row opens on the first word it does take.
-    expect(signInItems(applyRecipe(withCatalogAgents(laptop), key)).initial.get("logins/hermes")).toBe("copy");
+    expect(signInItems(applyRecipe(withCatalogAgents(laptop), key), new Map()).initial.get("logins/hermes")).toBe("copy");
   });
 
   it("an MCP server with auth is a row under its own group, named by the config it sits in, copy or skip", () => {
@@ -171,7 +171,7 @@ describe("the sign-ins screen", () => {
     const notes: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", detail: "stdio: npx notes-mcp; carries no secret" };
     const remote: ManifestEntry = { rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote sign-ins", group: "MCP sign-ins", paths: ["~/.mcp-auth"], bytes: 1800, default: "bring", consent: true, detail: "browser sign-ins saved by mcp-remote for remote servers: 1 token (1.4 KB)" };
     const locked: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/mac", label: "mac", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "skip", reason: "command is macOS-only, will not run", consent: true, detail: "stdio: /Applications/x; carries a secret: env A (4 B)" };
-    const s = signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, notes, remote, locked] }), recipe));
+    const s = signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, notes, remote, locked] }), recipe), new Map());
     expect(s.items.filter(i => i.group === MCP_LOGINS).map(i => [i.label, i.why])).toEqual([
       ["github", "in Claude Code's config"],
       ["mcp-remote sign-ins", "sign-ins mcp-remote saved for Claude Code"],
@@ -182,20 +182,20 @@ describe("the sign-ins screen", () => {
     // A server carrying a secret stays off the machine until the person says copy; one the catalog locked out cannot move at all.
     expect(s.initial.get(github.id)).toBe("skip");
     expect(words(s, locked.id)).toEqual(["skip"]);
-    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, { ...github, choice: "copy" }] }), recipe)).initial.get(github.id)).toBe("copy");
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, { ...github, choice: "copy" }] }), recipe), new Map()).initial.get(github.id)).toBe("copy");
     const off = { ...recipe, rows: recipe.rows.map(r => (r.id === "claude" ? { ...r, on: false } : r)) };
-    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, remote] }), off)).items.map(i => i.id)).not.toContain(github.id);
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, remote] }), off), new Map()).items.map(i => i.id)).not.toContain(github.id);
   });
 
   it("a login whose command is not coming is listed with the reason and skip alone", () => {
     const off = { ...recipe, rows: recipe.rows.filter(r => r.id !== "kubectl") };
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), off));
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), off), new Map());
     expect(s.items.find(i => i.id === "logins/kube")).toMatchObject({ why: "kubectl is not coming", detail: ["kubectl is not coming: its tool row is unticked; copy or sign in ticks it", "~/.kube/config"] });
     expect(s.initial.get("logins/kube")).toBe("skip");
   });
 
   it("a group header counts how its rows answered, in the choice order", () => {
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe));
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map());
     const agents = s.items.filter(i => i.group === AGENT_LOGINS);
     expect(signInGroupLine(agents, { ticks: new Set(), answers: new Map(s.initial) })).toBe("1 copy  3 sign in  0 API key  0 skip");
   });

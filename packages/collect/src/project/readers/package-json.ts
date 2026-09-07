@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // package.json: the manager it pins, the runtimes its engines field accepts,
-// and the programs its scripts run. A script's first word names a devDependency
-// as often as a machine tool, and an engines key names an editor as often as a
-// runtime, so both count only where the catalog already carries them.
+// the programs its scripts run and the packages it depends on. A script's first
+// word names a devDependency as often as a machine tool, an engines key names
+// an editor as often as a runtime, and a dependency is the project's own to
+// install, so all three count only where the catalog already carries them.
 import { commandNames } from "../../history/commands.js";
 import type { ProjectFinding, ProjectReader } from "../reader.js";
 
@@ -10,6 +11,8 @@ interface PackageJson {
   packageManager?: unknown;
   engines?: unknown;
   scripts?: unknown;
+  dependencies?: unknown;
+  devDependencies?: unknown;
 }
 
 function parse(text: string): PackageJson | undefined {
@@ -26,7 +29,8 @@ const strings = (value: unknown): [string, string][] =>
 
 export const packageJsonReader: ProjectReader = {
   id: "package-json",
-  files: ["package.json"],
+  // A workspace keeps its browser or its linters in a package's own manifest, not the root's.
+  files: ["package.json", "apps/*/package.json", "packages/*/package.json"],
   reads: "text",
   read(file): readonly ProjectFinding[] {
     const pkg = parse(file.text);
@@ -42,6 +46,7 @@ export const packageJsonReader: ProjectReader = {
     for (const [, command] of strings(pkg.scripts)) {
       for (const name of commandNames(command)) out.push({ name, label: name, why: `${file.path} scripts run ${name}`, catalogOnly: true });
     }
+    for (const [name, range] of [...strings(pkg.dependencies), ...strings(pkg.devDependencies)]) out.push({ name, label: name, why: `${file.path} depends on ${name} ${range}`, catalogOnly: true, installs: "npm" });
     return out;
   },
 };

@@ -22,6 +22,9 @@ import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.
 import { fakeClock } from "./fake-clock.js";
 import { WebSocketServer } from "ws";
 
+/** The recipes here set up with "true", which the harness stage runs under its guard like every installer. */
+const setupRan = (cmd: string): boolean => cmd.includes("\ntrue' &");
+
 describe("runtime", () => {
   it("creates a workspace from a golden manifest and emits protocol events", async () => {
     const events: string[] = [];
@@ -1811,13 +1814,15 @@ describe("runtime golden builders", () => {
 
   it("a run reaches the exec listener as one command with its result, whatever carried it", async () => {
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) => (cmd === "install" ? { exitCode: 0, stdout: "harness on\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    const harness = (cmd: string) => cmd.includes("\ninstall' &");
+    backend.execImpl = (_m, cmd) => (harness(cmd) ? { exitCode: 0, stdout: "harness on\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const seen: GoldenExec[] = [];
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, onExec: e => void seen.push(e) } });
     await rt.golden.prepare({ name: "default" });
-    // The base stage's steps and the cache sweeps run under the guard; the harness install is the one bare run.
-    expect(backend.machines[0]!.runLog.filter(s => !s.includes("setsid bash -c"))).toEqual(["install"]);
-    expect(seen.filter(e => e.cmd === "install")).toEqual([expect.objectContaining({ machineId: "m1", exitCode: 0, stdout: "harness on\n" })]);
+    // The base stage's steps, the harness install and the cache sweeps all run under the guard: nothing runs bare.
+    expect(backend.machines[0]!.runLog.filter(s => !s.includes("setsid bash -c"))).toEqual([]);
+    expect(backend.machines[0]!.runLog.filter(harness)).toHaveLength(1);
+    expect(seen.filter(e => harness(e.cmd))).toEqual([expect.objectContaining({ machineId: "m1", exitCode: 0, stdout: "harness on\n" })]);
   });
 
   it("reap keeps a first-life builder left behind by an earlier process, kills one found paused, and keeps this process's own", async () => {
@@ -3677,7 +3682,7 @@ describe("runtime golden import", () => {
 
     // A prepare whose stages fail: the engine kills the machine and the placeholder goes with it.
     const failing = stubBackend();
-    failing.execImpl = (x, cmd) => (cmd === "true" ? { exitCode: 1, stdout: "", stderr: "setup broke" } : dfOk(x, cmd));
+    failing.execImpl = (x, cmd) => (setupRan(cmd) ? { exitCode: 1, stdout: "", stderr: "setup broke" } : dfOk(x, cmd));
     const store2 = memoryStore();
     const c = createRuntime({ backend: failing, store: store2, adapters: {}, goldenRecipe: recipeWith(importOf()), killConfirm: { graceMs: 50, pollMs: 5 } });
     await expect(c.golden.prepare()).rejects.toThrow("golden setup failed");
@@ -3768,7 +3773,7 @@ describe("runtime golden import", () => {
     const stored = (await store.get("builders", b.id)) as { import: { applied: string[] } };
     stored.import.applied = stored.import.applied.filter(s => s !== "installing-harness");
     await store.put("builders", b.id, stored);
-    backend.execImpl = (m, cmd) => (cmd === "true" ? { exitCode: 1, stdout: "", stderr: "setup broke" } : dfOk(m, cmd));
+    backend.execImpl = (m, cmd) => (setupRan(cmd) ? { exitCode: 1, stdout: "", stderr: "setup broke" } : dfOk(m, cmd));
 
     const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), killConfirm: { graceMs: 50, pollMs: 5 } });
     const frames: string[] = [];

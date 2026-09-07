@@ -46,8 +46,6 @@ export function claudeEnvs(env: LiveEnv): Record<string, string> {
   };
 }
 
-export const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
-
 /** Sleeping experiments on the account carry a poc label (ttl-test, p1, ...): never touch them. */
 export function isReserved(labels: Record<string, string>): boolean {
   return "poc" in labels;

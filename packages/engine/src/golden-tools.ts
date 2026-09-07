@@ -7,7 +7,7 @@
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
 import { HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
-import { fmtBytes, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep } from "@wsp/protocol";
+import { fmtBytes, listedName, nameList, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
@@ -68,6 +68,24 @@ export function reasonOf(res: ExecResult, timeoutS: number): string {
   const lines = (text: string): string[] => text.split("\n").map(l => l.trim()).filter(l => l !== "");
   const err = lines(res.stderr);
   return (err.filter(l => l.startsWith("Error:")).at(-1) ?? err.at(-1) ?? lines(res.stdout).at(-1) ?? `exit ${res.exitCode}`).slice(0, 160);
+}
+
+/** The pin an install recorded: the tag it fetched and the sum it read, when its road printed both. The one place a
+ * result becomes a pin, for the recipe row that carries it and the digest tick the seal writes. */
+export function recordedPin(t: ToolResult): ToolPin | undefined {
+  return t.outcome === "installed" && t.road?.sha256 !== undefined && t.road.tag !== undefined ? { tag: t.road.tag, sha256: t.road.sha256 } : undefined;
+}
+
+/** The pins a tools stage recorded, by the row's id. */
+export function recordedPins(tools: readonly ToolResult[]): Map<string, ToolPin> {
+  return new Map(tools.flatMap((t): [string, ToolPin][] => { const pin = recordedPin(t); return pin === undefined ? [] : [[t.id, pin]]; }));
+}
+
+/** The digest with the pins the tools stage recorded written on its ticks, so the sealed version says which release
+ * each row is fixed to and the recipe that carries the same pins reads as no change. */
+export function withRecordedPins(digest: RecipeDigest, tools: readonly ToolResult[]): RecipeDigest {
+  const pins = recordedPins(tools);
+  return pins.size === 0 ? digest : { ...digest, ticks: digest.ticks.map(t => (pins.has(t.id) ? { ...t, pin: pins.get(t.id)! } : t)) };
 }
 
 /** The last WSP_ROAD line a road install printed, when it printed one. */
@@ -171,7 +189,7 @@ export function guardedRoad(road: RoadName, cmd: string): string {
 function skippedByReason(skipped: readonly ToolResult[]): string {
   const byNote = new Map<string, string[]>();
   for (const t of skipped) byNote.set(t.note ?? "no reason given", [...(byNote.get(t.note ?? "no reason given") ?? []), t.label]);
-  return [...byNote].map(([note, names]) => `${names.join(", ")} (${note})`).join("; ");
+  return [...byNote].map(([note, names]) => `${nameList(names)} (${note})`).join("; ");
 }
 
 type Run = (cmd: string, label: string, road: RoadName, step?: GoldenStep) => Promise<ExecResult>;
@@ -194,15 +212,15 @@ function summarize(tools: ToolResult[], housekeeping: string | undefined): strin
   const parts: string[] = [];
   const n = (o: ToolResult["outcome"]) => tools.filter(t => t.outcome === o);
   // An install is named when it says something more than that it landed: the road it took, a note its plan carried.
-  // The note is bracketed because a note carries this list's own separator, so a bare one reads as another tool.
+  // The note is bracketed and the label quoted when it carries this list's own separator, so neither reads as another tool.
   const named = n("installed").flatMap(t => {
     const road = t.road !== undefined ? ` ${ROAD_MODULES[t.road.kind].words}` : "";
     const note = t.note !== undefined ? ` (${t.note})` : "";
-    return road === "" && note === "" ? [] : [`${t.label}${road}${note}`];
+    return road === "" && note === "" ? [] : [`${listedName(t.label)}${road}${note}`];
   });
   parts.push(`${n("installed").length} installed${named.length > 0 ? ` (${named.join(", ")})` : ""}`);
   const failed = n("failed");
-  if (failed.length > 0) parts.push(`${failed.length} failed: ${failed.map(t => `${t.label} (${t.note})`).join(", ")}`);
+  if (failed.length > 0) parts.push(`${failed.length} failed: ${failed.map(t => `${listedName(t.label)} (${t.note})`).join(", ")}`);
   const skipped = n("skipped");
   if (skipped.length > 0) parts.push(`${skipped.length} skipped: ${skippedByReason(skipped)}`);
   return housekeeping !== undefined ? `${parts.join(", ")}; ${housekeeping}` : parts.join(", ");
@@ -232,8 +250,10 @@ async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], r
   }
 }
 
-/** What a batched check prints for a row that is not there: the marker, the row's id, then the last line its check
- * printed. Like the command check above, one run answers for every row rather than one round trip each. */
+/** What a batched check prints for a row that is not there: the marker, the row's place in the run, then the last
+ * line its check printed. The place and not the id, because an id is a custom row's own free text and can carry the
+ * space this line is read back on. Like the command check above, one run answers for every row rather than one round
+ * trip each. */
 const CHECK_FAILED = "wsp-check";
 
 /** The installs that carry a check of their own, all read in one run on the tools PATH after the stage: a row whose
@@ -247,12 +267,12 @@ async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], res
   if (checked.length === 0) return;
   const cmd = [
     `export PATH=${TOOLS_PATH}`,
-    ...checked.map(c => `if ! out="$( ( ${c.check} ) 2>&1 )"; then printf '${CHECK_FAILED} %s %s\\n' ${shellQuote(c.result.id)} "$(printf '%s' "$out" | tail -1)"; fi`),
+    ...checked.map((c, i) => `if ! out="$( ( ${c.check} ) 2>&1 )"; then printf '${CHECK_FAILED} %s %s\\n' ${i} "$(printf '%s' "$out" | tail -1)"; fi`),
   ].join("\n");
   const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
   if (res.exitCode !== 0) {
     const why = reasonOf(res, INLINE_EXEC_MS / 1000);
-    stage(`the checks could not be run (${why}): ${checked.map(c => c.result.label).join(", ")} count as failed`);
+    stage(`the checks could not be run (${why}): ${nameList(checked.map(c => c.result.label))} count as failed`);
     for (const c of checked) {
       c.result.outcome = "failed";
       c.result.note = `the check could not be run (${c.check}): ${why}`;
@@ -263,8 +283,8 @@ async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], res
     const words = line.trim().split(" ");
     return words[0] === CHECK_FAILED && words[1] !== undefined ? [[words[1], words.slice(2).join(" ")] as const] : [];
   }));
-  for (const c of checked) {
-    const why = failed.get(c.result.id);
+  for (const [i, c] of checked.entries()) {
+    const why = failed.get(String(i));
     if (why === undefined) continue;
     c.result.outcome = "failed";
     c.result.note = `the check did not pass (${c.check})${why === "" ? "" : `: ${why}`}`;

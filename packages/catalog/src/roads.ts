@@ -2,24 +2,42 @@
 // The roads a catalog entry or a recipe's tools row can take onto a Linux
 // machine (the modules that walk them are in road-modules.ts), and the pinned
 // installers the script road carries: uv, Node, Docker's compose plugin and
-// rustup by their checksummed releases, Hermes by a git checkout at a commit,
-// Claude Code by its vendor's installer. Every pin here is checked on the
-// machine before anything runs.
+// Swift and rustup by their checksummed releases, Playwright's Chromium at the
+// Playwright the render tests run, 1Password's CLI from its own apt repository
+// under its pinned signing key, Hermes by a git checkout at a commit, Claude Code
+// by its vendor's installer. Every pin here is checked on the machine before
+// anything runs.
+import { SUM_SHOWN, pinMismatchLine, shellQuote, shortSum, type ToolPin } from "@wsp/protocol";
 import type { LinuxCask } from "./linux-casks.js";
 
-export const MIB = 1024 * 1024;
+export type { ToolPin };
 
-/** What the first install of a release recorded: the tag it fetched and the asset's sha256. */
-export interface ToolPin {
-  tag: string;
-  sha256: string;
-}
+export const MIB = 1024 * 1024;
 
 /** How an install stands against the recipe's pin: nothing recorded, the same version (checked), or a version the
  * source has since moved to (a first install again, re-recorded). Without a version the pin's own stands. */
 export function pinStateOf(version: string | undefined, pin: ToolPin | undefined): "none" | "same" | "moved" {
   if (pin === undefined) return "none";
   return version === undefined || version === pin.tag ? "same" : "moved";
+}
+
+/** The pin an install is fixed to: the recorded one while the road's version is its tag or names none; nothing once
+ * the version moved past it, since that install is a first one again. */
+export function standingPin(road: InstallRoad): ToolPin | undefined {
+  return "pin" in road && pinStateOf(road.version, road.pin) === "same" ? road.pin : undefined;
+}
+
+/** The road without the pin a build recorded on it: what a first run of it installs. */
+export function unpinned<R extends InstallRoad>(road: R): R {
+  if (!("pin" in road)) return road;
+  const { pin: _pin, ...rest } = road;
+  return rest as R;
+}
+
+/** The line that fails a pinned download whose sum is not the recorded one. `what` and `tag` are bash words the
+ * script has set by then; the served sum is read from the script's own `sum`. */
+export function pinCheckLine(what: string, tag: string, sha256: string): string {
+  return `[ "$sum" = ${shellQuote(sha256)} ] || { echo "Error: ${pinMismatchLine(what, tag, shortSum(sha256), `\${sum:0:${SUM_SHOWN}}`)}" >&2; exit 1; }`;
 }
 
 /** A package manager's global; `version` absent means the current one, or the laptop's when a row mirrors one. */
@@ -52,9 +70,23 @@ export type InstallRoad =
 export type RoadName = InstallRoad["road"];
 export const ROADS: readonly RoadName[] = ["brew", "npm", "pnpm", "bun", "uv", "pipx", "cargo", "go", "release", "vendor", "apt", "script"];
 
-/** The one curl into a shell the rules allow: the harness vendor's own installer, run on a first-life builder and
- * recorded in the manifest as setupSha; the smoke is what proves the result. */
-export const GOLDEN_SETUP = "curl -fsSL https://claude.ai/install.sh | bash";
+/** A vendor installer its vendor documents as curl piped into bash, run the one way a road may: the script is
+ * downloaded to a file through the road's curl function, so a retry re-reads the download and never a body a shell
+ * has begun to run; checked to be a shell script, since the vendor publishes no sum; then run from the file with
+ * nothing on stdin. */
+export function installerScript(url: string): string {
+  return [
+    'f="$(mktemp)"',
+    `trap 'rm -f "$f"' EXIT`,
+    `curl -o "$f" ${shellQuote(url)}`,
+    `test "$(head -c 2 "$f")" = '#!' || { echo ${shellQuote(`Error: what ${url} served is not a shell script`)} >&2; exit 1; }`,
+    'bash "$f" </dev/null',
+  ].join("\n");
+}
+
+/** The one vendor installer the rules allow: the harness vendor's own, run on a first-life builder and recorded in
+ * the manifest as setupSha; the smoke is what proves the result. */
+export const GOLDEN_SETUP = installerScript("https://claude.ai/install.sh");
 export const GOLDEN_SMOKE = "claude --version";
 
 /** The guest's home directory: every machine runs as root. */
@@ -231,4 +263,66 @@ export const HERMES_INSTALL = [
   "uv venv --python 3.11 /root/.hermes/venvs/hermes",
   "uv pip install --python /root/.hermes/venvs/hermes/bin/python -e /root/.hermes/hermes-agent",
   "ln -sfn /root/.hermes/venvs/hermes/bin/hermes /usr/local/bin/hermes",
+].join("\n");
+
+/** Playwright's own Chromium build for the Playwright the web render tests import: the browser lives under
+ * ~/.cache/ms-playwright keyed by that version's revision, so a project on another Playwright looks for another one. */
+export const PLAYWRIGHT = { version: "1.62.1" } as const;
+
+/** The global first, then Playwright's installer for its Chromium and the Debian packages the browser needs; that
+ * installer reads the apt index itself. */
+export const PLAYWRIGHT_INSTALL = [APT_ENV, `npm install -g playwright@${PLAYWRIGHT.version}`, "playwright install --with-deps chromium"].join("\n");
+
+/** Swift by swift.org's Debian 12 toolchain tarball; swift.org signs it and publishes no sum, so the sums are the
+ * tarballs' own as read on 2026-09-07 (https://www.swift.org/install/linux/debian/12/). */
+export const SWIFT = {
+  version: "6.3.3",
+  sha256: {
+    x86_64: "19e0c78cad5418ad48bfa87aa20c53ac9ac9996d1695d04dd94f7c7ea4eb133f",
+    aarch64: "ecba8ef87b54a5048d466af500f3169c939a6b8a2cb7c600f76b5184457f293a",
+  },
+} as const;
+
+const SWIFT_HOME = "/opt/swift";
+
+/** The packages swift.org's own Debian 12 image installs ahead of the toolchain
+ * (https://github.com/swiftlang/swift-docker/blob/main/6.3/debian/12/Dockerfile). The toolchain unpacks under its
+ * own prefix, since it ships a clang and an lld of its own that would shadow the LLVM row's under /usr/bin. */
+export const SWIFT_INSTALL = [
+  APT_ENV,
+  "apt-get install -y -qq binutils libicu-dev libcurl4-openssl-dev libedit-dev libsqlite3-dev libncurses-dev libpython3-dev libxml2-dev pkg-config uuid-dev tzdata git gcc libstdc++-12-dev",
+  'arch="$(uname -m)"',
+  'case "$arch" in',
+  `  x86_64) dir=debian12 sha=${SWIFT.sha256.x86_64} ;;`,
+  `  aarch64) dir=debian12-aarch64 sha=${SWIFT.sha256.aarch64} ;;`,
+  '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+  "esac",
+  `pkg="swift-${SWIFT.version}-RELEASE-$dir.tar.gz"`,
+  `curl -o "/tmp/$pkg" "https://download.swift.org/swift-${SWIFT.version}-release/$dir/swift-${SWIFT.version}-RELEASE/$pkg"`,
+  'echo "$sha  /tmp/$pkg" | sha256sum -c - >/dev/null',
+  `rm -rf ${SWIFT_HOME} && mkdir -p ${SWIFT_HOME}`,
+  `tar -xzf "/tmp/$pkg" -C ${SWIFT_HOME} --strip-components=1`,
+  'rm -f "/tmp/$pkg"',
+  `chmod -R o+r ${SWIFT_HOME}/usr/lib/swift`,
+  `ln -sfn ${SWIFT_HOME}/usr/bin/swift /usr/local/bin/swift`,
+  `ln -sfn ${SWIFT_HOME}/usr/bin/swiftc /usr/local/bin/swiftc`,
+].join("\n");
+
+/** 1Password's apt signing key as published on 2026-09-07 (https://downloads.1password.com/linux/keys/1password.asc);
+ * a rotated key fails the install instead of being trusted unread. */
+const ONE_PASSWORD_KEY_SHA256 = "f39e7dd9dedc581ced85732832f217e0de5860a3b80279b5af4bc7c6d8157bae";
+
+const ONE_PASSWORD_KEYRING = "/usr/share/keyrings/1password-archive-keyring.asc";
+const ONE_PASSWORD_LIST = "/etc/apt/sources.list.d/1password.list";
+
+/** 1Password publishes the CLI only through its own apt repository (https://developer.1password.com/docs/cli/get-started/),
+ * so the road adds the repository under its key and reads that one index before the install. */
+export const OP_INSTALL = [
+  APT_ENV,
+  `curl -o ${ONE_PASSWORD_KEYRING} https://downloads.1password.com/linux/keys/1password.asc`,
+  `echo "${ONE_PASSWORD_KEY_SHA256}  ${ONE_PASSWORD_KEYRING}" | sha256sum -c - >/dev/null`,
+  'arch="$(dpkg --print-architecture)"',
+  `echo "deb [arch=$arch signed-by=${ONE_PASSWORD_KEYRING}] https://downloads.1password.com/linux/debian/$arch stable main" > ${ONE_PASSWORD_LIST}`,
+  `apt-get update -qq -o Dir::Etc::sourcelist=${ONE_PASSWORD_LIST} -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0`,
+  "apt-get install -y -qq 1password-cli",
 ].join("\n");

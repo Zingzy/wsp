@@ -179,7 +179,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         harness = event.harness ?? harness;
         turn = openTurn(event, event.turnId ?? `${event.sessionId}#${count}`, count, at);
         if (event.prompt !== undefined) addMessage(turn, "user", event.prompt, at, false);
-        if (event.afterCut === true) addWork(turn, { createdAt: at, label: AFTER_CUT_LINE, tone: "info", sourceActivityKind: "runtime.resume" }, at);
+        if (event.afterCut === true) addWork(turn, { createdAt: at, label: AFTER_CUT_LINE, tone: "notice", sourceActivityKind: "runtime.resume" }, at);
         continue;
       }
       case "session.delta": {
@@ -196,7 +196,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         const t = turnFor(event, at);
         closeOpenMessage(t);
         const label = event.notify === NOTIFY_ME ? "told you" : `told thread ${event.notify.slice(0, 8)}`;
-        addWork(t, { createdAt: at, label, detail: event.text, tone: "info", sourceActivityKind: "runtime.notify" }, at);
+        addWork(t, { createdAt: at, label, detail: event.text, tone: "notice", sourceActivityKind: "runtime.notify" }, at);
         continue;
       }
       case "session.done": {

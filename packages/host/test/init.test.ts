@@ -13,11 +13,11 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, parseManifest, type Manifest, type ManifestEntry } from "@wsp/collect";
-import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
+import { SNAPSHOT_STORAGE, type BackendPricing, type ExecResult } from "@wsp/engine";
 import { ALREADY_APPLIED, Recipe, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, memoryStore, type GoldenRecipe, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GOLDEN_SETUP, catalogEntry } from "@wsp/catalog";
+import { catalogEntry } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
@@ -776,7 +776,7 @@ describe("wsp init, interactive", () => {
     await f.until("Tools  2/6");
     // Nothing here and nothing ticked: the base rows still come, and every other row is on the screen at its size.
     // Sixteen base rows fold behind the visible two, and the why column is cut to the screen's width.
-    expect(f.text()).toMatch(/• fd\s+base\s+always on th\S*\s+2\.9 MB\n/);
+    expect(f.text()).toMatch(/• fd\s+base\s+always on th[^\n]*?\s+2\.9 MB\n/);
     expect(f.text()).toContain("On: 16 tools, 1.5 GB");
     await f.press(KEY.enter);
     await f.until("Also on this Mac");
@@ -816,7 +816,7 @@ describe("wsp init, the project the run is for", () => {
     await f.until("Tools  2/6");
     // Go is off in the catalog and never used here; the folder's own go.mod put it on the machine, in its own group.
     expect(f.text()).toMatch(/▾ Your project needs\s+1 of 1\s+239\.1 MB/);
-    expect(f.text()).toMatch(/● +Go +project +go\.mod needs… +239\.1 MB/);
+    expect(f.text()).toMatch(/● +Go +project +go\.mod needs[^\n]*? +239\.1 MB/);
     await f.press(KEY.enter);
     await throughScreens(f, ["Also on this Mac", "Sign-ins", "wsp for your agents"]);
     await f.until(BOOT);
@@ -1167,7 +1167,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(small.rows.find(r => r.id === "gh")).toMatchObject({ signIn: "machine" });
     expect(small.rows.find(r => r.id === "go")).not.toHaveProperty("signIn");
     // --yes answers every row with the word its screen would have opened on: the same map signInItems hands the screen.
-    const screens = signInItems(applyRecipe(withCatalogAgents(LAPTOP), MEASURED));
+    const screens = signInItems(applyRecipe(withCatalogAgents(LAPTOP), MEASURED), new Map());
     for (const [id, choice] of screens.initial) {
       // The one exception is a Keychain login, which nobody is here to consent to; the run says so on the screen above.
       if (choice === "copy" && saved.get(id)?.paths.some(p => p.startsWith("Keychain:")) === true) continue;
@@ -1976,7 +1976,7 @@ describe("wsp init, flags and no terminal", () => {
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => {
-        if (!cmd.includes(GOLDEN_SETUP)) return guestAnswer(cmd);
+        if (!cmd.includes("claude.ai/install.sh")) return guestAnswer(cmd);
         duringPrepare = { out: f.io.output.write, err: f.io.stderr.write };
         f.io.stderr.write("heartbeat for builder m1 not written: ETIMEDOUT\n");
         return { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" };
@@ -2003,7 +2003,7 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes(GOLDEN_SETUP) ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude.ai/install.sh") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
       f.backends.push(backend);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
     };
@@ -2042,7 +2042,8 @@ describe("wsp init, flags and no terminal", () => {
     writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    user: Zingzy\n");
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd === "true" ? { exitCode: 0, stdout: "export GH_TOKEN=gho_fake\ntoken gho_fake seen\n", stderr: "" } : guestAnswer(cmd));
+      // The recipe's setup line is "true"; the harness stage runs it under its guard like every installer.
+      backend.execImpl = (_m, cmd) => (cmd.includes("\ntrue' &") ? { exitCode: 0, stdout: "export GH_TOKEN=gho_fake\ntoken gho_fake seen\n", stderr: "" } : guestAnswer(cmd));
       f.backends.push(backend);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
     };
@@ -2728,7 +2729,7 @@ describe("wsp init, a signal during prepare", () => {
       const backend = stubBackend();
       backend.execImpl = (m, cmd) => {
         // The signal lands inside the agents install, which then finishes on its own; the kill waits until told.
-        if (cmd.includes(GOLDEN_SETUP)) {
+        if (cmd.includes("claude.ai/install.sh")) {
           const kill = m.kill.bind(m);
           m.kill = async () => {
             await held;
@@ -3031,6 +3032,10 @@ describe("disk estimate before the boot", () => {
     const saved = loadManifest(recipePath(f.opts.statePath));
     expect(saved.entries.find(e => e.id === "tools/catalog/gh")?.pin).toEqual({ tag: "v2.86.0", sha256: sha });
     expect(saved.entries.filter(e => e.pin !== undefined)).toHaveLength(1);
+    // The small recipe carries the same pin under the catalog id, so wsp init --recipe installs that tag and checks the sum.
+    const small = Recipe.parse(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "recipe.json"), "utf8")));
+    expect(small.rows.find(r => r.id === "gh")?.pin).toEqual({ tag: "v2.86.0", sha256: sha });
+    expect(small.rows.filter(r => r.pin !== undefined)).toHaveLength(1);
     // The results file carries the same checksum and tag beside the road.
     const results = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")) as { tools: { id: string; road?: { kind: string; sha256?: string } }[] };
     expect(results.tools.find(t => t.id === "tools/catalog/gh")?.road).toEqual({ kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: sha, tag: "v2.86.0" });
@@ -3064,9 +3069,10 @@ describe("disk estimate before the boot", () => {
 describe("wsp init with a golden already built from a recipe", () => {
   /** A first init under --yes that prepared and sealed golden v1; the builder stays for its window. Its first
    * workspace is refused by the host fake so the machines here are the builder and the forks the seals boot. */
-  async function sealed(over: Partial<InitOptions> = {}) {
+  async function sealed(over: Partial<InitOptions> = {}, answer?: (cmd: string) => ExecResult) {
     const store = memoryStore();
     const shared = stubBackend();
+    if (answer !== undefined) shared.execImpl = (_m, cmd) => answer(cmd);
     const first = fake({ yes: true, ...over });
     first.opts.runtime = recipe => {
       first.backends.push(shared);
@@ -3094,6 +3100,80 @@ describe("wsp init with a golden already built from a recipe", () => {
     };
     return { store, shared, first, next };
   }
+
+  it("a release pin recorded at v1 rides the small recipe: the same recipe reads as no change, a stale pin reinstalls the row at the recorded release with the sum check, and the words say which release moved", async () => {
+    const sha = "b".repeat(64);
+    // The fake guest serves whatever tag the road asks for, and hashes every asset the same.
+    const answer = (cmd: string): ExecResult => {
+      const tag = /repos\/cli\/cli\/releases\/(?:tags\/(\S+?)'|latest)/.exec(cmd);
+      return tag === null ? guestAnswer(cmd) : { exitCode: 0, stdout: `WSP_ROAD release gh_linux_amd64.tar.gz ${sha} ${tag[1] ?? "v2.86.0"}\n`, stderr: "" };
+    };
+    // gh with no formula row here, so the recipe's bare row installs it from its GitHub release.
+    const collect = async () => ({ entries: FIXTURE.entries.filter(e => e.id !== "tools/brew/gh") });
+    const { store, shared, first, next } = await sealed({ collect }, answer);
+    const recipeFile = join(dirname(first.opts.statePath), "recipe.json");
+    const small = () => Recipe.parse(JSON.parse(readFileSync(recipeFile, "utf8")));
+    const roadRuns = () => shared.machines.flatMap(m => m.execLog.filter(c => c.includes("repos/cli/cli/releases/")));
+    // v1 fetched the current release with nothing to check, and the small recipe now carries what it recorded.
+    expect(roadRuns()).toHaveLength(1);
+    expect(roadRuns()[0]).toContain("releases/latest");
+    expect(roadRuns()[0]).not.toContain('[ "$sum" =');
+    expect(small().rows.find(r => r.id === "gh")?.pin).toEqual({ tag: "v2.86.0", sha256: sha });
+    expect(small().rows.filter(r => r.pin !== undefined).map(r => r.id)).toEqual(["gh"]);
+    // The sealed digest says the same, stamped by the build, so the recipe it wrote reads as the recipe it built.
+    const sealedDigest = (v: number) => (store.get("golden-recipes", `default@v${v}`) as Promise<{ ticks: { id: string; road?: string; pin?: unknown }[] }>);
+    expect((await sealedDigest(1)).ticks.find(t => t.id === "tools/catalog/gh")).toMatchObject({ road: "release", pin: { tag: "v2.86.0", sha256: sha } });
+
+    // The same recipe again: the pin folds away and nothing is built.
+    const same = next({ tty: false, collect });
+    expect((await runInit(same.opts, same.io)).code).toBe(0);
+    expect(same.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(roadRuns()).toHaveLength(1);
+
+    // A stale pin, as a recipe from elsewhere would carry: the row is changed, reinstalled at the recorded release, and the sum checked.
+    writeFileSync(recipeFile, JSON.stringify({ ...small(), rows: small().rows.map(r => (r.id === "gh" ? { ...r, pin: { tag: "v2.85.0", sha256: sha } } : r)) }));
+    const stale = next({ tty: false, collect });
+    expect((await runInit(stale.opts, stale.io)).code).toBe(0);
+    const out = stale.text();
+    expect(out).toContain("Builds version 2 on top of version 1: 1 tool updated");
+    expect(out).toContain("update 1 tool: GitHub CLI (release v2.86.0 to v2.85.0)");
+    expect(out).toContain("Updating the golden. Taken as the default (--yes).");
+    expect(out).not.toMatch(BOOT);
+    expect(roadRuns()).toHaveLength(2);
+    const pinned = roadRuns()[1]!;
+    expect(pinned).toContain("releases/tags/v2.85.0");
+    // The guard quotes the script once more on its way to the guest, so the check is read by its parts.
+    expect(pinned).toContain('[ "$sum" = ');
+    expect(pinned).toContain(sha);
+    // The failure the road would print names the download, the tag and both sums.
+    expect(pinned).toContain(`$asset at $tag does not match the checksum recorded on its first install: recorded ${"b".repeat(12)}, served \${sum:0:12}`);
+    expect((await store.get("goldens", "default") as GoldenManifest).head).toBe(2);
+    expect((await sealedDigest(2)).ticks.find(t => t.id === "tools/catalog/gh")).toMatchObject({ pin: { tag: "v2.85.0", sha256: sha } });
+    expect(small().rows.find(r => r.id === "gh")?.pin).toEqual({ tag: "v2.85.0", sha256: sha });
+
+    // And v2 with the pin it recorded is, again, no change.
+    const again = next({ tty: false, collect });
+    expect((await runInit(again.opts, again.io)).code).toBe(0);
+    expect(again.text()).toContain("Golden v2 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(roadRuns()).toHaveLength(2);
+
+    // Under --recipe <file>, the file's pin wins over the state's: the row is planned at the file's tag.
+    const file = join(dirname(first.opts.statePath), "elsewhere.json");
+    writeFileSync(file, JSON.stringify({ ...small(), rows: small().rows.map(r => (r.id === "gh" ? { ...r, pin: { tag: "v2.84.0", sha256: sha } } : r)) }));
+    const given = next({ tty: false, collect, recipeFile: file });
+    expect((await runInit(given.opts, given.io)).code).toBe(0);
+    expect(given.text()).toContain("update 1 tool: GitHub CLI (release v2.85.0 to v2.84.0)");
+    expect(roadRuns()).toHaveLength(3);
+    expect(roadRuns()[2]).toContain("releases/tags/v2.84.0");
+    expect((await store.get("goldens", "default") as GoldenManifest).head).toBe(3);
+    expect(small().rows.find(r => r.id === "gh")?.pin).toEqual({ tag: "v2.84.0", sha256: sha });
+    // A file that leaves the row unpinned takes the state's pin: nothing is reinstalled.
+    writeFileSync(file, JSON.stringify({ ...small(), rows: small().rows.map(r => { const { pin: _pin, ...rest } = r; return rest; }) }));
+    const unpinned = next({ tty: false, collect, recipeFile: file });
+    expect((await runInit(unpinned.opts, unpinned.io)).code).toBe(0);
+    expect(unpinned.text()).toContain("Golden v3 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(roadRuns()).toHaveLength(3);
+  });
 
   it("--yes with a small change: the changes since v1 are listed, the update runs on the kept builder with the one sentence, v2 is current, and no machine boots", async () => {
     const { store, shared, first, next } = await sealed();

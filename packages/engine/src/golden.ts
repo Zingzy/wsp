@@ -13,7 +13,7 @@ import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, type ToolResult } from "./golden-tools.js";
+import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, withRecordedPins, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
@@ -136,7 +136,6 @@ export interface PrepareBuilderOptions extends MachineSize {
   deployDaemon?: (machine: Machine) => Promise<void | string>;
   /** Harness install; its sha is recorded in the manifest. */
   setup: string;
-  setupTimeoutMs?: number;
   /** The person's files, agents and tools: files after the daemon, agents with the harness, tools last. */
   import?: GoldenImport;
   /** The upload's transport; tests inject one. */
@@ -277,7 +276,6 @@ export interface ImportResult {
 export interface ApplyImportOptions {
   import?: GoldenImport;
   setup: string;
-  setupTimeoutMs?: number;
   /** What the base stage did on this builder, so a floor row that did not land is in the result with the person's tools. */
   base?: ToolResult[];
   /** Stages this builder already carries; those for the same recipe hash are skipped. */
@@ -294,8 +292,8 @@ const UPLOAD_HEADROOM = 256 * MIB;
 const AGENTS_DISK_FLOOR = 800 * MIB;
 const AGENT_TIMEOUT_S = 900;
 const SHELL_TIMEOUT_S = 300;
-/** A harness-stage install under the guard, with every road's network lines ahead of it: the Node floor and the
- * agents' installers type the bare curl the road table's function defines, and may type any manager. */
+/** A harness-stage install under the guard, with every road's network lines ahead of it: the setup line, the Node
+ * floor and the agents' installers type the bare curl the road table's function defines, and may type any manager. */
 const guardedHarness = (script: string): string => guarded([...ROAD_STEPS.script.env, script].join("\n"), AGENT_TIMEOUT_S);
 const SHELL_CHECK_S = 60;
 
@@ -413,10 +411,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     stage("installing-harness", ALREADY_APPLIED);
   } else {
     stage("installing-harness");
-    const res = await machine.run(opts.setup, { deadlineMs: opts.setupTimeoutMs ?? 300_000, onLine: line => stage("installing-harness", line) });
-    if (res.exitCode !== 0) {
-      throw new Error(`golden setup failed (exit ${res.exitCode}): ${res.stderr.slice(-500)}`);
-    }
+    const res = await machine.run(guardedHarness(opts.setup), { deadlineMs: guardDeadlineMs(AGENT_TIMEOUT_S), onLine: line => stage("installing-harness", line) });
+    if (res.exitCode !== 0) throw new Error(`golden setup failed: ${reasonOf(res, AGENT_TIMEOUT_S)}`);
     if (!only) {
       ran = true;
       const node = imp.node !== undefined ? await installNode(machine, imp.node, stage) : undefined;
@@ -469,6 +465,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         const tools = await installTools(machine, imp.tools, stage);
         result.tools.push(...tools.tools);
         if (tools.homebrew !== undefined) result.homebrew = tools.homebrew;
+        if (ledger.recipe !== undefined) ledger.recipe = withRecordedPins(ledger.recipe, tools.tools);
       }
       const missing = missingToolsOf([...(result.base ?? []), ...result.tools]);
       if (missing.length > 0) ledger.missingTools = missing;
@@ -619,7 +616,6 @@ export interface BuildGoldenOptions extends MachineSize {
   kind?: MachineKind;
   baseTemplate?: string;
   manifest?: GoldenManifest;
-  setupTimeoutMs?: number;
   smokeTimeoutMs?: number;
   onStage?: StageListener;
 }
@@ -684,7 +680,6 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
       onStage: stage,
       ...(opts.import !== undefined ? { import: opts.import } : {}),
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
-      ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
     });
     stage("ready");
     return {
@@ -837,7 +832,6 @@ export interface GoldenDelta {
 
 export interface ApplyDeltaOptions {
   setup: string;
-  setupTimeoutMs?: number;
   /** The smoke of the version being updated; removed agents leave it, added ones join it. */
   previousSmoke: string;
   /** The tools missing from the version being updated; those the delta neither retires nor plans again stay missing. */
@@ -921,7 +915,6 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
     onStage: stage,
     ...(retired.length > 0 ? { retired } : {}),
     ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
-    ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
   });
   const result = applied.result;
   if (!reported && retired.length > 0) report?.(result);
@@ -948,7 +941,6 @@ export interface UpgradeBuilderOptions extends MachineSize {
   head: GoldenVersion;
   delta: GoldenDelta;
   setup: string;
-  setupTimeoutMs?: number;
   fetch?: typeof globalThis.fetch;
   onStage?: StageListener;
 }
@@ -982,7 +974,6 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
       ...(opts.head.leftBehind !== undefined ? { previousLeftBehind: opts.head.leftBehind } : {}),
       onStage: stage,
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
-      ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
     });
     stage("ready");
     return {
@@ -1012,7 +1003,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
 export async function buildGolden(
   opts: BuildGoldenOptions,
 ): Promise<{ manifest: GoldenManifest; version: GoldenVersion }> {
-  const { backend, setup, smoke, kind, baseTemplate, manifest, setupTimeoutMs, smokeTimeoutMs, onStage, labels, ...size } = opts;
+  const { backend, setup, smoke, kind, baseTemplate, manifest, smokeTimeoutMs, onStage, labels, ...size } = opts;
   const builder = await prepareBuilder({
     backend,
     setup,
@@ -1020,7 +1011,6 @@ export async function buildGolden(
     labels: { ...labels, [BUILDER_LABEL]: "1" },
     ...(kind !== undefined ? { kind } : {}),
     ...(baseTemplate !== undefined ? { baseTemplate } : {}),
-    ...(setupTimeoutMs !== undefined ? { setupTimeoutMs } : {}),
     ...(onStage !== undefined ? { onStage } : {}),
   });
   return sealGolden(builder, {
