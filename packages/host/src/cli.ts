@@ -29,6 +29,7 @@ import { HARNESS_ADAPTERS } from "./adapters.js";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
+import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
 import { FIRST_WORKSPACE } from "./init-first.js";
@@ -37,7 +38,7 @@ import { historyCache, smallRecipePath } from "./recipe-file.js";
 import { isRecipeTick, runRecipe, runScan } from "./recipe-command.js";
 import { recipeAnswer, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { scanTools } from "./scan.js";
-import { colourDepth, confirmPrompt, isTTY, passwordPrompt, type PromptOptions } from "./init-layout.js";
+import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
@@ -157,6 +158,8 @@ export interface CliIO {
   error(line: string): void;
   /** Raw text on stderr, no newline added: a reply as it streams in. */
   stream?(text: string): void;
+  /** The same text, standing back from the reply it sits beside, as far as the stream's colours go; absent leaves it plain. */
+  muted?(text: string): string;
   /** A yes-or-no question; resolves to "yes" or "no". */
   ask(question: string): Promise<string>;
   /** A person is at the keyboard (stdin and stdout are terminals); absent means an agent or a pipe, and nothing is asked. */
@@ -216,6 +219,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     log: line => console.log(line),
     error: line => console.error(line),
     stream: text => process.stderr.write(text),
+    muted: text => muted(text, colourDepth(isTTY(process.stderr))),
     isTTY: screen,
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: q => (screen ? answered(passwordPrompt(split(q))) : nobody(q)),
@@ -337,6 +341,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
     hostId: hostIdentity(),
+    vaultCaches: CACHE_RULE,
   });
 }
 

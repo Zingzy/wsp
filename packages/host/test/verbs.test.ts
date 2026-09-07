@@ -17,7 +17,7 @@ import type { HostHandle } from "../src/server.js";
 import { PLAN_ONLY, dialHost, messageTo } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, scriptedAgent, stuckAgent, type Captured } from "./verbs-fixture.js";
+import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
 
 describe("wsp verbs over the host", () => {
   let dir: string;
@@ -157,7 +157,7 @@ describe("wsp verbs over the host", () => {
     const [thread] = await rt.sessions.list(worker.id);
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
     expect(sent.io.lines).toEqual([`created worker ${worker.id}`, `thread ${thread!.threadId}`, "re: build it"]);
-    expect(sent.io.streamed.endsWith("re: build it")).toBe(true);
+    expect(sent.io.streamed.endsWith("Ready.\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
   });
 
   it("fork, thread new, exec and wake refuse a workspace whose machine is gone, quoting the provider, with no waking line", async () => {
@@ -394,8 +394,50 @@ describe("wsp verbs over the host", () => {
     expect(codex.starts.map(s => s.prompt)).toEqual(["write tests"]);
     expect(claude.starts).toEqual([]);
     expect(io.lines).toEqual([`thread ${row!.threadId}`, "codex: write tests"]);
-    expect(io.streamed).toBe("codex: write tests");
+    expect(io.streamed).toBe("code\n$ ls\nx: write tests\ncompleted\n");
     expect(io.errors).toEqual([]);
+  });
+
+  it("a turn's tool calls stream one muted line each as they land, what each answered behind it, and its end reads as the app's status line", async () => {
+    await restartHost({
+      claude: toolingAgent(
+        [
+          { toolName: "Bash", input: { command: "git status\n--porcelain" }, output: "On branch main\nnothing to commit" },
+          { toolName: "Read", input: { file_path: "packages/engine/src/golden-mcp.ts" }, output: "" },
+          { toolName: "Grep", input: { pattern: "shellQuote" }, output: "packages/host/src/exec.ts:12:  shellQuote(argv)" },
+          { toolName: "Wombat", input: { fur: "grey" }, output: "no tool by that name", failed: true },
+        ],
+        { status: "completed", text: "had a look", durationMs: 72_000, costUsd: 0.22 },
+      ),
+    });
+    await run("new", "alpha");
+    const io = captured();
+    io.muted = text => `~${text}~`;
+    expect(await cli(["thread", "new", "--in", "alpha", "look around", "--state", statePath], io)).toBe(0);
+    expect(io.streamed.split("\n")).toEqual([
+      "~$ git status~",
+      "~On branch main~",
+      "~read packages/engine/src/golden-mcp.ts~",
+      "~searched code for shellQuote~",
+      "~packages/host/src/exec.ts:12: shellQuote(argv)~",
+      "~Wombat~",
+      "~failed: no tool by that name~",
+      "~completed · Worked for 1m 12s · $0.22~",
+      "",
+    ]);
+    expect(io.lines).toEqual([expect.stringMatching(/^thread /), "had a look"]);
+    expect(io.errors).toEqual([]);
+
+    // --json keeps stdout the raw deltas and writes no line of its own.
+    const asJson = await run("thread", "new", "--in", "alpha", "again", "--json");
+    expect(asJson.io.streamed).toBe("");
+    const calls = (json(asJson.io) as { type?: string; kind?: string; toolName?: string }[]).filter(e => e.type === "session.delta");
+    expect(calls.map(e => [e.kind, e.toolName])).toEqual([
+      ["tool_use", "Bash"], ["tool_result", undefined],
+      ["tool_use", "Read"], ["tool_result", undefined],
+      ["tool_use", "Grep"], ["tool_result", undefined],
+      ["tool_use", "Wombat"], ["tool_result", undefined],
+    ]);
   });
 
   it("thread new without an agent takes the runtime's default; an agent the runtime has no adapter for is refused by the runtime", async () => {
@@ -627,7 +669,7 @@ describe("wsp verbs over the host", () => {
     expect(code).toBe(0);
     expect(codex.starts.map(s => [s.prompt, s.resume])).toEqual([["first", undefined], ["second", byCli!.claudeSessionId]]);
     expect(io.lines).toEqual(["codex: second"]);
-    expect(io.streamed).toBe("codex: second");
+    expect(io.streamed).toBe("code\n$ ls\nx: second\ncompleted\n");
     const followUp = await run("send", byPerson!.threadId!, "and this");
     expect(followUp.code).toBe(0);
     expect(claude.starts.map(s => [s.prompt, s.resume])).toEqual([["from the app", undefined], ["and this", byPerson!.claudeSessionId]]);
@@ -669,7 +711,7 @@ describe("wsp verbs over the host", () => {
     // The picks cannot change a turn already running; the one line says which were dropped.
     expect(joined.io.errors).toEqual(["joined the running turn; --model, --effort dropped, it keeps its own model, effort and access"]);
     expect(joined.io.lines).toEqual(["done STEERED"]);
-    expect(joined.io.streamed).toBe("done STEERED");
+    expect(joined.io.streamed).toBe("done STEERED\ncompleted\n");
     expect(opened.io.lines).toEqual([`thread ${row!.threadId}`, "done STEERED"]);
     const [alpha] = await rt.workspaces.list();
     const history = await rt.sessions.history(alpha!.id);

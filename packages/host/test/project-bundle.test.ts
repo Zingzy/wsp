@@ -5,10 +5,10 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { INSTALL_NAMES, OUTPUT_NAMES } from "@wsp/collect";
+import { CACHE_DIRS } from "@wsp/collect";
 import { PROJECT_STATE_RESOLVERS, agentHomes, folderExportScript } from "@wsp/engine";
 import { afterEach, describe, expect, it } from "vitest";
-import { CACHE_RULE, isCacheName, packProject, planProject, projectBundler } from "../src/project-bundle.js";
+import { CACHE_RULE, isCacheDir, packProject, planProject, projectBundler } from "../src/project-bundle.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
@@ -64,6 +64,16 @@ function fixture(): string {
   put(root, "target/debug/bin", "rust output\n");
   put(root, ".mypy_cache/3.12/x.json", "{}");
   put(root, ".eslintcache", "cache file\n");
+  put(root, "src/lruCache.ts", "a tracked source file whose name holds the word\n");
+  put(root, "src/cache-names.ts", "another\n");
+  put(root, "src/dist", "a tracked file named like a cache directory\n");
+  git(root, "add", "-f", "src");
+  git(root, "commit", "-q", "-m", "named like caches");
+  put(root, "notes/my-cache-service/README.md", "an untracked directory whose name holds the word\n");
+  put(root, "notes/CacheNotes.md", "an untracked file whose name holds the word\n");
+  put(root, ".claude/settings.json", "{}\n");
+  put(root, ".claude/worktrees/wt/.git", "gitdir: /elsewhere/.git/worktrees/wt\n");
+  put(root, ".claude/worktrees/wt/src/index.ts", "a nested checkout\n");
   put(root, "empty-dir/.keep", "");
   mkdirSync(join(root, "really-empty"));
   symlinkSync("src/index.ts", join(root, "inside-link"));
@@ -88,14 +98,14 @@ describe("planProject", () => {
     const rels = files.map(f => f.rel);
     expect(plan.repo).toBe(true);
     expect(plan.source).toBe(realpathSync(root));
-    for (const kept of ["src/index.ts", "bin/run.sh", "notes.txt", ".env", "config/secrets.json", "data.sqlite", ".git/HEAD", ".git/config", "dist/keep.js", "build/README.md", "empty-dir/.keep", "really-empty", "inside-link"]) {
+    for (const kept of ["src/index.ts", "src/lruCache.ts", "src/cache-names.ts", "src/dist", "notes/my-cache-service/README.md", "notes/CacheNotes.md", ".eslintcache", "bin/run.sh", "notes.txt", ".env", "config/secrets.json", "data.sqlite", ".git/HEAD", ".git/config", "dist/keep.js", "build/README.md", "empty-dir/.keep", "really-empty", "inside-link"]) {
       expect(rels, kept).toContain(kept);
     }
     expect(rels.some(r => r.startsWith(".git/objects/"))).toBe(true);
-    for (const gone of ["node_modules/left/index.js", "dist/output.js", "build/app.js", ".venv/lib/python3/site-packages/x.py", "env/bin/python", ".cache/x", "target/debug/bin", ".mypy_cache/3.12/x.json", ".eslintcache", "outside-link", "up-link"]) {
+    for (const gone of ["node_modules/left/index.js", "dist/output.js", "build/app.js", ".venv/lib/python3/site-packages/x.py", "env/bin/python", ".cache/x", "target/debug/bin", ".mypy_cache/3.12/x.json", ".claude/worktrees/wt/.git", ".claude/worktrees/wt/src/index.ts", "outside-link", "up-link"]) {
       expect(rels, gone).not.toContain(gone);
     }
-    expect(plan.excluded).toEqual([".cache", ".eslintcache", ".mypy_cache", ".venv", "build", "dist", "env", "node_modules", "target"]);
+    expect(plan.excluded).toEqual([".cache", ".claude/worktrees/wt", ".mypy_cache", ".venv", "build", "dist", "env", "node_modules", "target"]);
     expect(plan.skipped).toEqual([
       { path: "outside-link", note: "a link to /etc/hosts, outside the folder; not followed" },
       { path: "up-link", note: "a link to ../elsewhere, outside the folder; not followed" },
@@ -279,10 +289,33 @@ describe("planProject", () => {
     await expect(planProject(join(root, "missing"), {})).rejects.toThrow(/not a folder/);
   });
 
-  it("the cache rule is the collector's name sets, the word and the Finder file", () => {
-    for (const n of [...INSTALL_NAMES, ...OUTPUT_NAMES]) expect(isCacheName(n)).toBe(true);
-    for (const n of [".parcel-cache", "__pycache__", ".pytest_cache", "CacheStorage", ".DS_Store"]) expect(isCacheName(n)).toBe(true);
-    for (const n of ["src", "lib", "cached-results.md", "Cargo.lock", "yarn.lock", "data.sqlite-wal", "DS_Store.bak"]) expect(isCacheName(n)).toBe(n === "cached-results.md");
+  it("the cache rule is the collector's directory list by exact name: no file, no substring, and CACHE_RULE spells the same list for the guest", () => {
+    for (const n of CACHE_DIRS) expect(isCacheDir(n), n).toBe(true);
+    for (const n of ["node_modules", ".cache", "__pycache__", ".pytest_cache", ".ruff_cache", ".pnpm-store", "dist", "coverage"]) expect(isCacheDir(n), n).toBe(true);
+    for (const n of ["src", "lib", "lruCache.ts", "cache-names.ts", "cached-results.md", "CacheStorage", "my-cache-service", ".eslintcache", ".DS_Store", "Cargo.lock", "yarn.lock", "data.sqlite-wal"]) expect(isCacheDir(n), n).toBe(false);
+    expect(CACHE_RULE).toEqual({ dirs: [...CACHE_DIRS], files: [".DS_Store"], markers: ["pyvenv.cfg", ".git"] });
+  });
+
+  it("a submodule checkout stays behind on both trips: the local walk and the guest script agree", async () => {
+    const root = fixture();
+    const lib = mkdtempSync(join(tmpdir(), "wsp-sub-"));
+    dirs.push(lib);
+    git(lib, "init", "-q");
+    put(lib, "lib.ts", "export const lib = 1;\n");
+    git(lib, "add", "lib.ts");
+    git(lib, "commit", "-q", "-m", "lib");
+    git(root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "vendor/lib");
+    git(root, "commit", "-q", "-m", "submodule");
+    expect(statSync(join(root, "vendor/lib/.git")).isFile()).toBe(true);
+    const { plan, files } = await planProject(root, {});
+    expect(plan.excluded).toContain("vendor/lib");
+    expect(files.map(f => f.rel)).toContain(".gitmodules");
+    expect(files.some(f => f.rel.startsWith("vendor/lib/"))).toBe(false);
+    const out = join(root, "..", `${basename(root)}.tgz`);
+    dirs.push(out);
+    const ran = spawnSync("bash", ["-c", folderExportScript(realpathSync(root), CACHE_RULE, out)], { encoding: "utf8" });
+    expect(ran.status).toBe(0);
+    expect(ran.stdout.trim().split("\n").sort()).toEqual([...plan.excluded].sort());
   });
 
   it("the trip home leaves behind what the trip out left behind: the machine-side script under CACHE_RULE names the same cache roots as planProject, and its archive holds the plan's files, tracked files inside a cache root and the outside links being the two differences", async () => {
@@ -298,8 +331,8 @@ describe("planProject", () => {
     const archived = listed(readFileSync(out)).map(l => l.replace(/^\.\//, "").replace(/\/$/, "")).filter(l => l !== "." && l !== "");
     const planned = files.map(f => f.rel).filter(rel => !plan.excluded.some(root => rel === root || rel.startsWith(`${root}/`)));
     expect(archived.sort()).toEqual([...planned, "outside-link", "up-link"].sort());
-    for (const name of ["node_modules", "dist", "build", ".cache", ".DS_Store", "__pycache__", ".eslintcache", "MyCache"]) expect(isCacheName(name), name).toBe(true);
-    for (const name of ["src", "notes.txt", "data.sqlite-wal", "caching.md"]) expect(isCacheName(name), name).toBe(false);
+    for (const name of ["node_modules", "dist", "build", ".cache", "__pycache__", ".mypy_cache"]) expect(isCacheDir(name), name).toBe(true);
+    for (const name of ["src", "notes.txt", "data.sqlite-wal", "caching.md", "MyCache", ".eslintcache", ".DS_Store"]) expect(isCacheDir(name), name).toBe(false);
   });
 
   it("Finder metadata stays behind at every level; sqlite journals travel", async () => {

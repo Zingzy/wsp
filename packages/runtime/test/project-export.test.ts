@@ -29,7 +29,7 @@ function fakeLander(existing?: number): ProjectLander & { probes: string[]; land
   return {
     probes,
     landings,
-    caches: { globs: ["node_modules", "dist"], markers: ["pyvenv.cfg"] },
+    caches: { dirs: ["node_modules", "dist"], files: [], markers: ["pyvenv.cfg"] },
     probe: async dest => {
       probes.push(dest);
       return existing === undefined ? undefined : { files: existing };
@@ -55,7 +55,7 @@ function machineWith(backend: StubBackend, present: readonly string[]): void {
     if (cmd.startsWith("test -d ")) return { exitCode: 0, stdout: "yes\n", stderr: "" };
     if (cmd.startsWith("for p in ")) return { exitCode: 0, stdout: present.map(p => `${p}\n`).join(""), stderr: "" };
     const out = /tar czf '([^']+)'/.exec(cmd)?.[1];
-    if (out !== undefined && cmd.includes("find .")) {
+    if (out !== undefined && cmd.includes("find '.'")) {
       tars.set(out, FOLDER_TGZ);
       return { exitCode: 0, stdout: EXCLUDED, stderr: "" };
     }
@@ -112,10 +112,10 @@ describe("project.export on a workspace", () => {
     for (const e of stages) expect(e).toMatchObject({ workspaceId: ws.id, source: SOURCE, dest: DEST, elapsedMs: expect.any(Number) });
     const machine = backend.machines[0]!;
     expect(machine.execLog.some(c => c === `test -d '${SOURCE}' && echo yes || echo no`)).toBe(true);
-    const pack = machine.runLog.find(s => s.includes("find ."))!;
+    const pack = machine.runLog.find(s => s.includes("find '.'"))!;
     expect(pack).toContain(`cd '${SOURCE}'`);
-    expect(pack).toContain("-name 'node_modules' -o -name 'dist' -o \\( -type d -exec test -f '{}/pyvenv.cfg' \\; \\)");
-    expect(pack).toMatch(/tar czf '\/tmp\/wsp-out-[^']+\.tgz' -X '\/tmp\/wsp-out-[^']+\.tgz\.list' \./);
+    expect(pack).toContain("\\( -type d \\( -name 'node_modules' -o -name 'dist' \\) \\) -o \\( -type d -exec test -f '{}/pyvenv.cfg' \\; \\)");
+    expect(pack).toMatch(/tar czf '\/tmp\/wsp-out-[^']+\.tgz' --no-recursion --null -T '\/tmp\/wsp-out-[^']+\.tgz\.keep'$/m);
     const probe = machine.execLog.find(c => c.startsWith("for p in "))!;
     expect(probe).toBe(`for p in ${ROOTS.map(r => `'${r}'`).join(" ")}; do test -e "$p" && echo "$p"; done; true`);
     const state = machine.runLog.find(s => s.startsWith("tar czf") && s.includes("-C /"))!;
