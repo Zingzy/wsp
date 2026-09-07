@@ -1359,10 +1359,11 @@ describe("messageTo", () => {
 });
 
 describe("the verbs never talk to the provider", () => {
-  it("import the protocol, the collector for the recipe verbs and the host's lock file only: no runtime, engine, backend or key loading", () => {
+  it("import the protocol, the catalog, the collector for the recipe verbs and the host's lock file only: no runtime, engine, backend or key loading", () => {
     const source = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
     const imports = [...source.matchAll(/ from "([^"]+)";$/gm)].map(m => m[1]!);
-    expect(imports.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/collect", "@wsp/protocol"]);
+    // The catalog is rows and ids alone (the agents a thread can take), so the agent argument's list reaches no provider.
+    expect(imports.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/catalog", "@wsp/collect", "@wsp/protocol"]);
     expect(imports).not.toContain("@wsp/runtime");
     expect(imports).not.toContain("@wsp/engine");
     expect(source).not.toMatch(/SOLARI|ANTHROPIC|loadKeys|SolariBackend|getsolari/);

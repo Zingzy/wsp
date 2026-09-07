@@ -6,10 +6,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { createClaudeAdapter } from "@wsp/adapter-claude";
-import { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
+import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import {
   BROWSER_SHIM_PATH,
+  HARNESS_ADAPTERS,
   SolariBackend,
   TOOLS_PATH,
   applyDotfiles,
@@ -17,7 +17,6 @@ import {
   describeAge,
   goldenHead,
   jsonFileStore,
-  machineExecStream,
   type EventUnion,
   type GoldenBuildRequest,
   type Runtime,
@@ -26,7 +25,6 @@ import {
   hostIdentity,
 } from "@wsp/runtime";
 
-const CONFIG_DIR = "/root/.claude-cfg";
 const cliLabels = (): Record<string, string> => ({ wsp: "1", "wsp-cli": "1", createdAt: new Date().toISOString() });
 const RESERVED = { key: "poc", value: "ttl-test" }; // sleeping experiment: never touch
 
@@ -51,10 +49,10 @@ function loadEnv(root: string): { SOLARI_API_KEY: string; ANTHROPIC_API_KEY: str
   return out as { SOLARI_API_KEY: string; ANTHROPIC_API_KEY: string };
 }
 
-function claudeEnvs(anthropicKey: string, golden?: { browserShim?: boolean }): Record<string, string> {
+export function claudeEnvs(anthropicKey: string, golden?: { browserShim?: boolean }): Record<string, string> {
   return {
     ANTHROPIC_API_KEY: anthropicKey,
-    CLAUDE_CONFIG_DIR: CONFIG_DIR,
+    CLAUDE_CONFIG_DIR,
     IS_SANDBOX: "1",
     PATH: TOOLS_PATH,
     // Only a golden sealed with the browser shim may point tools at it.
@@ -62,21 +60,13 @@ function claudeEnvs(anthropicKey: string, golden?: { browserShim?: boolean }): R
   };
 }
 
-function makeRuntime(): { rt: Runtime; envs: Record<string, string> } {
-  const root = repoRoot();
+export function makeRuntime(root = repoRoot()): { rt: Runtime; envs: Record<string, string> } {
   const env = loadEnv(root);
   const backend = new SolariBackend({ apiKey: env.SOLARI_API_KEY });
   const rt = createRuntime({
     backend,
     store: jsonFileStore(join(root, ".wsp", "state.json")),
-    adapters: {
-      claude: ctx =>
-        createClaudeAdapter({
-          exec: machineExecStream(ctx.machine),
-          configDir: CONFIG_DIR,
-          baseEnv: ctx.env,
-        }),
-    },
+    adapters: HARNESS_ADAPTERS,
     hostId: hostIdentity(),
   });
   return { rt, envs: claudeEnvs(env.ANTHROPIC_API_KEY) };
