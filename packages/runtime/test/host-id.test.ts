@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hostIdentity, localConfigDir } from "../src/host-id.js";
+import { withRefused } from "./fs-refusal.js";
+
+vi.mock("node:fs", async importOriginal => (await import("./fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
 
 describe("host identity", () => {
   const dirs: string[] = [];
   afterEach(() => {
-    for (const d of dirs.splice(0)) {
-      chmodSync(d, 0o700);
-      rmSync(d, { recursive: true, force: true });
-    }
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
   it("is the hostname plus a per-install id made once in the given dir and read back after", () => {
@@ -33,15 +33,16 @@ describe("host identity", () => {
     expect(localConfigDir()).toBe(join(xdg!, "wsp"));
   });
 
-  it("falls back to the hostname alone when the dir cannot be made, and says so once", () => {
+  it("falls back to the hostname alone when the dir cannot be made, and says so once", async () => {
     const parent = mkdtempSync(join(tmpdir(), "wsp-host-id-ro-"));
     dirs.push(parent);
-    chmodSync(parent, 0o500);
+    const dir = join(parent, "wsp");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const dir = join(parent, "wsp");
-      expect(hostIdentity(dir)).toBe(hostname());
-      expect(hostIdentity(dir)).toBe(hostname());
+      await withRefused(dir, () => {
+        expect(hostIdentity(dir)).toBe(hostname());
+        expect(hostIdentity(dir)).toBe(hostname());
+      });
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]![0]).toMatch(/^host id not kept in .*; holds carry the hostname alone$/);
       expect(existsSync(dir)).toBe(false);
