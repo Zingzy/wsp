@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Lineage section's project goldens in a real Chromium: each sits under the
 // version it stands on, newest first, the one this workspace forks from wears
-// the badge, the live disk row offers the snapshot, every row a fork, the dot
+// the word, the live disk row offers the snapshot, every row a fork, the dot
 // and the button sit on the title line, and the rows keep inside the tab, in
 // both themes, photographed for review. Like the creation layout test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
@@ -42,7 +42,7 @@ describe.skipIf(skipped !== undefined)("the lineage's project goldens laid out i
 
   afterAll(() => stopRender(browser, vite?.child));
 
-  it.each(["dark", "light"] as const)("in the %s theme the project goldens sit under their versions newest first, the fork wears its badge, snapshot and fork are offered, and every row ends inside the tab", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme the project goldens sit under their versions newest first, the fork carries its word, snapshot and fork are offered, and every row ends inside the tab", async theme => {
     await page!.goto(`${base}?theme=${theme}`);
     await page!.waitForSelector("[data-k=pg-snap_project-wsp-1]");
     const tab = await page!.locator("[data-testid=machine-tab]").boundingBox();
@@ -55,8 +55,11 @@ describe.skipIf(skipped !== undefined)("the lineage's project goldens laid out i
     expect(p1!.y).toBeGreaterThan(p2!.y + p2!.height);
     expect(v11!.y).toBeGreaterThan(p1!.y + p1!.height);
     expect(wsp!.y).toBeGreaterThan(v11!.y + v11!.height);
-    expect(await page!.locator("[data-k=pg-snap_project-spoo-2]").textContent()).toBe("spoothis fork");
-    expect(await page!.locator("[data-k=v12]").textContent()).toBe("v12head");
+    expect(await page!.locator("[data-k=pg-snap_project-spoo-2]").textContent()).toBe("spoo");
+    expect(await page!.locator("[data-k=pg-snap_project-spoo-2]").locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").allTextContents()).toEqual(["this fork"]);
+    expect(await page!.locator("[data-k=v12]").textContent()).toBe("v12");
+    expect(await page!.locator("[data-k=v12]").locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").allTextContents()).toEqual(["head"]);
+    expect(await page!.locator("[data-slot=badge]").count()).toBe(0);
     expect(await page!.getByRole("button", { name: "snapshot spoo-fork as a project golden" }).count()).toBe(1);
     expect(await page!.getByRole("button", { name: /^fork / }).count()).toBe(3);
     for (const button of await page!.getByRole("button", { name: /^fork / }).all()) {
@@ -72,13 +75,21 @@ describe.skipIf(skipped !== undefined)("the lineage's project goldens laid out i
     ] as const) {
       const row = page!.locator(title).locator("xpath=ancestor::li[1]");
       const heading = await row.locator(title).boundingBox();
-      const dot = await row.locator("xpath=div[1]/span[1]").boundingBox();
+      const dot = await row.locator("xpath=span[1]").boundingBox();
       const act = await page!.getByRole("button", { name: button }).boundingBox();
-      const detail = await row.locator("xpath=div[1]/span[last()]").boundingBox();
+      const detail = await row.locator("xpath=span[last()]").boundingBox();
       expect(Math.abs(middle(dot!) - middle(heading!)), `${title} dot`).toBeLessThanOrEqual(1);
       expect(Math.abs(middle(act!) - middle(heading!)), `${title} button`).toBeLessThanOrEqual(1);
       expect(detail!.y, `${title} detail`).toBeGreaterThanOrEqual(heading!.y + heading!.height - 1);
     }
+    // The marks are one column for the whole section: the live disk's, the version's and the nested fork's words start
+    // at the same x, and so do the buttons after them.
+    const wordAt = async (title: string): Promise<number> => (await page!.locator(title).locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").boundingBox())!.x;
+    const nowX = await wordAt("text=Live disk");
+    expect(await wordAt("[data-k=v12]")).toBe(nowX);
+    expect(await wordAt("[data-k=pg-snap_project-spoo-2]")).toBe(nowX);
+    const snapshotX = (await page!.getByRole("button", { name: "snapshot spoo-fork as a project golden" }).boundingBox())!.x;
+    expect((await page!.getByRole("button", { name: "fork spoo from snap_project-spoo-2" }).boundingBox())!.x).toBe(snapshotX);
     await page!.locator("[data-testid=machine-tab]").screenshot({ path: join(SHOTS, `lineage-projects-${theme}.png`) });
     expect(existsSync(join(SHOTS, `lineage-projects-${theme}.png`))).toBe(true);
   }, 30_000);

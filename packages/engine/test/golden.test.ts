@@ -197,8 +197,10 @@ describe("interactive golden: prepare then seal", () => {
     expect(builder.machine.streamUrl).toBeUndefined();
     expect(daemonOn).toEqual(["m1"]);
     expect(sansBase(stages)).toEqual(["creating:sandbox from base", "deploying-daemon", "installing-harness", "ready"]);
-    // The floor goes on before the daemon: node first, so the daemon's native module compiles against it.
-    expect(ran.filter(r => r.id === "m1").map(r => r.script).findIndex(s => s.includes("nodejs.org/dist"))).toBe(0);
+    // The floor goes on before the daemon: the login shell's PATH, then node, so the daemon's native module compiles against it.
+    const floor = ran.filter(r => r.id === "m1").map(r => r.script);
+    expect(floor.findIndex(s => s.includes("> /etc/profile.d/wsp-golden.sh"))).toBe(0);
+    expect(floor.findIndex(s => s.includes("nodejs.org/dist"))).toBe(1);
     expect(timeline).toEqual(["create m1"]); // alive and waiting for the person
   });
 
@@ -1396,7 +1398,7 @@ describe("golden import stages", () => {
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(sweepsAt[2]!);
     expect(sweepsAt[2]).toBeLessThan(cmds.indexOf("echo ok"));
     // Each closing line carries what the sweep gave back and the df reading the stage left.
-    expect(stages).toContain("deploying-daemon:17 installed; caches swept, 700.0 MB back; 3.6 GB free");
+    expect(stages).toContain("deploying-daemon:18 installed; caches swept, 700.0 MB back; 3.6 GB free");
     expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700.0 MB back; 4.3 GB free");
     expect(stages).toContain("installing-tools:3 installed; caches swept, 700.0 MB back; 5.0 GB free");
     // A sweep that fails is named, and the build goes on to the next stage.
@@ -1737,6 +1739,14 @@ describe("golden import stages", () => {
     ];
     expect(builder.import?.missingTools).toEqual(want);
     expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual(want);
+  });
+
+  it("a base floor row that failed reaches the ledger and the sealed version with its name, outcome and reason, one shape with the tools stage", async () => {
+    const { backend, fetch } = backendFor([["apt-get install -y -qq docker.io", { exitCode: 100, stdout: "", stderr: "E: Unable to locate package docker-compose-v2" }]]);
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    const docker = { id: "base/docker", name: "Docker engine and compose", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" };
+    expect(builder.import?.missingTools).toEqual([docker]);
+    expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual([docker]);
   });
 
   it("the rc calls the pack silenced land on the ledger and the seal stamps them on the version, with the stage line naming them; a pack that silenced nothing leaves both without", async () => {

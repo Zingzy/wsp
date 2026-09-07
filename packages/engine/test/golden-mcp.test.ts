@@ -9,10 +9,10 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMcp, mcpPlanFor, mcpTally, type McpPlan, type McpResult } from "../src/golden-mcp.js";
-import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpFormat, type McpGuestEditor } from "@wsp/catalog";
+import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, UV_INSTALL, type McpFormat, type McpGuestEditor } from "@wsp/catalog";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import type { RecipeEntry } from "../src/golden-import.js";
-import { FREE_KB_CMD, type ToolResult } from "../src/golden-tools.js";
+import { FREE_KB_CMD, guardedRoad, type ToolResult } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const execFileAsync = promisify(execFile);
@@ -256,6 +256,8 @@ describe("applyMcp", () => {
     expect(cmds.filter(c => c.includes("astral-sh/uv/releases"))).toHaveLength(1);
     expect(cmds.indexOf(checks[0]!)).toBeLessThan(cmds.findIndex(c => c.includes("astral-sh/uv/releases")));
     expect(cmds.some(c => c.includes("ghp_secret"))).toBe(false);
+    // uv is a script road row in the catalog, so the stage walks that road and takes set -euo pipefail from it rather than writing its own.
+    expect(cmds.find(c => c.includes("astral-sh/uv/releases"))).toBe(guardedRoad("script", UV_INSTALL));
   });
 
   it("the tally for the stage's end line counts the servers by outcome, zero counts left out, and says nothing for an empty plan", () => {

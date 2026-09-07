@@ -360,6 +360,8 @@ export interface ThreadTerminalDrawerProps {
   terminalLabelsById?: ReadonlyMap<string, string>;
   /** The workspace's state as the pane shows it; anything but live dims the frame, refuses keys and says why. */
   pane?: TerminalPaneState;
+  /** The lines under the pane's title, in order: what took the machine, the next size up, the rebuild last. */
+  paneHints?: readonly string[];
   /** The wake every Wake button calls: the same op the Machine panel uses. */
   onWake?: () => void;
   /** Ptys the daemon no longer holds: their pane says the shell ended and offers a new one. */
@@ -399,6 +401,7 @@ function TerminalActionButton({ label, className, onClick, children }: TerminalA
 }
 
 const LIVE_PANE: TerminalPaneState = { kind: "live" };
+const NO_HINTS: readonly string[] = [];
 const NO_LOST: ReadonlySet<string> = new Set();
 
 /** Seconds since it mounted, ticking on its own clock so the overlay re-renders once a second at most. */
@@ -418,7 +421,7 @@ function Elapsed() {
  * lifts; a key pressed on it shows the refusal instead of vanishing into a socket that is down. Keys on its own
  * button are the button's.
  */
-function TerminalPaneOverlay({ pane, refused, onWake, onLift }: { pane: TerminalPaneState; refused: string | null; onWake?: () => void; onLift: () => void }) {
+function TerminalPaneOverlay({ pane, hints, refused, onWake, onLift }: { pane: TerminalPaneState; hints: readonly string[]; refused: string | null; onWake?: () => void; onLift: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [keyRefused, setKeyRefused] = useState<string | null>(null);
   useEffect(() => {
@@ -448,9 +451,11 @@ function TerminalPaneOverlay({ pane, refused, onWake, onLift }: { pane: Terminal
         <span>{terminalPaneTitle(pane)}</span>
         {pane.kind === "reconnecting" ? <Elapsed key={pane.kind} /> : null}
       </p>
-      {pane.kind === "not-answering" || pane.kind === "gone" ? (
-        <p className="text-xs text-muted-foreground">Rebuild it from the Machine panel</p>
-      ) : null}
+      {hints.map(hint => (
+        <p key={hint} className="text-xs text-muted-foreground" data-terminal-hint>
+          {hint}
+        </p>
+      ))}
       {pane.kind === "paused" && onWake ? (
         <Button size="xs" variant="outline" onClick={onWake}>
           Wake
@@ -502,6 +507,7 @@ export default function ThreadTerminalDrawer({
   onHeightChange,
   terminalLabelsById,
   pane = LIVE_PANE,
+  paneHints = NO_HINTS,
   onWake,
   lostTerminalIds = NO_LOST,
   terminalIo,
@@ -939,7 +945,7 @@ export default function ThreadTerminalDrawer({
 
       <div className="relative min-h-0 w-full flex-1">
         {pane.kind !== "live" ? (
-          <TerminalPaneOverlay pane={pane} refused={refused} onLift={onOverlayLift} {...(onWake !== undefined ? { onWake } : {})} />
+          <TerminalPaneOverlay pane={pane} hints={paneHints} refused={refused} onLift={onOverlayLift} {...(onWake !== undefined ? { onWake } : {})} />
         ) : activeLost ? (
           <ShellGoneOverlay onNewTerminal={onNewTerminalAction} label={newTerminalActionLabel} />
         ) : null}

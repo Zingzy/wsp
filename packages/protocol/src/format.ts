@@ -3,7 +3,7 @@
 // runtime's import events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { MachineSizeOffer, MachineState, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, MachineSizeOffer, MachineState, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -448,6 +448,49 @@ export function codexReconnectLine(elapsedMs: number): string {
   return `stopped after ${fmtDuration(elapsedMs, "clock")} of Codex reconnecting to its model provider with no answer`;
 }
 
+/** What the daemon last read of the guest's memory and load before its link went quiet. */
+export interface MemoryReading {
+  used: number;
+  total: number;
+  load1: number;
+}
+
+/** The share of memory in use past which the kernel's killer is one allocation away: 3.59 of 3.94 GB (91 percent)
+ * when a build took a daemon, measured 2026-09-06. */
+export const MEMORY_NEAR_FULL = 0.9;
+
+export function memoryNearFull(mem: { used: number; total: number }): boolean {
+  return mem.total > 0 && mem.used / mem.total >= MEMORY_NEAR_FULL;
+}
+
+/** The line every pane and row shows when a machine stopped answering with its memory near full: the last figures
+ * the daemon sent, and that the work took the memory, so nobody rebuilds a machine that is fine. */
+export function outOfMemoryLine(r: MemoryReading): string {
+  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the machine last answered; the work on it took the memory, not a fault of the machine`;
+}
+
+/** Two byte counts against each other with the unit said once when they share it: "3.6 of 3.9 GB", "900.0 MB of 3.9 GB". */
+function fmtBytesOf(used: number, total: number): string {
+  const t = fmtBytes(total);
+  const u = fmtBytes(used);
+  const unit = t.slice(t.lastIndexOf(" "));
+  return `${u.endsWith(unit) ? u.slice(0, -unit.length) : u} of ${t}`;
+}
+
+/** The sidebar row's form of the same fact, in the shape the daemon note takes: the row's second line is about
+ * thirty characters wide, so the sentence above would be cut at the figures. */
+export function outOfMemoryRowLine(r: MemoryReading): string {
+  return `out of memory, ${fmtBytesOf(r.used, r.total)}`;
+}
+
+/** What to do about it, shown ahead of any rebuild: the smallest size in the provider's table with more memory than
+ * this machine, with its rate, for the next workspace. With none in the table, less at once is the only road. */
+export function biggerSizeLine(current: WorkspaceSize, offers: readonly MachineSizeOffer[]): string {
+  const bigger = offers.filter(o => o.memMb > current.memMb).sort((a, b) => a.memMb - b.memMb)[0];
+  if (bigger === undefined) return "No size with more memory is offered; run less on the machine at once";
+  return `A workspace on ${fmtSize(bigger)} (${fmtRate(bigger.rateUsdPerHour)}) fits more; pick it when you make the next one`;
+}
+
 /** The machine row's line while the runtime replaces a daemon older than this wsp, and the line it shows instead
  * when the replacement failed. A person is never told the helper is called a daemon: they did not install it and
  * cannot run it, so its name would only be one more thing to know. Neither line carries the reason a deploy gave:
@@ -520,6 +563,17 @@ export function goldenBuildLine(from: number, to: number, changes: readonly Gold
  * a state in words, never a badge. The move is the person's; nothing replaces a machine they are working on. */
 export function behindGoldenLine(on: number, head: number): string {
   return `on image v${on}, v${head} available`;
+}
+
+/** The states a lineage row can be in, each as the muted mono word the row's marks column shows: state is text there,
+ * never a badge, and a missing tool's outcome indexes this table as it is. */
+export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" } as const;
+export type LineageMark = keyof typeof LINEAGE_MARKS;
+
+/** A missing tool's row as the lineage shows it. A record sealed before the name and outcome were recorded still
+ * carries its id, so it reads by that and as failed rather than as a blank row. */
+export function missingToolRow(t: { id: string; name?: string; outcome?: GoldenMissingTool["outcome"]; note: string }): { name: string; note: string; mark: LineageMark } {
+  return { name: t.name === undefined || t.name === "" ? t.id : t.name, note: t.note, mark: t.outcome ?? "failed" };
 }
 
 /** What the provider answered one call with: the status, its message, the request id its reply carried when it

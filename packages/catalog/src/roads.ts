@@ -2,11 +2,11 @@
 // The roads a catalog entry or a recipe's tools row can take onto a Linux
 // machine (the modules that walk them are in road-modules.ts), and the pinned
 // installers the script road carries: uv, Node, Docker's compose plugin and
-// Swift by their checksummed releases, Playwright's Chromium at the Playwright
-// the render tests run, 1Password's CLI from its own apt repository under its
-// pinned signing key, Hermes by a git checkout at a commit, Claude Code by its
-// vendor's installer. Every pin here is checked on the machine before anything
-// runs.
+// Swift and rustup by their checksummed releases, Playwright's Chromium at the
+// Playwright the render tests run, 1Password's CLI from its own apt repository
+// under its pinned signing key, Hermes by a git checkout at a commit, Claude Code
+// by its vendor's installer. Every pin here is checked on the machine before
+// anything runs.
 import type { LinuxCask } from "./linux-casks.js";
 
 export const MIB = 1024 * 1024;
@@ -186,6 +186,33 @@ export const PYTHON_INSTALL = [
   UV_INSTALL,
   "uv python install 3.12",
   'ln -sfn "$(uv python find --managed-python 3.12)" /usr/local/bin/python3',
+].join("\n");
+
+/** rustup by the installer rust-lang archives per release, checksummed against
+ * the sha256 published beside it (https://static.rust-lang.org/rustup/archive). */
+export const RUSTUP = {
+  version: "1.29.1",
+  sha256: {
+    x86_64: "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+    aarch64: "15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433",
+  },
+} as const;
+
+/** The stable toolchain in rustup's default profile, which is cargo, rustc, the standard library, clippy, rustfmt and
+ * the docs. Homebrew's rust bottle would link against llvm@22 instead, 2.5 GB of its 3.1 GB closure on Linux. The
+ * installer leaves the shell files alone: the guest's PATH already carries the cargo bin directory. */
+export const RUSTUP_INSTALL = [
+  'arch="$(uname -m)"',
+  'case "$arch" in',
+  `  x86_64) sha=${RUSTUP.sha256.x86_64} ;;`,
+  `  aarch64) sha=${RUSTUP.sha256.aarch64} ;;`,
+  '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+  "esac",
+  `curl -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/${RUSTUP.version}/$arch-unknown-linux-gnu/rustup-init"`,
+  'echo "$sha  /tmp/rustup-init" | sha256sum -c - >/dev/null',
+  "chmod +x /tmp/rustup-init",
+  "/tmp/rustup-init -y --no-modify-path --profile default --default-toolchain stable",
+  "rm -f /tmp/rustup-init",
 ].join("\n");
 
 /** Debian ships fd as fdfind to dodge a name clash; agents type fd, so the row links it onto PATH under that name. */

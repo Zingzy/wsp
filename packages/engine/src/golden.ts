@@ -296,7 +296,7 @@ const AGENT_TIMEOUT_S = 900;
 const SHELL_TIMEOUT_S = 300;
 /** A harness-stage install under the guard, with every road's network lines ahead of it: the Node floor and the
  * agents' installers type the bare curl the road table's function defines, and may type any manager. */
-const guardedHarness = (script: string): string => guarded(["set -euo pipefail", ...ROAD_STEPS.script.env, script].join("\n"), AGENT_TIMEOUT_S);
+const guardedHarness = (script: string): string => guarded([...ROAD_STEPS.script.env, script].join("\n"), AGENT_TIMEOUT_S);
 const SHELL_CHECK_S = 60;
 
 /** One start of the login shell the way the app's pty runs it, a login shell (profile.d puts the tools on PATH before
