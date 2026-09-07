@@ -2,7 +2,9 @@
 // The composer under the chat thread: the transplanted prompt editor, slash
 // menu, send and stop buttons over one draft per workspace. Enter starts one
 // turn through sessions.start, resumed with the workspace's Claude session
-// unless a new thread was requested; a failed send puts the draft back. Stop
+// unless a new thread was requested; a thread with no session to resume, its
+// launch having failed, is named instead, and the runtime runs the message as
+// its first turn. A failed send puts the draft back. Stop
 // sends one sessions.interrupt for the turn on screen and waits, disabled,
 // for the turn's end; the runtime pushes the interrupted done before it
 // answers, and the composer opens when the process exits. not-running means
@@ -196,7 +198,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     [searchKey],
   );
 
-  const { setSending, appendUserTurn, appendLocalError, resume, busy, sending } = thread;
+  const { setSending, appendUserTurn, appendLocalError, resume, thread: into, busy, sending } = thread;
   const start = useCallback(
     (prompt: string, onRefused: () => void) => {
       if (!api) return;
@@ -204,13 +206,15 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       setSending(true);
       hold(threadKey);
       appendUserTurn(prompt, requestId);
-      void api.startSession({ workspaceId, prompt, requestId, ...(resume ? { resume } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions }).catch((err: unknown) => {
-        setSending(false);
-        onRefused();
-        appendLocalError(err instanceof Error ? err.message : String(err));
-      });
+      void api
+        .startSession({ workspaceId, prompt, requestId, ...(resume ? { resume } : {}), ...(into !== undefined ? { thread: into } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions })
+        .catch((err: unknown) => {
+          setSending(false);
+          onRefused();
+          appendLocalError(err instanceof Error ? err.message : String(err));
+        });
     },
-    [api, appendLocalError, appendUserTurn, cwd, hold, resume, setSending, startOptions, threadKey, workspaceId],
+    [api, appendLocalError, appendUserTurn, cwd, hold, into, resume, setSending, startOptions, threadKey, workspaceId],
   );
 
   const send = useCallback(() => {

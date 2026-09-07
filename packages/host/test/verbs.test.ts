@@ -7,7 +7,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { ThreadView, markedDefault } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, ThreadView, markedDefault } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -440,14 +440,48 @@ describe("wsp verbs over the host", () => {
     ]);
   });
 
-  it("thread new without an agent takes the runtime's default; an agent the runtime has no adapter for is refused by the runtime", async () => {
+  it("thread new without an agent takes the runtime's default; an agent the host has no adapter for is refused naming the agents it has, before a napping machine is woken", async () => {
     await run("new", "alpha");
     const ok = await run("thread", "new", "--in", "alpha", "hello");
     expect(ok.code).toBe(0);
     expect((await rt.sessions.list())[0]).toMatchObject({ harness: "claude", startedBy: "cli" });
+    await run("pause", "alpha");
     const refused = await run("thread", "new", "--in", "alpha", "--agent", "gemini", "hello");
     expect(refused.code).toBe(1);
     expect(refused.io.errors).toEqual(['wsp thread new: no adapter registered for harness "gemini"; agents on this host: claude, codex']);
+    expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
+    expect(await rt.sessions.list()).toHaveLength(1);
+  });
+
+  it("fork --send under an agent the host has no adapter for is refused naming the agents it has, and no machine is minted", async () => {
+    await run("new", "alpha");
+    const refused = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--agent", "gemini");
+    expect(refused.code).toBe(1);
+    expect(refused.io.errors).toEqual(['wsp fork: no adapter registered for harness "gemini"; agents on this host: claude, codex']);
+    expect(refused.io.lines).toEqual([]);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
+    expect(await rt.sessions.list()).toEqual([]);
+  });
+
+  it("an empty or whitespace task or message is refused in words by thread new, fork --send and send; no machine is minted or woken and nothing starts", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "first");
+    const [row] = await rt.sessions.list();
+    await run("pause", "alpha");
+    for (const task of ["", "  \n\t"]) {
+      const opened = await run("thread", "new", "--in", "alpha", task);
+      expect(opened.code).toBe(1);
+      expect(opened.io.errors).toEqual([`wsp thread new: ${EMPTY_TASK_LINE}`]);
+      const forked = await run("fork", "alpha", "--name", "worker", "--send", task);
+      expect(forked.code).toBe(1);
+      expect(forked.io.errors).toEqual([`wsp fork: ${EMPTY_TASK_LINE}`]);
+      const sent = await run("send", row!.threadId!, task);
+      expect(sent.code).toBe(1);
+      expect(sent.io.errors).toEqual([`wsp send: ${EMPTY_TASK_LINE}`]);
+    }
+    expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
+    expect(claude.starts).toHaveLength(1);
+    expect(await rt.sessions.list()).toHaveLength(1);
   });
 
   it("a failed turn exits 1 with the error on stderr and no last message", async () => {
@@ -978,7 +1012,7 @@ describe("wsp verbs over the host", () => {
     old.on("connection", socket => {
       socket.on("message", raw => {
         const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
-        const reply = op === "workspaces.list" ? { workspaces: [workspace] } : op === "workspaces.wake" ? { workspace } : op === "sessions.start" ? { session } : {};
+        const reply = op === "workspaces.list" ? { workspaces: [workspace] } : op === "workspaces.wake" ? { workspace } : op === "harnesses.list" ? { harnesses: [] } : op === "sessions.start" ? { session } : {};
         socket.send(JSON.stringify({ id, ok: true, ...reply }));
       });
     });

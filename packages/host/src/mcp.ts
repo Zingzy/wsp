@@ -15,7 +15,7 @@ import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe
 import { INSTRUCTIONS } from "./skill.js";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { VERSION } from "./version.js";
-import { absoluteFolder, absolutePath, agentsChosen, awake, checkedPicks, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, messageTo, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workFolder, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
+import { absoluteFolder, absolutePath, agentsChosen, awake, checkedStart, create, createFromHead, deleteWorkspace, deletedLine, dialHost, dropping, execOn, exportProject, follow, forget, forgotLine, importProject, messageTo, nap, notifyOf, openingOf, planLines, planProject, projectGoldenOf, secretsChosen, snapshot, stop, stopLine, threadOf, threadRows, turnFailure, workFolder, workspaceOf, workspaces, type ExportRequest, type HostClient, type Out, type Turn } from "./verbs.js";
 
 /** Nothing printed: the tools answer with values, and the stages a create streams have no reader here. */
 const QUIET: Out = { emit: () => {}, stream: () => {} };
@@ -210,7 +210,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
       absoluteFolder(folder);
       const client = await dial();
       const source = await workspaceOf(client, ref);
-      if (task !== undefined) await checkedPicks(client, harness, input);
+      if (task !== undefined) await checkedStart(client, task, harness, input);
       const created = await create(client, QUIET, source.golden, name ?? `${source.name}-fork`, word);
       if (task === undefined) return asJson(created);
       let failure: string;
@@ -284,7 +284,9 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
     },
     async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, ...input }) => {
       const client = await dial();
-      const target = await awake(client, await workspaceOf(client, ref), "send", QUIET_LINE);
+      const found = await workspaceOf(client, ref);
+      await checkedStart(client, task, harness, input);
+      const target = await awake(client, found, "send", QUIET_LINE);
       const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN));
       return asText(turnText(out), out);
     },
@@ -299,6 +301,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: S
     async ({ thread: ref, message, ...input }) => {
       const client = await dial();
       const thread = await threadOf(client, ref);
+      await checkedStart(client, message, thread.harness, input);
       await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
       const out = turnOut(await follow(client, messageTo(thread, message, input), "agent", QUIET_TURN));
       return asText(turnText(out), out);
