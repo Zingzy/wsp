@@ -50,7 +50,7 @@ describe("the agent contract on the command line and the tool door", () => {
     backend = stubBackend();
     store = memoryStore();
     await store.put("goldens", "default", SEALED_GOLDEN);
-    const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
+    const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`), () => ({ kind: "written" }));
     rt = createRuntime({ backend, store, adapters: { claude: claude.adapter } });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -119,6 +119,7 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(opened).toMatchObject({ threadId: expect.any(String), text: "re: hello", outcome: "started" });
     await last("send", "send", opened.threadId, "again");
     await last("stop", "stop", opened.threadId);
+    await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
     await last("export", "export", "alpha", join(dir, "out", "proj"), "--from", EXPORT_SOURCE);
     execGuest(backend, "ok\n", 0);
     // A streamed verb's frames carry the output and its result leaves it out, so no line prints twice.

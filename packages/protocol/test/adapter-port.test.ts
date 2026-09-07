@@ -15,6 +15,8 @@ const PORT_NAMES = [
   "HarnessCatalogModelProbe",
   "HarnessCatalogProbe",
   "HarnessCatalogRefusal",
+  "SessionRenameWrite",
+  "SessionRenamer",
   "SessionTitleReader",
   "catalogRefused",
 ];

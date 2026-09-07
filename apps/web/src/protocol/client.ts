@@ -9,6 +9,7 @@ import {
   HarnessCatalog,
   PortForward,
   SessionInterruptOutcome,
+  SessionRenameResult,
   SessionSteerOutcome,
   type Capabilities,
   type DaemonReachView,
@@ -286,6 +287,11 @@ export interface Api {
    * means a session.steer event is on the wire; not-running means the turn beat it and the caller starts a turn instead.
    * Optional so fixtures without a steering harness need not fake it; the composer keeps the stop road without it. */
   steerSession?(sessionId: string, prompt: string, requestId: string): Promise<SessionSteerOutcome>;
+  /** Names the session in its harness's own store on the machine; takes the runtime's session id, as interruptSession
+   * does. renamed means the store took it and the next listing carries it; every other outcome named nothing, and
+   * failed carries the machine's own line for the write it refused. Optional so fixtures that never rename need not
+   * fake it; a client without it offers no rename. */
+  renameSession?(sessionId: string, title: string): Promise<SessionRenameResult>;
   /** What each harness's CLI takes at launch; the composer's pickers render from it. With a workspace the runtime
    * asks the binaries on its machine, else its table answers. Optional so fixtures without pickers need not fake it;
    * without it the composer shows none. */
@@ -420,6 +426,8 @@ export function makeApi(c: ProtocolClient): Api {
       SessionInterruptOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.interrupt", { sessionId })).outcome),
     steerSession: async (sessionId, prompt, requestId) =>
       SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId })).outcome),
+    // Parsed, not trusted: an outcome outside the enum must not read as renamed.
+    renameSession: async (sessionId, title) => SessionRenameResult.parse(await c.request<Record<string, unknown>>("sessions.rename", { sessionId, title })),
     // Parsed, not trusted: a picker renders only values the wire type vouches for.
     listHarnesses: async workspaceId =>
       HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list", workspaceId !== undefined ? { workspaceId } : {})).harnesses),

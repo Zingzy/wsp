@@ -39,9 +39,10 @@ const CLAUDE_CONTEXT_WINDOWS: HarnessOption[] = [option("200k", "200k"), { ...op
 // The handshake lists each model's levels and names no default; the CLI documents high on every model that takes one (code.claude.com/docs/en/model-config, Adjust effort level).
 const CLAUDE_EFFORTS: HarnessOption[] = levels(["low", "medium", "high", "xhigh", "max"], "high");
 
-// The table alone cannot say whether a harness steers: only its adapter, on a machine, knows.
+// The table alone cannot say whether a harness steers, or whether it keeps a person's name for a session: only its
+// adapter, on a machine, knows either. A client reads a table row as no answer (keepsRename), never as a no.
 const fromTable = (
-  catalog: Omit<HarnessCatalog, "source" | "version" | "contextWindows" | "steers"> & { contextWindows?: HarnessOption[]; pin?: TablePin },
+  catalog: Omit<HarnessCatalog, "source" | "version" | "contextWindows" | "steers" | "renames"> & { contextWindows?: HarnessOption[]; pin?: TablePin },
 ): HarnessCatalog => {
   const { pin, ...rest } = catalog;
   return {
@@ -49,6 +50,7 @@ const fromTable = (
     version: pin === undefined ? null : `${pin.read} ${pin.version}, ${pin.date}`,
     contextWindows: [],
     steers: false,
+    renames: false,
     ...rest,
   };
 };

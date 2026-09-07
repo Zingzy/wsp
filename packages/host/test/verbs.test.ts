@@ -14,7 +14,7 @@ import { WebSocketServer } from "ws";
 import { HELP, cli, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { PLAN_ONLY, dialHost, messageTo } from "../src/verbs.js";
+import { PLAN_ONLY, dialHost, messageTo, threadRows } from "../src/verbs.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -860,6 +860,60 @@ describe("wsp verbs over the host", () => {
     expect(missing.io.errors).toEqual(["wsp stop: no thread nope"]);
   });
 
+  it("thread rename names the thread in the agent's own store and says so; an agent that keeps no name, one whose store has no such session, and an unknown thread each say why", async () => {
+    const named = scriptedAgent(prompt => `re: ${prompt}`, title => (title === "nowhere" ? { kind: "no-session" } : title === "locked" ? { kind: "failed", error: "database is locked" } : { kind: "written" }));
+    await restartHost({ claude: named.adapter, codex: codex.adapter });
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const [row] = await rt.sessions.list();
+
+    const renamed = await run("thread", "rename", row!.threadId!.slice(0, 8), "the name he typed");
+    expect(renamed.code).toBe(0);
+    expect(renamed.io.lines).toEqual([`thread ${row!.threadId} named the name he typed, in Claude Code too`]);
+    expect(named.renames).toEqual([{ sessionId: row!.claudeSessionId, title: "the name he typed" }]);
+    expect(ThreadView.parse((await threadRows(await dialHost(statePath)))[0]).title).toBe("the name he typed");
+
+    const nowhere = await run("thread", "rename", row!.threadId!, "nowhere", "--json");
+    expect(nowhere.code).toBe(0);
+    expect(json(nowhere.io)).toEqual([{ threadId: row!.threadId, title: "nowhere", harness: "claude", outcome: "no-session" }]);
+
+    // A store that refused the write says nothing about its sessions, so its own line is the answer, not "no such session".
+    const locked = await run("thread", "rename", row!.threadId!, "locked");
+    expect(locked.code).toBe(0);
+    expect(locked.io.lines).toEqual([`thread ${row!.threadId} not named: database is locked`]);
+    expect(json((await run("thread", "rename", row!.threadId!, "locked", "--json")).io)).toEqual([
+      { threadId: row!.threadId, title: "locked", harness: "claude", outcome: "failed", error: "database is locked" },
+    ]);
+
+    await run("thread", "new", "--in", "alpha", "--agent", "codex", "build it there");
+    const codexRow = (await rt.sessions.list()).find(v => v.harness === "codex")!;
+    const unsupported = await run("thread", "rename", codexRow.threadId!, "the name");
+    expect(unsupported.code).toBe(0);
+    expect(unsupported.io.lines).toEqual([`thread ${codexRow.threadId} not named: Codex keeps no name of a person's for a session`]);
+
+    const missing = await run("thread", "rename", "nope", "the name");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp thread rename: no thread nope"]);
+    const short = await run("thread", "rename", row!.threadId!);
+    expect(short.code).toBe(3);
+    expect(short.io.errors).toEqual(["wsp thread rename: wsp thread rename takes a thread and one name"]);
+  });
+
+  it("thread rename wakes a napping workspace first, since the name goes into a store on its machine", async () => {
+    const named = scriptedAgent(prompt => `re: ${prompt}`, () => ({ kind: "written" }));
+    await restartHost({ claude: named.adapter });
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const [row] = await rt.sessions.list();
+    await run("pause", "alpha");
+    const renamed = await run("thread", "rename", row!.threadId!, "the name");
+    expect(renamed.code).toBe(0);
+    expect(renamed.io.errors).toEqual(["waking alpha"]);
+    expect(named.renames).toEqual([{ sessionId: row!.claudeSessionId, title: "the name" }]);
+    const [alpha] = await rt.workspaces.list();
+    expect(alpha!.phase).toBe("running");
+  });
+
   it("thread new --notify me prints the thread's end once on stderr, after the reply, and records it in the thread", async () => {
     await run("new", "alpha");
     const { code, io } = await run("thread", "new", "--in", "alpha", "--notify", "me", "build it");
@@ -1451,7 +1505,7 @@ describe("wsp verbs over the host", () => {
     expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(3);
-    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify] "<task>"\nusage: wsp thread rename <thread> "<title>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {

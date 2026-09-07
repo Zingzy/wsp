@@ -114,6 +114,8 @@ import type {
   ReachState,
   SessionEvent,
   SessionInterruptResult,
+  SessionRenameResult,
+  SessionRenamer,
   SessionStartOutcome,
   SessionSteerResult,
   SessionOrigin,
@@ -128,7 +130,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, NOTIFY_ME, RECORD_RESTORED, actionRefusal, catalogRefused, daemonVersionOf, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -185,6 +187,8 @@ export interface HarnessAdapter {
   probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** Reads the harness's own title for a session out of its store on the machine; absent on a harness that keeps none. */
   sessionTitle?: SessionTitleReader;
+  /** Writes a person's name for a session into that same store; absent on a harness that keeps no name of a person's. */
+  renameSession?: SessionRenamer;
   /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
    * means nothing is exported and both run with the machine's own environment only. */
   readonly env?: Readonly<Record<string, string>>;
@@ -814,6 +818,10 @@ export interface Runtime {
      * harness took it; a turn already over, a harness without steer or an unknown id answers. Refuses like start
      * while the workspace is pausing or paused. */
     steer(sessionId: string, opts: { prompt: string; requestId?: string }): Promise<SessionSteerResult>;
+    /** Names the session's harness session in the harness's own store, in the field the harness itself writes, and
+     * keeps the name on every row of the thread; a harness that keeps no name of a person's, a store without that
+     * session and an unknown id answer. Refuses while the workspace cannot be reached, as a listing's read needs it. */
+    rename(sessionId: string, title: string): Promise<SessionRenameResult>;
   };
   readonly harnesses: {
     /** What each harness with an adapter takes at launch; the composer's pickers render from this. With a running
@@ -2501,7 +2509,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * not answer costs one exec, not one per composer mount. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
   const catalogOn = (table: HarnessCatalog, machine: Machine, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
-    const known: HarnessCatalog = { ...table, steers: adapter.steers };
+    const known: HarnessCatalog = { ...table, steers: adapter.steers, renames: adapter.renameSession !== undefined };
     if (adapter.probeCatalog === undefined) return Promise.resolve(known);
     const key = `${machine.id}:${table.harness}`;
     const hit = catalogs.get(key);
@@ -2921,6 +2929,32 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (outcome !== "accepted") return { outcome };
       recordSteer(s, sessionId, o);
       return { outcome: "accepted" };
+    },
+
+    async rename(sessionId, title) {
+      await ready();
+      const named = title.trim();
+      if (named === "") throw new Error(EMPTY_TITLE_LINE);
+      const s = sessions.get(sessionId);
+      if (!s) return { outcome: "not-found" };
+      const harnessSessionId = s.view.claudeSessionId;
+      const entry = await entryOf(s.view.workspaceId);
+      const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "rename", entry.record.gone);
+      if (refusal !== null) throw new Error(refusal);
+      const write = adapterFor(entry, s.view.harness).adapter.renameSession;
+      if (write === undefined) return { outcome: "unsupported" };
+      // The store is keyed by the harness's own id, so a thread whose harness never announced one has nothing to name.
+      if (harnessSessionId === undefined) return { outcome: "no-session" };
+      const wrote = await write(harnessSessionId, named, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout));
+      // A store that refused the write says nothing about which sessions it has, so its own line travels as the answer.
+      if (wrote.kind === "failed") return { outcome: "failed", error: wrote.error };
+      if (wrote.kind === "no-session") return { outcome: "no-session" };
+      // Every turn of the thread shares the harness's session, and the fold reads the latest turn's title.
+      for (const row of sessions.values()) {
+        if (row.view.workspaceId === entry.record.id && row.view.claudeSessionId === harnessSessionId) row.view.harnessTitle = named;
+      }
+      await persistSessions(entry.record.id);
+      return { outcome: "renamed" };
     },
   };
 

@@ -5,10 +5,10 @@
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
 import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, SessionTitleReader, TurnResult } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleReader, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
-import { parseSessionTitle, sessionTitleCommand } from "./session-title.js";
+import { parseRename, parseSessionTitle, renameCommand, sessionTitleCommand } from "./session-title.js";
 
 export interface CodexStartOptions {
   prompt: string;
@@ -53,6 +53,8 @@ export interface CodexAdapter {
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
   sessionTitle: SessionTitleReader;
+  /** Names the thread in that same index, in the column the CLI's own rename writes. */
+  renameSession: SessionRenamer;
   readonly env: Readonly<Record<string, string>>;
 }
 
@@ -313,6 +315,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     steers: false,
     probeCatalog,
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
+    renameSession: (threadId, title, exec) => exec(renameCommand({ home: deps.home, threadId, title })).then(parseRename),
     env,
   };
 }
