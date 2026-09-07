@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { backgroundTasksLine, behindGoldenLine, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine } from "../src/index.js";
+import { backgroundTasksLine, behindGoldenLine, builderStaysLine, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, deleteNotice, fmtBytes, fmtCost, fmtDuration, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, notifyLine, plural, providerAnswerLine, SEAL_FAILED_BUILDER_GONE_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, titleLine, TURN_IDLE_MS, TURN_WALL_MS, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, SEAL_FAILED_LINE } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 describe("fmtBytes", () => {
@@ -190,5 +190,39 @@ describe("one copy of the rule", () => {
 
   it("each recorded exception holds exactly one formatter: a folded one leaves the list, a second one is a copy", () => {
     expect([...EXCEPTIONS].map(rel => [rel, hits(rel)])).toEqual([...EXCEPTIONS].map(rel => [rel, 1]));
+  });
+});
+
+describe("the seal's words when the provider refuses the snapshot", () => {
+  const refused = { status: 502, message: "Failed to snapshot sandbox", requestId: "req_7", at: "2026-09-07T01:19:43.352Z" };
+
+  it("providerAnswerLine carries the status, the message and the request id; without one it says so and gives the UTC time of the reply instead, never an empty id", () => {
+    expect(providerAnswerLine(refused)).toBe("502 Failed to snapshot sandbox (request req_7)");
+    expect(providerAnswerLine({ status: 502, message: "Failed to snapshot sandbox", at: "2026-09-07T01:19:43.352Z" })).toBe("502 Failed to snapshot sandbox (no request id from the provider, at 2026-09-07T01:19:43.352Z)");
+  });
+
+  it("an attempt line names the attempt, the answer, what the builder reads and when the next attempt is", () => {
+    expect(snapshotAttemptLine(1, 3, refused, "running", 60_000)).toBe("attempt 1 of 3 answered 502 Failed to snapshot sandbox (request req_7); the builder reads running, next attempt in 1m");
+  });
+
+  it("the failure line counts the attempts and says whether the provider still has the builder", () => {
+    expect(snapshotFailedLine(3, refused, "running")).toBe("the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_7) while the builder read running");
+    expect(snapshotFailedLine(1, refused, "gone")).toBe("the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_7) and no longer has the builder (404)");
+    expect(snapshotFailedLine(1, refused, "unread", "upstream sad (503)")).toBe("the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_7) and could not be read about the builder (upstream sad (503))");
+  });
+
+  it("the stays-up sentence is one rule, and the failed seal's last line wraps it", () => {
+    const stays = builderStaysLine("m1", 0.11, "wsp init --recipe '/tmp/r.json'");
+    expect(stays).toBe("Builder m1 stays up at about $0.11/hr; wsp init --recipe '/tmp/r.json' attaches to it again, and the sweep stops it once it is six hours old.");
+    expect(sealFailedBuilderStaysLine("m1", 0.11, "wsp init --recipe '/tmp/r.json'")).toBe(`Seal failed; the builder is as you left it. ${stays}`);
+    expect(sealFailedBuilderUnreadLine("m1", 0.11, "wsp init --recipe '/tmp/r.json'")).toBe(`Seal failed; the provider could not be read about the builder, so nothing on it was touched. ${stays}`);
+    expect(SEAL_FAILED_BUILDER_GONE_LINE).toBe("Seal failed and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again; the recipe is kept.");
+  });
+
+  it("the update's last lines say the golden stands and whether the provider still has the machine the new version ran on", () => {
+    expect(upgradeSealFailedStaysLine(1, "m1", 0.11)).toBe("Golden v1 is unchanged. Builder m1 is as it was, up at about $0.11/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.");
+    expect(upgradeSealFailedGoneLine(1)).toBe("Golden v1 is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.");
+    expect(upgradeSealFailedUnreadLine(1, "m1")).toBe("Golden v1 is unchanged. The provider could not be read about builder m1, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.");
+    expect(SEAL_FAILED_LINE).toBe("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.");
   });
 });
