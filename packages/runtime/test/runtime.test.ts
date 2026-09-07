@@ -5208,6 +5208,8 @@ describe("a workspace behind the golden's head", () => {
     const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
     const record = (await store.get("workspaces", ws.id)) as { phase: string };
     await store.put("workspaces", ws.id, { ...record, phase });
+    // The store's word has to be the provider's too: a napping record over a running machine hydrates running.
+    if (phase === "napping") backend.machines[0]!.paused = true;
     await rt.close();
     const later = createRuntime({ backend, store, adapters: {} });
     try {

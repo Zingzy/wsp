@@ -128,6 +128,18 @@ describe("Workspace verified wake", () => {
     expect(result.reason).toContain("vanished");
   });
 
+  it("noteRunning puts a napping phase back to running, so the next nap pauses the machine for real", async () => {
+    const { machine, calls } = counting();
+    const ws = new Workspace(machine, { goldenSnapshot: "snap_g" }, { phase: "napping" });
+    await ws.nap();
+    expect(calls.pause).toBe(0);
+    ws.noteRunning();
+    expect(ws.currentPhase).toBe("running");
+    await ws.nap();
+    expect(calls.pause).toBe(1);
+    expect(ws.currentPhase).toBe("napping");
+  });
+
   it("a failed wake with no resurrect hook throws and leaves the workspace napping", async () => {
     const { machine } = counting();
     const ws = new Workspace(machine, { goldenSnapshot: "snap_g", wakeCheck: async () => "no daemon" });

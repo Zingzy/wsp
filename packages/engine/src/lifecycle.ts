@@ -121,6 +121,12 @@ export class Workspace {
     this.phase = "napping";
   }
 
+  /** The provider runs this machine while the phase says napping (a nap whose pause never took, a resume nobody
+   * wrote): the phase follows the fact, so the next nap pauses it for real and no wake resumes a running machine. */
+  noteRunning(): void {
+    this.phase = "running";
+  }
+
   /** Done when the resumed machine passes the wake check, not when resume()
    * returns: Solari has handed back a machine reporting running whose guest
    * never served again (resume fell back to a fresh host at default size).

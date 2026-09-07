@@ -237,6 +237,36 @@ describe("wsp verbs over the host", () => {
     expect(again.io.errors).toEqual([]);
   });
 
+  it("a record that says paused while the provider runs the machine: exec goes on without a resume and the store ends running; pause pauses for real", async () => {
+    await run("new", "alpha");
+    await run("pause", "alpha");
+    const m = backend.machines[0]!;
+    // The nap never took at the provider, and a resume on a running machine is refused.
+    const runningAtProvider = (): void => {
+      m.paused = false;
+      m.resume = async () => {
+        throw Object.assign(new Error("Sandbox is not paused"), { kind: "conflict", status: 409 });
+      };
+    };
+    runningAtProvider();
+    execGuest(backend, "awake-ok\n", 0);
+    const ran = await run("exec", "alpha", "--", "echo", "awake-ok");
+    expect(ran.code).toBe(0);
+    expect(ran.io.lines).toEqual(["awake-ok"]);
+    const [alpha] = await rt.workspaces.list();
+    expect(alpha!.phase).toBe("running");
+    expect(await store.get("workspaces", alpha!.id)).toMatchObject({ phase: "running" });
+
+    await run("pause", "alpha");
+    expect(m.paused).toBe(true);
+    runningAtProvider();
+    const paused = await run("pause", "alpha");
+    expect(paused.code).toBe(0);
+    expect(paused.io.lines).toEqual(["alpha paused"]);
+    expect(m.paused).toBe(true);
+    expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
+  });
+
   it("thread new and send on a paused workspace wake it first, one line on stderr, then run the turn", async () => {
     await run("new", "alpha");
     await run("pause", "alpha");
