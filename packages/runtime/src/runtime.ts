@@ -24,6 +24,7 @@ import {
   exportPaths,
   goldenHead,
   importInto,
+  isMissing,
   isNetworkError,
   landBundle,
   parseMergeOutput,
@@ -113,14 +114,14 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { ALREADY_APPLIED, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NOTIFY_ME, RECORD_RESTORED, actionRefusal, daemonVersionOf, fmtBytes, fmtDuration, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, notifyLine, offeredSize, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
-import { POLL_INTERVAL_MS, createStatusTracker, goneWords, machineStateOf, type StatusApi, type StatusWatchOptions } from "./status.js";
+import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, providerSaid, type StatusApi, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, type HarnessCatalogProbe } from "./harness-catalog.js";
 
@@ -832,6 +833,8 @@ const DELETED_REASON = "machine deleted while the agent was working";
 const UNANSWERING_REASON = "machine stopped answering while the agent was working";
 const RESTARTED_REASON = "host restarted while the agent was working";
 const GONE_REASON = "machine gone at the provider while the agent was working";
+/** The host log's one line for a workspace found gone, from the road and from the record load alike. */
+const goneLogLine = (workspaceId: string, words: string): string => `workspace ${workspaceId} is gone: ${words}`;
 /** What a cut turn's parent hears: the row's own span, since no harness result reports one. */
 const restartCutLine = (elapsedMs: number): string => `cut by a host restart after ${fmtDuration(elapsedMs, "clock")}`;
 /** A guest with no daemon is asked again after this long (one may be deployed later). */
@@ -1741,6 +1744,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         try {
           await entry.ws.nap();
         } catch (e) {
+          if (isMissing(e)) {
+            await settleGone(entry, goneWords(entry.record.machineId, { by: "pause", at: clock.now(), answer: providerSaid(e) }));
+            throw e;
+          }
           entry.record.phase = entry.ws.currentPhase;
           await persist(entry.record);
           await emitStatus(entry, reachOf(entry), e instanceof Error ? e.message : String(e));
@@ -1809,17 +1816,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     })();
     return entry.adopting;
   };
-  /** The provider stopped knowing the machine (deleted behind wsp, or expired): the record follows the fact and stays
-   * there. Nothing bills, the idle window is dropped, sessions end; rebuild and delete are the roads out. */
-  const adoptGone = async (entry: LiveWorkspace, reason: string): Promise<void> => {
-    if (entry.record.phase === "gone" || entry.napping || entry.waking) return;
+  /** The one road to gone, whichever call found the provider no longer knew the machine (deleted behind wsp, or
+   * expired): the record follows the fact and stays there. The gone event closes the awake stretch with a cost tick
+   * at this instant, drops the idle window and ends the sessions; the row and the one log line carry the words;
+   * rebuild and delete are the roads out. */
+  const settleGone = async (entry: LiveWorkspace, reason: string): Promise<void> => {
     entry.record.phase = "gone";
     entry.record.gone = reason;
     await persist(entry.record);
     endSessions(entry.record.id, GONE_REASON);
-    console.warn(`workspace ${entry.record.id} is gone: ${reason}`);
+    console.warn(goneLogLine(entry.record.id, reason));
     bus.emit({ type: "workspace.gone", workspaceId: entry.record.id, machineId: entry.record.machineId, reason });
     await emitStatus(entry, "gone", reason);
+  };
+  /** A sighting from outside a verb (the poll, the sweep): a nap or a wake in flight meets the machine itself and
+   * settles what it finds, so the sighting defers to it. */
+  const adoptGone = async (entry: LiveWorkspace, reason: string): Promise<void> => {
+    if (entry.record.phase === "gone" || entry.napping || entry.waking) return;
+    await settleGone(entry, reason);
   };
   bus.on("workspace.status", e => {
     if (e.type !== "workspace.status") return;
@@ -1843,12 +1857,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await napWith(id, idleReason(windowMs));
       } catch (e) {
         if (e instanceof MoveUnansweredError) throw e;
+        // A machine the pause found gone settled its record on the way out; the gone event dropped this window.
+        if (isMissing(e)) return;
         // The provider answered with a refusal: asking again at once changes nothing, so a full window starts from
         // its answer and the row is pushed once more with that window, the words unchanged.
         idle.touch(id);
         const entry = live.get(id);
         if (entry !== undefined) await emitStatus(entry, reachOf(entry), e instanceof Error ? e.message : String(e));
-        throw e;
+        console.warn(`idle nap of ${id} was answered with ${providerSaid(e)}; a full ${Math.round(windowMs / 60_000)} min window starts over`);
       }
     },
     retryMs: opts.status?.pollIntervalMs ?? POLL_INTERVAL_MS,
@@ -1890,7 +1906,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** A stored record this process has no entry for yet; its machine is fetched once, here. */
   const admit = async (stored: StoredBuilder): Promise<void> => {
     const machine = await backend.get(stored.id).then(observed, (e: unknown) => {
-      if ((e as { kind?: string }).kind === "missing") return undefined;
+      if (isMissing(e)) return undefined;
       throw e;
     });
     if (!machine) {
@@ -1951,8 +1967,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // so before anything lists it or meters it.
         let missing: string | undefined;
         const machine = await backend.get(stored.machineId).catch((e: unknown) => {
-          if ((e as { kind?: string }).kind !== "missing") throw e;
-          missing = goneWords(stored.machineId, e instanceof Error ? e.message : String(e));
+          if (!isMissing(e)) throw e;
+          missing = providerSaid(e);
           return deadMachine(stored.machineId);
         });
         // The state rides on the view get() just fetched; a second read would reset the provider's idle timer.
@@ -1977,10 +1993,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize),
           ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
         };
-        if (phase === "gone") record.gone = stored.gone ?? missing ?? goneWords(stored.machineId);
+        if (phase === "gone") record.gone = stored.gone ?? goneWords(stored.machineId, { by: "record load", at: clock.now(), ...(missing !== undefined ? { answer: missing } : {}) });
         attach(record, machine);
         if (phase !== stored.phase) {
-          if (phase === "gone") console.warn(`workspace ${stored.id} is gone: ${record.gone}`);
+          if (phase === "gone") console.warn(goneLogLine(stored.id, record.gone!));
           else console.warn(`workspace ${stored.id} was left ${stored.phase} and its machine is ${atProvider} at the provider; the record hydrates ${phase}`);
           await persist(record);
         }
@@ -2145,7 +2161,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const entry = live.get(id);
         let kept: LiveWorkspace | undefined;
         if (entry !== undefined) {
-          const gone = await entry.machine.kill().then(() => true, (k: unknown) => (k as { kind?: string }).kind === "missing");
+          const gone = await entry.machine.kill().then(() => true, (k: unknown) => isMissing(k));
           if (gone) live.delete(id);
           else {
             kept = entry;
@@ -2182,10 +2198,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry.waking) return entry.waking;
       if (entry.record.phase === "gone") throw new Error(goneRefusal("wake", entry.record.gone));
       if (entry.napping) await entry.napping.catch(() => {});
-      // A wake nobody should need is the one sign the provider paused the machine on its own, and a wake of a machine
-      // the provider runs would be refused with its words: one read settles either, and the record follows the fact.
-      if (entry.record.phase === "running" && (await entry.machine.state().catch(() => "running")) === "paused") await adoptPause(entry);
-      else if (await runsUnderNapping(entry)) await adoptRunning(entry);
+      // A wake nobody should need is the one sign the provider paused the machine on its own, or lost it, and a wake of
+      // a machine the provider runs would be refused with its words: one read settles any, and the record follows the fact.
+      if (entry.record.phase === "running") {
+        let answer: string | undefined;
+        const read = await entry.machine.state().catch((e: unknown) => {
+          if (!isMissing(e)) return "running";
+          answer = providerSaid(e);
+          return "gone";
+        });
+        if (read === "gone") {
+          await settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), ...(answer !== undefined ? { answer } : {}) }));
+          throw new Error(goneRefusal("wake", entry.record.gone));
+        }
+        if (read === "paused") await adoptPause(entry);
+      } else if (await runsUnderNapping(entry)) await adoptRunning(entry);
       if (entry.record.phase === "running") return view(entry.record);
       entry.waking = (async () => {
         entry.budget = budgetFor("wake", wakeDeadlineMs);
@@ -2310,7 +2337,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         try {
           endSessions(id, DELETED_REASON);
           await entry.machine.kill().catch((e: unknown) => {
-            if ((e as { kind?: string }).kind !== "missing") throw e;
+            if (!isMissing(e)) throw e;
           });
           await drop(id);
         } finally {
@@ -2805,7 +2832,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       try {
         await b.builder.machine.kill();
       } catch (e) {
-        if ((e as { kind?: string }).kind !== "missing") {
+        if (!isMissing(e)) {
           failed.push({ id: b.record.id, message: `could not stop: ${e instanceof Error ? e.message : String(e)}; stays recorded, retried next sweep` });
           continue;
         }
@@ -3309,7 +3336,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await backend.deleteSnapshot(v.snapshotId);
         } catch (e) {
           // A snapshot the provider already lost is gone either way; its version goes with it.
-          if ((e as { kind?: string }).kind !== "missing") {
+          if (!isMissing(e)) {
             failed.push({ version: v.version, message: e instanceof Error ? e.message : String(e) });
             continue;
           }
@@ -3506,7 +3533,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       try {
         machine = observed(await backend.get(row.id));
       } catch (e) {
-        if ((e as { kind?: string }).kind === "missing") continue;
+        if (isMissing(e)) continue;
         known.add(row.id);
         failed.push({ id: row.id, message: `not recorded: ${e instanceof Error ? e.message : String(e)}; retried next sweep` });
         continue;
@@ -3587,7 +3614,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         try {
           await b.builder.machine.kill();
         } catch (e) {
-          if ((e as { kind?: string }).kind !== "missing") {
+          if (!isMissing(e)) {
             failed.push({ id: b.record.id, message: `could not stop: ${messageOf(e)}; stays recorded, retried next sweep` });
             continue;
           }
@@ -3611,6 +3638,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       } catch (e) {
         failed.push({ message: messageOf(e) });
         return result({ reaped: [], spared: [] }, []);
+      }
+      // A recorded machine the listing lacks is read once: the listing is best effort, so only the read decides, and a
+      // read that finds the machine gone settles its record here rather than at the next poll or verb.
+      const listed = new Set(listing.map(row => row.id));
+      for (const entry of [...live.values()]) {
+        if (entry.creating || entry.napping || entry.waking || entry.deleting || entry.record.phase === "gone" || listed.has(entry.record.machineId)) continue;
+        let answer: string | undefined;
+        const read = await entry.machine.state().catch((e: unknown) => {
+          if (!isMissing(e)) return undefined;
+          answer = providerSaid(e);
+          return "gone";
+        });
+        if (read === "gone") await adoptGone(entry, goneWords(entry.record.machineId, { by: "sweep", at: clock.now(), ...(answer !== undefined ? { answer } : {}) }));
       }
       const claimed = new Set(knownIds());
       const adopted = await adoptLost(listing, claimed, failed);

@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
+import { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import {
   BROWSER_SHIM_PATH,
   SolariBackend,
@@ -25,7 +26,6 @@ import {
   hostIdentity,
 } from "@wsp/runtime";
 
-const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
 const CONFIG_DIR = "/root/.claude-cfg";
 const cliLabels = (): Record<string, string> => ({ wsp: "1", "wsp-cli": "1", createdAt: new Date().toISOString() });
 const RESERVED = { key: "poc", value: "ttl-test" }; // sleeping experiment: never touch
@@ -115,7 +115,7 @@ class Timings {
 
 /** Names no size, so the create takes the size the backend calls default. */
 export function goldenBuild(envs: Record<string, string>): GoldenBuildRequest {
-  return { setup: CLAUDE_INSTALL, smoke: "claude --version", envs, labels: cliLabels() };
+  return { setup: GOLDEN_SETUP, smoke: GOLDEN_SMOKE, envs, labels: cliLabels() };
 }
 
 async function ensureGolden(rt: Runtime, envs: Record<string, string>, timings: Timings): Promise<string> {

@@ -1,6 +1,6 @@
 // Adapted from pingdotgg/t3code packages/client-runtime/src/work-log/presentation.ts at 57a66608 (MIT).
 // Differs from upstream: the branded MCP tool label table is removed, and the tool-group summary and viewed-image helpers live in the adapter now.
-import { isToolLifecycleItemType, type ToolLifecycleItemType } from "../components/chat/adapt";
+import type { ToolLifecycleItemType, WorkLogTone } from "../components/chat/adapt";
 
 export function isWorktreeSetupActivity(kind: string): boolean {
   return kind === "setup-script.requested" || kind === "setup-script.started";
@@ -10,7 +10,7 @@ export interface WorkLogPresentationEntry {
   readonly label: string;
   readonly toolTitle?: string;
   readonly toolData?: unknown;
-  readonly tone: "thinking" | "tool" | "info" | "error";
+  readonly tone: WorkLogTone;
   readonly command?: string;
   readonly detail?: string;
   readonly viewedImagePath?: string;
@@ -175,13 +175,6 @@ export function commandDetailRepeatsCommand(input: {
     data?.toolCallId !== undefined ||
     nonEmptyString(data?.kind)?.toLowerCase() === "execute"
   );
-}
-
-function workLogEntryIsToolLike(entry: WorkLogPresentationEntry): boolean {
-  if (entry.tone === "tool" || entry.tone === "thinking" || entry.tone === "error") return true;
-  if (entry.command !== undefined && entry.command.trim().length > 0) return true;
-  if (entry.requestKind !== undefined) return true;
-  return entry.itemType !== undefined && isToolLifecycleItemType(entry.itemType);
 }
 
 export function workLogEntryIsLocalCodeSearch(entry: WorkLogPresentationEntry): boolean {

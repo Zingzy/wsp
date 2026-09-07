@@ -94,7 +94,7 @@ describe("the tools screen", () => {
     expect(text(by("go").why)).toBe("used       below the floor, 2 commands in 1 session");
     expect(text(by("wrangler").why)).toBe("used       40 commands in 3 sessions");
     expect(text(by("gh").hint)).toBe("40.2 MB");
-    expect(text(by("op").hint)).toBe("size unknown");
+    expect(text(by("op").hint)).toBe("41.0 MB");
     expect(by("node").detail).toEqual(["ships in 5 lab images; on by default in the catalog; on every machine", "part of the base on every machine"]);
     expect(by("go").detail).toEqual(["your agents used it in 1 session (2 calls)", "about 239.1 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
     expect(by("java").detail[0]).toBe("ships in 4 lab images; on request");

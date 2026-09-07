@@ -37,8 +37,7 @@ describe("the table of what travels", () => {
     ]);
     expect(recipeTable(RECIPE, slice("gh"))[0]).toMatchObject({ name: "GitHub CLI", group: HERE_GROUP, heavy: false });
     expect(recipeTable(RECIPE, slice("gh"))[0]!.size).toBe(42188962);
-    // The one row the catalog could not measure reads as unknown.
-    expect(shape(recipeTable(RECIPE, slice("op")))).toEqual([["off", "1Password CLI", "in the catalog, on request", "size unknown"]]);
+    expect(shape(recipeTable(RECIPE, slice("op")))).toEqual([["off", "1Password CLI", "in the catalog, on request", "41.0 MB"]]);
   });
 
   it("a row under the floor says so beside its counts, a heavy row against its own, and the footer names the floor once", () => {
@@ -70,6 +69,8 @@ describe("the table of what travels", () => {
       ["off", "Go", "in the catalog, on request", "239.1 MB"],
     ]);
     expect(rows[2]).toMatchObject({ id: "cuda", kind: "custom", group: ADDED_GROUP, base: false, heavy: true });
+    // A custom row without a size is the one kind the totals cannot count.
+    expect(totalsLine(rows)).toBe("On: 4 rows, 2.1 GB, 1 of unknown size");
     expect(GROUP_LABEL[ADDED_GROUP]).toBe("added");
     // The agents table never carries one, and a recipe with none draws no such row.
     expect(recipeTable({ ...RECIPE, custom }, slice("claude")).map(r => r.id)).toEqual(["claude"]);
@@ -110,7 +111,7 @@ describe("the table of what travels", () => {
   it("the totals: what comes, what it downloads, and how many sizes the catalog does not have", () => {
     expect(totalsLine(recipeTable(with_(used("go", 3, 40)), slice("node", "claude", "go")), "tools")).toBe("On: 3 tools, 645.9 MB");
     expect(totalsLine(recipeTable({ ...RECIPE, rows: [] }, slice("claude", "go", "ripgrep")))).toBe("On: 1 row, 4.5 MB");
-    expect(totalsLine(recipeTable(with_(used("op", 1, 1)), slice("op", "ripgrep")))).toBe("On: 2 rows, 4.5 MB, 1 of unknown size");
+    expect(totalsLine(recipeTable(with_(used("op", 1, 1)), slice("op", "ripgrep")))).toBe("On: 2 rows, 45.4 MB");
     expect(totalsLine([])).toBe("On: 0 rows, 0 B");
     // A group's header carries the same two facts over its own rows, the base counted as rows and not as ticks.
     expect(groupTotal(recipeTable(with_(used("go", 3, 40)), slice("node", "go")).filter(r => r.base))).toBe("1  198.8 MB");

@@ -160,6 +160,9 @@ importers:
       '@wsp/adapter-claude':
         specifier: workspace:*
         version: link:../../packages/adapter-claude
+      '@wsp/catalog':
+        specifier: workspace:*
+        version: link:../../packages/catalog
       '@wsp/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

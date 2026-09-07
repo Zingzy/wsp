@@ -20,6 +20,7 @@ import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
+import { isMissing } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { importInto } from "./vault.js";
 
@@ -47,7 +48,6 @@ export class MachineAliveError extends Error {
   }
 }
 
-const isMissing = (e: unknown): boolean => (e as { kind?: unknown }).kind === "missing";
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** How often the seal asks for the snapshot the provider refused with its 502, and how long it waits between asks. */
@@ -136,7 +136,6 @@ export interface PrepareBuilderOptions extends MachineSize {
   deployDaemon?: (machine: Machine) => Promise<void | string>;
   /** Harness install; its sha is recorded in the manifest. */
   setup: string;
-  setupTimeoutMs?: number;
   /** The person's files, agents and tools: files after the daemon, agents with the harness, tools last. */
   import?: GoldenImport;
   /** The upload's transport; tests inject one. */
@@ -277,7 +276,6 @@ export interface ImportResult {
 export interface ApplyImportOptions {
   import?: GoldenImport;
   setup: string;
-  setupTimeoutMs?: number;
   /** What the base stage did on this builder, so a floor row that did not land is in the result with the person's tools. */
   base?: ToolResult[];
   /** Stages this builder already carries; those for the same recipe hash are skipped. */
@@ -294,9 +292,9 @@ const UPLOAD_HEADROOM = 256 * MIB;
 const AGENTS_DISK_FLOOR = 800 * MIB;
 const AGENT_TIMEOUT_S = 900;
 const SHELL_TIMEOUT_S = 300;
-/** A harness-stage install under the guard, with every road's network lines ahead of it: the Node floor and the
- * agents' installers type the bare curl the road table's function defines, and may type any manager. */
-const guardedHarness = (script: string): string => guarded(["set -euo pipefail", ...ROAD_STEPS.script.env, script].join("\n"), AGENT_TIMEOUT_S);
+/** A harness-stage install under the guard, with every road's network lines ahead of it: the setup line, the Node
+ * floor and the agents' installers type the bare curl the road table's function defines, and may type any manager. */
+const guardedHarness = (script: string): string => guarded([...ROAD_STEPS.script.env, script].join("\n"), AGENT_TIMEOUT_S);
 const SHELL_CHECK_S = 60;
 
 /** One start of the login shell the way the app's pty runs it, a login shell (profile.d puts the tools on PATH before
@@ -413,10 +411,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     stage("installing-harness", ALREADY_APPLIED);
   } else {
     stage("installing-harness");
-    const res = await machine.run(opts.setup, { deadlineMs: opts.setupTimeoutMs ?? 300_000, onLine: line => stage("installing-harness", line) });
-    if (res.exitCode !== 0) {
-      throw new Error(`golden setup failed (exit ${res.exitCode}): ${res.stderr.slice(-500)}`);
-    }
+    const res = await machine.run(guardedHarness(opts.setup), { deadlineMs: guardDeadlineMs(AGENT_TIMEOUT_S), onLine: line => stage("installing-harness", line) });
+    if (res.exitCode !== 0) throw new Error(`golden setup failed: ${reasonOf(res, AGENT_TIMEOUT_S)}`);
     if (!only) {
       ran = true;
       const node = imp.node !== undefined ? await installNode(machine, imp.node, stage) : undefined;
@@ -619,7 +615,6 @@ export interface BuildGoldenOptions extends MachineSize {
   kind?: MachineKind;
   baseTemplate?: string;
   manifest?: GoldenManifest;
-  setupTimeoutMs?: number;
   smokeTimeoutMs?: number;
   onStage?: StageListener;
 }
@@ -684,7 +679,6 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
       onStage: stage,
       ...(opts.import !== undefined ? { import: opts.import } : {}),
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
-      ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
     });
     stage("ready");
     return {
@@ -837,7 +831,6 @@ export interface GoldenDelta {
 
 export interface ApplyDeltaOptions {
   setup: string;
-  setupTimeoutMs?: number;
   /** The smoke of the version being updated; removed agents leave it, added ones join it. */
   previousSmoke: string;
   /** The tools missing from the version being updated; those the delta neither retires nor plans again stay missing. */
@@ -921,7 +914,6 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
     onStage: stage,
     ...(retired.length > 0 ? { retired } : {}),
     ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
-    ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
   });
   const result = applied.result;
   if (!reported && retired.length > 0) report?.(result);
@@ -948,7 +940,6 @@ export interface UpgradeBuilderOptions extends MachineSize {
   head: GoldenVersion;
   delta: GoldenDelta;
   setup: string;
-  setupTimeoutMs?: number;
   fetch?: typeof globalThis.fetch;
   onStage?: StageListener;
 }
@@ -982,7 +973,6 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
       ...(opts.head.leftBehind !== undefined ? { previousLeftBehind: opts.head.leftBehind } : {}),
       onStage: stage,
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
-      ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),
     });
     stage("ready");
     return {
@@ -1012,7 +1002,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
 export async function buildGolden(
   opts: BuildGoldenOptions,
 ): Promise<{ manifest: GoldenManifest; version: GoldenVersion }> {
-  const { backend, setup, smoke, kind, baseTemplate, manifest, setupTimeoutMs, smokeTimeoutMs, onStage, labels, ...size } = opts;
+  const { backend, setup, smoke, kind, baseTemplate, manifest, smokeTimeoutMs, onStage, labels, ...size } = opts;
   const builder = await prepareBuilder({
     backend,
     setup,
@@ -1020,7 +1010,6 @@ export async function buildGolden(
     labels: { ...labels, [BUILDER_LABEL]: "1" },
     ...(kind !== undefined ? { kind } : {}),
     ...(baseTemplate !== undefined ? { baseTemplate } : {}),
-    ...(setupTimeoutMs !== undefined ? { setupTimeoutMs } : {}),
     ...(onStage !== undefined ? { onStage } : {}),
   });
   return sealGolden(builder, {

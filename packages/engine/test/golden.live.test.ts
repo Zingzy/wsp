@@ -2,7 +2,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { buildGolden, forkGolden, prepareBuilder, sealGolden } from "../src/golden.js";
 import { SolariBackend } from "../src/solari-backend.js";
 import type { Machine } from "../src/machine.js";
-import { CLAUDE_INSTALL, claudeEnvs, isReserved, LIVE, liveEnv } from "./live.js";
+import { GOLDEN_SETUP } from "@wsp/catalog";
+import { claudeEnvs, isReserved, LIVE, liveEnv } from "./live.js";
 
 const TEST_LABEL = { wsp: "1", "wsp-test": "golden-live" };
 
@@ -29,7 +30,7 @@ describe.runIf(LIVE)("golden pipeline (live: P1+P2 replay)", () => {
       memMb: 4096,
       envs: claudeEnvs(env),
       labels: TEST_LABEL,
-      setup: CLAUDE_INSTALL,
+      setup: GOLDEN_SETUP,
       smoke: "claude --version",
     });
     const tBuild = Date.now() - t0;
@@ -89,7 +90,7 @@ describe.runIf(LIVE)("interactive golden (live: prepare, sit, seal)", () => {
       memMb: 4096,
       envs: claudeEnvs(env),
       labels: label,
-      setup: CLAUDE_INSTALL,
+      setup: GOLDEN_SETUP,
       onStage: s => stages.push(s),
     });
     const tPrepare = Date.now() - t0;

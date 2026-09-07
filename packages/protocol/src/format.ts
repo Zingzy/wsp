@@ -325,6 +325,17 @@ export function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
+/** One name inside a comma-joined list of names: quoted when the name carries that comma itself, so a free-text
+ * label an agent wrote reads as one entry and not as two nameless ones. */
+export function listedName(name: string): string {
+  return name.includes(",") ? JSON.stringify(name) : name;
+}
+
+/** A list of names as every tally that names its rows prints it, each name by the rule above. */
+export function nameList(names: readonly string[]): string {
+  return names.map(listedName).join(", ");
+}
+
 /** A thread count with its noun, as the sidebar's counts and the verbs' lines say it. */
 export function fmtThreads(n: number): string {
   return plural(n, "thread");
@@ -508,6 +519,28 @@ export function vaultOverCapLine(bytes: number, capBytes: number): string {
  * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
 export function vaultKeptLine(why: string): string {
   return `nap kept the previous vault; ${why}`;
+}
+
+/** Which call found the provider no longer knew a record's machine: the status poll's read, a pause, a wake's read,
+ * the sweep's read of a machine its listing lacked, or the record load at host start. */
+export type GoneSeenBy = "status poll" | "pause" | "wake" | "sweep" | "record load";
+
+/** One sighting of a machine gone at the provider: who saw it, when (epoch ms), and the provider's answer to that
+ * call when it answered in words (its status and message); a state read that came back gone carries none. */
+export interface GoneSighting {
+  by: GoneSeenBy;
+  at: number;
+  answer?: string;
+}
+
+/** What a record says about a machine the provider stopped knowing: which call found it gone and the second it did,
+ * quoting the provider where it said anything. Without a sighting, only that it is gone. */
+export function goneWords(machineId: string, seen?: GoneSighting): string {
+  const base = `machine ${machineId} is gone at the provider`;
+  if (seen === undefined) return base;
+  const at = new Date(seen.at).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const answer = seen.answer === undefined || seen.answer === "" ? "" : ` (${seen.answer})`;
+  return `${base}: the ${seen.by} found it gone at ${at}${answer}`;
 }
 
 /** The machine row's line when a record that said paused met a machine the provider was running all along (a nap

@@ -13,6 +13,7 @@ import {
   type TurnDiffSummary,
   type TurnId,
   type TurnSummary,
+  type WorkLogTone,
 } from "./adapt";
 import { resolveWorkEntryToolPresentation } from "../../work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "../../work-log/scrollAnchor";
@@ -36,13 +37,13 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   BrainIcon,
-  CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
   HammerIcon,
+  InfoIcon,
   SearchIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -1143,7 +1144,7 @@ function ThinkingTimelineRow() {
   // Reserve the activity row during setup so the handoff keeps the same height; nothing thinks on a machine that is not running.
   return (
     <div className="min-h-7">
-      {isPreparingWorktree || machineWait !== null ? null : <LiveActivityRow label={THINKING_LABEL} iconName="brain" />}
+      {isPreparingWorktree || machineWait !== null ? null : <LiveActivityRow label={THINKING_LABEL} tone="thinking" iconName="brain" />}
     </div>
   );
 }
@@ -1390,10 +1391,12 @@ function WorkEntryLabelText({ label }: { label: WorkEntryLabel }) {
 
 function LiveActivityRow({
   label,
+  tone,
   iconName,
   failed = false,
 }: {
   label: WorkEntryLabel;
+  tone: WorkLogTone;
   iconName?: WorkEntryIconName;
   failed?: boolean;
 }) {
@@ -1401,12 +1404,13 @@ function LiveActivityRow({
     <div className="relative min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed">
       <LiveActivityContent
         label={label}
+        tone={tone}
         iconName={iconName}
         failed={failed}
         announceFailure={failed}
       />
       <ActivityShimmerOverlay>
-        <LiveActivityContent label={label} iconName={iconName} failed={failed} highlighted />
+        <LiveActivityContent label={label} tone={tone} iconName={iconName} failed={failed} highlighted />
       </ActivityShimmerOverlay>
     </div>
   );
@@ -1414,12 +1418,14 @@ function LiveActivityRow({
 
 function LiveActivityContent({
   label,
+  tone,
   iconName,
   failed = false,
   announceFailure = false,
   highlighted = false,
 }: {
   label: WorkEntryLabel;
+  tone: WorkLogTone;
   iconName: WorkEntryIconName | undefined;
   failed?: boolean;
   announceFailure?: boolean;
@@ -1433,14 +1439,14 @@ function LiveActivityContent({
       className={cn(
         "flex min-h-6 min-w-0 items-center gap-1.5 py-0.5",
         resolvedIconName ? "px-0.5" : "px-1",
-        highlighted ? "text-foreground" : "text-secondary-label",
+        highlighted ? "text-foreground" : WORK_TONES[tone].labelClass,
       )}
     >
       {resolvedIconName ? (
         <span
           className={cn(
             "flex size-6 shrink-0 items-center justify-center",
-            highlighted ? "text-foreground" : "text-icon-muted",
+            highlighted ? "text-foreground" : WORK_TONES[tone].iconClass,
           )}
           role={announceFailure ? "img" : undefined}
           aria-label={announceFailure ? "Tool call failed" : undefined}
@@ -1471,11 +1477,12 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
     >
       {row.active ? (
-        <LiveActivityRow label={label} iconName={workEntryIconName(row.entry)} failed={failed} />
+        <LiveActivityRow label={label} tone={row.entry.tone} iconName={workEntryIconName(row.entry)} failed={failed} />
       ) : (
         <div className="min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed">
           <LiveActivityContent
             label={label}
+            tone={row.entry.tone}
             iconName={workEntryIconName(row.entry)}
             failed={failed}
             announceFailure={failed}
@@ -1764,11 +1771,11 @@ type WorkEntryIconName =
   | "bot"
   | "brain"
   | "browser"
-  | "check"
   | "circle-alert"
   | "eye"
   | "globe"
   | "hammer"
+  | "info"
   | "search"
   | "square-pen"
   | "terminal"
@@ -1784,8 +1791,6 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
       return <BrainIcon className={className} aria-hidden />;
     case "browser":
       return <GlobeIcon className={className} aria-hidden />;
-    case "check":
-      return <CheckIcon className={className} aria-hidden />;
     case "circle-alert":
       return <CircleAlertIcon className={className} aria-hidden />;
     case "eye":
@@ -1794,6 +1799,8 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
       return <GlobeIcon className={className} aria-hidden />;
     case "hammer":
       return <HammerIcon className={className} aria-hidden />;
+    case "info":
+      return <InfoIcon className={className} aria-hidden />;
     case "search":
       return <SearchIcon className={className} aria-hidden />;
     case "square-pen":
@@ -1809,33 +1816,19 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
   }
 }
 
-function workToneIcon(tone: TimelineWorkEntry["tone"]): {
-  iconName: WorkEntryIconName;
-  className: string;
-} {
-  if (tone === "error") {
-    return {
-      iconName: "circle-alert",
-      className: "text-foreground",
-    };
-  }
-  if (tone === "thinking") {
-    return {
-      iconName: "brain",
-      className: "text-foreground",
-    };
-  }
-  if (tone === "info") {
-    return {
-      iconName: "check",
-      className: "text-icon-muted",
-    };
-  }
-  return {
-    iconName: "zap",
-    className: "text-foreground",
-  };
+interface WorkToneStyle {
+  readonly icon: WorkEntryIconName;
+  readonly iconClass: string;
+  readonly labelClass: string;
 }
+
+// The one table a work row's tone is drawn from. A notice states a fact, so it draws neither a check nor a cross.
+const WORK_TONES: Record<WorkLogTone, WorkToneStyle> = {
+  thinking: { icon: "brain", iconClass: "text-foreground", labelClass: "text-secondary-label" },
+  tool: { icon: "zap", iconClass: "text-icon-muted", labelClass: "text-secondary-label" },
+  notice: { icon: "info", iconClass: "text-icon-muted", labelClass: "font-mono text-muted-foreground" },
+  error: { icon: "circle-alert", iconClass: "text-foreground", labelClass: "text-secondary-label" },
+};
 
 function buildToolCallExpandedBody(
   workEntry: TimelineWorkEntry,
@@ -1865,6 +1858,7 @@ const toolCallExpandedBodyClassName =
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
   if (toolPresentation) return toolPresentation.icon;
+  if (!isToolLike(workEntry)) return WORK_TONES[workEntry.tone].icon;
   const action = toolGroupAction(workEntry);
   if (action !== "other") return toolGroupSummaryIconName(action);
 
@@ -1877,7 +1871,7 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
       return "bot";
   }
 
-  return workToneIcon(workEntry.tone).iconName;
+  return WORK_TONES[workEntry.tone].icon;
 }
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
@@ -1916,7 +1910,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     }
     setExpanded(next);
   };
-  const iconConfig = workToneIcon(workEntry.tone);
+  const tone = WORK_TONES[workEntry.tone];
   const showFailedIndicator = indicatesFailure(workEntry);
   const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
   const entryIconName =
@@ -1939,17 +1933,9 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   // treatment is reserved for severe failures.
   const iconWrapperClass = cn(
     "flex size-6 shrink-0 items-center justify-center",
-    showDestructiveRowStyle
-      ? "text-destructive"
-      : workEntry.tone === "tool" || showFailedIndicator
-        ? "text-icon-muted"
-        : iconConfig.className,
+    showDestructiveRowStyle ? "text-destructive" : showFailedIndicator ? "text-icon-muted" : tone.iconClass,
   );
-  const headingClass = showDestructiveRowStyle
-    ? "font-medium text-destructive"
-    : isToolLike(workEntry)
-      ? "text-secondary-label"
-      : "text-foreground/80";
+  const headingClass = showDestructiveRowStyle ? "font-medium text-destructive" : tone.labelClass;
   const accessibleDisplayText = showFailedIndicator
     ? `${previewText}, tool call failed`
     : previewText;
