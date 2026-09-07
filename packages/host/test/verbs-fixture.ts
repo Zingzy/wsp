@@ -38,7 +38,8 @@ export function captured(): Captured {
 }
 
 /** A harness that answers every prompt with reply(prompt) in two text deltas, or fails the turn when the reply is
- * empty; a resumed start keeps the session id, as the real one does. The prompt `cut` is a turn the transport cut,
+ * empty, with one Bash call between them carrying its input as JSON the way the adapters send it; a resumed start
+ * keeps the session id, as the real one does. The prompt `cut` is a turn the transport cut,
  * as the idle deadline does: a failed done, then an end with no exit code and no result. */
 export const CUT_LINE = "stopped after 15m 00s with no output for 10m";
 export function scriptedAgent(reply: (prompt: string) => string) {
@@ -55,7 +56,7 @@ export function scriptedAgent(reply: (prompt: string) => string) {
         o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
         if (text !== "") {
           o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: text.slice(0, 4) });
-          o.onEvent({ type: "turn.delta", sessionId, kind: "tool_use", text: "ls", toolName: "Bash" });
+          o.onEvent({ type: "turn.delta", sessionId, kind: "tool_use", text: JSON.stringify({ command: "ls" }), toolName: "Bash", toolUseId: "toolu_1" });
           o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: text.slice(4) });
         }
         o.onEvent({ type: "turn.done", sessionId, result });
@@ -136,6 +137,38 @@ export function heldAgent(steers: boolean) {
     end(t, { status: "completed", text });
   };
   return { adapter, starts, steered, interrupted, release };
+}
+
+/** One scripted tool call: the name and input the harness reports for it, and what it answered when it answered
+ * anything, failed the way a harness marks a call that went wrong. */
+export interface ScriptedCall {
+  toolName: string;
+  input: unknown;
+  output?: string;
+  failed?: boolean;
+}
+
+/** A harness whose turn is the tool calls it was handed and nothing else, each carrying its input as the JSON the
+ * adapters send and its answer behind it, then the done that says what the turn took and cost: what a turn that
+ * works for minutes before it answers looks like from the client. */
+export function toolingAgent(calls: ReadonlyArray<ScriptedCall>, result: TurnResult): HarnessAdapterFactory {
+  return () => ({
+    steers: false,
+    start: o => {
+      const sessionId = o.resume ?? randomUUID();
+      const finished = Promise.resolve().then(() => {
+        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        for (const [i, call] of calls.entries()) {
+          o.onEvent({ type: "turn.delta", sessionId, kind: "tool_use", text: JSON.stringify(call.input), toolName: call.toolName, toolUseId: `toolu_${i}` });
+          if (call.output !== undefined) o.onEvent({ type: "turn.delta", sessionId, kind: "tool_result", text: call.output, toolUseId: `toolu_${i}`, isError: call.failed === true });
+        }
+        o.onEvent({ type: "turn.done", sessionId, result });
+        o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        return result;
+      });
+      return { localId: sessionId, finished, interrupt: async () => {} };
+    },
+  });
 }
 
 /** A harness whose turn never ends: the session starts and nothing more arrives. */

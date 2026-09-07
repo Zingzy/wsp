@@ -109,11 +109,15 @@ export interface HelpKey {
   does: string;
 }
 
+/** Text that stands back from what it sits beside, at a colour depth: a grey from 256 colours up, dim at 16, plain
+ * at none. */
+export const muted = (s: string, depth: number): string => (depth <= 1 ? s : depth < 8 ? styleText("dim", s) : grey(GREY.mid, s));
+
 /** The help line under a screen at a colour depth: keys in one grey and what they do in a dimmer one from 256 colours up, plain keys and dim words at 16, plain text at none; entries joined with a dot. */
 export function helpLine(keys: readonly HelpKey[], depth: number): string {
   if (depth <= 1) return keys.map(k => `${k.key} ${k.does}`).join(DOT);
-  if (depth < 8) return keys.map(k => `${k.key} ${styleText("dim", k.does)}`).join(styleText("dim", DOT));
-  return keys.map(k => `${grey(GREY.bright, k.key)} ${grey(GREY.mid, k.does)}`).join(grey(GREY.mid, DOT));
+  const key = depth < 8 ? (s: string) => s : (s: string) => grey(GREY.bright, s);
+  return keys.map(k => `${key(k.key)} ${muted(k.does, depth)}`).join(muted(DOT, depth));
 }
 
 /** The columns a card's bar and its two spaces take before each line. clack's log.message writes lines as they are

@@ -72,6 +72,199 @@ export function notifyLine(threadId: string, result: TurnResult): string {
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
 }
 
+/** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, then
+ * what it cost. The app's chat footer and the command line's last line read from this one list. */
+export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }): string[] {
+  const parts: string[] = [];
+  if (typeof turn.durationMs === "number") parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
+  if (typeof turn.costUsd === "number") parts.push(fmtCost(turn.costUsd));
+  return parts;
+}
+
+/** The chat footer as one line, for a stream that has no footer: the outcome word, then what it worked and cost. */
+export function turnSettledLine(result: TurnResult): string {
+  return [result.status, ...turnSettledParts(result)].join(" · ");
+}
+
+/** One tool call's input, as the wire's delta carries it: the JSON the harness reported, already parsed. */
+type ToolInput = Readonly<Record<string, unknown>>;
+
+/** The line one tool name reads as; undefined when the call's input does not carry what the line needs. */
+type ToolLine = (input: ToolInput) => string | undefined;
+
+/** What kind of item a call is to a client that groups its rows by kind, in the words the app's transcript uses. */
+export type ToolItemType = "command_execution" | "file_change" | "web_search" | "collab_agent_tool_call" | "mcp_tool_call";
+
+/** What a call asks of the machine, for the client that puts the ask to a person. */
+export type ToolRequestKind = "command" | "file-read" | "file-change";
+
+/** One tool's row: the line its call reads as, the input field a client shows for it, what kind of item the call is,
+ * the paths it changed when it changes any, and whether it looked through the code. */
+interface ToolRow {
+  readonly line: ToolLine;
+  readonly shows: readonly string[];
+  readonly itemType?: ToolItemType;
+  readonly requestKind?: ToolRequestKind;
+  readonly paths?: (input: ToolInput) => readonly string[];
+  readonly codeSearch?: boolean;
+}
+
+function toolField(input: ToolInput, name: string): string | undefined {
+  const value = input[name];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function firstField(input: ToolInput, fields: readonly string[]): string | undefined {
+  return fields.map(name => toolField(input, name)).find(value => value !== undefined);
+}
+
+const shellRow: ToolRow = {
+  line: input => {
+    const command = toolField(input, "command");
+    return command === undefined ? undefined : `$ ${titleLine(command)}`;
+  },
+  shows: ["description"],
+  itemType: "command_execution",
+  requestKind: "command",
+};
+
+const pathRow = (verb: string, field: string, requestKind: ToolRequestKind): ToolRow => ({
+  line: input => {
+    const path = toolField(input, field);
+    return path === undefined ? undefined : `${verb} ${path}`;
+  },
+  shows: [field],
+  requestKind,
+  ...(requestKind === "file-change"
+    ? { itemType: "file_change" as const, paths: (input: ToolInput) => { const path = toolField(input, field); return path === undefined ? [] : [path]; } }
+    : {}),
+});
+
+const aboutRow = (verb: string, field: string, rest: Omit<ToolRow, "line" | "shows"> = {}): ToolRow => ({
+  line: input => {
+    const what = toolField(input, field);
+    return what === undefined ? undefined : `${verb} ${titleLine(what)}`;
+  },
+  shows: [field],
+  ...rest,
+});
+
+/** Codex reports every path one call touched in a single change item; Claude reports one path per call. */
+function changedPaths(input: ToolInput): readonly string[] {
+  const changes = input["changes"];
+  if (!Array.isArray(changes)) return [];
+  return changes.flatMap(change => {
+    const path = typeof change === "object" && change !== null ? (change as ToolInput)["path"] : undefined;
+    return typeof path === "string" && path.length > 0 ? [path] : [];
+  });
+}
+
+const changeRow: ToolRow = {
+  line: input => {
+    const paths = changedPaths(input);
+    if (paths.length === 0) return undefined;
+    return paths.length === 1 ? `edited ${paths[0]}` : `edited ${plural(paths.length, "file")}`;
+  },
+  shows: [],
+  itemType: "file_change",
+  requestKind: "file-change",
+  paths: changedPaths,
+};
+
+/** Every tool a harness reports, one row per name, Claude's and Codex's alike: what the command line writes for the
+ * call and what the app's transcript makes of it come from the same row, so a new tool is a row here and nothing
+ * else. A name with no row reads as itself, by the fields below. */
+const TOOL_ROWS: ReadonlyMap<string, ToolRow> = new Map<string, ToolRow>([
+  ["Bash", shellRow],
+  ["command_execution", shellRow],
+  ["Read", pathRow("read", "file_path", "file-read")],
+  ["Write", pathRow("wrote", "file_path", "file-change")],
+  ["Edit", pathRow("edited", "file_path", "file-change")],
+  ["MultiEdit", pathRow("edited", "file_path", "file-change")],
+  ["NotebookEdit", pathRow("edited", "notebook_path", "file-change")],
+  ["file_change", changeRow],
+  ["Grep", aboutRow("searched code for", "pattern", { codeSearch: true })],
+  ["Glob", aboutRow("searched code for", "pattern", { codeSearch: true })],
+  ["WebSearch", aboutRow("searched the web for", "query", { itemType: "web_search" })],
+  ["web_search", aboutRow("searched the web for", "query", { itemType: "web_search" })],
+  ["WebFetch", aboutRow("fetched", "url", { itemType: "web_search" })],
+  ["Task", aboutRow("agent:", "description", { itemType: "collab_agent_tool_call" })],
+]);
+
+/** The fields a call's row shows when its own row names none, most particular first. */
+const SHOWN_FIELDS: readonly string[] = ["file_path", "notebook_path", "pattern", "query", "url", "description", "prompt"];
+
+/** The call's input as an object, or undefined while it is still arriving or when it is not one. */
+function toolInput(input: string): ToolInput | undefined {
+  let fields: unknown;
+  try {
+    fields = JSON.parse(input);
+  } catch {
+    return undefined;
+  }
+  return typeof fields === "object" && fields !== null && !Array.isArray(fields) ? (fields as ToolInput) : undefined;
+}
+
+/** The one line a tool call reads as while a turn runs: the shell line behind a prompt, the file behind the verb
+ * that touched it, the search behind what it looked for, else the tool's own name. `input` is the delta's text,
+ * the JSON the harness reported for the call; text that is not an object leaves the name alone. */
+export function toolActivityLine(toolName: string | undefined, input: string): string {
+  const name = toolName ?? "tool";
+  const row = TOOL_ROWS.get(name);
+  if (row === undefined) return name;
+  const fields = toolInput(input);
+  return fields === undefined ? name : row.line(fields) ?? name;
+}
+
+/** What a tool call is, for a client whose rows carry more than one line: the field to show, the shell command and
+ * what it was for, the paths the call changed, and the kinds a client groups by. Input that is not an object yet is
+ * shown as it stands, since a call streams in and a row is drawn before it is whole. */
+export interface ToolCallFacts {
+  readonly detail?: string;
+  readonly command?: string;
+  readonly description?: string;
+  readonly changedFiles?: readonly string[];
+  readonly itemType?: ToolItemType;
+  readonly requestKind?: ToolRequestKind;
+}
+
+export function toolCallFacts(toolName: string, input: string): ToolCallFacts {
+  const row = TOOL_ROWS.get(toolName);
+  const itemType = row?.itemType ?? (toolName.startsWith("mcp__") ? "mcp_tool_call" : undefined);
+  const kinds = {
+    ...(itemType !== undefined ? { itemType } : {}),
+    ...(row?.requestKind !== undefined ? { requestKind: row.requestKind } : {}),
+  };
+  const fields = toolInput(input);
+  if (fields === undefined) return { ...kinds, ...(input.length > 0 ? { detail: input } : {}) };
+  const detail = firstField(fields, [...(row?.shows ?? []), ...SHOWN_FIELDS]);
+  const shell = row?.requestKind === "command";
+  const command = shell ? toolField(fields, "command") : undefined;
+  const description = shell ? toolField(fields, "description") : undefined;
+  const changedFiles = row?.paths?.(fields) ?? [];
+  return {
+    ...kinds,
+    ...(detail !== undefined ? { detail } : {}),
+    ...(command !== undefined ? { command } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(changedFiles.length > 0 ? { changedFiles } : {}),
+  };
+}
+
+/** Whether a call looked through the code, for the client that folds those rows together. */
+export function isCodeSearchTool(toolName: string | undefined): boolean {
+  return toolName !== undefined && TOOL_ROWS.get(toolName)?.codeSearch === true;
+}
+
+/** What one tool call answered, as the line under the call: its first line by the rule the call's own line is cut
+ * by, with the word ahead of it when the harness marked the call failed. Nothing when a call that worked answered
+ * with nothing, since a blank line says less than no line. */
+export function toolResultLine(text: string, isError = false): string | undefined {
+  const first = titleLine(text);
+  if (!isError) return first === "" ? undefined : first;
+  return first === "" ? "failed" : `failed: ${first}`;
+}
+
 /** A count with its noun, the noun pluralised by an s: the one rule every line that counts rows, sessions, calls,
  * threads or a plan's files reads, so none of them says "1 sessions". A noun that does not take an s is spelled by
  * its caller. */
@@ -95,8 +288,8 @@ export function deleteNotice(threads: number): string {
   return `Its machine is deleted at the provider; its record and ${fmtThreads(threads)} leave this computer.`;
 }
 
-/** A thread's title as every list shows it: the prompt's first non-empty line with its whitespace collapsed, so a
- * multi-paragraph brief is one row in the CLI's table and one line in the sidebar. */
+/** Text cut to one line: its first non-empty line with the whitespace collapsed, so a multi-paragraph brief is one
+ * row in the CLI's table and one line in the sidebar, and a heredoc of a command is one line of a turn's activity. */
 export function titleLine(text: string): string {
   const first = text.split(/\r?\n/).find(l => l.trim().length > 0) ?? "";
   return first.replace(/\s+/g, " ").trim();
