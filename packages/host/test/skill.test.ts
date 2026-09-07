@@ -42,6 +42,24 @@ describe("the wsp skill", () => {
     for (const outcome of SessionStartOutcome.options) expect(WSP_SKILL, outcome).toContain(`(outcome \`${outcome}\`)`);
   });
 
+  it("tells an orchestrating agent to start threads detached and wait with threads wait, one finished thread per call, and never to poll threads", () => {
+    expect(WSP_SKILL).toContain("| `wsp threads wait <thread>... [--timeout <s>]` | `threads_wait` (threads, timeout) |");
+    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### threads wait"), WSP_SKILL.indexOf("### stop"));
+    expect(section).toContain("wsp thread new --in dev --detach");
+    expect(section).toContain("wsp threads wait 1a2b3c4d 5e6f7a8b --timeout 600");
+    expect(section).toContain("One thread per call");
+    expect(section).toContain("`thread 1a2b3c4d still running after 10m`");
+    expect(section).toContain("Never poll `threads`");
+    const loop = WSP_SKILL.slice(WSP_SKILL.indexOf("## The loop for building with wsp"), WSP_SKILL.indexOf("## Where the person steps in"));
+    expect(loop).toContain("--detach");
+    expect(loop).toContain("`threads_wait`");
+    expect(loop).toContain("never poll `threads`");
+    expect(loop).not.toContain("nohup wsp thread new");
+    // The MCP instructions carry the road too, since an agent holding only the tools reads nothing else.
+    expect(INSTRUCTIONS).toContain("`detach`");
+    expect(INSTRUCTIONS).toContain("`threads_wait`");
+  });
+
   it("quotes the failure a reply with a background command gets, as the adapter words it", () => {
     const rules = WSP_SKILL.slice(WSP_SKILL.indexOf("## Rules learned the hard way"));
     expect(rules).toContain(`\`${backgroundTasksLine(1)}\``);

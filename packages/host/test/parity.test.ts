@@ -289,10 +289,12 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       .join("\n");
     expect(flagDrift(stale, COMMAND_LINES)).toEqual([
       "wsp thread new reads --access, which its row does not show",
+      "wsp thread new reads --detach, which its row does not show",
       "wsp thread new reads --effort, which its row does not show",
       "wsp thread new reads --model, which its row does not show",
       "wsp thread new reads --title, which its row does not show",
       "wsp send reads --access, which its row does not show",
+      "wsp send reads --detach, which its row does not show",
       "wsp send reads --effort, which its row does not show",
       "wsp send reads --model, which its row does not show",
     ]);
@@ -320,8 +322,10 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     }
   });
 
-  it("when a turn ends and when the notify line goes are the runtime's words in every door: the skill, the thread_new tool and the help", async () => {
-    const tool = (await listTools()).find(t => t.name === "thread_new")!.description!;
+  it("when a turn ends and when the notify line goes are the runtime's words in every door: the skill, the thread_new tool and the help; the wait tool says the wait is the notify line's", async () => {
+    const tools = await listTools();
+    const tool = tools.find(t => t.name === "thread_new")!.description!;
+    expect(tools.find(t => t.name === "threads_wait")!.description).toContain("the one line a notify sends");
     for (const text of [tool, WSP_SKILL]) {
       expect(text).toContain(TURN_END_WORDS);
       expect(text).toContain(NOTIFY_WORDS);

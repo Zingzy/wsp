@@ -41,6 +41,7 @@ import {
   TerminalConfig,
   TerminalScheme,
   ThreadView,
+  TurnStatus,
   WorkspaceView,
   actionRefusal,
   authRefusal,
@@ -61,6 +62,8 @@ import {
   importConsented,
   importRequest,
   noAdapterLine,
+  notifyLine,
+  notifyTail,
   offeredSize,
   secretOffer,
   secretSignalsLine,
@@ -75,6 +78,7 @@ import {
   unknownAgentLine,
   usageRefusal,
   verbFailure,
+  waitTimedOutLine,
   workspaceState,
   workspaceWord,
   type Capabilities,
@@ -366,15 +370,25 @@ export async function workspaceOf(client: HostClient, ref: string): Promise<Work
   throw new Error(`no workspace ${ref}`);
 }
 
-/** A thread by id, or by a prefix of it that names exactly one. */
-export async function threadOf(client: HostClient, ref: string): Promise<ThreadView> {
-  const all = await threads(client);
+/** The thread a reference names among these rows: by id, or by a prefix of it that names exactly one. */
+function pickThread(all: readonly ThreadView[], ref: string): ThreadView {
   const exact = all.find(t => t.id === ref);
   if (exact !== undefined) return exact;
   const prefixed = all.filter(t => t.id.startsWith(ref));
   if (prefixed.length === 1) return prefixed[0]!;
   if (prefixed.length > 1) throw new Error(`${prefixed.length} threads start with ${ref}; give more of the id`);
   throw new Error(`no thread ${ref}`);
+}
+
+/** A thread by id, or by a prefix of it that names exactly one. */
+export async function threadOf(client: HostClient, ref: string): Promise<ThreadView> {
+  return pickThread(await threads(client), ref);
+}
+
+/** Several threads by the same rule, off one listing, in the order named. */
+export async function threadsOf(client: HostClient, refs: readonly string[]): Promise<ThreadView[]> {
+  const all = await threads(client);
+  return refs.map(ref => pickThread(all, ref));
 }
 
 export type ThreadRow = ThreadView & { workspaceName: string };
@@ -680,25 +694,15 @@ export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {})
 /** A start reply the protocol schema refuses: the host process predates or postdates this command's build. */
 const OTHER_VERSION = "the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up";
 
-/** Starts a turn as `startedBy` and follows it to its reply: `on.queued` when the runtime says the start waits behind
- * the thread's running turn, `on.started` the thread as soon as the runtime names it, `on.event` every event of the
- * turn with the turn so far. Fails when the host goes away first. The send carries its own request id so an app view
- * with the same text in flight cannot take this turn's start for its own, and so the queued notice is known to be
- * this start's. Events are picked by the turn's id: a start that waited behind the thread's running turn must not
- * read that turn's end as its own. The follow ends at session.done, which carries the whole reply: session.end
- * follows the runtime's exit read and reap, minutes later when the machine is slow to answer. A turn the runtime
- * ended itself has no done, so its end is the last event instead. */
-export async function follow(
-  client: HostClient,
-  start: Record<string, unknown>,
-  startedBy: SessionOrigin,
-  on: { queued?(): void; started?(turn: Turn): void; event(e: SessionEvent, turn: Turn): void },
-): Promise<Turn> {
-  const pushed = pushedFrames(client);
+/** Starts a turn as `startedBy` and answers with it the moment the runtime names it: what a detached start returns
+ * and what a follow goes on from. `onQueued` fires when the runtime says the start waits behind the thread's running
+ * turn. The send carries its own request id so an app view with the same text in flight cannot take this turn's
+ * start for its own, and so the queued notice is known to be this start's. */
+async function begin(client: HostClient, start: Record<string, unknown>, startedBy: SessionOrigin, onQueued?: () => void): Promise<{ turn: Turn; turnId: string }> {
   await client.events();
   const requestId = randomUUID();
   const offQueued = client.onFrame(f => {
-    if (f.type === "session.queued" && f["requestId"] === requestId) on.queued?.();
+    if (f.type === "session.queued" && f["requestId"] === requestId) onQueued?.();
   });
   let answer: Record<string, unknown>;
   try {
@@ -711,26 +715,122 @@ export async function follow(
   const { session, outcome, turnId } = reply.data;
   const threadId = session.threadId;
   if (threadId === undefined) throw new Error("the runtime stamped no thread on the session");
-  const turn: Turn = { session, threadId, outcome };
-  on.started?.(turn);
-  const ended = new Promise<Turn>(done => {
-    pushed.follow(
-      f => sessionEvent(f) && f.turnId === turnId,
-      f => {
-        const e = f as unknown as SessionEvent;
-        if (e.type === "session.start" && e.afterCut === true) turn.afterCut = true;
-        if (e.type === "session.done") turn.result = e.result;
-        if (e.type === "session.end" && e.reason !== undefined) turn.reason = e.reason;
-        on.event(e, turn);
-        if (e.type !== "session.done" && e.type !== "session.end") return;
-        pushed.stop();
-        done(turn);
-      },
-    );
-  });
+  return { turn: { session, threadId, outcome }, turnId };
+}
+
+/** A start whose caller does not stay for the reply: the turn runs on, and a wait on the thread or its notify
+ * carries the end. Answers once the turn is started, so a start queued behind the thread's running turn answers
+ * when that turn has ended and this one began. */
+export async function startDetached(client: HostClient, start: Record<string, unknown>, startedBy: SessionOrigin, onQueued?: () => void): Promise<Turn> {
+  return (await begin(client, start, startedBy, onQueued)).turn;
+}
+
+/** Starts a turn as `startedBy` and follows it to its reply: `on.queued` when the runtime says the start waits behind
+ * the thread's running turn, `on.started` the thread as soon as the runtime names it, `on.event` every event of the
+ * turn with the turn so far. Fails when the host goes away first. Events are picked by the turn's id: a start that
+ * waited behind the thread's running turn must not read that turn's end as its own. The follow ends at
+ * session.done, which carries the whole reply: session.end follows the runtime's exit read and reap, minutes later
+ * when the machine is slow to answer. A turn the runtime ended itself has no done, so its end is the last event
+ * instead. */
+export async function follow(
+  client: HostClient,
+  start: Record<string, unknown>,
+  startedBy: SessionOrigin,
+  on: { queued?(): void; started?(turn: Turn): void; event(e: SessionEvent, turn: Turn): void },
+): Promise<Turn> {
+  const pushed = pushedFrames(client);
   try {
+    const { turn, turnId } = await begin(client, start, startedBy, on.queued);
+    on.started?.(turn);
+    const ended = new Promise<Turn>(done => {
+      pushed.follow(
+        f => sessionEvent(f) && f.turnId === turnId,
+        f => {
+          const e = f as unknown as SessionEvent;
+          if (e.type === "session.start" && e.afterCut === true) turn.afterCut = true;
+          if (e.type === "session.done") turn.result = e.result;
+          if (e.type === "session.end" && e.reason !== undefined) turn.reason = e.reason;
+          on.event(e, turn);
+          if (e.type !== "session.done" && e.type !== "session.end") return;
+          pushed.stop();
+          done(turn);
+        },
+      );
+    });
     return await untilSettled(client, ended);
   } finally {
+    pushed.stop();
+  }
+}
+
+/** A thread's turn as it ended, for whoever waited on it: the thread and the runtime's result for the turn. */
+export interface Ended {
+  threadId: string;
+  result: TurnResult;
+}
+
+/** What a wait came to: the thread that left running, or the deadline that passed first. */
+export type Waited = { ended: Ended } | { timedOutMs: number };
+
+/** A turn that ended with no result and no reason, in the words a follow's failure uses. */
+const NO_RESULT = "turn ended without a result";
+
+/** The thread's latest turn as its transcript ended it: the done's result when the turn replied, else failed with
+ * the runtime's reason when the runtime ended it, else failed as the harness left it. A thread the transcript no
+ * longer holds a turn of answers with its row's status alone. Read newest first, since the end may follow the done
+ * by minutes and an older turn's done must not stand in for a newer turn's. */
+async function endedOf(client: HostClient, workspaceId: string, threadId: string, status: TurnStatus): Promise<Ended> {
+  const { events } = await client.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId });
+  let end: Extract<SessionEvent, { type: "session.end" }> | undefined;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]!;
+    if (e.threadId !== threadId) continue;
+    if (e.type === "session.end") {
+      if (end !== undefined) break;
+      end = e;
+      continue;
+    }
+    if (e.type === "session.done" && (end === undefined || e.turnId === end.turnId)) return { threadId, result: e.result };
+    if (e.type === "session.start" && end !== undefined && e.turnId === end.turnId) break;
+  }
+  if (end !== undefined) return { threadId, result: { status: "failed", error: end.reason ?? NO_RESULT } };
+  return { threadId, result: { status } };
+}
+
+/** The runtime's thread id of a row, the one its events carry; a row from before threads had ids is its own. */
+const threadIdOf = (t: ThreadView): string => t.threadId ?? t.id;
+
+/** Blocks until one of the named threads leaves running and answers with that thread's end: at once for one already
+ * over, else on the first done or end the host pushes for any of them; the deadline when `timeoutMs` passes first.
+ * The rows are listed after the subscription, so an end between the two is a held frame and not a gap. A done
+ * carries its result; an end without one in hand is read off the transcript, since the reply may have landed before
+ * this call. Fails when the host goes away first. */
+export async function firstEnded(client: HostClient, named: readonly ThreadView[], timeoutMs?: number): Promise<Waited> {
+  const pushed = pushedFrames(client);
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await client.events();
+    const rows = await threads(client);
+    const over = named.map(t => rows.find(r => r.id === t.id)).find((r): r is ThreadView & { status: TurnStatus } => r !== undefined && r.status !== "running");
+    if (over !== undefined) return { ended: await endedOf(client, over.workspaceId, threadIdOf(over), over.status) };
+    const ids = new Set(named.map(threadIdOf));
+    const ended = new Promise<Waited>(done => {
+      pushed.follow(
+        f => sessionEvent(f) && (f.type === "session.done" || f.type === "session.end") && f.threadId !== undefined && ids.has(f.threadId),
+        f => {
+          const e = f as unknown as SessionEvent & { threadId: string };
+          pushed.stop();
+          if (e.type === "session.done") done({ ended: { threadId: e.threadId, result: e.result } });
+          else done(endedOf(client, e.workspaceId, e.threadId, "failed").then(ended => ({ ended })));
+        },
+      );
+    });
+    const deadline = new Promise<Waited>(settle => {
+      if (timeoutMs !== undefined) timer = setTimeout(() => settle({ timedOutMs: timeoutMs }), timeoutMs);
+    });
+    return await untilSettled(client, Promise.race([ended, deadline]));
+  } finally {
+    clearTimeout(timer);
     pushed.stop();
   }
 }
@@ -799,6 +899,14 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
   const failure = turnFailure(turn);
   if (failure !== undefined) throw new Error(failure);
   return turn;
+}
+
+/** The verbs' way through a detached start: the queued and joined lines on stderr as a follow prints them, then the
+ * thread's id on stdout the moment the runtime names it, and nothing of the reply, which threads wait carries. */
+async function detachVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, picks: Picks = {}): Promise<void> {
+  const turn = await startDetached(client, start, "cli", () => ctx.io.error(WAITING));
+  if (turn.outcome !== "started") ctx.io.error(JOINED[turn.outcome](picks));
+  ctx.out.emit(turnView(turn), `thread ${turn.threadId}`);
 }
 
 export type ExecExit = Extract<ExecEvent, { type: "exec.exit" }>;
@@ -972,7 +1080,27 @@ const SEND_MEETS = `On a thread whose turn is not running the message starts a n
 
 /** outcome says how the message landed: its own turn, steered into the thread's running one, or queued behind it;
  * afterCut is set when the thread's previous turn ended without a result, so the reply may be missing context. */
-const TurnOut = z.object({ threadId: z.string(), workspaceId: z.string(), harness: z.string(), text: z.string(), outcome: SessionStartOutcome, afterCut: z.literal(true).optional() });
+const TurnOut = z.object({
+  threadId: z.string(),
+  workspaceId: z.string(),
+  harness: z.string(),
+  text: z.string().optional().describe("the reply, complete; absent under detach, where the turn is still running and threads_wait carries its end"),
+  outcome: SessionStartOutcome,
+  afterCut: z.literal(true).optional(),
+});
+/** What a wait answers with for the thread that left running: the turn's outcome and the facts the harness reported,
+ * the reply cut to the notify line's tail. */
+const ThreadEndOut = z.object({
+  threadId: z.string(),
+  status: TurnStatus,
+  durationMs: z.number().optional(),
+  costUsd: z.number().optional(),
+  reply: z.string().optional().describe("the last non-empty line of the reply, or the error when there is no reply"),
+});
+const WaitOut = z.object({
+  finished: ThreadEndOut.optional().describe("the thread that left running; absent when the timeout passed first"),
+  timedOut: z.literal(true).optional().describe("set when the timeout passed with every named thread still running"),
+});
 const ThreadRowOut = ThreadView.extend({ workspaceName: z.string() });
 const Argv = z.array(z.string()).min(1);
 
@@ -986,13 +1114,42 @@ const turnView = (turn: Turn): z.infer<typeof TurnOut> => ({
   threadId: turn.threadId,
   workspaceId: turn.session.workspaceId,
   harness: turn.session.harness,
-  text: turn.result?.text ?? "",
+  ...(turn.result !== undefined ? { text: turn.result.text ?? "" } : {}),
   outcome: turn.outcome,
   ...(turn.afterCut === true ? { afterCut: true as const } : {}),
 });
 
 /** The reply as the tool's text, with the cut line first when the thread's previous turn did not finish. */
-const turnText = (out: z.infer<typeof TurnOut>): string => (out.afterCut === true ? `${AFTER_CUT_LINE}\n${out.text}` : out.text);
+const turnText = (out: z.infer<typeof TurnOut>): string => (out.afterCut === true ? `${AFTER_CUT_LINE}\n${out.text ?? ""}` : out.text ?? "");
+
+/** A detached start's answer on the tool door: the thread's id, as the command line's first line prints it. */
+const detachedOut = (turn: Turn): CallToolResult => asText(`thread ${turn.threadId}`, turnView(turn));
+
+const endView = (ended: Ended): z.infer<typeof ThreadEndOut> => {
+  const reply = notifyTail(ended.result);
+  return {
+    threadId: ended.threadId,
+    status: ended.result.status,
+    ...(ended.result.durationMs !== undefined ? { durationMs: ended.result.durationMs } : {}),
+    ...(ended.result.costUsd !== undefined ? { costUsd: ended.result.costUsd } : {}),
+    ...(reply !== undefined ? { reply } : {}),
+  };
+};
+
+/** A wait's answer on both doors: the finished thread's end under the notify line, or timedOut under the line that
+ * says who is still running. */
+function waitAnswer(named: readonly ThreadView[], waited: Waited): { value: z.infer<typeof WaitOut>; line: string } {
+  if ("ended" in waited) return { value: { finished: endView(waited.ended) }, line: notifyLine(waited.ended.threadId, waited.ended.result) };
+  return { value: { timedOut: true }, line: waitTimedOutLine(named.map(threadIdOf), waited.timedOutMs) };
+}
+
+/** The seconds a --timeout names, as milliseconds; a word that is not a number above zero is refused. */
+function timeoutFlag(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) throw usageRefusal(`--timeout takes seconds, a number above zero, not ${JSON.stringify(value)}`);
+  return seconds * 1_000;
+}
 
 /** The turn's reply as the tool result; a turn that did not complete is a tool error with the harness's reason. */
 function turnOut(turn: Turn): z.infer<typeof TurnOut> {
@@ -1008,6 +1165,7 @@ const WorkspaceIn = z.string().describe("the workspace's name, or its id when tw
 const AgentIn = z.string().optional().describe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
 const NotifyIn = z.string().optional().describe("a thread (by id, or a prefix of it) told in one line each time a turn of the new thread ends, as a message into it; or me, for the person's app");
 const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute; absent means the workspace's project folder, else the home folder");
+const DetachIn = z.boolean().optional().describe("true answers with the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end; for a turn that runs for minutes or an hour, so this call does not block for it");
 const TitleIn = z.string().optional().describe("the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host would generate after the first reply never replaces it; absent lets the thread be named from its opening words and then from its first reply");
 const ConfirmIn = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");
 /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
@@ -1085,7 +1243,7 @@ export const VERBS: readonly Verb[] = [
     about: "every thread as the sidebar lists it: agent, state, who opened it, the folder it works in",
     options: { in: { type: "string" } },
     run: async ctx => {
-      if (ctx.args.length !== 0) throw usageRefusal("wsp threads takes no positional arguments");
+      if (ctx.args.length !== 0) throw usageRefusal("wsp threads takes no positional arguments; wsp threads wait is its one subcommand");
       const rows = await threadRows(await ctx.client(), flag(ctx.flags, "in"));
       ctx.out.emit({ threads: rows }, table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "FOLDER", "TITLE"], ...rows.map(threadLine)]).join("\n"));
       return 0;
@@ -1095,6 +1253,38 @@ export const VERBS: readonly Verb[] = [
       input: { workspace: WorkspaceIn.optional() },
       output: { threads: z.array(ThreadRowOut) },
       call: async ({ workspace: within }, deps) => asJson({ threads: await threadRows(await deps.client(), within) }),
+    }),
+  },
+  {
+    name: "threads wait",
+    usage: "wsp threads wait <thread>... [--timeout <s>]",
+    about: "blocks until one of the threads leaves running and prints its finished line, the one a notify sends; --timeout gives up after so many seconds and says so on stderr",
+    options: { timeout: { type: "string" } },
+    run: async ctx => {
+      if (ctx.args.length === 0) throw usageRefusal("wsp threads wait takes one thread or more");
+      const timeoutMs = timeoutFlag(flag(ctx.flags, "timeout"));
+      const client = await ctx.client();
+      const named = await threadsOf(client, ctx.args);
+      const { value, line } = waitAnswer(named, await firstEnded(client, named, timeoutMs));
+      if (value.timedOut === true) {
+        ctx.out.emit(value);
+        ctx.io.error(line);
+      } else ctx.out.emit(value, line);
+      return 0;
+    },
+    tool: tool({
+      description: `Blocks until one of the named threads leaves running and answers with that thread's end: its id, status (completed, interrupted or failed), how long it worked, what it cost and the last line of its reply, the text being the one line a notify sends. One thread per call: a caller that started three builders calls this three times, dropping each returned id from the list, since a thread already over comes back at once and would come back again. With timeout, the seconds to wait before answering with nothing and timedOut true, so other work fits between calls; keep it under your own tool call limit and call again. Start the threads with thread_new or send with detach true, and never poll threads for a state change.`,
+      input: {
+        threads: z.array(z.string()).min(1).describe("thread ids, or prefixes that each pick one"),
+        timeout: z.number().positive().optional().describe("seconds to wait; absent waits until one of the threads finishes"),
+      },
+      output: WaitOut.shape,
+      call: async ({ threads: refs, timeout }, deps) => {
+        const client = await deps.client();
+        const named = await threadsOf(client, refs);
+        const { value, line } = waitAnswer(named, await firstEnded(client, named, timeout === undefined ? undefined : timeout * 1_000));
+        return asText(line, value);
+      },
     }),
   },
   {
@@ -1392,9 +1582,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "thread new",
-    usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title] "<task>"',
-    about: "opens a thread with the agent, model, effort and access the app offers; follows its first turn",
-    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" }, title: { type: "string" } },
+    usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach] "<task>"',
+    about: "opens a thread with the agent, model, effort and access the app offers; follows its first turn, or with --detach prints the id and returns",
+    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" }, title: { type: "string" }, detach: { type: "boolean" } },
     run: async ctx => {
       const [task] = ctx.args;
       const within = flag(ctx.flags, "in");
@@ -1406,19 +1596,23 @@ export const VERBS: readonly Verb[] = [
       const picks = pickFlags(ctx.flags);
       await checkedStart(client, task, harness, picks, found.id);
       const workspace = await awake(client, found, "send", line => ctx.io.error(line));
-      ctx.out.emit(turnView(await followVerb(ctx, client, openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")), title: flag(ctx.flags, "title") }), true)));
+      const opening = openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")), title: flag(ctx.flags, "title") });
+      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening);
+      else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true)));
       return 0;
     },
     tool: tool({
-      description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll. ${NOTIFY_WORDS}.`,
-      input: { workspace: WorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, title: TitleIn },
+      description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll. ${NOTIFY_WORDS}.`,
+      input: { workspace: WorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, title: TitleIn, detach: DetachIn },
       output: TurnOut.shape,
-      call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, ...input }, deps) => {
+      call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, detach, ...input }, deps) => {
         const client = await deps.client();
         const found = await workspaceOf(client, ref);
         await checkedStart(client, task, harness, input, found.id);
         const target = await awake(client, found, "send", QUIET_LINE);
-        const out = turnOut(await follow(client, openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell), title }), "agent", QUIET_TURN));
+        const opening = openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell), title });
+        if (detach === true) return detachedOut(await startDetached(client, opening, "agent"));
+        const out = turnOut(await follow(client, opening, "agent", QUIET_TURN));
         return asText(turnText(out), out);
       },
     }),
@@ -1454,9 +1648,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "send",
-    usage: 'wsp send <thread> [--model, --effort, --access <value>] "<message>"',
-    about: "a message to the thread, on a named model, effort or access; a running turn keeps its own",
-    options: PICK_OPTIONS,
+    usage: 'wsp send <thread> [--model, --effort, --access <value>] [--detach] "<message>"',
+    about: "a message to the thread, on a named model, effort or access; a running turn keeps its own; --detach prints the id and returns",
+    options: { ...PICK_OPTIONS, detach: { type: "boolean" } },
     run: async ctx => {
       const [ref, message] = ctx.args;
       if (ref === undefined || message === undefined || ctx.args.length !== 2) throw usageRefusal("wsp send takes a thread and one message");
@@ -1465,18 +1659,20 @@ export const VERBS: readonly Verb[] = [
       const thread = await threadOf(client, ref);
       await checkedStart(client, message, thread.harness, picks, thread.workspaceId);
       await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
-      ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks), false, picks)));
+      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, messageTo(thread, message, picks), picks);
+      else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks), false, picks)));
       return 0;
     },
     tool: tool({
-      description: `Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. A model, effort or access named here is the turn's; a turn that joins a running one keeps that one's. ${SEND_MEETS}`,
-      input: { thread: z.string(), message: z.string(), ...PICK_INPUTS },
+      description: `Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end. A model, effort or access named here is the turn's; a turn that joins a running one keeps that one's. ${SEND_MEETS}`,
+      input: { thread: z.string(), message: z.string(), ...PICK_INPUTS, detach: DetachIn },
       output: TurnOut.shape,
-      call: async ({ thread: ref, message, ...input }, deps) => {
+      call: async ({ thread: ref, message, detach, ...input }, deps) => {
         const client = await deps.client();
         const thread = await threadOf(client, ref);
         await checkedStart(client, message, thread.harness, input, thread.workspaceId);
         await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
+        if (detach === true) return detachedOut(await startDetached(client, messageTo(thread, message, input), "agent"));
         const out = turnOut(await follow(client, messageTo(thread, message, input), "agent", QUIET_TURN));
         return asText(turnText(out), out);
       },
