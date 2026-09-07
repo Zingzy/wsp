@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { hostname } from "node:os";
-import { posix } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { hostname, tmpdir } from "node:os";
+import { join, posix } from "node:path";
 import type { AdapterEvent, ExecStream, TurnResult, TurnStatus } from "@wsp/adapter-claude";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import {
@@ -15,6 +16,7 @@ import {
   destExists,
   exportFolder,
   exportPaths,
+  exportPathsInto,
   goldenHead,
   importInto,
   isNetworkError,
@@ -23,7 +25,7 @@ import {
   plural,
   agentsOnMachine,
   guestAgentHomes,
-  stateRoots,
+  stateListing,
   killUntilGone,
   prepareBuilder,
   reap,
@@ -283,10 +285,12 @@ export interface LandRequest {
   dest: string;
   /** Remove what is at dest first; without it an existing dest is refused with kind "exists". */
   replace: boolean;
-  tar: Buffer;
-  /** The agents' state roots as an archive of the guest's root, each agent's home on the guest by catalog id, and the
-   * agents whose state comes home (every one with sessions for the folder when absent). */
-  state?: { tar: Buffer; homes: Readonly<Record<string, string>>; agents?: readonly string[] };
+  /** The archive as a file on this computer, streamed off the machine rather than held in memory; whoever asked for
+   * the landing removes it afterwards. */
+  archive: string;
+  /** The agents' state under the guest's root as an archive on this computer, each agent's home on the guest by
+   * catalog id, and the agents whose state comes home (every one with sessions for the folder when absent). */
+  state?: { archive: string; homes: Readonly<Record<string, string>>; agents?: readonly string[] };
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */
@@ -509,6 +513,8 @@ function outcomeWords(a: ProjectAgentResult): string {
 }
 /** Bounds a merge that hangs; one project's rows take python3 well under it. */
 const MERGE_DEADLINE_MS = 120_000;
+/** Bounds a listing that hangs; walking the agents' homes takes python3 well under it, and past what one inline exec is allowed to run. */
+const LISTING_DEADLINE_MS = 120_000;
 
 /** Runs one agent's merge script on the machine and folds what it printed into the agent's result: rows merged is
  * moved, a store not there yet leaves the rows waiting with the reason, a failure carries the last line of stderr.
@@ -3382,24 +3388,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         bus.emit({ type: "project.export", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });
       };
       const downloading = (what: string) => (p: { bytes: number; total: number }): void => report("downloading", `${what}: ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, p);
+      const scratch = mkdtempSync(join(tmpdir(), "wsp-exported-"));
       try {
         const homes = guestAgentHomes();
-        const roots = stateRoots(homes, o.agents);
+        const listing = stateListing(homes, o.source, o.agents);
         const at = await o.lander.probe(o.dest);
         if (at !== undefined && o.replace !== true) throw destExists(o.dest, at.files);
         report("packing", `Packing ${o.source} on the machine.`);
-        const folder = await exportFolder(entry.machine, o.source, o.lander.caches, { timeoutMs: 600_000, onProgress: downloading("The folder") });
-        const found = roots.length === 0 ? { exitCode: 0, stdout: "", stderr: "" } : await entry.machine.exec(`for p in ${roots.map(shellQuote).join(" ")}; do test -e "$p" && echo "$p"; done; true`, { timeoutMs: INLINE_EXEC_MS });
+        const archive = join(scratch, "folder.tgz");
+        const folder = await exportFolder(entry.machine, o.source, o.lander.caches, archive, { timeoutMs: 600_000, onProgress: downloading("The folder") });
+        const found = listing === "" ? { exitCode: 0, stdout: "", stderr: "" } : await entry.machine.run(listing, { deadlineMs: LISTING_DEADLINE_MS });
         if (found.exitCode !== 0) throw new Error(`could not look for agent state on the machine: ${found.stderr.slice(-200)}`);
         const present = found.stdout.split("\n").filter(l => l !== "");
         let state: LandRequest["state"];
         if (present.length > 0) {
           report("packing", `Packing the agents' state for it on the machine.`);
-          const tar = await exportPaths(entry.machine, present, { timeoutMs: 600_000, onProgress: downloading("Agent state") });
-          state = { tar, homes, ...(o.agents !== undefined ? { agents: o.agents } : {}) };
+          const stateArchive = join(scratch, "state.tgz");
+          await exportPathsInto(entry.machine, present, stateArchive, { timeoutMs: 600_000, onProgress: downloading("Agent state") });
+          state = { archive: stateArchive, homes, ...(o.agents !== undefined ? { agents: o.agents } : {}) };
         }
         report("landing", `Landing at ${o.dest}.`);
-        const landed = await o.lander.land({ source: o.source, dest: o.dest, replace: o.replace === true, tar: folder.tar, ...(state !== undefined ? { state } : {}) });
+        const landed = await o.lander.land({ source: o.source, dest: o.dest, replace: o.replace === true, archive, ...(state !== undefined ? { state } : {}) });
         const outcomes = landed.agents.map(homeOutcome);
         const caches = folder.excluded.length === 0 ? "" : `; ${plural(folder.excluded.length, "cache")} left behind`;
         report("done", `${plural(landed.files, "file")}, ${fmtBytes(landed.bytes)}, landed at ${o.dest}${caches}; ${outcomes.length === 0 ? "no agent sessions for it on the machine" : `sessions: ${outcomes.join(", ")}`}.`);
@@ -3407,6 +3416,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       } catch (e) {
         report("failed", e instanceof Error ? e.message : String(e));
         throw e;
+      } finally {
+        rmSync(scratch, { recursive: true, force: true });
       }
     },
   };
