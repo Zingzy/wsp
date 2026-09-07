@@ -1,63 +1,56 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The rows both project dialogs are built from: a section of the one container
-// with its small label and the hairline above it, a labelled mono path input
-// with the desktop shell's folder picker beside it when there is one, the
-// desktop's picker row, a fact row with its value flush right, a row the
-// person ticks, the fixed list of step rows the runtime's events fill, and the
-// one slot above the footer that reads the step under way, the refusal or the
-// landed line over a thin bar. Every row is one height so nothing moves
-// between states; only the slot's words may grow, since a refusal or a landed
-// line is never cut.
+// with its small label and the hairline above it, a mono path input for a
+// browser tab, the desktop's picker row, a fact row with its value flush
+// right, the caches row whose list opens under its count, a row the person
+// ticks, and the one slot above the footer that reads the step under way, the
+// refusal or the landed line over a thin bar. Every row is one height so
+// nothing moves between states; only the slot's words may grow, since a
+// refusal or a landed line is never cut.
 import type { KeyboardEvent, ReactNode } from "react";
-import { FolderIcon } from "lucide-react";
-import { durationLabel } from "../components/machine/format.js";
+import { ChevronDownIcon, FolderIcon } from "lucide-react";
 import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible.js";
 import { Input } from "../components/ui/input.js";
-import { Label } from "../components/ui/label.js";
 import { cn } from "../lib/utils.js";
-import type { StatusTone, StepRow } from "./projectTrip.js";
+import { count, type StatusTone } from "./projectTrip.js";
 
-const SECTION_LABEL = "text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground";
+const SECTION_LABEL = "font-mono text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground";
 
 /** One section of the dialog's single container: its label, and a hairline above it unless it opens the container. */
 export function TripSection({ k, label, htmlFor, children }: { k: string; label: string; htmlFor?: string; children: ReactNode }) {
   return (
     <section data-k={k} className="flex flex-col gap-1.5 border-t border-border/50 py-3 first:border-t-0 first:pt-0">
       {htmlFor === undefined ? (
-        <p className={cn("font-mono", SECTION_LABEL)}>{label}</p>
+        <p className={SECTION_LABEL}>{label}</p>
       ) : (
-        <Label htmlFor={htmlFor} className={cn("font-mono", SECTION_LABEL)}>
+        <label htmlFor={htmlFor} className={SECTION_LABEL}>
           {label}
-        </Label>
+        </label>
       )}
       {children}
     </section>
   );
 }
 
+/** A path typed into a browser tab, where no system picker exists; the section around it carries its label. */
 export function FolderField({
   id,
-  label,
   value,
   placeholder,
   disabled,
   autoFocus,
   onChange,
   onEnter,
-  onPick,
 }: {
   id: string;
-  /** The field's own label; absent when the section around it carries one. */
-  label?: string;
   value: string;
   placeholder: string;
   disabled: boolean;
   autoFocus?: boolean;
   onChange: (next: string) => void;
   onEnter?: () => void;
-  /** Opens the system picker; absent in a browser tab, where the input stands alone. */
-  onPick?: () => void;
 }) {
   const keyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === "Enter" && onEnter !== undefined) {
@@ -65,36 +58,20 @@ export function FolderField({
       onEnter();
     }
   };
-  const field = (
-    <div className="flex items-center gap-2">
-      <Input
-        id={id}
-        nativeInput
-        autoFocus={autoFocus}
-        autoComplete="off"
-        spellCheck={false}
-        className="font-mono text-xs"
-        placeholder={placeholder}
-        value={value}
-        disabled={disabled}
-        onChange={e => onChange(e.target.value)}
-        onKeyDown={keyDown}
-      />
-      {onPick === undefined ? null : (
-        <Button type="button" variant="outline" size="sm" className="w-28 shrink-0" disabled={disabled} onClick={onPick}>
-          Choose folder
-        </Button>
-      )}
-    </div>
-  );
-  if (label === undefined) return field;
   return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id} className={SECTION_LABEL}>
-        {label}
-      </Label>
-      {field}
-    </div>
+    <Input
+      id={id}
+      nativeInput
+      autoFocus={autoFocus}
+      autoComplete="off"
+      spellCheck={false}
+      className="font-mono text-xs"
+      placeholder={placeholder}
+      value={value}
+      disabled={disabled}
+      onChange={e => onChange(e.target.value)}
+      onKeyDown={keyDown}
+    />
   );
 }
 
@@ -114,20 +91,47 @@ export function FolderPickerRow({ path, placeholder, disabled, onPick }: { path:
   );
 }
 
-/** A fact with its value flush right; a value that is a number or a path is mono, prose is not, and either is cut with
- * an ellipsis and rides its title whole. */
-export function FactRow({ label, k, title, mono = true, children }: { label: string; k: string; title?: string; mono?: boolean; children: ReactNode }) {
+/** A fact with its value flush right; a value that is a number or a path is mono, prose is not, a word standing in
+ * for a value not yet known is muted, and any of them is cut with an ellipsis and rides its title whole. */
+export function FactRow({ label, k, title, mono = true, muted = false, children }: { label: string; k: string; title?: string; mono?: boolean; muted?: boolean; children: ReactNode }) {
   return (
     <div className="flex h-7 min-w-0 items-center justify-between gap-3 text-xs">
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <span
-        className={cn("min-w-0 truncate text-right text-foreground", mono && "font-mono tabular-nums")}
+        className={cn("min-w-0 truncate text-right", muted ? "text-muted-foreground" : "text-foreground", mono && "font-mono tabular-nums")}
         title={title ?? (typeof children === "string" ? children : undefined)}
         data-k={k}
       >
         {children}
       </span>
     </div>
+  );
+}
+
+/** The caches left behind as a count, with the list behind a disclosure so a long one wraps below the row instead of
+ * being cut; before the trip knows them, the idle word muted, or nothing. */
+export function CachesRow({ excluded, idle = "" }: { excluded: readonly string[] | null; idle?: string }) {
+  if (excluded === null || excluded.length === 0) {
+    return (
+      <FactRow label="Caches left behind" k="caches" muted={excluded === null}>
+        {excluded === null ? idle : "none"}
+      </FactRow>
+    );
+  }
+  return (
+    <Collapsible>
+      <FactRow label="Caches left behind" k="caches">
+        <CollapsibleTrigger className="group inline-flex items-center gap-1">
+          {count(excluded.length, "folder")}
+          <ChevronDownIcon aria-hidden className="size-3 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+        </CollapsibleTrigger>
+      </FactRow>
+      <CollapsiblePanel>
+        <p data-k="cache-list" className="break-all pb-1.5 text-right font-mono text-[11px] leading-4 text-muted-foreground">
+          {excluded.join(", ")}
+        </p>
+      </CollapsiblePanel>
+    </Collapsible>
   );
 }
 
@@ -166,23 +170,6 @@ function Bar({ fraction, label }: { fraction: number; label: string }) {
     <span role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} className="block h-1 w-full overflow-hidden rounded-full bg-border">
       <span className="block h-full rounded-full bg-foreground/70 transition-[width] duration-300" style={{ width: `${percent}%` }} />
     </span>
-  );
-}
-
-export function StepRows({ label, transfer, rows }: { label: string; transfer: string; rows: readonly StepRow[] }) {
-  return (
-    <ol aria-label={label} className="divide-y divide-border/40 rounded-md border border-border/60 px-2.5">
-      {rows.map(r => (
-        <li key={r.stage} data-step={r.stage} className="flex h-7 items-center gap-3 text-xs">
-          <span data-k="step-label" className={cn("w-[5.5rem] shrink-0 font-mono text-[11px] uppercase tracking-wider", r.message === null ? "text-muted-foreground" : "text-foreground")}>{r.stage}</span>
-          <span className="min-w-0 flex-1 truncate text-foreground" title={r.message ?? undefined}>
-            {r.message ?? ""}
-          </span>
-          <span className="w-16 shrink-0">{r.fraction !== null ? <Bar fraction={r.fraction} label={transfer} /> : null}</span>
-          <span className="w-10 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">{r.elapsedMs === null ? "" : durationLabel(r.elapsedMs)}</span>
-        </li>
-      ))}
-    </ol>
   );
 }
 

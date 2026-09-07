@@ -10,17 +10,15 @@
 // is for the plan the person read: editing the path drops the plan and its
 // ticks until the folder is read again.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDownIcon } from "lucide-react";
 import { fmtBytes, importIntoLine, importRequest, repoLine, secretSignalsLine, secretsNote, SESSIONS_NOTE, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { agentState, canTravel, defaultAgents, defaultConsent, importProgress, isImportOf, landedLine, secretOffer } from "./importProject.js";
-import { count, refusalOf, refusalTone, type Refusal, type StatusTone } from "./projectTrip.js";
-import { ConsentRow, FactRow, FolderField, FolderPickerRow, TripSection, TripStatus } from "./ProjectTripRows.js";
+import { count, refusalOf, slotWords, type Refusal } from "./projectTrip.js";
+import { CachesRow, ConsentRow, FactRow, FolderField, FolderPickerRow, TripSection, TripStatus } from "./ProjectTripRows.js";
 
 type Phase = "idle" | "importing" | "done";
 
@@ -135,14 +133,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
   const busy = reading || phase === "importing";
   const primary = phase === "done" ? "Done" : refusal?.exists ? "Replace and import" : "Import";
   const progress = phase === "idle" ? null : importProgress(events, workspace.name);
-  const said: { words: string; tone: StatusTone } =
-    refusal !== null
-      ? { words: refusal.message, tone: refusalTone(refusal) }
-      : result !== null
-        ? { words: landedLine(result, sent.current.source, workspace.name), tone: "quiet" }
-        : progress !== null
-          ? { words: progress.line, tone: "step" }
-          : { words: reading ? "Reading the folder." : "", tone: "quiet" };
+  const said = slotWords({ refusal, landed: result === null ? null : landedLine(result, sent.current.source, workspace.name), progress, idle: reading ? "Reading the folder." : "" });
 
   return (
     <Dialog open onOpenChange={open => { if (!open && phase !== "importing") onClose(); }}>
@@ -207,7 +198,7 @@ function Summary({ plan }: { plan: ProjectPlan | null }) {
       <FactRow label="Files" k="files">
         {plan === null ? "" : `${count(plan.files, "file")} · ${fmtBytes(plan.bytes)}`}
       </FactRow>
-      <Caches excluded={plan?.excluded ?? null} />
+      <CachesRow excluded={plan?.excluded ?? null} />
       <FactRow label="Not carried" k="skipped" {...(skippedTitle !== undefined && skippedTitle !== "" ? { title: skippedTitle } : {})}>
         {plan === null ? "" : plan.skipped.length === 0 ? "none" : count(plan.skipped.length, "path")}
       </FactRow>
@@ -215,32 +206,6 @@ function Summary({ plan }: { plan: ProjectPlan | null }) {
         {plan === null ? "" : plan.source}
       </FactRow>
     </div>
-  );
-}
-
-/** The caches as a count, with the list behind a disclosure so a long one wraps below the row instead of being cut. */
-function Caches({ excluded }: { excluded: readonly string[] | null }) {
-  if (excluded === null || excluded.length === 0) {
-    return (
-      <FactRow label="Caches left behind" k="caches">
-        {excluded === null ? "" : "none"}
-      </FactRow>
-    );
-  }
-  return (
-    <Collapsible>
-      <FactRow label="Caches left behind" k="caches">
-        <CollapsibleTrigger className="group inline-flex items-center gap-1">
-          {count(excluded.length, "folder")}
-          <ChevronDownIcon aria-hidden className="size-3 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
-        </CollapsibleTrigger>
-      </FactRow>
-      <CollapsiblePanel>
-        <p data-k="cache-list" className="break-all pb-1.5 text-right font-mono text-[11px] leading-4 text-muted-foreground">
-          {excluded.join(", ")}
-        </p>
-      </CollapsiblePanel>
-    </Collapsible>
   );
 }
 

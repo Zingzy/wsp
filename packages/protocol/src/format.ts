@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Binary units with one decimal for the wizard, the engine's stage lines, the
-// runtime's import events and the app; a turn's duration as the chat's footer,
+// runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, MachineSizeOffer, MachineState, ProjectImportEvent, ProjectSecret, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -804,7 +804,22 @@ export function secretSignalsLine(s: ProjectSecret): string {
   return `${s.signals.join(", ")}, ${fmtBytes(s.bytes)}`;
 }
 
-export interface ImportProgress {
+/** The line under the export dialog's title: which workspace the folder leaves, and where it lands. */
+export function exportFromLine(workspaceName: string): string {
+  return `From ${workspaceName}, to this Mac.`;
+}
+
+/** What the ticks on the export dialog's agent rows do. */
+export const EXPORT_SESSIONS_NOTE = "Ticked agents' sessions come home with the folder. The rest stay on the machine.";
+
+/** The export dialog's agent section when the workspace has no threads to make rows of. */
+export const NO_THREADS_NOTE = "No threads here. Every agent's sessions for the folder come home with it.";
+
+/** What a row of the export's summary says before the folder has landed, since nothing is read from the machine first. */
+export const NOT_LANDED_WORD = "when it lands";
+
+/** A trip's events folded into the one progress line and its bar. */
+export interface TripProgress {
   readonly line: string;
   /** How far the bar is, 0 to 1; it never goes back. */
   readonly fraction: number;
@@ -815,7 +830,7 @@ export interface ImportProgress {
  * by its total so the words hold still while the bar moves, a landing by the workspace it lands on. The runtime lands
  * the project and then uploads and lands the sessions tar in a second pass, so that pass is named and the bar holds
  * its high-water mark instead of dropping to nought. A failure has no step; the status line carries it. */
-export function importProgress(events: readonly Pick<ProjectImportEvent, "stage" | "message" | "bytes" | "total">[], workspaceName: string): ImportProgress | null {
+export function importProgress(events: readonly Pick<ProjectImportEvent, "stage" | "message" | "bytes" | "total">[], workspaceName: string): TripProgress | null {
   let line = "";
   let fraction = 0;
   let landings = 0;
@@ -838,6 +853,40 @@ export function importProgress(events: readonly Pick<ProjectImportEvent, "stage"
       case "landing":
         landings += 1;
         line = `Landing on ${workspaceName}`;
+        fraction = 1;
+        break;
+      case "done":
+        line = "Done";
+        fraction = 1;
+        break;
+      case "failed":
+        return null;
+    }
+  }
+  return events.length === 0 ? null : { line, fraction };
+}
+
+/** An export's events folded into the one progress line and its bar. The runtime packs and downloads the folder,
+ * then packs and downloads the sessions as a second pass whose bytes start again at nought, so the pass is named by
+ * counting the packings and the bar holds its high-water mark; a download is named by its total so the words hold
+ * still while the bar moves. A failure has no step; the status line carries it. */
+export function exportProgress(events: readonly Pick<ProjectExportEvent, "stage" | "bytes" | "total">[]): TripProgress | null {
+  let line = "";
+  let fraction = 0;
+  let packings = 0;
+  const pass = (): string => (packings > 1 ? "sessions" : "the folder");
+  for (const e of events) {
+    switch (e.stage) {
+      case "packing":
+        packings += 1;
+        line = `Packing ${pass()}`;
+        break;
+      case "downloading":
+        line = `Downloading ${pass()}${e.total === undefined ? "" : `, ${fmtBytes(e.total)}`}`;
+        if (e.bytes !== undefined && e.total !== undefined && e.total > 0) fraction = Math.max(fraction, e.bytes / e.total);
+        break;
+      case "landing":
+        line = "Landing on this Mac";
         fraction = 1;
         break;
       case "done":

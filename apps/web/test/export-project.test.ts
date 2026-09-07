@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The export dialog's pure parts: the step rows folded from project.export
-// events, which events belong to one export, the agent rows the workspace's
-// threads give it and the request their ticks become, the destination a
-// picked parent folder gives, the landed line, each agent's words and the
-// refusal a caught error becomes with the tone the status line gives it.
+// The export dialog's pure parts: which events belong to one export, the
+// agent rows the workspace's threads give it and the request their ticks
+// become, the destination a picked parent folder gives, the landed line, each
+// agent's words, the refusal a caught error becomes with the tone the status
+// line gives it, and what the one slot says out of a refusal, a landed line, a
+// step and the idle words. The progress line is the protocol's, tested there.
 import { describe, expect, it } from "vitest";
 import type { ProjectAgentResult, ProjectExportEvent, ProjectExportResult, SessionView } from "@wsp/protocol";
-import { EXPORT_STEPS, agentRows, agentsRequest, exportLandedLine, exportStepRows, isExportOf, pickedDest } from "../src/sidebar/exportProject.js";
+import { agentRows, agentsRequest, exportLandedLine, isExportOf, pickedDest } from "../src/sidebar/exportProject.js";
 import { RequestError } from "../src/protocol/client.js";
-import { agentOutcome, agentOutcomes, refusalOf, refusalTone } from "../src/sidebar/projectTrip.js";
+import { agentOutcome, agentOutcomes, refusalOf, refusalTone, slotWords } from "../src/sidebar/projectTrip.js";
 
 const ev = (over: Partial<ProjectExportEvent>): ProjectExportEvent => ({
   type: "project.export",
@@ -22,27 +23,6 @@ const ev = (over: Partial<ProjectExportEvent>): ProjectExportEvent => ({
 });
 
 const row = (id: string, harness: string, over: Partial<SessionView> = {}): SessionView => ({ id, workspaceId: "ws_a", harness, status: "completed", ...over });
-
-describe("export step rows", () => {
-  it("lists the four steps in order with no message before any event", () => {
-    expect(EXPORT_STEPS).toEqual(["packing", "downloading", "landing", "done"]);
-    expect(exportStepRows([])).toEqual(EXPORT_STEPS.map(stage => ({ stage, message: null, elapsedMs: null, fraction: null })));
-  });
-
-  it("keeps the last event per step, reads the download fraction from bytes of total, and leaves failed out", () => {
-    const rows = exportStepRows([
-      ev({}),
-      ev({ stage: "downloading", message: "The folder: 1.0 MB of 4.0 MB.", elapsedMs: 40, bytes: 1_048_576, total: 4_194_304 }),
-      ev({ stage: "downloading", message: "The folder: 2.0 MB of 4.0 MB.", elapsedMs: 60, bytes: 2_097_152, total: 4_194_304 }),
-      ev({ stage: "failed", message: "the machine went away", elapsedMs: 70 }),
-    ]);
-    expect(rows.map(r => r.stage)).toEqual(["packing", "downloading", "landing", "done"]);
-    expect(rows[0]).toEqual({ stage: "packing", message: "Packing /root/proj on the machine.", elapsedMs: 10, fraction: null });
-    expect(rows[1]).toEqual({ stage: "downloading", message: "The folder: 2.0 MB of 4.0 MB.", elapsedMs: 60, fraction: 0.5 });
-    expect(rows[2]!.message).toBeNull();
-    expect(rows[3]!.message).toBeNull();
-  });
-});
 
 describe("which events are this export's", () => {
   it("matches the workspace and the destination as sent, and nothing else", () => {
@@ -118,5 +98,18 @@ describe("the landed line", () => {
     expect(exportLandedLine(result, "/root/proj")).toBe("proj is at /Users/me/code/proj on this Mac; no agent sessions for it on the machine.");
     expect(exportLandedLine({ ...result, excluded: ["node_modules"] }, "/root/proj/")).toBe("proj is at /Users/me/code/proj on this Mac; no agent sessions for it on the machine.");
     expect(exportLandedLine({ ...result, excluded: ["node_modules", "dist"], agents: [{ agent: "claude", files: 2, bytes: 100, outcome: "moved", sessions: 2 }] }, "/root/proj")).toBe("proj is at /Users/me/code/proj on this Mac.");
+  });
+});
+
+describe("what the one slot says", () => {
+  const progress = { line: "Downloading the folder, 2.7 KB", fraction: 0.5 };
+
+  it("reads the refusal in its tone first, then the landed line quietly, then the step in mono, else the idle words quietly", () => {
+    expect(slotWords({ refusal: { message: "/x exists", exists: true }, landed: "proj is at /x.", progress, idle: "" })).toEqual({ words: "/x exists", tone: "caution" });
+    expect(slotWords({ refusal: { message: "/x is not a folder", exists: false }, landed: null, progress: null, idle: "" })).toEqual({ words: "/x is not a folder", tone: "error" });
+    expect(slotWords({ refusal: null, landed: "proj is at /x.", progress, idle: "" })).toEqual({ words: "proj is at /x.", tone: "quiet" });
+    expect(slotWords({ refusal: null, landed: null, progress, idle: "Reading the folder." })).toEqual({ words: "Downloading the folder, 2.7 KB", tone: "step" });
+    expect(slotWords({ refusal: null, landed: null, progress: null, idle: "Reading the folder." })).toEqual({ words: "Reading the folder.", tone: "quiet" });
+    expect(slotWords({ refusal: null, landed: null, progress: null, idle: "" })).toEqual({ words: "", tone: "quiet" });
   });
 });
