@@ -201,6 +201,19 @@ describe("the MCP server over the host", () => {
     expect(backend.machines).toHaveLength(2);
   });
 
+  it("a fork the provider refuses at the machine cap is a tool error naming the workspaces holding the slots", async () => {
+    await call("new", { name: "first" });
+    await call("new", { name: "t-cap" });
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
+      return create(spec);
+    };
+    const refused = await call("fork", { workspace: "first", name: "f2" });
+    expect(refused).toMatchObject({ isError: true, text: "both machine slots are in use: first, t-cap. Pause one or wait for a nap." });
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["first", "t-cap"]);
+  });
+
   it("new forks the golden's head into a workspace of that name; workspaces lists it as the app sees it", async () => {
     const made = await call("new", { name: "alpha" });
     expect(made.isError).toBe(false);

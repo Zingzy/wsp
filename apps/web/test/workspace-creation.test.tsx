@@ -10,10 +10,13 @@ import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
 
 afterEach(cleanup);
 
+// The runtime's own refusal at the machine cap: the failing log line and the explanation's detail are one sentence.
+const CAP_LINE = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
+
 function lines(count: number): CreationLine[] {
   return Array.from({ length: count }, (_, i) => ({
     stage: i === count - 1 ? "failed" : "machine-booting",
-    message: i === count - 1 ? "Sandbox limit reached (2)" : `Stage ${i + 1} of the create ran and reported its progress here.`,
+    message: i === count - 1 ? CAP_LINE : `Stage ${i + 1} of the create ran and reported its progress here.`,
     at: new Date(Date.UTC(2026, 8, 5, 12, 31, i)).toISOString(),
     elapsedMs: 800 * (i + 1),
   }));
@@ -25,7 +28,7 @@ function failed(count: number): Creation {
     name: "beta",
     workspaceId: "ws_beta",
     lines: lines(count),
-    failed: { title: "The provider refused: machine cap reached", detail: "Every slot is taken; pause or delete a workspace to free one, then try again." },
+    failed: { title: "The provider refused: machine cap reached", detail: CAP_LINE },
   };
 }
 
@@ -46,13 +49,21 @@ describe("workspace creation layout", () => {
     expect(within(buttons).getByRole("button", { name: "Dismiss" })).toBeDefined();
   });
 
-  it("keeps the refusal's lead red and the rest muted, Retry tactile and Dismiss as text", async () => {
+  it("keeps the refusal's lead red, says the failing line's words once, Retry tactile and Dismiss as text", async () => {
     const view = await mount(failed(2));
     const lead = within(view).getByText("The provider refused: machine cap reached");
     expect(lead.className).toContain("text-destructive-foreground");
-    expect(lead.nextElementSibling!.className).toContain("text-muted-foreground");
+    expect(lead.nextElementSibling).toBeNull();
+    expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
     expect(within(view).getByRole("button", { name: "Retry" }).className).toContain("bg-popover");
     expect(within(view).getByRole("button", { name: "Dismiss" }).className).toContain("border-transparent");
+  });
+
+  it("a detail the failing line does not already say is kept, muted, under the lead", async () => {
+    const view = await mount({ ...failed(2), failed: { title: "Not connected to the runtime", detail: "runtime connection lost" } });
+    const lead = within(view).getByText("Not connected to the runtime");
+    expect(lead.nextElementSibling!.className).toContain("text-muted-foreground");
+    expect(lead.nextElementSibling!.textContent).toContain("runtime connection lost");
   });
 
   it("puts the log in a box whose classes, and so its height, are the same with two lines and with twenty", async () => {
@@ -69,7 +80,7 @@ describe("workspace creation layout", () => {
     expect(twentyBox.className).toBe(twoClasses);
     const items = within(twentyBox).getAllByRole("listitem");
     expect(items).toHaveLength(20);
-    expect(items[19]!.textContent).toContain("Sandbox limit reached (2)");
+    expect(items[19]!.textContent).toContain(CAP_LINE);
     expect(items[19]!.className).toContain("text-destructive-foreground");
   });
 

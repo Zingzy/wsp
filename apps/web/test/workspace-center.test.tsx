@@ -151,12 +151,13 @@ describe("workspace creation view", () => {
   });
 
   it("a failure keeps the log with the failing line in red, stops the wave, explains the refusal, and retry runs the create again", async () => {
+    const CAP_LINE = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
     const api = fakeApi([workspace]);
     const create = vi.fn<(name: string) => Promise<WorkspaceView>>();
     create.mockImplementationOnce(async () => {
       useStore.getState().applyEvent(stage({}));
-      useStore.getState().applyEvent(stage({ stage: "failed", message: "Sandbox limit reached (2)", elapsedMs: 800 }));
-      throw new RequestError("Sandbox limit reached (2)", "concurrency");
+      useStore.getState().applyEvent(stage({ stage: "failed", message: CAP_LINE, elapsedMs: 800 }));
+      throw new RequestError(CAP_LINE, "concurrency");
     });
     create.mockImplementation(() => new Promise<WorkspaceView>(() => {}));
     api.createFromGoldenHead = create;
@@ -171,13 +172,13 @@ describe("workspace creation view", () => {
     expect(wave.querySelector("svg")!.getAttribute("data-state")).toBe("stopped");
     const lines = within(within(view).getByRole("list", { name: "Creation log" })).getAllByRole("listitem");
     expect(lines).toHaveLength(2);
-    expect(lines[1]!.textContent).toContain("Sandbox limit reached (2)");
+    expect(lines[1]!.textContent).toContain(CAP_LINE);
     expect(lines[1]!.className).toContain("text-destructive-foreground");
     expect(lines[0]!.className).not.toContain("text-destructive-foreground");
-    expect(view.textContent).toContain("The provider refused: machine cap reached");
-    expect(view.textContent).toMatch(/every slot is taken/);
-    // The provider's words appear once, on the failing line.
-    expect(view.textContent!.split("Sandbox limit reached (2)")).toHaveLength(2);
+    // The runtime's words are the refusal: they appear once, on the failing line, and no second wording follows the title.
+    const lead = within(view).getByText("The provider refused: machine cap reached");
+    expect(lead.nextElementSibling).toBeNull();
+    expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
 
     fireEvent.click(within(view).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
