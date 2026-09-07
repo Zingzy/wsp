@@ -4,6 +4,7 @@
 // status check, the global config that carries over, how it keys project
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
+import { CODEX_CONFIG_FILE, CODEX_HOOKS } from "./codex-hooks.js";
 import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE_CONTEXT, PI_CONTEXT, type AgentContext } from "./context.js";
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
@@ -183,8 +184,9 @@ export const CATALOG: readonly CatalogEntry[] = [
     node: 16,
     signIn: SIGN_IN_ROWS.codex,
     // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
-    mcp: { format: CODEX_TOML, files: ["~/.codex/config.toml"], scope: "user scope" },
-    configPaths: ["~/.codex/config.toml", "~/.codex/AGENTS.md", "~/.codex/prompts", "~/.codex/skills"],
+    mcp: { format: CODEX_TOML, files: [CODEX_CONFIG_FILE], scope: "user scope" },
+    hooks: CODEX_HOOKS,
+    configPaths: [CODEX_CONFIG_FILE, "~/.codex/AGENTS.md", "~/.codex/prompts", "~/.codex/skills"],
     projectState: [
       { state: "rollout transcript", location: "sessions/YYYY/MM/DD/rollout-TIMESTAMP-THREADID.jsonl", key: "by date and thread id, not by path", pathFields: ["cwd in the session_meta payload and on per-turn lines"], move: "rewrite cwd", status: "measured" },
       { state: "thread index", location: "state_5.sqlite, table threads", key: "one row per thread id", pathFields: ["cwd", "rollout_path"], move: "update threads set cwd; rollout_path changes only if CODEX_HOME itself moves", status: "measured" },

@@ -402,6 +402,42 @@ describe("packPlan", () => {
     expect(readFileSync(join(extract(plain.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo done"}]}]}}');
   });
 
+  it("a copied Codex config loses a notify whose program is a Mac binary, listed as left behind, and keeps every other key as written", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".codex", "computer-use"), { recursive: true });
+    writeFileSync(join(home, ".codex", "computer-use", "SkyComputerUseClient"), "MZ-ish", { mode: 0o755 });
+    const app = `${home}/.codex/computer-use/SkyComputerUseClient`;
+    const config = `model = "gpt-5.5"\nnotify = ["${app}", "turn-ended"]\n\n[projects."${home}"]\ntrust_level = "trusted"\n`;
+    writeFileSync(join(home, ".codex", "config.toml"), config);
+    const plan = planFiles([row({ rung: "agents", id: "agents/codex", paths: ["~/.codex/config.toml"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    expect(readFileSync(join(extract(packed.tar), ".codex", "config.toml"), "utf8")).toBe(`model = "gpt-5.5"\n\n[projects."${home}"]\ntrust_level = "trusted"\n`);
+    const left = [{ id: "agents/codex", path: "~/.codex/config.toml", note: `hook left behind: ${app}` }];
+    expect(packed.skipped).toEqual(left);
+    expect(packed.leftBehind).toEqual(left);
+    // A notify the machine can run travels with the rest of the file, byte for byte.
+    const runs = config.replace(app, "/usr/bin/notify-send");
+    writeFileSync(join(home, ".codex", "config.toml"), runs);
+    const kept = await packPlan(plan, { secrets: new Map(), home });
+    expect(readFileSync(join(extract(kept.tar), ".codex", "config.toml"), "utf8")).toBe(runs);
+    expect(kept.skipped).toEqual([]);
+    expect(kept.leftBehind).toBeUndefined();
+    // The shape Codex's own config page writes: the interpreter stays, the script it runs travels to its guest path.
+    writeFileSync(join(home, ".codex", "notify.py"), "print('hi')\n", { mode: 0o755 });
+    writeFileSync(join(home, ".codex", "config.toml"), config.replace(`"${app}", "turn-ended"`, `"python3", "${home}/.codex/notify.py"`));
+    const script = await packPlan(plan, { secrets: new Map(), home });
+    const at = extract(script.tar);
+    expect(readFileSync(join(at, ".codex", "config.toml"), "utf8")).toBe(config.replace(`"${app}", "turn-ended"`, '"python3", "/root/.codex/notify.py"'));
+    expect(readFileSync(join(at, ".codex", "notify.py"), "utf8")).toBe("print('hi')\n");
+    expect(statSync(join(at, ".codex", "notify.py")).mode & 0o777).toBe(0o755);
+    expect(script.skipped).toEqual([]);
+    // The same shape naming a script that is not there: the key goes, listed by the script.
+    writeFileSync(join(home, ".codex", "config.toml"), config.replace(`"${app}", "turn-ended"`, '"python3", "~/.codex/gone.py"'));
+    const gone = await packPlan(plan, { secrets: new Map(), home });
+    expect(readFileSync(join(extract(gone.tar), ".codex", "config.toml"), "utf8")).toBe(`model = "gpt-5.5"\n\n[projects."${home}"]\ntrust_level = "trusted"\n`);
+    expect(gone.leftBehind).toEqual([{ id: "agents/codex", path: "~/.codex/config.toml", note: "hook left behind: ~/.codex/gone.py" }]);
+  });
+
   it("a helper key that travels without the Claude Code config lands beside a settings.json holding only the line that reads it, with a note on the login", async () => {
     const home = laptop();
     mkdirSync(join(home, ".claude"), { recursive: true });
