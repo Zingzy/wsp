@@ -30,7 +30,7 @@ import { importResultPath } from "../src/init-import.js";
 import { noteOutcomes } from "../src/init-signin.js";
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
-import { guestAnswer, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
+import { guestAnswer, mcpEditPlan, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
@@ -700,6 +700,11 @@ describe("wsp init, the summary-first screens", () => {
     await f.until(/Hermes Agent API keys\s+[^\n]*skip/);
     await f.press(KEY.left);
     await f.until(/Hermes Agent API keys\s+[^\n]*copy from this Mac/);
+    // Down past the CLIs, headers included, onto the server with a token: copy keeps it in the machine's config with its secret.
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.down, KEY.down);
+    await f.until("its token is in the agent's own config");
+    await f.press(KEY.left);
+    await f.until(/▾ MCP servers from your agents' configs\s+1 copy\s+0 skip\n┃ ❯\s+github\s+in Claude Code's config\s+copy from this Mac\n/);
     await f.press(KEY.enter);
 
     await f.until("wsp for your agents on this Mac  5/6");
@@ -707,14 +712,14 @@ describe("wsp init, the summary-first screens", () => {
 
     await f.until(BOOT);
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
-    // The four agents and the one MCP server without a secret; the one with a token, unticked, is out and unlisted.
+    // The four agents and both MCP servers, the one with a token by the copy it was given on the screen.
     // Gemini's row is the catalog's, added after what the collector found, so it installs last.
-    expect(summary).toMatch(/Agents\s+5 of 8/);
+    expect(summary).toMatch(/Agents\s+6 of 8/);
     expect(summary).toMatch(/Sign-ins\s+1 copy, 5 sign in\s+24\.4 KB\n/);
     expect(summary).toMatch(/Hermes Agent API keys\s+copy\n/);
     expect(summary).toMatch(/kubectl config\s+skip\n/);
-    expect(summary).not.toContain("github");
-    expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, Gemini CLI, 2 tools plus Homebrew's toolchain, 1 MCP server/);
+    expect(summary).toMatch(/github\s+copy\n/);
+    expect(summary.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, Gemini CLI, 2 tools plus Homebrew's toolchain, 2 MCP servers/);
     expect(f.text()).toMatch(/Recipe saved to .*golden-recipe\.json and .*recipe\.json/);
     await f.press("y");
     await sealIt(f);
@@ -744,10 +749,14 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("logins/hermes")).toMatchObject({ bring: false, choice: "machine" });
     expect(saved.get("logins/gemini")).toMatchObject({ bring: false, choice: "machine" });
     expect(saved.get("logins/kube")).toMatchObject({ bring: false, choice: "skip" });
-    expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
+    expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: true, choice: "copy" });
     expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
-    // The server with the token was never ticked, so the build left it off the machine's config and says why.
-    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).mcp).toEqual(expect.arrayContaining([expect.objectContaining({ name: "github", outcome: "skipped", note: "unticked" })]));
+    // The server with the token was answered copy on the screen, so the edit the machine ran kept it in the config
+    // beside the one without a secret, and the build says both are there.
+    const edits = log.flatMap(c => mcpEditPlan(c) ?? []);
+    expect(edits.map(e => e.write)).toEqual([false, true]);
+    expect(edits[1]!.agents[0]!.scopes[0]).toMatchObject({ keep: ["github", "notes"], drop: [] });
+    expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).mcp).toEqual(expect.arrayContaining([expect.objectContaining({ name: "github", outcome: "installed" }), expect.objectContaining({ name: "notes", outcome: "installed" })]));
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
     const rows = new Map(small.rows.map(r => [r.id, r]));
     expect(rows.get("gemini")).toMatchObject({ on: true, signIn: "machine" });

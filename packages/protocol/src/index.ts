@@ -737,6 +737,10 @@ export type GoldenLogin = z.infer<typeof GoldenLogin>;
  * record of what did not install is kept by. */
 export const GoldenMissingTool = z.object({ id: z.string(), name: z.string(), outcome: z.enum(["skipped", "failed"]), note: z.string() });
 export type GoldenMissingTool = z.infer<typeof GoldenMissingTool>;
+/** A path the pack left off the image, by the recipe row it belongs to and why: a hook whose script is not a plain
+ * file under home. Forks of the version run without it. */
+export const GoldenLeftBehind = z.object({ id: z.string(), path: z.string(), note: z.string() });
+export type GoldenLeftBehind = z.infer<typeof GoldenLeftBehind>;
 /** One base tool's command with the version read on the builder after the base stage. */
 export const GoldenBaseTool = z.object({ name: z.string(), version: z.string() });
 export type GoldenBaseTool = z.infer<typeof GoldenBaseTool>;
@@ -766,6 +770,9 @@ export const GoldenVersion = z.object({
   /** Every tool the import skipped or failed to install, by name with the cause and reason, so a workspace can say why
    * one is missing; absent when every tool installed or the version was sealed before this was recorded. */
   missingTools: z.array(GoldenMissingTool).optional(),
+  /** What the pack left off the image and why, by row and path; absent when everything ticked travelled or the version
+   * was sealed before this was recorded. */
+  leftBehind: z.array(GoldenLeftBehind).optional(),
   /** The snapshot the builder that sealed this version descends from: an update's head. Absent on a version built
    * from a fresh machine, and on versions sealed before this was recorded. */
   parentSnapshotId: z.string().optional(),

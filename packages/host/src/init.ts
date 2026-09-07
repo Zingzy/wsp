@@ -21,6 +21,7 @@ import { ALREADY_APPLIED, customRows, fmtBytes, fmtDuration, fmtMemGb } from "@w
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
+  answeredRows,
   applyRecipe,
   goldenRecipeFor,
   type Answers,
@@ -790,11 +791,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const { ticks, choices } = answers;
   const offered: Manifest = { entries: manifest.entries.filter(e => loginShown(e, manifest, ticks)) };
 
-  const bringing = (): ManifestEntry[] =>
-    manifest.entries.filter(e => ticks.has(e.id)).map(e => {
-      const choice = choices.get(e.id);
-      return isLoginChoice(choice) ? { ...e, choice } : e;
-    });
+  const bringing = (): ManifestEntry[] => answeredRows(manifest, ticks, choices).filter(e => e.bring);
   let bring = bringing();
   // Filled by the Keychain reads below, after the earlier-builder check; the pack reads it only at build time.
   const secrets = new Map<string, string>();
@@ -808,7 +805,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       home: opts.home,
       secrets,
       platform: opts.platform,
-      rows: manifest.entries.map(e => ({ ...e, bring: ticks.has(e.id) })),
+      rows: answeredRows(manifest, ticks, choices),
       brew,
       custom: customRows(catalogRecipe),
       onResult: r => {

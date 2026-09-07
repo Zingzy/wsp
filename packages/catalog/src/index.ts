@@ -6,4 +6,5 @@ export * from "./signin.js";
 export * from "./jsonc.js";
 export * from "./mcp.js";
 export * from "./context.js";
+export * from "./hooks.js";
 export * from "./catalog.js";

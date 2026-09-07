@@ -7,7 +7,7 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, type GoldenBaseTool, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, fmtBytes, goldenHead, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenVersion, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
@@ -20,7 +20,7 @@ import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./ma
 import type { Machine, MachineBackend, MachineKind, MachineState } from "./machine.js";
 import { importInto } from "./vault.js";
 
-export { goldenHead, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
+export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
 
 export type StageListener = (stage: GoldenStage, detail?: string) => void;
 
@@ -144,6 +144,8 @@ export interface PackedFiles {
   skipped: SkippedPath[];
   /** The rc files stripped at pack time, so the checklist names what to set from what actually left. */
   cut: CutNames[];
+  /** The skips a fork should know about, stamped on the sealed version: a hook whose script did not travel. */
+  leftBehind?: GoldenLeftBehind[];
 }
 
 export interface GoldenImport {
@@ -197,6 +199,8 @@ export interface ImportLedger {
   /** The tools the tools stage did not put on the image, skipped or failed, and why; absent when every tool installed.
    * The seal stamps it on the version. */
   missingTools?: GoldenMissingTool[];
+  /** What the pack left off the image and why; absent when everything ticked travelled. The seal stamps it on the version. */
+  leftBehind?: GoldenLeftBehind[];
 }
 
 export interface AgentResult {
@@ -260,6 +264,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
     smoke: prior?.smoke ?? "true",
     ...(recipe !== undefined ? { recipe } : {}),
     ...(prior?.missingTools !== undefined ? { missingTools: prior.missingTools } : {}),
+    ...(prior?.leftBehind !== undefined ? { leftBehind: prior.leftBehind } : {}),
   };
   const result: ImportResult = { recipeHash: imp.recipeHash, tools: [], agents: [], ...(opts.base !== undefined ? { base: opts.base } : {}), ...(opts.retired !== undefined ? { retired: opts.retired } : {}) };
   const done = (s: ImportStage): boolean => ledger.applied.includes(s);
@@ -313,6 +318,7 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       stage("uploading-files", "nothing to upload");
       // No pack ran, so nothing is known about cuts; a reader falls back to the recipe's own names.
       result.files = { bytes: 0, skipped: imp.files?.skipped ?? [] };
+      delete ledger.leftBehind;
       mark("applying-setup");
       mark("uploading-files");
     } else {
@@ -320,6 +326,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       stage("applying-setup", `${imp.files.count} file${imp.files.count === 1 ? "" : "s"}: ${rungs}`);
       const packed = await imp.files.pack();
       packed.skipped = [...imp.files.skipped, ...packed.skipped];
+      if (packed.leftBehind !== undefined && packed.leftBehind.length > 0) ledger.leftBehind = packed.leftBehind;
+      else delete ledger.leftBehind;
       const notes = packed.skipped.map(s => `${s.path} (${s.note})`);
       stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}`);
       mark("applying-setup");
@@ -696,6 +704,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       browserShim,
       ...(opts.logins !== undefined ? { logins: opts.logins } : {}),
       ...(builder.import?.missingTools !== undefined ? { missingTools: builder.import.missingTools } : {}),
+      ...(builder.import?.leftBehind !== undefined ? { leftBehind: builder.import.leftBehind } : {}),
       ...(builder.base !== undefined ? { base: builder.base } : {}),
       ...(builder.retired !== undefined && builder.retired.length > 0 ? { retired: builder.retired } : {}),
     };
@@ -738,6 +747,8 @@ export interface ApplyDeltaOptions {
   previousSmoke: string;
   /** The tools missing from the version being updated; those the delta neither retires nor plans again stay missing. */
   previousMissing?: readonly GoldenMissingTool[];
+  /** What the version being updated left off its image; the rows the delta neither removes nor plans again keep their notes. */
+  previousLeftBehind?: readonly GoldenLeftBehind[];
   /** The base tools read on the version being updated; a version sealed before they existed has none and is refused. */
   previousBase: readonly GoldenBaseTool[] | undefined;
   fetch?: typeof globalThis.fetch;
@@ -775,11 +786,23 @@ export function smokeTally(smoke: string): string {
   return `${plural(checks.length, "agent")} ${checks.length === 1 ? "answers" : "answer"}: ${names.join(", ")}`;
 }
 
+/** The recipe rows a delta addresses: what it retires and what it plans again, tools and agents alike. */
+function touchedBy(delta: GoldenDelta): Set<string> {
+  return new Set([...delta.retired, ...delta.import.tools, ...(delta.import.skippedTools ?? []), ...delta.import.agents, ...(delta.import.skippedAgents ?? [])].map(t => t.id));
+}
+
 /** What an updated image is missing: the previous version's missing tools the delta neither retired nor planned again,
  * then what this delta's tools stage skipped or failed. A retired tool leaves the list; the recipe stopped asking
  * for it, so a fork has nothing to explain. */
 export function nextMissing(previous: readonly GoldenMissingTool[], delta: GoldenDelta, fresh: readonly GoldenMissingTool[]): GoldenMissingTool[] {
-  const touched = new Set([...delta.retired, ...delta.import.tools, ...(delta.import.skippedTools ?? [])].map(t => t.id));
+  const touched = touchedBy(delta);
+  return [...previous.filter(p => !touched.has(p.id)), ...fresh];
+}
+
+/** What an updated image is without: the previous version's notes for rows the delta neither retired nor planned
+ * again, then what this delta's pack left behind. */
+export function nextLeftBehind(previous: readonly GoldenLeftBehind[], delta: GoldenDelta, fresh: readonly GoldenLeftBehind[]): GoldenLeftBehind[] {
+  const touched = touchedBy(delta);
   return [...previous.filter(p => !touched.has(p.id)), ...fresh];
 }
 
@@ -818,6 +841,9 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
   const missing = nextMissing(opts.previousMissing ?? [], delta, applied.ledger.missingTools ?? []);
   if (missing.length > 0) applied.ledger.missingTools = missing;
   else delete applied.ledger.missingTools;
+  const left = nextLeftBehind(opts.previousLeftBehind ?? [], delta, applied.ledger.leftBehind ?? []);
+  if (left.length > 0) applied.ledger.leftBehind = left;
+  else delete applied.ledger.leftBehind;
   return { ledger: applied.ledger, result };
 }
 
@@ -858,6 +884,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
       previousSmoke: opts.head.smoke.cmd,
       previousBase: opts.head.base,
       ...(opts.head.missingTools !== undefined ? { previousMissing: opts.head.missingTools } : {}),
+      ...(opts.head.leftBehind !== undefined ? { previousLeftBehind: opts.head.leftBehind } : {}),
       onStage: stage,
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
       ...(opts.setupTimeoutMs !== undefined ? { setupTimeoutMs: opts.setupTimeoutMs } : {}),

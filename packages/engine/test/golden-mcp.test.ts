@@ -29,13 +29,15 @@ const AGENTS = {
 };
 
 describe("mcpPlanFor", () => {
-  it("keeps the ticked servers, drops the unticked with their reason, sets aside an agent that is not ticked, and moves the home scope", () => {
+  it("keeps the ticked servers, drops the unticked with their reason and a ticked server whose secret was not answered copy, sets aside an agent that is not ticked, and moves the home scope", () => {
     const rows = [
       row("agents/claude"),
       row(`${MCP_ID_PREFIX}claude/github`),
       row(`${MCP_ID_PREFIX}claude/notes`, { bring: false, default: "skip", reason: "command ~/Library/x is macOS-only, will not run" }),
       row(`${MCP_ID_PREFIX}claude/old`, { bring: false }),
       row(`${MCP_ID_PREFIX}claude/home/zomato`),
+      row(`${MCP_ID_PREFIX}claude/gsc`, { consent: true, choice: "skip" }),
+      row(`${MCP_ID_PREFIX}claude/home/drive`, { consent: true, choice: "copy" }),
       row("agents/codex", { bring: false }),
       row(`${MCP_ID_PREFIX}codex/grafana`),
       row(`${MCP_ID_PREFIX}mcp-remote`, { paths: ["~/.mcp-auth"] }),
@@ -50,8 +52,8 @@ describe("mcpPlanFor", () => {
         {
           id: "claude", label: "Claude Code",
           scopes: [
-            { files: AGENTS.claude.files, format: MCP_SERVERS_JSON, keep: ["github"], drop: [{ name: "notes", reason: "command ~/Library/x is macOS-only, will not run" }, { name: "old", reason: "unticked" }] },
-            { files: AGENTS.claude.files, format: MCP_SERVERS_JSON, project: { from: HOME, to: "/root" }, keep: ["zomato"], drop: [] },
+            { files: AGENTS.claude.files, format: MCP_SERVERS_JSON, keep: ["github"], drop: [{ name: "notes", reason: "command ~/Library/x is macOS-only, will not run" }, { name: "old", reason: "unticked" }, { name: "gsc", reason: "credential-shaped; not copied without your answer on its row" }] },
+            { files: AGENTS.claude.files, format: MCP_SERVERS_JSON, project: { from: HOME, to: "/root" }, keep: ["zomato", "drive"], drop: [] },
           ],
           aside: [],
         },

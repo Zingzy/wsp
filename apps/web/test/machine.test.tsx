@@ -442,6 +442,37 @@ describe("lineage", () => {
     expect(screen.queryByText("not on this image")).toBeNull();
   });
 
+  it("lists what the pack left off the forked version's image under its own label, the file beside each note, under that version alone", async () => {
+    const leftBehind = [
+      { id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: /opt/homebrew/bin/terminal-notifier" },
+      { id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: ~/.claude/hooks/gone" },
+    ];
+    const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), leftBehind: [{ id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: ~/old" }] }, { ...gv(12), leftBehind }] };
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await mount([onV12()], CAPS, lineage);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    const lists = document.querySelectorAll("[data-k='left-behind']");
+    expect(lists).toHaveLength(1);
+    expect(lists[0]!.closest("li")?.querySelector("[data-k='v12']")).not.toBeNull();
+    expect(lists[0]!.querySelector("p")?.textContent).toBe("left on this computer");
+    const rows = [...lists[0]!.querySelectorAll("li")].map(li => [li.querySelector("[data-k='left-path']")?.textContent, li.querySelector("[data-k='left-note']")?.textContent]);
+    expect(rows).toEqual([
+      ["~/.claude/settings.json", "hook left behind: /opt/homebrew/bin/terminal-notifier"],
+      ["~/.claude/settings.json", "hook left behind: ~/.claude/hooks/gone"],
+    ]);
+    expect(screen.queryByText("hook left behind: ~/old")).toBeNull();
+    expect(document.querySelector("[data-k='missing-tools']")).toBeNull();
+    expect(errors.mock.calls.map(c => String(c[0]))).not.toContainEqual(expect.stringContaining("same key"));
+    errors.mockRestore();
+  });
+
+  it("a version that recorded nothing left behind gets no such list", async () => {
+    await mount([onV12()], CAPS, twoVersions);
+    await waitFor(() => expect(fact("v12")).toBe("v12headthis fork"));
+    expect(document.querySelector("[data-k='left-behind']")).toBeNull();
+    expect(screen.queryByText("left on this computer")).toBeNull();
+  });
+
   it("asks before rolling back; confirming calls the api once and moves head", async () => {
     const api = await mount([onV12()], CAPS, twoVersions);
     fireEvent.click(await screen.findByRole("button", { name: "roll back to v11" }));

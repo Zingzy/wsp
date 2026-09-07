@@ -637,6 +637,14 @@ describe("golden version logins", () => {
     expect(() => GoldenVersion.parse({ ...base, missingTools: [{ name: "gopls", outcome: "skipped", note: "no Linux bottle" }] })).toThrow();
     expect(() => GoldenVersion.parse({ ...base, missingTools: [{ id: "tools/brew/gopls", name: "gopls", outcome: "installed", note: "" }] })).toThrow();
   });
+
+  it("carries what the pack left off the image by row, path and note, and stays optional for versions sealed before", () => {
+    const leftBehind = [{ id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: /opt/homebrew/bin/terminal-notifier" }];
+    expect(GoldenVersion.parse({ ...base, leftBehind })).toEqual({ ...base, leftBehind });
+    expect(GoldenVersion.parse(base).leftBehind).toBeUndefined();
+    expect(() => GoldenVersion.parse({ ...base, leftBehind: [{ id: "agents/claude", note: "hook left behind: x" }] })).toThrow();
+    expect(() => GoldenVersion.parse({ ...base, leftBehind: ["hook left behind: x"] })).toThrow();
+  });
 });
 
 describe("goldenHead", () => {

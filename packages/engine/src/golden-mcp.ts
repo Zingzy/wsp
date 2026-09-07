@@ -6,7 +6,7 @@
 // guest edits the files in place and touches no server it was not told about.
 import type { McpFormat, McpGuestResult } from "@wsp/catalog";
 import { MCP_ID_PREFIX, shellQuote } from "@wsp/protocol";
-import { TOOLS_PATH, UV_INSTALL, type RecipeEntry } from "./golden-import.js";
+import { TOOLS_PATH, UV_INSTALL, WITHHELD_NOTE, withheld, type RecipeEntry } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { TOOL_TIMEOUT_S, type ToolResult, closing, freeNote, guardDeadlineMs, guarded, reasonOf } from "./golden-tools.js";
 import type { ExecResult, Machine } from "./machine.js";
@@ -89,7 +89,8 @@ export function parseMcpId(id: string): { agent: string; home: boolean; name: st
 }
 
 /** The plan from every row of the recipe with its tick: ticked servers stay, unticked ones come out with the
- * row's own reason, and an agent that is not ticked has its servers set aside. Nothing when no row is a server. */
+ * row's own reason, a ticked server whose secret was not answered copy comes out too, and an agent that is not
+ * ticked has its servers set aside. Nothing when no row is a server. */
 export function mcpPlanFor(rows: readonly RecipeEntry[], opts: McpPlanOptions): McpPlan | undefined {
   const guestHome = opts.guestHome ?? GUEST_HOME;
   const ticked = new Set(rows.filter(e => e.bring === true).map(e => e.id));
@@ -112,8 +113,8 @@ export function mcpPlanFor(rows: readonly RecipeEntry[], opts: McpPlanOptions): 
         files: source.files,
         format: source.format,
         ...(home ? { project: { from: opts.home, to: guestHome } } : {}),
-        keep: rows.filter(o => ticked.has(o.row.id)).map(o => o.name),
-        drop: rows.filter(o => !ticked.has(o.row.id)).map(o => ({ name: o.name, reason: o.row.reason ?? "unticked" })),
+        keep: rows.filter(o => ticked.has(o.row.id) && !withheld(o.row)).map(o => o.name),
+        drop: rows.filter(o => !ticked.has(o.row.id) || withheld(o.row)).map(o => ({ name: o.name, reason: !ticked.has(o.row.id) ? (o.row.reason ?? "unticked") : WITHHELD_NOTE })),
       });
     }
     agents.push({ id: agent, label: source.label, scopes, aside: [] });

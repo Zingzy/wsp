@@ -5,6 +5,7 @@
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
 import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE_CONTEXT, PI_CONTEXT, type AgentContext } from "./context.js";
+import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { APT_INDEX, roadModule } from "./road-modules.js";
@@ -88,6 +89,9 @@ export interface AgentEntry extends EntryBase {
   mcp?: McpConfig;
   /** How the agent loads the machine context on the guest; absent, it gets no hook and no skill there. */
   context?: AgentContext;
+  /** How the agent's settings name the hook scripts it runs, so a copy carries each script or takes the hook out;
+   * absent when the catalog knows no hooks for it, and its settings copy as they are. */
+  hooks?: HookCarry;
   /** The directory on this computer the agent loads its global skills from, `~/`-relative, one folder per skill with
    * a SKILL.md inside; the wsp skill goes there with the MCP server. */
   skills: string;
@@ -157,8 +161,9 @@ export const CATALOG: readonly CatalogEntry[] = [
     signIn: SIGN_IN_ROWS.claude,
     // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
     mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login" },
+    hooks: CLAUDE_HOOKS,
     configPaths: [
-      "~/.claude/settings.json", "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
+      CLAUDE_SETTINGS_FILE, "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
       "~/.claude/plugins/installed_plugins.json", "~/.claude/plugins/known_marketplaces.json", "~/.claude.json",
     ],
     // ~/.claude.json holds per-project state and caches rewritten on every run; the plugin indexes carry lastUpdated stamps.
