@@ -19,7 +19,7 @@ import {
   Rows3Icon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GitDiffReply, GitStatusReply } from "@wsp/protocol";
+import { REPO_STATE_WORDS, type GitDiffReply, type GitStatusReply } from "@wsp/protocol";
 import { ChangedFilesTree } from "../components/chat/ChangedFilesTree.js";
 import { DiffStatLabel } from "../components/chat/DiffStatLabel.js";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "../components/diffs/AnnotatableCodeView.js";
@@ -47,7 +47,7 @@ type LoadState =
   | { kind: "error"; message: string; last: GitDiffReply | null };
 
 /** The repository git resolved for one folder: its top level and branch, or the word that there is none. */
-type RepoState = { kind: "unknown" } | { kind: "repo"; root: string; branch: string } | { kind: "none" };
+type RepoState = { kind: "unknown" } | { kind: "repo"; root: string; branch: string } | { kind: "none" } | { kind: "refused" };
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 
@@ -148,6 +148,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const scopeLabel = SCOPE_LABELS[scope];
   const shown = repo.cwd === cwd ? repo.state : { kind: "unknown" as const };
   const folderLabel = shown.kind === "repo" ? shown.root : cwd;
+  const said = shown.kind !== "repo" && REPO_STATE_WORDS[shown.kind].word !== "" ? REPO_STATE_WORDS[shown.kind] : null;
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background" data-diff-surface data-diff-scope={scope} data-diff-cwd={cwd}>
@@ -178,11 +179,21 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           </Menu>
           <span
             className="inline-flex h-6 min-w-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground"
-            title={shown.kind === "repo" ? `git: ${shown.root}` : shown.kind === "none" ? `no repository at or above ${cwd}` : cwd}
+            title={said !== null ? undefined : shown.kind === "repo" ? `git: ${shown.root}` : shown.kind === "none" ? `no repository at or above ${cwd}` : cwd}
             data-diff-repo={shown.kind === "repo" ? shown.root : undefined}
+            data-diff-repo-state={shown.kind}
           >
             <FolderGitIcon className={cn("size-3.5 shrink-0", shown.kind === "repo" ? "opacity-70" : "opacity-40")} />
-            <span className="min-w-0 truncate">{shown.kind === "none" ? `no git at ${cwd}` : folderLabel}</span>
+            {said === null ? (
+              <span className="min-w-0 truncate">{shown.kind === "none" ? `no git at ${cwd}` : folderLabel}</span>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger render={<span className="min-w-0 truncate" tabIndex={0} />}>{said.word}</TooltipTrigger>
+                <TooltipPopup side="top" className="max-w-72">
+                  {said.note}
+                </TooltipPopup>
+              </Tooltip>
+            )}
             {shown.kind === "repo" ? <span className="shrink-0 truncate opacity-70">· {shown.branch}</span> : null}
           </span>
           <Tooltip>

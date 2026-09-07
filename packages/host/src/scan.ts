@@ -9,7 +9,7 @@
 import { ROADS, asLinuxbrew, catalogToolFor, roadModule, type InstallRoad, type RoadName } from "@wsp/catalog";
 import { firstLine, linuxSupport, parseBrewfile, parseCargoInstalls, parseNpmGlobals, parsePipxList, parseUvToolList, type Host, type Pkg } from "@wsp/collect";
 import { agentOwning, parseDu } from "@wsp/engine";
-import { shellQuote, type RecipeCustomRow } from "@wsp/protocol";
+import { shellQuote, toolRowId, type RecipeCustomRow } from "@wsp/protocol";
 
 /** One tool this Mac has, as the Also on this Mac screen and `wsp recipe scan` draw it. */
 export interface ScanRow {
@@ -144,7 +144,7 @@ async function sizesUnder(host: Host, dir: string | undefined, names: readonly s
 /** Whether the catalog already carries a package: a tool row of its own on the Tools screen (a formula the base
  * installs on every machine is one of those), or the package an agent on the Agents screen installs itself. */
 function carried(manager: string, name: string): boolean {
-  return catalogToolFor(name) !== undefined || catalogToolFor(lastSegment(name)) !== undefined || agentOwning(`tools/${manager}/${name}`) !== undefined;
+  return catalogToolFor(name) !== undefined || catalogToolFor(lastSegment(name)) !== undefined || agentOwning(toolRowId(manager, name)) !== undefined;
 }
 
 /** Whether the recipe already installs the tool by another hand than this screen's: a row `wsp recipe --add` wrote

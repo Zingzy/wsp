@@ -7,10 +7,10 @@ describe("repoAbsence", () => {
     expect(repoAbsence(Object.assign(new Error("not inside a git repository"), { code: "not-a-git-repo" }))).toBe("none");
   });
 
-  it("leaves every other failure unknown: a refused read, another code, a bare error, a non-error", () => {
-    expect(repoAbsence(Object.assign(new Error("outside the browsable roots"), { code: "outside-roots" }))).toBe("unknown");
-    expect(repoAbsence(new Error("socket closed"))).toBe("unknown");
-    expect(repoAbsence(null)).toBe("unknown");
-    expect(repoAbsence("not-a-git-repo")).toBe("unknown");
+  it("reads every other failure as a read the machine refused: another code, a bare error, a non-error", () => {
+    expect(repoAbsence(Object.assign(new Error("outside the browsable roots"), { code: "outside-root" }))).toBe("refused");
+    expect(repoAbsence(new Error("socket closed"))).toBe("refused");
+    expect(repoAbsence(null)).toBe("refused");
+    expect(repoAbsence("not-a-git-repo")).toBe("refused");
   });
 });

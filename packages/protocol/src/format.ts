@@ -530,6 +530,12 @@ export function vaultOverCapLine(bytes: number, capBytes: number): string {
   return `the export was ${fmtBytes(bytes)}, over the ${fmtBytes(capBytes)} cap`;
 }
 
+/** A store an agent keeps for every project that an export could not read on the machine: nothing from it travelled,
+ * so the project's rows in it stayed there rather than every other project's leaving with them. */
+export function storeUnreadLine(store: string, why: string): string {
+  return `could not read ${store} on the machine, so nothing from it travelled: ${why}`;
+}
+
 /** The napping status's line when the nap could not store a fresh vault and the previous one stands: a wake that has
  * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
 export function vaultKeptLine(why: string): string {
@@ -639,6 +645,28 @@ export function pinMovedLine(from: ToolPin | undefined, to: ToolPin | undefined)
 
 /** Why a tool installs differently now when its road and pin stand: the lines the road runs are not the golden's. */
 export const INSTALLER_MOVED_LINE = "its install lines changed";
+
+/** The detail of a tools row the catalog does not carry: it is on this Mac, at the version this Mac runs when the
+ * collector read one. */
+export function installedOnMacLine(version: string | undefined): string {
+  return version === undefined ? "installed on this Mac" : `installed on this Mac, ${version}`;
+}
+
+/** What the build does with a tools row it installs: the road in its own words, then the line the step runs. */
+export function installsByLine(words: string, shown: string): string {
+  return `installs ${words}: ${shown}`;
+}
+
+/** What the build does with a ticked tools row it sets aside, with the plan's reason. */
+export function leftOutLine(note: string): string {
+  return `left out of the build: ${note}`;
+}
+
+/** A recipe file's tick on a tool outside the catalog that this Mac has no row for: nothing here says how to install
+ * it, so the tick is said and left out rather than dropped in silence. */
+export function notHereLine(name: string, file: string): string {
+  return `${name} is ticked in ${file}, but this Mac has no row that installs it; it is left out.`;
+}
 
 /** The app's line for a workspace still forked from an older golden version, offered the way the helper update is:
  * a state in words, never a badge. The move is the person's; nothing replaces a machine they are working on. */

@@ -19,6 +19,15 @@ export interface MovedState {
   skipped?: number;
 }
 
+/** A store one agent keeps for every project, which cannot travel whole: an export of one project would carry every
+ * other project's rows off the machine. `store` is its path under the agent's home and `filter` the python3 lines
+ * that write PATH's rows of STORE into COPY, counting what they wrote in FILTERED. PATH, STORE, COPY, FILTERED and
+ * SAID are the listing's own names; a filter or a listing step that binds one of them breaks the step it sits in. */
+export interface SharedStore {
+  store: string;
+  filter: readonly string[];
+}
+
 /** Moves one agent's project state from an old absolute path to a new one inside that agent's home. */
 export interface ProjectStateResolver {
   /** The catalog id of the agent whose state this moves. */
@@ -38,10 +47,12 @@ export interface ProjectStateResolver {
   /** The files under home holding state for `path` and the folders under it alone, absolute; a store shared with
    * other projects (an index, a registry) is never one. */
   entries(home: string, path: string): Promise<string[]>;
-  /** The listing the machine runs to name the paths under `home` there holding `path`'s state, so a trip pulls those
-   * and not the whole of `roots`: a python3 script printing one absolute path per line. Absent on a module whose
-   * roots are already the answer (a store shared with every project). */
-  listing?(home: string, path: string): string;
+  /** The steps of the listing the machine runs to name the paths under `home` there holding `path`'s state, so a trip
+   * pulls those and not the whole of `roots`: python3 lines calling say() for each path. Absent on a module whose
+   * whole roots are the answer once its shared store has been filtered. */
+  listing?(home: string, path: string): readonly string[];
+  /** The store this home keeps for every project, filtered into a copy the trip pulls in its place. */
+  shared?: SharedStore;
   /** The merge the machine runs once the files have landed, for an agent whose rows for the project sit in a store
    * shared with other projects: a python3 script that puts this home's rows for `from`, keyed to `to`, into the store
    * under the agent's home on the machine and prints a MergeOutput as its last line. Nothing when this home holds no
