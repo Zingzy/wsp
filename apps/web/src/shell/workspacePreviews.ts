@@ -1,37 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What a workspace looked like when the person last left it, for the switcher
-// cards. Two halves: the last line of the thread that was open, which the
-// chat view records as it draws it and every shell has, and a picture of the
-// page, which only the desktop shell can take. Neither is persisted: a
-// transcript's words belong to the machine, not to this computer's disk.
+// A picture of the page for each workspace as the person last left it, for
+// the switcher cards. Only the desktop shell can take one, so a browser tab's
+// cards stay text, and it is never persisted: a page can hold a transcript,
+// whose words belong to the machine and not to this computer's disk.
 import { create } from "zustand";
 import { desktopBridge } from "../lib/desktopShell.js";
 
-/** The last line the chat showed, under the thread it came from: a card drops it once another thread is open. */
-export interface WorkspaceLine {
-  readonly threadKey: string;
-  readonly text: string;
-}
-
 interface WorkspacePreviewsState {
-  lines: Readonly<Record<string, WorkspaceLine>>;
   images: Readonly<Record<string, string>>;
-  noteLine: (workspaceId: string, line: WorkspaceLine) => void;
   /** Replaces every picture at once, so this side holds exactly what the shell answered and nothing the shell has
    * since dropped at its own cap. */
   setImages: (images: Readonly<Record<string, string>>) => void;
 }
 
 export const useWorkspacePreviews = create<WorkspacePreviewsState>(set => ({
-  lines: {},
   images: {},
-  noteLine: (workspaceId, line) =>
-    set(s => {
-      // A streaming turn redraws its last line on every delta; only a line that actually changed may wake a reader.
-      const held = s.lines[workspaceId];
-      if (held?.threadKey === line.threadKey && held.text === line.text) return s;
-      return { lines: { ...s.lines, [workspaceId]: line } };
-    }),
   setImages: images => set({ images }),
 }));
 

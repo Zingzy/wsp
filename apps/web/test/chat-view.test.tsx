@@ -329,28 +329,16 @@ describe("ChatView", () => {
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
   });
 
-  it("records the thread's last line for the switcher card, under the runtime thread id the card matches on", async () => {
-    useWorkspacePreviews.setState({ lines: {}, images: {} });
+  it("records nothing as it draws: the previews store is the shell's pictures alone", async () => {
+    const held = useWorkspacePreviews.getState();
+    expect(Object.keys(held)).toEqual(["images", "setImages"]);
     const { api, emit } = fixtureApi([workspace], { [WS]: threaded("Ran the gate.\n\nAll 12 tests green.\n") });
     await setup(api);
     await screen.findByText(/All 12 tests green\./);
-    await waitFor(() => expect(useWorkspacePreviews.getState().lines[WS]).toEqual({ threadKey: THREAD, text: "All 12 tests green." }));
-
-    // What the thread says next replaces it, whitespace collapsed the way the notify line collapses it.
-    emit({ type: "session.delta", ...THREADED_SCOPE, at: T0 + 120_000, kind: "text", text: "\n  Bumped  the\tlockfile.  \n" });
-    await waitFor(() => expect(useWorkspacePreviews.getState().lines[WS]?.text).toBe("Bumped the lockfile."));
-  });
-
-  it("writes nothing when a delta leaves the thread's last line saying what it already said", async () => {
-    useWorkspacePreviews.setState({ lines: {}, images: {} });
-    const { api, emit } = fixtureApi([workspace], { [WS]: threaded("Added GET /health.") });
-    await setup(api);
-    await waitFor(() => expect(useWorkspacePreviews.getState().lines[WS]?.text).toBe("Added GET /health."));
-    const held = useWorkspacePreviews.getState().lines;
-    // The same words again, as a redraw of one streaming line: same text, so the same record object must come back.
-    emit({ type: "session.delta", ...THREADED_SCOPE, at: T0 + 121_000, kind: "text", text: "\nAdded GET /health." });
-    await waitFor(() => expect(screen.getAllByText(/Added GET \/health\./).length).toBeGreaterThan(0));
-    expect(useWorkspacePreviews.getState().lines).toBe(held);
+    // A whole transcript drawn and a turn streaming over it: the store the switcher reads is not written to once.
+    emit({ type: "session.delta", ...THREADED_SCOPE, at: T0 + 120_000, kind: "text", text: "\nBumped the lockfile.\n" });
+    await waitFor(() => expect(screen.getAllByText(/Bumped the lockfile\./).length).toBeGreaterThan(0));
+    expect(useWorkspacePreviews.getState()).toBe(held);
   });
 
   it("virtualizes a long transcript instead of mounting every row", async () => {

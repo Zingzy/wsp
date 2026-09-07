@@ -11,12 +11,13 @@
 // one muted mono line in a slot the composer keeps at one height whether or
 // not a line is in it, a right-click on a workspace row opens the in-app menu
 // at the pointer in the tooltip skin, inside the viewport, and the switch
-// chord held down puts the workspace switcher up without moving the shell
-// under it, and at three sidebar widths the workspace and thread rows keep
-// one grammar: one height per row kind, the state word in its slot at the
-// right edge only off running, the meta line in one order cut from the
-// right, no import or export glyph, the thread title up to a fixed time
-// column. Vite serves test/shell to Playwright's browser, so like the glyph test it runs
+// chord held down puts the workspace switcher up, its cards three parts
+// each, without moving the shell under it, and at three sidebar widths the
+// workspace and thread rows keep one grammar: one height per row kind, the
+// state word in its slot at the right edge only off running, the meta line
+// in one order cut from the right, no import or export glyph, the thread
+// title up to a fixed time column. Vite serves test/shell to Playwright's
+// browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
 import { existsSync, mkdirSync } from "node:fs";
@@ -223,7 +224,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
-  it("holding the switch chord puts the switcher up over the shell, one card per workspace, and the highlight moves nothing", async () => {
+  it("holding the switch chord puts the switcher up over the shell, one card per workspace of three parts, and the highlight moves nothing", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&shell=desktop`);
       await page!.waitForSelector("[data-sidebar-row]");
@@ -235,6 +236,22 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(await cards.count()).toBe(3);
       const boxes = await cards.evaluateAll(els => els.map(el => JSON.stringify(el.getBoundingClientRect().toJSON())));
       expect(new Set(await cards.evaluateAll(els => els.map(el => el.getBoundingClientRect().height))).size).toBe(1);
+      // Three parts, in one order, on every card: the well, the name in sans, the thread's title in muted mono.
+      const parts = await cards.evaluateAll(els =>
+        els.map(el =>
+          [...el.children].map(child => child.getAttributeNames().find(name => name.startsWith("data-card-"))?.slice("data-card-".length) ?? "?").join(","),
+        ),
+      );
+      expect(parts).toEqual(["preview,name,thread", "preview,name,thread", "preview,name,thread"]);
+      const fonts = await cards.evaluateAll(els =>
+        els.map(el => {
+          const mono = (part: string): boolean => /mono/i.test(getComputedStyle(el.querySelector(`[data-card-${part}]`)!).fontFamily);
+          return { name: mono("name"), thread: mono("thread") };
+        }),
+      );
+      expect(fonts).toEqual([...Array(3)].map(() => ({ name: false, thread: true })));
+      // No cost, no state word and no open word on any card: the state is read off the preview and the sidebar.
+      for (const text of await cards.evaluateAll(els => els.map(el => el.textContent ?? ""))) expect(text).not.toMatch(/\$|Running|Paused|Gone|open/);
       expect(await page!.locator("[data-workspace-card][aria-selected=true]").getAttribute("data-workspace-card")).toBe("ws_b");
       await page!.screenshot({ path: join(SHOTS_DIR, `workspace-switcher-${theme}.png`) });
       console.info(`workspace switcher screenshot: ${join(SHOTS_DIR, `workspace-switcher-${theme}.png`)}`);
