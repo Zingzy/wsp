@@ -8,6 +8,8 @@ export interface StubMachine extends Machine {
   spec: MachineSpec;
   paused: boolean;
   killed: boolean;
+  /** The host lost the VM while the gateway still lists it running: metrics answer 404, the state read still says running. */
+  hostLost: boolean;
   /** Every command the guest was given, exec and run alike, in order. */
   execLog: string[];
   /** The scripts that went through run(), the road for anything that may outlive one exec. */
@@ -17,6 +19,7 @@ export interface StubMachine extends Machine {
   resumes: number;
   /** What describe() reports; tests mutate it to play a resume that rebuilt the VM. */
   shape: MachineShape;
+  metrics(): Promise<void>;
 }
 
 export interface StubBackend extends MachineBackend {
@@ -120,6 +123,7 @@ export function stubBackend(): StubBackend {
         spec,
         paused: false,
         killed: false,
+        hostLost: false,
         execLog: [],
         runLog: [],
         runOptions: [],
@@ -166,6 +170,9 @@ export function stubBackend(): StubBackend {
         },
         async describe(): Promise<MachineShape> {
           return { ...m.shape };
+        },
+        async metrics(): Promise<void> {
+          if (m.killed || m.hostLost) throw Object.assign(new Error("host no longer knows this VM"), { kind: "missing", status: 404 });
         },
         async downloadUrl(path: string): Promise<string> {
           return `${await vaultOrigin()}/download${path}`;

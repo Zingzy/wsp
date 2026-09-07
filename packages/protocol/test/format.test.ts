@@ -50,6 +50,7 @@ import {
   goldenBuildLine,
   goneWords,
   harnessExitLine,
+  hostLostAnswer,
   isCodeSearchTool,
   listedName,
   machineCapRefusal,
@@ -567,6 +568,14 @@ describe("goneWords", () => {
     expect(goneWords("sb_1", { by: "pause", at, answer: "404 Not found" })).toBe("machine sb_1 is gone at the provider: the pause found it gone at 2026-09-07T01:21:10Z (404 Not found)");
     expect(goneWords("sb_1", { by: "status poll", at })).toBe("machine sb_1 is gone at the provider: the status poll found it gone at 2026-09-07T01:21:10Z");
     expect(goneWords("sb_1", { by: "sweep", at, answer: "" })).toBe("machine sb_1 is gone at the provider: the sweep found it gone at 2026-09-07T01:21:10Z");
+  });
+
+  it("quotes the host's metrics answer when it, not the state read, gave the machine away", () => {
+    const at = Date.parse("2026-09-07T01:21:10Z");
+    expect(hostLostAnswer("404 Sandbox not found")).toBe("metrics 404 Sandbox not found; the state read still said running");
+    expect(goneWords("sb_1", { by: "status poll", at, answer: hostLostAnswer("404 Sandbox not found") })).toBe(
+      "machine sb_1 is gone at the provider: the status poll found it gone at 2026-09-07T01:21:10Z (metrics 404 Sandbox not found; the state read still said running)",
+    );
   });
 });
 

@@ -12,7 +12,7 @@ import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
-import { CATALOG_TTL_MS, GRACE_MS, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
+import { CATALOG_TTL_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -69,6 +69,16 @@ describe("runtime", () => {
     await srv.close();
   });
 
+  it("every fork carries HOME, USER and the golden's PATH in its envs, under the workspace's own", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    expect(GUEST_LOGIN_ENV).toEqual({ HOME: "/root", USER: "root", PATH: TOOLS_PATH });
+    await rt.workspaces.create({ golden: "snap_g", name: "plain" });
+    await rt.workspaces.create({ golden: "snap_g", name: "own", envs: { FOO: "1", HOME: "/home/dev" } });
+    expect(backend.machines[0]!.spec.envs).toEqual(GUEST_LOGIN_ENV);
+    expect(backend.machines[1]!.spec.envs).toEqual({ HOME: "/home/dev", USER: "root", PATH: TOOLS_PATH, FOO: "1" });
+  });
+
   it("wake after the paused machine vanished resurrects a fresh golden fork", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
@@ -80,7 +90,7 @@ describe("runtime", () => {
     const woken = await rt.workspaces.wake(ws.id);
     expect(woken.machineId).toBe("m2");
     expect(backend.machines[1]!.spec.fromSnapshot).toBe("snap_g");
-    expect(backend.machines[1]!.spec.envs).toEqual({ FOO: "1" });
+    expect(backend.machines[1]!.spec.envs).toEqual({ ...GUEST_LOGIN_ENV, FOO: "1" });
     const wokeEvent = events.find(e => e.type === "workspace.woken");
     expect(wokeEvent).toMatchObject({ machineId: "m2", resurrected: true });
   });
@@ -132,10 +142,10 @@ describe("runtime", () => {
     const session = await rt.sessions.start(ws.id, { prompt: "say hi" });
     const result = await session.finished;
     expect(result.status).toBe("completed");
-    // The adapter is handed the golden's login PATH: a launch served by a bare-PATH exec must still find the binary.
+    // The adapter is handed the machine's login environment: who the guest runs as and the golden's PATH, so a launch served by a bare-PATH exec still finds the binary.
     // Every context, not the first alone: a turn is not the only road that asks a harness something on the machine.
     expect(contexts.length).toBeGreaterThan(0);
-    for (const ctx of contexts) expect(ctx.env).toEqual({ PATH: TOOLS_PATH });
+    for (const ctx of contexts) expect(ctx.env).toEqual(GUEST_LOGIN_ENV);
     const types = events.map(e => e.type);
     expect(types).toContain("session.start");
     expect(types).toContain("session.delta");

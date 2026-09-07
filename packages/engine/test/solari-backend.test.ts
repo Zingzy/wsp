@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { isMissing } from "../src/errors.js";
 import { EXEC_ENV, REQUEST_ID_HEADER, SolariBackend } from "../src/solari-backend.js";
 
 function fakeFetch(routes: Record<string, { status: number; body: unknown; headers?: Record<string, string> }>) {
@@ -136,6 +137,31 @@ describe("SolariBackend", () => {
     expect(EXEC_ENV).toBe("export HOME=/root USER=root");
     expect(body.args[1]).not.toContain("SHELL");
     expect(body.args[0]).toBe("-c");
+  });
+  it("passes the spec's envs through as the create body's envs, and sends none when the spec names none", async () => {
+    const f = fakeFetch({ "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } } });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    await b.create({ kind: "sandbox", fromSnapshot: "snap_1", envs: { HOME: "/root", USER: "root", PATH: "/usr/bin:/bin" } });
+    await b.create({ kind: "sandbox", fromSnapshot: "snap_1" });
+    const bodies = f.mock.calls.map(c => JSON.parse(String(c[1]?.body)) as Record<string, unknown>);
+    expect(bodies[0]).toMatchObject({ fromSnapshot: "snap_1", envs: { HOME: "/root", USER: "root", PATH: "/usr/bin:/bin" } });
+    expect(bodies[1]).not.toHaveProperty("envs");
+  });
+  it("reads GET /sandboxes/:id/metrics for the host's answer, and a 404 there is the machine missing", async () => {
+    const f = fakeFetch({
+      "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } },
+      "GET /sandboxes/x/metrics": { status: 200, body: { cpuPct: 12.5, memBytes: 734003200, memTotalBytes: 8589934592, diskBytes: 2147483648 } },
+      "GET /sandboxes/lost": { status: 200, body: { sandboxId: "lost", kind: "sandbox", state: "running" } },
+      "GET /sandboxes/lost/metrics": { status: 404, body: { error: "Sandbox not found" } },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox" });
+    await expect(m.metrics!()).resolves.toBeUndefined();
+    const lost = await b.get("lost");
+    expect(await lost.state()).toBe("running");
+    const refused = await lost.metrics!().then(() => undefined, (e: unknown) => e);
+    expect(isMissing(refused)).toBe(true);
+    expect(f.mock.calls.map(c => `${c[1]?.method} ${new URL(String(c[0])).pathname}`)).toEqual(["POST /sandboxes", "GET /sandboxes/x/metrics", "GET /sandboxes/lost", "GET /sandboxes/lost", "GET /sandboxes/lost/metrics"]);
   });
   it("a refused call's error carries the request id the reply's header named", async () => {
     const id = "vm_1";
