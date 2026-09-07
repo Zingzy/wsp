@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, MachineAliveError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import type { RecipeDigest } from "@wsp/protocol";
@@ -16,7 +16,7 @@ import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } f
  * which `ignoreKill` answers true is accepted and changes nothing. */
 function recordingBackend(
   execResults: Record<string, ExecResult> = {},
-  opts: { ignoreKill?: (id: string, nth: number) => boolean; built?: (spec: MachineSpec) => MachineShape; exec?: (cmd: string) => ExecResult; stream?: boolean } = {},
+  opts: { ignoreKill?: (id: string, nth: number) => boolean; built?: (spec: MachineSpec) => MachineShape; exec?: (cmd: string) => ExecResult; stream?: boolean; snapshot?: (id: string, nth: number) => void; state?: (id: string) => void } = {},
 ) {
   const created: MachineSpec[] = [];
   const snapshots: string[] = [];
@@ -51,7 +51,12 @@ function recordingBackend(
           if (opts.stream) for (const line of res.stdout.split("\n")) if (line !== "") o.onLine?.(line);
           return res;
         },
-        snapshot: async (name) => { snapshots.push(name); timeline.push(`snapshot ${id}`); return `snap_${name}`; },
+        snapshot: async (name) => {
+          timeline.push(`snapshot ${id}`);
+          opts.snapshot?.(id, timeline.filter(t => t === `snapshot ${id}`).length);
+          snapshots.push(name);
+          return `snap_${name}`;
+        },
         pause: async () => {}, resume: async () => {},
         kill: async () => {
           killed.push(id);
@@ -60,7 +65,10 @@ function recordingBackend(
           killCount.set(id, nth);
           if (!opts.ignoreKill?.(id, nth)) gone.add(id);
         },
-        state: async () => (gone.has(id) ? "gone" : "running"),
+        state: async () => {
+          opts.state?.(id);
+          return gone.has(id) ? "gone" : "running";
+        },
         downloadUrl: async () => "https://x", uploadUrl: async () => "https://x",
         ...(opts.built ? { describe: async () => opts.built!(spec) } : {}),
       };
@@ -75,8 +83,11 @@ function recordingBackend(
     async list() { return []; },
     async deleteSnapshot(id) { deletedSnapshots.push(id); },
   };
-  return { backend, created, snapshots, killed, deletedSnapshots, timeline, ran, inline };
+  return { backend, created, snapshots, killed, deletedSnapshots, timeline, ran, inline, gone };
 }
+
+/** What the provider's snapshot call answers when it refuses: the 502 the backend maps, with the reply's request id. */
+const refusedSnapshot = (requestId: string): Error => Object.assign(new Error("Failed to snapshot sandbox"), { kind: "snapshotUnavailable", status: 502, requestId });
 
 const FAST_KILL = { graceMs: 20, pollMs: 1 };
 /** What a machine that still serves answers the reach check with. */
@@ -339,6 +350,63 @@ describe("interactive golden: prepare then seal", () => {
     expect((err as NotFirstLifeError).machineId).toBe("m1");
     expect(snapshots).toEqual([]);
     expect(timeline).toEqual(["create m1"]);
+  });
+
+  it("a snapshot the provider refuses with its 502 is asked for three times while the builder reads running, each attempt a stage line with the provider's answer; then the seal fails typed and the builder is left as it was", async () => {
+    const { backend, killed, timeline } = recordingBackend({}, { snapshot: (_id, nth) => { throw refusedSnapshot(`req_${nth}`); } });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    const err = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(SnapshotFailedError);
+    expect(err).toMatchObject({ kind: "snapshotFailed", machineId: "m1", attempts: 3, builderState: "running", answer: { status: 502, message: "Failed to snapshot sandbox", requestId: "req_3" } });
+    expect(timeline).toEqual(["create m1", "snapshot m1", "snapshot m1", "snapshot m1"]);
+    expect(killed).toEqual([]);
+    expect(sansBase(stages).slice(-4)).toEqual([
+      "snapshotting:golden-v1",
+      "snapshotting:attempt 1 of 3 answered 502 Failed to snapshot sandbox (request req_1); the builder reads running, next attempt in 1ms",
+      "snapshotting:attempt 2 of 3 answered 502 Failed to snapshot sandbox (request req_2); the builder reads running, next attempt in 1ms",
+      "failed:the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_3) while the builder read running",
+    ]);
+  });
+
+  it("a snapshot that lands on the second attempt seals as any other", async () => {
+    const { backend, timeline } = recordingBackend({}, { snapshot: (_id, nth) => { if (nth === 1) throw refusedSnapshot("req_1"); } });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    const { version } = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 });
+    expect(version.snapshotId).toBe("snap_golden-v1");
+    expect(timeline).toEqual(["create m1", "snapshot m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
+    expect(stages.at(-1)).toBe("sealed:v1");
+  });
+
+  it("a refused snapshot on a builder the provider answers 404 for ends at the first attempt: nothing is killed and the error says the provider no longer has it", async () => {
+    const { backend, killed, timeline, gone } = recordingBackend({}, { snapshot: id => { gone.add(id); throw refusedSnapshot("req_1"); } });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    const err = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
+    expect(err).toMatchObject({ kind: "snapshotFailed", attempts: 1, builderState: "gone" });
+    expect(timeline).toEqual(["create m1", "snapshot m1"]);
+    expect(killed).toEqual([]);
+    expect(stages.at(-1)).toBe("failed:the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_1) and no longer has the builder (404)");
+  });
+
+  it("a refused snapshot whose read of the builder fails with anything but 404 ends at once with the builder unread and untouched", async () => {
+    const { backend, killed, timeline } = recordingBackend({}, { snapshot: () => { throw refusedSnapshot("req_1"); }, state: () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); } });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    const err = await sealGolden(builder, { backend, smoke: "true", onStage, snapshotRetryMs: 1 }).catch(e => e as unknown);
+    expect(err).toMatchObject({ kind: "snapshotFailed", attempts: 1, builderState: "unread", readError: "upstream sad" });
+    expect(timeline).toEqual(["create m1", "snapshot m1"]);
+    expect(killed).toEqual([]);
+    expect(stages.at(-1)).toBe("failed:the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_1) and could not be read about the builder (upstream sad)");
+  });
+
+  it("any other snapshot failure is not asked again and consumes the builder as before", async () => {
+    const { backend, killed, timeline } = recordingBackend({}, { snapshot: () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); } });
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    await expect(sealGolden(builder, { backend, smoke: "true", snapshotRetryMs: 1 })).rejects.toThrow("upstream sad");
+    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1"]);
+    expect(killed).toEqual(["m1"]);
   });
 
   it("a failed seal kills every machine, drops the snapshot, and leaves the prior manifest untouched", async () => {

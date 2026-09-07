@@ -26,6 +26,8 @@ export interface StubBackend extends MachineBackend {
   /** What a download URL serves for a guest path; absent, an empty archive. */
   downloads?: (path: string) => Buffer;
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
+  /** Runs before each snapshot is taken, with which attempt on that machine this is; one that throws is the provider refusing. */
+  beforeSnapshot?: (m: StubMachine, nth: number) => void;
   /** Every snapshot taken and not deleted, as the provider would list it. */
   snapshots: SnapshotRow[];
   /** What the next snapshot is listed at; a golden measured 7.8 to 8.5 GB live. */
@@ -66,6 +68,7 @@ export function stubBackend(): StubBackend {
   const machines: StubMachine[] = [];
   const snapshots: SnapshotRow[] = [];
   const snapshotsNamed = new Map<string, number>();
+  const snapshotAsks = new Map<string, number>();
   const puts: StubBackend["puts"] = [];
   const vaultOrigin = vaultServer(puts, () => backend.downloads);
 
@@ -105,6 +108,8 @@ export function stubBackend(): StubBackend {
           return backend.execImpl(m, script);
         },
         async snapshot(name: string): Promise<string> {
+          snapshotAsks.set(m.id, (snapshotAsks.get(m.id) ?? 0) + 1);
+          backend.beforeSnapshot?.(m, snapshotAsks.get(m.id)!);
           // The provider mints an id per call; a repeated name (two in one millisecond) must not fold into one row.
           const nth = (snapshotsNamed.get(name) ?? 0) + 1;
           snapshotsNamed.set(name, nth);
