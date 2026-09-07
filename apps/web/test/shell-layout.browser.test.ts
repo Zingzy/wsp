@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The shell's chrome in a real Chromium: the sidebar's brand lockup starts
 // where the search row does, the two top rows are one height and start
-// where the workspace rows do, a thread row's title keeps its room at the
+// where the workspace rows do, the search row opens the palette without
+// moving a row, a thread row's title keeps its room at the
 // default width, a status toast holds a long token inside its box, the line
 // the runtime puts on a machine's row takes that row's second line whole,
 // uncut and without growing the row, and collapsing the sidebar leaves the
@@ -15,6 +16,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "../src/keybindingDefaults";
+import { shortcutLabelForCommand } from "../src/keybindings";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -69,7 +72,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const lockup = await box("[data-slot=sidebar-header] [role=img][aria-label=wsp]");
-      const search = await box("button[aria-label='Search threads']");
+      const search = await box("button[aria-label='Search']");
       expect(Math.abs(lockup.x - search.x)).toBeLessThan(1);
       const path = join(SHOTS_DIR, `sidebar-header-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -77,7 +80,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 30_000);
 
-  it("the search row and the Workspaces row are one height, start where the workspace rows do, paint nothing at rest, and the field takes the row's place without moving anything", async () => {
+  it("the search row and the Workspaces row are one height, start where the workspace rows do, paint nothing at rest, carry the chord at the right edge, and open the palette without moving anything", async () => {
     const shot = async (name: string, theme: string): Promise<void> => {
       const path = join(SHOTS_DIR, `sidebar-top-${name}-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -90,32 +93,56 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       });
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
-      const search = await box("button[aria-label='Search threads']");
+      const search = await box("button[aria-label='Search']");
       const section = await box("button[aria-label='Workspaces']");
       const workspace = await box("[data-row-id='ws:ws_a']");
       const firstThread = await box("[data-row-id^='thread:']");
       expect(search.height).toBe(section.height);
       expect(Math.abs(search.x - section.x)).toBeLessThan(1);
       expect(Math.abs(search.x - workspace.x)).toBeLessThan(1);
-      expect(await transparent("button[aria-label='Search threads']")).toBe(true);
+      expect(await transparent("button[aria-label='Search']")).toBe(true);
       expect(await transparent("button[aria-label='Workspaces']")).toBe(true);
+      expect(await page!.locator("[data-slot=sidebar] input").count()).toBe(0);
+      const chord = await box("button[aria-label='Search'] kbd");
+      const platform = await page!.evaluate(() => navigator.platform);
+      expect(await page!.locator("button[aria-label='Search'] kbd").textContent()).toBe(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle", platform));
+      expect(chord.x + chord.width).toBeLessThanOrEqual(search.x + search.width);
+      expect(chord.x).toBeGreaterThan(search.x + search.width / 2);
+      expect(Math.abs(chord.y + chord.height / 2 - (search.y + search.height / 2))).toBeLessThan(1.5);
       const glyph = await box("button[aria-label='New workspace']");
       expect(glyph.x + glyph.width).toBeLessThanOrEqual(section.x + section.width);
       expect(Math.abs(glyph.y + glyph.height / 2 - (section.y + section.height / 2))).toBeLessThan(1);
       await shot("rest", theme);
 
-      await page!.locator("button[aria-label='Search threads']").click();
-      const field = page!.locator("input[aria-label='Search threads']");
-      await field.waitFor();
-      expect(await field.evaluate(el => document.activeElement === el)).toBe(true);
-      const fieldRow = await box("[data-sidebar-search]");
-      expect(fieldRow.height).toBe(search.height);
-      expect(Math.abs(fieldRow.y - search.y)).toBeLessThan(1);
+      await page!.locator("button[aria-label='Search']").click();
+      await page!.waitForSelector("[data-command-palette]");
+      expect(await page!.locator("[data-command-palette] input[placeholder]").first().evaluate(el => document.activeElement === el)).toBe(true);
+      expect(await page!.locator("[data-slot=sidebar] input").count()).toBe(0);
+      expect(await box("button[aria-label='Search']")).toEqual(search);
       expect(await box("[data-row-id='ws:ws_a']")).toEqual(workspace);
       expect(await box("[data-row-id^='thread:']")).toEqual(firstThread);
-      await shot("focused", theme);
+      // The dialog fades in; the shot waits for the popup to be drawn at full opacity.
+      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-command-palette]")!).opacity === "1");
+      await page!.screenshot({ path: join(SHOTS_DIR, `sidebar-top-palette-${theme}.png`) });
+      console.info(`sidebar palette screenshot: ${join(SHOTS_DIR, `sidebar-top-palette-${theme}.png`)}`);
       await page!.keyboard.press("Escape");
-      await page!.locator("button[aria-label='Search threads']").waitFor();
+      await page!.waitForSelector("[data-command-palette]", { state: "detached" });
+      await page!.waitForTimeout(300);
+      expect(await page!.locator("[data-command-palette]").count()).toBe(0);
+      // Keyboard: focus alone opens nothing; Enter and Space, the button's own activation, do.
+      await page!.locator("button[aria-label='Search']").focus();
+      await page!.waitForTimeout(300);
+      expect(await page!.locator("[data-command-palette]").count()).toBe(0);
+      expect(await page!.locator("button[aria-label='Search']").evaluate(el => document.activeElement === el)).toBe(true);
+      for (const key of ["Enter", "Space"]) {
+        await page!.keyboard.press(key);
+        await page!.waitForSelector("[data-command-palette]");
+        await page!.keyboard.press("Escape");
+        await page!.waitForSelector("[data-command-palette]", { state: "detached" });
+        await page!.locator("button[aria-label='Search']").focus();
+      }
+      await page!.waitForTimeout(300);
+      expect(await page!.locator("[data-command-palette]").count()).toBe(0);
 
       await page!.locator("button[aria-label='Workspaces']").click();
       await page!.waitForSelector("[data-sidebar-row]", { state: "detached" });
