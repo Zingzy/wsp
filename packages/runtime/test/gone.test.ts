@@ -2,9 +2,10 @@
 // A machine the provider stopped knowing settles its record to gone through
 // one road, whichever call saw the 404: the poll, a nap, a wake's read or the
 // sweep. The awake stretch closes there, the idle clock is dropped, the row's
-// words name the call and the time, and the host log carries one line. A nap
-// the provider refuses in words (Not pausable) is a refusal, not a vanish.
-import { createServer, type Server } from "node:http";
+// words name the call and the time, and the host log carries one line. A poll
+// that began before the record settled lands nothing. A nap the provider
+// refuses in words (Not pausable) is a refusal, not a vanish.
+import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { goneRefusal, goneWords, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
 import { createRuntime, type RuntimeOptions } from "../src/runtime.js";
@@ -29,7 +30,7 @@ function testRuntime(extra: Partial<RuntimeOptions> = {}) {
     adapters: {},
     clock: fc.clock,
     idle: { defaultWindowMs: WINDOW },
-    status: { costIntervalMs: COST, pollIntervalMs: POLL, reconcileMinMs: 0, probeTimeoutMs: 500 },
+    status: { costIntervalMs: COST, pollIntervalMs: POLL, reconcileMinMs: 0, probeTimeoutMs: 5_000 },
     ...extra,
   });
   const statuses: WorkspaceStatus[] = [];
@@ -54,13 +55,16 @@ afterEach(async () => {
   openServers.length = 0;
 });
 
-/** The edge answers for the machine, not the daemon: every poll goes on to ask the provider. */
-async function edgeAnswers(m: StubMachine, statusCode: number): Promise<void> {
-  const server = createServer((_req, res) => res.writeHead(statusCode).end());
+/** The edge answers for the machine, not the daemon, and only when the test says: a probe waits in `held` until the test
+ * answers it (404) or drops it (a failed reach); either way the poll goes on to ask the provider, in the order the test picks. */
+async function edgeHolding(m: StubMachine): Promise<{ held: ServerResponse[]; answer: (res: ServerResponse) => void; drop: (res: ServerResponse) => void }> {
+  const held: ServerResponse[] = [];
+  const server = createServer((_req, res) => void held.push(res));
   await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
   openServers.push(server);
   const port = (server.address() as { port: number }).port;
   m.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+  return { held, answer: res => void res.writeHead(404).end(), drop: res => void res.destroy() };
 }
 
 const countReads = (m: StubMachine): { n: number } => {
@@ -76,26 +80,34 @@ const countReads = (m: StubMachine): { n: number } => {
 const goneLines = (warn: ReturnType<typeof vi.spyOn>) => warn.mock.calls.map(c => String(c[0])).filter(l => /is gone/.test(l));
 
 describe("a 404 settles the record gone through one road", () => {
-  it("from the status poll: the stretch closes with a cost tick at that instant, the idle clock is dropped, the words name the poll and the time, one log line", async () => {
+  it("from the status poll: the stretch closes with a cost tick at that instant, the idle clock is dropped, the words name the poll and the time, one log line, and a poll that began before lands nothing", async () => {
     const { rt, backend, fc, statuses, costs } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
-      await edgeAnswers(m, 404);
+      const edge = await edgeHolding(m);
       const reads = countReads(m);
       const pause = vi.spyOn(m, "pause");
       const stop = rt.status.watch();
       try {
+        await until(() => edge.held.length >= 1);
+        edge.answer(edge.held.shift()!);
         await until(() => reads.n >= 1);
         fc.advance(COST);
-        await until(() => costs.some(c => c.awakeMs === COST) && reads.n >= 2);
+        const polls = COST / POLL;
+        await until(() => edge.held.length >= polls);
+        // All but one of the polls the advance fired land now; the last stays in flight across the kill.
+        for (const res of edge.held.splice(0, polls - 1)) edge.answer(res);
+        await until(() => costs.some(c => c.awakeMs === COST) && reads.n >= polls);
         expect(costs.at(-1)).toMatchObject({ phase: "running", awakeMs: COST });
         expect(costs.at(-1)!.rateUsdPerHour).toBeCloseTo(0.11);
 
         m.killed = true;
         fc.advance(POLL);
         const seenAt = fc.clock.now();
+        await until(() => edge.held.length >= 2);
+        edge.answer(edge.held.pop()!);
         await until(async () => (await rt.workspaces.get(ws.id)).phase === "gone" && costs.at(-1)!.phase === "gone");
 
         const record = await rt.workspaces.get(ws.id);
@@ -111,6 +123,15 @@ describe("a 404 settles the record gone through one road", () => {
         fc.advance(COST);
         await until(() => costs.at(-1)!.at === new Date(fc.clock.now()).toISOString());
         expect(costs.at(-1)).toMatchObject({ phase: "gone", rateUsdPerHour: 0, awakeMs: COST, accruedUsd: accrued });
+        // The poll left in flight lands now, a minute on: its reach failed, it asks the provider and hears gone, and
+        // the row it built on the running record it read is dropped, so nothing after the gone row says running.
+        const rows = statuses.length;
+        expect(reads.n).toBe(polls + 1);
+        edge.drop(edge.held.shift()!);
+        await until(() => reads.n >= polls + 2);
+        await new Promise(r => setImmediate(r));
+        expect(statuses.slice(rows)).toEqual([]);
+        expect(edge.held.length).toBe(0);
         expect(goneLines(warn)).toEqual([`workspace ${ws.id} is gone: ${record.gone}`]);
         fc.advance(WINDOW * 2);
         expect(pause).not.toHaveBeenCalled();
