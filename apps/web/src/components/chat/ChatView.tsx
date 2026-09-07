@@ -11,7 +11,7 @@
 // on the dead one.
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { fmtCost, fmtDuration, workspaceState } from "@wsp/protocol";
+import { turnSettledParts, workspaceState } from "@wsp/protocol";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
@@ -126,9 +126,7 @@ const TURN_STATUS: Record<TurnSummary["state"], string> = {
 /** Duration and cost of the turn that just settled; its error, when it has one, is already a row in the thread. */
 function SettledFooter({ turn }: { turn: TurnSummary }) {
   const failed = turn.state !== "completed";
-  const parts: string[] = [];
-  if (turn.durationMs !== null) parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
-  if (turn.costUsd !== null) parts.push(fmtCost(turn.costUsd));
+  const parts = turnSettledParts(turn);
   return (
     <div
       data-testid="settled-footer"

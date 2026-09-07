@@ -261,6 +261,20 @@ describe("terminalIO", () => {
     expect(s.text()).not.toContain(SOLARI);
   });
 
+  it("the quiet lines a turn streams are plain when stderr is no terminal and dim when the environment forces colour", () => {
+    setup();
+    const io = screen(false).io;
+    expect(io.muted?.("$ git status")).toBe("$ git status");
+    const was = process.env["FORCE_COLOR"];
+    process.env["FORCE_COLOR"] = "1";
+    try {
+      expect(io.muted?.("$ git status")).toBe("\x1b[2m$ git status\x1b[22m");
+    } finally {
+      if (was === undefined) delete process.env["FORCE_COLOR"];
+      else process.env["FORCE_COLOR"] = was;
+    }
+  });
+
   it("ctrl-c at the key prompt stops with nothing written", async () => {
     setup();
     const s = screen(true);

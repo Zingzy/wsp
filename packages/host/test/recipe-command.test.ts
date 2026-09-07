@@ -4,13 +4,13 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { computeRecipe } from "@wsp/collect";
+import { computeRecipe, type HistoryCache } from "@wsp/collect";
 import { LOGIN_CHOICES, Recipe, type LoginChoice } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { applySets, parseSet, parseSets, parseSignIn, runRecipe, type RecipeIo } from "../src/recipe-command.js";
+import { applySets, parseSet, parseSets, parseSignIn, runRecipe, runScan, type RecipeIo } from "../src/recipe-command.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
-import { saveSmallRecipe } from "../src/recipe-file.js";
+import { historyCache, saveSmallRecipe } from "../src/recipe-file.js";
 import { BASE_GROUP, HERE_GROUP, PROJECT_GROUP, USED_GROUP } from "../src/init-table.js";
 import { allRows, commandTableLines, recipePrintout } from "../src/recipe-answer.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
@@ -102,6 +102,25 @@ describe("wsp recipe", () => {
     expect(allRows(await runRecipe(laptop(), { out, tick: "used" }, quiet, at)).find(r => r.id === "java")).toMatchObject({ on: false });
     await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
     expect(allRows(await runRecipe(laptop(), { out, projects: [PROJ] }, quiet, at)).find(r => r.id === "java")).toMatchObject({ on: false });
+  });
+
+  it("reads each session file once and takes the rest from the cache beside the state, on the write verb and on the scan", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-cache-"));
+    const out = outPath();
+    const cache = (): HistoryCache => historyCache(join(dir, "state", "state.json"));
+    const first = laptop();
+    const one = await runRecipe(first, { out, cache: cache() }, quiet, at);
+    expect(first.reads.filter(r => r.endsWith(".jsonl")).length).toBe(4);
+
+    const again = laptop();
+    const two = await runRecipe(again, { out, cache: cache() }, quiet, at);
+    expect(again.reads.filter(r => r.endsWith(".jsonl"))).toEqual([]);
+    expect(two).toEqual(one);
+
+    // The scan reads the same histories through the same cache, so a scan after a recipe opens nothing either.
+    const scanned = laptop();
+    await runScan(scanned, { cache: cache() }, quiet, at);
+    expect(scanned.reads.filter(r => r.endsWith(".jsonl"))).toEqual([]);
   });
 
   it("--project reads that folder's own manifests too: what it takes to build is on whatever the rule decided, in its own group", async () => {

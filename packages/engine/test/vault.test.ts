@@ -65,7 +65,7 @@ describe("vault", () => {
     expect(runs.map(r => r.split("\n")[0]!.split(" ").slice(0, 2).join(" "))).toEqual(["tar czf", "set -eo"]);
     expect(runs[1]).toContain("tar xzf");
     const inline = execCmds.filter(c => !runs.includes(c));
-    expect(inline.map(c => c.split(" ").slice(0, 2).join(" "))).toEqual(["stat -c", "rm -f"]);
+    expect(inline.map(c => c.split(" ").slice(0, 2).join(" "))).toEqual(["wc -c", "rm -f"]);
   });
 
   it("importInto uploads via uploadUrl and untars at the destination", async () => {
@@ -99,13 +99,14 @@ describe("vault size cap", () => {
     const sized: Machine = {
       ...machine,
       exec: async cmd => {
-        if (/^stat -c %s/.test(cmd)) return { exitCode: 0, stdout: "300000000\n", stderr: "" };
+        if (/^wc -c </.test(cmd)) return { exitCode: 0, stdout: "300000000\n", stderr: "" };
         return machine.exec(cmd);
       },
     };
     await expect(exportPaths(sized, ["/root/big"], { fetch: fetchStub, maxBytes: 200_000_000 })).rejects.toMatchObject({
       kind: "vaultTooLarge",
       bytes: 300_000_000,
+      message: "the export was 286.1 MB, over the 190.7 MB cap",
     });
     expect(fetchStub).not.toHaveBeenCalled();
     expect(execCmds.some(c => c.startsWith("rm -f"))).toBe(true);
@@ -512,7 +513,7 @@ describe("exportFolder", () => {
   afterEach(() => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
-  const RULE: CacheRule = { globs: ["node_modules", "dist", "*[cC][aA][cC][hH][eE]*", ".DS_Store"], markers: ["pyvenv.cfg"] };
+  const RULE: CacheRule = { dirs: ["node_modules", "dist", ".cache"], files: [".DS_Store"], markers: ["pyvenv.cfg"] };
 
   /** A folder with source, ignored state, a repository and every cache shape the rule names. */
   function folder(): string {
@@ -523,14 +524,16 @@ describe("exportFolder", () => {
       writeFileSync(join(root, rel), text);
     };
     put("src/a.ts", "a\n");
-    put("src/cache-utils.ts", "tracked or not, the name says cache\n");
+    put("src/cache-utils.ts", "a source file whose name holds the word\n");
     put(".env", "TOKEN=x\n");
     put(".git/config", "[core]\n");
     put(".git/build/keep", "nothing under .git is judged\n");
     put("node_modules/left/index.js", "cache\n");
     put("dist/out.js", "output\n");
     put(".cache/x", "cache\n");
-    put("notes/CacheNotes.md", "the word, any case\n");
+    put("notes/CacheNotes.md", "the word, any case, still not a cache\n");
+    put("my-cache-service/README.md", "a directory whose name holds the word\n");
+    put("src/dist", "a file named like a cache directory\n");
     put(".DS_Store", "finder");
     put("myenv/pyvenv.cfg", "home = /usr/bin\n");
     put("myenv/bin/python", "venv by marker\n");
@@ -584,9 +587,50 @@ describe("exportFolder", () => {
     const ran = await new Promise<ExecResult>(resolve => execFile("bash", ["-c", script], (err, stdout, stderr) => resolve({ exitCode: err === null ? 0 : 1, stdout, stderr })));
     expect(ran.stderr).toBe("");
     expect(ran.exitCode).toBe(0);
-    expect(ran.stdout.trim().split("\n").sort()).toEqual([".DS_Store", ".cache", "deep/dir/.DS_Store", "dist", "myenv", "node_modules", "notes/CacheNotes.md", "src/cache-utils.ts"]);
-    expect(listing(readFileSync(out))).toEqual([".env", ".git", ".git/build", ".git/build/keep", ".git/config", "deep", "deep/dir", "notes", "really-empty", "src", "src/a.ts"]);
+    expect(ran.stdout.trim().split("\n").sort()).toEqual([".DS_Store", ".cache", "deep/dir/.DS_Store", "dist", "myenv", "node_modules"]);
+    expect(listing(readFileSync(out))).toEqual([".env", ".git", ".git/build", ".git/build/keep", ".git/config", "deep", "deep/dir", "my-cache-service", "my-cache-service/README.md", "notes", "notes/CacheNotes.md", "really-empty", "src", "src/a.ts", "src/cache-utils.ts", "src/dist"]);
     expect(existsSync(`${out}.list`)).toBe(false);
+  });
+
+  it("exportPaths under a cache rule leaves installs, build output and nested worktrees behind at every path, keeps the repository, and the cap is read after they are gone", async () => {
+    const g = await guest();
+    const root = mkdtempSync(join(tmpdir(), "wsp-vault-home-"));
+    dirs.push(root);
+    const put = (rel: string, text: string | Buffer): void => {
+      mkdirSync(join(root, rel, ".."), { recursive: true });
+      writeFileSync(join(root, rel), text);
+    };
+    put("proj/src/a.ts", "a\n");
+    put("proj/apps/web/src/lib/lruCache.ts", "a source file whose name holds the word\n");
+    put("proj/packages/collect/src/cache-names.ts", "another\n");
+    put(".claude/projects/-root-my-cache-service/S1.jsonl", "a session folder whose name holds the word\n");
+    put("proj/.git/config", "[core]\n");
+    put("proj/.git/node_modules/keep", "nothing under .git is judged\n");
+    put("proj/node_modules/big/blob", randomBytes(400_000));
+    put("proj/dist/out.js", "output\n");
+    put("proj/.claude/worktrees/wt/.git", "gitdir: /elsewhere/.git/worktrees/wt\n");
+    put("proj/.claude/worktrees/wt/src/b.ts", "a nested checkout\n");
+    put("notes.md", "kept\n");
+    const rule: CacheRule = { dirs: ["node_modules", "dist", ".cache"], files: [".DS_Store"], markers: ["pyvenv.cfg", ".git"] };
+    const paths = [join(root, "proj"), join(root, "notes.md"), join(root, ".claude")];
+    try {
+      await expect(exportPaths(g.machine, paths, { fetch: globalThis.fetch, maxBytes: 100_000 })).rejects.toMatchObject({ kind: "vaultTooLarge" });
+      const tar = await exportPaths(g.machine, paths, { fetch: globalThis.fetch, maxBytes: 100_000, exclude: rule });
+      const rel = (p: string): string => p.replace(/^\//, "");
+      const names = listing(tar).map(l => l.startsWith(rel(root)) ? l.slice(rel(root).length + 1) : l);
+      expect(names).toEqual([".claude", ".claude/projects", ".claude/projects/-root-my-cache-service", ".claude/projects/-root-my-cache-service/S1.jsonl", "notes.md", "proj", "proj/.claude", "proj/.claude/worktrees", "proj/.git", "proj/.git/config", "proj/.git/node_modules", "proj/.git/node_modules/keep", "proj/apps", "proj/apps/web", "proj/apps/web/src", "proj/apps/web/src/lib", "proj/apps/web/src/lib/lruCache.ts", "proj/packages", "proj/packages/collect", "proj/packages/collect/src", "proj/packages/collect/src/cache-names.ts", "proj/src", "proj/src/a.ts"]);
+      const script = g.cmds.find(c => c.includes("find "))!;
+      expect(script).toContain(`cd '/'`);
+      const cache = `\\( \\( -type d \\( -name 'node_modules' -o -name 'dist' -o -name '.cache' \\) \\) -o \\( -type f \\( -name '.DS_Store' \\) \\) -o \\( -type d -exec test -f '{}/pyvenv.cfg' \\; \\) -o \\( -type d -exec test -f '{}/.git' \\; \\) \\)`;
+      const where = paths.map(p => `'${rel(p)}'`).join(" ");
+      expect(script).toContain(`find ${where} -mindepth 1 -path '*/.git' -prune -o ${cache} -prune -print > `);
+      expect(script).toContain(`printf '%s\\0' ${where} > `);
+      expect(script).toContain(`find ${where} -mindepth 1 \\( -path '*/.git' -o -path '*/.git/*' \\) -print0 -o ${cache} -prune -o -print0 >> `);
+      expect(script).toMatch(/tar czf '\/tmp\/wsp-vault-[^']+\.tgz' --no-recursion --null -T '\/tmp\/wsp-vault-[^']+\.tgz\.keep'\n/);
+      expect(g.cmds.filter(c => c.startsWith("rm -f"))).toHaveLength(2);
+    } finally {
+      g.close();
+    }
   });
 
   it("brings the archive home over the download road with its size known up front and the excluded roots, and leaves nothing on the guest", async () => {
@@ -595,7 +639,7 @@ describe("exportFolder", () => {
     try {
       const seen: { bytes: number; total: number }[] = [];
       const { tar, excluded } = await exportFolder(g.machine, root, RULE, { fetch: globalThis.fetch, onProgress: p => seen.push(p) });
-      expect(excluded).toEqual([".DS_Store", ".cache", "deep/dir/.DS_Store", "dist", "myenv", "node_modules", "notes/CacheNotes.md", "src/cache-utils.ts"]);
+      expect(excluded).toEqual([".DS_Store", ".cache", "deep/dir/.DS_Store", "dist", "myenv", "node_modules"]);
       expect(listing(tar)).toContain("src/a.ts");
       expect(listing(tar)).not.toContain("dist/out.js");
       expect(seen.at(-1)).toEqual({ bytes: tar.length, total: tar.length });

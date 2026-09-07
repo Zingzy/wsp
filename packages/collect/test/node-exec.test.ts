@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { nodeExec } from "../src/live-host.js";
+import { nodeExec, nodeFs } from "../src/live-host.js";
 
 const dirs: string[] = [];
 const pids: number[] = [];
@@ -48,6 +48,18 @@ const pidIn = async (file: string): Promise<number> => {
   pids.push(pid);
   return pid;
 };
+
+describe("nodeFs.stat", () => {
+  it("reads the modification time off the disk, so a reader can tell a file it already read has moved", async () => {
+    const file = join(scratch(), "s1.jsonl");
+    writeFileSync(file, "one\n");
+    const before = await nodeFs.stat(file);
+    expect(before).toMatchObject({ kind: "file", bytes: 4, mtimeMs: statSync(file).mtimeMs });
+    utimesSync(file, new Date(), new Date(statSync(file).mtimeMs + 5_000));
+    const after = await nodeFs.stat(file);
+    expect(after!.mtimeMs).toBeGreaterThan(before!.mtimeMs);
+  });
+});
 
 describe("nodeExec.run", () => {
   it("returns stdout on exit 0 and nothing on a failure or a missing command", async () => {

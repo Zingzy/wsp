@@ -697,6 +697,50 @@ describe("wsp init, interactive", () => {
     expect((await run).code).toBe(1);
   });
 
+  it("the history spinner counts each session file off as it lands and says how long the whole read took, once", async () => {
+    const read = { agent: "claude", state: "read" as const, sessions: 3, calls: 12 };
+    const f = fake({
+      recipe: async (onHistory, _onProject, onProgress) => {
+        for (const n of [1, 2, 3]) onProgress({ agent: "claude", read: n, files: 3 });
+        onHistory(read);
+        return { ...RECIPE, histories: [read] };
+      },
+    });
+    const run = runInit(f.opts, f.io);
+    await f.until("1/6");
+    const t = f.text();
+    // The count is on the spinner's own line while it reads, and the counts each store came to land after it.
+    expect(t).toContain("Reading what your agents used  Claude Code: reading session 2 of 3");
+    expect(t).toContain("Reading what your agents used  Claude Code: 3 sessions, 12 tool calls");
+    // How long it took, said once, after the spinner is gone and before the card.
+    expect(t).toMatch(/Read 3 sessions in \d+m?s/);
+    expect(t.match(/Read 3 sessions in/g)).toHaveLength(1);
+    expect(t.indexOf("Read 3 sessions in")).toBeLessThan(t.indexOf("Found on this computer"));
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
+  it("counts the session files it opened, not the sessions a project filter kept, so the duration line still lands", async () => {
+    // What wsp init --project sees: every session file is opened and none of them ran under the folder that was named.
+    const none = { agent: "claude", state: "empty" as const, sessions: 0, calls: 0 };
+    const f = fake({
+      recipe: async (onHistory, _onProject, onProgress) => {
+        for (const n of [1, 2]) onProgress({ agent: "claude", read: n, files: 2 });
+        onHistory(none);
+        return { ...RECIPE, histories: [none] };
+      },
+    });
+    const run = runInit(f.opts, f.io);
+    await f.until("1/6");
+    expect(f.text()).toMatch(/Read 2 sessions in \d+m?s/);
+    await throughScreens(f);
+    await f.until(BOOT);
+    await f.press("n");
+    expect((await run).code).toBe(1);
+  });
+
   it("on a narrow terminal the tally is cut to the width so the spinner line never wraps onto itself", async () => {
     const f = fake({
       columns: 48,
@@ -1049,6 +1093,9 @@ describe("wsp init, the summary-first screens", () => {
     const written = JSON.parse(readFileSync(join(f.opts.home, ".claude.json"), "utf8")) as { mcpServers: { wsp: { command: string; args: string[] } } };
     expect(written.mcpServers.wsp.command).toBe(process.execPath);
     expect(written.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", f.opts.statePath]);
+    // The command the config now runs, named once after the agents' lines.
+    expect(out).toContain(`The server command is ${process.execPath}`);
+    expect(out).toContain(`mcp --state ${f.opts.statePath}`);
     await f.press("n");
     expect((await run).code).toBe(1);
   });

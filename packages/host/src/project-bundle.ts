@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { CACHE_WORD, FINDER_METADATA, INSTALL_NAMES, OUTPUT_NAMES, bareUrls, fileSignals, keysSignal } from "@wsp/collect";
+import { CACHE_DIRS, FINDER_METADATA, bareUrls, fileSignals, keysSignal } from "@wsp/collect";
 import { PROJECT_STATE_RESOLVERS, TAR_MAX_FILE_BYTES, countProjectState, filesUnder, fitsTar, moveProjectState, resolveProjectPath, tarOf, underProject, type AgentMoveReport, type CacheRule, type TarEntry } from "@wsp/engine";
 import { CredentialSignal, type ProjectAgentOutcome, type ProjectAgentResult, type ProjectCarry, type ProjectPlan, type ProjectRewrite, type ProjectSecret } from "@wsp/protocol";
 import type { PackedProject, PackedState, ProjectBundler, StateRequest } from "@wsp/runtime";
@@ -29,16 +29,29 @@ const SECTION = /^\s*\[([^\s"\]]+)(?:\s+"([^"]*)")?\s*\]/;
 const AUTH_HEADER = /^\s*extraheader\s*=\s*"?authorization\s*:/i;
 const LS_FILES_MAX_BYTES = 256 * 1024 * 1024;
 
-/** The cache rule, from the collector's rules: what an install recreates, what a build regenerates, a name that says cache, or Finder metadata. */
-export function isCacheName(name: string): boolean {
-  return INSTALL_NAMES.has(name) || OUTPUT_NAMES.has(name) || CACHE_WORD.test(name) || FINDER_METADATA.test(name);
+/** The cache rule for a directory: its whole name is on the collector's list. A file is never a cache by name. */
+export function isCacheDir(name: string): boolean {
+  return CACHE_DIRS.has(name);
 }
 
-/** The same rule as find spells it, for the archive a machine packs on the trip home: the name sets as they are, the
- * cache word as a case-blind glob, the Finder file by name, and the venv marker for a directory under any name. */
+/** A directory holding a .git file is a worktree or submodule checkout whose repository lives elsewhere; it is
+ * recreated from that repository, so it stays behind like a cache on both trips, tracked (a submodule) or not, as
+ * the guest's find cannot ask git. The folder's own root is judged apart, since a root .git file is the folder being
+ * one such checkout. */
+function holdsGitFile(dir: string): boolean {
+  try {
+    return statSync(join(dir, GIT_DIR)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** The same rule as find spells it, for the archive a machine packs on the trip home and for the nap-time vault: the
+ * directory list by name, the Finder file by name, and the venv and checkout markers for a directory under any name. */
 export const CACHE_RULE: CacheRule = {
-  globs: [...INSTALL_NAMES, ...OUTPUT_NAMES, "*[cC][aA][cC][hH][eE]*", ".DS_Store"],
-  markers: [VENV_MARKER],
+  dirs: [...CACHE_DIRS],
+  files: [FINDER_METADATA],
+  markers: [VENV_MARKER, GIT_DIR],
 };
 
 interface BundlePath {
@@ -181,7 +194,7 @@ function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked:
     }
     if (st.isDirectory()) {
       const git = inGit || name === GIT_DIR;
-      const cache = !git && !isTracked && (isCacheName(name) || existsSync(join(abs, VENV_MARKER)));
+      const cache = !git && ((!isTracked && (isCacheDir(name) || existsSync(join(abs, VENV_MARKER)))) || holdsGitFile(abs));
       if (cache) {
         w.excluded.push(rel);
         if (!w.trackedDirs.has(rel)) continue;
@@ -198,7 +211,7 @@ function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked:
       w.skipped.push({ path: rel, note: "not a regular file" });
       continue;
     }
-    if (!inGit && !isTracked && isCacheName(name)) {
+    if (!inGit && !isTracked && name === FINDER_METADATA) {
       w.excluded.push(rel);
       continue;
     }

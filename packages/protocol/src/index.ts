@@ -1632,9 +1632,9 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { actionRefusal, goneRefusal, imageMoveRefusal, needsRebuild, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
-export { AFTER_CUT_LINE, ALREADY_RUNNING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, backgroundTasksLine, behindGoldenLine, builderStaysLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, deleteNotice, execFolderLine, fmtBytes, fmtCost, fmtDuration, fmtElapsed, fmtMemGb, fmtThreads, forgetNotice, goldenBuildLine, harnessExitLine, machineUnreachedLine, notifyLine, plural, providerAnswerLine, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, snapshotAttemptLine, snapshotFailedLine, stepRetryLine, timedOutLine, titleLine, turnCutLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, type BuilderReading, type DurationStyle, type GoldenChange, type ProviderAnswer, type TurnCutRule } from "./format.js";
+export * from "./format.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
-export { inFolder, shellQuote } from "./shell-quote.js";
+export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { workspaceFromHash, workspaceHash } from "./app-address.js";

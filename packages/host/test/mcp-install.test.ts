@@ -2,15 +2,21 @@
 // Installing the MCP server into a local agent's config: the command that
 // runs this same wsp against this state file, placed by the catalog entry's
 // own config module under the person's home.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { mcpServerCommandLine } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, cli, type CliIO } from "../src/cli.js";
-import { installEach, installLines, installMcp, mcpServerSpec } from "../src/mcp-install.js";
+import { installEach, installLines, installMcp, mcpServerSpec, runningWsp, type RunningWsp } from "../src/mcp-install.js";
 import { WSP_SKILL } from "../src/skill.js";
+import { VERSION } from "../src/version.js";
 
-const PROC = { execPath: "/opt/node/bin/node", execArgv: ["--disable-warning=ExperimentalWarning"], argv: ["/opt/node/bin/node", "/opt/wsp/dist/bin.js", "mcp", "install"] };
+/** wsp run from a checkout: node given the bundle's path, and no wsp on PATH is that file. */
+const PROC: RunningWsp = { execPath: "/opt/node/bin/node", execArgv: ["--disable-warning=ExperimentalWarning"], argv: ["/opt/node/bin/node", "/opt/wsp/dist/bin.js", "mcp", "install"], version: "0.1.2", PATH: "/usr/bin:/bin" };
+
+/** The command line the install prints for the spec it registered. */
+const commandLine = (spec: { command: string; args: readonly string[] }): string => mcpServerCommandLine(spec.command, spec.args);
 
 function io(): CliIO & { lines: string[]; errors: string[] } {
   const out = {
@@ -38,11 +44,47 @@ describe("installing the MCP server for a local agent", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it("the server's command is this same wsp, run the way it was started, against this state file, wherever the agent's cwd is", () => {
-    expect(mcpServerSpec(statePath, PROC)).toEqual({
-      command: "/opt/node/bin/node",
-      args: ["--disable-warning=ExperimentalWarning", "/opt/wsp/dist/bin.js", "mcp", "--state", statePath],
-    });
+  it("run out of npx's cache, the server's command is the npx beside this node with this version pinned, never the cache path, whatever wsp PATH holds; bare npx only when none sits there", () => {
+    mkdirSync(join(home, "bin"));
+    writeFileSync(join(home, "bin", "wsp"), "#!/usr/bin/env node\n");
+    mkdirSync(join(home, "node", "bin"), { recursive: true });
+    writeFileSync(join(home, "node", "bin", "npx"), "#!/usr/bin/env node\n");
+    const cached = join(home, ".npm", "_npx", "ee7519ab73f4721e", "node_modules", ".bin", "wsp");
+    const npx: RunningWsp = { ...PROC, execPath: join(home, "node", "bin", "node"), argv: [join(home, "node", "bin", "node"), cached, "mcp", "install"], PATH: `${join(home, "bin")}:/usr/bin` };
+    expect(mcpServerSpec(statePath, npx)).toEqual({ command: join(home, "node", "bin", "npx"), args: ["-y", "@zingzy/wsp@0.1.2", "mcp", "--state", statePath] });
+    const resolved = { ...npx, argv: [npx.execPath, join(home, ".npm", "_npx", "ee7519ab73f4721e", "node_modules", "@zingzy", "wsp", "dist", "bin.js")] };
+    expect(mcpServerSpec(statePath, resolved).command).toBe(join(home, "node", "bin", "npx"));
+    const bareNode: RunningWsp = { ...npx, execPath: "/opt/node/bin/node", argv: ["/opt/node/bin/node", cached] };
+    expect(mcpServerSpec(statePath, bareNode)).toEqual({ command: "npx", args: ["-y", "@zingzy/wsp@0.1.2", "mcp", "--state", statePath] });
+  });
+
+  it("the default reading of the process is this node, its flags and argv, its PATH and the running package's version, the one an npx pin names", () => {
+    expect(VERSION).toMatch(/^\d+\.\d+\.\d+/);
+    expect(runningWsp()).toEqual({ execPath: process.execPath, execArgv: process.execArgv, argv: process.argv, version: VERSION, PATH: process.env.PATH });
+    expect(mcpServerSpec(statePath)).toEqual(mcpServerSpec(statePath, runningWsp()));
+  });
+
+  it("run as the wsp on PATH, the server's command is that binary and the word mcp, through a symlinked PATH folder too", () => {
+    mkdirSync(join(home, ".local", "lib", "node_modules", "@zingzy", "wsp", "dist"), { recursive: true });
+    mkdirSync(join(home, ".local", "bin"), { recursive: true });
+    writeFileSync(join(home, ".local", "lib", "node_modules", "@zingzy", "wsp", "dist", "bin.js"), "#!/usr/bin/env node\n");
+    symlinkSync("../lib/node_modules/@zingzy/wsp/dist/bin.js", join(home, ".local", "bin", "wsp"));
+    const bin = join(home, ".local", "bin", "wsp");
+    const global: RunningWsp = { ...PROC, argv: ["/opt/node/bin/node", bin, "mcp", "install"], PATH: `/usr/bin:${join(home, ".local", "bin")}` };
+    expect(mcpServerSpec(statePath, global)).toEqual({ command: bin, args: ["mcp", "--state", statePath] });
+    symlinkSync(join(home, ".local", "bin"), join(home, "link"));
+    const linked = { ...global, PATH: `${join(home, "link")}:/usr/bin` };
+    expect(mcpServerSpec(statePath, linked)).toEqual({ command: join(home, "link", "wsp"), args: ["mcp", "--state", statePath] });
+  });
+
+  it("run any other way, the server's command is this node with the flags and script it was started with, against this state file, wherever the agent's cwd is", () => {
+    const node = { command: "/opt/node/bin/node", args: ["--disable-warning=ExperimentalWarning", "/opt/wsp/dist/bin.js", "mcp", "--state", statePath] };
+    expect(mcpServerSpec(statePath, PROC)).toEqual(node);
+    // A wsp on PATH that is not the one running does not get registered over it.
+    mkdirSync(join(home, "bin"));
+    writeFileSync(join(home, "bin", "wsp"), "#!/usr/bin/env node\n");
+    expect(mcpServerSpec(statePath, { ...PROC, PATH: `${join(home, "bin")}:/usr/bin` })).toEqual(node);
+    expect(mcpServerSpec(statePath, { ...PROC, PATH: undefined })).toEqual(node);
   });
 
   it("places the server in the agent's config file under the home, creating the file and its folder, and says where", () => {
@@ -95,6 +137,7 @@ describe("installing the MCP server for a local agent", () => {
     const spec = mcpServerSpec(statePath, PROC);
     const report = installEach(["claude", "emacs", "pi"], spec, home);
     expect(report).toEqual({
+      server: spec,
       installed: [
         { id: "claude", agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" },
         { id: "pi", agent: "Pi", skill: "~/.pi/agent/skills/wsp/SKILL.md" },
@@ -105,12 +148,13 @@ describe("installing the MCP server for a local agent", () => {
     expect(readFileSync(join(home, ".pi", "agent", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
   });
 
-  it("wsp mcp install --json prints the report as one JSON line and nothing else, and exits 1 when an agent failed", async () => {
+  it("wsp mcp install --json prints the report as one JSON line and nothing else, the registered command in it, and exits 1 when an agent failed", async () => {
     const out = io();
     expect(await cli(["mcp", "install", "--agent", "claude", "--agent", "codex", "--json", "--state", statePath], out)).toBe(0);
     expect(out.lines).toHaveLength(1);
     expect(out.errors).toEqual([]);
     expect(JSON.parse(out.lines[0]!)).toEqual({
+      server: mcpServerSpec(statePath),
       installed: [
         { id: "claude", agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" },
         { id: "codex", agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false, skill: "~/.codex/skills/wsp/SKILL.md" },
@@ -183,10 +227,13 @@ describe("installing the MCP server for a local agent", () => {
     expect(installLines({ agent: "Pi", skill: "~/.pi/agent/skills/wsp/SKILL.md" })).toEqual(["Pi: the catalog has no MCP config for it yet, so the server was not written; add it by hand.", "The wsp skill went to ~/.pi/agent/skills/wsp/SKILL.md"]);
   });
 
-  it("wsp mcp install --agent <id> writes the config for this state file and prints one line; without --agent it prints the usage", async () => {
+  it("wsp mcp install --agent <id> writes the config for this state file and prints its lines and the command it registered; without --agent it prints the usage", async () => {
     const out = io();
     expect(await cli(["mcp", "install", "--agent", "claude", "--state", statePath], out)).toBe(0);
-    expect(out.lines).toEqual(["Claude Code now has the wsp tools: ~/.claude.json", "The wsp skill went to ~/.claude/skills/wsp/SKILL.md"]);
+    const registered = mcpServerSpec(statePath);
+    expect(registered.command).toBe(process.execPath);
+    expect(out.lines).toEqual(["Claude Code now has the wsp tools: ~/.claude.json", "The wsp skill went to ~/.claude/skills/wsp/SKILL.md", commandLine(registered)]);
+    expect(out.lines[2]).toContain(`mcp --state ${statePath}`);
     expect(readFileSync(join(home, ".claude", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
     const written = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")) as { mcpServers: { wsp: { command: string; args: string[] } } };
     expect(written.mcpServers.wsp.command).toBe(process.execPath);
@@ -198,7 +245,8 @@ describe("installing the MCP server for a local agent", () => {
     writeFileSync(join(home, ".gemini", "settings.json"), '{\n  // the look\n  "theme": "dark"\n}\n');
     const commented = io();
     expect(await cli(["mcp", "install", "--agent", "gemini", "--state", statePath], commented)).toBe(0);
-    expect(commented.lines).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone.", "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md"]);
+    expect(commented.lines).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone.", "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md", commandLine(registered)]);
+    // No config took the server, so there is no registered command to name.
     const none = io();
     expect(await cli(["mcp", "install", "--agent", "pi", "--state", statePath], none)).toBe(0);
     expect(none.lines).toEqual(["Pi: the catalog has no MCP config for it yet, so the server was not written; add it by hand.", "The wsp skill went to ~/.pi/agent/skills/wsp/SKILL.md"]);

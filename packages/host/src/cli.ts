@@ -29,15 +29,16 @@ import { HARNESS_ADAPTERS } from "./adapters.js";
 import { THREAD_AGENTS } from "./thread-agents.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
+import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
 import { runInit, type InitIO } from "./init.js";
 import { FIRST_WORKSPACE } from "./init-first.js";
 import { recipePath } from "./init-recipe.js";
-import { smallRecipePath } from "./recipe-file.js";
+import { historyCache, smallRecipePath } from "./recipe-file.js";
 import { isRecipeTick, runRecipe, runScan } from "./recipe-command.js";
 import { recipeAnswer, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { scanTools } from "./scan.js";
-import { colourDepth, confirmPrompt, isTTY, passwordPrompt, type PromptOptions } from "./init-layout.js";
+import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { addressLines, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
@@ -62,7 +63,7 @@ import {
 } from "./service.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
-import { installEach, installLines, mcpServerSpec } from "./mcp-install.js";
+import { installEach, installLines, mcpServerSpec, registeredLine } from "./mcp-install.js";
 import { COMMON, VERBS, findVerb, runVerb, verbHelp, verbUsage } from "./verbs.js";
 import { VERSION } from "./version.js";
 
@@ -192,6 +193,8 @@ export interface CliIO {
   error(line: string): void;
   /** Raw text on stderr, no newline added: a reply as it streams in. */
   stream?(text: string): void;
+  /** The same text, standing back from the reply it sits beside, as far as the stream's colours go; absent leaves it plain. */
+  muted?(text: string): string;
   /** A yes-or-no question; resolves to "yes" or "no". */
   ask(question: string): Promise<string>;
   /** A person is at the keyboard (stdin and stdout are terminals); absent means an agent or a pipe, and nothing is asked. */
@@ -251,6 +254,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     log: line => console.log(line),
     error: line => console.error(line),
     stream: text => process.stderr.write(text),
+    muted: text => muted(text, colourDepth(isTTY(process.stderr))),
     isTTY: screen,
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: q => (screen ? answered(passwordPrompt(split(q))) : nobody(q)),
@@ -383,6 +387,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
     hostId: hostIdentity(),
+    vaultCaches: CACHE_RULE,
   });
 }
 
@@ -505,7 +510,8 @@ async function init(
       ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
       ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
       collect: collectThisComputer,
-      recipe: (onHistory, onProject) => computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, ...(project !== undefined ? { folders: [project] } : {}) }),
+      recipe: (onHistory, onProject, onHistoryProgress) =>
+        computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, onHistoryProgress, cache: historyCache(opts.statePath), ...(project !== undefined ? { folders: [project] } : {}) }),
       scanProject: async folder => {
         const { path, exists } = projectFolder(folder);
         return exists ? scanProject(nodeHost(), path) : undefined;
@@ -919,7 +925,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
   const out = resolve(values.out ?? smallRecipePath(statePath));
   try {
     if (scanning) {
-      const scan = await runScan(nodeHost(), { ...projects, alsoHere: recipe => scanTools(nodeHost(), recipe) }, streams);
+      const scan = await runScan(nodeHost(), { ...projects, cache: historyCache(statePath), alsoHere: recipe => scanTools(nodeHost(), recipe) }, streams);
       if (values.json === true) io.log(JSON.stringify(scan));
       else {
         for (const line of scanPrintout(scan, depth)) io.log(line);
@@ -931,6 +937,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
       nodeHost(),
       {
         out,
+        cache: historyCache(statePath),
         ...(values.tick !== undefined ? { tick: values.tick } : {}),
         ...(values.set !== undefined ? { set: values.set } : {}),
         ...(values.signin !== undefined ? { signin: values.signin } : {}),
@@ -1013,6 +1020,8 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   if (json) io.log(JSON.stringify(report));
   else {
     for (const placed of report.installed) for (const line of installLines(placed)) io.log(line);
+    const registered = registeredLine(report);
+    if (registered !== undefined) io.log(registered);
     for (const failed of report.failures) io.error(`wsp mcp install: ${failed.error}`);
   }
   return report.failures.length > 0 ? 1 : 0;

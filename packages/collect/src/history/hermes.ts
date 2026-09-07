@@ -4,7 +4,7 @@
 // through the sqlite3 command in read-only mode, one query for the columns
 // this needs.
 import type { Host } from "../host.js";
-import { type Call, type HistoryReader, isRecord, tryJson } from "./reader.js";
+import { type Call, type HistoryReader, isRecord, stampOf, tryJson } from "./reader.js";
 
 const QUERY = "select session_id, tool_calls from messages where tool_calls is not null";
 /** The same rows with the folder each session ran in; a database without the sessions table falls back to QUERY. */
@@ -30,12 +30,16 @@ export function hermesCalls(session: string, toolCalls: unknown, folder?: string
 }
 
 export const hermesReader: HistoryReader = {
-  async *read(host: Host, root: string): AsyncIterable<Call> {
-    if ((await host.fs.stat(root)) === undefined) return;
-    const out = (await host.exec.run("sqlite3", ["-readonly", "-json", root, QUERY_WITH_CWD])) ?? (await host.exec.run("sqlite3", ["-readonly", "-json", root, QUERY]));
-    if (out === undefined) throw new Error(`${root} could not be read with sqlite3`);
+  // One database is one file: it is read whole or not at all, so its own stamp says whether any session in it moved.
+  async files(host, root) {
+    const stamped = await stampOf(host, root);
+    return stamped === undefined ? [] : [stamped];
+  },
+  async *read(host: Host, _root: string, file: string): AsyncIterable<Call> {
+    const out = (await host.exec.run("sqlite3", ["-readonly", "-json", file, QUERY_WITH_CWD])) ?? (await host.exec.run("sqlite3", ["-readonly", "-json", file, QUERY]));
+    if (out === undefined) throw new Error(`${file} could not be read with sqlite3`);
     const rows = out.trim() === "" ? [] : tryJson(out);
-    if (!Array.isArray(rows)) throw new Error(`${root}: sqlite3 returned no JSON`);
+    if (!Array.isArray(rows)) throw new Error(`${file}: sqlite3 returned no JSON`);
     for (const row of rows) {
       if (!isRecord(row) || typeof row["session_id"] !== "string") continue;
       yield* hermesCalls(row["session_id"], row["tool_calls"], typeof row["cwd"] === "string" ? row["cwd"] : undefined);

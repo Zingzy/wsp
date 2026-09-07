@@ -16,7 +16,13 @@ export interface WorkspaceHooks {
   restoreVault?: (m: Machine) => Promise<void>;
   /** Judges a resumed machine; undefined means healthy, a string names the fault. */
   wakeCheck?: (m: Machine) => Promise<string | undefined>;
+  /** Carries out one provider move the guest has to cooperate with, on the machine given: the runtime bounds it,
+   * reads the provider when it does not answer and retries it once. Absent, the move is awaited as the provider runs it. */
+  move?: (m: Machine, move: ProviderMove) => Promise<void>;
 }
+
+/** The two provider calls a thrashing guest can hold up for minutes. */
+export type ProviderMove = "pause" | "resume";
 
 export type WorkspacePhase = "running" | "napping" | "waking";
 
@@ -112,8 +118,12 @@ export class Workspace {
   async nap(): Promise<void> {
     if (this.phase === "napping") return;
     await this.hooks.stashVault?.(this.machine);
-    await this.machine.pause();
+    await this.move("pause");
     this.phase = "napping";
+  }
+
+  private move(move: ProviderMove): Promise<void> {
+    return this.hooks.move ? this.hooks.move(this.machine, move) : this.machine[move]();
   }
 
   /** The provider paused this machine outside a nap (its own idle timer, a console click): the phase follows the fact, so the next wake resumes. No vault was stashed. */
@@ -139,7 +149,7 @@ export class Workspace {
       const faults: string[] = [];
       for (let attempt = 1; attempt <= WAKE_ATTEMPTS; attempt++) {
         try {
-          await this.machine.resume();
+          await this.move("resume");
         } catch (e) {
           if (!isMissing(e)) throw e;
           // Paused machines can vanish after hours (PoC overnight-pause finding).
@@ -154,7 +164,7 @@ export class Workspace {
         }
         faults.push(`attempt ${attempt}: ${fault}`);
         if (attempt < WAKE_ATTEMPTS) {
-          await this.machine.pause().catch((e: unknown) => {
+          await this.move("pause").catch((e: unknown) => {
             faults.push(`re-pause failed: ${e instanceof Error ? e.message : String(e)}`);
           });
         }

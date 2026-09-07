@@ -230,6 +230,15 @@ describe("deriveSession: tool classification", () => {
     expect(m.workEntries[0]).toMatchObject({ label: toolName, ...expected });
   });
 
+  it.each([
+    ["command_execution", { command: "pnpm test" }, { itemType: "command_execution", command: "pnpm test" }],
+    ["file_change", { changes: [{ kind: "edit", path: "src/a.ts" }, { kind: "add", path: "src/b.ts" }] }, { itemType: "file_change", changedFiles: ["src/a.ts", "src/b.ts"] }],
+    ["web_search", { query: "vitest snapshots" }, { itemType: "web_search", detail: "vitest snapshots" }],
+  ])("a Codex turn's %s row reads as the same kind of call the Claude name reads as", (toolName, input, expected) => {
+    const m = deriveSession([start, tool(toolName, input)]);
+    expect(m.workEntries[0]).toMatchObject({ label: toolName, ...expected });
+  });
+
   it("keeps unparsable tool input as the detail", () => {
     const m = deriveSession([start, { type: "session.delta", ...scope, kind: "tool_use", toolName: "Bash", toolUseId: "t1", text: "{not json" }]);
     expect(m.workEntries[0]).toMatchObject({ detail: "{not json" });
