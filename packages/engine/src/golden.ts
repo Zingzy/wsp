@@ -258,6 +258,7 @@ const UPLOAD_HEADROOM = 256 * MIB;
 const AGENTS_DISK_FLOOR = 800 * MIB;
 const AGENT_TIMEOUT_S = 900;
 const SHELL_TIMEOUT_S = 300;
+const SHELL_CHECK_S = 60;
 
 /** One interactive start of the login shell, reading the rc files the way the app's terminal will: what it prints
  * to stderr is what the person sees before the first prompt. The guest exec has no HOME, so the prelude sets it. */
@@ -359,16 +360,6 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       ran = true;
       await upload(packed, "");
       result.files = { bytes: packed.bytes, skipped: packed.skipped, cut: packed.cut };
-      if (imp.shell !== undefined) {
-        const noise = (await machine.run(shellCheck(imp.shell.shell), { deadlineMs: 60_000 })).stderr.split("\n").filter(l => l.trim() !== "");
-        if (noise.length === 0) {
-          stage("uploading-files", `${imp.shell.shell} starts quiet`);
-          delete ledger.shellNoise;
-        } else {
-          ledger.shellNoise = `${noise[0]}, ${plural(noise.length, "line")}`;
-          stage("uploading-files", `shell noise: ${ledger.shellNoise}`);
-        }
-      }
       mark("uploading-files");
     }
   }
@@ -440,6 +431,20 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       else delete ledger.missingTools;
       mark("installing-tools");
     }
+    // What the person sees before the first prompt: the rc files call tools and agents, so the shell starts once
+    // everything that installs is on the machine, and only on a pass that changed it.
+    let shellLine: string | undefined;
+    if (imp.shell !== undefined && (ran || harnessRan)) {
+      const res = await machine.run(guarded(shellCheck(imp.shell.shell), SHELL_CHECK_S), { deadlineMs: guardDeadlineMs(SHELL_CHECK_S) });
+      const noise = res.exitCode === 124 ? [reasonOf(res, SHELL_CHECK_S)] : res.stderr.split("\n").filter(l => l.trim() !== "");
+      if (noise.length === 0) {
+        shellLine = `${imp.shell.shell} starts quiet`;
+        delete ledger.shellNoise;
+      } else {
+        ledger.shellNoise = res.exitCode === 124 ? noise[0]! : `${noise[0]}, ${plural(noise.length, "line")}`;
+        shellLine = `shell noise: ${ledger.shellNoise}`;
+      }
+    }
     // The edit runs on every pass that has a plan: an attach re-uploads the volatile ~/.claude.json, which brings every
     // laptop definition back as it was. It is idempotent and touches only the servers the plan names. It does not count
     // as a run for the result: on an attach the saved result from the build stands, tools and agents included.
@@ -464,8 +469,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       else mark("installing-mcp");
       // A refused rewrite over a document that landed leaves the saved result true: the machine still holds it.
       if (!ran && (context.failure === undefined || !contextWasOn)) imp.onContext?.({ context: context.context, ...(context.failure !== undefined ? { contextFailure: context.failure } : {}) });
-      // The stage's last detail is what the terminal keeps as its end line, so the servers' tally rides with the context.
-      stage("installing-mcp", closing(servers, `machine context: ${context.summary}`));
+      // The stage's last detail is what the terminal keeps as its end line, so the servers' tally and the shell's first start ride with the context.
+      stage("installing-mcp", closing(servers, shellLine, `machine context: ${context.summary}`));
     }
     if (ran || edited) {
       // A builder whose exec died (a full disk did it once) would be sealed and handed off answering nothing.

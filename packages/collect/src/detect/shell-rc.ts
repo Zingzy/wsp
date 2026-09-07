@@ -215,21 +215,6 @@ function carried(line: string, arith: number): Pick<Open, "heredoc" | "arith"> {
   return { heredoc: o.heredoc, arith: o.arith };
 }
 
-/** The lines of an rc file that are shell: a heredoc's body and its terminator are left out. */
-export function shellLines(text: string): string[] {
-  const out: string[] = [];
-  let passing: Pick<Open, "heredoc" | "arith"> = { arith: 0 };
-  for (const line of text.split(/\r?\n/)) {
-    if (passing.heredoc !== undefined) {
-      if (line.trim() === passing.heredoc) passing = { arith: passing.arith };
-      continue;
-    }
-    out.push(line);
-    passing = carried(line, passing.arith);
-  }
-  return out;
-}
-
 /** The arithmetic depth is one stream over the file: a cut line reads it and writes it back like a kept line does. */
 export function stripExports(text: string): { names: string[]; carried: string } {
   const names: string[] = [];

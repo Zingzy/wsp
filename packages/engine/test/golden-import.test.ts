@@ -971,6 +971,15 @@ describe("agentInstallsFor", () => {
 });
 
 describe("imageCommands", () => {
+  it("reads each step's command from the step itself: Homebrew's step and a manager's formula step name theirs", () => {
+    const plan = toolInstallsFor([row({ rung: "tools", id: "tools/brew/eza" }), row({ rung: "tools", id: "tools/pipx/black" })]);
+    expect(plan.installs.find(t => t.id === "tools/homebrew")?.bin).toBe("brew");
+    expect(plan.installs.find(t => t.id === "tools/manager/pipx")?.bin).toBe("pipx");
+    const on = imageCommands([], { ...plan, installs: plan.installs.map(t => ({ ...t, bin: t.bin === undefined ? undefined : `x-${t.bin}` })) });
+    for (const cmd of ["x-brew", "x-pipx"]) expect(on.has(cmd), cmd).toBe(true);
+    for (const cmd of ["brew", "pipx"]) expect(on.has(cmd), cmd).toBe(false);
+  });
+
   it("names what the image answers: the base image's commands, the floor's, the shell the rows bring, each ticked tool by package and command, Homebrew when the plan brings it, each ticked agent; an unticked row adds nothing", () => {
     const entries = [
       row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] }),
@@ -981,7 +990,7 @@ describe("imageCommands", () => {
       row({ rung: "agents", id: "agents/claude" }),
     ];
     const on = imageCommands(entries, toolInstallsFor(entries));
-    for (const cmd of ["ls", "dircolors", "stty", "git", "rg", "unzip", "zsh", "eza", "brew", "typescript", "tsc", "claude"]) expect(on.has(cmd), cmd).toBe(true);
+    for (const cmd of ["ls", "dircolors", "stty", "git", "rg", "unzip", "zsh", "eza", "brew", "tsc", "claude"]) expect(on.has(cmd), cmd).toBe(true);
     for (const cmd of ["starship", "diskbloom", "fish"]) expect(on.has(cmd), cmd).toBe(false);
     const bare = imageCommands([row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] })], toolInstallsFor([]));
     expect(bare.has("fish")).toBe(true);
@@ -991,9 +1000,10 @@ describe("imageCommands", () => {
 
 describe("toolNames", () => {
   it("names every tool the recipe or the catalog knows, ticked or not, by package and command, and never the base image's plain commands", () => {
-    const names = toolNames([row({ rung: "tools", id: "tools/brew/eza", bring: false }), row({ rung: "tools", id: "tools/npm/@railway/cli" }), row({ rung: "shell", id: "shell/zshrc" })]);
-    for (const n of ["eza", "cli", "gh", "gcloud", "typescript", "tsc", "rg"]) expect(names.has(n), n).toBe(true);
-    for (const n of ["ls", "z", "zshrc", "docker-compose"]) expect(names.has(n), n).toBe(false);
+    const names = toolNames([row({ rung: "tools", id: "tools/brew/eza", bring: false }), row({ rung: "tools", id: "tools/npm/@railway/cli" }), row({ rung: "tools", id: "tools/brew-tap/owner/tap" }), row({ rung: "shell", id: "shell/zshrc" })]);
+    for (const n of ["eza", "railway", "gh", "gcloud", "typescript", "tsc", "rg"]) expect(names.has(n), n).toBe(true);
+    // A package's basename is not a command: the road names the package and the catalog names the command.
+    for (const n of ["cli", "tap", "ls", "z", "zshrc", "docker-compose"]) expect(names.has(n), n).toBe(false);
   });
 });
 

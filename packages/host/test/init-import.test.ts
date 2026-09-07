@@ -699,14 +699,20 @@ describe("packPlan: command guard", () => {
     const none = await packPlan(plan, { secrets: new Map(), home, onImage: new Set(["ls", "cat"]) });
     const dir = extract(none.tar);
     const zshrc = readFileSync(join(dir, ".zshrc"), "utf8");
-    expect(zshrc).toBe([GUARD_BEGIN, "starship() { return 127; }", "eza() { return 127; }", "diskbloom() { return 127; }", "# Not on this machine, so wsp silenced their calls above: starship, eza, diskbloom. Tick them in wsp init to install them.", GUARD_END, "", RC].join("\n"));
-    expect(readFileSync(join(dir, ".bashrc"), "utf8")).toBe([GUARD_BEGIN, "starship() { return 127; }", "# Not on this machine, so wsp silenced their calls above: starship. Tick them in wsp init to install them.", GUARD_END, "", 'eval "$(starship init bash)"', ""].join("\n"));
+    const guard = (name: string): string => `command -v ${name} >/dev/null 2>&1 || ${name}() { return 127; }`;
+    expect(zshrc).toBe([GUARD_BEGIN, guard("starship"), guard("eza"), guard("diskbloom"), "# Guarded above: a call to one of these that is not on this machine is silent instead of an error: starship, eza, diskbloom. Tick them in wsp init to install them.", GUARD_END, "", RC].join("\n"));
+    expect(readFileSync(join(dir, ".bashrc"), "utf8")).toBe([GUARD_BEGIN, guard("starship"), "# Guarded above: a call to one of these that is not on this machine is silent instead of an error: starship. Tick them in wsp init to install them.", GUARD_END, "", 'eval "$(starship init bash)"', ""].join("\n"));
+    // The guard is conditional: with the tools on PATH the same file calls the real commands.
+    mkdirSync(join(dir, "bin"));
+    for (const name of ["starship", "eza", "diskbloom"]) writeFileSync(join(dir, "bin", name), `#!/bin/sh\necho real-${name} "$@" >&2\n`, { mode: 0o755 });
+    const real = spawnSync("/bin/zsh", ["-f", "-c", "source ./.zshrc"], { cwd: dir, encoding: "utf8", env: { HOME: dir, PATH: `${join(dir, "bin")}:/usr/bin:/bin` } });
+    expect(real.stderr.split("\n").filter(l => l !== "")).toEqual(["real-starship init zsh", "real-diskbloom --quiet", "real-eza -la"]);
     expect(none.silenced).toEqual(["starship", "eza", "diskbloom"]);
     expect(zsh(dir)).toEqual({ stderr: "", status: 127 });
 
     const withEza = await packPlan(plan, { secrets: new Map(), home, onImage: new Set(["ls", "cat", "eza"]) });
     const two = readFileSync(join(extract(withEza.tar), ".zshrc"), "utf8");
-    expect(two).toContain("starship() { return 127; }\ndiskbloom() { return 127; }\n# Not on this machine, so wsp silenced their calls above: starship, diskbloom.");
+    expect(two).toContain(`${guard("starship")}\n${guard("diskbloom")}\n# Guarded above: a call to one of these that is not on this machine is silent instead of an error: starship, diskbloom.`);
     expect(two).not.toContain("eza()");
     expect(withEza.silenced).toEqual(["starship", "diskbloom"]);
 

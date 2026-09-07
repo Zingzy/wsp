@@ -49,20 +49,29 @@ function closingBrace(line: string, open: number): number {
   return line.length - 1;
 }
 
-/** The line cut into commands at unquoted separators, subshells and substitutions opened; a `${...}` stays in its word. */
+/** The line cut into commands at unquoted separators, subshells and substitutions opened, a `$(...)` inside double
+ * quotes too since its command runs; a `${...}` stays in its word; a `#` at the start of a word ends the line. */
 export function splitCommands(line: string): string[] {
   const out: string[] = [];
   let cur = "";
   let quote: string | undefined;
+  /** The quote each open `(` or `$(` was met inside, put back when its `)` closes. */
+  const opened: (string | undefined)[] = [];
   const flush = (): void => {
     if (cur.trim() !== "") out.push(cur.trim());
     cur = "";
   };
   for (let i = 0; i < line.length; i += 1) {
     const c = line[i]!;
+    const two = line.slice(i, i + 2);
     if (quote !== undefined) {
       if (c === "\\" && quote === '"') {
         cur += c + (line[i + 1] ?? "");
+        i += 1;
+      } else if (quote === '"' && two === "$(") {
+        flush();
+        opened.push(quote);
+        quote = undefined;
         i += 1;
       } else if (c === quote) quote = undefined;
       else cur += c;
@@ -77,9 +86,15 @@ export function splitCommands(line: string): string[] {
       i += 1;
       continue;
     }
-    const two = line.slice(i, i + 2);
+    if (c === "#" && (i === 0 || /[\s;&|(){}]/.test(line[i - 1]!))) {
+      flush();
+      const end = line.indexOf("\n", i);
+      i = end === -1 ? line.length : end - 1;
+      continue;
+    }
     if (SEPARATORS.has(two) || two === "$(") {
       flush();
+      if (two === "$(") opened.push(undefined);
       i += 1;
       continue;
     }
@@ -89,9 +104,15 @@ export function splitCommands(line: string): string[] {
       i = end;
       continue;
     }
+    if (c === "(" || c === ")") {
+      flush();
+      if (c === "(") opened.push(undefined);
+      else if (opened.length > 0) quote = opened.pop();
+      continue;
+    }
     // An ampersand beside a redirection (`2>&1`, `&>`) is part of it, not a background job.
     const redirect = c === "&" && (">" === line[i - 1] || "<" === line[i - 1] || line[i + 1] === ">");
-    if (!redirect && (SEPARATORS.has(c) || c === "`" || c === "(" || c === ")" || c === "{" || c === "}")) {
+    if (!redirect && (SEPARATORS.has(c) || c === "`" || c === "{" || c === "}")) {
       flush();
       continue;
     }

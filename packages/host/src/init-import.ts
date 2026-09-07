@@ -278,12 +278,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       cpSync(f.source, target, { recursive: true, dereference: true, filter: keep });
       chmodSync(target, f.mode);
     }
-    // Every rc file staged, by name where dotfiles live or by identity with one of the laptop's, ships as its
-    // carried copy: secret exports are set on the machine by hand, never carried in the file, a bare source
-    // of a file under home that is not in this pack is wrapped so the machine skips it instead of printing an
-    // error, an oh-my-zsh plugin for a tool the image does not have leaves the plugin list, and a call to a command
-    // the image does not have gets a silent no-op in one guard block on top. The copy keeps the laptop's mode, so
-    // a read-only file is opened writable for the one write.
+    // The copy keeps the laptop's mode, so a read-only rc file is opened writable for the one write.
     const cut: CutNames[] = [];
     const silenced: string[] = [];
     const { onImage, tools } = opts;
