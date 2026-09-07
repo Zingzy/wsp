@@ -256,7 +256,8 @@ export function TerminalViewport({
   }, [config.font]);
 
   // A read that failed while the socket was down, or a file saved since, lands on the next live socket: a pane already
-  // drawn takes the file's colours and font. Padding and opacity are the surface's construction options and take the next open.
+  // drawn takes the file's colours, font, padding and opacity. The cursor style is the core's construction option and
+  // takes the next open.
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!live || readHostConfig === undefined || !terminal) return;
@@ -264,8 +265,12 @@ export function TerminalViewport({
     void readTerminalFile(readHostConfig, appScheme()).then(file => {
       if (stale || file === null || terminalRef.current !== terminal) return;
       fileRef.current = file;
-      terminal.setTheme(terminalThemeWith(file, terminalThemeFromApp(containerRef.current)));
-      void terminal.setFont(terminalFontWith(file, fontRef.current, chosenRef.current) ?? {});
+      const settings = terminalSurfaceSettings(file, terminalThemeFromApp(containerRef.current), fontRef.current, chosenRef.current);
+      terminal.setTheme(settings.theme);
+      void terminal.setFont(settings.font ?? {});
+      terminal.setPadding(settings.padding);
+      terminal.setBackgroundOpacity(settings.backgroundOpacity);
+      setTranslucent(terminal.translucent);
     });
     return () => {
       stale = true;
