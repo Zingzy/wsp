@@ -10,6 +10,7 @@ import {
   outOfMemoryLine,
   outOfMemoryRowLine,
   stillWorkingRefusal,
+  foreignFlagLine,
   LINEAGE_MARKS,
   REPO_STATE_WORDS,
   missingToolRow,
@@ -528,6 +529,13 @@ describe("stillWorkingRefusal", () => {
     expect(stillWorkingRefusal("5ffc2c96-1111-4222-8333-444455556666")).toBe(
       "thread 5ffc2c96 replied, still working; wait for its turn to finish before sending",
     );
+  });
+});
+
+describe("foreignFlagLine", () => {
+  it("names the verb or verbs that read the flag, then the one that does not", () => {
+    expect(foreignFlagLine("--tick", ["wsp recipe"], "wsp recipe scan")).toBe("--tick belongs to wsp recipe; wsp recipe scan does not read it");
+    expect(foreignFlagLine("--agent", ["wsp fork", "wsp thread new"], "wsp send")).toBe("--agent belongs to wsp fork and wsp thread new; wsp send does not read it");
   });
 });
 

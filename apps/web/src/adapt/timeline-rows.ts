@@ -6,7 +6,7 @@
 // MCP presentation tables. Turn duration comes from the turn summary because
 // entries are unstamped on our wire.
 import { fmtDuration, isCodeSearchTool } from "@wsp/protocol";
-import type { MessagesTimelineRow, TimelineEntry, ToolGroupAction, ToolGroupSummaryKind, TurnSummary, WorkLogEntry } from "./view-model.js";
+import type { MessagesTimelineRow, TimelineEntry, ToolGroupAction, ToolGroupSummaryKind, TurnSummary, WorkLogEntry, WorkLogTone } from "./view-model.js";
 
 const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 
@@ -349,7 +349,6 @@ function actionLabel(action: ToolGroupAction, count: number): string {
     case "read": return `Read ${count} ${one ? "file" : "files"}`;
     case "edit": return `Changed ${count} ${one ? "file" : "files"}`;
     case "command": return `Ran ${count} ${one ? "command" : "commands"}`;
-    case "browser": return `Used browser ${count} ${one ? "time" : "times"}`;
     case "search": return `Searched the web ${count} ${one ? "time" : "times"}`;
     case "code-search": return `Searched code ${count} ${one ? "time" : "times"}`;
     case "other": return `Used ${count} ${one ? "tool" : "tools"}`;
@@ -381,18 +380,32 @@ export function summarizeToolGroup(entries: ReadonlyArray<WorkLogEntry>): string
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
+/** What a group of plain calls is called when no item type says: reasoning reads as an agent's, a tool call as a tool's. */
+const TONE_GROUP_KINDS: Record<WorkLogTone, ToolGroupSummaryKind> = {
+  thinking: "agent-tool",
+  tool: "tone-tool",
+  notice: "other",
+  error: "other",
+};
+
 export function toolGroupSummaryKind(entries: ReadonlyArray<WorkLogEntry>): ToolGroupSummaryKind {
   const tools = entries.filter(e => e.tone !== "thinking");
   const actions = new Set((tools.length > 0 ? tools : entries).map(toolGroupAction));
   if (actions.size !== 1) return "mixed";
   const action = [...actions][0]!;
   if (action !== "other") return action;
-  const fallback = new Set(entries.map((entry): ToolGroupSummaryKind => {
-    if (entry.itemType === "mcp_tool_call") return "other";
-    if (entry.itemType === "dynamic_tool_call") return "dynamic-tool";
-    if (entry.itemType === "collab_agent_tool_call" || entry.tone === "thinking") return "agent-tool";
-    if (entry.tone === "tool") return "tone-tool";
-    return "other";
-  }));
-  return fallback.size === 1 ? [...fallback][0]! : "mixed";
+  const kinds = new Set(entries.map(entry => workEntryKind(entry) ?? TONE_GROUP_KINDS[entry.tone]));
+  return kinds.size === 1 ? [...kinds][0]! : "mixed";
+}
+
+/** The kind one tool-like row is drawn as: its action, else what the harness called the item; null when only its tone can say. */
+export function workEntryKind(entry: WorkLogEntry): ToolGroupSummaryKind | null {
+  const action = toolGroupAction(entry);
+  if (action !== "other") return action;
+  switch (entry.itemType) {
+    case "mcp_tool_call": return "other";
+    case "dynamic_tool_call": return "dynamic-tool";
+    case "collab_agent_tool_call": return "agent-tool";
+    default: return null;
+  }
 }

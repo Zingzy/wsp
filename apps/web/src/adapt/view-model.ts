@@ -97,7 +97,7 @@ export interface TurnSummary {
   readonly completedAt: string | null;
 }
 
-export type ToolGroupAction = "read" | "edit" | "command" | "browser" | "code-search" | "search" | "other" | "update";
+export type ToolGroupAction = "read" | "edit" | "command" | "code-search" | "search" | "other" | "update";
 export type ToolGroupSummaryKind = ToolGroupAction | "dynamic-tool" | "agent-tool" | "tone-tool" | "mixed";
 
 export type MessagesTimelineRow =

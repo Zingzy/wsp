@@ -2,7 +2,7 @@
 import { join } from "node:path";
 import { mergeScript } from "./merge.js";
 import { movedOr, type MovedState, type ProjectStateResolver } from "./resolver.js";
-import { countRows, movedColumn, pathParams, selectRows, sqliteMergeStep, underPath, updateRows, type MergeMode, type MergeTable } from "./sqlite.js";
+import { countRows, movedColumn, pathParams, sharedTables, sqliteFilter, sqliteMergeStep, underPath, updateRows, type Row, type SharedTable } from "./sqlite.js";
 
 const UPDATES = [
   ["project", `update project set worktree = ${movedColumn("worktree")}, sandboxes = '[]' where ${underPath("worktree")}`],
@@ -10,13 +10,12 @@ const UPDATES = [
   ["sessions", `update session set directory = ${movedColumn("directory")} where ${underPath("directory")}`],
 ] as const;
 const DB = "opencode.db";
-/** The same three tables for the machine's store, then each session's messages and their parts: the project keeps
- * its id (the first commit's hash, the same on both), so the merge names it by id and moves its worktree; a directory
- * row is its own key; messages and parts carry string ids of their own and hold no path. */
-type Row = MergeTable["rows"][number];
 const SESSION_IDS = `select id from session where ${underPath("directory")}`;
 const same = (r: Row): Row => r;
-const MERGES: readonly ({ table: string; where: string; move: (row: Row, from: string, to: string) => Row } & MergeMode)[] = [
+/** The whole store is one file every project's sessions sit in; these are the project's rows of it. The project keeps
+ * its id (the first commit's hash, the same on both), so the merge names it by id and moves its worktree; a directory
+ * row is its own key; messages and parts carry string ids of their own and hold no path. */
+const TABLES: readonly SharedTable[] = [
   { table: "project", key: ["id"], set: ["worktree", "sandboxes"], where: underPath("worktree"), move: (r, from, to) => ({ ...r, worktree: movedOr(r["worktree"] ?? null, from, to), sandboxes: "[]" }) },
   { table: "project_directory", key: ["project_id", "directory"], set: [], where: underPath("directory"), move: (r, from, to) => ({ ...r, directory: movedOr(r["directory"] ?? null, from, to) }) },
   { table: "session", key: ["id"], set: ["directory"], where: underPath("directory"), move: (r, from, to) => ({ ...r, directory: movedOr(r["directory"] ?? null, from, to) }) },
@@ -29,6 +28,7 @@ export const opencodeResolver: ProjectStateResolver = {
   carry: "transcript-only",
   states: UPDATES.map(([state]) => state),
   roots: [DB],
+  shared: { store: DB, filter: sqliteFilter(TABLES) },
   async move(home, from, to) {
     const db = join(home, DB);
     const rows = updateRows(db, UPDATES.map(([, sql]) => ({ sql, params: pathParams(from, to) })));
@@ -40,11 +40,7 @@ export const opencodeResolver: ProjectStateResolver = {
   sessions: async (home, path) => countRows(join(home, DB), `select count(*) as n from session where ${underPath("directory")}`, { $from: path }),
   entries: async () => [],
   async merge(home, from, to, guestHome) {
-    const tables: MergeTable[] = MERGES.map(({ where, move, ...mode }) => ({
-      ...mode,
-      rows: (selectRows(join(home, DB), `select * from ${mode.table} where ${where} order by 1, 2`, { $from: from }) ?? []).map(r => move(r, from, to)),
-    }));
-    if (tables.every(t => t.rows.length === 0)) return undefined;
-    return mergeScript(from, to, [sqliteMergeStep(join(guestHome, DB), tables)]);
+    const tables = sharedTables(join(home, DB), TABLES, from, to);
+    return tables === undefined ? undefined : mergeScript(from, to, [sqliteMergeStep(join(guestHome, DB), tables)]);
   },
 };

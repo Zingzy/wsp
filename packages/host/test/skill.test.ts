@@ -4,11 +4,10 @@
 // its instructions.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, MCP_AGENT_IDS } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { SessionStartOutcome, backgroundTasksLine, notifyLine } from "@wsp/protocol";
 import { INSTRUCTIONS, SETUP_HEADING, SKILL_NAME, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
-import { THREAD_AGENTS } from "../src/thread-agents.js";
-import { VERBS } from "../src/verbs.js";
+import { CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 
 describe("the wsp skill", () => {
   it("is the repo's skills/wsp/SKILL.md, with the frontmatter name and a one-line description without a colon or a quote", () => {
@@ -23,7 +22,8 @@ describe("the wsp skill", () => {
   });
 
   it("names every verb in the verbs table and the agents the MCP server installs for; a new verb without a line fails here", () => {
-    for (const verb of VERBS) expect(WSP_SKILL, verb.name).toContain(`\`wsp ${verb.name}`);
+    for (const verb of CLI_VERBS) expect(WSP_SKILL, verb.name).toContain(`\`wsp ${verb.name}`);
+    for (const verb of VERBS) expect(WSP_SKILL, verb.name).toContain(`\`${toolName(verb.name)}\``);
     expect(WSP_SKILL).toContain(`get the server: ${MCP_AGENT_IDS}.`);
     // The install's flags are stated where the reader is sent to find them, not only in the walkthrough and the help.
     expect(WSP_SKILL).toContain("`--agent` repeats to do several in one call");

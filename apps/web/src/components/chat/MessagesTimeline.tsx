@@ -9,11 +9,11 @@ import {
   type ProviderSkill,
   type TimelineEntry,
   type TimestampFormat,
-  toolGroupAction,
   type ToolGroupSummaryKind,
   type TurnDiffSummary,
   type TurnId,
   type TurnSummary,
+  workEntryKind,
   type WorkLogTone,
 } from "./adapt";
 import { resolveWorkGroupScrollAnchor } from "../../work-log/scrollAnchor";
@@ -1489,7 +1489,6 @@ const TOOL_GROUP_GLYPHS: Record<ToolGroupSummaryKind, LucideIcon> = {
   read: EyeIcon,
   edit: SquarePenIcon,
   command: TerminalIcon,
-  browser: GlobeIcon,
   search: GlobeIcon,
   "code-search": SearchIcon,
   other: WrenchIcon,
@@ -1782,20 +1781,8 @@ const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,0.6875rem)] leading-relaxed select-text";
 
 function workEntryGlyph(workEntry: TimelineWorkEntry): LucideIcon {
-  if (!isToolLike(workEntry)) return WORK_TONES[workEntry.tone].Glyph;
-  const action = toolGroupAction(workEntry);
-  if (action !== "other") return TOOL_GROUP_GLYPHS[action];
-
-  switch (workEntry.itemType) {
-    case "mcp_tool_call":
-      return WrenchIcon;
-    case "dynamic_tool_call":
-      return HammerIcon;
-    case "collab_agent_tool_call":
-      return BotIcon;
-  }
-
-  return WORK_TONES[workEntry.tone].Glyph;
+  const kind = isToolLike(workEntry) ? workEntryKind(workEntry) : null;
+  return kind === null ? WORK_TONES[workEntry.tone].Glyph : TOOL_GROUP_GLYPHS[kind];
 }
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();

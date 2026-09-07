@@ -443,6 +443,13 @@ export function stillWorkingRefusal(threadId: string): string {
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 
+/** The refusal of a flag another verb reads: the verbs it belongs to, then the one that does not read it, so the
+ * caller is told where the flag lives rather than left with the parser's bare unknown-option line. */
+export function foreignFlagLine(flag: string, readers: readonly string[], here: string): string {
+  const owners = readers.length > 1 ? `${readers.slice(0, -1).join(", ")} and ${readers.at(-1)}` : readers[0];
+  return `${flag} belongs to ${owners}; ${here} does not read it`;
+}
+
 /** The refusal of a start naming an agent the host has no adapter for, listing the ones it has. */
 export function noAdapterLine(harness: string, agents: readonly string[]): string {
   return `no adapter registered for harness "${harness}"; agents on this host: ${agents.join(", ") || "none"}`;
@@ -521,6 +528,12 @@ export const DAEMON_UPDATE_FAILED = "could not update the helper";
 /** Why a nap's vault export was refused: its size against the cap, both in the one byte rule. */
 export function vaultOverCapLine(bytes: number, capBytes: number): string {
   return `the export was ${fmtBytes(bytes)}, over the ${fmtBytes(capBytes)} cap`;
+}
+
+/** A store an agent keeps for every project that an export could not read on the machine: nothing from it travelled,
+ * so the project's rows in it stayed there rather than every other project's leaving with them. */
+export function storeUnreadLine(store: string, why: string): string {
+  return `could not read ${store} on the machine, so nothing from it travelled: ${why}`;
 }
 
 /** The napping status's line when the nap could not store a fresh vault and the previous one stands: a wake that has

@@ -4,10 +4,9 @@
 // command line and single rows flipped by id. Names and counts only; the
 // histories are read here and nothing of them leaves.
 import { existsSync } from "node:fs";
-import { agentName, catalogEntry } from "@wsp/catalog";
+import { THREAD_AGENTS, agentName, catalogEntry } from "@wsp/catalog";
 import { type AgentHistory, type HistoryCache, type HistoryProgress, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
 import { LOGIN_CHOICES, RECIPE_TICKS, addAlreadyHereLine, customRows, plural, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick, type ToolPin } from "@wsp/protocol";
-import { THREAD_AGENTS } from "./thread-agents.js";
 import { loadRecipe, outsideRow, outsideRowsOf, ownRowIdOf, ownRowOf, pinsOf, saveSmallRecipe, withPins } from "./recipe-file.js";
 import { customFromFlags, withCustom, withoutCustom } from "./recipe-custom.js";
 import { recipeAnswer, recipeScan, type RecipeAnswer, type RecipeScan } from "./recipe-answer.js";

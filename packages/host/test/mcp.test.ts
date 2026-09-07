@@ -11,7 +11,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { CATALOG } from "@wsp/catalog";
+import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
 import { EMPTY_TASK_LINE, ProjectGolden, Recipe, ThreadView, WorkspaceView } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +19,6 @@ import { serve } from "../src/cli.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
 import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
 import { WSP_SKILL, instructionsOf } from "../src/skill.js";
-import { THREAD_AGENTS } from "../src/thread-agents.js";
 import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -811,12 +810,17 @@ describe("the MCP server never talks to the provider", () => {
       return seen;
     };
     const walked = closure("mcp.ts");
-    // The collector reads this computer for the recipe tool; it depends on the catalog and the protocol and nothing else.
-    expect(walked.get("mcp.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/collect", "@wsp/protocol"]);
+    // The tools are the verb table's; the collector reads this computer for the recipe verbs and depends on the
+    // catalog and the protocol and nothing else. The catalog is rows and ids alone (the agents a thread can take),
+    // so the list the agent argument names reaches no provider either.
+    expect(walked.get("mcp.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual([]);
+    expect(walked.get("verbs.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/catalog", "@wsp/collect", "@wsp/protocol"]);
     expect([...walked.keys()].sort()).toContain("recipe-answer.ts");
     expect([...walked.keys()].sort()).toContain("init-layout.ts");
+    // The adapter packages come from the one registry's list of agents, so a new agent is banned here without an edit.
+    const banned = new RegExp(`@wsp/(runtime|engine|daemon|web|${THREAD_AGENTS.map(a => `adapter-${a}`).join("|")})`);
     for (const [file, imports] of walked) {
-      for (const i of imports) expect(`${i} in ${file}`).not.toMatch(/@wsp\/(runtime|engine|adapter-claude|daemon|web)/);
+      for (const i of imports) expect(`${i} in ${file}`).not.toMatch(banned);
     }
   });
 });

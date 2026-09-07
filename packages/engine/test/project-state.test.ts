@@ -9,8 +9,9 @@ import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { ProjectCarry } from "@wsp/protocol";
-import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, parseMergeOutput, resolveProjectPath, stateListing, underProject, type MergeOutput, type ProjectStateResolver } from "../src/project-state/index.js";
+import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, parseMergeOutput, parseStateListing, resolveProjectPath, stateListing, storeCopy, underProject, type MergeOutput, type ProjectStateResolver, type UnreadStore } from "../src/project-state/index.js";
 import { mergeScript } from "../src/project-state/merge.js";
+import { rewriteJsonl } from "../src/project-state/resolver.js";
 import { PY_PREAMBLE } from "../src/project-state/py.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
@@ -488,6 +489,24 @@ describe("project path rules", () => {
   });
 });
 
+describe("rewriteJsonl", () => {
+  it("a rewrite that fails leaves the file as it was and no .wsp-move beside it, whether the file is missing or an edit throws", async () => {
+    const dir = scratch();
+    const missing = join(dir, "missing.jsonl");
+    // The failure lands while the write stream is still opening, so the temp file's fate is a thread-pool race; many rounds catch it.
+    for (let i = 0; i < 300; i++) {
+      await expect(rewriteJsonl(missing, () => true)).rejects.toThrow(/ENOENT/);
+      expect(existsSync(`${missing}.wsp-move`)).toBe(false);
+    }
+    const file = join(dir, "s.jsonl");
+    const text = lines(JSON.stringify({ cwd: FROM }), JSON.stringify({ cwd: OTHER }));
+    write(file, text);
+    await expect(rewriteJsonl(file, () => { throw new Error("bad line"); })).rejects.toThrow("bad line");
+    expect(readFileSync(file, "utf8")).toBe(text);
+    expect(existsSync(`${file}.wsp-move`)).toBe(false);
+  });
+});
+
 describe("moveProjectState", () => {
   it("registers each module under its own catalog agent, naming only measured rows of that entry", () => {
     expect(PROJECT_STATE_RESOLVERS.size).toBeGreaterThan(0);
@@ -569,14 +588,67 @@ describe("moveProjectState", () => {
 
 // --- sessions per agent -----------------------------------------------------------------------------------------------
 
-/** Runs one agent's listing the way the machine does: the command stateListing builds, in a shell. */
-function runListing(agent: string, home: string, path: string): { exit: number; paths: string[]; err: string } {
-  const r = spawnSync("bash", ["-c", stateListing({ [agent]: home }, path, [agent])], { encoding: "utf8" });
-  return { exit: r.status ?? -1, paths: r.stdout.split("\n").filter(l => l !== ""), err: r.stderr };
+/** Runs one agent's listing the way the machine does: the command stateListing builds, in a shell, with `into` the
+ * directory on the machine the filtered copies are written under. */
+function runListing(agent: string, home: string, path: string, into = scratch()): { exit: number; paths: string[]; unread: UnreadStore[]; err: string } {
+  const r = spawnSync("bash", ["-c", stateListing({ [agent]: home }, path, into, [agent])], { encoding: "utf8" });
+  return { exit: r.status ?? -1, ...parseStateListing(r.stdout), err: r.stderr };
+}
+/** The python3 source of one agent's listing, off the command the machine would run. */
+function listingSource(agent: string, home: string, path: string, into: string): string {
+  const command = stateListing({ [agent]: home }, path, into, [agent]);
+  const opens = "set -e\npython3 -c '";
+  return command.slice(opens.length, -1).replaceAll(String.raw`'\''`, "'");
+}
+/** The peak resident memory of the python3 a listing runs, in MB, beside the paths it named: the script is exec'd
+ * inside a wrapper that reads its own rusage once it ends, since no one spelling of time(1) is on both platforms. */
+function listingPeak(agent: string, home: string, path: string, into: string): { peakMb: number; paths: string[] } {
+  const wrapper = [
+    "import resource, sys",
+    "exec(compile(sys.stdin.read(), \"listing\", \"exec\"), {})",
+    // ru_maxrss is kilobytes on linux and bytes on darwin.
+    'sys.stderr.write(str(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024 if sys.platform == "darwin" else 1024)))',
+  ].join("\n");
+  const r = spawnSync("python3", ["-c", wrapper], { input: listingSource(agent, home, path, into), encoding: "utf8", maxBuffer: 1 << 26 });
+  if (r.status !== 0) throw new Error(`the listing failed (exit ${r.status}): ${r.stderr}`);
+  return { peakMb: Number(r.stderr), paths: r.stdout.split("\n").filter(l => l !== "") };
+}
+
+/** The store shape the cold review measured on: one Hermes store holding two projects with `per` messages of 2 KB
+ * each, a session in a folder under the project, and the sibling sharing the project's prefix. The 8 KB page fits
+ * two of those rows, so the store on disk is about twice the project's own slice. */
+function sharedHermesStore(root: string, per: number): string {
+  const home = join(root, "hermes-shared");
+  const db = join(home, "state.db");
+  mkdirSync(home, { recursive: true });
+  const d = new DatabaseSync(db);
+  try {
+    d.exec("pragma page_size = 8192");
+    d.exec(HERMES_SCHEMA);
+    const body = "m".repeat(2048);
+    const session = d.prepare("insert into sessions values (?, ?, ?, ?)");
+    const message = d.prepare("insert into messages (session_id, content) values (?, ?)");
+    d.exec("begin");
+    for (const [id, cwd, n] of [["a1", FROM, per], ["a2", FROM_SUB, 1], ["b1", OTHER, per], ["o1", DECOY, 1]] as const) {
+      session.run(id, cwd, cwd, n);
+      for (let i = 0; i < n; i++) message.run(id, body);
+    }
+    d.exec("commit");
+  } finally {
+    d.close();
+  }
+  return home;
+}
+
+/** Where a module's shared store is copied to for a trip: the store's own path under the scratch root. */
+function copyOf(agent: string, home: string, into: string): string {
+  const shared = resolverFor(agent).shared;
+  if (shared === undefined) throw new Error(`${agent} keeps no store for every project`);
+  return storeCopy(into, home, shared.store);
 }
 
 describe("the listing the machine runs", () => {
-  it("each module names the paths under its home it reads, so a trip pulls those and nothing else from a home", () => {
+  it("each module names the paths under its home it reads, and the store it keeps for every project is one of them", () => {
     expect(Object.fromEntries([...PROJECT_STATE_RESOLVERS.values()].map(r => [r.agent, r.roots]))).toEqual({
       claude: ["projects"],
       codex: ["state_5.sqlite", "sessions"],
@@ -585,75 +657,228 @@ describe("the listing the machine runs", () => {
       opencode: ["opencode.db"],
       pi: ["sessions"],
     });
-    for (const r of PROJECT_STATE_RESOLVERS.values()) for (const root of r.roots) expect(root, r.agent).not.toMatch(/^\/|\.\./);
+    expect(Object.fromEntries([...PROJECT_STATE_RESOLVERS.values()].flatMap(r => (r.shared === undefined ? [] : [[r.agent, r.shared.store]])))).toEqual({
+      codex: "state_5.sqlite",
+      gemini: "projects.json",
+      hermes: "state.db",
+      opencode: "opencode.db",
+    });
+    for (const r of PROJECT_STATE_RESOLVERS.values()) {
+      for (const root of r.roots) expect(root, r.agent).not.toMatch(/^\/|\.\./);
+      if (r.shared !== undefined) expect(r.roots, r.agent).toContain(r.shared.store);
+    }
   });
 
-  it("brings down the project's own entries and the stores read for it, never another project's, from a home holding four", () => {
+  it("brings down the project's own entries and a filtered copy of each store kept for every project, never another project's, from a home holding four", () => {
     const root = scratch();
+    const into = scratch();
     const claude = claudeHome(root);
-    expect(runListing("claude", claude, FROM)).toEqual({
+    expect(runListing("claude", claude, FROM, into)).toEqual({
       exit: 0,
       err: "",
+      unread: [],
       paths: [join(claude, "projects", "-private-tmp-wsp-r212-proj-b-2-x"), join(claude, "projects", "-private-tmp-wsp-r212-proj-b-2-x-sub")],
     });
     const pi = piHome(root);
-    expect(runListing("pi", pi, FROM).paths).toEqual([
+    expect(runListing("pi", pi, FROM, into).paths).toEqual([
       join(pi, "sessions", "--private-tmp-wsp-r212-proj-b_2.x--"),
       join(pi, "sessions", "--private-tmp-wsp-r212-proj-b_2.x-sub--"),
     ]);
     const codex = codexHome(root);
-    expect(runListing("codex", codex, FROM).paths).toEqual([
-      join(codex, "state_5.sqlite"),
+    expect(runListing("codex", codex, FROM, into).paths).toEqual([
+      copyOf("codex", codex, into),
       join(codex, "sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl"),
       join(codex, "sessions", "2026", "09", "05", "rollout-2026-09-05T22-00-00-t3.jsonl"),
     ]);
     const gemini = geminiHome(root);
-    expect(runListing("gemini", gemini, FROM).paths).toEqual([
-      join(gemini, "projects.json"),
+    expect(runListing("gemini", gemini, FROM, into).paths).toEqual([
+      copyOf("gemini", gemini, into),
       join(gemini, "tmp", "b_2.x"),
       join(gemini, "history", "b_2.x"),
       join(gemini, "tmp", "sub"),
     ]);
-    expect(runListing("hermes", hermesHome(root), FROM).paths).toEqual([join(root, "hermes", "state.db")]);
-    expect(runListing("opencode", opencodeHome(root), FROM).paths).toEqual([join(root, "opencode", "opencode.db")]);
+    const hermes = hermesHome(root);
+    expect(runListing("hermes", hermes, FROM, into).paths).toEqual([copyOf("hermes", hermes, into)]);
+    const opencode = opencodeHome(root);
+    expect(runListing("opencode", opencode, FROM, into).paths).toEqual([copyOf("opencode", opencode, into)]);
   });
 
-  it("names nothing but the stores it reads anyway for a path no agent ran in, and nothing at all for a home that is not there", () => {
+  it("Codex: the copy of the index holds the project's threads alone and the store on the machine is not touched", () => {
     const root = scratch();
+    const into = scratch();
+    const home = codexHome(root);
+    const before = tree(home);
+    expect(runListing("codex", home, FROM, into).exit).toBe(0);
+    expect(rows(copyOf("codex", home, into))).toEqual({
+      threads: [
+        { id: "t1", rollout_path: join(home, "sessions", "2026", "09", "05", "rollout-2026-09-05T21-58-00-t1.jsonl"), cwd: FROM, archived: 0, updated_at: 1 },
+        { id: "t3", rollout_path: join(home, "sessions", "2026", "09", "05", "rollout-2026-09-05T22-00-00-t3.jsonl"), cwd: FROM_SUB, archived: 0, updated_at: 3 },
+      ],
+    });
+    expect(tree(home)).toEqual(before);
+  });
+
+  it("Hermes: the copy of the store holds the project's sessions and their messages alone", () => {
+    const root = scratch();
+    const into = scratch();
+    const home = hermesHome(root);
+    const before = tree(home);
+    expect(runListing("hermes", home, FROM, into).exit).toBe(0);
+    expect(rows(copyOf("hermes", home, into))).toEqual({
+      sessions: [
+        { id: "20260906_033144_55e3e2", cwd: FROM, git_repo_root: FROM, message_count: 2 },
+        { id: "20260906_034000_bbbbbb", cwd: FROM, git_repo_root: null, message_count: 1 },
+        { id: "20260906_035000_cccccc", cwd: FROM_SUB, git_repo_root: FROM, message_count: 1 },
+      ],
+      messages: [
+        { id: 1, session_id: "20260906_033144_55e3e2", content: "hi" },
+        { id: 2, session_id: "20260906_033144_55e3e2", content: "there" },
+      ],
+    });
+    expect(tree(home)).toEqual(before);
+  });
+
+  it("OpenCode: the copy of the store holds the project's rows in every table, its sessions' messages and their parts alone", () => {
+    const root = scratch();
+    const into = scratch();
+    const home = opencodeHome(root);
+    const before = tree(home);
+    expect(runListing("opencode", home, FROM, into).exit).toBe(0);
+    expect(rows(copyOf("opencode", home, into))).toEqual({
+      project: [{ id: HASH, worktree: FROM, vcs: "git", name: "b_2.x", sandboxes: `["${FROM}-copy"]`, time_created: 1 }],
+      project_directory: [{ project_id: HASH, directory: FROM }, { project_id: HASH, directory: FROM_SUB }],
+      session: [{ id: "ses_1", project_id: HASH, directory: FROM, title: "first" }, { id: "ses_3", project_id: HASH, directory: FROM_SUB, title: "deeper" }],
+      message: [{ id: "msg_1", session_id: "ses_1", role: "user" }],
+      part: [{ id: "prt_1", message_id: "msg_1", text: "hi" }],
+    });
+    expect(tree(home)).toEqual(before);
+  });
+
+  it("Gemini: the copy of the registry holds the project's keys alone, in the shape the agent writes", () => {
+    const root = scratch();
+    const into = scratch();
+    const home = geminiHome(root);
+    const before = tree(home);
+    expect(runListing("gemini", home, FROM, into).exit).toBe(0);
+    expect(readFileSync(copyOf("gemini", home, into), "utf8")).toBe(JSON.stringify({ projects: { [FROM]: "b_2.x", [FROM_SUB]: "sub" } }, null, 2) + "\n");
+    expect(tree(home)).toEqual(before);
+  });
+
+  it("a second trip through the same scratch root writes the copy again rather than into the one already there", () => {
+    const root = scratch();
+    const into = scratch();
+    const home = hermesHome(root);
+    const first = runListing("hermes", home, FROM, into);
+    const copied = rows(copyOf("hermes", home, into));
+    expect(runListing("hermes", home, FROM, into)).toEqual(first);
+    expect(rows(copyOf("hermes", home, into))).toEqual(copied);
+  });
+
+  it("a store whose schema holds a virtual table is filtered all the same: its own create makes the shadow tables", () => {
+    const root = scratch();
+    const into = scratch();
+    const home = join(root, "hermes");
+    seed(join(home, "state.db"), "create table sessions (id text primary key, cwd text, git_repo_root text, message_count integer); create virtual table notes using fts5(body); create table messages (id integer primary key, session_id text, content text)", [
+      ["insert into sessions values (?, ?, ?, 1)", ["s1", FROM, FROM]],
+      ["insert into sessions values (?, ?, ?, 1)", ["s2", OTHER, OTHER]],
+      ["insert into notes values ('a note')", []],
+    ]);
+    expect(runListing("hermes", home, FROM, into)).toMatchObject({ exit: 0, paths: [copyOf("hermes", home, into)], unread: [] });
+    const d = new DatabaseSync(copyOf("hermes", home, into), { readOnly: true });
+    try {
+      expect(d.prepare("select * from sessions order by id").all().map(r => ({ ...r }))).toEqual([{ id: "s1", cwd: FROM, git_repo_root: FROM, message_count: 1 }]);
+      expect(Number((d.prepare("select count(*) as n from notes").get() as { n: number | bigint }).n)).toBe(0);
+    } finally {
+      d.close();
+    }
+  });
+
+  it("the filter streams the project's slice into the copy: peak memory stays a fraction of the rows it writes", () => {
+    const into = scratch();
+    const home = sharedHermesStore(scratch(), 120_000);
+    const run = listingPeak("hermes", home, FROM, into);
+    expect(run.paths).toEqual([copyOf("hermes", home, into)]);
+    const copied = new DatabaseSync(copyOf("hermes", home, into), { readOnly: true });
+    try {
+      const count = (table: string): number => Number((copied.prepare(`select count(*) as n from ${table}`).get() as { n: number | bigint }).n);
+      expect(count("sessions")).toBe(2);
+      expect(count("messages")).toBe(120_001);
+    } finally {
+      copied.close();
+    }
+    // 120001 rows of 2 KB is a 246 MB slice: fetchall of it peaked at 277.75 MB on this box, the fetchmany loop at 20.75 MB.
+    expect(run.peakMb).toBeLessThan(64);
+  }, 600_000);
+
+  it("names nothing at all for a path no agent ran in, for a store the agent has not made and for a home that is not there", () => {
+    const root = scratch();
+    const into = scratch();
     const claude = claudeHome(root);
     const never = "/Users/me/never";
-    expect(runListing("claude", claude, never).paths).toEqual([]);
-    expect(runListing("pi", piHome(root), never).paths).toEqual([]);
-    expect(runListing("codex", codexHome(root), never).paths).toEqual([join(root, "codex", "state_5.sqlite")]);
-    expect(runListing("gemini", geminiHome(root), never).paths).toEqual([join(root, "gemini", "projects.json")]);
-    for (const agent of ["claude", "pi", "codex", "gemini"]) expect(runListing(agent, join(root, `${agent}-gone`), FROM).paths, agent).toEqual([]);
+    expect(runListing("claude", claude, never, into).paths).toEqual([]);
+    expect(runListing("pi", piHome(root), never, into).paths).toEqual([]);
+    expect(runListing("codex", codexHome(root), never, into).paths).toEqual([]);
+    expect(runListing("gemini", geminiHome(root), never, into).paths).toEqual([]);
+    expect(runListing("hermes", hermesHome(root), never, into).paths).toEqual([]);
+    expect(runListing("opencode", opencodeHome(root), never, into).paths).toEqual([]);
+    // A home the agent made but never wrote its store in: its sessions tree is not the answer for the project.
+    const bare = join(root, "codex-bare");
+    write(join(bare, "sessions", "2026", "09", "05", "rollout-other.jsonl"), lines(codexMeta(OTHER)));
+    expect(runListing("codex", bare, FROM, into).paths).toEqual([]);
+    for (const agent of ["claude", "pi", "codex", "gemini", "hermes", "opencode"]) expect(runListing(agent, join(root, `${agent}-gone`), FROM, into).paths, agent).toEqual([]);
     // The sibling sharing the project's prefix is its own project, named only when it is the one asked for.
-    expect(runListing("claude", claude, DECOY).paths).toEqual([join(claude, "projects", "-private-tmp-wsp-r212-proj-b-2-x-old")]);
+    expect(runListing("claude", claude, DECOY, into).paths).toEqual([join(claude, "projects", "-private-tmp-wsp-r212-proj-b-2-x-old")]);
   });
 
   it("a source spelled with a trailing slash or a dot segment, as the wire carries it, names the same paths", () => {
     const claude = claudeHome(scratch());
-    const plain = runListing("claude", claude, FROM).paths;
+    const into = scratch();
+    const plain = runListing("claude", claude, FROM, into).paths;
     expect(plain).toHaveLength(2);
-    expect(runListing("claude", claude, `${FROM}/`).paths).toEqual(plain);
-    expect(runListing("claude", claude, `${FROM}/./`).paths).toEqual(plain);
+    expect(runListing("claude", claude, `${FROM}/`, into).paths).toEqual(plain);
+    expect(runListing("claude", claude, `${FROM}/./`, into).paths).toEqual(plain);
   });
 
-  it("a store on the machine it cannot read gives up the module's whole roots, so the trip reports it the way a bad store here is reported", () => {
+  it("a store on the machine it cannot read brings nothing from that home at all, and names the store and why in its place", () => {
     const root = scratch();
-    const codex = codexHome(root);
+    const into = scratch();
+    const homes: Record<string, string> = {};
+    const codex = (homes["codex"] = codexHome(root));
     write(join(codex, "state_5.sqlite"), "not a database\n");
-    expect(runListing("codex", codex, FROM)).toEqual({ exit: 0, err: "", paths: [join(codex, "state_5.sqlite"), join(codex, "sessions")] });
-    const gemini = geminiHome(root);
+    // Never the index and never the sessions/ tree beside it, which holds every other project's rollouts.
+    expect(runListing("codex", codex, FROM, into)).toEqual({
+      exit: 0,
+      err: "",
+      paths: [],
+      unread: [{ agent: "codex", store: join(codex, "state_5.sqlite"), why: "file is not a database" }],
+    });
+    const gemini = (homes["gemini"] = geminiHome(root));
     write(join(gemini, "projects.json"), "{ not json\n");
-    expect(runListing("gemini", gemini, FROM).paths).toEqual([join(gemini, "projects.json"), join(gemini, "tmp"), join(gemini, "history")]);
+    const registry = runListing("gemini", gemini, FROM, into);
+    // Never the registry and never the whole of tmp/ and history/, which hold every other project's chats.
+    expect(registry.paths).toEqual([]);
+    expect(registry.unread).toMatchObject([{ agent: "gemini", store: join(gemini, "projects.json") }]);
+    expect(registry.unread[0]!.why).toMatch(/Expecting property name/);
+    const hermes = (homes["hermes"] = hermesHome(root));
+    write(join(hermes, "state.db"), "not a database\n");
+    expect(runListing("hermes", hermes, FROM, into)).toEqual({
+      exit: 0,
+      err: "",
+      paths: [],
+      unread: [{ agent: "hermes", store: join(hermes, "state.db"), why: "file is not a database" }],
+    });
+    const opencode = (homes["opencode"] = opencodeHome(root));
+    write(join(opencode, "opencode.db"), "not a database\n");
+    expect(runListing("opencode", opencode, FROM, into).unread).toEqual([{ agent: "opencode", store: join(opencode, "opencode.db"), why: "file is not a database" }]);
+    // Nor a half written copy under the scratch root, which the trip would have pulled at the store's own path.
+    for (const [agent, home] of Object.entries(homes)) expect(existsSync(copyOf(agent, home, into)), agent).toBe(false);
   });
 
   it("every listing and the merge open with the one preamble, so the rule for a path at the project or under it is defined once", () => {
     const definitions = (script: string): number => script.split("def under(").length - 1;
+    const into = scratch();
     for (const r of PROJECT_STATE_RESOLVERS.values()) {
-      const script = r.listing?.(join("/root", `.${r.agent}`), FROM);
-      if (script === undefined) continue;
+      const script = listingSource(r.agent, join("/root", `.${r.agent}`), FROM, into);
       expect(script.startsWith(PY_PREAMBLE), r.agent).toBe(true);
       expect(definitions(script), r.agent).toBe(1);
     }
@@ -664,17 +889,19 @@ describe("the listing the machine runs", () => {
 
   it("stateListing runs one python3 per agent with a home and a module, narrows to the agents named and refuses an id the catalog does not know", () => {
     const homes = guestAgentHomes();
+    const into = scratch();
     const runs = (command: string): number => command.split("\npython3 -c '").length - 1;
-    const command = stateListing(homes, FROM);
+    const command = stateListing(homes, FROM, into);
     expect(command.startsWith("set -e\npython3 -c '")).toBe(true);
     expect(runs(command)).toBe(PROJECT_STATE_RESOLVERS.size);
     const carried = (value: string): string => Buffer.from(JSON.stringify(value), "utf8").toString("base64");
     for (const home of Object.values(homes)) expect(command).toContain(carried(home));
     expect(command).toContain(carried(FROM));
-    expect(runs(stateListing(homes, FROM, ["pi", "claude"]))).toBe(2);
-    expect(runs(stateListing({ claude: "/x/.claude" }, FROM))).toBe(1);
-    expect(stateListing({}, FROM)).toBe("");
-    expect(() => stateListing(homes, FROM, ["claude", "codx"])).toThrow(`no agent called codx; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
+    for (const r of PROJECT_STATE_RESOLVERS.values()) if (r.shared !== undefined) expect(command).toContain(carried(storeCopy(into, homes[r.agent]!, r.shared.store)));
+    expect(runs(stateListing(homes, FROM, into, ["pi", "claude"]))).toBe(2);
+    expect(runs(stateListing({ claude: "/x/.claude" }, FROM, into))).toBe(1);
+    expect(stateListing({}, FROM, into)).toBe("");
+    expect(() => stateListing(homes, FROM, into, ["claude", "codx"])).toThrow(`no agent called codx; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
   });
 });
 
