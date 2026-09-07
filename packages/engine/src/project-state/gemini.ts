@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { mergeScript, pyData } from "./merge.js";
+import { listScript } from "./listing.js";
+import { mergeScript } from "./merge.js";
+import { pyData } from "./py.js";
 import { underProject } from "@wsp/protocol";
 import { filesUnder, movedPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
@@ -16,12 +18,13 @@ const readRegistry = (file: string): Registry | undefined => (existsSync(file) ?
 const slugsUnder = (home: string, path: string): string[] => Object.entries(readRegistry(join(home, REGISTRY))?.projects ?? {}).flatMap(([key, slug]) => (underProject(key, path) ? [slug] : []));
 /** The catalog rows a slug names, each with its directory under the home. */
 const SLUG_DIRS = [["project temp dir", "tmp"], ["shell history", "history"]] as const;
+const ROOTS = [REGISTRY, ...SLUG_DIRS.map(([, dir]) => dir)];
 
 export const geminiResolver: ProjectStateResolver = {
   agent: "gemini",
   carry: "transcript-only",
   states: ["project registry", "project temp dir", "shell history"],
-  roots: [REGISTRY, ...SLUG_DIRS.map(([, dir]) => dir)],
+  roots: ROOTS,
   async move(home, from, to) {
     const file = join(home, REGISTRY);
     const registry = readRegistry(file);
@@ -53,6 +56,21 @@ export const geminiResolver: ProjectStateResolver = {
   },
   sessions: async (home, path) => slugsUnder(home, path).reduce((n, slug) => n + filesUnder(join(home, "tmp", slug, "chats"), ".jsonl").length, 0),
   entries: async (home, path) => slugsUnder(home, path).flatMap(slug => SLUG_DIRS.flatMap(([, dir]) => filesUnder(join(home, dir, slug), ""))).sort(),
+  // The registry maps every project to its slug and the count is read off it here, so it comes home whole; of tmp
+  // and history only the slugs it registers at the path or under it follow.
+  listing: (home, path) =>
+    listScript(home, path, ROOTS, [
+      `REG = os.path.join(HOME, ${pyData(REGISTRY)})`,
+      "say(REG)",
+      "if os.path.exists(REG):",
+      '    with open(REG, encoding="utf-8") as h:',
+      '        projects = json.load(h).get("projects") or {}',
+      "    for key, slug in projects.items():",
+      "        if not under(key, PATH) or not isinstance(slug, str):",
+      "            continue",
+      `        for d in ${pyData(SLUG_DIRS.map(([, dir]) => dir))}:`,
+      "            say(os.path.join(HOME, d, slug))",
+    ]),
   async merge(home, from, to, guestHome) {
     const keys = Object.entries(readRegistry(join(home, REGISTRY))?.projects ?? {}).flatMap(([path, slug]) => {
       const target = movedPath(path, from, to);

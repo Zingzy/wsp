@@ -6,8 +6,7 @@
 // zombie (its retry budget, measured: minutes of silence plus a failed probe).
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AdapterEvent } from "@wsp/adapter-claude";
-import { ALREADY_RUNNING, sendRefusal, workspaceState, workspaceWord, type EventUnion, type SessionEvent } from "@wsp/protocol";
+import { ALREADY_RUNNING, sendRefusal, workspaceState, workspaceWord, type AdapterEvent, type EventUnion, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";

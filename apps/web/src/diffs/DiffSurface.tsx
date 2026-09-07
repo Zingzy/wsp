@@ -20,7 +20,7 @@ import {
   Rows3Icon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GitDiffReply, GitStatusReply } from "@wsp/protocol";
+import { REPO_STATE_WORDS, type GitDiffReply, type GitStatusReply } from "@wsp/protocol";
 import { ChangedFilesTree } from "../components/chat/ChangedFilesTree.js";
 import { DiffStatLabel } from "../components/chat/DiffStatLabel.js";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "../components/diffs/AnnotatableCodeView.js";
@@ -38,7 +38,8 @@ import { getDiffCollapseIconClassName, resolveDiffThemeName, resolveFileDiffPath
 import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting.js";
 import { cn } from "../lib/utils.js";
 import type { ReviewCommentContext } from "../reviewCommentContext.js";
-import { DaemonOpError, gitDiff, gitStatus } from "../terminal/daemon-fs.js";
+import { repoAbsence } from "../adapt/git.js";
+import { gitDiff, gitStatus } from "../terminal/daemon-fs.js";
 import { SCOPE_LABELS, SCOPES, toDiffModel } from "./model.js";
 import { DEFAULT_SCOPE, useDiffStore } from "./store.js";
 
@@ -48,7 +49,7 @@ type LoadState =
   | { kind: "error"; message: string; last: GitDiffReply | null };
 
 /** The repository git resolved for one folder: its top level and branch, or the word that there is none. */
-type RepoState = { kind: "unknown" } | { kind: "repo"; root: string; branch: string } | { kind: "none" };
+type RepoState = { kind: "unknown" } | { kind: "repo"; root: string; branch: string } | { kind: "none" } | { kind: "refused" };
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 
@@ -99,7 +100,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
         if (!gone) setRepo({ cwd, state: repoOf(status) });
       },
       (e: unknown) => {
-        if (!gone) setRepo({ cwd, state: e instanceof DaemonOpError && e.code === "not-a-git-repo" ? { kind: "none" } : { kind: "unknown" } });
+        if (!gone) setRepo({ cwd, state: { kind: repoAbsence(e) } });
       },
     );
     return () => {
@@ -190,12 +191,22 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           {shown.kind === "unknown" ? null : (
             <span
               className="inline-flex h-6 shrink-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground"
-              title={shown.kind === "repo" ? `git: ${shown.root}` : `no repository at or above ${cwd}`}
-              data-diff-git
+              title={
+                shown.kind === "repo"
+                  ? `git: ${shown.root}`
+                  : shown.kind === "none"
+                    ? `no repository at or above ${cwd}`
+                    : REPO_STATE_WORDS.refused.note
+              }
+              data-diff-git={shown.kind}
               data-diff-repo={shown.kind === "repo" ? shown.root : undefined}
             >
               <FolderGitIcon className={cn("size-3.5 shrink-0", shown.kind === "repo" ? "opacity-70" : "opacity-40")} />
-              {shown.kind === "repo" ? <span className="max-w-40 truncate">{shown.branch}</span> : <span>no git</span>}
+              {shown.kind === "repo" ? (
+                <span className="max-w-40 truncate">{shown.branch}</span>
+              ) : (
+                <span>{shown.kind === "none" ? "no git" : REPO_STATE_WORDS.refused.word}</span>
+              )}
             </span>
           )}
           <Tooltip>

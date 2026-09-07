@@ -51,6 +51,20 @@ import {
   WorkspaceView,
 } from "../src/index.js";
 
+import * as wire from "../src/index.js";
+
+describe("the recipe's pins", () => {
+  it("a recipe row and a digest tick carry one pin shape, the tag and the sum, beside the tick's road and install lines", () => {
+    const pin = { tag: "v2.86.0", sha256: "b".repeat(64) };
+    expect(wire.ToolPin.parse(pin)).toEqual(pin);
+    expect(wire.ToolPin.safeParse({ tag: "v2.86.0" }).success).toBe(false);
+    const row = { id: "gh", kind: "tool", on: true, source: { kind: "popular", sessions: 1, images: 1 }, pin };
+    expect(wire.RecipeRow.parse(row)).toEqual(row);
+    const tick = { id: "tools/catalog/gh", road: "release", installer: "a".repeat(64), pin };
+    expect(wire.RecipeDigest.parse({ ticks: [tick, { id: "agents/claude" }], files: [] })).toEqual({ ticks: [tick, { id: "agents/claude" }], files: [] });
+  });
+});
+
 describe("protocol views", () => {
   it("parses a WorkspaceView and rejects a bad phase", () => {
     const ws = {

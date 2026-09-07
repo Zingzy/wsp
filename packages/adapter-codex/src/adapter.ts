@@ -4,8 +4,8 @@
 // thread.started names the thread a resume takes, items start and complete
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
-import type { AdapterEvent, ExecStreamFactory, TurnResult } from "@wsp/adapter-claude";
 import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
 
 export interface CodexStartOptions {

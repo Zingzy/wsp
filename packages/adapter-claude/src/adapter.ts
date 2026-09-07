@@ -4,74 +4,10 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { backgroundTasksLine, fmtDuration, harnessExitLine } from "@wsp/protocol";
+import type { AdapterEvent, ExecStreamFactory, SessionHarness, TurnResult, TurnStatus } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe, type ClaudeCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
-
-export type DeltaKind = "text" | "thinking" | "tool_use" | "tool_result";
-export type TurnStatus = "completed" | "interrupted" | "failed";
-
-export interface TurnResult {
-  status: TurnStatus;
-  durationMs?: number;
-  costUsd?: number;
-  usage?: Record<string, unknown>;
-  text?: string;
-  error?: string;
-}
-
-/** What system/init says about the CLI beyond model and tools; a client builds its composer catalog from it. */
-export interface SessionHarness {
-  slashCommands?: string[];
-  permissionMode?: string;
-  agents?: string[];
-}
-
-export type AdapterEvent =
-  | {
-      type: "session.start";
-      sessionId: string;
-      model?: string;
-      cwd?: string;
-      tools?: string[];
-      harness?: SessionHarness;
-    }
-  | {
-      type: "turn.delta";
-      sessionId: string;
-      kind: DeltaKind;
-      text: string;
-      toolName?: string;
-      toolUseId?: string;
-      isError?: boolean;
-      /** The agent's tool shell folder after this tool_use, present only when the call moved it. */
-      cwd?: string;
-    }
-  | { type: "turn.done"; sessionId: string; result: TurnResult }
-  | { type: "session.end"; sessionId: string; exitCode: number | null; sawResult: boolean };
-
-export interface ExecStream {
-  readonly lines: AsyncIterable<string>;
-  /** Graceful stop: SIGTERM. */
-  teardown(): void;
-  /** SIGKILL. */
-  kill(): void;
-  /** Appends one line to the process's stdin channel, or answers gone when the process already ended where it runs;
-   * rejects once the stream ended or when it was started without one. */
-  write(line: string): Promise<"written" | "gone">;
-  /** Ends the stdin channel: the process reads EOF. Nothing after the stream ended. */
-  closeInput(): void;
-  readonly exited: Promise<number | null>;
-}
-
-export type ExecStreamFactory = (
-  command: string,
-  options: {
-    env: Record<string, string>;
-    /** Present, the process's stdin is a line channel seeded with these lines; absent, the process gets no channel. */
-    input?: readonly string[];
-  },
-) => ExecStream;
 
 export interface StartOptions {
   prompt: string;

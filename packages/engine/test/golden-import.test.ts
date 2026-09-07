@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
-import { CATALOG_AGENTS, GOLDEN_SETUP } from "@wsp/catalog";
+import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
+import { withRecordedPins } from "../src/golden-tools.js";
+import { CATALOG_AGENTS, GOLDEN_SETUP, ROAD_MODULES, catalogEntry as catalogEntryOf } from "@wsp/catalog";
 import {
+  rowRoad,
   UNMEASURED_ROAD,
   PATH_LINE,
   CATALOG_PREFIX,
@@ -453,15 +457,42 @@ describe("planFiles: everything rows", () => {
 
 describe("recipeDigest and recipeHash", () => {
   const zshrc = (digest = "d1") => ({ id: "shell/zshrc", path: "~/.zshrc", dest: ".zshrc", digest });
-  const hashOf = (entries: RecipeEntry[], files: DigestedFile[] = []) => recipeHash(recipeDigest(entries, files));
+  const hashOf = (entries: RecipeEntry[], files: DigestedFile[] = []) => recipeHash(recipeDigest(entries, files, [], new Map()));
+  const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
   it("the digest holds the ticked ids with their login answers and tool pins, and the planned files by path with their digest, each sorted", () => {
     const entries = [row({ rung: "tools", id: "tools/npm/bun", version: "1.4.0" }), row({ rung: "logins", id: "logins/gh", choice: "copy" }), row({ rung: "shell", id: "shell/zshrc", bytes: 3 }), row({ rung: "shell", id: "shell/bashrc", bring: false })];
     const files = [{ id: "shell/zshrc", path: "~/.zshrc", dest: ".zshrc", digest: "d1" }, { id: "logins/gh", path: "~/.config/gh/hosts.yml", dest: ".config/gh/hosts.yml", digest: "d2" }];
-    expect(recipeDigest(entries, files)).toEqual({
-      ticks: [{ id: "logins/gh", choice: "copy" }, { id: "shell/zshrc" }, { id: "tools/npm/bun", version: "1.4.0" }],
+    expect(recipeDigest(entries, files, [], new Map())).toEqual({
+      ticks: [{ id: "logins/gh", choice: "copy" }, { id: "shell/zshrc" }, { id: "tools/npm/bun", version: "1.4.0", road: "npm", installer: sha256("npm install -g bun@1.4.0") }],
       files: [{ id: "logins/gh", path: "~/.config/gh/hosts.yml", dest: ".config/gh/hosts.yml", digest: "d2" }, { id: "shell/zshrc", path: "~/.zshrc", dest: ".zshrc", digest: "d1" }],
     });
+  });
+
+  it("a tools tick carries its road's identity: the road by name, the sha256 of the lines a first run of it installs with, and the pin those lines are fixed to while it stands", () => {
+    const pin = { tag: "v2.86.0", sha256: "d".repeat(64) };
+    const gh = catalogEntryOf("gh")!;
+    const road = gh.kind === "tool" ? gh.installRoad : undefined;
+    if (road?.road !== "release") throw new Error("gh installs from its release");
+    const firstRun = ROAD_MODULES.release.install(road, "gh") as string;
+    // The lines are hashed without the pin: the run that recorded it and the run that carries it install the same golden.
+    const bare = recipeDigest([row({ rung: "tools", id: "tools/catalog/gh" })], [], [], new Map()).ticks[0]!;
+    const pinned = recipeDigest([row({ rung: "tools", id: "tools/catalog/gh", pin })], [], [], new Map()).ticks[0]!;
+    expect(bare).toEqual({ id: "tools/catalog/gh", road: "release", installer: sha256(firstRun) });
+    expect(pinned).toEqual({ id: "tools/catalog/gh", road: "release", installer: sha256(firstRun), pin });
+    expect(firstRun).toContain("releases/latest");
+    // A version past the pin leaves it behind: the tick fixes to nothing, and the lines are the tagged install's.
+    const moved = recipeDigest([row({ rung: "tools", id: "tools/catalog/gh", version: "v2.87.0", pin })], [], [], new Map()).ticks[0]!;
+    expect(moved).toEqual({ id: "tools/catalog/gh", version: "v2.87.0", road: "release", installer: sha256(ROAD_MODULES.release.install({ ...road, version: "v2.87.0" }, "gh") as string) });
+    // A tools row no road installs, and every other rung, carries none.
+    expect(recipeDigest([row({ rung: "tools", id: "tools/brew-tap/zingzy/tap" })], [], [], new Map()).ticks[0]).toEqual({ id: "tools/brew-tap/zingzy/tap" });
+    expect(recipeDigest([row({ rung: "agents", id: "agents/claude" })], [], [], new Map()).ticks[0]).toEqual({ id: "agents/claude" });
+    // The hash reads the road and its lines, never the pin: the recipe that carries what a build recorded still attaches to that builder.
+    expect(recipeHash(recipeDigest([row({ rung: "tools", id: "tools/catalog/gh", pin })], [], [], new Map()))).toBe(recipeHash(recipeDigest([row({ rung: "tools", id: "tools/catalog/gh" })], [], [], new Map())));
+    const tick = (over: object) => recipeHash({ ticks: [{ id: "tools/catalog/x", ...over }], files: [] });
+    expect(tick({ road: "brew", installer: "a" })).not.toBe(tick({ road: "script", installer: "a" }));
+    expect(tick({ road: "brew", installer: "a" })).not.toBe(tick({ road: "brew", installer: "b" }));
+    expect(tick({ road: "brew", installer: "a", pin })).toBe(tick({ road: "brew", installer: "a" }));
   });
 
   it("the hash depends on the ticked ids, login choices and tool pins, not on order, byte counts or labels", () => {
@@ -477,32 +508,32 @@ describe("recipeDigest and recipeHash", () => {
 
   it("the login shell enters the digest once, off the ticked shell rows, and a change of it alone changes the hash", () => {
     const withLogin = (login?: string, bring = true) => [row({ rung: "identity", id: "identity/git-user" }), row({ rung: "shell", id: "shell/zshrc", bring, ...(login !== undefined ? { login } : {}) }), row({ rung: "shell", id: "shell/tmux", bring, ...(login !== undefined ? { login } : {}) })];
-    expect(recipeDigest(withLogin("zsh"))).toMatchObject({ login: "zsh", ticks: [{ id: "identity/git-user" }, { id: "shell/tmux" }, { id: "shell/zshrc" }] });
-    expect(recipeDigest(withLogin())).not.toHaveProperty("login");
+    expect(recipeDigest(withLogin("zsh"), [], [], new Map())).toMatchObject({ login: "zsh", ticks: [{ id: "identity/git-user" }, { id: "shell/tmux" }, { id: "shell/zshrc" }] });
+    expect(recipeDigest(withLogin(), [], [], new Map())).not.toHaveProperty("login");
     expect(hashOf(withLogin("zsh"))).not.toBe(hashOf(withLogin("fish")));
     expect(hashOf(withLogin("zsh"))).not.toBe(hashOf(withLogin()));
     // With no shell row ticked the login shell decides nothing on the machine, so it stays out.
-    expect(recipeDigest(withLogin("zsh", false))).not.toHaveProperty("login");
+    expect(recipeDigest(withLogin("zsh", false), [], [], new Map())).not.toHaveProperty("login");
     expect(hashOf(withLogin("zsh", false))).toBe(hashOf(withLogin("fish", false)));
   });
 
   it("a terminal font row changes nothing on the machine, so its tick stays out of the digest and the hash", () => {
     const zsh = row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"], bytes: 10 });
     const font = (bring: boolean, family: string) => row({ rung: "shell", id: "shell/terminal-font", label: `terminal font: ${family} (Ghostty)`, bring, font: family });
-    const zshAlone = "097e8d1cc07133686c458c3dfd579fe46f30dabc418bdb578af6be6616dfeafd";
+    const zshAlone = "ee0a7014681344c90f680ef305d1d1585e7e82c2f272a03e3e683ffe3a787c05";
     expect(hashOf([zsh])).toBe(zshAlone);
     expect(hashOf([zsh, font(true, "Hack")])).toBe(zshAlone);
     expect(hashOf([zsh, font(true, "Menlo")])).toBe(zshAlone);
     expect(hashOf([zsh, font(false, "Hack")])).toBe(zshAlone);
-    expect(recipeDigest([zsh, font(true, "Hack")]).ticks).toEqual([{ id: "shell/zshrc" }]);
+    expect(recipeDigest([zsh, font(true, "Hack")], [], [], new Map()).ticks).toEqual([{ id: "shell/zshrc" }]);
   });
 
   it("a volatile file is in the digest, marked, and never in the hash, whatever its bytes; the same file not volatile is", () => {
     const rows = [row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json", "~/.claude.json"], volatile: ["~/.claude.json"] })];
     const settings = { id: "agents/claude", path: "~/.claude/settings.json", dest: ".claude-cfg/settings.json", digest: "s1" };
     const state = (digest: string, volatile = true) => ({ id: "agents/claude", path: "~/.claude.json", dest: ".claude-cfg/.claude.json", digest, volatile });
-    expect(recipeDigest(rows, [settings, state("c1")]).files).toEqual([{ ...state("c1"), volatile: true }, settings]);
-    expect(recipeDigest(rows, [settings, state("c1", false)]).files).toEqual([{ id: "agents/claude", path: "~/.claude.json", dest: ".claude-cfg/.claude.json", digest: "c1" }, settings]);
+    expect(recipeDigest(rows, [settings, state("c1")], [], new Map()).files).toEqual([{ ...state("c1"), volatile: true }, settings]);
+    expect(recipeDigest(rows, [settings, state("c1", false)], [], new Map()).files).toEqual([{ id: "agents/claude", path: "~/.claude.json", dest: ".claude-cfg/.claude.json", digest: "c1" }, settings]);
     expect(hashOf(rows, [settings, state("c1")])).toBe(hashOf(rows, [settings, state("c2")]));
     expect(hashOf(rows, [settings, state("c1")])).toBe(hashOf(rows, [settings]));
     expect(hashOf(rows, [settings, state("c1", false)])).not.toBe(hashOf(rows, [settings, state("c2", false)]));
@@ -518,7 +549,7 @@ describe("recipeDigest and recipeHash", () => {
     expect(hashOf(rows, [zshrc(), git])).not.toBe(hashOf(rows, [zshrc()]));
     expect(hashOf(rows, [zshrc()])).not.toBe(hashOf(rows));
     // A digest read back from a store hashes the same as the one just computed, whatever its key order.
-    const stored = JSON.parse(JSON.stringify(recipeDigest(rows, [git, zshrc()]))) as RecipeDigest;
+    const stored = JSON.parse(JSON.stringify(recipeDigest(rows, [git, zshrc()], [], new Map()))) as RecipeDigest;
     expect(recipeHash({ files: stored.files.map(f => ({ digest: f.digest, dest: f.dest, path: f.path, id: f.id })), ticks: stored.ticks })).toBe(hashOf(rows, [zshrc(), git]));
   });
 });
@@ -691,7 +722,7 @@ describe("toolInstallsFor", () => {
     expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/python@3.14"]);
     expect(t.skipped).toEqual([]);
     expect(t.brewfile).toBe('brew "python@3.14"\n');
-    expect(toolUninstall(row({ rung: "tools", id: "tools/brew/jq" }))).toEqual({ note: "jq is part of the base and stays" });
+    expect(toolUninstall(row({ rung: "tools", id: "tools/brew/jq" }), new Map())).toEqual({ note: "jq is part of the base and stays" });
   });
 
   it("one formula has nothing to share, so no shared step; two get one between the taps and the first formula", () => {
@@ -874,13 +905,13 @@ describe("catalog rows", () => {
   });
 
   it("a catalog tool comes off through the same module: the release binary, the formula, the apt package, the npm global, the vendor's tree", () => {
-    expect(toolUninstall(catalog("gh"))).toEqual({ cmd: `${PATH_LINE}\nrm -f /usr/local/bin/'gh'` });
-    expect(toolUninstall(catalog("go"))).toEqual({ cmd: expect.stringMatching(/brew uninstall go'$/) });
-    expect(toolUninstall(catalog("ffmpeg"))).toEqual({ cmd: `${PATH_LINE}\nexport DEBIAN_FRONTEND=noninteractive\napt-get purge -y -qq ffmpeg && apt-get autoremove -y -qq --purge` });
-    expect(toolUninstall(catalog("wrangler"))).toEqual({ cmd: `${PATH_LINE}\nnpm uninstall -g wrangler` });
-    expect(toolUninstall(catalog("gcloud"))).toEqual({ cmd: expect.stringContaining("rm -rf /opt/google-cloud-sdk") });
-    expect(toolUninstall(catalog("git"))).toEqual({ note: "git is part of the base and stays" });
-    expect(toolUninstall(catalog("nothing"))).toEqual({ note: "no manager known for this row" });
+    expect(toolUninstall(catalog("gh"), new Map())).toEqual({ cmd: `${PATH_LINE}\nrm -f /usr/local/bin/'gh'` });
+    expect(toolUninstall(catalog("go"), new Map())).toEqual({ cmd: expect.stringMatching(/brew uninstall go'$/) });
+    expect(toolUninstall(catalog("ffmpeg"), new Map())).toEqual({ cmd: `${PATH_LINE}\nexport DEBIAN_FRONTEND=noninteractive\napt-get purge -y -qq ffmpeg && apt-get autoremove -y -qq --purge` });
+    expect(toolUninstall(catalog("wrangler"), new Map())).toEqual({ cmd: `${PATH_LINE}\nnpm uninstall -g wrangler` });
+    expect(toolUninstall(catalog("gcloud"), new Map())).toEqual({ cmd: expect.stringContaining("rm -rf /opt/google-cloud-sdk") });
+    expect(toolUninstall(catalog("git"), new Map())).toEqual({ note: "git is part of the base and stays" });
+    expect(toolUninstall(catalog("nothing"), new Map())).toEqual({ note: "no manager known for this row" });
   });
 
   it("a catalog go row beside go rows is the manager's step: go installs once, the go rows wait on the catalog row, and no manager step is planned", () => {
@@ -918,6 +949,37 @@ describe("catalog rows", () => {
 });
 
 describe("tap formulae on the release road", () => {
+  it("a tap row on the road identifies by the road the plan installs by, with its pin: sealed with the recorded pin it diffs to nothing against the recipe that carries it", () => {
+    const table: BrewTable = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
+    const id = "tools/brew/zingzy/tap/diskbloom";
+    const tap = (over: Partial<RecipeEntry> = {}) => row({ rung: "tools", id, label: "diskbloom", linux: "unknown", ...over });
+    const pin = { tag: "v0.1.0", sha256: "a".repeat(64) };
+    // The plan installs the row from its release with the check; the tick says the same road and carries the same pin.
+    expect(toolInstallsFor([tap({ pin })], table).installs.at(-1)!.cmd).toContain('[ "$sum" = ');
+    // The tick's version is the release the road installs at: the Mac's tag, which a Homebrew row does not carry itself.
+    const pinned = recipeDigest([tap({ pin })], [], [], table).ticks[0]!;
+    expect(pinned).toEqual({ id, version: "v0.1.0", road: "release", installer: expect.stringMatching(/^[0-9a-f]{64}$/), pin });
+    // A first run of the same row: the same road and lines, no pin yet.
+    const first = recipeDigest([tap()], [], [], table);
+    expect(first.ticks[0]).toEqual({ id, version: "v0.1.0", road: "release", installer: pinned.installer });
+    // The seal stamps what the install recorded; the recipe that then carries it is no change, and the words say nothing.
+    const sealed = withRecordedPins(first, [{ id, label: "diskbloom", outcome: "installed", road: { kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: pin.sha256, tag: "v0.1.0" } }]);
+    expect(sealed.ticks[0]).toEqual(pinned);
+    expect(isEmptyDiff(diffRecipes(sealed, recipeDigest([tap({ pin })], [], [], table)))).toBe(true);
+    expect(describeDiff(diffRecipes(sealed, recipeDigest([tap({ pin })], [], [], table)))).toEqual([]);
+    // Only a pin the person really dropped, the Mac's tag standing, is said as one.
+    expect(describeDiff(diffRecipes(sealed, first))).toEqual(["update 1 tool: diskbloom (no longer fixed to release v0.1.0)"]);
+    // The Mac's tap moving on is a move, both releases named: the tick installs at the new tag, no pin standing yet.
+    const moved: BrewTable = new Map([["zingzy/tap/diskbloom", { ...table.get("zingzy/tap/diskbloom")!, source: { repo: "Zingzy/diskbloom", tag: "v0.2.0" } }]]);
+    expect(recipeDigest([tap({ pin })], [], [], moved).ticks[0]).toEqual({ id, version: "v0.2.0", road: "release", installer: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(describeDiff(diffRecipes(sealed, recipeDigest([tap({ pin })], [], [], moved)))).toEqual(["update 1 tool: diskbloom (v0.1.0 to v0.2.0)"]);
+    // Without this Mac's Homebrew read, no release is known: the plan sets the row aside and the tick reads it as the formula it names.
+    expect(toolInstallsFor([tap({ pin })]).skipped.map(s => s.note)).toEqual(["no Linux bottle known"]);
+    expect(recipeDigest([tap({ pin })], [], [], new Map()).ticks[0]).toEqual({ id, road: "brew", installer: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    // One resolver: the plan's step for the row is the road the digest read.
+    expect(rowRoad(tap({ pin }), table)).toEqual({ road: { road: "release", repo: "Zingzy/diskbloom", version: "v0.1.0", pin, go: "github.com/Zingzy/diskbloom@v0.1.0" }, bin: "diskbloom" });
+  });
+
   it("a tap formula on the road names its binary too", () => {
     const table: BrewTable = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", linux: "unknown" })], table);
@@ -1059,7 +1121,7 @@ describe("imageCommands", () => {
     const plan = toolInstallsFor([row({ rung: "tools", id: "tools/brew/eza" }), row({ rung: "tools", id: "tools/pipx/black" })]);
     expect(plan.installs.find(t => t.id === "tools/homebrew")?.bin).toBe("brew");
     expect(plan.installs.find(t => t.id === "tools/manager/pipx")?.bin).toBe("pipx");
-    const on = imageCommands([], { ...plan, installs: plan.installs.map(t => ({ ...t, bin: t.bin === undefined ? undefined : `x-${t.bin}` })) });
+    const on = imageCommands([], { ...plan, installs: plan.installs.map(t => ({ ...t, bin: t.bin === undefined ? undefined : `x-${t.bin}` })) }, new Map());
     for (const cmd of ["x-brew", "x-pipx"]) expect(on.has(cmd), cmd).toBe(true);
     for (const cmd of ["brew", "pipx"]) expect(on.has(cmd), cmd).toBe(false);
   });
@@ -1073,10 +1135,10 @@ describe("imageCommands", () => {
       row({ rung: "tools", id: "tools/catalog/typescript" }),
       row({ rung: "agents", id: "agents/claude" }),
     ];
-    const on = imageCommands(entries, toolInstallsFor(entries));
+    const on = imageCommands(entries, toolInstallsFor(entries), new Map());
     for (const cmd of ["ls", "dircolors", "stty", "git", "rg", "unzip", "zsh", "eza", "brew", "tsc", "claude"]) expect(on.has(cmd), cmd).toBe(true);
     for (const cmd of ["starship", "diskbloom", "fish"]) expect(on.has(cmd), cmd).toBe(false);
-    const bare = imageCommands([row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] })], toolInstallsFor([]));
+    const bare = imageCommands([row({ rung: "shell", id: "shell/fish", paths: ["~/.config/fish"] })], toolInstallsFor([]), new Map());
     expect(bare.has("fish")).toBe(true);
     for (const cmd of ["zsh", "brew", "eza"]) expect(bare.has(cmd), cmd).toBe(false);
   });
@@ -1084,7 +1146,7 @@ describe("imageCommands", () => {
 
 describe("toolNames", () => {
   it("names every tool the recipe or the catalog knows, ticked or not, by package and command, and never the base image's plain commands", () => {
-    const names = toolNames([row({ rung: "tools", id: "tools/brew/eza", bring: false }), row({ rung: "tools", id: "tools/npm/@railway/cli" }), row({ rung: "tools", id: "tools/brew-tap/owner/tap" }), row({ rung: "shell", id: "shell/zshrc" })]);
+    const names = toolNames([row({ rung: "tools", id: "tools/brew/eza", bring: false }), row({ rung: "tools", id: "tools/npm/@railway/cli" }), row({ rung: "tools", id: "tools/brew-tap/owner/tap" }), row({ rung: "shell", id: "shell/zshrc" })], new Map());
     for (const n of ["eza", "railway", "gh", "gcloud", "typescript", "tsc", "rg"]) expect(names.has(n), n).toBe(true);
     // A package's basename is not a command: the road names the package and the catalog names the command.
     for (const n of ["cli", "tap", "ls", "z", "zshrc", "docker-compose"]) expect(names.has(n), n).toBe(false);

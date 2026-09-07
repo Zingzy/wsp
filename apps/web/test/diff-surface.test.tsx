@@ -127,6 +127,15 @@ describe("diff surface", () => {
     expect(screen.getByRole("alert").textContent).toBe("not inside a git repository");
   });
 
+  it("says git went unread when the machine refused the read, not that there is no repository", async () => {
+    const refuses = () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" });
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": refuses }));
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(container.querySelector("[data-diff-git]")?.getAttribute("data-diff-git")).toBe("refused"));
+    expect(container.querySelector("[data-diff-git]")?.textContent).toBe("git unread");
+    expect(container.querySelector("[data-diff-repo]")).toBeNull();
+  });
+
   it("keeps the repository label through a refresh of the same folder", async () => {
     const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
     provideDaemonWire(WS, wire);

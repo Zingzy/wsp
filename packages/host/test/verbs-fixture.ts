@@ -3,7 +3,7 @@
 // scripted harness that answers every prompt, one whose turn never ends, and
 // the guest side of the exec stream over the stub backend.
 import { randomUUID } from "node:crypto";
-import type { TurnResult } from "@wsp/adapter-claude";
+import type { TurnResult } from "@wsp/protocol";
 import { tarOf, type ExecResult } from "@wsp/engine";
 import type { HarnessAdapterFactory, HarnessStartOptions, ProjectBundler } from "@wsp/runtime";
 import type { CliIO } from "../src/cli.js";
@@ -247,6 +247,7 @@ export const projectBundler = (): ProjectBundler => ({
 });
 
 export const EXPORT_SOURCE = "/root/work/proj";
+const CLAUDE_GUEST_HOME = "/root/.claude-cfg";
 /** The one Claude Code session on the machine for the folder, as the export brings it down. */
 export const EXPORT_SESSION = (cwd: string): string => `{"type":"user","cwd":"${cwd}","sessionId":"S1"}\n`;
 
@@ -263,7 +264,11 @@ export function exportGuest(backend: StubBackend): { sources: string[] } {
       sources.push(probed);
       return { exitCode: 0, stdout: "yes\n", stderr: "" };
     }
-    if (cmd.startsWith("for p in ")) return { exitCode: 0, stdout: cmd.includes("'/root/.claude-cfg/projects'") ? "/root/.claude-cfg/projects\n" : "", stderr: "" };
+    // The modules' listings carry their home base64 encoded, and only Claude Code's names anything here.
+    if (cmd.startsWith("set -e\npython3 -c ")) {
+      const claude = cmd.includes(Buffer.from(JSON.stringify(CLAUDE_GUEST_HOME), "utf8").toString("base64"));
+      return { exitCode: 0, stdout: claude ? `${CLAUDE_GUEST_HOME}/projects/-root-work-proj\n` : "", stderr: "" };
+    }
     const out = /tar czf '([^']+)'/.exec(cmd)?.[1];
     if (out !== undefined && cmd.includes("find '.'")) {
       tars.set(out, tarOf([{ path: "./src/index.ts", mode: 0o644, content: "export const a = 1;\n" }, { path: "./.env", mode: 0o600, content: "TOKEN=x\n" }]));

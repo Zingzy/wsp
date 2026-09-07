@@ -4,7 +4,7 @@
 // database is nothing found, never created.
 import { existsSync } from "node:fs";
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
-import { pyData } from "./merge.js";
+import { pyData } from "./py.js";
 
 export interface RowUpdate {
   sql: string;

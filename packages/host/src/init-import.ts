@@ -528,7 +528,10 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     rewrites: [[".claude/", `${CLAUDE_REL}/`], [".claude.json", `${CLAUDE_REL}/.claude.json`]],
   });
   const shell = shellInstallFor(bring);
-  const tools = toolInstallsFor(bring, opts.brew, opts.custom);
+  // The Mac's Homebrew unread (the wizard said so) is an empty table: no tap formula has a release to take.
+  const brew: BrewTable = opts.brew ?? new Map();
+  const custom = opts.custom ?? [];
+  const tools = toolInstallsFor(bring, brew, custom);
   const agents = agentInstallsFor(bring);
   const mcp = opts.rows !== undefined ? mcpPlanFor(opts.rows, { home, guestHome: GUEST_HOME, agents: MCP_SOURCES, binDirs: MCP_BIN_DIRS }) : undefined;
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
@@ -547,9 +550,9 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
       const value = opts.secrets.get(secretKey(s));
       return value === undefined ? [] : [{ id: s.id, path: secretPath(s), dest: s.dest, digest: createHash("sha256").update(value).digest("hex"), volatile: true }];
     });
-  const hash = recipeHash(recipeDigest(bring, digested, opts.custom));
+  const hash = recipeHash(recipeDigest(bring, digested, custom, brew));
   const settingsSource = join(home, CLAUDE_SETTINGS_FILE.slice(2));
-  const packOpts: PackOptions = { secrets: opts.secrets, home, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)), onImage: imageCommands(bring, tools), tools: toolNames(opts.rows ?? bring) };
+  const packOpts: PackOptions = { secrets: opts.secrets, home, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)), onImage: imageCommands(bring, tools, brew), tools: toolNames(opts.rows ?? bring, brew) };
   const pack = (): Promise<PackedFiles> => packPlan(plan, packOpts);
   const volatileFiles = files.filter(f => f.volatile);
   const volatile =
@@ -559,7 +562,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   return {
     recipeHash: hash,
     get recipe() {
-      return recipeDigest(bring, [...digested, ...secretDigests()], opts.custom);
+      return recipeDigest(bring, [...digested, ...secretDigests()], custom, brew);
     },
     ...(anyFiles
       ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack, ...(volatile !== undefined ? { volatile } : {}) } }

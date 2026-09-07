@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { loginIdOf } from "@wsp/catalog";
 import { type HistoryCache, fileHistoryCache } from "@wsp/collect";
-import { Recipe } from "@wsp/protocol";
+import { Recipe, type ToolPin } from "@wsp/protocol";
 
 /** Where the small recipe lives, beside the saved manifest: what wsp recipe writes and wsp init --recipe reads. */
 export function smallRecipePath(statePath: string): string {
@@ -40,22 +40,36 @@ export function saveSmallRecipe(path: string, recipe: Recipe): void {
   writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`);
 }
 
-/** This computer's recipe with a saved one's ticks and answers written on, by id: a row the saved one lacks is off
- * and unanswered, and a saved row this computer's recipe does not carry follows them as it was saved. The rows
+/** The pins a list of rows carries, by id: a recipe's rows by catalog id, a manifest's entries by row id. */
+export function pinsOf(rows: readonly { id: string; pin?: ToolPin }[] | undefined): Map<string, ToolPin> {
+  return new Map((rows ?? []).flatMap((r): [string, ToolPin][] => (r.pin === undefined ? [] : [[r.id, r.pin]])));
+}
+
+/** The recipe with these pins written on the rows they name; every other row keeps what it had. */
+export function withPins(recipe: Recipe, pins: ReadonlyMap<string, ToolPin>): Recipe {
+  if (pins.size === 0) return recipe;
+  return { ...recipe, rows: recipe.rows.map(r => (pins.has(r.id) ? { ...r, pin: pins.get(r.id)! } : r)) };
+}
+
+/** This computer's recipe with a saved one's ticks, answers and pins written on, by id: a row the saved one lacks is
+ * off and unanswered, and a saved row this computer's recipe does not carry follows them as it was saved. The rows
  * outside the catalog are the saved recipe's own: nothing on this computer decides them. */
 export function withTicksOf(here: Recipe, saved: Recipe): Recipe {
   const rows = new Map(saved.rows.map(r => [r.id, r]));
   const ids = new Set(here.rows.map(r => r.id));
-  return {
-    ...here,
-    ...(saved.custom !== undefined ? { custom: saved.custom } : {}),
-    rows: [
-      ...here.rows.map(r => {
-        const { signIn: _signIn, ...rest } = r;
-        const s = rows.get(r.id);
-        return { ...rest, on: s?.on === true, ...(s?.signIn === undefined ? {} : { signIn: s.signIn }) };
-      }),
-      ...saved.rows.filter(r => !ids.has(r.id)),
-    ],
-  };
+  return withPins(
+    {
+      ...here,
+      ...(saved.custom !== undefined ? { custom: saved.custom } : {}),
+      rows: [
+        ...here.rows.map(r => {
+          const { signIn: _signIn, ...rest } = r;
+          const s = rows.get(r.id);
+          return { ...rest, on: s?.on === true, ...(s?.signIn === undefined ? {} : { signIn: s.signIn }) };
+        }),
+        ...saved.rows.filter(r => !ids.has(r.id)),
+      ],
+    },
+    pinsOf(saved.rows),
+  );
 }

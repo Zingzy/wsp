@@ -10,7 +10,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, createContext, useContext, useState, type ReactElement, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import { REPO_STATE_WORDS, type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -77,6 +77,7 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
+import type { TerminalWire } from "../src/terminal/link.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
@@ -151,7 +152,12 @@ async function setup(api: Api, threadId: string | null = null) {
 
 const row = () => document.querySelector<HTMLElement>("[data-composer-checkout]");
 const folder = () => document.querySelector<HTMLElement>("[data-composer-folder]")?.dataset["composerFolder"];
-const branch = () => document.querySelector<HTMLElement>("[data-composer-branch]")?.dataset["composerBranch"];
+const branchSlot = () => document.querySelector<HTMLElement>("[data-composer-branch]");
+const branch = () => branchSlot()?.dataset["composerBranch"];
+const BRANCH_NOTE = "The folder's branch as the machine reports it. Nothing here switches it; check out another branch from the terminal.";
+/** The height pair the folder label and the size-xs picker button carry; an empty slot with it keeps the row from moving. */
+const SLOT_HEIGHT = ["h-7", "sm:h-6"];
+const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, [DAEMON_ROOT]);
 const menuEntry = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-entry="${path}"]`);
 const menuPick = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-pick="${path}"]`);
@@ -187,6 +193,79 @@ describe("composer checkout row", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ prompt: "build it here", cwd: "/root/app" });
+  });
+
+  it("names a repository's branch with the glyph beside it and says on hover that it is read, not switched", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    const { api } = fixtureApi();
+    await setup(api);
+    await waitFor(() => expect(branch()).toBe("feature/panes"));
+    const slot = branchSlot()!;
+    expect(slot.querySelector("svg")).not.toBeNull();
+    expect(slot.textContent).toBe("feature/panes");
+    expect(screen.getByText(BRANCH_NOTE).getAttribute("role")).toBe("tooltip");
+  });
+
+  it("says in the branch slot that the machine could not read the folder's git state, before the first message, and nothing shifts", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" }) });
+    provideDaemonWire(WS, wire);
+    const { api } = fixtureApi();
+    await setup(api);
+    await waitFor(() => expect(branch()).toBe("refused"));
+    expect(screen.getByRole("button", { name: "Working folder: /root" })).toBeTruthy();
+    const slot = branchSlot()!;
+    expect(slot.querySelector("svg")).toBeNull();
+    expect(slot.textContent).toBe(REPO_STATE_WORDS.refused.word);
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(["font-mono", "text-muted-foreground/70"]));
+    expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
+    expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
+    expect(folder()).toBe("/root");
+  });
+
+  it("says the same word beside the locked label once a turn exists: a dropped wire is a read that failed too", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": () => new Error("socket closed") }));
+    const { api } = fixtureApi(CHAT_STREAM.slice());
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    expect(row()?.dataset["pickable"]).toBeUndefined();
+    await waitFor(() => expect(branch()).toBe("refused"));
+    const slot = branchSlot()!;
+    expect(slot.textContent).toBe(REPO_STATE_WORDS.refused.word);
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
+    expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
+  });
+
+  it("leaves the branch slot empty, no glyph and no words, while the ask is still out", async () => {
+    const inner = fakeWire({ "fs.list": LISTING });
+    const wire: TerminalWire = { request: (op, params) => (op === "git.status" ? new Promise(() => {}) : inner.request(op, params)) };
+    provideDaemonWire(WS, wire);
+    const { api } = fixtureApi();
+    await setup(api);
+    await settle();
+    const slot = branchSlot()!;
+    expect(branch()).toBe("unknown");
+    expect(slot.querySelector("svg")).toBeNull();
+    expect(slot.textContent).toBe("");
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
+    expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
+    expect(screen.queryByText(REPO_STATE_WORDS.refused.note)).toBeNull();
+    expect(folder()).toBe("/root");
+  });
+
+  it("leaves the branch slot empty for a folder outside any repository", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": () => Object.assign(new Error("not a git repository"), { code: "not-a-git-repo" }) });
+    provideDaemonWire(WS, wire);
+    const { api } = fixtureApi();
+    await setup(api);
+    await waitFor(() => expect(branch()).toBe("none"));
+    const slot = branchSlot()!;
+    expect(slot.querySelector("svg")).toBeNull();
+    expect(slot.textContent).toBe("");
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
+    expect(screen.queryByText("no repository")).toBeNull();
+    expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
+    expect(screen.queryByText(REPO_STATE_WORDS.refused.note)).toBeNull();
   });
 
   it("offers home and the imported project as roots, and browses and picks inside the project", async () => {

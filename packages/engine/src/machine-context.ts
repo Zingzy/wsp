@@ -8,7 +8,7 @@
 // through a hook per agent without any file of the person's being touched. A
 // hook the person's own file already claims is left alone and named in the result.
 import { CATALOG_AGENTS, CONTEXT_MARKER, MODE, SKILL_NAME, agentName, type AgentContext, type AgentEntry, type ContextHooks, type ContextOutcomeKind, type GuestFile, type GuestRoots } from "@wsp/catalog";
-import { fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
+import { TURN_END_WORDS, backgroundTasksLine, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
 import { TOOLS_PATH } from "./golden-import.js";
@@ -34,8 +34,7 @@ export const GUEST_ROOTS: GuestRoots = { etc: "/etc", home: "/root" };
 
 /** The harness runs one turn per message and kills the agent's background tasks when the turn's process exits, so
  * a command the agent did not wait for never reports back; the turn then reads failed with that reason. */
-const TURN_FACT =
-  "- A turn ends when you reply, and a command your tool runs in the background is killed with it; nothing wakes you when it finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.";
+const TURN_FACT = `- ${TURN_END_WORDS}; a reply given with a command still running in the background reads failed (${backgroundTasksLine(1)}), and nothing wakes you when that command finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.`;
 
 /** The short, always-loaded text; the skill beside it carries the full document. */
 export const contextPath = (roots: GuestRoots = GUEST_ROOTS): string => `${roots.etc}/wsp/machine-context.md`;

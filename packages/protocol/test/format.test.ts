@@ -11,6 +11,7 @@ import {
   outOfMemoryRowLine,
   stillWorkingRefusal,
   LINEAGE_MARKS,
+  REPO_STATE_WORDS,
   missingToolRow,
   behindGoldenLine,
   builderStaysLine,
@@ -50,6 +51,13 @@ import {
   SEAL_FAILED_LINE,
   sealFailedBuilderStaysLine,
   sealFailedBuilderUnreadLine,
+  INSTALLER_MOVED_LINE,
+  NO_ROAD_WORDS,
+  SUM_SHOWN,
+  pinMismatchLine,
+  pinMovedLine,
+  roadMovedLine,
+  shortSum,
   sizeFromWord,
   sizeRefusal,
   sizeWord,
@@ -571,6 +579,21 @@ describe("goldenBuildLine", () => {
   });
 });
 
+describe("REPO_STATE_WORDS", () => {
+  it("says nothing for a folder outside any repository or one not yet asked, and one short lowercase word or two for a read the machine refused", () => {
+    expect(REPO_STATE_WORDS.unknown).toEqual({ word: "", note: "" });
+    expect(REPO_STATE_WORDS.none).toEqual({ word: "", note: "" });
+    expect(REPO_STATE_WORDS.refused.word).toBe("git unread");
+    expect(REPO_STATE_WORDS.refused.word).toMatch(/^[a-z]+( [a-z]+)?$/);
+    expect(REPO_STATE_WORDS.refused.word.length).toBeLessThanOrEqual(12);
+  });
+
+  it("explains the word beside it in one dry sentence about the machine and this folder's git state", () => {
+    expect(REPO_STATE_WORDS.refused.note).toBe("The machine could not read this folder's git state, so no branch is shown.");
+    expect(REPO_STATE_WORDS.refused.note).toMatch(/^[^.]+\.$/);
+  });
+});
+
 describe("LINEAGE_MARKS", () => {
   it("names every outcome a missing tool can carry and every state a lineage row shows, each as one short lowercase word or two", () => {
     const outcomes: GoldenMissingTool["outcome"][] = ["skipped", "failed"];
@@ -631,5 +654,29 @@ describe("builderStaysLine and the seal's and the update's last lines", () => {
     expect(upgradeSealFailedGoneLine(1)).toBe("Golden v1 is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.");
     expect(upgradeSealFailedUnreadLine(1, "m1")).toBe("Golden v1 is unchanged. The provider could not be read about builder m1, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.");
     expect(SEAL_FAILED_LINE).toBe("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.");
+  });
+});
+
+describe("a pinned release that moved", () => {
+  it("the failure names the download, its tag, and the recorded and served sums, both cut so the reason line keeps them", () => {
+    expect(SUM_SHOWN).toBe(12);
+    expect(shortSum("b".repeat(64))).toBe("b".repeat(12));
+    expect(pinMismatchLine("gh_2.86.0_linux_amd64.tar.gz", "v2.86.0", shortSum("b".repeat(64)), shortSum("c".repeat(64)))).toBe(
+      "gh_2.86.0_linux_amd64.tar.gz at v2.86.0 does not match the checksum recorded on its first install: recorded bbbbbbbbbbbb, served cccccccccccc",
+    );
+    // With the widest tool and asset names the catalog has, the line stays under the 160 characters the reason rule keeps.
+    expect(pinMismatchLine("google-cloud-cli-575.0.0-linux-x86_64.tar.gz", "575.0.0", "b".repeat(12), "c".repeat(12)).length).toBeLessThan(160);
+  });
+
+  it("why a tool installs differently now: the road in the roads' words, the release by tag, the sum when the tag stands, the lines otherwise", () => {
+    expect(roadMovedLine("with Homebrew", "by its own installer")).toBe("now by its own installer, was with Homebrew");
+    const v1 = { tag: "v2.86.0", sha256: "b".repeat(64) };
+    const v2 = { tag: "v2.87.0", sha256: "c".repeat(64) };
+    expect(pinMovedLine(v1, v2)).toBe("release v2.86.0 to v2.87.0");
+    expect(pinMovedLine(v1, { ...v1, sha256: "c".repeat(64) })).toBe("the checksum recorded for v2.86.0 changed");
+    expect(pinMovedLine(undefined, v1)).toBe("now fixed to release v2.86.0");
+    expect(pinMovedLine(v1, undefined)).toBe("no longer fixed to release v2.86.0");
+    expect(INSTALLER_MOVED_LINE).toBe("its install lines changed");
+    expect(roadMovedLine("with Homebrew", NO_ROAD_WORDS)).toBe("now by no road, was with Homebrew");
   });
 });

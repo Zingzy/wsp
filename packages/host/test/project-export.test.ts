@@ -20,6 +20,12 @@ const scratch = (): string => {
   dirs.push(d);
   return d;
 };
+/** An archive as it reaches the lander: a file on this computer, the way the runtime streams it off the machine. */
+const archived = (tar: Buffer): string => {
+  const file = join(scratch(), "archive.tgz");
+  writeFileSync(file, tar);
+  return file;
+};
 const put = (root: string, rel: string, text: string | Buffer): void => {
   mkdirSync(dirname(join(root, rel)), { recursive: true });
   writeFileSync(join(root, rel), text);
@@ -71,7 +77,7 @@ const folderTar = (): Buffer =>
     { path: "./really-empty", mode: 0o755, dir: true },
   ]);
 
-/** The agents' state roots as the machine tars them at the guest's root: Claude Code with a session, tool results
+/** The agents' state as the machine tars it at the guest's root: Claude Code with a session, tool results
  * and memory for the folder plus another project's session; Codex with its index naming a rollout under sessions/
  * and one archived elsewhere; Hermes with a row and no file; Pi with nothing for the folder. */
 function stateTar(extra: TarEntry[] = []): Buffer {
@@ -127,7 +133,7 @@ describe("projectLander", () => {
     const homes = macHomes(real);
     const before = { claude: snapshot(homes["claude"]!), codex: snapshot(homes["codex"]!) };
     const lander = projectLander(homes);
-    const landed = await lander.land({ source: SOURCE, dest, replace: false, tar: folderTar(), state: { tar: stateTar(), homes: guestAgentHomes() } });
+    const landed = await lander.land({ source: SOURCE, dest, replace: false, archive: archived(folderTar()), state: { archive: archived(stateTar()), homes: guestAgentHomes() } });
     expect(landed.files).toBe(3);
     expect(landed.bytes).toBe(Buffer.byteLength("export const a = 1;\n") + Buffer.byteLength("#!/bin/sh\necho run\n") + Buffer.byteLength("TOKEN=x\n"));
     expect(readFileSync(join(dest, "src/index.ts"), "utf8")).toBe("export const a = 1;\n");
@@ -162,14 +168,14 @@ describe("projectLander", () => {
     const homes = macHomes(dest);
     const before = snapshot(homes["claude"]!);
     const lander = projectLander(homes);
-    await expect(lander.land({ source: SOURCE, dest, replace: false, tar: folderTar(), state: { tar: stateTar(), homes: guestAgentHomes() } })).rejects.toMatchObject({
+    await expect(lander.land({ source: SOURCE, dest, replace: false, archive: archived(folderTar()), state: { archive: archived(stateTar()), homes: guestAgentHomes() } })).rejects.toMatchObject({
       kind: "exists",
       message: `${dest} already exists on this computer with 2 files; export with replace to overwrite it`,
     });
     expect(readFileSync(join(dest, "old.txt"), "utf8")).toBe("old");
     expect(snapshot(homes["claude"]!)).toEqual(before);
     expect(readdirSync(root).filter(n => n.startsWith("proj.wsp-in-"))).toEqual([]);
-    const landed = await lander.land({ source: SOURCE, dest, replace: true, tar: folderTar() });
+    const landed = await lander.land({ source: SOURCE, dest, replace: true, archive: archived(folderTar()) });
     expect(landed).toEqual({ files: 3, bytes: expect.any(Number), agents: [] });
     expect(existsSync(join(dest, "old.txt"))).toBe(false);
     expect(readFileSync(join(dest, ".env"), "utf8")).toBe("TOKEN=x\n");
@@ -178,7 +184,7 @@ describe("projectLander", () => {
   it("a failed extraction leaves nothing at the destination or beside it", async () => {
     const root = scratch();
     const dest = join(root, "proj");
-    await expect(projectLander({}).land({ source: SOURCE, dest, replace: false, tar: Buffer.from("not an archive") })).rejects.toThrow(/extracting the archive/);
+    await expect(projectLander({}).land({ source: SOURCE, dest, replace: false, archive: archived(Buffer.from("not an archive")) })).rejects.toThrow(/extracting the archive/);
     expect(readdirSync(root)).toEqual([]);
   });
 
@@ -188,11 +194,11 @@ describe("projectLander", () => {
     const homes = macHomes(`${realpathSync(root)}/proj`);
     const before = snapshot(homes["claude"]!);
     const lander = projectLander(homes);
-    await expect(lander.land({ source: SOURCE, dest, replace: false, tar: folderTar(), state: { tar: Buffer.from("not an archive"), homes: guestAgentHomes() } })).rejects.toThrow(/extracting the archive/);
+    await expect(lander.land({ source: SOURCE, dest, replace: false, archive: archived(folderTar()), state: { archive: archived(Buffer.from("not an archive")), homes: guestAgentHomes() } })).rejects.toThrow(/extracting the archive/);
     expect(readdirSync(root)).toEqual([]);
     expect(snapshot(homes["claude"]!)).toEqual(before);
     expect(readdirSync(tmpdir()).filter(n => n.startsWith("wsp-home-"))).toEqual([]);
-    const landed = await lander.land({ source: SOURCE, dest, replace: false, tar: folderTar(), state: { tar: stateTar(), homes: guestAgentHomes() } });
+    const landed = await lander.land({ source: SOURCE, dest, replace: false, archive: archived(folderTar()), state: { archive: archived(stateTar()), homes: guestAgentHomes() } });
     expect(landed.files).toBe(3);
     expect(landed.agents.map(a => [a.agent, a.outcome])).toEqual([["claude", "moved"], ["codex", "transcript-only"], ["hermes", "nothing"]]);
   });
@@ -202,7 +208,7 @@ describe("projectLander", () => {
       const root = scratch();
       const dest = join(root, "proj");
       const tar = tarOf([{ path: "./ok.txt", mode: 0o644, content: "ok\n" }, { path: "../evil.txt", mode: 0o644, content: "evil\n" }]);
-      await expect(projectLander({}).land({ source: SOURCE, dest, replace: false, tar })).rejects.toThrow(/extracting the archive/);
+      await expect(projectLander({}).land({ source: SOURCE, dest, replace: false, archive: archived(tar) })).rejects.toThrow(/extracting the archive/);
       expect(readdirSync(root)).toEqual([]);
     });
 
@@ -215,7 +221,7 @@ describe("projectLander", () => {
       const made = spawnSync("tar", ["-P", "-czf", archive, join(outside, "evil.txt")]);
       expect(made.status).toBe(0);
       rmSync(outside, { recursive: true, force: true });
-      const landed = await projectLander({}).land({ source: SOURCE, dest, replace: false, tar: readFileSync(archive) });
+      const landed = await projectLander({}).land({ source: SOURCE, dest, replace: false, archive });
       expect(landed.files).toBe(1);
       expect(existsSync(join(outside, "evil.txt"))).toBe(false);
       expect(readFileSync(join(dest, outside, "evil.txt"), "utf8")).toBe("evil\n");
@@ -231,7 +237,7 @@ describe("projectLander", () => {
         { path: "./out", target: outside },
         { path: "./out/evil.txt", mode: 0o644, content: "evil\n" },
       ]);
-      await expect(projectLander({}).land({ source: SOURCE, dest, replace: false, tar })).rejects.toThrow(/extracting the archive/);
+      await expect(projectLander({}).land({ source: SOURCE, dest, replace: false, archive: archived(tar) })).rejects.toThrow(/extracting the archive/);
       expect(readdirSync(outside)).toEqual([]);
       expect(readdirSync(root)).toEqual([]);
     });
@@ -240,7 +246,7 @@ describe("projectLander", () => {
   it("a destination that is not an absolute path is refused before anything is read", async () => {
     const lander = projectLander({});
     await expect(lander.probe("code/proj")).rejects.toThrow(/absolute path, got code\/proj/);
-    await expect(lander.land({ source: SOURCE, dest: "code/proj", replace: false, tar: folderTar() })).rejects.toThrow(/absolute path, got code\/proj/);
+    await expect(lander.land({ source: SOURCE, dest: "code/proj", replace: false, archive: archived(folderTar()) })).rejects.toThrow(/absolute path, got code\/proj/);
     expect(existsSync("code")).toBe(false);
   });
 
@@ -250,7 +256,7 @@ describe("projectLander", () => {
     const real = `${realpathSync(root)}/code/proj`;
     const homes = macHomes(real);
     const lander = projectLander(homes);
-    const landed = await lander.land({ source: SOURCE, dest, replace: false, tar: folderTar(), state: { tar: stateTar(), homes: guestAgentHomes() } });
+    const landed = await lander.land({ source: SOURCE, dest, replace: false, archive: archived(folderTar()), state: { archive: archived(stateTar()), homes: guestAgentHomes() } });
     expect(landed.files).toBe(3);
     expect(readdirSync(join(root, "code"))).toEqual(["proj"]);
     expect(readFileSync(join(root, "code", "proj", "src/index.ts"), "utf8")).toBe("export const a = 1;\n");
@@ -258,7 +264,7 @@ describe("projectLander", () => {
     expect(readdirSync(join(homes["claude"]!, "projects")).sort()).toEqual([claudeKey(real), "-Users-me-other"].sort());
     expect(readFileSync(join(homes["claude"]!, "projects", claudeKey(real), "S1.jsonl"), "utf8")).toBe(session("S1", real));
     expect(await lander.probe(dest)).toEqual({ files: 3 });
-    await expect(lander.land({ source: SOURCE, dest, replace: false, tar: folderTar() })).rejects.toMatchObject({ kind: "exists", message: `${join(root, "code", "proj")} already exists on this computer with 3 files; export with replace to overwrite it` });
+    await expect(lander.land({ source: SOURCE, dest, replace: false, archive: archived(folderTar()) })).rejects.toMatchObject({ kind: "exists", message: `${join(root, "code", "proj")} already exists on this computer with 3 files; export with replace to overwrite it` });
   });
 
   it("agents named narrow whose state comes home; an agent whose store cannot be read is failed with the reason and the others still land", async () => {
@@ -267,15 +273,15 @@ describe("projectLander", () => {
     const real = `${realpathSync(root)}/proj`;
     const homes = macHomes(real);
     const lander = projectLander(homes);
-    const narrowed = await lander.land({ source: SOURCE, dest, replace: false, tar: folderTar(), state: { tar: stateTar(), homes: guestAgentHomes(), agents: ["claude"] } });
+    const narrowed = await lander.land({ source: SOURCE, dest, replace: false, archive: archived(folderTar()), state: { archive: archived(stateTar()), homes: guestAgentHomes(), agents: ["claude"] } });
     expect(narrowed.agents.map(a => a.agent)).toEqual(["claude"]);
     expect(existsSync(join(homes["codex"]!, "sessions/2026/09/06"))).toBe(false);
     const broken = await lander.land({
       source: SOURCE,
       dest: join(root, "again"),
       replace: false,
-      tar: folderTar(),
-      state: { tar: stateTar([{ path: "root/.local/share/opencode/opencode.db", mode: 0o644, content: "not a database\n" }]), homes: guestAgentHomes() },
+      archive: archived(folderTar()),
+      state: { archive: archived(stateTar([{ path: "root/.local/share/opencode/opencode.db", mode: 0o644, content: "not a database\n" }])), homes: guestAgentHomes() },
     });
     expect(broken.agents.map(a => [a.agent, a.outcome])).toEqual([
       ["claude", "moved"],

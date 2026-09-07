@@ -7,7 +7,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CATALOG_AGENTS, GUEST_HOME, type AgentEntry } from "@wsp/catalog";
-import type { ProjectAgent } from "@wsp/protocol";
+import { shellQuote, type ProjectAgent } from "@wsp/protocol";
 import { missingCommands } from "../golden-tools.js";
 import type { Machine } from "../machine.js";
 import { claudeResolver } from "./claude.js";
@@ -16,6 +16,7 @@ import { geminiResolver } from "./gemini.js";
 import { hermesResolver } from "./hermes.js";
 import { opencodeResolver } from "./opencode.js";
 import { piResolver } from "./pi.js";
+import { ROOTS_STEP, listScript } from "./listing.js";
 import { resolveProjectPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
 export { parseMergeOutput, type MergeOutput } from "./merge.js";
@@ -82,18 +83,23 @@ export function guestAgentHomes(): Record<string, string> {
   return Object.fromEntries(CATALOG_AGENTS.map(a => [a.id, a.guestStateHome ?? join(GUEST_HOME, a.stateHome)]));
 }
 
-/** The paths a trip pulls from the homes: each registered module's roots under its agent's home, in catalog order,
- * for the agents named (every one with a home when none is). An id the catalog does not know is refused, so a typo
- * is a sentence rather than a trip that brings nothing. */
-export function stateRoots(homes: Readonly<Record<string, string>>, ids?: readonly string[]): string[] {
+/** The one command the machine runs to name the paths a trip pulls from the homes: each registered module's listing
+ * script for the agents named (every one with a home when none is), in catalog order, each printing its paths on
+ * stdout; a module with no listing of its own gives up its whole roots. An id the catalog does not know is refused,
+ * so a typo is a sentence rather than a trip that brings nothing, and empty when no agent qualifies, so the caller
+ * asks the machine nothing. A listing that will not run fails the command, since a silent empty answer would read as
+ * a machine with no state for the project.
+ */
+export function stateListing(homes: Readonly<Record<string, string>>, path: string, ids?: readonly string[]): string {
   const unknown = ids?.find(id => !CATALOG_AGENTS.some(a => a.id === id));
   if (unknown !== undefined) throw new Error(`no agent called ${unknown}; the catalog knows ${CATALOG_AGENTS.map(a => a.id).join(", ")}`);
-  return CATALOG_AGENTS.flatMap(({ id }) => {
+  const scripts = CATALOG_AGENTS.flatMap(({ id }) => {
     const home = homes[id];
     const resolver = PROJECT_STATE_RESOLVERS.get(id);
     if (home === undefined || resolver === undefined || (ids !== undefined && !ids.includes(id))) return [];
-    return resolver.roots.map(root => join(home, root));
+    return [resolver.listing?.(home, path) ?? listScript(home, path, resolver.roots, [ROOTS_STEP])];
   });
+  return scripts.length === 0 ? "" : ["set -e", ...scripts.map(s => `python3 -c ${shellQuote(s)}`)].join("\n");
 }
 
 /** The agents whose home holds sessions for the folder, in catalog order, each with its name, the bytes of the files
