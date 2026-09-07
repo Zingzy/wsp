@@ -581,9 +581,9 @@ function ThreadRow({ thread, time, active, onSelect }: { thread: SidebarThreadSn
             <ThreadRowLeadingStatus status={pill} />
             {pill ? <span aria-hidden>·</span> : null}
             <Tooltip>
-              <TooltipTrigger render={<span data-thread-provenance aria-label={provenanceLabel(thread)} className="inline-flex min-w-0 items-center gap-1" />}>
-                <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-3" />
-                <span className="truncate">{openerWord(thread.startedBy)}</span>
+              <TooltipTrigger render={<span data-thread-provenance aria-label={provenanceLabel(thread)} className="inline-flex min-w-0 items-center gap-1 text-sidebar-foreground" />}>
+                <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-[13px]" />
+                <span className="truncate text-muted-foreground/55">{openerWord(thread.startedBy)}</span>
               </TooltipTrigger>
               <TooltipPopup side="top">{provenanceLabel(thread)}</TooltipPopup>
             </Tooltip>

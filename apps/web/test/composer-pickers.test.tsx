@@ -213,7 +213,11 @@ describe("composer pickers", () => {
     expect(document.querySelector("[data-composer-checkout] [data-composer-picker]")).toBeNull();
     // Defaults read: the catalog's default model under the harness's mark, the default context, the default mode.
     expect(picker("model")?.textContent).toContain("Opus 5");
-    expect(picker("model")?.querySelector('[data-harness-mark="claude"]')).not.toBeNull();
+    const triggerMark = picker("model")?.querySelector('svg[data-harness-mark="claude"]');
+    expect(triggerMark?.classList.contains("text-agent-claude")).toBe(true);
+    // A monochrome mark would take the foreground from this span rather than the button's muted label colour.
+    expect(triggerMark?.parentElement?.tagName).toBe("SPAN");
+    expect(triggerMark?.parentElement?.classList.contains("text-foreground")).toBe(true);
     expect(picker("effort")?.textContent).toBe("Effort · 1M");
     expect(picker("permissionMode")?.textContent).toContain("Bypass");
     expect(pickerValue("permissionMode")).toBe("bypassPermissions");
@@ -354,6 +358,10 @@ describe("composer pickers", () => {
     let menu = await openModelMenu();
     const codex = () => menu.querySelector<HTMLButtonElement>('[data-composer-harness="codex"]')!;
     expect(menu.querySelector<HTMLButtonElement>('[data-composer-harness="claude"]')?.getAttribute("aria-selected")).toBe("true");
+    // The rail draws each agent's own mark: Claude's in its hue, OpenAI's monochrome as published in the tab's own colour, both bare.
+    expect(menu.querySelector('[data-composer-harness="claude"] svg[data-harness-mark="claude"]')?.classList.contains("text-agent-claude")).toBe(true);
+    expect([...codex().querySelector('svg[data-harness-mark="codex"]')!.classList].filter(c => c.startsWith("text-"))).toEqual([]);
+    expect(codex().textContent).toBe("");
     fireEvent.click(codex());
     await waitFor(() => expect(within(menu).getByRole("status").textContent).toBe("Start a new thread to use Codex here"));
     expect(picker("model")?.dataset["harness"]).toBe("claude");

@@ -158,23 +158,35 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
-  it("a thread row keeps twelve characters of a long title at the default width, the agent and opener whole under it, rows one height", async () => {
+  it("a thread row keeps twelve characters of a long title at the default width, the agent's bare mark and opener whole under it, rows one height", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const rows = await page!.locator("[data-row-id^='thread:']").evaluateAll(els =>
         els.map(el => {
           const title = el.querySelector<HTMLElement>("[data-thread-title]");
           const meta = el.querySelector<HTMLElement>("[data-thread-meta]");
-          if (!title || !meta) return null;
+          const mark = el.querySelector<HTMLElement>("[data-harness-mark]");
+          const opener = mark?.nextElementSibling;
+          if (!title || !meta || !mark || !opener) return null;
           const font = getComputedStyle(title);
           const ctx = document.createElement("canvas").getContext("2d")!;
           ctx.font = `${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
+          const markBox = mark.getBoundingClientRect();
+          const openerBox = opener.getBoundingClientRect();
+          const paint = getComputedStyle(mark);
           return {
             height: el.getBoundingClientRect().height,
             titleWidth: title.clientWidth,
             twelveChars: ctx.measureText((title.textContent ?? "").slice(0, 12)).width,
             metaClipped: [meta, ...meta.querySelectorAll("*")].some(e => e.scrollWidth > e.clientWidth),
             meta: `${meta.textContent ?? ""} (${meta.querySelector("[data-thread-provenance]")?.getAttribute("aria-label")})`,
+            mark: mark.getAttribute("data-harness-mark"),
+            markSize: [markBox.width, markBox.height],
+            // The mark's centre against the opener word's centre: optically on the line, not hanging above it.
+            markOffset: markBox.y + markBox.height / 2 - (openerBox.y + openerBox.height / 2),
+            markColor: paint.color,
+            openerColor: getComputedStyle(opener).color,
+            bare: paint.backgroundColor === "rgba(0, 0, 0, 0)" && paint.borderTopWidth === "0px" && paint.boxShadow === "none",
           };
         }),
       );
@@ -182,13 +194,25 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(rows.map(r => r?.meta)).toEqual([
         "Working·you (Claude Code · you)",
         "cli (Claude Code · cli)",
-        "cli (Claude Code · cli)",
+        "cli (Codex · cli)",
         "you (Claude Code · you)",
       ]);
       for (const row of rows) {
         expect(row!.titleWidth).toBeGreaterThanOrEqual(row!.twelveChars);
         expect(row!.metaClipped).toBe(false);
+        // Bare marks of 13 to 16 px, centred on the words beside them, in a colour of their own, on nothing.
+        for (const side of row!.markSize) {
+          expect(side).toBeGreaterThanOrEqual(13);
+          expect(side).toBeLessThanOrEqual(16);
+        }
+        expect(Math.abs(row!.markOffset)).toBeLessThan(1.5);
+        expect(row!.markColor).not.toBe(row!.openerColor);
+        expect(row!.bare).toBe(true);
       }
+      // Claude's mark is its terracotta; OpenAI's is monochrome by design, so it takes the row's foreground.
+      const colours = new Map(rows.map(r => [r!.mark, r!.markColor]));
+      expect(colours.size).toBe(2);
+      expect(colours.get("claude")).not.toBe(colours.get("codex"));
       expect(new Set(rows.map(r => r!.height)).size).toBe(1);
       const path = join(SHOTS_DIR, `sidebar-threads-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -359,6 +383,69 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         expect(state.box).toEqual(idle.box);
         expect(state.shell).toEqual(idle.shell);
       }
+    }
+  }, 60_000);
+
+  it("the composer's model picker carries the agent's bare mark on its button and one per agent on its rail, in both themes", async () => {
+    interface MarkRead {
+      harness: string | null;
+      size: number[];
+      /** The mark's centre against its neighbour's centre. */
+      offset: number;
+      color: string;
+      bare: boolean;
+    }
+    const readMarks = (selector: string): Promise<MarkRead[]> =>
+      page!.locator(selector).evaluateAll(els =>
+        els.map(el => {
+          const box = el.getBoundingClientRect();
+          const beside = (el.nextElementSibling ?? el.parentElement!).getBoundingClientRect();
+          const s = getComputedStyle(el);
+          return {
+            harness: el.getAttribute("data-harness-mark"),
+            size: [box.width, box.height],
+            offset: box.y + box.height / 2 - (beside.y + beside.height / 2),
+            color: s.color,
+            bare: s.backgroundColor === "rgba(0, 0, 0, 0)" && s.borderTopWidth === "0px" && s.boxShadow === "none",
+          };
+        }),
+      );
+    const expectBare = (marks: MarkRead[]) => {
+      for (const mark of marks) {
+        for (const side of mark.size) {
+          expect(side).toBeGreaterThanOrEqual(13);
+          expect(side).toBeLessThanOrEqual(16);
+        }
+        expect(Math.abs(mark.offset)).toBeLessThan(1.5);
+        expect(mark.bare).toBe(true);
+      }
+    };
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
+      await page!.waitForSelector("[data-composer-picker='model'] svg[data-harness-mark]");
+      const [trigger] = await readMarks("[data-composer-picker='model'] svg[data-harness-mark]");
+      expect(trigger!.harness).toBe("claude");
+      expectBare([trigger!]);
+      expect(trigger!.color).not.toBe(await page!.locator("[data-composer-picker='model']").evaluate(el => getComputedStyle(el).color));
+      await page!.locator("[data-composer-picker='model']").click();
+      await page!.waitForSelector("[data-composer-model-menu]");
+      // The popup fades and scales in; the shot waits for it to be drawn whole and on the page.
+      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-slot=popover-popup]")!).opacity === "1");
+      await page!.waitForTimeout(300);
+      const popup = await box("[data-slot=popover-popup]");
+      expect(popup.width).toBeGreaterThan(200);
+      expect(popup.y).toBeGreaterThanOrEqual(0);
+      const rail = await readMarks("[data-composer-harness] svg[data-harness-mark]");
+      console.info(`picker marks at ${theme}: ${JSON.stringify({ trigger, rail })}`);
+      expect(rail.map(m => m.harness)).toEqual(["claude", "codex"]);
+      expectBare(rail);
+      expect(rail[0]!.color).toBe(trigger!.color);
+      expect(rail[1]!.color).not.toBe(rail[0]!.color);
+      const path = join(SHOTS_DIR, `composer-picker-${theme}.png`);
+      await page!.screenshot({ path });
+      console.info(`composer picker screenshot: ${path}`);
+      await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[data-composer-model-menu]", { state: "detached" });
     }
   }, 60_000);
 

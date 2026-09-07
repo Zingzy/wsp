@@ -6,20 +6,20 @@ import { HARNESS_CLIENTS, catalogFor, catalogFromHarness, deriveSession, harness
 import { CHAT_HARNESS, CHAT_STREAM } from "./fixtures/chat-stream.js";
 
 describe("the client's harness registry", () => {
-  it("has one module per harness, each seeding the slash menu with names without their slash", () => {
-    expect(HARNESS_CLIENTS.map(c => c.harness)).toEqual(["claude"]);
+  it("has one module per harness with a mark or a slash seed, each seeding the slash menu with names without their slash", () => {
+    expect(HARNESS_CLIENTS.map(c => c.harness)).toEqual(["claude", "codex", "gemini", "opencode", "pi"]);
     for (const c of HARNESS_CLIENTS) {
       expect(harnessClient(c.harness)).toBe(c);
       for (const s of c.slashCommands) expect(s.name).not.toMatch(/^\//);
     }
-    expect(harnessClient("codex")).toBeUndefined();
+    expect(harnessClient("hermes")).toBeUndefined();
     // The composer's first pick is the catalog's default agent, the same fact the runtime starts an unnamed thread on.
     expect(DEFAULT_HARNESS).toBe(DEFAULT_AGENT.id);
   });
 
   it("resolves a catalog by the harness id sessions.start uses, from the registered module alone", () => {
     for (const c of HARNESS_CLIENTS) expect(catalogFor(c.harness)).toEqual({ harness: c.harness, slashCommands: c.slashCommands });
-    expect(catalogFor("codex")).toBeNull();
+    expect(catalogFor("hermes")).toBeNull();
   });
 });
 

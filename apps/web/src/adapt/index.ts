@@ -43,4 +43,4 @@ export { terminalPaneState, terminalPaneTitle, terminalPaneHints, terminalEmptyL
 export { toTerminalAttachEvent, isPtyEvent } from "./terminal.js";
 export { catalogFor, catalogFromHarness } from "./catalog.js";
 export { repoAbsence } from "./git.js";
-export { HARNESS_CLIENTS, harnessClient, type HarnessClient, type HarnessGlyph } from "./harnesses.js";
+export { HARNESS_CLIENTS, glyphOf, harnessClient, type HarnessClient, type HarnessGlyph } from "./harnesses.js";
