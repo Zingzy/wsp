@@ -140,12 +140,17 @@ protocol values:
 ## For agents
 
 An agent on your computer can drive wsp the way you do. One command puts the
-wsp MCP server into that agent's own config and the wsp skill into its
-skills folder:
+wsp MCP server into that agent's own config, the wsp skill into its skills
+folder, and a short wsp section into the `AGENTS.md` of the folder you run it
+in (`CLAUDE.md` too, for Claude Code):
 
 ```sh
 wsp mcp install --agent claude     # or codex, gemini, opencode
 ```
+
+Run it again and that section is replaced where it stands, never added twice;
+`--remove` takes it back out and leaves the rest of the file alone. It ends by
+printing the one thing to do next, inside the agent you just set up.
 
 The MCP tools are the verbs above: `workspaces`, `threads`, `new`,
 `snapshot`, `fork`, `pause`, `thread_new`, `send`, `exec`, `export`. A
