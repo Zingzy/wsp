@@ -5,10 +5,10 @@ import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
 import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, sealGolden, smokeTally, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
-import { CURL_NET, MCP_SERVERS_JSON, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
-import type { RecipeDigest } from "@wsp/protocol";
+import { CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
+import { shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
-import { AGENT_INSTALLERS, HOMEBREW, type ToolInstall } from "../src/golden-import.js";
+import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec } from "../src/machine.js";
 
@@ -197,8 +197,10 @@ describe("interactive golden: prepare then seal", () => {
     expect(builder.machine.streamUrl).toBeUndefined();
     expect(daemonOn).toEqual(["m1"]);
     expect(sansBase(stages)).toEqual(["creating:sandbox from base", "deploying-daemon", "installing-harness", "ready"]);
-    // The floor goes on before the daemon: node first, so the daemon's native module compiles against it.
-    expect(ran.filter(r => r.id === "m1").map(r => r.script).findIndex(s => s.includes("nodejs.org/dist"))).toBe(0);
+    // The floor goes on before the daemon: the login shell's PATH, then node, so the daemon's native module compiles against it.
+    const floor = ran.filter(r => r.id === "m1").map(r => r.script);
+    expect(floor.findIndex(s => s.includes("> /etc/profile.d/wsp-golden.sh"))).toBe(0);
+    expect(floor.findIndex(s => s.includes("nodejs.org/dist"))).toBe(1);
     expect(timeline).toEqual(["create m1"]); // alive and waiting for the person
   });
 
@@ -240,12 +242,17 @@ describe("interactive golden: prepare then seal", () => {
     expect(created[1]!.idleTimeoutMs).toBeUndefined();
   });
 
-  it("prepare kills the machine and reports failed when the harness install fails", async () => {
-    const { backend, killed } = recordingBackend({ "bad install": { exitCode: 1, stdout: "", stderr: "nope" } });
+  it("prepare kills the machine and reports failed when the harness install fails, with the install's own last line as the reason", async () => {
+    const { backend, killed } = recordingBackend({}, { exec: cmd => (cmd.includes("bad install") ? { exitCode: 1, stdout: "", stderr: "nope" } : { exitCode: 0, stdout: "", stderr: "" }) });
     const { stages, onStage } = stageRecorder();
-    await expect(prepareBuilder({ backend, setup: "bad install", onStage })).rejects.toThrow(/setup failed/);
+    await expect(prepareBuilder({ backend, setup: "bad install", onStage })).rejects.toThrow("golden setup failed: nope");
     expect(killed).toEqual(["m1"]);
-    expect(stages.at(-1)).toMatch(/^failed:golden setup failed/);
+    expect(stages.at(-1)).toBe("failed:golden setup failed: nope");
+  });
+
+  it("a setup the guard ended reads as its timeout, not as a bare exit code", async () => {
+    const { backend } = recordingBackend({}, { exec: cmd => (cmd.includes("slow install") ? { exitCode: 124, stdout: "", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" }) });
+    await expect(prepareBuilder({ backend, setup: "slow install" })).rejects.toThrow("golden setup failed: timed out after 900s");
   });
 
   it("seal snapshots, kills the builder before the smoke fork boots, and records the kind", async () => {
@@ -777,8 +784,7 @@ describe("golden import stages", () => {
       expect(hits, needle).toHaveLength(1);
       return hits[0]!;
     };
-    expect(scripts).toContain("the-setup");
-    for (const guardedBody of ["install-zsh", "node-install", "claude-install", "codex-install", "brew-bootstrap", "bun@1.4.0", "autoremove", "cleanup -s --prune=all"]) {
+    for (const guardedBody of ["the-setup", "install-zsh", "node-install", "claude-install", "codex-install", "brew-bootstrap", "bun@1.4.0", "autoremove", "cleanup -s --prune=all"]) {
       expect(oneOf(guardedBody)).toMatch(/\nsetsid bash -c '/);
     }
     expect(scripts.filter(s => s.includes("brew install gh"))).toHaveLength(2);
@@ -1199,6 +1205,29 @@ describe("golden import stages", () => {
     }
   });
 
+  it("the setup line and the catalog's own agent installers run under the guard with the road lines: Claude's downloads to a file, checks it and runs it with no pipe into a shell, Codex's npm carries the fetch clock", async () => {
+    const { backend, cmds, fetch } = backendFor();
+    const agents = (["claude", "codex"] as const).map(id => ({ id: `agents/${id}`, ...AGENT_INSTALLERS[id]! }));
+    const builder = await prepareBuilder({ backend, setup: GOLDEN_SETUP, fetch, import: importOf({ agents }) });
+    const runs = cmds.filter(c => c.includes("claude.ai/install.sh"));
+    // Once as the setup line, once as the Claude Code row; the same text both times, whole and under the same lines.
+    expect(runs.map(r => r.includes(NODE_PATH_LINE))).toEqual([false, true]);
+    for (const [run, path] of [[runs[0]!, []], [runs[1]!, [NODE_PATH_LINE]]] as const) {
+      expect(run).toContain(`setsid bash -c ${shellQuote([...ROAD_STEPS.script.env, ...path, GOLDEN_SETUP].join("\n"))} &`);
+      expect(run).toMatch(/while \[ \$t -lt 900 \]/);
+      expect(run).not.toMatch(/\|\s*(bash|sh)\b/);
+      const at = (needle: string) => { const i = run.indexOf(needle); expect(i, needle).toBeGreaterThan(-1); return i; };
+      expect(at(CURL_NET)).toBeLessThan(at('curl -o "$f"'));
+      expect(at('curl -o "$f"')).toBeLessThan(at('head -c 2 "$f"'));
+      expect(at('head -c 2 "$f"')).toBeLessThan(at('bash "$f" </dev/null'));
+    }
+    const codex = cmds.filter(c => c.includes("npm install -g @openai/codex@"));
+    expect(codex).toHaveLength(1);
+    expect(codex[0]).toContain(`${ROAD_STEPS.npm.env.join("\n")}\n`);
+    expect(codex[0]!.indexOf(ROAD_STEPS.npm.env[0]!)).toBeLessThan(codex[0]!.indexOf("npm install -g @openai/codex@"));
+    expect(builder.setupSha).toBe(createHash("sha256").update(`${GOLDEN_SETUP}\n${GOLDEN_SETUP}\n${AGENT_INSTALLERS["codex"]!.install}`).digest("hex"));
+  });
+
   it("a failure's reason is Homebrew's Error: line, not the advice line that follows it", async () => {
     const { backend, fetch } = backendFor([
       ["brew install gh", { exitCode: 1, stdout: "==> Fetching downloads for: gh\n", stderr: "Error: gh: A `brew install gh` process has already locked /home/linuxbrew/.linuxbrew/Cellar/gcc.\nPlease wait for it to finish or terminate it to continue.\n" }],
@@ -1410,7 +1439,7 @@ describe("golden import stages", () => {
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(sweepsAt[2]!);
     expect(sweepsAt[2]).toBeLessThan(cmds.indexOf("echo ok"));
     // Each closing line carries what the sweep gave back and the df reading the stage left.
-    expect(stages).toContain("deploying-daemon:17 installed; caches swept, 700.0 MB back; 3.6 GB free");
+    expect(stages).toContain("deploying-daemon:18 installed; caches swept, 700.0 MB back; 3.6 GB free");
     expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700.0 MB back; 4.3 GB free");
     expect(stages).toContain("installing-tools:3 installed; caches swept, 700.0 MB back; 5.0 GB free");
     // A sweep that fails is named, and the build goes on to the next stage.
@@ -1625,7 +1654,8 @@ describe("golden import stages", () => {
     ]);
     expect(puts).toHaveLength(1);
     // The harness ran, so the context is written and the machine is asked whether it still answers before the hand-off.
-    expect(cmds.slice(cmds.indexOf("true")).map(c => (c.includes("echo WSP_CTX") ? "probe" : c.includes("tar xzf - -C '/' ") ? "write" : c))).toEqual(["true", "probe", "write", "echo ok"]);
+    const setupAt = cmds.findIndex(c => c.includes("\ntrue' &"));
+    expect(cmds.slice(setupAt).map(c => (c.includes("echo WSP_CTX") ? "probe" : c.includes("tar xzf - -C '/' ") ? "write" : c.includes("\ntrue' &") ? "setup" : c))).toEqual(["setup", "probe", "write", "echo ok"]);
     expect(builder.import?.smoke).toBe("true");
 
     let result: ImportResult | undefined;
@@ -1751,6 +1781,14 @@ describe("golden import stages", () => {
     ];
     expect(builder.import?.missingTools).toEqual(want);
     expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual(want);
+  });
+
+  it("a base floor row that failed reaches the ledger and the sealed version with its name, outcome and reason, one shape with the tools stage", async () => {
+    const { backend, fetch } = backendFor([["apt-get install -y -qq docker.io", { exitCode: 100, stdout: "", stderr: "E: Unable to locate package docker-compose-v2" }]]);
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
+    const docker = { id: "base/docker", name: "Docker engine and compose", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" };
+    expect(builder.import?.missingTools).toEqual([docker]);
+    expect((await sealGolden(builder, { backend, smoke: "true" })).version.missingTools).toEqual([docker]);
   });
 
   it("the rc calls the pack silenced land on the ledger and the seal stamps them on the version, with the stage line naming them; a pack that silenced nothing leaves both without", async () => {
@@ -2080,7 +2118,8 @@ describe("golden import stages", () => {
       const results: ImportResult[] = [];
       const base = [entry("shell", "shell/zshrc", { paths: ["~/.zshrc"], bytes: 10 })];
       const binaries = [entry("tools", "tools/brew/gh", { linux: "yes" }), entry("tools", "tools/brew/zingzy/tap/diskbloom", { linux: "unknown" })];
-      const guardedCmds = (from: number) => cmds.slice(from).filter(c => c.includes("setsid bash -c"));
+      // The setup line runs on every harness stage; what this counts is the rows.
+      const guardedCmds = (from: number) => cmds.slice(from).filter(c => c.includes("setsid bash -c") && !c.includes("\ntrue' &"));
 
       const v1 = await sealGolden(await prepareBuilder({ backend, setup: "true", fetch, import: planOf(base, "h1", results) }), { backend, smoke: "true" });
       const n1 = cmds.length;

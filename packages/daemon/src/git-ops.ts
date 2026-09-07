@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import { workArgv } from "@wsp/protocol";
 import { OpError } from "./workspace-paths.js";
 
 export const GIT_DIFF_CAP_BYTES = 2 * 1024 * 1024;
@@ -13,11 +14,12 @@ export interface GitResult {
   truncated: boolean;
 }
 
-/** Spawned directly, never through a shell. GIT_OPTIONAL_LOCKS keeps status
+/** Spawned as argv behind the work-score line, never interpolated into a shell. GIT_OPTIONAL_LOCKS keeps status
  * from touching the index; LC_ALL=C keeps the not-a-repo message matchable. */
 export function runGit(cwd: string, args: string[], opts: { input?: string; maxBytes?: number } = {}): Promise<GitResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn("git", args, {
+    const git = workArgv("git", args);
+    const child = spawn(git.file, git.args, {
       cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", LC_ALL: "C" },

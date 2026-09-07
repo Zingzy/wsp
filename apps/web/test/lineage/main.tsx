@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the machine tab of a workspace forked from
-// a golden missing three tools, in either theme (?theme=light), so a test
+// a golden missing four tools, one of them a base floor row, in either theme (?theme=light), so a test
 // can lay out and photograph what jsdom cannot.
 import { createRoot } from "react-dom/client";
 import type { EventUnion, SnapshotLineage, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
@@ -25,6 +25,7 @@ const lineage: SnapshotLineage = {
         { id: "tools/brew/gopls", name: "gopls", outcome: "skipped", note: "no Linux bottle" },
         { id: "tools/cli/diskbloom", name: "diskbloom", outcome: "skipped", note: "no GitHub release to install from" },
         { id: "tools/homebrew", name: "Homebrew", outcome: "failed", note: "exit 1: git: not found; the base image has no git and the bootstrap script needs it before it can clone the tap" },
+        { id: "base/docker", name: "Docker engine and compose", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" },
       ],
     },
   ],

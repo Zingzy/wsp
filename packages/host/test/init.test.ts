@@ -17,7 +17,7 @@ import { SNAPSHOT_STORAGE, type BackendPricing, type ExecResult } from "@wsp/eng
 import { ALREADY_APPLIED, Recipe, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, memoryStore, type GoldenRecipe, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GOLDEN_SETUP, catalogEntry } from "@wsp/catalog";
+import { catalogEntry } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
@@ -776,7 +776,7 @@ describe("wsp init, interactive", () => {
     await f.until("Tools  2/6");
     // Nothing here and nothing ticked: the base rows still come, and every other row is on the screen at its size.
     // Sixteen base rows fold behind the visible two, and the why column is cut to the screen's width.
-    expect(f.text()).toMatch(/• fd\s+base\s+always on th\S*\s+2\.9 MB\n/);
+    expect(f.text()).toMatch(/• fd\s+base\s+always on th[^\n]*?\s+2\.9 MB\n/);
     expect(f.text()).toContain("On: 16 tools, 1.5 GB");
     await f.press(KEY.enter);
     await f.until("Also on this Mac");
@@ -816,7 +816,7 @@ describe("wsp init, the project the run is for", () => {
     await f.until("Tools  2/6");
     // Go is off in the catalog and never used here; the folder's own go.mod put it on the machine, in its own group.
     expect(f.text()).toMatch(/▾ Your project needs\s+1 of 1\s+239\.1 MB/);
-    expect(f.text()).toMatch(/● +Go +project +go\.mod needs… +239\.1 MB/);
+    expect(f.text()).toMatch(/● +Go +project +go\.mod needs[^\n]*? +239\.1 MB/);
     await f.press(KEY.enter);
     await throughScreens(f, ["Also on this Mac", "Sign-ins", "wsp for your agents"]);
     await f.until(BOOT);
@@ -1976,7 +1976,7 @@ describe("wsp init, flags and no terminal", () => {
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => {
-        if (!cmd.includes(GOLDEN_SETUP)) return guestAnswer(cmd);
+        if (!cmd.includes("claude.ai/install.sh")) return guestAnswer(cmd);
         duringPrepare = { out: f.io.output.write, err: f.io.stderr.write };
         f.io.stderr.write("heartbeat for builder m1 not written: ETIMEDOUT\n");
         return { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" };
@@ -2003,7 +2003,7 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes(GOLDEN_SETUP) ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude.ai/install.sh") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
       f.backends.push(backend);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
     };
@@ -2042,7 +2042,8 @@ describe("wsp init, flags and no terminal", () => {
     writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    user: Zingzy\n");
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd === "true" ? { exitCode: 0, stdout: "export GH_TOKEN=gho_fake\ntoken gho_fake seen\n", stderr: "" } : guestAnswer(cmd));
+      // The recipe's setup line is "true"; the harness stage runs it under its guard like every installer.
+      backend.execImpl = (_m, cmd) => (cmd.includes("\ntrue' &") ? { exitCode: 0, stdout: "export GH_TOKEN=gho_fake\ntoken gho_fake seen\n", stderr: "" } : guestAnswer(cmd));
       f.backends.push(backend);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
     };
@@ -2728,7 +2729,7 @@ describe("wsp init, a signal during prepare", () => {
       const backend = stubBackend();
       backend.execImpl = (m, cmd) => {
         // The signal lands inside the agents install, which then finishes on its own; the kill waits until told.
-        if (cmd.includes(GOLDEN_SETUP)) {
+        if (cmd.includes("claude.ai/install.sh")) {
           const kill = m.kill.bind(m);
           m.kill = async () => {
             await held;

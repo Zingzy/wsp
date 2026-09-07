@@ -8,8 +8,9 @@
 import { ChevronDownIcon, FolderInputIcon, FolderOutputIcon, MessageSquareIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { agentName } from "@wsp/catalog";
-import { goldenHead, needsRebuild, type WorkspaceSize } from "@wsp/protocol";
+import { goldenHead, needsRebuild, outOfMemoryRowLine, type WorkspaceSize } from "@wsp/protocol";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
+import { useOutOfMemoryReadings } from "../machine/live.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
@@ -157,6 +158,7 @@ export function WorkspaceSidebar() {
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
   const searching = query.trim().length > 0;
   const visible = useMemo(() => visibleProjects(projects, query), [projects, query]);
+  const outOfMemory = useOutOfMemoryReadings(projects);
   const importTarget = importing === null ? undefined : workspaces.find(w => w.id === importing.workspaceId);
   const exportTarget = exporting === null ? undefined : workspaces.find(w => w.id === exporting.workspaceId);
   const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting);
@@ -278,9 +280,11 @@ export function WorkspaceSidebar() {
                   const gone = project.state === "gone";
                   const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
                   const cost = costs[project.id] ?? null;
-                  const meta = workspaceMetaLine(project.status !== null ? project.status.daemonNote : project.workspace.daemonNote, [
+                  // Like the daemon note, a drop with memory near full is the one thing on the row a person is waiting on.
+                  const oom = outOfMemory[project.id];
+                  const meta = workspaceMetaLine((project.status !== null ? project.status.daemonNote : project.workspace.daemonNote) ?? (oom !== undefined ? outOfMemoryRowLine(oom) : undefined), [
                     costLabel({
-                      phase: project.phase,
+                      state: project.state,
                       rateUsdPerHour: cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null,
                       accruedUsd: cost?.accruedUsd ?? null,
                     }),

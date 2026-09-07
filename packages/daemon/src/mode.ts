@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
 import { readFile, readlink } from "node:fs/promises";
-import type { DaemonEvent } from "@wsp/protocol";
+import { workArgv, type DaemonEvent } from "@wsp/protocol";
 
 export interface ModeProbeResult {
   icanon: boolean;
@@ -35,8 +35,9 @@ export function parseStatTpgid(stat: string): number | null {
 }
 
 function run(cmd: string, args: string[]): Promise<string> {
+  const work = workArgv(cmd, args);
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: 1000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    execFile(work.file, work.args, { timeout: 1000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
   });
 }
 

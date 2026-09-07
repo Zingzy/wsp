@@ -7,9 +7,9 @@
 // members once; Homebrew's toolchain is one line; a row nothing measured counts
 // at a stated default for its kind. Nothing here runs a command: the host reads
 // the Mac's Homebrew and hands the table in.
-import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MACOS_ONLY_FORMULAE, formulaOf, managerFormula, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
+import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MACOS_ONLY_FORMULAE, catalogToolOf, formulaOf, managerFormula, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
 import { MIB, ROADS, catalogEntry, catalogToolByRoad, catalogToolFor, sizeBytes, type RoadName } from "@wsp/catalog";
-import type { RecipeCustomRow } from "@wsp/protocol";
+import { BREW_ID_PREFIX, type RecipeCustomRow } from "@wsp/protocol";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
 
 /** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
@@ -156,7 +156,7 @@ export const isRoad = (s: string | undefined): s is RoadName => (ROADS as readon
  * same package by the same road as this Mac's row (a formula by brew, a global by npm). */
 function catalogSize(e: RecipeEntry): ToolSize | undefined {
   const manager = e.id.split("/")[1];
-  const entry = e.id.startsWith(CATALOG_PREFIX) ? catalogEntry(packageOf(e)) : isRoad(manager) ? catalogToolByRoad(manager, packageOf(e)) : undefined;
+  const entry = e.id.startsWith(CATALOG_PREFIX) ? catalogEntry(packageOf(e)) : (catalogToolOf(e) ?? (isRoad(manager) ? catalogToolByRoad(manager, packageOf(e)) : undefined));
   const size = entry === undefined ? undefined : sizeBytes(entry.size);
   return size === undefined ? undefined : { bytes: size, road: "measured", deps: 0 };
 }
@@ -220,7 +220,8 @@ export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew
   for (const e of ticked) {
     if (e.rung !== "tools" || !installs.has(e.id) || e.id.startsWith("tools/brew-tap/")) continue;
     const formula = formulaOf(e);
-    if (formula !== undefined && catalogToolByRoad("brew", formula) === undefined) {
+    // A formula the plan installs by the catalog's road counts at the catalog's measurement, not this Mac's Cellar.
+    if (formula !== undefined && catalogToolByRoad("brew", formula) === undefined && catalogToolOf(e) === undefined) {
       if (formulaBytes(formula, brew) === undefined) assume(e);
       else for (const m of closureOf(formula, brew)) members.add(m);
       continue;

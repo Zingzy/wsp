@@ -4,7 +4,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   backgroundTasksLine,
+  biggerSizeLine,
+  MEMORY_NEAR_FULL,
+  memoryNearFull,
+  outOfMemoryLine,
+  outOfMemoryRowLine,
   stillWorkingRefusal,
+  LINEAGE_MARKS,
+  missingToolRow,
   behindGoldenLine,
   builderStaysLine,
   DAEMON_UPDATE_FAILED,
@@ -25,12 +32,15 @@ import {
   fmtThreads,
   forgetNotice,
   goldenBuildLine,
+  goneWords,
   harnessExitLine,
   isCodeSearchTool,
+  listedName,
   machineCapRefusal,
   machineUnreachedLine,
   mcpServerCommandLine,
   moveTimedOutLine,
+  nameList,
   nextInsideAgentLine,
   notifyLine,
   offeredSize,
@@ -68,6 +78,7 @@ import {
   upgradeSealFailedUnreadLine,
   vaultKeptLine,
   vaultOverCapLine,
+  type GoldenMissingTool,
 } from "../src/index.js";
 import * as format from "../src/format.js";
 import * as protocol from "../src/index.js";
@@ -98,6 +109,42 @@ describe("fmtBytes and fmtMemGb", () => {
     expect(fmtBytes(3000 * 1024 * 1024)).toBe("2.9 GB");
     expect(fmtBytes(2048 * 1024 * 1024)).toBe("2.0 GB");
     expect(fmtBytes(250 * 1024 * 1024)).toBe("250.0 MB");
+  });
+});
+
+describe("a machine that stopped answering with its memory near full", () => {
+  const GiB = 1024 ** 3;
+  const offers = [
+    { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
+    { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
+    { cpu: 4, memMb: 16384, rateUsdPerHour: 0.3 },
+  ];
+
+  it("near full is the measured share, on the number only", () => {
+    expect(MEMORY_NEAR_FULL).toBe(0.9);
+    expect(memoryNearFull({ used: 3.59 * GiB, total: 3.94 * GiB })).toBe(true);
+    expect(memoryNearFull({ used: 90, total: 100 })).toBe(true);
+    expect(memoryNearFull({ used: 89, total: 100 })).toBe(false);
+    expect(memoryNearFull({ used: 0, total: 0 })).toBe(false);
+  });
+
+  it("the line carries the last figures and says the work took the memory, never that the machine failed", () => {
+    expect(outOfMemoryLine({ used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.42 })).toBe(
+      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the machine last answered; the work on it took the memory, not a fault of the machine",
+    );
+  });
+
+  it("the row form says the unit once when both sides share it, so the sidebar's second line holds it whole", () => {
+    expect(outOfMemoryRowLine({ used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.42 })).toBe("out of memory, 3.6 of 3.9 GB");
+    expect(outOfMemoryRowLine({ used: 900 * 1024 ** 2, total: 3.94 * GiB, load1: 1 })).toBe("out of memory, 900.0 MB of 3.9 GB");
+  });
+
+  it("the size line names the smallest offer with more memory and its rate, or that there is none", () => {
+    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one");
+    expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A workspace on 4 vCPU · 16 GB ($0.30/hr) fits more; pick it when you make the next one");
+    expect(biggerSizeLine({ cpu: 4, memMb: 16384 }, offers)).toBe("No size with more memory is offered; run less on the machine at once");
+    // Order in the table does not pick the offer; memory does.
+    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, [...offers].reverse())).toContain("2 vCPU · 8 GB");
   });
 });
 
@@ -303,6 +350,25 @@ describe("plural, fmtThreads, forgetNotice and deleteNotice", () => {
   });
 });
 
+describe("listedName and nameList", () => {
+  it("leaves a name that carries no comma alone and joins a list with the separator", () => {
+    expect(listedName("ripgrep")).toBe("ripgrep");
+    expect(nameList(["ripgrep", "just", "GitHub CLI"])).toBe("ripgrep, just, GitHub CLI");
+    expect(nameList([])).toBe("");
+  });
+
+  it("quotes a name that carries the separator, so a free-text label reads as one entry and not as two", () => {
+    expect(listedName("swift-format, swiftlint")).toBe('"swift-format, swiftlint"');
+    expect(nameList(["swift-format, swiftlint", "just"])).toBe('"swift-format, swiftlint", just');
+    // A plain join leaves the label's own comma reading as a third entry; that is what the quotes take away.
+    expect(["swift-format, swiftlint", "just"].join(", ").split(", ")).toHaveLength(3);
+  });
+
+  it("escapes a quote the name itself carries, so the quoting cannot be read as the end of the name", () => {
+    expect(listedName('the "fast", grep')).toBe('"the \\"fast\\", grep"');
+  });
+});
+
 describe("titleLine", () => {
   it("is the prompt's first non-empty line with its whitespace collapsed, so a multi-paragraph brief is one line everywhere", () => {
     expect(titleLine("You are a builder for the wsp repo.\n\nTicket: Zingzy/wsp-map#292.\nBuild: the fix.")).toBe("You are a builder for the wsp repo.");
@@ -396,6 +462,19 @@ describe("machineCapRefusal", () => {
 
   it("says so plainly when nothing of this computer holds a slot, instead of naming an empty list", () => {
     expect(machineCapRefusal([])).toBe("the provider is at its machine cap and no machine of this computer holds a slot; free one at the provider and try again");
+  });
+});
+
+describe("goneWords", () => {
+  it("names the machine alone when nobody saw the provider lose it", () => {
+    expect(goneWords("m1")).toBe("machine m1 is gone at the provider");
+  });
+
+  it("names the call that found it gone and the second it did, quoting the provider's answer when the call had one", () => {
+    const at = Date.parse("2026-09-07T01:21:10.500Z");
+    expect(goneWords("sb_1", { by: "pause", at, answer: "404 Not found" })).toBe("machine sb_1 is gone at the provider: the pause found it gone at 2026-09-07T01:21:10Z (404 Not found)");
+    expect(goneWords("sb_1", { by: "status poll", at })).toBe("machine sb_1 is gone at the provider: the status poll found it gone at 2026-09-07T01:21:10Z");
+    expect(goneWords("sb_1", { by: "sweep", at, answer: "" })).toBe("machine sb_1 is gone at the provider: the sweep found it gone at 2026-09-07T01:21:10Z");
   });
 });
 
@@ -496,6 +575,26 @@ describe("goldenBuildLine", () => {
   it("a build with no version under it names no version to build on, and a build that changes nothing says only what it makes", () => {
     expect(goldenBuildLine(0, 1, [{ count: 4, noun: "tool", word: "added" }])).toBe("Builds version 1: 4 tools added");
     expect(goldenBuildLine(2, 3, [{ count: 0, noun: "tool", word: "added" }])).toBe("Builds version 3 on top of version 2");
+  });
+});
+
+describe("LINEAGE_MARKS", () => {
+  it("names every outcome a missing tool can carry and every state a lineage row shows, each as one short lowercase word or two", () => {
+    const outcomes: GoldenMissingTool["outcome"][] = ["skipped", "failed"];
+    for (const o of outcomes) expect(LINEAGE_MARKS[o]).toBe(o);
+    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped" });
+    for (const word of Object.values(LINEAGE_MARKS)) {
+      expect(word).toMatch(/^[a-z]+( [a-z]+)?$/);
+      expect(word.length).toBeLessThanOrEqual(9);
+    }
+  });
+});
+
+describe("missingToolRow", () => {
+  it("shows a record as its name, reason and outcome, and one sealed without a name or an outcome by its id and as failed, so no row renders blank", () => {
+    expect(missingToolRow({ id: "tools/brew/gopls", name: "gopls", outcome: "skipped", note: "no Linux bottle" })).toEqual({ name: "gopls", note: "no Linux bottle", mark: "skipped" });
+    expect(missingToolRow({ id: "base/docker", note: "E: Unable to locate package docker-compose-v2" })).toEqual({ name: "base/docker", note: "E: Unable to locate package docker-compose-v2", mark: "failed" });
+    expect(missingToolRow({ id: "base/docker", name: "", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" }).name).toBe("base/docker");
   });
 });
 

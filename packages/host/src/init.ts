@@ -18,8 +18,8 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUILDER_DISK_GB, PACK_BUDGET_BYTES, TOOLS_DISK_FLOOR, agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, pinState, plural, recordedPins, shownOf, toolInstallsFor, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote } from "@wsp/protocol";
+import { agentInstallsFor, brewfileFor, BUILDER_DISK_GB, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -819,7 +819,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   });
   // The Mac's Homebrew sizes the formulae on the Tools screen; a brew that fails leaves the measured table.
   let brew: BrewTable = new Map();
-  if (opts.brew !== undefined && manifest.entries.some(e => e.id.startsWith("tools/brew/"))) {
+  if (opts.brew !== undefined && manifest.entries.some(e => e.id.startsWith(BREW_ID_PREFIX))) {
     const sizes = spin(io.output, "Reading Homebrew for sizes", io.isTTY);
     try {
       brew = await opts.brew();

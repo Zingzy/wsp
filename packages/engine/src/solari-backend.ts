@@ -1,5 +1,5 @@
 import type { Capabilities } from "@wsp/protocol";
-import { backoffMs, classify, shouldRetry, type WspError } from "./errors.js";
+import { backoffMs, classify, isMissing, shouldRetry, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing } from "./machine.js";
 import { previewTokenExpiry } from "./preview.js";
@@ -248,7 +248,7 @@ class SolariMachine implements Machine {
       const view = await this.backend.request<SandboxView>("GET", this.path());
       return STATE_MAP[view.state] ?? "gone";
     } catch (e) {
-      if ((e as WspError).kind === "missing") return "gone";
+      if (isMissing(e)) return "gone";
       throw e;
     }
   }

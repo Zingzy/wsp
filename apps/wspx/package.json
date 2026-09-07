@@ -6,6 +6,7 @@
   },
   "dependencies": {
     "@wsp/adapter-claude": "workspace:*",
+    "@wsp/catalog": "workspace:*",
     "@wsp/runtime": "workspace:*"
   },
   "devDependencies": {

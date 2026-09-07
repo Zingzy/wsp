@@ -181,10 +181,10 @@ describe("deriveSession: streaming states", () => {
     else expect(errors).toEqual([expect.objectContaining({ label: errorLabel, sourceActivityKind: "runtime.error", turnId: "sess_t#1" })]);
   });
 
-  it("a start stamped afterCut puts an info row under the prompt, so the person knows why context may be missing", () => {
+  it("a start stamped afterCut puts a notice row under the prompt, so the person knows why context may be missing", () => {
     const m = deriveSession([{ ...start, afterCut: true } as SessionEvent, done, end]);
     const rows = m.workEntries.filter(w => w.sourceActivityKind === "runtime.resume");
-    expect(rows.map(w => [w.label, w.tone, w.turnId])).toEqual([["previous turn was cut; resuming", "info", "sess_t#1"]]);
+    expect(rows.map(w => [w.label, w.tone, w.turnId])).toEqual([["previous turn was cut; resuming", "notice", "sess_t#1"]]);
     expect(m.timeline.slice(0, 2).map(e => e.kind)).toEqual(["message", "work"]);
     expect(deriveSession([start, done, end]).workEntries.filter(w => w.sourceActivityKind === "runtime.resume")).toEqual([]);
   });
@@ -291,6 +291,23 @@ describe("deriveMessagesTimelineRows", () => {
     expect(r[1]).toMatchObject({ kind: "message", showAssistantMeta: true, assistantCopyStreaming: false });
   });
 
+  it("the cut row and the notify row hide behind the fold like any work, and stand alone as notice rows when it opens", () => {
+    const scoped = { ...scope, turnId: "turn_c" };
+    const events: SessionEvent[] = [
+      { type: "session.start", ...scoped, at: 1_000, prompt: "carry on", afterCut: true },
+      { type: "session.delta", ...scoped, at: 2_000, kind: "text", text: "picking up where it stopped" },
+      { type: "session.notify", ...scoped, at: 2_500, notify: "me", text: "thread thread_c finished (completed, 1.5s): picking up" },
+      { type: "session.done", ...scoped, at: 3_000, result: { status: "completed", durationMs: 1500, text: "picking up where it stopped" } },
+      { type: "session.end", ...scoped, at: 3_100, exitCode: 0, sawResult: true },
+    ];
+    expect(rows(events).map(x => x.kind)).toEqual(["message", "turn-fold", "message"]);
+    const open = rows(events, { expandedTurnIds: new Set(["turn_c"]) });
+    expect(open.map(x => x.kind)).toEqual(["message", "turn-fold", "work", "message", "work"]);
+    const notices = open.filter(x => x.kind === "work").map(x => x.kind === "work" && x.groupedEntries.map(e => [e.tone, e.sourceActivityKind]));
+    expect(notices).toEqual([[["notice", "runtime.resume"]], [["notice", "runtime.notify"]]]);
+    expect(open[1]).toMatchObject({ kind: "turn-fold", label: "Worked for 1.5s" });
+  });
+
   it("expanding the fold shows every entry: first message, the tool group toggle, the last message", () => {
     const r = rows(CHAT_STREAM, { expandedTurnIds: new Set([CHAT_TURN]) });
     expect(r.map(x => x.kind)).toEqual(["turn-fold", "message", "work-toggle", "message"]);
@@ -387,10 +404,10 @@ describe("deriveSession: a thread's end told where its start said", () => {
     { type: "session.end", ...scoped, at: 3_100, exitCode: 0, sawResult: true },
   ];
 
-  it("is one info work row in the turn naming the thread told, with the line as its detail", () => {
+  it("is one notice work row in the turn naming the thread told, with the line as its detail", () => {
     const model = deriveSession(events("thread_parent_0001"));
     const rows = model.workEntries.filter(w => w.sourceActivityKind === "runtime.notify");
-    expect(rows.map(w => [w.label, w.detail, w.tone, w.turnId])).toEqual([["told thread thread_p", line, "info", "turn_n"]]);
+    expect(rows.map(w => [w.label, w.detail, w.tone, w.turnId])).toEqual([["told thread thread_p", line, "notice", "turn_n"]]);
     expect(model.turns[0]).toMatchObject({ state: "completed", durationMs: 492_000, costUsd: 1.94 });
   });
 

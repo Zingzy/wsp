@@ -413,9 +413,9 @@ describe("serveRuntime golden wizard ops", () => {
     expect(prepared["builder"]).toMatchObject({ id: "m1", name: "default", kind: "desktop", screen: { streamUrl: "wss://stub/stream/m1" } });
     expect(backend.machines[0]!.spec).toMatchObject({ kind: "desktop", template: "default", envs: { ANTHROPIC_API_KEY: "k" } });
     expect(backend.machines[0]!.spec.labels).toMatchObject({ wsp: "1", "wsp-builder": "1" });
-    // The base stage's steps run first, the harness install is the last thing on the builder.
+    // The base stage's steps run first, the harness install is the last thing on the builder, under the harness guard.
     expect(backend.machines[0]!.execLog.filter(c => c.includes("nodejs.org/dist"))).toHaveLength(1);
-    expect(backend.machines[0]!.execLog.at(-1)).toBe("curl install");
+    expect(backend.machines[0]!.execLog.at(-1)).toMatch(/\nsetsid bash -c 'set -euo pipefail\n[^]*\ncurl install' &\n/);
     // the builder is not a workspace
     expect((await c.request("workspaces.list"))["workspaces"]).toEqual([]);
     expect(await store.list("builders")).toHaveLength(1);

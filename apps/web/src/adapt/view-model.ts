@@ -37,6 +37,9 @@ export type ToolLifecycleItemType =
 
 export type ProviderRequestKind = "command" | "file-read" | "file-change" | "mcp-elicitation";
 
+/** A row's tone picks its glyph and colours from one table; notice is a fact the runtime states (a cut, a line told), never an outcome. */
+export type WorkLogTone = "thinking" | "tool" | "notice" | "error";
+
 /** Which wire event produced a work row; the copied rows key chrome on it. */
 export type WorkLogSourceKind = "tool.started" | "tool.completed" | "reasoning" | "runtime.error" | "runtime.notify" | "runtime.resume";
 
@@ -54,7 +57,7 @@ export interface WorkLogEntry {
   /** The Bash tool's description: the harness's own sentence for the call, shown in place of the command and its state word. */
   readonly description?: string;
   readonly changedFiles?: ReadonlyArray<string>;
-  readonly tone: "thinking" | "tool" | "info" | "error";
+  readonly tone: WorkLogTone;
   readonly toolTitle?: string;
   readonly itemType?: ToolLifecycleItemType;
   readonly requestKind?: ProviderRequestKind;

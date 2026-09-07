@@ -202,7 +202,7 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
     `release="$(curl ${shellQuote(api)} || true)"`,
     tag === undefined ? `tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"` : `tag=${shellQuote(tag)}`,
     `urls="$(printf '%s\\n' "$release" | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
-    `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk)$' | head -1 || true)"`,
+    `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk|zst|tar\\.zst|json)$' | head -1 || true)"`,
     'if [ -n "$url" ]; then',
     '  asset="${url##*/}"',
     '  curl -o "$tmp/$asset" "$url"',
@@ -304,6 +304,10 @@ export interface RoadStep {
   env: readonly string[];
 }
 
+/** A script road's step is a whole script whose last line may be a cleanup, so the road runs it under set -e:
+ * without it a failed download reads as an install on a machine that already carries the tool. */
+const SHELL_STRICT = "set -euo pipefail";
+
 /** A package manager or a download finishes in a couple of minutes or is stuck; Homebrew, go, apt and a script may
  * build or configure for longer; cargo compiles every crate from source. Homebrew's retry count rides BREW_ENV; apt
  * clocks its own reads (two minutes and three tries by default); bun and go expose no knob. */
@@ -322,7 +326,7 @@ export const ROAD_STEPS: { readonly [K in RoadName]: RoadStep } = {
   release: { limitS: DOWNLOAD_S, retry: true, env: [CURL_NET] },
   vendor: { limitS: DOWNLOAD_S, retry: true, env: [CURL_NET] },
   apt: { limitS: MIXED_S, retry: false, env: [] },
-  script: { limitS: MIXED_S, retry: false, env: [NPM_NET, PIP_NET, UV_NET, CARGO_NET, CURL_NET] },
+  script: { limitS: MIXED_S, retry: false, env: [SHELL_STRICT, NPM_NET, PIP_NET, UV_NET, CARGO_NET, CURL_NET] },
 };
 
 /** The module that walks a road, typed to it. */

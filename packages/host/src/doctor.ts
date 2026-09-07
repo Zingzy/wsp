@@ -10,7 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, TOOLS_PATH, WSP_LABEL, isReserved, type Machine } from "@wsp/engine";
+import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, type Machine } from "@wsp/engine";
+import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir } from "./assets.js";
@@ -24,7 +25,22 @@ const execFileAsync = promisify(execFile);
 // preview edge (it dials eth0), so 0.0.0.0 is the whole point of this file.
 // PATH is set before the daemon loads, never inherited: a relaunch from the
 // guest's side arrives with a bare one (measured after an OOM kill, 2026-09-06).
-export const START_MJS = `process.env.PATH = ${JSON.stringify(TOOLS_PATH)};
+// The killer's score and the nice value are written here, on the daemon's own
+// pid, so every road that starts the daemon gives them; a start that may not
+// write one (not root, or no Linux /proc) says so in the log and runs on.
+export const START_MJS = `import { writeFileSync } from "node:fs";
+import { setPriority } from "node:os";
+process.env.PATH = ${JSON.stringify(TOOLS_PATH)};
+try {
+  writeFileSync("/proc/self/oom_score_adj", ${JSON.stringify(String(DAEMON_OOM_SCORE_ADJ))});
+} catch (e) {
+  console.error(\`oom_score_adj not set: \${e.message}\`);
+}
+try {
+  setPriority(${DAEMON_NICE});
+} catch (e) {
+  console.error(\`priority not set: \${e.message}\`);
+}
 const { OPEN_SOCKET_PATH, startDaemon } = await import("./dist/index.js");
 const d = await startDaemon({ host: "0.0.0.0", openSocketPath: OPEN_SOCKET_PATH });
 console.log(\`wsp-daemon listening on 0.0.0.0:\${d.port}\`);
@@ -451,7 +467,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
         try {
           return await rt.workspaces.create(spec);
         } catch (e) {
-          if ((e as { kind?: string }).kind !== "missing") throw e;
+          if (!isMissing(e)) throw e;
           io.log("golden snapshot is gone; rebuilding");
           const rebuilt = await buildGolden();
           return rt.workspaces.create({ ...spec, golden: rebuilt });

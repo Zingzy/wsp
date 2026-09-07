@@ -29,12 +29,33 @@ describe("scanProject", () => {
     expect(scan.candidates).toEqual([]);
   });
 
-  it("the toolchain pins name a tool and its version, in asdf's syntax and in mise's", async () => {
+  it("the toolchain pins name a tool and its version, in asdf's syntax and in mise's, and the pin file itself asks for mise", async () => {
     const asdf = await scanProject(project({ ".tool-versions": "# pinned\nnodejs 22.1.0\ngolang 1.24.0\n\nruby 3.3.5\n" }), PROJ);
-    expect(why(asdf)).toEqual({ node: ".tool-versions names nodejs 22.1.0", go: ".tool-versions names golang 1.24.0" });
-    expect(asdf.candidates).toEqual([{ id: "ruby", name: "ruby", why: ".tool-versions names ruby 3.3.5" }]);
+    expect(why(asdf)).toEqual({ node: ".tool-versions names nodejs 22.1.0", go: ".tool-versions names golang 1.24.0", ruby: ".tool-versions names ruby 3.3.5", mise: ".tool-versions needs mise" });
+    expect(asdf.candidates).toEqual([]);
     const mise = await scanProject(project({ "mise.toml": '[tools]\ngo = "1.24"\npython = ["3.12"]\n\n[env]\nGOFLAGS = "-mod=mod"\n' }), PROJ);
-    expect(why(mise)).toEqual({ go: "mise.toml names go 1.24", python: "mise.toml names python 3.12" });
+    expect(why(mise)).toEqual({ go: "mise.toml names go 1.24", python: "mise.toml names python 3.12", mise: "mise.toml needs mise" });
+  });
+
+  it("package.json dependencies: a package the project installs itself by npm is not a need of the machine; one whose row installs more than the package is", async () => {
+    const pkg = JSON.stringify({ dependencies: { react: "^19.0.0", "@railway/cli": "^4.0.0" }, devDependencies: { "@playwright/test": "^1.62.1", eslint: "^9.0.0", typescript: "^5.0.0", vercel: "^41.0.0" } });
+    const scan = await scanProject(project({ "package.json": pkg }), PROJ);
+    // eslint, typescript, vercel and the Railway CLI are npm globals in the catalog: the project's own install covers them.
+    // Playwright's row installs its Chromium and the browser's Debian packages, which no dependency brings.
+    expect(why(scan)).toEqual({ playwright: "package.json depends on @playwright/test ^1.62.1" });
+    // A dependency the catalog has no row for is the project's to install, never a custom row candidate.
+    expect(scan.candidates).toEqual([]);
+    const plain = await scanProject(project({ "package.json": JSON.stringify({ devDependencies: { playwright: "1.62.1" } }) }), PROJ);
+    expect(why(plain)).toEqual({ playwright: "package.json depends on playwright 1.62.1" });
+    // A client library shares its name with the server's tools: node-redis is not a need for redis-cli, the sqlite
+    // binding not one for the sqlite3 shell, and an npm package called chromium is not a browser.
+    const clients = await scanProject(project({ "package.json": JSON.stringify({ dependencies: { redis: "^4.7.0", sqlite: "^5.1.1", pg: "^8.0.0", chromium: "^3.0.0", bun: "^1.0.0" } }) }), PROJ);
+    expect(clients).toEqual({ dir: PROJ, rows: [], candidates: [] });
+  });
+
+  it("a workspace package's own package.json counts, under apps or packages, and says which one asked", async () => {
+    const scan = await scanProject(project({ "package.json": JSON.stringify({ private: true }), "apps/web/package.json": JSON.stringify({ devDependencies: { playwright: "1.62.1" } }), "packages/cli/package.json": JSON.stringify({ scripts: { release: "gh release create" } }), "apps/README.md": "# apps" }), PROJ);
+    expect(why(scan)).toEqual({ playwright: "apps/web/package.json depends on playwright 1.62.1", gh: "packages/cli/package.json scripts run gh" });
   });
 
   it("a workflow's setup actions and the tools its run steps call, inline and in a block", async () => {
@@ -68,11 +89,6 @@ describe("scanProject", () => {
     expect(why(scan)).toEqual({ pnpm: "packageManager pnpm@10.15.0" });
   });
 
-  it("a candidate takes its ecosystem's own spelling, whichever file named it first", async () => {
-    const scan = await scanProject(project({ ".tool-versions": "ruby 3.3.5\n", Gemfile: 'source "https://rubygems.org"\n' }), PROJ);
-    expect(scan.candidates).toEqual([{ id: "ruby", name: "Ruby", why: ".tool-versions names ruby 3.3.5" }]);
-  });
-
   it("a marker is read for its presence alone: a lockfile of megabytes, or bytes that are not text, is never opened", async () => {
     const host = project({ "package-lock.json": "{}", "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" });
     const scan = await scanProject(host, PROJ);
@@ -80,13 +96,11 @@ describe("scanProject", () => {
     expect(host.calls.filter(c => c.includes("lock"))).toEqual([]);
   });
 
-  it("a manifest the catalog has no row for is a candidate, not a row, and the first file to name a tool writes its line", async () => {
+  it("a Gemfile and a composer.json tick Ruby and PHP, and the first file to name a tool writes its line", async () => {
     const scan = await scanProject(project({ Gemfile: 'source "https://rubygems.org"\n', "composer.json": "{}", "package.json": JSON.stringify({ packageManager: "pnpm@10.1.0" }), "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" }), PROJ);
-    expect(why(scan)).toEqual({ pnpm: "packageManager pnpm@10.1.0" });
-    expect(scan.candidates).toEqual([
-      { id: "ruby", name: "Ruby", why: "Gemfile needs Ruby" },
-      { id: "php", name: "PHP", why: "composer.json needs PHP" },
-    ]);
+    expect(why(scan)).toEqual({ pnpm: "packageManager pnpm@10.1.0", ruby: "Gemfile needs Ruby", php: "composer.json needs PHP" });
+    expect(scan.rows.map(n => n.name)).toEqual(["pnpm", "Ruby 3.1 with bundler", "PHP 8.2 with Composer"]);
+    expect(scan.candidates).toEqual([]);
   });
 
   it("a folder with nothing to read, and one that is not there at all, ask for nothing", async () => {

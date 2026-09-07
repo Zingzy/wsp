@@ -39,7 +39,7 @@ describe("ptyEnv on a uid without a passwd row", () => {
 
   it("the pty falls back to bash, still a login shell, when there is no passwd row to read a shell from", () => {
     delete process.env["SHELL"];
-    expect(ptyLaunch({})).toMatchObject({ file: "bash", args: ["-l"] });
+    expect(ptyLaunch({}).args.slice(-2)).toEqual(["bash", "-l"]);
     expect(ptyLaunch({}).env).not.toHaveProperty("SHELL");
   });
 

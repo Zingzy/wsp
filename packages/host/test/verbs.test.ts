@@ -181,7 +181,8 @@ describe("wsp verbs over the host", () => {
     handle = undefined;
     backend.machines[0]!.killed = true; // deleted at the provider while no host ran
     await restartHost({ claude: claude.adapter });
-    const words = `machine ${alpha!.machineId} is gone at the provider: gone`;
+    const words = (await rt.workspaces.get(alpha!.id)).gone!;
+    expect(words).toMatch(new RegExp(`^machine ${alpha!.machineId} is gone at the provider: the record load found it gone at \\S+Z \\(404 gone\\)$`));
     const forked = await run("fork", "alpha");
     expect(forked.code).toBe(1);
     expect(forked.io.errors).toEqual([`wsp fork: Workspace machine is gone; rebuild it to fork (${words})`]);

@@ -7,7 +7,7 @@ import { APT_INDEX, APT_UPDATE, BASE_FLOOR, installAfter, smokeOf } from "@wsp/c
 import { fmtBytes, type GoldenBaseTool, type GoldenStage } from "@wsp/protocol";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { PATH_LINE, TOOLS_PATH, aptIndexStep, viaRoad, type ToolInstall } from "./golden-import.js";
+import { PATH_LINE, PROFILE_PATH_FILE, PROFILE_PATH_LINE, TOOLS_PATH, aptIndexStep, viaRoad, type ToolInstall } from "./golden-import.js";
 import { installTools, type ToolResult } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 
@@ -22,7 +22,9 @@ const withEnv = (cmd: string): string => `${PRELUDE}\n${cmd}`;
 /** The floor as the tools loop runs it: one guarded step per row in catalog order through the row's road, each after
  * the row the catalog says it runs on top of; the apt index is read once, before the first row that waits on it. */
 export function baseInstalls(): ToolInstall[] {
-  const out: ToolInstall[] = [];
+  // A thread's terminal is a login shell and the stages export their PATH per step, so without this file the
+  // terminal finds only what the image ships. Every golden gets it, whether or not Homebrew ever bootstraps.
+  const out: ToolInstall[] = [{ id: stepId("login-path"), label: "login shell PATH", manager: "script", cmd: withEnv(`${PATH_LINE}\n${PROFILE_PATH_LINE}`), shown: `the tools PATH in ${PROFILE_PATH_FILE}` }];
   for (const e of BASE_FLOOR) {
     const dep = installAfter(e);
     if (dep === APT_INDEX && !out.some(t => t.id === APT_STEP)) out.push(aptIndexStep(APT_STEP, withEnv(`${PATH_LINE}\n${APT_UPDATE}`)));

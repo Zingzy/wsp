@@ -187,15 +187,38 @@ describe("estimateDisk", () => {
     expect(estimateDisk([codex, pi], 0, TABLE).agents).toBe((455 + 165) * MIB);
   });
 
-  it("a manager the plan pulls in as a formula counts at the catalog's measurement, and so does the toolchain it needs", () => {
-    const rust = sizeBytes(catalogEntry("rust")!.size)!;
-    const est = estimateDisk([row({ id: "tools/cargo/bat", label: "bat" })], 0, new Map([["rust", { name: "rust", fullName: "rust", deps: [], bytes: 400 * MIB, macosOnly: false }]]));
+  it("a manager the plan pulls in as a formula counts that formula from this Mac, and so does the toolchain it needs", () => {
+    const est = estimateDisk([row({ id: "tools/pipx/black", label: "black" })], 0, new Map([["pipx", { name: "pipx", fullName: "pipx", deps: [], bytes: 400 * MIB, macosOnly: false }]]));
     expect(est.toolchain).toBe(BREW_TOOLCHAIN_BYTES);
+    expect(est.tools).toBe(400 * MIB);
+    expect(est.unknown).toEqual(["black"]);
+    expect(est.assumed).toBe(100 * MIB);
+    expect(est.total).toBe(BREW_TOOLCHAIN_BYTES + 400 * MIB + 100 * MIB);
+  });
+
+  it("a manager the catalog installs off Homebrew counts at the catalog's measurement, with no toolchain behind it", () => {
+    const rust = sizeBytes(catalogEntry("rust")!.size)!;
+    const est = estimateDisk([row({ id: "tools/cargo/bat", label: "bat" })], 0, TABLE);
+    expect(est.toolchain).toBe(0);
     expect(est.tools).toBe(rust);
     expect(est.unknown).toEqual(["bat"]);
-    expect(est.assumed).toBe(100 * MIB);
-    expect(est.total).toBe(BREW_TOOLCHAIN_BYTES + rust + 100 * MIB);
+    expect(est.total).toBe(rust + 100 * MIB);
   });
+
+  for (const formula of ["rust", "rustup"]) {
+    it(`a Mac's ${formula} formula for a manager's toolchain counts at the catalog's measurement, not this Mac's Cellar, and brings no toolchain`, () => {
+      const rust = sizeBytes(catalogEntry("rust")!.size)!;
+      const table: BrewTable = new Map([
+        [formula, { name: formula, fullName: formula, deps: ["llvm@21"], bytes: 3 * GIB, macosOnly: false }],
+        ["llvm@21", { name: "llvm@21", fullName: "llvm@21", deps: [], bytes: 2 * GIB, macosOnly: false }],
+      ]);
+      const est = estimateDisk([brew(formula), row({ id: "tools/cargo/bat", label: "bat" })], 0, table);
+      expect(est.toolchain).toBe(0);
+      expect(est.tools).toBe(rust);
+      expect(est.unknown).toEqual(["bat"]);
+      expect(est.total).toBe(rust + 100 * MIB);
+    });
+  }
 
   it("says by how much a recipe overshoots the room", () => {
     const huge: BrewTable = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 30 * GIB, macosOnly: false }]]);

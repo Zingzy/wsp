@@ -2,7 +2,8 @@
 import { createRuntime, memoryStore } from "@wsp/runtime";
 import { describe, expect, it } from "vitest";
 import { goldenRecipe } from "../src/cli.js";
-import { GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
+import { GOLDEN_SETUP, GOLDEN_SMOKE, ROAD_STEPS } from "@wsp/catalog";
+import { shellQuote } from "@wsp/protocol";
 import { stubBackend } from "./stub-backend.js";
 
 const ANTHROPIC = "sk-ant-x-fake-anthropic-key";
@@ -49,7 +50,9 @@ describe("host golden recipe", () => {
     // The base floor's steps come first; the df that closes the base stage and the setup are the last two.
     expect(builder.execLog[0]).toBe("rm -f /tmp/wsp-vault-*.tgz");
     expect(builder.runLog.some(s => s.includes("nodejs.org/dist"))).toBe(true);
-    expect(builder.execLog.slice(-2)).toEqual(["df -Pk /root | awk 'NR==2{print $4}'", GOLDEN_SETUP]);
+    expect(builder.execLog.at(-2)).toBe("df -Pk /root | awk 'NR==2{print $4}'");
+    // The setup runs under the harness guard with the road lines, the installer's text quoted whole inside it.
+    expect(builder.execLog.at(-1)).toContain(`setsid bash -c ${shellQuote([...ROAD_STEPS.script.env, GOLDEN_SETUP].join("\n"))} &`);
     expect(builder.spec).toMatchObject({ kind: "sandbox", onIdle: "kill", envs: { ANTHROPIC_API_KEY: ANTHROPIC } });
     expect(builder.spec.idleTimeoutMs).toBeGreaterThan(0);
 

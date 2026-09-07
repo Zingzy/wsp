@@ -243,6 +243,16 @@ describe("describing and sizing the delta", () => {
     ]);
   });
 
+  it("quotes a tool label that carries the comma these lines join their names with, added and updated alike", () => {
+    const pair = "tools/custom/swift-format, swiftlint";
+    const added = describeDiff(diffRecipes(snap([]), snap([row("tools", pair), row("tools", "tools/brew/just")])));
+    expect(added).toEqual([`add 2 tools: "swift-format, swiftlint", just`]);
+    // With the quoted label read as one word, the count and the entries the line splits into agree.
+    expect(added[0]!.replace(/"[^"]*"/g, "row").split(": ")[1]!.split(", ")).toHaveLength(2);
+    const updated = describeDiff(diffRecipes(snap([row("tools", pair, { version: "1.0" })]), snap([row("tools", pair, { version: "1.1" })])));
+    expect(updated).toEqual([`update 1 tool: "swift-format, swiftlint" (1.0 to 1.1)`]);
+  });
+
   it("small: no agent added, at most SMALL_TOOLS tool installs, at most SMALL_BYTES to upload", () => {
     const base = snap([]);
     const tools = (n: number) => Array.from({ length: n }, (_, i) => row("tools", `tools/brew/t${i}`));

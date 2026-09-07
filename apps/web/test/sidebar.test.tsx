@@ -6,6 +6,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
+import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
@@ -642,6 +643,19 @@ describe("gone machines", () => {
     expect(screen.queryByRole("button", { name: "New thread in old" })).toBeNull();
   });
 
+  it("a record still saying running whose status found the machine gone reads Gone with no rate and no countdown, even while the status carries both", async () => {
+    const gone = status(API, { machineState: "gone", reach: { state: "gone" }, idleAt: NOW + 17 * 60_000, rateUsdPerHour: 0.11, reason: "machine m_ws_a is gone at the provider: the status poll found it gone at 2026-09-06T10:21:04Z" });
+    await mount(fakeApi([API], [gone]), "api");
+    act(() => useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 60_000, accruedUsd: 0.0018, at: new Date(NOW).toISOString() }));
+    const row = rowOf("api");
+    await waitFor(() => expect(row.textContent).toContain("Gone"));
+    expect(row.textContent).not.toContain("/hr");
+    expect(row.textContent).not.toContain("naps");
+    expect(row.textContent).not.toContain("active");
+    expect(row.textContent).toContain("$0.0018 today");
+    expect(screen.getByRole("button", { name: "Rebuild api" }).getAttribute("title")).toBe(gone.reason!);
+  });
+
   it("a gone row offers forget beside the rebuild; confirming names what goes, calls the api once, and the row leaves on workspace.deleted", async () => {
     const api = await mount(fakeApi([OLD], [status(OLD)], [session("s1", "ws_c", { prompt: "fix the port list", status: "completed" })]), "old");
     await waitFor(() => expect(rowOf("old").textContent).toContain("Gone"));
@@ -667,6 +681,25 @@ describe("gone machines", () => {
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Forget" }));
     await waitFor(() => expect(screen.getByText(reason)).toBeDefined());
     expect(rowOf("old").textContent).toContain("Gone");
+  });
+});
+
+describe("a machine that stopped answering with memory near full", () => {
+  it("the row's second line is the short form with the last figures, and clears when the link is back", async () => {
+    const GiB = 1024 ** 3;
+    resetLive();
+    await mount(fakeApi([API], [status(API, { reach: { state: "unreachable" } })]), "api");
+    act(() => {
+      getLive("ws_a").feedStatus("live");
+      getLive("ws_a").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
+    });
+    const meta = () => rowOf("api").querySelector("[data-workspace-meta]")?.textContent ?? "";
+    expect(meta()).not.toContain("Out of memory");
+    act(() => getLive("ws_a").feedStatus("connecting"));
+    await waitFor(() => expect(meta()).toBe("out of memory, 3.6 of 3.9 GB"));
+    expect(rowOf("api").textContent).toContain("Unreachable");
+    act(() => getLive("ws_a").feedStatus("live"));
+    await waitFor(() => expect(meta()).not.toContain("Out of memory"));
   });
 });
 

@@ -3,7 +3,7 @@
 // against the recipe now, as rows to apply on top and rows the recipe stopped
 // asking for. Pure; golden.ts runs the result on a fork or on the kept builder.
 import { ROAD_MODULES } from "@wsp/catalog";
-import { INSTALLER_MOVED_LINE, MCP_ID_PREFIX, NO_ROAD_WORDS, pinMovedLine, roadMovedLine, versionMovedLine, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
+import { INSTALLER_MOVED_LINE, listedName, MCP_ID_PREFIX, NO_ROAD_WORDS, pinMovedLine, roadMovedLine, versionMovedLine, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
 import { isRoad } from "./tool-sizes.js";
 
 type Tick = RecipeDigest["ticks"][number];
@@ -185,7 +185,7 @@ export function describeDiff(d: RecipeDiff): string[] {
   for (const change of ["added", "changed", "removed"] as const) {
     group(change, d.files.filter(f => f.change === change).map(f => `~/${f.dest}`), "file");
     if (change === "changed") for (const f of d.files.filter(x => x.change === "missing")) lines.push(`kept on the golden, no longer on this computer: ~/${f.dest}`);
-    group(change, d.tools.filter(t => t.change === change).map(t => (change === "changed" ? `${t.label} (${t.why ?? versionMovedLine(t.from, t.to)})` : t.label)), "tool");
+    group(change, d.tools.filter(t => t.change === change).map(t => (change === "changed" ? `${listedName(t.label)} (${t.why ?? versionMovedLine(t.from, t.to)})` : listedName(t.label))), "tool");
     if (change !== "changed") {
       const agents = d.agents.filter(a => a.change === change);
       group(change, agents.filter(a => !a.id.startsWith(MCP_ID_PREFIX)).map(a => a.label), "agent");

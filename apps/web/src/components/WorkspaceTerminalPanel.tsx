@@ -67,7 +67,7 @@ function LinkedPanel({
   const status = useSyncExternalStore(fn => terms.onStatus(fn), () => terms.status());
   const labels = useMemo(() => terminalLabels(tabs), [tabs]);
   const lost = useMemo(() => lostTerminals(tabs), [tabs]);
-  const { pane, onWake } = useTerminalPane(workspaceId, status);
+  const { pane, hints, onWake } = useTerminalPane(workspaceId, status);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
   const terminalConfig = useTerminalViewportConfig();
   const activateTerminal = useRightPanelStore(s => s.activateTerminal);
@@ -98,6 +98,7 @@ function LinkedPanel({
       activeTerminalGroupId={surface.id}
       focusRequestId={0}
       pane={pane}
+      paneHints={hints}
       onWake={onWake}
       lostTerminalIds={lost}
       onSplitTerminal={() => split("horizontal")}

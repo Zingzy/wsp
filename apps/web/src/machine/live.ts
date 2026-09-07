@@ -5,8 +5,8 @@
 // whether the newest sample is current or the last one before the socket went.
 // A daemon that refuses sys.watch leaves its reason here, so the rows can say
 // the stream is unavailable instead of waiting for it.
-import { useSyncExternalStore } from "react";
-import type { DaemonLinkStatus, SysSample } from "@wsp/protocol";
+import { useCallback, useRef, useSyncExternalStore } from "react";
+import { memoryNearFull, type DaemonLinkStatus, type MemoryReading, type SysSample, type WorkspacePhase } from "@wsp/protocol";
 
 /** Two minutes at the daemon's two-second interval. */
 export const LIVE_WINDOW = 60;
@@ -74,4 +74,56 @@ export function useWorkspaceLive(workspaceId: string): LiveState {
     fn => getLive(workspaceId).onChange(fn),
     () => getLive(workspaceId).snapshot(),
   );
+}
+
+/** The last reading before the link went, when memory was near full: what the panes and the row say the drop was
+ * about instead of a bare not answering. Null while the link is live (the machine answers, whatever the figures),
+ * with no sample yet, with room left, or on a workspace that is not running (a nap closes the link too, and the
+ * figures from before it say nothing about now). */
+export function outOfMemoryReading(state: LiveState, phase: WorkspacePhase): MemoryReading | null {
+  const last = state.samples[state.samples.length - 1];
+  if (phase !== "running" || state.reach === "live" || last === undefined || !memoryNearFull(last.mem)) return null;
+  return { used: last.mem.used, total: last.mem.total, load1: last.load1 };
+}
+
+const sameReading = (a: MemoryReading | null, b: MemoryReading | null): boolean =>
+  a === b || (a !== null && b !== null && a.used === b.used && a.total === b.total && a.load1 === b.load1);
+
+/** The reading for one workspace, the same object while its figures hold: a two-second sample that changes nothing
+ * a pane says is not a render of that pane. */
+export function useOutOfMemoryReading(workspaceId: string, phase: WorkspacePhase): MemoryReading | null {
+  const last = useRef<MemoryReading | null>(null);
+  const subscribe = useCallback((fn: () => void) => getLive(workspaceId).onChange(fn), [workspaceId]);
+  const snapshot = useCallback(() => {
+    const next = outOfMemoryReading(getLive(workspaceId).snapshot(), phase);
+    if (!sameReading(last.current, next)) last.current = next;
+    return last.current;
+  }, [workspaceId, phase]);
+  return useSyncExternalStore(subscribe, snapshot);
+}
+
+/** The same over many workspaces, for the sidebar's rows: one subscription, and the same object while every row's
+ * figures hold. */
+export function useOutOfMemoryReadings(workspaces: ReadonlyArray<{ id: string; phase: WorkspacePhase }>): Readonly<Record<string, MemoryReading>> {
+  const last = useRef<Readonly<Record<string, MemoryReading>>>({});
+  const subscribe = useCallback(
+    (fn: () => void) => {
+      const offs = workspaces.map(w => getLive(w.id).onChange(fn));
+      return () => offs.forEach(off => off());
+    },
+    [workspaces],
+  );
+  const snapshot = useCallback(() => {
+    const next: Record<string, MemoryReading> = {};
+    for (const w of workspaces) {
+      const r = outOfMemoryReading(getLive(w.id).snapshot(), w.phase);
+      if (r !== null) next[w.id] = r;
+    }
+    const prev = last.current;
+    const ids = Object.keys(next);
+    if (ids.length === Object.keys(prev).length && ids.every(id => sameReading(prev[id] ?? null, next[id]!))) return prev;
+    last.current = next;
+    return next;
+  }, [workspaces]);
+  return useSyncExternalStore(subscribe, snapshot);
 }
