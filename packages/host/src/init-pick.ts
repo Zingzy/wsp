@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The screens of wsp init on the catalog: the agents (the six, ticked when
-// used on this Mac and wsp can run their threads), what they need (the whole table of agents and tools, one
-// row each with its size, over the totals and the disk line), and the sign-ins
-// and keys (logins that sign in on the machine after the build listed, keys
-// ticked to copy, and the wsp tools offered to each agent here whose config
-// the catalog knows). The recipe is the state: catalog ids with a tick each;
-// the collector's rows follow it.
+// used on this Mac and wsp can run their threads), what they need (the whole
+// table of agents and tools, one row each with its size, over the totals and
+// the disk line), and the sign-ins and keys (logins that sign in on the
+// machine after the build listed, keys ticked to copy, and the wsp tools
+// offered to each agent here whose config the catalog knows). The recipe is
+// the state: catalog ids with a tick each; the collector's rows follow it.
 import type { Readable, Writable } from "node:stream";
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type Size, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
 import { type LoginChoice, type Manifest, type ManifestEntry, floorApplies } from "@wsp/collect";
@@ -16,7 +16,7 @@ import { GUTTER, colourDepth, isTTY } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
 import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, scannedTicks, withScanned } from "./init-also.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
-import { BASE_GROUP, FLOOR_LINE, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
+import { BASE_GROUP, FLOOR_LINE, agentRows, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
 import { hasLogin, signInFor, type SignIn } from "./signin-table.js";
 import { SIGN_IN_CHOICES, SIGN_IN_WORDS, signInChoice } from "./signin-words.js";
@@ -369,7 +369,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
     };
     switch (screen) {
       case "agents": {
-        const rows = recipeTable(recipe, CATALOG_AGENTS);
+        const rows = agentRows(recipe);
         const r = await tableScreen({
           title: AGENTS_TITLE,
           top: AGENTS_TOP,

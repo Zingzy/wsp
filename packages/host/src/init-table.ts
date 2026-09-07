@@ -3,7 +3,7 @@
 // with its tick, why it is here in the words the person's own machine gives,
 // and the size its install downloads. wsp recipe prints it as text; wsp init's
 // agents and tools screens are the same rows as a list.
-import { CATALOG, type CatalogEntry, sizeBytes } from "@wsp/catalog";
+import { CATALOG, CATALOG_AGENTS, type CatalogEntry, sizeBytes } from "@wsp/catalog";
 import { HEAVY_USED_FLOOR, USED_FLOOR, floorApplies, isHeavy, meetsUsedFloor } from "@wsp/collect";
 import { customRows, fmtBytes, plural, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { GREY, GUTTER, accent, grey } from "./init-layout.js";
@@ -111,6 +111,12 @@ export function recipeTable(recipe: Recipe, catalog: readonly CatalogEntry[] = C
     const group = [...rows, ...added].filter(r => r.group === g);
     return [...group.filter(r => r.heavy), ...group.filter(r => !r.heavy)];
   });
+}
+
+/** The agents screen's rows: the ticked first, then by sessions here, the rest as the table orders them, so the agent
+ * wsp drives sits on top and the cursor starts on it. The tools screen keeps the table's own heavy-first order. */
+export function agentRows(recipe: Recipe): TableRow[] {
+  return recipeTable(recipe, CATALOG_AGENTS).sort((a, b) => Number(b.on) - Number(a.on) || sessionsOf(recipe, b.id) - sessionsOf(recipe, a.id));
 }
 
 /** A row's size, or that the catalog has none for it. */

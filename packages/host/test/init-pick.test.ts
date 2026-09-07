@@ -34,7 +34,7 @@ import {
 } from "../src/init-pick.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { LATER_LINE, answerOf } from "../src/init-select.js";
-import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, HERE_GROUP, USED_GROUP, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
+import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, HERE_GROUP, USED_GROUP, agentRows, groupTotal, recipeTable, totalsLine } from "../src/init-table.js";
 import { THREAD_AGENTS } from "../src/thread-agents.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { HOME, claudeLine, fakeHost } from "./recipe-fixture.js";
@@ -61,6 +61,19 @@ describe("the agents screen", () => {
     expect(items.every(i => i.group === undefined && i.lock === undefined)).toBe(true);
     expect(items.find(i => i.label === "Codex")!.detail[0]).toBe("installs, but wsp cannot run its threads yet");
     expect(items.find(i => i.label === "Claude Code")!.detail).toEqual(["on this Mac; its config (39.1 KB) comes along", "about 208.0 MB installed on the machine (measured 2026-09-05)"]);
+  });
+
+  it("puts the ticked agents first, then the most used, then the rest as the table has them, so the cursor starts on the one wsp drives", () => {
+    // Codex is heavier and ran more sessions than Claude Code, but it is off; OpenCode is here and never ran.
+    const here = { kind: "installed" as const, paths: [], bin: true };
+    const recipe: Recipe = {
+      ...RECIPE,
+      histories: [{ agent: "claude", state: "read", sessions: 3, calls: 40 }, { agent: "codex", state: "read", sessions: 5, calls: 90 }],
+      rows: [...RECIPE.rows.filter(r => r.kind !== "agent"), { id: "claude", kind: "agent", on: true, source: here }, { id: "codex", kind: "agent", on: false, source: here }, { id: "opencode", kind: "agent", on: false, source: here }],
+    };
+    expect(agentRows(recipe).map(r => [r.name, r.on])).toEqual([["Claude Code", true], ["Codex", false], ["OpenCode", false], ["Hermes Agent", false], ["Gemini CLI", false], ["Pi", false]]);
+    // The tools table keeps heavy rows first inside a group: this order is the agents screen's alone.
+    expect(recipeTable(recipe, CATALOG_AGENTS).map(r => r.name)).toEqual(["Codex", "Claude Code", "OpenCode", "Hermes Agent", "Gemini CLI", "Pi"]);
   });
 });
 
@@ -234,7 +247,7 @@ describe("the agents screen drawn", () => {
       },
     });
     const recipe = await computeRecipe(host, { threadAgents: THREAD_AGENTS, now: () => new Date("2026-09-06T03:00:00Z") });
-    const rows = recipeTable(recipe, CATALOG_AGENTS);
+    const rows = agentRows(recipe);
     const o = streams();
     const p = tableScreen({
       title: AGENTS_TITLE,
@@ -258,10 +271,14 @@ describe("the agents screen drawn", () => {
     expect(t).toMatch(/○ OpenCode\s+installed\s+installed here, never used\s+673\.0 MB\n/);
     expect(t).toMatch(/○ Hermes Agent\s+catalog\s+not installed here/);
     expect(t).toContain("On: 1 agent, 208.0 MB");
-    // The row under the cursor says why it installs but stays off.
+    // Claude Code, the one ticked, is the first row and the cursor starts on it, so its detail has no note yet.
+    expect(t.indexOf("● Claude Code")).toBeLessThan(t.indexOf("○ Codex"));
+    expect(t).not.toContain("installs, but wsp cannot run its threads yet");
+    // Down lands on Codex, and only the frame drawn after the keypress carries its note.
+    const before = o.raw().length;
     o.input.write(KEY.down);
     await settle();
-    expect(o.text()).toContain("installs, but wsp cannot run its threads yet");
+    expect(stripVTControlCharacters(o.raw().slice(before))).toContain("installs, but wsp cannot run its threads yet");
     o.input.write(KEY.enter);
     const r = await p;
     expect(r.kind === "next" && [...r.ticks]).toEqual(["claude"]);
