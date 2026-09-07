@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
-import { APT_INDEX, APT_UPDATE, BASE_FLOOR, BREW_ENV, CURL_NET, NET_READ_S, NET_RETRIES, ROAD_STEPS, CATALOG, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, DEFAULT_AGENT, GCLOUD, HISTORY_FORMATS, HOMEBREW_STEP, KUBECTL, LINUX_CASKS, LOGIN_ROWS, PLAYWRIGHT, ROADS, ROAD_MODULES, SIGN_IN_ROWS, agentName, baseEntryFor, baseNote, catalogEntry, catalogToolFor, catalogToolForDependency, guestEnv, hasLogin, installAfter, installLine, keysIdOf, keysRowOf, loginIdOf, loginRow, roadModule, sizeBytes, smokeOf, SIZE_METHODS, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { pinMismatchLine } from "@wsp/protocol";
+import { agentName, APT_INDEX, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -98,6 +99,31 @@ describe("catalog", () => {
         }
       }
     }
+  });
+
+  it("one rule says which pin stands and one line checks it: the sum, the tag and both sums in the failure, on the release road and the vendor's", () => {
+    const pin = { tag: "v2.86.0", sha256: "d".repeat(64) };
+    // A pin stands while the road names its tag or none; a version past it, or no pin, leaves nothing to check.
+    expect(standingPin({ road: "release", repo: "cli/cli", pin })).toEqual(pin);
+    expect(standingPin({ road: "release", repo: "cli/cli", version: "v2.86.0", pin })).toEqual(pin);
+    expect(standingPin({ road: "release", repo: "cli/cli", version: "v2.87.0", pin })).toBeUndefined();
+    expect(standingPin({ road: "release", repo: "cli/cli" })).toBeUndefined();
+    expect(standingPin({ road: "vendor", cask: KUBECTL, pin })).toEqual(pin);
+    expect(standingPin({ road: "npm", package: "bun", version: "1.4.0" })).toBeUndefined();
+    // The road without its record is what a first run installs: the current release, no check.
+    expect(unpinned({ road: "release", repo: "cli/cli", pin })).toEqual({ road: "release", repo: "cli/cli" });
+    expect(unpinned({ road: "release", repo: "cli/cli", version: "v2.86.0", pin })).toEqual({ road: "release", repo: "cli/cli", version: "v2.86.0" });
+    expect(unpinned({ road: "npm", package: "bun" })).toEqual({ road: "npm", package: "bun" });
+    // The failure names what came down, at which tag, then the recorded sum and the served one, each cut to 12 characters so the reason line keeps both.
+    expect(pinCheckLine("$asset", "$tag", pin.sha256)).toBe(`[ "$sum" = '${"d".repeat(64)}' ] || { echo "Error: $asset at $tag does not match the checksum recorded on its first install: recorded dddddddddddd, served \${sum:0:12}" >&2; exit 1; }`);
+    const release = roadModule({ road: "release", repo: "cli/cli", pin }).install({ road: "release", repo: "cli/cli", pin }, "gh") as string;
+    expect(release).toContain("tag='v2.86.0'");
+    expect(release).toContain(pinCheckLine("$asset", "$tag", pin.sha256));
+    expect(KUBECTL.install(undefined, pin)).toContain(pinCheckLine("kubectl", "$ver", pin.sha256));
+    expect(GCLOUD.install(undefined, pin)).toContain(pinCheckLine("$pkg", "$ver", pin.sha256));
+    expect(KUBECTL.install(undefined, undefined)).not.toContain('[ "$sum" =');
+    // The words are the protocol's, so the reason line a person reads is the one the format test pins.
+    expect(pinCheckLine("x", "y", "z")).toContain(pinMismatchLine("x", "y", "z", "${sum:0:12}"));
   });
 
   it("proves every browser or device sign-in with a status check", () => {
@@ -248,7 +274,8 @@ describe("catalog", () => {
     const tagged = line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", go: "github.com/spoo-me/spoo-cli" }, "spoo");
     expect(tagged).toContain(`release="$(curl 'https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1' || true)"`);
     expect(tagged).not.toContain("tag=\"$(");
-    expect(tagged).toContain(`echo "WSP_ROAD release \${asset:-$url} $sum "'v0.4.1'`);
+    expect(tagged).toContain("tag='v0.4.1'");
+    expect(tagged).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
     // A bare module goes in at the tag; one that carries its own version keeps it; a road with none has no go branch.
     expect(tagged).toContain("go install 'github.com/spoo-me/spoo-cli@v0.4.1'");
     expect(tagged).toContain(`echo "Error: release "'v0.4.1'" of "'spoo-me/spoo-cli'" has no Linux build, and go is not on the machine" >&2`);
@@ -275,6 +302,9 @@ describe("catalog", () => {
     expect([line(gcloud), off(gcloud), ROAD_MODULES.vendor.bin!(gcloud)]).toEqual([GCLOUD.install("575.0.0", undefined), { cmd: GCLOUD.uninstall }, "gcloud"]);
     const kubectl: InstallRoad = { road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "c".repeat(64) } };
     expect(line(kubectl)).toBe(KUBECTL.install(undefined, { tag: "v1.37.0", sha256: "c".repeat(64) }));
+    // A vendor pin whose version moved on is not the cask's to check: the cask gets none, so a first install records anew.
+    expect(line({ ...kubectl, version: "v1.38.0" })).toBe(KUBECTL.install("v1.38.0", undefined));
+    expect(line({ ...kubectl, version: "v1.38.0" })).not.toContain('[ "$sum" =');
     // apt rows wait on the one index read; purge takes what the package alone pulled in.
     const apt: InstallRoad = { road: "apt", packages: ["neovim"] };
     expect([line(apt), off(apt), ROAD_MODULES.apt.after]).toEqual(["export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq neovim", { cmd: "export DEBIAN_FRONTEND=noninteractive\napt-get purge -y -qq neovim && apt-get autoremove -y -qq --purge" }, APT_INDEX]);

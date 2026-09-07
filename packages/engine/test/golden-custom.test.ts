@@ -127,20 +127,20 @@ describe("a recipe's rows outside the catalog in its digest", () => {
   const entries = [row({ id: "tools/brew/fd" })];
 
   it("pin the golden: adding one, changing its line or dropping it is another golden", () => {
-    const none = recipeHash(recipeDigest(entries));
-    const one = recipeHash(recipeDigest(entries, [], [just]));
-    const other = recipeHash(recipeDigest(entries, [], [{ ...just, install: ["apt-get install -y just"] }]));
+    const none = recipeHash(recipeDigest(entries, [], [], new Map()));
+    const one = recipeHash(recipeDigest(entries, [], [just], new Map()));
+    const other = recipeHash(recipeDigest(entries, [], [{ ...just, install: ["apt-get install -y just"] }], new Map()));
     expect(new Set([none, one, other]).size).toBe(3);
-    expect(recipeHash(recipeDigest(entries, [], [just, ruff]))).toBe(recipeHash(recipeDigest(entries, [], [ruff, just])));
+    expect(recipeHash(recipeDigest(entries, [], [just, ruff], new Map()))).toBe(recipeHash(recipeDigest(entries, [], [ruff, just], new Map())));
   });
 
   it("a check that changed alone is not a change to the machine", () => {
-    expect(recipeHash(recipeDigest(entries, [], [just]))).toBe(recipeHash(recipeDigest(entries, [], [{ ...just, check: "just --version" }])));
+    expect(recipeHash(recipeDigest(entries, [], [just], new Map()))).toBe(recipeHash(recipeDigest(entries, [], [{ ...just, check: "just --version" }], new Map())));
   });
 
   it("read as an added, changed or removed tool when a later run is diffed against the golden's own digest", () => {
-    const before = recipeDigest(entries, [], [just]);
-    const after = recipeDigest(entries, [], [{ ...just, install: ["apt-get install -y just"] }, ruff]);
+    const before = recipeDigest(entries, [], [just], new Map());
+    const after = recipeDigest(entries, [], [{ ...just, install: ["apt-get install -y just"] }, ruff], new Map());
     expect(diffRecipes(before, after).tools).toEqual([
       { id: "tools/custom/just", label: "just", change: "changed", from: "brew install just", to: "apt-get install -y just" },
       { id: "tools/custom/ruff", label: "ruff", change: "added", to: "uv tool install ruff" },

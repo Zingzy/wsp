@@ -965,6 +965,20 @@ describe("golden import stages", () => {
     expect(stages).toContain(`installing-tools:2 installed (GitHub CLI from its release (${UNMEASURED_ROAD})); caches swept; 2.9 GB free`);
   });
 
+  it("the tools stage stamps the pin a release install recorded on the ledger's digest, so the sealed version says which release the row is fixed to", async () => {
+    const { backend, fetch } = backendFor([["repos/cli/cli/releases/latest", { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.86.0\n`, stderr: "" }]]);
+    const plan = toolInstallsFor([{ rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" }]);
+    const recipe: RecipeDigest = { ticks: [{ id: "agents/claude" }, { id: "tools/catalog/gh", road: "release", installer: "i".repeat(64) }], files: [] };
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ tools: plan.installs, recipe }) });
+    expect(builder.import?.recipe?.ticks).toEqual([{ id: "agents/claude" }, { id: "tools/catalog/gh", road: "release", installer: "i".repeat(64), pin: { tag: "v2.86.0", sha256: "b".repeat(64) } }]);
+    // The digest handed in is left as the caller planned it.
+    expect(recipe.ticks[1]).not.toHaveProperty("pin");
+    // A road that printed no sum, or a tool that did not install, stamps nothing.
+    const { backend: b2, fetch: f2 } = backendFor([["repos/cli/cli/releases/latest", { exitCode: 0, stdout: "WSP_ROAD go github.com/cli/cli/v2/cmd/gh@latest\n", stderr: "" }]]);
+    const viaGo = await prepareBuilder({ backend: b2, setup: "true", fetch: f2, import: importOf({ tools: plan.installs, recipe }) });
+    expect(viaGo.import?.recipe).toEqual(recipe);
+  });
+
   it("a catalog go row beside a go row on the guest: Homebrew installs go once, the go row runs after it, and the tally counts each install once", async () => {
     const { backend, cmds, fetch } = backendFor();
     const plan = toolInstallsFor([
@@ -2086,16 +2100,16 @@ describe("golden import stages", () => {
     const entry = (rung: string, id: string, over: Partial<RecipeEntry> = {}): RecipeEntry => ({ rung, id, label: id.slice(id.lastIndexOf("/") + 1), paths: [], bytes: 0, default: "bring", bring: true, ...over });
     const planOf = (rows: RecipeEntry[], recipeHash: string, results: ImportResult[]): GoldenImport => ({
       recipeHash,
-      recipe: recipeDigest(rows),
+      recipe: recipeDigest(rows, [], [], new Map()),
       tools: toolInstallsFor(rows, ROAD_TABLE).installs,
       agents: [],
       onResult: r => void results.push(r),
     });
     /** As wsp init plans an update: the rows the diff names, planned like a first build, hashed as the whole recipe. */
     const deltaBetween = (from: RecipeEntry[], to: RecipeEntry[], recipeHash: string, results: ImportResult[] = []): GoldenDelta => {
-      const diff = diffRecipes(recipeDigest(from), recipeDigest(to));
+      const diff = diffRecipes(recipeDigest(from, [], [], new Map()), recipeDigest(to, [], [], new Map()));
       const rows = rowsToApply(diff);
-      return { import: { ...planOf(to.filter(e => rows.has(e.id)), recipeHash, results), recipe: recipeDigest(to) }, retired: retiredBy(diff), retiredOnImage: retiredBy(diff) };
+      return { import: { ...planOf(to.filter(e => rows.has(e.id)), recipeHash, results), recipe: recipeDigest(to, [], [], new Map()) }, retired: retiredBy(diff), retiredOnImage: retiredBy(diff) };
     };
 
     it("a binary row toggled after the seal: ticked, the next version installs it; unticked, the version after retires it and leaves it on the image; a Homebrew formula and a road tool each way", async () => {
@@ -2149,7 +2163,7 @@ describe("golden import stages", () => {
       // The lineage carries what v3's image holds that its recipe does not ask for.
       expect(v3.version.retired).toEqual([{ id: "tools/brew/gh", name: "gh" }, { id: "tools/brew/zingzy/tap/diskbloom", name: "diskbloom" }]);
       expect(v2.version.retired).toBeUndefined();
-      expect(b3.import).toEqual({ recipeHash: "h3", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "true", recipe: recipeDigest(base) });
+      expect(b3.import).toEqual({ recipeHash: "h3", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "true", recipe: recipeDigest(base, [], [], new Map()) });
     });
 
     it("every retired row is in the result beside what the delta installed, so the run's list says what the image still carries", async () => {

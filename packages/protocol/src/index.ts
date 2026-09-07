@@ -815,13 +815,32 @@ export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
 export const LoginChoice = z.enum(LOGIN_CHOICES);
 export type LoginChoice = z.infer<typeof LoginChoice>;
 
+/** What the first install of a release recorded: the tag it fetched and the asset's sha256. The one shape for the
+ * recipe row that carries it, the collector's row, the catalog road that checks it and the tick the seal writes. */
+export const ToolPin = z.object({ tag: z.string().min(1), sha256: z.string().min(1) });
+export type ToolPin = z.infer<typeof ToolPin>;
+
 /** What a golden is built from, as its builder records it: every ticked row
- * with its login answer and tool pin, and every planned path with a digest of
- * the bytes that travel. Two recipes with equal digests build the same golden;
- * the hash a builder carries is this object's, so a later run can say what
- * changed instead of only that something did. */
+ * with its login answer, tool pin and install road, and every planned path
+ * with a digest of the bytes that travel. Two recipes with equal digests build
+ * the same golden; the hash a builder carries is this object's, so a later run
+ * can say what changed instead of only that something did. */
 export const RecipeDigest = z.object({
-  ticks: z.array(z.object({ id: z.string(), choice: LoginChoice.optional(), version: z.string().optional() })),
+  ticks: z.array(
+    z.object({
+      id: z.string(),
+      choice: LoginChoice.optional(),
+      /** The version the row installs: the laptop's, or the one its road reads for it (a tap formula's release tag). */
+      version: z.string().optional(),
+      /** A tools row's install road by name, and the sha256 of the lines that road runs before any recorded pin: a
+       * road that installs differently under the same id is a changed row. */
+      road: z.string().optional(),
+      installer: z.string().optional(),
+      /** The release a tools row is fixed to while its recorded pin stands. The build that records a pin stamps it
+       * here, so the recipe carrying the same pin reads as no change; it never enters the hash. */
+      pin: ToolPin.optional(),
+    }),
+  ),
   /** The computer's login shell by name, when a shell row is ticked: it decides which shell the machine logs into. */
   login: z.string().optional(),
   /** A volatile entry (its tool rewrites it, or it is a Keychain value the machine gets rendered) is recorded but never hashed. */
@@ -850,6 +869,9 @@ export const RecipeRow = z.object({
   source: RecipeSource,
   size: z.number().int().nonnegative().optional(),
   signIn: LoginChoice.optional(),
+  /** Only on a tool installed from a release: what its first install fetched and hashed, written by the build that
+   * recorded it. The next build installs that tag and fails the row when the download's sum is not this one. */
+  pin: ToolPin.optional(),
 });
 export type RecipeRow = z.infer<typeof RecipeRow>;
 
