@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The machine surface of the right panel: facts, live utilisation, spend,
 // lineage with rollback, pause, wake, upgrade, rebuild and forget for one
-// workspace's machine.
+// workspace's machine. Pause, wake, rebuild, forget and copy id read the
+// workspace registry; the tab keeps its own confirmations for the two that ask.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { runAction } from "../../actions/contextMenu.js";
+import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
+import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
+import { useWorkspaceVerbs } from "../../actions/verbs.js";
+import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
 import { LINEAGE_MARKS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, imageMoveRefusal, isBilling, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
@@ -75,9 +81,8 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
 
 function Header({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
   const machineId = status?.machineId ?? workspace.machineId;
-  const copy = (): void => {
-    void navigator.clipboard?.writeText(machineId).catch(() => {});
-  };
+  const verbs = useWorkspaceVerbs();
+  const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), verbs), "copy-id");
   return (
     <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
       <PhaseDot workspace={workspace} status={status} />
@@ -86,7 +91,7 @@ function Header({ workspace, status }: { workspace: WorkspaceView; status: Works
         <span className="max-w-28 truncate" title={machineId} data-k="machine-id">
           {machineId}
         </span>
-        <Button size="icon-micro" variant="ghost-muted" aria-label="Copy machine id" onClick={copy}>
+        <Button size="icon-micro" variant="ghost-muted" aria-label={copy.title} onClick={() => void runAction(copy)}>
           <CopyIcon />
         </Button>
       </span>
@@ -203,7 +208,7 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
           {biggerSizeLine(status.size, capabilities.sizes)}
         </p>
       )}
-      {rebuild && <Rebuild workspace={workspace} />}
+      {rebuild && <Rebuild workspace={workspace} status={status} />}
       <p className="mt-1.5 text-[11px] text-muted-foreground/70">The idle window is fixed when a workspace is created.</p>
       {capabilities?.containers === false && (
         <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="containers">
@@ -226,16 +231,20 @@ function useClock(ticking: boolean): number {
   return now;
 }
 
-function Rebuild({ workspace }: { workspace: WorkspaceView }) {
+function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
   const api = useStore(s => s.api);
+  const verbs = useWorkspaceVerbs();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // The tab asks before it rebuilds, so its registry entry opens the dialog; the dialog's own button calls the api and
+  // names a client without the verb.
+  const action = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), { ...verbs, rebuild: async () => setOpen(true) }), "rebuild");
 
   const rebuild = async (): Promise<void> => {
     setOpen(false);
     if (!api?.rebuild) {
-      setNote("This client cannot rebuild machines.");
+      setNote(CLIENT_CANNOT_REBUILD);
       return;
     }
     setBusy(true);
@@ -252,8 +261,8 @@ function Rebuild({ workspace }: { workspace: WorkspaceView }) {
 
   return (
     <div className="mt-2 flex flex-col gap-1.5">
-      <Button size="sm" variant="outline" className={WARN_BUTTON} disabled={busy} aria-label={`rebuild ${workspace.name}`} onClick={() => setOpen(true)}>
-        {busy ? "Rebuilding…" : "Rebuild"}
+      <Button size="sm" variant="outline" className={WARN_BUTTON} disabled={busy || action.refusal !== null} title={action.refusal ?? action.hint ?? undefined} aria-label={rowLabelOf(action)} onClick={() => void runAction(action)}>
+        {busy ? "Rebuilding…" : action.buttonWord}
       </Button>
       {note && (
         <p className="text-[11px] text-muted-foreground" data-k="rebuild-note">
@@ -732,16 +741,17 @@ function LineageNote({ k, label, text }: { k: string; label: string; text: strin
 }
 
 function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; status: WorkspaceStatus | null; upgrade: Upgrade }) {
-  const toggle = useStore(s => s.toggle);
+  const verbs = useWorkspaceVerbs();
   const capabilities = useCapabilities();
   const sessions = useStore(s => s.sessions[workspace.id]);
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<MachineSizeOffer | null>(null);
   const [forgetting, setForgetting] = useState(false);
-  const running = workspace.phase === "running";
-  const waking = workspace.phase === "waking";
-  const pausing = workspace.phase === "pausing";
   const gone = workspace.phase === "gone";
+  // The tab's forget opens its own dialog, in place of the request the sidebar answers; the dialog names a client without the verb.
+  const actions = resolveActions(workspaceActions, workspaceTarget(workspace, status), { ...verbs, forget: () => setForgetting(true) });
+  const phase = actionById(actions, "phase");
+  const forget = actionById(actions, "forget");
   // Backend fact, not a probe: a provider that cannot resize gets no picker at all.
   const canResize = capabilities?.resize === true;
   const options = status && canResize && capabilities ? upgradeOptions(status.size, capabilities.sizes) : [];
@@ -766,23 +776,24 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
             variant="outline"
             size="sm"
             className={cn("flex-1", WARN_BUTTON)}
-            aria-label={`forget ${workspace.name}`}
-            title="The machine is gone; drop the workspace from this computer"
-            onClick={() => setForgetting(true)}
+            disabled={forget.refusal !== null}
+            aria-label={rowLabelOf(forget)}
+            title={forget.refusal ?? forget.hint ?? undefined}
+            onClick={() => void runAction(forget)}
           >
-            Forget
+            {forget.buttonWord}
           </Button>
         ) : (
           <Button
             variant="outline"
             size="sm"
             className="flex-1"
-            disabled={waking || pausing}
-            aria-label={`${running ? "pause" : "wake"} ${workspace.name}`}
-            title={running ? "Suspend the VM and keep the disk" : "Boot the VM from its disk"}
-            onClick={() => void toggle(workspace.id)}
+            disabled={phase.refusal !== null}
+            aria-label={rowLabelOf(phase)}
+            title={phase.refusal ?? phase.hint ?? undefined}
+            onClick={() => void runAction(phase)}
           >
-            {running ? "Pause" : waking ? "Waking…" : pausing ? "Pausing…" : "Wake"}
+            {phase.buttonWord}
           </Button>
         )}
         <Button

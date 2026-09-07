@@ -115,7 +115,9 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, onPickHa
         data-value={model?.value}
         data-harness={catalog.harness}
       >
-        <HarnessMark harness={catalog.harness} label={catalog.label} className="size-3.5" />
+        <span className="inline-flex text-foreground">
+          <HarnessMark harness={catalog.harness} label={catalog.label} className="size-3.5" />
+        </span>
         <span className="truncate">{label}</span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </PopoverTrigger>

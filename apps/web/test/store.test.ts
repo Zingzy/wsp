@@ -115,6 +115,21 @@ describe("the workspace the address opens on", () => {
     useStore.setState({ selectedId: "ws_a" });
     expect(await refreshed([view("ws_a"), view("ws_b")])).toBe("ws_a");
   });
+
+  it("a thread link opens that thread when the list carries it; a thread the list does not carry falls back to the workspace with a word", async () => {
+    const thread: SessionView = { id: "s1", workspaceId: "ws_b", harness: "claude", status: "completed", threadId: "thr_1", prompt: "hello" };
+    hash("#w/ws_b/t/thr_1");
+    const { api } = fakeApi([view("ws_a"), view("ws_b")], [thread]);
+    useStore.setState({ api });
+    await useStore.getState().refresh();
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId, useStore.getState().toast]).toEqual(["ws_b", "thr_1", null]);
+
+    useStore.setState({ selectedId: null, selectedThreadId: null });
+    hash("#w/ws_b/t/thr_nope");
+    await useStore.getState().refresh();
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_b", null]);
+    expect(useStore.getState().toast).toBe("No thread thr_nope in this workspace; opened the workspace instead");
+  });
 });
 
 describe("store creations", () => {

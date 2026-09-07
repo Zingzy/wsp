@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The palette container: one dialog over the copied content and results,
 // items from the store's workspaces and sessions, opened through the bus.
-// Actions run the same shell commands the shortcuts do.
+// The workspace rows come from the workspace registry, so they run what the
+// sidebar's buttons and menus run.
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { deriveSidebarProjects } from "../../adapt/index.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
 import { useSelectedWorkspaceId, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
-import { goToAdjacentWorkspace, goToWorkspace, showTerminal } from "../../shell/shellCommands.js";
-import { requestNewThread, requestNewWorkspace } from "../../shell/shellRequests.js";
+import { goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
+import { requestNewWorkspace } from "../../shell/shellRequests.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
 import { useSidebar } from "../ui/sidebar.js";
 import {
@@ -37,10 +39,9 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
   const select = useStore(s => s.select);
-  const togglePhase = useStore(s => s.toggle);
   const selectedId = useSelectedWorkspaceId();
-  const openSurface = useRightPanelStore(s => s.open);
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
+  const verbs = useWorkspaceVerbs();
 
   useEffect(
     () =>
@@ -62,28 +63,16 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       selectWorkspace: goToWorkspace,
       selectThread: select,
       newWorkspace: requestNewWorkspace,
-      newThread: workspaceId => {
-        select(workspaceId);
-        requestNewThread({ workspaceId });
-      },
-      openTerminal: showTerminal,
-      openBrowser: workspaceId => openSurface(workspaceId, "preview"),
-      openMachine: workspaceId => openSurface(workspaceId, "machine"),
-      togglePhase,
-      rebuild: async workspaceId => {
-        if (!api?.rebuild) return;
-        await api.rebuild(workspaceId);
-      },
       toggleSidebar,
       toggleRightPanel,
       nextWorkspace: () => goToAdjacentWorkspace(1),
       previousWorkspace: () => goToAdjacentWorkspace(-1),
     }),
-    [api, openSurface, select, toggleRightPanel, togglePhase, toggleSidebar],
+    [select, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, canRebuild: api?.rebuild !== undefined, handlers }),
-    [api, handlers, projects, query, selectedId],
+    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, handlers, verbs }),
+    [api, handlers, projects, query, selectedId, verbs],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {
