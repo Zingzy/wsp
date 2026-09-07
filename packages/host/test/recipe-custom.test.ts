@@ -107,15 +107,17 @@ describe("the recipe verb's flags", () => {
     expect(lines).toEqual([]);
   });
 
+  // The id is one no package manager carries: --add reads what this computer's managers have and refuses a package
+  // that is already a row of its own, so a real formula's name here would pass or fail with the machine's Brewfile.
   it("writes what --add named into the recipe it mints, reading an empty home and never this computer's", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-recipe-cli-"));
     dirs.push(dir);
     const out = join(dir, "recipe.json");
-    expect(await withHome(dir, () => cli(["recipe", "--out", out, "--add", "just=brew install just", "--add-check", "just=just --version"], io([], [])))).toBe(0);
+    expect(await withHome(dir, () => cli(["recipe", "--out", out, "--add", "wsp-selftest=apt-get install -y wsp-selftest", "--add-check", "wsp-selftest=wsp-selftest --version"], io([], [])))).toBe(0);
     const recipe: Recipe = JSON.parse(readFileSync(out, "utf8"));
     expect(recipe.histories.filter(h => h.state === "read")).toEqual([]);
     expect(recipe.custom).toEqual([
-      { kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "just --version", why: "added by the agent" },
+      { kind: "custom", id: "wsp-selftest", name: "wsp-selftest", install: ["apt-get install -y wsp-selftest"], check: "wsp-selftest --version", why: "added by the agent" },
     ]);
   });
 });

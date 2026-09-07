@@ -95,12 +95,16 @@ usage:
                      that no catalog row carries. --tick used|installed|default
                      names the rule that decides every tick (used, the default,
                      ticks what your agents actually ran here); --set <id>=on|off
-                     and --signin <id>=copy|machine|key|skip flip a row and a
-                     sign-in by catalog id, key bringing the key files beside a
+                     flips a row by its catalog id, or a package this Mac's own
+                     package managers have by the id wsp recipe scan gives it,
+                     which the build installs by that package's own road;
+                     --signin <id>=copy|machine|key|skip answers a sign-in by
+                     catalog id, key bringing the key files beside a
                      login and nothing else of it; --add <id>=<command> carries
-                     a tool the catalog does not, installed by that command on
-                     the machine, with --add-check <id>=<command> saying it is
-                     there; --project reads a folder's own manifests for what it
+                     a tool neither the catalog nor this Mac has, installed by
+                     that command on the machine, with
+                     --add-check <id>=<command> saying it is there;
+                     --project reads a folder's own manifests for what it
                      takes to build and weighs the histories by it,
                      --out says where the file goes and --json prints the table
                      as one object. Naming --tick or --project decides every
@@ -945,6 +949,7 @@ async function recipe(io: CliIO, argv: string[], statePathOf: (flag?: string) =>
         ...(values.add !== undefined ? { add: values.add } : {}),
         ...(values["add-check"] !== undefined ? { addCheck: values["add-check"] } : {}),
         ...projects,
+        alsoHere: recipe => scanTools(nodeHost(), recipe),
       },
       streams,
     );
