@@ -26,7 +26,7 @@ export function SearchRow({ action }: { action?: ReactNode }) {
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label="Search" className={cn(TOP_ROW_CLASS, action !== undefined && "pe-8")} onClick={() => openCommandPalette()}>
+            <SidebarMenuButton aria-label="Search" data-search-row="" className={cn(TOP_ROW_CLASS, action !== undefined && "pe-8")} onClick={() => openCommandPalette()}>
               <SearchIcon className="size-3.5" />
               <span>Search</span>
             </SidebarMenuButton>

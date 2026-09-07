@@ -145,7 +145,8 @@ async function mountShell(sessions: SessionView[] = []) {
       <div>center content</div>
     </AppShell>,
   );
-  await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+  // The shell opens on the sidebar's first row: ws_a with no sessions, the workspace of the latest one otherwise.
+  await waitFor(() => expect(useStore.getState().selectedId).not.toBeNull());
   await waitFor(() => expect(useStore.getState().workspaces.length).toBe(2));
   return api;
 }

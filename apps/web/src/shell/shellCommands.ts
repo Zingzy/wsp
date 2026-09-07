@@ -8,7 +8,7 @@
 // The workspace switch walks the sidebar's own order and lands in the new
 // workspace's composer; the chord's walk stays inside the switcher overlay
 // until the hold is let go.
-import { deriveSidebarProjects } from "../adapt/index.js";
+import { sidebarWorkspaceOrder } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
 import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, type WorkspaceSelectSlot } from "../keybindingTypes.js";
 import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
@@ -87,7 +87,7 @@ export function splitActivePanelTerminal(workspaceId: string, direction: SplitDi
     while a fork is in flight. */
 function orderedWorkspaceIds(): string[] {
   const { workspaces, statuses, sessions } = useStore.getState();
-  return deriveSidebarProjects({ workspaces, statuses, sessions }).map(project => project.id);
+  return sidebarWorkspaceOrder({ workspaces, statuses, sessions });
 }
 
 /** One step along an order that wraps at both ends, or null where there is nowhere else to go, which is what

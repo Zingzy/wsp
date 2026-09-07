@@ -46,6 +46,11 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
     .map(row => row.project);
 }
 
+/** The workspace ids as the sidebar draws them, top to bottom: the one order every "first" or "next" workspace reads. */
+export function sidebarWorkspaceOrder(input: SidebarInput): string[] {
+  return deriveSidebarProjects(input).map(project => project.id);
+}
+
 /** The latest turn start or end in the workspace, or its creation while it has none. */
 function lastActivityMs(workspace: Pick<WorkspaceView, "createdAt">, threads: ReadonlyArray<ThreadView>): number {
   return Math.max(Date.parse(workspace.createdAt), ...threads.flatMap(t => [t.startedAt ?? 0, t.endedAt ?? 0]));

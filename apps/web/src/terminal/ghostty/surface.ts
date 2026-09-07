@@ -23,7 +23,8 @@ import { cssFontFamilies, isMonospaceFamily } from "../../appearanceFonts";
 import { TERMINAL_SYMBOLS_FACE, terminalFontChain } from "./fontChain";
 import { localFontFamilies, registerLocalFonts } from "./localFonts";
 
-export const DEFAULT_TERMINAL_FONT_SIZE = 12;
+/** The app's mono size, --font-size-mono in index.css: the terminal's text matches the sidebar's and the composer's. */
+export const DEFAULT_TERMINAL_FONT_SIZE = 11;
 const MIN_TERMINAL_FONT_SIZE = 6;
 const MAX_TERMINAL_FONT_SIZE = 32;
 export const DEFAULT_TERMINAL_FONT_FAMILY = terminalFontChain(undefined);

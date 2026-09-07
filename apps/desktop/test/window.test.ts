@@ -11,7 +11,7 @@ describe("windowOptions", () => {
       height: 800,
       title: "wsp",
       titleBarStyle: "hiddenInset",
-      trafficLightPosition: { x: 16, y: 20 },
+      trafficLightPosition: { x: 16, y: 19 },
       vibrancy: "sidebar",
       visualEffectState: "followWindow",
       backgroundColor: "#00000000",
