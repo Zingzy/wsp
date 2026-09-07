@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { agentHomes } from "@wsp/engine";
 import type { BootPayload, ProjectImportResult, ProjectPlan } from "@wsp/protocol";
-import { describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { projectBundler } from "./project-bundle.js";
 import { projectLander } from "./project-export.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
@@ -20,8 +20,6 @@ export interface HostOptions {
   runtime: Runtime;
   /** The built web app: index.html plus its assets. */
   webDir: string;
-  /** The builder wsp init prepared; the callback relay links to it for the sign-ins run there. */
-  builder?: GoldenBuilderView;
   /** HTTP port for the app (0 picks a free one). Default 4400. */
   port?: number;
   /** Port for serveRuntime's WS (0 picks a free one). Default 4410. */
@@ -44,16 +42,21 @@ export interface HostOptions {
   recipePath?: string;
 }
 
-export interface HostHandle {
-  port: number;
-  wsPort: number;
-  authToken: string;
+/** The roads to a workspace and its project that the app's routes and wsp init share, so a workspace made without a
+ * host is the one the app would have made. */
+export interface WorkspaceRoads {
   /** Forks the golden's head into a new workspace, with the envs and labels the app's own create gives it. */
   createWorkspace(name: string): Promise<CreatedWorkspace>;
   /** Reads a folder on this computer as the app's import dialog reads it; nothing is packed or uploaded. */
   planProject(source: string): Promise<ProjectPlan>;
   /** Lands that folder on a workspace's machine through the bundler the app's import goes through. */
   importProject(opts: Omit<ProjectImportOptions, "bundler">): Promise<ProjectImportResult>;
+}
+
+export interface HostHandle extends WorkspaceRoads {
+  port: number;
+  wsPort: number;
+  authToken: string;
   close(): Promise<void>;
 }
 
@@ -188,6 +191,27 @@ class NoGoldenError extends Error {
   }
 }
 
+/** `homes` is where each agent keeps its sessions on this computer, what the bundler carries beside a folder. */
+export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, string>>, opts: Pick<HostOptions, "workspaceEnvs"> = {}): WorkspaceRoads & { bundlerFor(source: string): ProjectBundler } {
+  // One bundler road for the app's import op and the handle's own: a folder is read and packed the same either way.
+  const bundlerFor = (source: string) => projectBundler(source, homes);
+  return {
+    bundlerFor,
+    createWorkspace: async name => {
+      const head = goldenHead(await rt.golden.get());
+      if (!head) throw new NoGoldenError();
+      return rt.workspaces.create({
+        golden: head.snapshotId,
+        name,
+        ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
+        labels: { wsp: "1", "wsp-host": "1", createdAt: new Date().toISOString() },
+      });
+    },
+    planProject: source => bundlerFor(source).plan(),
+    importProject: o => rt.projects.import({ ...o, bundler: bundlerFor(o.source) }),
+  };
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -206,9 +230,8 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const webDir = resolvePath(opts.webDir);
   const log = opts.log ?? (() => {});
 
-  // One bundler road for the app's import op and the handle's own: a folder is read and packed the same either way.
   const homes = agentHomes(homedir());
-  const bundlerFor = (source: string) => projectBundler(source, homes);
+  const { bundlerFor, createWorkspace, planProject, importProject } = workspaceRoads(rt, homes, opts);
 
   // Before the runtime socket: the app lists and stops the relay's forwards through it.
   const relay = startCallbackRelay({
@@ -217,11 +240,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     log,
     ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),
     ...(opts.openLine !== undefined ? { openLine: opts.openLine } : {}),
-    ...(opts.builder !== undefined ? { builder: opts.builder } : {}),
   });
   let rtServer: RuntimeServer;
   try {
-    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, authToken, forwards: relay, projects: bundlerFor, landing: projectLander(homes) });
+    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, host: LOOPBACK, authToken, forwards: relay, projects: bundlerFor, landing: projectLander(homes) });
   } catch (e) {
     await relay.close();
     throw e;
@@ -238,21 +260,6 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     await rtServer.close();
     throw e;
   }
-
-  const planProject = (source: string): Promise<ProjectPlan> => bundlerFor(source).plan();
-
-  const importProject = (o: Omit<ProjectImportOptions, "bundler">): Promise<ProjectImportResult> => rt.projects.import({ ...o, bundler: bundlerFor(o.source) });
-
-  const createWorkspace = async (name: string): Promise<CreatedWorkspace> => {
-    const head = goldenHead(await rt.golden.get());
-    if (!head) throw new NoGoldenError();
-    return rt.workspaces.create({
-      golden: head.snapshotId,
-      name,
-      ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
-      labels: { wsp: "1", "wsp-host": "1", createdAt: new Date().toISOString() },
-    });
-  };
 
   const server = createServer((req, res) => {
     void (async () => {
@@ -296,8 +303,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   try {
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
-      // The app carries the runtime token; never expose it beyond loopback.
-      server.listen(opts.port ?? 4400, "127.0.0.1", resolve);
+      server.listen(opts.port ?? 4400, LOOPBACK, resolve);
     });
   } catch (e) {
     await relay.close();
@@ -318,7 +324,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     else if (b.heldBy !== undefined) log(`reap: left alone ${b.id}: your earlier builder from this setup, in use by another wsp process (pid ${b.heldBy.pid}); never touched by this host`);
     else if (b.building === true) log(`reap: left alone ${b.id}: your earlier builder from this setup; its setup never finished; the next sweep stops it`);
     else if (b.sealed !== undefined) log(describeSealed(b, b.sealed, rt.backend.pricing.rateUsdPerHour(b.size)));
-    else if (b.firstLife === true && b.id !== opts.builder?.id) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size)));
+    else if (b.firstLife === true) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size)));
   }
   try {
     const storage = await rt.golden.storage();

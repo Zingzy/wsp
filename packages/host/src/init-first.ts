@@ -32,6 +32,9 @@ export interface FirstWorkspace {
 export interface FirstAsk {
   /** Whether the person is at a terminal to answer; without one the flags and the defaults decide. */
   interactive: boolean;
+  /** Nobody at a terminal (an agent driving, or no terminal): only a flag forks, since a workspace bills and the
+   * caller did not ask for one. Off, a run that asks nothing still takes the question's default, a fork. */
+  unattended: boolean;
   /** --first-workspace; naming one answers the question yes. */
   name?: string;
   /** --import; naming a folder answers the question yes and skips the folder prompt. */
@@ -72,7 +75,9 @@ export async function askFirst(o: FirstAsk): Promise<FirstWorkspace | undefined 
   const name = o.name ?? FIRST_WORKSPACE;
   const folder = folderOf(o.folder);
   // A flag is an answer already given; asking again would ask an agent's caller a question nobody is there to read.
-  if (named || !o.interactive) return { name, ...(folder !== undefined ? { folder } : {}) };
+  if (named) return { name, ...(folder !== undefined ? { folder } : {}) };
+  if (o.unattended) return undefined;
+  if (!o.interactive) return { name };
   const go = await confirmPrompt({
     message: FIRST_QUESTION,
     hint: "Enter forks a workspace from the golden just sealed and imports a folder onto it. No leaves the app with none; you can make one there.",

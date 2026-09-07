@@ -146,7 +146,16 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
           adapters: {},
           goldenRecipe: { ...recipe, setup: SETUP, deployDaemon: async m => `node ${(await deployDaemon(m)).node}` },
         }),
-      host: async (rt, builder, hooks) => {
+      ports: { port: 0, wsPort: 0 },
+      upCommand: "wsp up",
+      forkCommand: "wsp new first",
+      roads: () => ({
+        createWorkspace: async () => { throw new Error("no workspace in this live run"); },
+        planProject: async () => { throw new Error("no project in this live run"); },
+        importProject: async () => { throw new Error("no project in this live run"); },
+      }),
+      host: async () => { throw new Error("no host in this live run"); },
+      relay: async (rt, builder, hooks) => {
         builderId = builder.id;
         notes.push(`builder ${builder.id} ready at ${Date.now() - t0}ms`);
         const machine = await backend.get(builder.id);
@@ -166,15 +175,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
             if (!hooks.onLine(line)) hostLines.push(line);
           },
         });
-        return {
-          port: 0,
-          wsPort: 0,
-          authToken: "",
-          createWorkspace: async () => { throw new Error("no workspace in this live run"); },
-          planProject: async () => { throw new Error("no project in this live run"); },
-          importProject: async () => { throw new Error("no project in this live run"); },
-          close: async () => relay?.close(),
-        };
+        return { close: async () => relay?.close() };
       },
     };
 
