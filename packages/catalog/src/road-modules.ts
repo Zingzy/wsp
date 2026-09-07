@@ -55,8 +55,9 @@ const PIP_NET = `export PIP_TIMEOUT=${NET_READ_S} PIP_RETRIES=${NET_RETRIES}`;
 const UV_NET = `export UV_HTTP_TIMEOUT=${NET_READ_S} UV_HTTP_RETRIES=${NET_RETRIES}`;
 const CARGO_NET = `export CARGO_HTTP_TIMEOUT=${NET_READ_S} CARGO_NET_RETRY=${NET_RETRIES}`;
 /** curl reads no environment for these, so every curl a road's script types goes through this function; under a
- * byte a second for the read window is a dead read to it. */
-export const CURL_NET = `curl() { command curl --connect-timeout ${NET_CONNECT_S} --speed-limit 1 --speed-time ${NET_READ_S} --retry ${NET_RETRIES} "$@"; }`;
+ * byte a second for the read window is a dead read to it. --silent with --show-error leaves curl's one error line as
+ * the last thing on stderr, which is what the reason rule reads; a script types `curl -o file url` and nothing more. */
+export const CURL_NET = `curl() { command curl --connect-timeout ${NET_CONNECT_S} --speed-limit 1 --speed-time ${NET_READ_S} --retry ${NET_RETRIES} --fail --silent --show-error --location "$@"; }`;
 
 const atVersion = <R extends { version?: string }>(r: R, version: string): R => ({ ...r, version });
 const pinned = (pkg: string, version: string | undefined, sep: string): string => (version === undefined ? pkg : `${pkg}${sep}${version}`);
@@ -198,13 +199,13 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
     'case "$arch" in x86_64) pat="amd64|x86_64|x64" ;; aarch64) pat="arm64|aarch64" ;; *) echo "Error: unsupported arch: $arch" >&2; exit 1 ;; esac',
     'tmp="$(mktemp -d /tmp/wsp-road-XXXXXX)"',
     "trap 'rm -rf \"$tmp\"' EXIT",
-    `release="$(curl -fsSL ${shellQuote(api)} || true)"`,
+    `release="$(curl ${shellQuote(api)} || true)"`,
     ...(tag === undefined ? [`tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"`] : []),
     `urls="$(printf '%s\\n' "$release" | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
     `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk)$' | head -1 || true)"`,
     'if [ -n "$url" ]; then',
     '  asset="${url##*/}"',
-    '  curl -fsSL -o "$tmp/$asset" "$url"',
+    '  curl -o "$tmp/$asset" "$url"',
     `  sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`,
     ...(pin !== undefined && tag !== undefined ? [`  [ "$sum" = ${shellQuote(pin)} ] || { echo "Error: $asset does not match the checksum recorded on the first install of "${shellQuote(tag)} >&2; exit 1; }`] : []),
     '  case "$asset" in',

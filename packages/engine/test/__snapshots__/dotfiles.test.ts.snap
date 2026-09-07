@@ -4,6 +4,7 @@ exports[`generated scripts > chezmoi apply script snapshot 1`] = `
 "set -euo pipefail
 export HOME="\${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
 export GIT_TERMINAL_PROMPT=0
+curl() { command curl --connect-timeout 15 --speed-limit 1 --speed-time 60 --retry 1 --fail --silent --show-error --location "$@"; }
 if ! command -v chezmoi >/dev/null 2>&1; then
   arch="$(uname -m)"
   case "$arch" in
@@ -11,7 +12,7 @@ if ! command -v chezmoi >/dev/null 2>&1; then
     aarch64) pkg=chezmoi_2.72.1_linux_arm64.tar.gz sha=75508ef41216b6d64f3145986b751729d7f92d09c6bad77d51cf2895ab35a508 ;;
     *) echo "unsupported arch: $arch" >&2; exit 1 ;;
   esac
-  curl -fsSL -o "/tmp/$pkg" "https://github.com/twpayne/chezmoi/releases/download/v2.72.1/$pkg"
+  curl -o "/tmp/$pkg" "https://github.com/twpayne/chezmoi/releases/download/v2.72.1/$pkg"
   echo "$sha  /tmp/$pkg" | sha256sum -c -
   tar -xzf "/tmp/$pkg" -C /tmp chezmoi
   install -m 0755 /tmp/chezmoi /usr/local/bin/chezmoi
@@ -101,6 +102,7 @@ exports[`presets > zsh preset script snapshot 1`] = `
 export HOME="\${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
 export DEBIAN_FRONTEND=noninteractive
 command -v zsh >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq zsh; }
+curl() { command curl --connect-timeout 15 --speed-limit 1 --speed-time 60 --retry 1 --fail --silent --show-error --location "$@"; }
 if ! command -v starship >/dev/null 2>&1; then
   arch="$(uname -m)"
   case "$arch" in
@@ -108,7 +110,7 @@ if ! command -v starship >/dev/null 2>&1; then
     aarch64) pkg=starship-aarch64-unknown-linux-musl.tar.gz sha=dc30189378d2f2e287384e8a692d3f95ad1df64cf0e8c36aa9201516028aed6b ;;
     *) echo "unsupported arch: $arch" >&2; exit 1 ;;
   esac
-  curl -fsSL -o "/tmp/$pkg" "https://github.com/starship/starship/releases/download/v1.26.0/$pkg"
+  curl -o "/tmp/$pkg" "https://github.com/starship/starship/releases/download/v1.26.0/$pkg"
   echo "$sha  /tmp/$pkg" | sha256sum -c -
   tar -xzf "/tmp/$pkg" -C /tmp starship
   install -m 0755 /tmp/starship /usr/local/bin/starship

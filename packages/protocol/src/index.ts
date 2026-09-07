@@ -1272,6 +1272,7 @@ const DAEMON_CONTENTS = [
   UNRECORDED,
   UNRECORDED,
   "b749121a659b9c45b07285ee0f4e95f15aae26ddbc1bcba75745e83c2ae032c6",
+  "b0b88a03c649769e0676ca38eaa5035825b71302c97a2858dcf8eb57131288be",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -1280,7 +1281,8 @@ const DAEMON_CONTENTS = [
  * daemon it has until the version it announces is behind this one. A hello without one is version 1: every daemon
  * deployed before the field existed, which has the pty, ports, manifest, inbox, fs, git and tunnel ops and no sys
  * or proc ops. Version 3 browses the imported project folders named in DAEMON_ROOTS_PATH beside its home.
- * Version 4 starts from a script that sets the guest PATH itself. */
+ * Version 4 starts from a script that sets the guest PATH itself. Version 5 fetches its Node through the catalog's
+ * curl function. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
