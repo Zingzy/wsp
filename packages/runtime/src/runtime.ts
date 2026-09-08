@@ -1120,12 +1120,6 @@ const HELD_TTL_MS = 15 * 60_000;
 const HEARTBEAT_MS = 5 * 60_000;
 
 const isCapRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind === "concurrency";
-/** Whether a workspace still holds one of the account's machine slots: a napped or gone one holds none. Read off
- * the record's phase alone, since a refusal has no time to ask the provider about every workspace. */
-const holdsSlot = (record: WorkspaceRecord): boolean => {
-  const state = workspaceState({ phase: record.phase });
-  return state !== "paused" && state !== "gone";
-};
 
 function pidAlive(pid: number): boolean {
   try {
@@ -1290,6 +1284,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * sentence, which reads for the local computer, the only machine short of these capabilities today. */
   const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes">, action: string): void => {
     if (backendFor(entry.record.kind).capabilities[can] !== true) throw new Error(localMachineRefusal(entry.record.name, action));
+  };
+  /** Whether a workspace holds one of the account's machine slots: only a kind whose machines the provider can nap
+   * does, the same capability the pause and wake refusals read, so this computer is never counted against the cap
+   * nor named beside the two moves that free a slot. Phase decides the rest off the record alone, since a refusal
+   * has no time to ask the provider about every workspace. */
+  const holdsSlot = (record: WorkspaceRecord): boolean => {
+    if (backendFor(record.kind).capabilities.ramPreservingPause !== true) return false;
+    const state = workspaceState({ phase: record.phase });
+    return state !== "paused" && state !== "gone";
   };
   /** The one rule about where a request came from, read by every verb and every list that serves workspaces: a
    * request relayed from a machine drives and sees only the kinds whose module takes one, so this computer's own
