@@ -30,13 +30,16 @@ export function reachNote(reach: ReachState | null): string | null {
   return reach === "slow" ? "edge slow" : null;
 }
 
-/** The row's line for a daemon that is not there. no-daemon is a machine that answers with nothing on the daemon's
- * port, unsupported one with no daemon road at all; the two are different facts and the line says which. Nothing
- * for every other reach. Every kind shows it: a driven kind's state word reads Unreachable, which is also what a
- * machine gone dark reads, and one of the two is a helper wsp puts back by itself while the machine is fine. */
-export function daemonGoneLine(reach: ReachState | null): string | undefined {
+/** The row's line for a daemon that is not there, and which of the two facts it is: no-daemon is a machine that
+ * answers with nothing on the daemon's port, unsupported one with no daemon road at all. Nothing for every other
+ * reach. A daemon that died is said on every kind, since a driven kind's state word reads Unreachable for it,
+ * which is also what a machine gone dark reads, and only one of the two is a helper wsp puts back by itself while
+ * the machine is fine. A machine with no road to a daemon at all is said only where the row has no state word to
+ * spend on it: nothing wsp drives is built without the road, so a driven row saying it would be saying something
+ * that cannot be true of it. */
+export function daemonGoneLine(reach: ReachState | null, driven: boolean): string | undefined {
   if (reach === "no-daemon") return "no daemon answering";
-  return reach === "unsupported" ? "no daemon on this machine" : undefined;
+  return reach === "unsupported" && !driven ? "no daemon on this machine" : undefined;
 }
 
 /** The sentences a meta line can carry in place of its counts, in the order a surface draws them: what the
@@ -47,7 +50,7 @@ export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput,
   return [
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
-    daemonGoneLine(project.reach),
+    daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace)).driven),
   ].filter((line): line is string => line !== undefined);
 }
 

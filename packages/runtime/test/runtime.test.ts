@@ -2045,6 +2045,59 @@ describe("runtime daemon reach", () => {
     expect(pushed.every(st => st.daemonNote === undefined || !st.daemonNote.includes("NPM_FAIL"))).toBe(true);
   });
 
+  it("a machine replaced under the record starts its own attempt instead of inheriting the old machine's cooldown", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const edge = await daemonPort(() => false);
+    const deployed: string[] = [];
+    const recipe = {
+      setup: "true",
+      smoke: "true",
+      deployDaemon: async (machine: { id: string }) => {
+        deployed.push(machine.id);
+        throw new Error("daemon deploy failed: NPM_FAIL");
+      },
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const edgeOn = (m: StubMachine): void => {
+      m.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    };
+    edgeOn(backend.machines[0]!);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stop = rt.status.watch();
+    try {
+      await until(() => deployed.length === 1);
+      await rt.workspaces.rebuild(ws.id);
+      edgeOn(backend.machines[1]!);
+      // Well inside the cooldown the first machine earned: the entry is that machine's, and this is another one.
+      await until(() => deployed.length === 2, 5_000);
+    } finally {
+      stop();
+      warn.mockRestore();
+    }
+    expect(deployed).toEqual(["m1", "m2"]);
+  });
+
+  it("leaves a dead daemon alone on a backend that mints no upload URL, since the deploy has no road to the machine", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    backend.capabilities.signedUrls = false;
+    const edge = await daemonPort(() => false);
+    const deployed: string[] = [];
+    const recipe = { setup: "true", smoke: "true", deployDaemon: async (machine: { id: string }) => void deployed.push(machine.id) };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
+    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    const stop = rt.status.watch();
+    try {
+      await until(() => edge.hits() >= 10);
+    } finally {
+      stop();
+    }
+    expect(deployed).toEqual([]);
+  });
+
   it("updateDaemon refuses on a runtime whose recipe carries no deploy", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });

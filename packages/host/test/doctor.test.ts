@@ -16,9 +16,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
 import {
   connectDaemonSocket,
-  DAEMON_LOG,
   DAEMON_UNIT,
   DAEMON_UNIT_PATH,
+  daemonLogCommand,
   daemonUnit,
   deployDaemon,
   deployScript,
@@ -520,7 +520,7 @@ describe("deployScript", () => {
     expect(lines.indexOf(`systemctl enable ${DAEMON_UNIT}`)).toBeLessThan(lines.indexOf(`systemctl restart ${DAEMON_UNIT}`));
     // The port check waits for the bind instead of guessing how long the daemon takes to reach it.
     expect(script).toContain(`for _ in $(seq 20); do ss -ltnH 'sport = :7070' | grep -q . && break; sleep 0.25; done`);
-    expect(script).toContain(`ss -ltn | grep -q 7070 && echo DAEMON_UP || { cat ${DAEMON_LOG}; echo DAEMON_DOWN; }`);
+    expect(script).toContain(`ss -ltn | grep -q 7070 && echo DAEMON_UP || { ${daemonLogCommand()}; echo DAEMON_DOWN; }`);
   });
 
   it("refuses a guest with no systemd rather than starting a daemon nothing would restart", () => {
@@ -544,8 +544,13 @@ describe("deployScript", () => {
     // Enabled with an install section, so a machine that reboots or comes back from a snapshot has its daemon.
     expect(unit).toContain("WantedBy=multi-user.target");
     expect(unit).toContain("ExecStart=/bin/sh -c 'exec node /root/wsp-daemon/start.mjs'");
-    expect(unit).toContain(`StandardOutput=append:${DAEMON_LOG}`);
-    expect(unit).toContain(`StandardError=append:${DAEMON_LOG}`);
+    // The journal, which rotates itself: nothing else on the guest bounds a log, and restarts here have no limit.
+    expect(unit).toContain("StandardOutput=journal");
+    expect(unit).toContain("StandardError=journal");
+    expect(unit).not.toContain("append:");
+    expect(daemonLogCommand()).toBe("journalctl -u wsp-daemon.service -n 50 --no-pager");
+    // A deploy that never saw the port come up reads the journal, and reads it bounded.
+    expect(deployScript("aabbcc")).not.toContain("/root/daemon.log");
   });
 
   it("the unit states the environment the daemon hands to every pty, since a restart inherits none of the deploy's", () => {

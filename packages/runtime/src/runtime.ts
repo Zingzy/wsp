@@ -1946,9 +1946,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const daemonRevivals = new Map<string, Promise<void>>();
 
   /** A running machine whose daemon port answers nothing gets this runtime's daemon put back on it, on the same
-   * road the doctor and the golden build use and with the workspace's own token. Until this landed nothing did:
-   * the kernel's memory killer took a daemon and the machine sat with none for five hours while its turns, which
-   * go over the provider's exec, kept running, so only the reach probe noticed (2026-09-08). Every poll that
+   * road the doctor and the golden build use and with the workspace's own token. The kernel's memory killer took
+   * a daemon once and the machine sat with none for five hours while its turns, which go over the provider's
+   * exec, kept running, so only the reach probe noticed (2026-09-08). Every poll that
    * measures the machine calls this, not every status the bus carries: a machine parked at no-daemon builds the
    * same status each time and the bus rightly drops the repeats, so a road listening there would try once and
    * never again. The probe window is behind the word already, since reachShown gives a row no-daemon only on the

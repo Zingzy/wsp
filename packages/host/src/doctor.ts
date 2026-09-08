@@ -108,19 +108,24 @@ function nodeBootstrap(): string {
  * dev server answers 403 through the preview edge. Next.js and webpack-dev-server have no env equivalent. */
 export const VITE_ALLOWED_HOSTS_ENV = "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS";
 
-/** The supervisor's name for the daemon, the one string the unit file, the stop and the start all read. */
+/** The supervisor's name for the daemon, the one string the unit file, the stop, the start and the log read. */
 export const DAEMON_UNIT = "wsp-daemon.service";
 export const DAEMON_UNIT_PATH = `/etc/systemd/system/${DAEMON_UNIT}`;
-export const DAEMON_LOG = "/root/daemon.log";
+
+/** What the daemon has printed lately, for a deploy that has to say why the port never came up. The journal
+ * rather than a file because journald rotates itself against a cap it states at boot (395 MB on a 20 GB guest,
+ * measured 2026-09-08) and nothing else on the guest would bound one: the redirect this replaced truncated the
+ * file on every deploy, and an appended one under Restart=always with no start limit has no end. */
+export const daemonLogCommand = (lines = 50): string => `journalctl -u ${DAEMON_UNIT} -n ${lines} --no-pager`;
 
 /** The unit the daemon runs under. Until 2026-09-08 it was started with setsid over the provider's exec and had no
  * supervisor at all: the kernel's memory killer took one and the machine sat with no daemon for five hours while
  * its turns, which go over that same exec, kept running. Restart=always is the whole point of the file, so the
  * start rate limit that would give up after five restarts is off. OOMPolicy=continue keeps a killed child (a test
  * run under a terminal) from taking the daemon with it, which systemd's default of stop would do. MemoryMax is a
- * share of the machine, not a figure, because every terminal the daemon opens sits in its cgroup. The environment
- * is stated here rather than inherited: a restart at boot or after a kill inherits nothing from the exec that
- * deployed the daemon. */
+ * share of the machine, not a figure, because every terminal the daemon opens sits in its cgroup. Output goes to
+ * the journal, the one store on the guest that bounds itself. The environment is stated here rather than
+ * inherited: a restart at boot or after a kill inherits nothing from the exec that deployed the daemon. */
 export function daemonUnit(previewHostSuffix?: string): string {
   return [
     "[Unit]",
@@ -140,8 +145,8 @@ export function daemonUnit(previewHostSuffix?: string): string {
     "RestartSec=1",
     `MemoryMax=${DAEMON_MEMORY_MAX_PERCENT}%`,
     "OOMPolicy=continue",
-    `StandardOutput=append:${DAEMON_LOG}`,
-    `StandardError=append:${DAEMON_LOG}`,
+    "StandardOutput=journal",
+    "StandardError=journal",
     "",
     "[Install]",
     "WantedBy=multi-user.target",
@@ -212,7 +217,7 @@ export function deployScript(token: string, previewHostSuffix?: string): string 
     `systemctl enable ${DAEMON_UNIT}`,
     `systemctl restart ${DAEMON_UNIT}`,
     `for _ in $(seq 20); do ss -ltnH 'sport = :${DAEMON_PORT}' | grep -q . && break; sleep 0.25; done`,
-    `ss -ltn | grep -q ${DAEMON_PORT} && echo DAEMON_UP || { cat ${DAEMON_LOG}; echo DAEMON_DOWN; }`,
+    `ss -ltn | grep -q ${DAEMON_PORT} && echo DAEMON_UP || { ${daemonLogCommand()}; echo DAEMON_DOWN; }`,
   ].join("\n");
 }
 

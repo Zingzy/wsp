@@ -230,8 +230,8 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     // The Spaces header says it above what the machine is, in the same place the row gives it.
     expect(spaceHeaderLines({ project: local("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual(["no daemon answering", "this computer"]);
-    expect(daemonGoneLine("slow")).toBeUndefined();
-    expect(daemonGoneLine(null)).toBeUndefined();
+    expect(daemonGoneLine("slow", false)).toBeUndefined();
+    expect(daemonGoneLine(null, false)).toBeUndefined();
   });
 
   it("a fork whose daemon died says so too: Unreachable alone reads as a lost machine, and this one is fine", () => {
@@ -245,6 +245,12 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "restarting the helper" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("restarting the helper");
     // The Spaces header leads with it above the size, where the row's line sits.
     expect(spaceHeaderLines({ project: driven("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })[0]).toBe("no daemon answering");
+    // Only the daemon that died crosses to a driven kind. A machine wsp forks is built with the road to a daemon,
+    // so a fork's row saying there is none would be saying something that cannot be true of it.
+    expect(line("unsupported")).toBe("$0.29 today · $0.110/hr · active");
+    expect(spaceHeaderLines({ project: driven("unsupported"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).not.toContain("no daemon on this machine");
+    expect(daemonGoneLine("unsupported", true)).toBeUndefined();
+    expect(daemonGoneLine("unsupported", false)).toBe("no daemon on this machine");
   });
 
   it("thread pills key on the session status, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {
