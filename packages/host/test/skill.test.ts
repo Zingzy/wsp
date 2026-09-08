@@ -2,6 +2,7 @@
 // The wsp skill for agents on this computer: one file in the repo, read as
 // text at build time, that names every verb and tool and gives the MCP server
 // its instructions.
+import { NOTHING_TO_SERVE_LINE } from "@wsp/protocol";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
@@ -89,7 +90,7 @@ describe("the wsp skill", () => {
     expect(setup).toContain("wsp threads --json");
     expect(setup).toContain("wsp threads: no wsp host is serving <path>; run wsp up first");
     expect(setup).toContain("app         http://127.0.0.1:4400");
-    expect(setup).toContain("no golden yet; run wsp init");
+    expect(setup).toContain(NOTHING_TO_SERVE_LINE);
     expect(setup).toContain("Solari API key: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.");
     expect(setup).toContain("wsp init --recipe ~/.wsp/recipe.json");
     expect(setup).toContain("--non-interactive --json > /tmp/wsp-init.jsonl");

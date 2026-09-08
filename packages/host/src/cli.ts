@@ -17,14 +17,16 @@ import {
   goldenHead,
   hostIdentity,
   jsonFileStore,
+  localExecStream,
   type GoldenRecipe,
   type GoldenVersion,
+  type LocalWiring,
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, TURN_END_WORDS, WS_PORT_OFFSET, authRefusal, fmtDuration, portsAsked, shellQuote, usageRefusal, type PortsAsked } from "@wsp/protocol";
-import { agentHomes } from "@wsp/engine";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, NOTHING_TO_SERVE_LINE, TURN_END_WORDS, WS_PORT_OFFSET, authRefusal, fmtDuration, portsAsked, shellQuote, usageRefusal, type PortsAsked } from "@wsp/protocol";
+import { agentHomes, LocalBackend } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
@@ -370,6 +372,21 @@ function statePathFrom(flag?: string): string {
   return resolve(flag ?? defaultStatePath());
 }
 
+/** This computer as a workspace: the local backend, a real child process per turn under the turn's limits, each
+ * harness's own store (the one their store variable names, else the default under their home), and the person's own
+ * login environment for every turn, the same one wsp exec runs under, so the keys and tools a terminal gives an agent
+ * reach it here too. The adapters strip their own agent-session variables from it, as they do on a fork. */
+export function localWiring(root = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
+  const homes = agentHomes(root, env);
+  const login = Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined));
+  return {
+    backend: new LocalBackend({ root, env }),
+    execStream: o => localExecStream({ root, ...o }),
+    home: id => homes[id] ?? join(root, `.${id}`),
+    env: login,
+  };
+}
+
 /** What every command of the shared parse works on: the port pair the one rule reads off the flags, whether a
  * person named either port, and the state file. wsp up and wsp init take theirs from this one call. */
 export interface SharedOpts extends PortsAsked {
@@ -389,6 +406,7 @@ export function statesHere(statePath: string): string[] {
 export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys)): Runtime {
   return createRuntime({
     backend: new SolariBackend({ apiKey: keys.solari }),
+    local: localWiring(),
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
@@ -560,11 +578,17 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   return hostFor(rt, keys, opts, io);
 }
 
+/** Whether the state has anything for the app to show: a sealed golden to fork from, or any workspace record, this
+ * computer's included. An empty state is refused with the two ways in rather than served as a blank app. */
+async function servesNothing(rt: Runtime): Promise<boolean> {
+  return goldenHead(await rt.golden.get()) === undefined && (await rt.workspaces.list()).length === 0;
+}
+
 export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | undefined> {
   const keys = await loadKeys(io, undefined, { anthropic: false });
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
-  if (goldenHead(await rt.golden.get()) === undefined) {
-    io.error("no golden yet; run wsp init");
+  if (await servesNothing(rt)) {
+    io.error(NOTHING_TO_SERVE_LINE);
     return undefined;
   }
   return hostFor(rt, keys, opts, io);
@@ -704,8 +728,8 @@ export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: 
     io.error(shellOnly);
     return 1;
   }
-  if (goldenHead(await makeRuntime(keys, opts.statePath).golden.get()) === undefined) {
-    io.error("no golden yet; run wsp init");
+  if (await servesNothing(makeRuntime(keys, opts.statePath))) {
+    io.error(NOTHING_TO_SERVE_LINE);
     return 1;
   }
   const claudeOnly = claudeKeyOnlyInThisShell(deps.keys);
@@ -983,7 +1007,8 @@ export const COMMAND_LINES: readonly CommandLine[] = [
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
-  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere });
+  // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
+  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, runtime: async statePath => makeRuntime(await loadKeys(io, undefined, { anthropic: false }), statePath) });
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom);
   let values: SharedFlags;
   let positionals: string[];

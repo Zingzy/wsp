@@ -771,6 +771,24 @@ export function nameDeletingRefusal(name: string): string {
 /** The refusal a fork or a rename gets for a blank name: a person and an agent both address a workspace by its name. */
 export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
 
+/** The one line wsp up refuses an empty state with: nothing to serve and the two ways in. A state with a sealed golden
+ * or any workspace record, this computer's included, serves; an empty one has nothing for the app to show. */
+export const NOTHING_TO_SERVE_LINE = "nothing to serve yet; wsp new --local makes this computer a workspace, or wsp init seals a golden";
+
+/** The one sentence a local workspace refuses a request relayed from a machine with. A local workspace is this
+ * computer; it answers only its own person, so a request that reached the host from a machine wsp runs cannot drive
+ * it. Today no machine has a road into the host, so nothing relays yet; the rule and its test land now. */
+export function relayedRefusal(name: string): string {
+  return `${name} is this computer; it answers only requests from this computer, never one relayed from a machine`;
+}
+
+/** The one sentence a local workspace refuses a verb its machine cannot take with. This computer is not a machine
+ * wsp forks, pauses or snapshots, so the verbs that move a provider fork have no meaning on it; `action` is the verb
+ * as the person typed it. The capability behind each is false, so the road that reads the capability says this. */
+export function localMachineRefusal(name: string, action: string): string {
+  return `${name} is this computer, not a machine wsp runs; it cannot ${action}`;
+}
+
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how
  * long it was given in all, and what the provider reads about the machine after it, or that the provider could not
  * be read. The person's road is to try again; the runtime never leaves the row at Pausing or Waking. */

@@ -157,12 +157,27 @@ export type PortProbeView = z.infer<typeof PortProbeView>;
 export const WorkspaceProject = z.object({ name: z.string(), dest: z.string(), importedAt: z.string() });
 export type WorkspaceProject = z.infer<typeof WorkspaceProject>;
 
+/** What a workspace's machine is: cloud, a fork wsp made at a provider, or local, this computer itself. A missing
+ * kind reads cloud, since every record written before local workspaces existed was one. The one fact every road
+ * that varies by machine kind reads; nothing switches on it outside the backend registry. */
+export const WorkspaceKind = z.enum(["cloud", "local"]);
+export type WorkspaceKind = z.infer<typeof WorkspaceKind>;
+
+/** Where a request to a workspace verb came from: here, this computer's own app, CLI or MCP, or relayed from a
+ * machine wsp runs. A local workspace answers only `here`; today no machine has a road into the host, so nothing
+ * relays yet, and the rule is written and tested so it holds when one appears. */
+export const WorkspaceOrigin = z.enum(["here", "relayed"]);
+export type WorkspaceOrigin = z.infer<typeof WorkspaceOrigin>;
+
 export const WorkspaceView = z.object({
   id: z.string(),
   name: z.string(),
   machineId: z.string(),
   phase: WorkspacePhase,
-  /** Snapshot id of the image this workspace forks from: a golden version's, or a project golden's. */
+  /** cloud, a provider fork, or local, this computer; absent reads cloud (every record from before local existed). */
+  kind: WorkspaceKind.optional(),
+  /** Snapshot id of the image this workspace forks from: a golden version's, or a project golden's; empty on a local
+   * workspace, which forks from no image. */
   golden: z.string(),
   createdAt: z.string(),
   project: WorkspaceProject.optional(),
@@ -1615,6 +1630,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     /** Auto-nap window for this workspace; absent takes the runtime default (20 min), null turns it off. */
     idleWindowMs: z.number().nullable().optional(),
   }),
+  /** The one local workspace: this computer. Forks nothing (the machine already exists); refused when this host wired
+   * no local backend, when one already exists, or for a name another workspace holds. Replies with { workspace }. */
+  z.object({ id: reqId, op: z.literal("workspaces.createLocal"), name: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
   z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.nap"), workspaceId: z.string() }),
@@ -1674,6 +1692,9 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     contextWindow: z.string().optional(),
     /** Absent reads as person: the app never sends it, the command line sends cli, the MCP server sends agent. */
     startedBy: SessionOrigin.optional(),
+    /** Where the request reached the host from: here or relayed from a machine; a local workspace refuses relayed.
+     * Absent reads here, and today every client on this computer sends here in practice. */
+    origin: WorkspaceOrigin.optional(),
     /** Minted by the client per send and echoed on the turn's session.start, so the client knows which start is its own. */
     requestId: z.string().optional(),
     /** A thread id, or NOTIFY_ME: registered on the thread this start opens, so every turn's end on it sends one line

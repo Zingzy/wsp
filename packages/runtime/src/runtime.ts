@@ -87,15 +87,18 @@ import {
   snapshotStorage,
   applyMachineContext,
   GUEST_USER_ENV,
+  LOCAL_MACHINE_ID,
   TOOLS_PATH,
 } from "@wsp/engine";
 import type {
   AdapterAttachOptions,
   AdapterEvent,
+  Capabilities,
   DaemonEvent,
   DaemonReachView,
   EventUnion,
   ExecStream,
+  ExecStreamFactory,
   GoldenBaseTool,
   GoldenBuilderView,
   GoldenLogin,
@@ -133,14 +136,16 @@ import type {
   TurnResult,
   TurnStatus,
   WorkspaceCreateStage,
+  WorkspaceKind,
+  WorkspaceOrigin,
   WorkspacePhase,
   WorkspaceProject,
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, RECORD_RESTORED, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
-import { machineExecStream } from "./machine-exec.js";
+import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
@@ -155,6 +160,12 @@ import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } fro
 export interface HarnessAdapterContext {
   machine: Machine;
   workspaceId: string;
+  /** How a turn's process is launched on this machine: the guest's detached-and-polled road on a cloud fork, a real
+   * child process on the local computer. The one concern that varies by machine kind and reaches the adapter here. */
+  execStream: ExecStreamFactory;
+  /** Where the harness keeps its sessions on this machine, by agent id: the folder the golden's sign-in wrote into on
+   * a cloud fork, the person's own store on the local computer. */
+  home: (agentId: string) => string;
   /** The machine's login environment, exported under the harness's own on every launch: the golden's PATH, so a
    * launch served by a process with a bare one still finds the binary. */
   env: Readonly<Record<string, string>>;
@@ -429,6 +440,8 @@ export interface ProjectImportOptions {
 }
 
 interface WorkspaceRecord extends WorkspaceView {
+  /** cloud or local; a record stored before local existed has none and reads cloud. */
+  kind: WorkspaceKind;
   spec: Pick<WorkspaceSpec, "envs" | "labels">;
   idleWindowMs?: number | null;
   /** What the provider built, read back after every create (it may clamp the
@@ -520,8 +533,23 @@ export interface GoldenExec {
   error?: string;
 }
 
+/** What a host wires for the one local workspace this computer can be: the backend that answers with this computer,
+ * how a turn's process is launched on it (a real child, not the guest's polled road), where each harness keeps its
+ * own sessions here, and the environment a turn runs under. Absent, the runtime serves cloud workspaces alone and
+ * `createLocal` is refused. The one place the local variant is registered beside the cloud default. */
+export interface LocalWiring {
+  backend: MachineBackend;
+  /** The launch factory for a turn on this computer, under the limits the registry hands every turn (the turn's own
+   * by default, none for the exec verb), so a local turn is cut the way a cloud turn is. */
+  execStream: (opts?: MachineExecOptions) => ExecStreamFactory;
+  home: (agentId: string) => string;
+  env: Readonly<Record<string, string>>;
+}
+
 export interface RuntimeOptions {
   backend: MachineBackend;
+  /** The local computer as a workspace, when a host wires it; the cloud backend serves every other workspace. */
+  local?: LocalWiring;
   store: Store;
   adapters: Record<string, HarnessAdapterFactory>;
   /** Required for golden.prepare / golden.seal; the scripted golden.build carries its own. */
@@ -755,6 +783,9 @@ export interface Runtime {
   readonly backend: MachineBackend;
   readonly workspaces: {
     create(opts: CreateWorkspaceOptions): Promise<CreatedWorkspace>;
+    /** The one local workspace: this computer. Refused when this host wired no local backend, when one already
+     * exists (one per host), and for a name another workspace holds. It forks nothing; the machine already exists. */
+    createLocal(name: string): Promise<WorkspaceView>;
     get(id: string): Promise<WorkspaceView>;
     list(): Promise<WorkspaceView[]>;
     nap(id: string): Promise<WorkspaceView>;
@@ -834,6 +865,9 @@ export interface Runtime {
         contextWindow?: string;
         /** Absent means a person asked. */
         startedBy?: SessionOrigin;
+        /** Where the request reached the host from: here (this computer's app, CLI or MCP) or relayed from a machine.
+         * A local workspace refuses a relayed one; absent reads here. Today nothing relays, so it is here in practice. */
+        origin?: WorkspaceOrigin;
         /** The client's id for this send, stamped on the turn's session.start as sent. */
         requestId?: string;
         /** A thread id, or NOTIFY_ME: kept on the thread this start opens, so the end of every turn on it sends one
@@ -1190,6 +1224,47 @@ async function readBodyUpTo(res: Response, cap: number): Promise<string> {
 
 export function createRuntime(opts: RuntimeOptions): Runtime {
   const { backend, store, adapters } = opts;
+  const local = opts.local;
+
+  /** The one place a workspace's kind means anything: the module that answers for machines of that kind. The backend
+   * that holds the machine, how a turn's process is launched on it, where each harness keeps its sessions there, the
+   * environment a turn runs under, and whether a request relayed from a machine may drive it. Every other road asks
+   * the module for a capability or a fact; nothing else compares the kind. Adding a kind (an ssh machine) is a row
+   * here and its wiring, nothing more. */
+  interface KindModule {
+    backend: MachineBackend;
+    execStream: (machine: Machine, opts?: MachineExecOptions) => ExecStreamFactory;
+    home: (agentId: string) => string;
+    env: Readonly<Record<string, string>>;
+    /** Whether a request relayed from a machine may drive a workspace of this kind; a local one answers only this computer. */
+    relayed: boolean;
+  }
+  const cloudHome = (id: string): string => {
+    const home = guestAgentHomes()[id];
+    if (home === undefined) throw new Error(`the catalog has no home for ${id}`);
+    return home;
+  };
+  const modules: Record<WorkspaceKind, KindModule | undefined> = {
+    cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true },
+    local: local === undefined ? undefined : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), home: local.home, env: local.env, relayed: false },
+  };
+  const moduleOf = (kind: WorkspaceKind): KindModule => {
+    const found = modules[kind];
+    if (found === undefined) throw new Error(`this host has no ${kind} backend wired, so it serves no ${kind} workspace`);
+    return found;
+  };
+  const backendFor = (kind: WorkspaceKind): MachineBackend => moduleOf(kind).backend;
+  const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry.machine, o);
+  /** The capability a verb reads before it runs: a machine whose capability is false refuses the verb with the one
+   * sentence, which reads for the local computer, the only machine short of these capabilities today. */
+  const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes">, action: string): void => {
+    if (backendFor(entry.record.kind).capabilities[can] !== true) throw new Error(localMachineRefusal(entry.record.name, action));
+  };
+  /** A request relayed from a machine cannot drive a workspace whose module takes none. Today no machine has a road
+   * into the host, so nothing relays yet; the rule holds when one appears. */
+  const refuseRelayed = (entry: LiveWorkspace, origin: WorkspaceOrigin | undefined): void => {
+    if (origin === "relayed" && !moduleOf(entry.record.kind).relayed) throw new Error(relayedRefusal(entry.record.name));
+  };
   const bus = eventBus();
   const pingTimeoutMs = opts.wake?.pingTimeoutMs ?? WAKE_PING_TIMEOUT_MS;
   const pauseDeadlineMs = opts.nap?.pauseDeadlineMs ?? PAUSE_DEADLINE_MS;
@@ -1411,6 +1486,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     name: r.name,
     machineId: r.machineId,
     phase: r.phase,
+    kind: r.kind,
     golden: r.golden,
     createdAt: r.createdAt,
     ...(r.claudeSessionId !== undefined ? { claudeSessionId: r.claudeSessionId } : {}),
@@ -1497,7 +1573,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         machineState: machineStateOf(entry.record.phase),
         reach: { state: reach },
         size,
-        rateUsdPerHour: backend.pricing.rateUsdPerHour(size),
+        rateUsdPerHour: backendFor(entry.record.kind).pricing.rateUsdPerHour(size),
         ...(reason !== undefined ? { reason } : {}),
         ...(idleAt !== undefined ? { idleAt } : {}),
       },
@@ -2147,12 +2223,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await store.put(OWNER, "id", { id: owner });
       }
       for (const raw of await store.list(WORKSPACES)) {
-        const stored = raw as Omit<WorkspaceRecord, "size"> & { size?: WorkspaceSize };
+        const stored = raw as Omit<WorkspaceRecord, "size" | "kind"> & { size?: WorkspaceSize; kind?: WorkspaceKind };
+        const kind: WorkspaceKind = stored.kind ?? "cloud";
+        // A record whose kind this host wired no module for is left as it was: only the host that owns that machine can serve it.
+        let module: KindModule;
+        try {
+          module = moduleOf(kind);
+        } catch (e) {
+          console.warn(`workspace ${stored.id} is left as it was: ${e instanceof Error ? e.message : String(e)}`);
+          continue;
+        }
         // The store is the fleet's truth and get(id) the provider's: a record whose machine the provider lost is
         // gone and one whose machine it holds paused is napping, whatever phase either was left at, and both say
         // so before anything lists it or meters it.
         let missing: string | undefined;
-        const machine = await backend.get(stored.machineId).catch((e: unknown) => {
+        const machine = await module.backend.get(stored.machineId).catch((e: unknown) => {
           if (!isMissing(e)) throw e;
           missing = providerSaid(e);
           return deadMachine(stored.machineId);
@@ -2175,8 +2260,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                   : stored.phase;
         const record: WorkspaceRecord = {
           ...stored,
+          kind,
           phase,
-          size: stored.size ?? sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize),
+          size: stored.size ?? sizeBuilt(await shapeOf(machine), module.backend.pricing.defaultSize),
           ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
         };
         if (phase === "gone") record.gone = stored.gone ?? goneWords(stored.machineId, { by: "record load", at: clock.now(), ...(missing !== undefined ? { answer: missing } : {}) });
@@ -2260,6 +2346,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const record: WorkspaceRecord = {
       id,
       name: o.name,
+      kind: "cloud",
       machineId: "",
       phase: "running",
       golden: o.golden,
@@ -2402,12 +2489,44 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return view((await entryOf(id)).record);
     },
 
+    async createLocal(name) {
+      await ready();
+      const { backend: mine } = moduleOf("local");
+      const n = nameGiven(name);
+      const refusal = nameRefusal(n);
+      if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
+      const machine = await mine.get(LOCAL_MACHINE_ID);
+      // The machine already exists and is the only one, so one record may stand on it: one local workspace per host.
+      const existing = [...live.values()].find(e => e.record.machineId === machine.id);
+      if (existing !== undefined) throw Object.assign(new Error(`this computer is already the workspace ${existing.record.name}; there is one local workspace per host`), { kind: "conflict" });
+      // A local workspace never naps (a computer runs while the host does), so its auto-nap window is off from the start.
+      const record: WorkspaceRecord = {
+        id: `ws_${randomBytes(4).toString("hex")}`,
+        name: n,
+        kind: "local",
+        machineId: machine.id,
+        phase: "running",
+        golden: "",
+        createdAt: new Date().toISOString(),
+        spec: {},
+        size: mine.pricing.defaultSize,
+        firstLife: false,
+        idleWindowMs: null,
+      };
+      attach(record, machine);
+      await persist(record);
+      const v = view(record);
+      bus.emit({ type: "workspace.created", workspace: v });
+      return v;
+    },
+
     async list() {
       await ready();
       return [...live.values()].filter(e => !e.creating).map(e => view(e.record));
     },
 
     async nap(id) {
+      refuseCannot(await entryOf(id), "ramPreservingPause", "be paused");
       return napWith(id);
     },
 
@@ -2431,7 +2550,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         if (read === "paused") await adoptPause(entry);
       } else if (await runsUnderNapping(entry)) await adoptRunning(entry);
+      // A running workspace has nothing to wake, whatever its kind; only a real resume asks the machine for one.
       if (entry.record.phase === "running") return view(entry.record);
+      refuseCannot(entry, "ramPreservingPause", "be woken");
       entry.waking = (async () => {
         entry.budget = budgetFor("wake", wakeDeadlineMs);
         entry.record.phase = "waking";
@@ -2461,6 +2582,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async upgrade(id, spec) {
       const entry = await entryOf(id);
+      refuseCannot(entry, "liveCloneForks", "be resized");
       await entry.ws.upgrade(spec);
       followMachine(entry);
       entry.record.spec = {
@@ -2475,6 +2597,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async updateImage(id) {
       const entry = await entryOf(id);
+      refuseCannot(entry, "liveCloneForks", "move to a newer image");
       const manifest = await goldenManifestOf(entry.record.golden);
       const head = goldenHead(manifest);
       const project = (await store.get(PROJECT_GOLDENS, entry.record.golden)) as ProjectGolden | undefined;
@@ -2504,6 +2627,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async rebuild(id) {
       const entry = await entryOf(id);
+      refuseCannot(entry, "liveCloneForks", "be rebuilt");
       if (entry.waking) await entry.waking.catch(() => {});
       const old = entry.record.machineId;
       const vaulted = (await store.getBlob(VAULTS, id)) !== undefined;
@@ -2532,6 +2656,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async snapshot(id) {
       const entry = await entryOf(id);
+      refuseCannot(entry, "liveCloneForks", "be snapshotted");
       const { name, project } = entry.record;
       if (project === undefined) throw new Error(`${name} has no project loaded; import one before snapshotting it`);
       if (entry.record.phase !== "running") throw new Error(`${name} is ${entry.record.phase}; only a running first-life machine can be snapshotted`);
@@ -2602,7 +2727,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id);
       const { adapter } = adapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
-      const inner = machineExecStream(entry.machine, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(cwd, argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
+      const inner = execFactoryFor(entry, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(cwd, argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
       let endWith: (reason: string) => void = () => {};
       const ended = new Promise<{ reason: string }>(resolve => {
         endWith = reason => resolve({ reason });
@@ -2830,7 +2955,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
-    return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, env: GUEST_LOGIN_ENV }) };
+    const kind = moduleOf(entry.record.kind);
+    return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, execStream: execFactoryFor(entry), home: kind.home, env: kind.env }) };
   };
 
   type LiveSession = { view: SessionView; turnId: string; handle: SessionHandle; turnLive?: TurnLive };
@@ -3210,6 +3336,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, o) {
       const entry = await entryOf(workspaceId);
+      refuseRelayed(entry, o.origin);
       const refuse = (): void => {
         const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
         if (refusal !== null) throw new Error(refusal);
@@ -4202,13 +4329,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   const status = createStatusTracker({
-    rateUsdPerHour: size => backend.pricing.rateUsdPerHour(size),
     store,
     records: async () => {
       await ready();
       return [...live.values()].filter(e => !e.creating).map(e => ({
         ...view(e.record),
         size: e.record.size,
+        // The rate follows the machine's kind: a local workspace's backend prices it at zero, so no cost line rides its row.
+        rateUsdPerHour: backendFor(e.record.kind).pricing.rateUsdPerHour(e.record.size),
         generation: e.generation,
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(e.machine.previewUrl ? { daemonReach: () => e.ws.daemonReach() } : {}),
@@ -4259,6 +4387,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const record: WorkspaceRecord = {
         id,
         name: named !== undefined && nameRefusal(named) === undefined ? named : row.id,
+        kind: "cloud",
         machineId: row.id,
         phase: state === "paused" ? "napping" : "running",
         golden: row.labels[GOLDEN_LABEL] ?? goldenHead(await golden.get())?.snapshotId ?? "",

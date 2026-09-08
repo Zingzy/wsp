@@ -33,7 +33,7 @@
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, MachineUnreached, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
 import { EXEC_CHUNK_BYTES, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
-import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
+import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
 export interface MachineExecOptions {
   /** Delay between log polls. */
@@ -50,6 +50,20 @@ export interface MachineExecOptions {
   now?: () => number;
   /** What every wait runs on, the poll's and the launch retry's; tests hand in one that moves the clock. */
   sleep?: (ms: number) => Promise<void>;
+}
+
+/** The two limits a turn runs under on every kind of machine, and what ends one: the wall since it started, else the
+ * idle stretch since its last byte or the person's last message. */
+export interface TurnLimits {
+  idleMs: number;
+  deadlineMs: number;
+}
+
+/** The one rule that cuts a turn, whatever launched it: the error carrying turnCutLine when a limit has passed, else
+ * nothing. The cloud road and the local child both read it, so a hung agent ends with the same words on either. */
+export function turnCut(limits: TurnLimits, elapsedMs: number, quietMs: number): Error | undefined {
+  const rule: TurnCutRule | undefined = elapsedMs >= limits.deadlineMs ? "wall" : quietMs >= limits.idleMs ? "idle" : undefined;
+  return rule === undefined ? undefined : new Error(turnCutLine(rule, elapsedMs, rule === "wall" ? limits.deadlineMs : limits.idleMs));
 }
 
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -150,12 +164,11 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           finish(null);
           return;
         }
-        const elapsed = now() - startedAt;
-        const cut = elapsed >= deadlineMs ? "wall" : now() - lastByteAt >= idleMs ? "idle" : undefined;
+        const cut = turnCut({ idleMs, deadlineMs }, now() - startedAt, now() - lastByteAt);
         if (cut !== undefined) {
           await reap();
           finish(null);
-          throw new Error(turnCutLine(cut, elapsed, cut === "wall" ? deadlineMs : idleMs));
+          throw cut;
         }
 
         let res: ExecResult;
