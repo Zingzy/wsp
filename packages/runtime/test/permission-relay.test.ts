@@ -2,10 +2,10 @@
 // A permission prompt a harness raises mid-turn, all the way through the
 // runtime: into the transcript as its own row with the options a person picks,
 // answered from the chat, denied by the runtime when nobody comes, cancelled
-// with the turn on a stop, and the access a thread starts at on a machine the
-// person keeps. The harness here is a fake that raises the prompt on command,
-// so nothing on a machine is needed and the runtime's own bookkeeping is what
-// is under test.
+// with the turn on a stop, the access a thread starts at on a machine the
+// person keeps, and an access picked while a turn runs. The harness here is a
+// fake that raises the prompt on command, so nothing on a machine is needed
+// and the runtime's own bookkeeping is what is under test.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -360,6 +360,58 @@ describe("the access a thread starts at", () => {
     await after.rt.close();
   });
 
+  it("a thread nobody named an access for starts at the pick the composer last made in that workspace", async () => {
+    const { rt, picks } = recording();
+    const local = await rt.workspaces.createLocal("mac");
+    await (await rt.sessions.start(local.id, { prompt: "one" })).finished;
+    expect(picks).toEqual(["default"]);
+
+    // The pick as the composer keeps it: on the host's own record, per workspace, so the next thread reads it
+    // whichever client or CLI opens it.
+    await rt.preferences.set({ access: { [local.id]: "bypassPermissions" } });
+    await (await rt.sessions.start(local.id, { prompt: "two" })).finished;
+    expect(picks).toEqual(["default", "bypassPermissions"]);
+
+    // A pick in one workspace says nothing about another's: that one still starts at what its catalog marks.
+    const other = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    await (await rt.sessions.start(other.id, { prompt: "three" })).finished;
+    expect(picks).toEqual(["default", "bypassPermissions", "bypassPermissions"]);
+    await rt.preferences.set({ access: { [local.id]: "plan" } });
+    await (await rt.sessions.start(local.id, { prompt: "four" })).finished;
+    expect(picks).toEqual(["default", "bypassPermissions", "bypassPermissions", "plan"]);
+  });
+
+  it("a pick this harness does not take is dropped, not a refusal: the send runs the harness's own default", async () => {
+    const { rt, picks } = recording();
+    const local = await rt.workspaces.createLocal("mac");
+    // A mode the other harness's list carries and claude's does not; the record is keyed by workspace, and a
+    // workspace's threads may run on either.
+    await rt.preferences.set({ access: { [local.id]: "read-only" } });
+    const first = await rt.sessions.start(local.id, { prompt: "one" });
+    await first.finished;
+    expect(picks).toEqual(["default"]);
+    // It drops to what the list marks, which on a kept machine is the mode that asks: never to something wider.
+    expect(first.view().permissionMode).toBe("default");
+    // The pick stands on the record for the harness it belongs to; nothing rewrites the person's record on a read.
+    expect((await rt.preferences.get()).access).toEqual({ [local.id]: "read-only" });
+    // A resume on that thread is read the same way rather than refused.
+    await (await rt.sessions.start(local.id, { prompt: "two", thread: first.view().threadId })).finished;
+    expect(picks).toEqual(["default", "default"]);
+  });
+
+  it("a start that names an access still wins over the pick, and a resumed thread keeps its own", async () => {
+    const { rt, picks } = recording();
+    const local = await rt.workspaces.createLocal("mac");
+    const first = await rt.sessions.start(local.id, { prompt: "one" });
+    await first.finished;
+    await rt.preferences.set({ access: { [local.id]: "bypassPermissions" } });
+    // The thread opened before the pick keeps the access its own turns ran at; the pick is what a new thread reads.
+    await (await rt.sessions.start(local.id, { prompt: "two", thread: first.view().threadId })).finished;
+    // A start that names one wins over both.
+    await (await rt.sessions.start(local.id, { prompt: "three", permissionMode: "plan" })).finished;
+    expect(picks).toEqual(["default", "default", "plan"]);
+  });
+
   it("a throwaway machine's list and its threads are unchanged: bypass is the default and carries no machine's name", async () => {
     const { rt, picks } = recording();
     const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
@@ -368,5 +420,127 @@ describe("the access a thread starts at", () => {
     expect(claude!.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe("Bypass");
     await (await rt.sessions.start(cloud.id, { prompt: "one" })).finished;
     expect(picks).toEqual(["bypassPermissions"]);
+  });
+});
+
+describe("an access picked while a turn runs", () => {
+  let root: string;
+  let store: Store;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "wsp-access-live-"));
+    store = memoryStore();
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  /** A turn that stays open until the test replies. `moves` is what its harness answers a mode change with, and null
+   * is a harness that takes none mid-turn, as codex exec does. */
+  const held = (moves: "set" | "refused" | null): { rt: Runtime; turns: { modes: string[]; reply: () => void }[]; picks: (string | undefined)[] } => {
+    const turns: { modes: string[]; reply: () => void }[] = [];
+    const picks: (string | undefined)[] = [];
+    const adapter: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: ({ onEvent, permissionMode }) => {
+        picks.push(permissionMode);
+        const modes: string[] = [];
+        let settle: (() => void) | undefined;
+        const finished = new Promise<{ status: "completed"; text: string }>(resolve => {
+          settle = () => {
+            const result = { status: "completed", text: "done" } as const;
+            onEvent({ type: "turn.done", sessionId: SESSION, result });
+            onEvent({ type: "session.end", sessionId: SESSION, exitCode: 0, sawResult: true });
+            resolve(result);
+          };
+        });
+        onEvent({ type: "session.start", sessionId: SESSION, cwd: "/root" });
+        turns.push({ modes, reply: () => settle?.() });
+        return {
+          localId: SESSION,
+          finished,
+          interrupt: async () => settle?.(),
+          ...(moves === null
+            ? {}
+            : {
+                setAccess: async (mode: string) => {
+                  modes.push(mode);
+                  return moves;
+                },
+              }),
+        };
+      },
+    });
+    const local: LocalWiring = {
+      backend: new LocalBackend({ root }),
+      execStream: o => localExecStream({ root, ...o }),
+      home: () => join(root, ".claude"),
+      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+    };
+    return { rt: createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter }, local }), turns, picks };
+  };
+
+  /** A running turn on the one local workspace. */
+  const running = async (rt: Runtime, turns: unknown[]): Promise<{ handle: SessionHandle; workspaceId: string }> => {
+    const ws = await rt.workspaces.createLocal("mac");
+    const handle = await rt.sessions.start(ws.id, { prompt: "run it" });
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+    return { handle, workspaceId: ws.id };
+  };
+
+  it("reaches the turn in front of the person, and the row carries the mode its later turns resume at", async () => {
+    const { rt, turns, picks } = held("set");
+    const { handle, workspaceId } = await running(rt, turns);
+    expect(handle.view().permissionMode).toBe("default");
+    expect(await rt.sessions.access(handle.id, "bypassPermissions")).toEqual({ outcome: "set" });
+    expect(turns[0]!.modes).toEqual(["bypassPermissions"]);
+    // The row is what a resume reads its access off, so a turn moved mid-flight must not leave it saying the old one.
+    expect(handle.view().permissionMode).toBe("bypassPermissions");
+
+    turns[0]!.reply();
+    await handle.finished;
+    const next = await rt.sessions.start(workspaceId, { prompt: "again", thread: handle.view().threadId });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    turns[1]!.reply();
+    await next.finished;
+    expect(picks).toEqual(["default", "bypassPermissions"]);
+  });
+
+  it("a harness that takes no mode change mid-turn answers unsupported and the turn keeps the access it started at", async () => {
+    const { rt, turns } = held(null);
+    const { handle } = await running(rt, turns);
+    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "unsupported" });
+    expect(handle.view().permissionMode).toBe("default");
+    turns[0]!.reply();
+    await handle.finished;
+  });
+
+  it("a CLI that refuses the mode reads as unsupported too, rather than as a change that landed", async () => {
+    const { rt, turns } = held("refused");
+    const { handle } = await running(rt, turns);
+    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "unsupported" });
+    expect(turns[0]!.modes).toEqual(["plan"]);
+    expect(handle.view().permissionMode).toBe("default");
+    turns[0]!.reply();
+    await handle.finished;
+  });
+
+  it("a mode the harness's own list does not carry is refused in the words a start refuses it with", async () => {
+    const { rt, turns } = held("set");
+    const { handle } = await running(rt, turns);
+    await expect(rt.sessions.access(handle.id, "sideways")).rejects.toThrow(/not one claude takes/);
+    expect(turns[0]!.modes).toEqual([]);
+    turns[0]!.reply();
+    await handle.finished;
+  });
+
+  it("answers rather than throwing: an unknown session, and a turn that is already over", async () => {
+    const { rt, turns } = held("set");
+    const { handle } = await running(rt, turns);
+    expect(await rt.sessions.access("s_nope", "plan")).toEqual({ outcome: "not-found" });
+    turns[0]!.reply();
+    await handle.finished;
+    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "not-running" });
+    expect(turns[0]!.modes).toEqual([]);
   });
 });

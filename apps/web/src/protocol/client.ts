@@ -8,6 +8,7 @@
 import {
   HarnessCatalog,
   PortForward,
+  SessionAccessOutcome,
   SessionAnswerOutcome,
   SessionInterruptOutcome,
   SessionRenameResult,
@@ -309,6 +310,11 @@ export interface Api {
    * was refused and the closing event is on the wire; every other outcome closed nothing here. Optional so fixtures
    * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. */
   answerPermission?(sessionId: string, askId: string, optionId: string): Promise<SessionAnswerOutcome>;
+  /** Moves the session's running turn to another access mode, from its next tool call on; takes the runtime's session
+   * id, as interruptSession does. set means the turn in front of the person now runs at the picked mode; every other
+   * outcome moved nothing, and the pick reaches the agent with the next message instead. Optional so fixtures without
+   * a running turn need not fake it; without it a pick made mid-turn simply waits for the next message. */
+  setSessionAccess?(sessionId: string, permissionMode: string): Promise<SessionAccessOutcome>;
   /** Names the session in its harness's own store on the machine; takes the runtime's session id, as interruptSession
    * does. renamed means the store took it and the next listing carries it; every other outcome named nothing, and
    * failed carries the machine's own line for the write it refused. Optional so fixtures that never rename need not
@@ -461,6 +467,8 @@ export function makeApi(c: ProtocolClient): Api {
       SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId })).outcome),
     answerPermission: async (sessionId, askId, optionId) =>
       SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId })).outcome),
+    setSessionAccess: async (sessionId, permissionMode) =>
+      SessionAccessOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.access", { sessionId, permissionMode })).outcome),
     // Parsed, not trusted: an outcome outside the enum must not read as renamed.
     renameSession: async (sessionId, title) => SessionRenameResult.parse(await c.request<Record<string, unknown>>("sessions.rename", { sessionId, title })),
     // Parsed, not trusted: a picker renders only values the wire type vouches for.

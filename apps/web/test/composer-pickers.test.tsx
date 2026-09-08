@@ -2,7 +2,8 @@
 // The model, effort and access pickers inside the composer box: filled from
 // the catalog the workspace's machine reports (the table until it answers,
 // and marked when it never does), a pick rides the next sessions.start and is
-// remembered per workspace, a model narrows the effort and context sections,
+// remembered per workspace, the access pick on the host's own record and into
+// a running turn where its harness takes one, a model narrows the effort and context sections,
 // favourites sort first, cmd-1 picks the first row, and the harness is
 // pinned once the thread has a turn. Base UI's menu and popover never settle
 // under jsdom (see composer-checkout.test), so both are stood in by a plain
@@ -10,7 +11,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, accessFromNextMessage, applyPreferencesPatch, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -152,11 +153,33 @@ const CODEX: HarnessCatalog = { harness: "codex", label: "Codex", source: "table
 const CODEX_TABLE = harnessCatalog("codex")!;
 const CLAUDE_TABLE = harnessCatalog("claude")!;
 
-function fixtureApi(opts: { table: HarnessCatalog[]; machine?: HarnessCatalog[] | Error; history?: ReadonlyArray<SessionEvent>; sessions?: SessionView[] }) {
+function fixtureApi(opts: {
+  table: HarnessCatalog[];
+  machine?: HarnessCatalog[] | Error;
+  history?: ReadonlyArray<SessionEvent>;
+  sessions?: SessionView[];
+  /** What the host answers a pick made while a turn runs; absent, the client has no such road at all. */
+  access?: SessionAccessOutcome;
+}) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: StartSessionOptions[] = [];
   const listed: Array<string | undefined> = [];
+  const patches: PreferencesPatch[] = [];
+  const moved: Array<{ sessionId: string; permissionMode: string }> = [];
   const api: Api = {
+    preferences: async () => useStore.getState().preferences,
+    setPreferences: async patch => {
+      patches.push(patch);
+      return applyPreferencesPatch(useStore.getState().preferences, patch);
+    },
+    ...(opts.access === undefined
+      ? {}
+      : {
+          setSessionAccess: async (sessionId: string, permissionMode: string) => {
+            moved.push({ sessionId, permissionMode });
+            return opts.access!;
+          },
+        }),
     listHarnesses: async workspaceId => {
       listed.push(workspaceId);
       if (workspaceId === undefined) return opts.table;
@@ -186,11 +209,11 @@ function fixtureApi(opts: { table: HarnessCatalog[]; machine?: HarnessCatalog[] 
       return { id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running", prompt: o.prompt, startedAt: 0 };
     },
   };
-  return { api, started, listed };
+  return { api, started, listed, patches, moved };
 }
 
 async function setup(api: Api) {
-  useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, sessions: {}, harnesses: [], harnessesByWorkspace: {} });
+  useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, sessions: {}, harnesses: [], harnessesByWorkspace: {}, preferences: DEFAULT_PREFERENCES });
   useStore.getState().bind(api);
   useStore.getState().setConn("live");
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
@@ -469,6 +492,59 @@ describe("composer pickers", () => {
     await setup(api);
     await waitFor(() => expect(picker("effort")?.textContent).toBe("Low · 1M"));
     expect(pickerValue("model")).toBe("claude-opus-5");
+    expect(pickerValue("permissionMode")).toBe("plan");
+  });
+
+  it("keeps the access pick on the host's record, where the next thread reads it, not in this browser's storage", async () => {
+    const { api, patches, started } = fixtureApi({ table: [CLAUDE] });
+    await setup(api);
+    await waitFor(() => expect(pickerValue("permissionMode")).toBe("bypassPermissions"));
+    fireEvent.click(picker("permissionMode")!);
+    fireEvent.click(option("plan")!);
+
+    await waitFor(() => expect(pickerValue("permissionMode")).toBe("plan"));
+    expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
+    expect(patches).toEqual([{ access: { [WS]: "plan" } }]);
+    // The record is the pick's one home: this browser's own store keeps the other picks and not this one.
+    expect(useComposerOptionsStore.getState().byWorkspaceId[WS]).toBeUndefined();
+    expect(JSON.stringify(window.localStorage.getItem("wsp:composer-options:v1"))).not.toContain("plan");
+
+    const editor = composerEditor();
+    await typeInto(editor, "go");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.permissionMode).toBe("plan");
+  });
+
+  it("shows the pick the record already carries for this workspace, over the mode the catalog marks", async () => {
+    const { api } = fixtureApi({ table: [CLAUDE] });
+    await setup(api);
+    await waitFor(() => expect(picker("permissionMode")).not.toBeNull());
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, access: { [WS]: "plan" } } });
+    await waitFor(() => expect(pickerValue("permissionMode")).toBe("plan"));
+    expect(picker("permissionMode")?.textContent).toContain("Plan");
+  });
+
+  it("a pick made while a turn runs reaches that turn, and says when it lands where the harness will not take it", async () => {
+    const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: "sess_0001", model: "claude-opus-5", permissionMode: "bypassPermissions" };
+    const took = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "set" });
+    await setup(took.api);
+    await waitFor(() => expect(pickerValue("permissionMode")).toBe("bypassPermissions"));
+    fireEvent.click(picker("permissionMode")!);
+    fireEvent.click(option("plan")!);
+    await waitFor(() => expect(took.moved).toEqual([{ sessionId: "s9", permissionMode: "plan" }]));
+    // The harness took it, so there is nothing to say: the turn in front of the person is at the picked mode.
+    await waitFor(() => expect(pickerValue("permissionMode")).toBe("plan"));
+    expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
+
+    const missed = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "unsupported" });
+    await setup(missed.api);
+    await waitFor(() => expect(pickerValue("permissionMode")).toBe("bypassPermissions"));
+    fireEvent.click(picker("permissionMode")!);
+    fireEvent.click(option("plan")!);
+    await waitFor(() => expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe(accessFromNextMessage("Plan")));
+    // The pick is kept either way: the line says when it lands, not that it was dropped.
+    expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
     expect(pickerValue("permissionMode")).toBe("plan");
   });
 

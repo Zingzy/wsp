@@ -50,7 +50,7 @@ import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatImageThumb } from "./ChatImages";
 import { attachmentOf, recordOf, useComposerImages, useComposerImagesStore } from "./composerImages";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
-import { ComposerOptionPickers, useComposerPicks } from "./ComposerOptionPickers";
+import { ComposerOptionPickers, useAccessPick, useComposerPicks } from "./ComposerOptionPickers";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerQueue } from "./ComposerQueue";
@@ -161,13 +161,20 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     const row = sessions?.find(r => r.claudeSessionId === runningTurn.sessionId || r.id === runningTurn.sessionId);
     return row?.id ?? runningTurn.sessionId;
   }, [runningTurn, sessions]);
+  // The same row sessions.interrupt is keyed by: a pick made while this turn runs goes to the runtime by that id.
+  const pickTarget = useMemo(
+    () => (stopTarget !== null && runningTurn !== null ? { sessionId: stopTarget, turnId: runningTurn.turnId } : null),
+    [runningTurn, stopTarget],
+  );
+  const accessPick = useAccessPick(workspaceId, pickTarget);
   const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
   const steerAttempt = steered !== null && runningTurn !== null && steered.turnId === runningTurn.turnId ? steered : null;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other gets the turn stopped.
   const canSteer = canStop && harnessCatalog?.steers === true && api?.steerSession !== undefined;
   // One line in the slot above the box: the newest failure, else what blocks a send, else the turn that replied but
-  // still runs, in the runtime's own words, since no new turn can start until its process exits.
+  // still runs, in the runtime's own words, since no new turn can start until its process exits, else an access pick
+  // the running turn's harness would not take mid-turn.
   const line =
     imageRefusal !== null
       ? imageRefusal
@@ -179,7 +186,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
           ? unavailable
           : runningTurn?.replied === true
             ? stillWorkingRefusal(threadKey)
-            : null;
+            : accessPick.line;
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
@@ -525,7 +532,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                           event.target.value = "";
                         }}
                       />
-                      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} />
+                      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} />
                     </div>
                     <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
                       <ComposerPrimaryActions

@@ -11,6 +11,8 @@
 // control_cancel_request, which the CLI sends for a prompt whose turn was
 // interrupted. A control_request this file does not know is answered with an
 // error rather than left unanswered, since the CLI waits on every one it sends.
+// The channel runs both ways: set_permission_mode is this host's own request,
+// and the CLI answers it with a control_response carrying the request's id.
 
 import { PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
 import type { PermissionAsk, PermissionOption } from "@wsp/protocol";
@@ -35,6 +37,8 @@ export type ControlLine =
   | { kind: "cancel"; requestId: string }
   /** A control_request of a subtype this adapter does not answer; the CLI is told so it stops waiting. */
   | { kind: "unknown"; requestId: string; subtype: string }
+  /** The CLI's answer to a request this adapter sent; `error` is its own words for one it would not take. */
+  | { kind: "answer"; requestId: string; error?: string }
   | undefined;
 
 /**
@@ -48,6 +52,13 @@ export function controlLine(event: Record<string, unknown>): ControlLine {
   if (type === "control_cancel_request") {
     const requestId = str(event.request_id);
     return requestId === undefined ? undefined : { kind: "cancel", requestId };
+  }
+  if (type === "control_response") {
+    const response = rec(event.response);
+    const requestId = str(response?.request_id);
+    if (requestId === undefined) return undefined;
+    const error = str(response?.subtype) === "error" ? str(response?.error) ?? "the CLI refused it without saying why" : undefined;
+    return { kind: "answer", requestId, ...(error !== undefined ? { error } : {}) };
   }
   if (type !== "control_request") return undefined;
   const requestId = str(event.request_id);
@@ -100,6 +111,15 @@ export function controlAnswerLine(ask: PermissionAsk, optionId: string, denyMess
         ? { behavior: "allow", updatedInput }
         : { behavior: "allow", updatedInput, updatedPermissions: [{ type: "setMode", mode: option.mode, destination: "session" }] };
   return JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: ask.askId, response } });
+}
+
+/** The request that puts a running turn into another access mode from its next tool call on: the same channel the
+ * prompts ride, in the direction the SDK host writes. The CLI answers it with a control_response of this request's
+ * own id. Measured on 2.1.263, 2026-09-08: every mode is taken mid-turn and the next tool call runs at it, except
+ * bypass, which is refused with "the session was not launched with --dangerously-skip-permissions" because that mode
+ * is a launch flag on this CLI, so a bypass pick is the one that waits for the person's next message. */
+export function setModeLine(requestId: string, mode: string): string {
+  return JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "set_permission_mode", mode } });
 }
 
 /** The answer to a control_request this adapter cannot serve: the CLI stops waiting on it and says why in its log. */

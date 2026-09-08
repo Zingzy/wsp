@@ -62,7 +62,7 @@ describe("makeApi wrappers", () => {
 
   it("preferences and setPreferences send the two preferences ops and unwrap the record the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
-    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, labs: false };
+    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, labs: false };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
     expect(await api.preferences!()).toEqual(record);
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.get" });
@@ -71,6 +71,17 @@ describe("makeApi wrappers", () => {
     // A record the wire type does not vouch for is not applied: the page would paint a theme it never checked.
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: { ...record, theme: "sepia" } });
     await expect(api.preferences!()).rejects.toThrow();
+  });
+
+  it("setSessionAccess sends sessions.access with the runtime's session id and unwraps the outcome", async () => {
+    const { api, lastSent } = await connect();
+    const move = api.setSessionAccess!;
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, outcome: "unsupported" });
+    expect(await move("s1", "bypassPermissions")).toBe("unsupported");
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "sessions.access", sessionId: "s1", permissionMode: "bypassPermissions" });
+    // An outcome outside the enum must not read as set: the composer would say nothing and the turn would keep asking.
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, outcome: "moved" });
+    await expect(move("s1", "plan")).rejects.toThrow();
   });
 
   it("hostFolders sends host.folders with only the fields it was given and unwraps the level the wire type vouches for", async () => {

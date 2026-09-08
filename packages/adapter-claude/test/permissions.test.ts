@@ -4,7 +4,7 @@
 // binary sent and took on 2026-09-08, copied off that run.
 import { describe, expect, it } from "vitest";
 import { PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
-import { controlAnswerLine, controlErrorLine, controlLine } from "../src/permissions.js";
+import { controlAnswerLine, controlErrorLine, controlLine, setModeLine } from "../src/permissions.js";
 
 const REQUEST_ID = "d9aa99d3-be4e-4a2b-8766-1b9494cde4f6";
 
@@ -65,6 +65,18 @@ describe("controlLine", () => {
     expect(controlLine({ type: "control_cancel_request" })).toBeUndefined();
   });
 
+  it("reads the CLI's answer to a request this host sent, and the words of one it would not take", () => {
+    expect(controlLine({ type: "control_response", response: { subtype: "success", request_id: "set_1" } })).toEqual({ kind: "answer", requestId: "set_1" });
+    expect(controlLine({ type: "control_response", response: { subtype: "error", request_id: "set_1", error: "no such mode" } })).toEqual({
+      kind: "answer",
+      requestId: "set_1",
+      error: "no such mode",
+    });
+    // A refusal with no words of its own is still a refusal, never a silent success.
+    expect(controlLine({ type: "control_response", response: { subtype: "error", request_id: "set_1" } })).toMatchObject({ kind: "answer", error: expect.any(String) });
+    expect(controlLine({ type: "control_response", response: {} })).toBeUndefined();
+  });
+
   it("reads a request of another subtype as one to refuse rather than one to answer", () => {
     expect(controlLine(askLine({ subtype: "hook_callback" }))).toEqual({ kind: "unknown", requestId: REQUEST_ID, subtype: "hook_callback" });
     expect(controlLine(askLine({ tool_name: undefined }))).toEqual({ kind: "unknown", requestId: REQUEST_ID, subtype: "can_use_tool" });
@@ -111,6 +123,16 @@ describe("controlErrorLine", () => {
     expect(JSON.parse(controlErrorLine(REQUEST_ID, "hook_callback"))).toEqual({
       type: "control_response",
       response: { subtype: "error", request_id: REQUEST_ID, error: "wsp answers no hook_callback control request" },
+    });
+  });
+});
+
+describe("setModeLine", () => {
+  it("asks the binary for the mode by its own slug, under the id its answer will carry", () => {
+    expect(JSON.parse(setModeLine("set_1", "bypassPermissions"))).toEqual({
+      type: "control_request",
+      request_id: "set_1",
+      request: { subtype: "set_permission_mode", mode: "bypassPermissions" },
     });
   });
 });
