@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // wsp doctor: proves the whole reach path against one live machine and prints
 // a timing table. fork -> deploy daemon -> previewUrl -> heartbeat client ->
-// inbox round trip -> kill, with a zero-machines check at the end.
+// inbox round trip -> kill, with a check at the end that this host left none.
 
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -10,8 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, type Machine } from "@wsp/engine";
-import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_TEMPLATES_LINE, templateRecordedLine, templateSkippedLine } from "@wsp/protocol";
+import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, OWNER_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, whoseMachine, type Machine, type MachineBackend } from "@wsp/engine";
+import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_TEMPLATES_LINE, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir } from "./assets.js";
@@ -437,6 +437,18 @@ export async function promoteGoldens(rt: Runtime, io: Pick<CliIO, "log">): Promi
   return counts.filter(([n]) => n > 0).map(([n, word]) => `${n} ${word}`).join(", ");
 }
 
+/** The doctor's teardown check. Only machines this host made count, by the owner stamp every machine wsp creates
+ * wears: a second computer on the same account stands its own, and the doctor deleted none of them. Those are one
+ * line, named and left alone; this host's own leftovers fail the run. Returns the step's note. */
+export async function verifyNoneLeft(backend: MachineBackend, owner: string, log: (line: string) => void): Promise<string> {
+  const rows = (await backend.list()).filter(m => !isReserved(m.labels) && m.state !== "gone");
+  const mine = rows.filter(m => whoseMachine(m.labels, owner) === "own");
+  const others = rows.filter(m => whoseMachine(m.labels, owner) !== "own");
+  if (others.length > 0) log(otherHostsMachinesLine(others.map(m => ({ id: m.id, ...(m.labels[OWNER_LABEL] !== undefined ? { owner: m.labels[OWNER_LABEL]! } : {}) }))));
+  if (mine.length > 0) throw new Error(`machines still up: ${mine.map(m => m.id).join(", ")}`);
+  return others.length > 0 ? "workspace deleted, no machines of this host left" : "workspace deleted, no machines left on the account";
+}
+
 export interface DoctorOptions {
   /** Envs baked into golden builds and forks (claude credentials). */
   envs?: Record<string, string>;
@@ -569,10 +581,9 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
       async () => {
         await rt.workspaces.delete(workspaceId!);
         workspaceId = undefined;
-        const leftover = (await rt.backend.list()).filter(m => !isReserved(m.labels) && m.state !== "gone");
-        if (leftover.length > 0) throw new Error(`machines still up: ${leftover.map(m => m.id).join(", ")}`);
+        return verifyNoneLeft(rt.backend, await rt.owner(), io.log);
       },
-      () => "workspace deleted, no machines left on the account",
+      note => note,
     );
   } catch (e) {
     failed = e instanceof Error ? e.message : String(e);

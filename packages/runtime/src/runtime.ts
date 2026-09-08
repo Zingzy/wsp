@@ -910,6 +910,9 @@ export interface Runtime {
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
   readonly status: StatusApi;
+  /** This state file's owner id, stamped on every machine it creates: a machine wearing another one was made by
+   * another host standing on the same account. Minted on the first read when the state file has none. */
+  owner(): Promise<string>;
   /** Records this state file's workspace machines that no record claims, kills its builders and smoke forks that none
    * claims plus orphans past their backstop, and lists the running machines it left alone. */
   reap(olderThanMs?: number): Promise<SweepResult>;
@@ -4189,6 +4192,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     golden,
     status,
+    owner: async () => {
+      await ready();
+      return owner;
+    },
     reap: async olderThanMs => {
       await ready();
       await refreshBuilders();

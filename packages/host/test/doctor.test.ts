@@ -30,9 +30,11 @@ import {
   promoteGoldens,
   stageDaemonBundle,
   tarPackCommand,
+  verifyNoneLeft,
   type DaemonSocket,
 } from "../src/doctor.js";
 import { redact } from "../src/init-log.js";
+import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 
 function tmp(prefix: string): string {
@@ -119,6 +121,51 @@ describe("promoteGoldens", () => {
     expect(await promoteGoldens(rt, cli)).toBe("this backend has no templates; goldens stay as snapshots");
     expect(lines).toEqual([]);
     expect(backend.promoted).toEqual([]);
+  });
+});
+
+describe("verifyNoneLeft", () => {
+  const at = (ms: number): string => new Date(Date.now() - ms).toISOString();
+
+  it("counts only machines wearing this host's owner stamp, names another host's in one line, and fails on its own", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, hostId: "h1" });
+    const owner = await rt.owner();
+    const lines: string[] = [];
+    // A second host's builders standing on the same account while this host runs the doctor.
+    const b1 = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": "h_other", createdAt: at(60_000) } });
+    const b2 = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": "h_other", createdAt: at(60_000) } });
+    const unowned = await backend.create({ kind: "sandbox", labels: { wsp: "1", createdAt: at(60_000) } });
+    await backend.create({ kind: "sandbox", labels: { poc: "ttl-test", wsp: "1" } });
+
+    await expect(verifyNoneLeft(backend, owner, l => lines.push(l))).resolves.toBe("workspace deleted, no machines of this host left");
+    expect(lines).toEqual([`left alone 3 machines this host did not make: ${b1.id} (owner h_other), ${b2.id} (owner h_other), ${unowned.id} (no owner)`]);
+
+    // One of this host's own is the failure the check exists for, and the line still names the others.
+    const mine = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-owner": owner, createdAt: at(60_000) } });
+    lines.length = 0;
+    await expect(verifyNoneLeft(backend, owner, l => lines.push(l))).rejects.toThrow(`machines still up: ${mine.id}`);
+    expect(lines).toHaveLength(1);
+  });
+
+  it("on an account with nothing standing the note is the one the release table quotes, and no line is logged", async () => {
+    const backend = stubBackend();
+    const lines: string[] = [];
+    await expect(verifyNoneLeft(backend, "h_me", l => lines.push(l))).resolves.toBe("workspace deleted, no machines left on the account");
+    expect(lines).toEqual([]);
+  });
+
+  it("the fork this host makes wears the stamp the check counts by, so a workspace left behind still fails it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    await store.put("goldens", "default", SEALED_GOLDEN);
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const view = await rt.workspaces.create({ golden: SEALED_GOLDEN.versions[0]!.snapshotId, name: "doctor-fork" });
+    expect(backend.machines[0]?.spec.labels?.["wsp-owner"]).toBe(await rt.owner());
+    await expect(verifyNoneLeft(backend, await rt.owner(), () => {})).rejects.toThrow(`machines still up: ${view.machineId}`);
+    await rt.workspaces.delete(view.id);
+    await expect(verifyNoneLeft(backend, await rt.owner(), () => {})).resolves.toBe("workspace deleted, no machines left on the account");
+    await rt.close();
   });
 });
 
