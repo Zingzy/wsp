@@ -1,0 +1,10 @@
+{
+  "name": "@wsp/docs",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "preview": "npx @scalar/cli@2.0.1 project preview --no-open",
+    "check": "npx @scalar/cli@2.0.1 project check-config",
+    "cli": "node scripts/cli-reference.mjs"
+  }
+}

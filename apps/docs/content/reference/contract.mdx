@@ -1,0 +1,64 @@
+# The contract
+
+The command line, the MCP tools and the wsp skill are one contract. Every capability exists in all three or in none, and a parity test in the repository holds them to it. A flag on the command line is the input of the same name on the tool, `--add-check` being `add_check`, and a repeatable flag is an array.
+
+## Output
+
+Without `--json`, stdout is for a person. Progress, the waking line and every refusal go to stderr.
+
+With `--json`, stdout carries JSON alone: one object per line, frames first, the last line the result. A verb with no stream prints the result alone. The result is the object the MCP tool of the same name answers with, less what the frames already carried, so no line prints twice.
+
+| verb | what `--json` prints |
+| --- | --- |
+| `wsp exec --json` | one `exec.output` frame per output line, then a result with the exit code and the folder |
+| `wsp import --json` | the plan, then `{"imported": ...}`, or the plan alone when nothing was imported |
+| `wsp fork dev --send "<task>" --json` | the creating frames, the workspace, then `{"turn": ...}` |
+
+## Exit codes
+
+A refusal or a failure is one line on stderr, and under `--json` the failure object `{"error": "<the line>", "class": "usage", "exit": 3}`. The exit code is the class's.
+
+| exit | class | when |
+| --- | --- | --- |
+| 0 | `ok` | it did what its line says; with `--json` stdout holds the answer |
+| 1 | `provider` | the host, the runtime, Solari or the machine refused or failed |
+| 2 | `auth` | no key, no sign-in, or the host refused the token |
+| 3 | `usage` | the line was refused before anything ran: a missing argument, an unknown flag or a value nothing takes |
+
+`wsp exec` is the one exception: its exit code is the command's own, and only a machine that could not run it is a `provider` failure. A person saying no to a confirmation is `<name> kept` on stderr with exit code 1.
+
+An MCP tool answers a failure as a tool error whose structured content is the same object, so `class` reads the same on both doors. A call whose inputs do not fit the tool's schema is refused by the server before the tool runs.
+
+## Naming things
+
+A workspace is named by its name, or by its id when two share a name. A thread is named by its id or by a prefix that picks exactly one.
+
+## Where the state lives
+
+Every verb takes `--state <path>`, the state file the host serves. The default is `~/.wsp/state.json`, or `./.wsp/state.json` in a checkout with a `.env`. The MCP server and the command line refuse a host of another version in one line; restart it with `wsp up`.
+
+## Turns, replies and processes
+
+A turn ends when the agent process exits, not at its reply. `wsp thread new` and `wsp send` return when the reply is complete, and the thread reads running until the process exits, which can be minutes when the agent left a command running.
+
+A `send` into a thread whose turn is still running does one of three things, and the command line says which on stderr:
+
+| outcome | when |
+| --- | --- |
+| `started` | the thread's turn was not running; a new turn starts on the model, effort and access named or the thread's own |
+| `steered` | the agent can take input mid-turn, as Claude Code can; the message joins the running turn and the reply is that turn's |
+| `queued` | the agent cannot; the message waits for the running turn to end, then runs |
+
+Into a thread whose turn has replied but whose agent process is still running, nothing starts. The send is refused with `thread <id> replied, still working; wait for its turn to finish before sending`, and the app's composer shows the same words. A send right after a `--notify` line or right after `threads wait` answers can meet this, since both go at the reply. Wait and send again rather than retrying in a loop.
+
+When a thread's previous turn did not finish, because of a deadline, a host restart or a nap, the next reply opens with `previous turn was cut; resuming` and the structured output carries `afterCut: true`. The agent resumes a transcript that may be missing its last steps, so restate what matters.
+
+## Notifications
+
+`--notify me` sends one line to the person for each turn. `--notify <thread>` sends that line into another thread as a message, steered into its running turn or queued. The line goes once, at the reply, and reads:
+
+```text
+thread 1a2b3c4d finished (completed, 12m 4s, $0.41): <last line of the reply>
+```
+
+The same line is what `wsp threads wait` prints, and what the `threads_wait` tool answers under `finished` with the id, status, duration, cost and the reply's last line.

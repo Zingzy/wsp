@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Github } from "lucide-react";
 import { CopyCommand } from "@/components/copy-command";
-import { INSTALL, RELEASES, REPO } from "@/links";
+import { DOCS, INSTALL, RELEASES, REPO } from "@/links";
 
 export function Wordmark() {
   return (
@@ -15,6 +15,7 @@ export function Wordmark() {
 }
 
 const LINKS = [
+  { href: DOCS, label: "Docs" },
   { href: "#story", label: "How it works" },
   { href: "#agents", label: "For your agent" },
   { href: "#compare", label: "Compare" },

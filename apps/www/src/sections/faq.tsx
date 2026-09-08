@@ -37,9 +37,16 @@ const QUESTIONS = [
   },
 ];
 
+const FAQ_LD = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: QUESTIONS.map(({ q, a }) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),
+});
+
 export function Faq() {
   return (
     <section id="faq" className="scroll-mt-16 border-t border-border">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: FAQ_LD }} />
       <div className="mx-auto grid max-w-7xl gap-12 px-5 py-24 sm:px-8 lg:grid-cols-12 lg:py-32">
         <div className="rise lg:col-span-4">
           <h2 className="font-display-mid text-[clamp(2rem,4.6vw,3.25rem)] leading-[1.02]">Questions.</h2>

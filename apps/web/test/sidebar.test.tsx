@@ -99,7 +99,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -1066,7 +1066,7 @@ describe("a workspace's own colour and glyph", () => {
   const tinted = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-tint]")).map(el => el.getAttribute("data-space-tint") ?? "");
 
   async function mountSpaces(api: FakeApi): Promise<FakeApi> {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
     useStore.getState().bind(api);
     render(
       <SidebarProvider defaultOpen>
@@ -1124,7 +1124,7 @@ describe("a workspace's own colour and glyph", () => {
   // whose id sorts first parts the two orders. A creation in flight holds its own key as the selection, which is in
   // neither order, and both fall back to a first row: the shell's wash has to be the header's workspace even then.
   it("the wash the shell paints and the header the body draws are the same workspace when the two orders differ", async () => {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
     const napping: WorkspaceView = { ...view("ws_aaa", "old", "napping"), tint: "azure" };
     const running: WorkspaceView = { ...view("ws_zzz", "api"), tint: "magenta" };
     const api = fakeApi([napping, running], [status(napping), status(running)]);
@@ -1164,7 +1164,7 @@ describe("Spaces mode", () => {
   // The current workspace's name reads twice on screen, in the header and on its own dot, so the shared mount's
   // one-name wait cannot be used here; the header arriving is what says the body is up.
   async function mountSpaces(api: FakeApi): Promise<FakeApi> {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
     useStore.getState().bind(api);
     render(
       <SidebarProvider defaultOpen>

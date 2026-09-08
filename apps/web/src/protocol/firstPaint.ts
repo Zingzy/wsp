@@ -10,7 +10,7 @@ import { DEFAULT_PREFERENCES, Preferences } from "@wsp/protocol";
 
 const FIRST_PAINT_KEY = "wsp:first-paint";
 
-const FirstPaint = Preferences.pick({ theme: true, sidebarWidth: true, sidebarMode: true }).partial();
+const FirstPaint = Preferences.pick({ theme: true, sidebarWidth: true, sidebarMode: true, labs: true }).partial();
 type FirstPaint = ReturnType<typeof FirstPaint.parse>;
 
 function cachedFirstPaint(): FirstPaint {
@@ -24,9 +24,9 @@ function cachedFirstPaint(): FirstPaint {
 
 /** A storage that throws leaves the next load on the defaults; nothing else depends on the write. */
 export function rememberFirstPaint(preferences: Preferences): void {
-  const { theme, sidebarWidth, sidebarMode } = preferences;
+  const { theme, sidebarWidth, sidebarMode, labs } = preferences;
   try {
-    window.localStorage.setItem(FIRST_PAINT_KEY, JSON.stringify({ theme, ...(sidebarWidth !== undefined ? { sidebarWidth } : {}), sidebarMode }));
+    window.localStorage.setItem(FIRST_PAINT_KEY, JSON.stringify({ theme, ...(sidebarWidth !== undefined ? { sidebarWidth } : {}), sidebarMode, labs }));
   } catch {
     return;
   }

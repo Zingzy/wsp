@@ -32,7 +32,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
-import { catalogIn, useCapabilities, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { catalogIn, useCapabilities, useLabs, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, onWorkspaceLookRequest, type ProjectTripRequest, type WorkspaceLookRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
@@ -131,6 +131,7 @@ export function WorkspaceSidebar() {
   const nowMs = useMemo(() => Date.now(), [nowMinute]);
 
   const [mode, setMode] = useSidebarMode();
+  const labs = useLabs();
   const [settledCollapsed, setSettledCollapsed] = useLocalStorage(SETTLED_COLLAPSED_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
   const [archivedOpenIds, setArchivedOpenIds] = useLocalStorage(ARCHIVED_OPEN_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
@@ -164,8 +165,8 @@ export function WorkspaceSidebar() {
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const sectionActions = useMemo(
-    () => resolveActions(sidebarActions, { mode, hasLocal, connected: api !== null }, { setMode, newLocal: () => void createLocal() }),
-    [api, createLocal, hasLocal, mode, setMode],
+    () => resolveActions(sidebarActions, { mode, hasLocal, connected: api !== null }, { setMode, newLocal: () => void createLocal() }, labs),
+    [api, createLocal, hasLocal, labs, mode, setMode],
   );
   const spaceId = useSpaceWorkspaceId();
   const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === spaceId) ?? null);
@@ -269,7 +270,7 @@ export function WorkspaceSidebar() {
    * first thread, and the machine its threads run on. */
   const blockOf = (project: SidebarProjectSnapshot) => {
     const workspace = workspaceTarget(project.workspace, project.status);
-    const actions = resolveActions(workspaceActions, workspace, verbs);
+    const actions = resolveActions(workspaceActions, workspace, verbs, labs);
     const machine: RowMachine = { state: workspaceState(workspace), ...(workspace.reason !== null ? { goneWords: workspace.reason } : {}) };
     return { actions, newThreadAction: actionById(actions, "new-thread"), machine };
   };

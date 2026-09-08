@@ -88,8 +88,10 @@ describe("the workspace menu the smoke expects", () => {
   it("is the workspace registry's own words in its own order, with a separator wherever the group changes", () => {
     const target = workspaceTarget(RUNNING, null);
     const shape = workspaceMenuShape(RUNNING);
-    expect(shape.filter(row => row !== SEPARATOR)).toEqual(workspaceActions.map(entry => entry.title(target)));
-    const groups = workspaceActions.map(entry => entry.group);
+    // The smoke's host runs with labs off, so the registry's labs rows are not in the shape it expects.
+    const shown = workspaceActions.filter(entry => entry.labs !== true);
+    expect(shape.filter(row => row !== SEPARATOR)).toEqual(shown.map(entry => entry.title(target)));
+    const groups = shown.map(entry => entry.group);
     expect(shape.filter(row => row === SEPARATOR)).toHaveLength(groups.filter((group, i) => i > 0 && groups[i - 1] !== group).length);
     // Read straight through, so a separator in the wrong place is a failure and not only a wrong count. The words
     // are named by key from the one table that holds them, never spelled again here.
@@ -106,8 +108,6 @@ describe("the workspace menu the smoke expects", () => {
       WORKSPACE_WORDS.exportProject,
       SEPARATOR,
       WORKSPACE_WORDS.rename,
-      WORKSPACE_WORDS.colour,
-      WORKSPACE_WORDS.icon,
       WORKSPACE_WORDS.fork,
       SEPARATOR,
       WORKSPACE_WORDS.copyId,
@@ -118,7 +118,8 @@ describe("the workspace menu the smoke expects", () => {
 
   it("follows the registry: an action added to it lands in the shape without this file or the smoke changing", () => {
     const before = workspaceMenuShape(RUNNING);
-    const added = [...workspaceActions, { ...workspaceActions[0]!, id: "invented", group: "invented", title: () => "Invented" }];
+    const shown = workspaceActions.filter(entry => entry.labs !== true);
+    const added = [...shown, { ...shown[0]!, id: "invented", group: "invented", title: () => "Invented" }];
     const target = workspaceTarget(RUNNING, null);
     const shape = contextMenuTemplate(
       added.map(entry => ({ id: entry.id, label: entry.title(target), group: entry.group, enabled: true })),

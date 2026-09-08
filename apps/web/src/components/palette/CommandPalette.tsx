@@ -10,7 +10,7 @@ import { deriveSidebarProjects } from "../../adapt/index.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
-import { useSelectedWorkspaceId, useStore } from "../../protocol/store.js";
+import { useLabs, useSelectedWorkspaceId, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { requestNewWorkspace } from "../../shell/shellRequests.js";
@@ -48,6 +48,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const selectedId = useSelectedWorkspaceId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
   const [sidebarMode, setSidebarMode] = useSidebarMode();
+  const labs = useLabs();
   const verbs = useWorkspaceVerbs();
 
   useEffect(
@@ -84,8 +85,8 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
     [createLocalWorkspace, openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, hasLocal, sidebarMode, handlers, verbs }),
-    [api, handlers, hasLocal, projects, query, selectedId, sidebarMode, verbs],
+    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, hasLocal, labs, sidebarMode, handlers, verbs }),
+    [api, handlers, hasLocal, labs, projects, query, selectedId, sidebarMode, verbs],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {

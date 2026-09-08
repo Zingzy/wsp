@@ -1026,18 +1026,26 @@ export const Preferences = z.object({
   sidebarWidth: z.number().int().positive().optional(),
   terminalSize: TerminalSizeSource,
   terminalZoom: z.record(z.string(), z.number().int()),
+  /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
+   * every read, so no client sets it and nothing a state file holds can turn it on. */
+  labs: z.boolean(),
 });
 export type Preferences = z.infer<typeof Preferences>;
 
-/** What preferences.set takes: any of the record's fields; a null sidebarWidth clears it back to the default, and
- * terminalZoom names only the workspaces it moves, a null entry dropping that workspace's zoom. */
-export const PreferencesPatch = Preferences.partial().extend({
+/** The one road that turns labs on: this variable in the host's environment, read once when the runtime starts. */
+export const LABS_ENV = "WSP_LABS";
+export const labsFromEnv = (env: Record<string, string | undefined>): boolean => env[LABS_ENV] === "1";
+
+/** What preferences.set takes: any of the record's fields but labs, which is the host's to say; a null sidebarWidth
+ * clears it back to the default, and terminalZoom names only the workspaces it moves, a null entry dropping that
+ * workspace's zoom. */
+export const PreferencesPatch = Preferences.omit({ labs: true }).partial().extend({
   sidebarWidth: z.number().int().positive().nullable().optional(),
   terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
 });
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {} };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1059,6 +1067,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     sidebarMode: patch.sidebarMode ?? current.sidebarMode,
     terminalSize: patch.terminalSize ?? current.terminalSize,
     terminalZoom,
+    labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
   };
 }

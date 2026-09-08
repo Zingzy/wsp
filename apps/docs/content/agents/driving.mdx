@@ -1,0 +1,66 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Driving wsp from an agent
+
+The agent on your computer can set wsp up from nothing and run work on workspaces, because the MCP tools and the command line are thin clients of the same host you use. Whatever the agent does shows in your sidebar, and you can read and answer any thread it opens.
+
+This page is the sequence the wsp skill teaches that agent. `wsp mcp install --agent <id>` puts the tools and the skill into Claude Code, Codex, Gemini CLI or OpenCode, and after that agent restarts it can follow this page on its own. In Claude Code the skill is `/wsp`.
+
+## What stays yours
+
+Two things are the person's and never the agent's.
+
+- **Sign-ins.** No tool can finish one. The run hands the page over and waits; the person opens it in their own browser.
+- **Keys.** The Solari key and any Anthropic key live in `~/.wsp/.env`. They are never typed into a conversation and never read back. `wsp up` reads them off the file itself, so starting the host is the agent's job and the keys still never pass through it.
+
+## The sequence
+
+Every step ends in what to expect. The agent runs the command, reads that line, and stops at the first one that does not match rather than carrying on.
+
+1. **Health check.** `wsp --version`, then `wsp threads --json`. With no `wsp` on the path, `npm i -g @zingzy/wsp` puts it there; `npx @zingzy/wsp` is worse, since its cache write fails under a sandboxed agent. Expect `wsp <version>` and then `{"threads":[]}`, which means a host is already serving and the agent can skip to the first workspace. `no wsp host is serving <path>; run wsp up first` means nothing serves.
+
+2. **Ask the host which state it is in.** `wsp up` serves until stopped, so the agent starts it detached and reads the first lines: `nohup wsp up > /tmp/wsp-up.log 2>&1 &`. Five answers are possible and each is a branch, not a failure. `app http://127.0.0.1:4400` with `runtime ws ws://127.0.0.1:4410` means a key and a golden are both there. `no golden yet; run wsp init` means the key is there and the image is not. `Solari API key: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.` means no key at all. An `EADDRINUSE` naming 4400 or 4410 means something else holds a port, so start again with `--port 4401 --ws-port 4411`. `another wsp host (pid <n>) is already serving <path>` means one of yours is up; use it.
+
+3. **The key.** The agent asks you to write `SOLARI_API_KEY=<key>` into `~/.wsp/.env`, and `ANTHROPIC_API_KEY=<key>` beside it if you pay Anthropic by the token. On a Claude subscription you skip that line and sign in on the machine during init instead.
+
+4. **Read before writing.** `wsp recipe scan` prints every option and writes nothing: the agents with what their history on this computer says, the tools with why each is there and its download size, what else a package manager here has, the commands your agents ran that the catalog does not carry, and the sign-ins with the default choice on each. `--json` gives the same rows with a `recommended` value and a reason on every one. Expect the tables and then `Nothing was written.`
+
+5. **Two questions, then the recipe.** The agent puts the heavy rows to you, anything over 300 MB, as one multiple choice question with the size beside each. Then the sign-ins, naming the default on each row and what the choices mean: copy it from this computer, sign in on the machine after the build, hand it an API key, or skip. Then one call writes the file: `wsp recipe --tick used`, plus `--set <id>=on|off` for every row you flipped, `--signin <id>=copy|machine|key|skip` for every sign-in, and `--project <folder>` when the setup is for one project. Expect `Recipe written to ~/.wsp/recipe.json`.
+
+6. **Build the golden.** The agent runs init detached with that recipe:
+
+   ```bash
+   nohup wsp init --recipe ~/.wsp/recipe.json --non-interactive --json > /tmp/wsp-init.jsonl 2> /tmp/wsp-init.log &
+   ```
+
+   It boots one builder machine, installs what is ticked, and at each sign-in the recipe answered `machine` it prints one JSON line and waits:
+
+   ```json
+   {"event":"sign-in","tool":"gh","label":"GitHub CLI login","browserUrl":"https://github.com/login/device","code":"8F4A-C21B","nextCommand":"open 'https://github.com/login/device'","waitSeconds":960}
+   ```
+
+   The agent hands you that line as it comes: the page, the code when there is one, and the command that opens it. It then reads the tool's own status on the machine and moves on when it says signed in, or when `waitSeconds` pass. Expect one `sign-in-result` line per hand-off, then `Golden v<n> sealed.` in the log, `Workspace first (<id>) forked from golden v<n>.` on the first seal, and `Open http://127.0.0.1:4400/`.
+
+7. **The host.** Init serves a host for as long as it runs. When nothing serves after it ends, the agent runs step two's detached `wsp up` again.
+
+8. **First workspace.** The first seal forks one, named `first`. `wsp wake first` answers with its state and `wsp new dev` makes another. A refusal naming the account's machine cap means two are already up; the builder stays up ten minutes after a seal and counts as one.
+
+9. **Import the project.** `wsp import <folder> --to first` prints the plan and moves nothing: the repository, the files and their size, the caches left behind, each secret-shaped file with its default, and the agents with sessions for the folder. The agent puts the secret-shaped rows to you, then runs it again with `--yes` or `--keep <path>`. Then `wsp snapshot first`, so the next workspace starts from a project golden with the project in place.
+
+10. **First thread.** `wsp thread new --in first --cwd <the project folder on the machine> --notify me "<the task>"`. Expect `thread <id>` first on stdout, the reply when it is complete, and the same thread in your sidebar.
+
+<Callout type="info">
+  `wsp doctor` is not the health check. It forks a live machine to prove the whole reach path, bills while it runs, and does not speak JSON.
+</Callout>
+
+## Costs to say out loud
+
+The builder costs about $0.11 an hour while it runs and holds one of the account's two machine slots. A good agent says so before starting step six.
+
+## The last line
+
+Once the host serves, the work happens inside your own agent. `wsp mcp install --agent <id>` is repeatable, and the tools show up after that agent restarts. The line to paste into any agent is:
+
+```text
+Use the wsp skill and open a thread on first that <the first task>.
+```

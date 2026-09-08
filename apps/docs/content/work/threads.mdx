@@ -1,0 +1,96 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Threads
+
+A thread is a conversation with one agent on one machine. Claude Code and Codex run headless there; you read and answer from the app, the command line or an MCP tool, and every thread shows in the sidebar whoever opened it.
+
+## Open one
+
+```bash
+wsp thread new --in dev "Fix the flaky terminal test."
+wsp thread new --in dev --cwd /root/app --notify me "Read ticket 413 and build it."
+wsp thread new --in dev --agent codex --model gpt-5.2 "Review the branch."
+wsp thread new --in dev --detach --title "413 build" "A long one."
+```
+
+| flag | meaning |
+| --- | --- |
+| `--in <workspace>` | required; the workspace the thread runs on, woken first if it naps |
+| `--agent <id>` | `claude` or `codex`; the default is `claude` |
+| `--model <slug>` | the model, in the agent's own words |
+| `--effort <word>` | the reasoning effort, in the agent's own words |
+| `--access <word>` | the permission or sandbox mode, in the agent's own words |
+| `--cwd <path>` | the folder on the machine the thread works in, absolute; absent means the workspace's project folder, else home |
+| `--notify me\|<thread>` | one line when each turn ends, to you or into another thread |
+| `--title <name>` | the thread's name, as a person's, never replaced |
+| `--detach` | print the thread id the moment the turn starts and return |
+
+The first stdout line is `thread <id>`. The reply streams to stderr as it arrives and lands on stdout when complete. A thread's folder decides which project state the agent loads, sessions, memory, `CLAUDE.md`, so put a thread where its project is.
+
+## Models, efforts and access
+
+Each picker offers what that agent's binary on that machine says it accepts, asked once when the workspace runs and remembered for five minutes. A value the agent does not take is refused before anything starts, naming the list.
+
+| | Claude Code | Codex |
+| --- | --- | --- |
+| models | `claude-fable-5-1`, `claude-opus-5` (default), `claude-sonnet-5` | `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.2` |
+| efforts | `low`, `medium`, `high` (default), `xhigh`, `max` | `low` (default), `medium`, `high`, `xhigh`, `max`, `ultra` |
+| access | `default`, `acceptEdits`, `plan`, `bypassPermissions` (default), `auto`, `manual`, `dontAsk` | `read-only`, `workspace-write`, `danger-full-access` (default) |
+| context | `200k`, `1m` | none |
+
+The default access mode on both is the one that asks nothing, because nobody is at the machine to answer a prompt: Claude Code's `bypassPermissions` and Codex's `danger-full-access`, on a throwaway machine of your own. `plan` reads and plans only. `acceptEdits` lands edits and refuses commands that need permission. Codex's `workspace-write` keeps edits and commands inside the working folder.
+
+A new thread with no model runs the default; a send keeps the thread's own picks. A cheaper model for a review is the usual pick: `--model claude-sonnet-5` or `--model gpt-5.2`.
+
+## Turns
+
+<Callout type="warning">
+  A turn ends when the agent process exits, not at its reply. The thread reads running until then, which can be minutes when the agent left a command running. A send that meets that gap is refused with `thread <id> replied, still working; wait for its turn to finish before sending`. Wait and send again; never loop.
+</Callout>
+
+A thread runs one turn at a time. `wsp send` into a thread whose turn is not running starts a new turn. Into one whose turn is running, Claude Code takes the message mid-turn and the reply is that turn's; Codex cannot, so the message waits behind the turn and then runs. The command line says which happened on stderr.
+
+A turn is cut after ten minutes with no output, and at six hours in all. The line says why: `stopped after 15m 00s with no output for 10m`. A build that is silent for ten minutes ends the turn, so long steps must print.
+
+A turn that ends while the agent still has commands running in the background reads failed, with `ended with 3 background tasks running`, because the agent kills those on exit and nothing ever reaches the thread. Brief agents to run every command in the foreground and wait for it, or to start a server that must outlive the turn with `setsid nohup ... &`.
+
+When a previous turn did not finish, because of a deadline, a host restart or a nap, the next reply opens with `previous turn was cut; resuming`. The agent resumes a transcript that may be missing its last steps, so restate what matters.
+
+## Continue, stop, wait
+
+```bash
+wsp send 1a2b3c4d "Also cover the codex case in the test."
+wsp stop 1a2b3c4d
+wsp threads wait 1a2b3c4d 5e6f7a8b --timeout 600
+```
+
+`stop` ends the running turn the way the app's stop button does: a graceful interrupt, then a kill after five seconds, since an interrupt can be acknowledged while background tasks keep the agent alive. The turn ends interrupted, the machine stays up, and the thread takes the next send. `thread <id> not running` means the turn had already ended and is not an error.
+
+`threads wait` blocks until one of the named threads leaves running and prints its finished line, the same line a `--notify` sends:
+
+```text
+thread 1a2b3c4d finished (completed, 12m 4s, $0.41): <last line of the reply>
+```
+
+One thread per call. `--timeout` gives up after that many seconds with nothing on stdout and the ok exit code, since nothing failed. This is how an agent that started three builders detached reads their ends: never by polling `wsp threads`.
+
+## Titles
+
+A thread is titled by its opening words for the few seconds the agent takes to name it, then by that name: three to six words, asked of the agent's cheapest model as the first turn starts. A name a person gives, with `--title`, `wsp thread rename`, or by renaming in the app, is never replaced. A rename writes into the agent's own session store, so Claude Code's session list and Codex's thread list show the same name wsp does.
+
+## Cost and duration
+
+When a turn settles, the line under it reads `completed · Worked for 1m 4s · $0.0231`. Claude Code reports its own cost. Codex reports none, so its line carries the duration alone. Under a cent the cost prints to four places so a short turn does not read as free.
+
+## Who opened it
+
+Every thread carries who opened it: `you` from the app, `cli` from the command line, `agent` from an MCP tool. The sidebar shows it under the title, `Claude Code · you`. A resumed turn keeps the provenance of the turn it resumes.
+
+## Failure lines worth knowing
+
+- `claude was not found on PATH (exit 127)`: the golden does not carry Claude Code.
+- `claude answered with no output and no usage after 4.2s`: the CLI refused the turn, usually a transcript a kill left half written; the stderr lines follow.
+- `Codex is not signed in on this machine; run codex login --device-auth there`.
+- `Codex's model provider reads its key from the environment variable OPENAI_API_KEY, which is not set on this machine`.
+- `stopped after 1m 30s of Codex reconnecting to its model provider with no answer`: the CLI itself never gives up, so wsp does.
+- `cut by a host restart after 15m 00s`: the host could not re-open the run when it came back.

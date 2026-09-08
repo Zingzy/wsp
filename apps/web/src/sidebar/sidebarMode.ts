@@ -14,7 +14,9 @@ import { useStore } from "../protocol/store.js";
 export const otherMode = (mode: SidebarMode): SidebarMode => (mode === "spaces" ? "list" : "spaces");
 
 export function useSidebarMode(): [SidebarMode, (mode: SidebarMode) => void] {
-  const mode = useStore(s => s.preferences.sidebarMode);
+  // Spaces is a labs body: with labs off the list is the only one the record can name, so the sidebar, the chords'
+  // spacesMode and the palette all read list whatever the record holds.
+  const mode = useStore(s => (s.preferences.labs ? s.preferences.sidebarMode : "list"));
   const setPreferences = useStore(s => s.setPreferences);
   return [mode, mode => void setPreferences({ sidebarMode: mode })];
 }

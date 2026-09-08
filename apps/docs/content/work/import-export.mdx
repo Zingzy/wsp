@@ -1,0 +1,42 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Import and export
+
+A project gets onto a machine with `import` and comes home with `export`. Both move a folder and the agent sessions keyed to it, and both refuse to overwrite anything unless told to.
+
+## Import
+
+```bash
+wsp folders /Users/you                          # what is inside, for naming a folder to import
+wsp import /Users/you/app --to dev              # the plan; nothing moves yet
+wsp import /Users/you/app --to dev --yes        # the plan's defaults
+wsp import /Users/you/app --to dev --keep .env --agents claude
+```
+
+The folder lands at the same path on the machine. That path must not exist there unless `--replace`. Caches, installs and build output stay behind and are recreated on the machine.
+
+Without `--yes`, `--keep` or `--cut`, a person at a terminal is asked once; a pipe or an agent gets the plan and nothing moves. The plan lists the repository, the files and their size, the caches left behind, each secret-shaped file with its default, and the agents with sessions for the folder.
+
+- A **secret-shaped file** is cut unless `--keep` names it.
+- A **repository config with a token in a URL** is offered rewritten and lands bare by default; `--cut` keeps it off.
+- `--agents` narrows whose sessions travel, keyed to the path on the machine. Each id must have sessions in the plan.
+
+The workspace must be running: a paused one is refused in one line, wake it first. `--json` prints the plan and then the result as one JSON line each.
+
+`wsp folders [<folder>] [--hidden]` lists the folders directly inside one folder on this computer, each with whether git tracks it. The roots are your home folder and every imported project; a path outside them is refused.
+
+<Callout type="info">
+  Take `wsp snapshot <workspace>` once the project lands and its dependencies are installed. The next workspace then starts from a project golden with everything in place and no second upload.
+</Callout>
+
+## Export
+
+```bash
+wsp export dev /Users/you/app-from-dev --agents claude
+```
+
+The folder must not exist on this computer unless `--replace`. `--from` is the folder's path on the machine, the same path as the destination when absent. The agent sessions keyed to the folder land in each agent's home here, keyed to the new path, so a session started on the machine can be resumed on your computer.
+
+## From the app
+
+The sidebar's import and export dialogs do the same thing with the same plan, and the folder browser is `wsp folders` with a click. The MCP tools `import`, `export` and `folders` take the same inputs as the flags.
