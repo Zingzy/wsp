@@ -34,8 +34,8 @@
 // every claim on the machine that the caller did not name.
 
 import { randomBytes } from "node:crypto";
-import { INLINE_EXEC_MS, MachineUnreached, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
-import { EXEC_CHUNK_BYTES, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
+import { INLINE_EXEC_MS, MachineUnreached, execFits, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
+import { EXEC_CHUNK_BYTES, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
 export interface MachineExecOptions {
@@ -73,6 +73,10 @@ const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** What a launch mints a run's name from, so a handle read back off the sessions index is checked against the shape
  * this code writes before it reaches shell text: a value that has been to a file on disk is no longer this code's. */
 const RUN_ID = /^[0-9a-f]{12}$/;
+/** How often the reap looks at the group it asked to go, while it waits out the one stop grace both roads give. */
+const GRACE_POLL_MS = 200;
+/** That grace as the shell's own counter, since a guest has no seq to lean on. */
+const GRACE_CHECKS = Array.from({ length: Math.round(RUN_STOP_MS / GRACE_POLL_MS) }, (_, i) => String(i + 1)).join(" ");
 
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
@@ -87,12 +91,11 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
    * run's files, and every road that asks whether a run is still there asks about this one. */
   const claim = (base: string): string => `${base}.d`;
   /** What ending one run comes to on the guest, in the shell both the reader's own reap and the connect sweep run:
-   * the recorded process group gets TERM then, two seconds on, KILL, and the run's files go. `$B` is the run, so the
-   * sweep can run it over a name its loop read off the machine. */
+   * the recorded process group gets TERM, then KILL once the stop grace passes, and the run's files go. */
   const reapScript = (b: string): string =>
     `P=$(cat ${b}.pid 2>/dev/null); ` +
     `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
-    `for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 -- -$P 2>/dev/null || break; sleep 0.2; done; ` +
+    `for i in ${GRACE_CHECKS}; do kill -0 -- -$P 2>/dev/null || break; sleep ${GRACE_POLL_MS / 1000}; done; ` +
     `kill -KILL -- -$P 2>/dev/null; fi; ` +
     `rm -rf ${b}.*`;
   /** A handle this factory could have minted: the run directory it launches into and a name of its own shape. */
@@ -326,9 +329,18 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       .map(line => line.slice(0, -".d".length))
       .filter(base => minted(base) && !kept.has(base));
     if (stale.length === 0) return [];
-    // Each run's group is ended beside the others, not after them: every reap waits out its own two seconds of
-    // grace, and a machine holding a day of them would spend that many times over in one connect.
-    await machine.exec(`${stale.map(base => `{ ${reapScript(base)}; } &`).join(" ")} wait; true`, { timeoutMs: execTimeoutMs });
+    // Each run's group is ended beside the others, not after them: every reap waits out its own stop grace, and a
+    // machine holding a day of them would spend that grace once per run in a connect that has to end.
+    const page = (bases: readonly string[]): string => `${bases.map(base => `{ ${reapScript(base)}; } &`).join(" ")} wait; true`;
+    // The machine holding the most stale runs is the one this exists for, and it is the one whose command would pass
+    // the exec body cap and be refused whole, so the reaps go a page at a time under the same rule every upload reads.
+    const pages: string[][] = [[]];
+    for (const base of stale) {
+      const last = pages.at(-1)!;
+      if (last.length > 0 && !execFits(page([...last, base]))) pages.push([base]);
+      else last.push(base);
+    }
+    for (const bases of pages) await machine.exec(page(bases), { timeoutMs: execTimeoutMs });
     return stale;
   };
 

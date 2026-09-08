@@ -24,7 +24,7 @@
 // sweep.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
+import { RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { turnCut, type MachineExecOptions } from "./machine-exec.js";
 
@@ -35,11 +35,9 @@ export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "d
 
 /** How often the limits are read against the clock; the cloud road reads them at its poll. */
 const CHECK_MS = 1_000;
-/** How long a turn on this computer gets to end itself when the host stops, before its group is killed. */
-const STOP_GRACE_MS = 2_000;
-
 /** Every process group a turn on this computer is running in, across every factory this process made: a turn leads
- * a group of its own, so nothing else on this computer knows where to find it. */
+ * a group of its own, so nothing else on this computer knows where to find it. A group is dropped the moment its
+ * stream settles, which is what makes the set the answer to whether a recorded pid is still that turn's. */
 const groups = new Set<number>();
 
 /** One turn's whole group, by the pid its spawn recorded: the child leads the group, so a negative pid is every
@@ -55,15 +53,20 @@ function signalGroup(pid: number, sig: NodeJS.Signals): void {
 
 /**
  * Ends every turn running on this computer and everything those turns started: SIGTERM to each group, SIGKILL to
- * whatever is still there once the grace passes. What a host calls as it stops, since a local turn's process cannot
- * be re-opened by the host that comes next and answers nobody after this one goes.
+ * whatever is still there once the grace passes, and answers the groups it had to kill. What a host calls as it
+ * stops, since a local turn's process cannot be re-opened by the host that comes next and answers nobody after this
+ * one goes.
  */
-export async function endLocalRuns(graceMs = STOP_GRACE_MS): Promise<void> {
+export async function endLocalRuns(graceMs = RUN_STOP_MS): Promise<readonly number[]> {
   const ending = [...groups];
-  if (ending.length === 0) return;
+  if (ending.length === 0) return [];
   for (const pid of ending) signalGroup(pid, "SIGTERM");
   await new Promise<void>(resolve => setTimeout(resolve, graceMs));
-  for (const pid of ending) signalGroup(pid, "SIGKILL");
+  // A group id is the kernel's again once its last member goes, so a turn that went down on the TERM is read out of
+  // the set rather than killed by the pid it used to be: this computer may have given that pid to something else.
+  const killed = ending.filter(pid => groups.has(pid));
+  for (const pid of killed) signalGroup(pid, "SIGKILL");
+  return killed;
 }
 
 /** One complete line at a time out of a growing byte stream: what precedes each newline is yielded, the tail waits

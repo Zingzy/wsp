@@ -774,6 +774,28 @@ describe("machineExecStream sweeping the runs a connecting host does not hold", 
     expect(readdirSync(runDir)).toEqual(["notarun.d"]);
   }, 30_000);
 
+  it("a machine holding two hundred stale runs is swept a page at a time, every page under the exec body cap", async () => {
+    const stale = Array.from({ length: 200 }, (_, i) => `/tmp/wsp-run/${i.toString(16).padStart(12, "0")}`);
+    const calls: string[] = [];
+    const machine = {
+      id: "crowded",
+      exec: (cmd: string) => {
+        calls.push(cmd);
+        return Promise.resolve({ exitCode: 0, stdout: cmd.startsWith("for d in") ? `${stale.map(base => `${base}.d`).join("\n")}\n` : "", stderr: "" });
+      },
+    } as unknown as Machine;
+
+    expect(await machineExecStream(machine).sweep!([])).toEqual(stale);
+
+    const reaps = calls.slice(1);
+    // Measured as the wire body the backend sends, the way every other call this file holds under the cap is.
+    for (const cmd of calls) expect(solariBody(cmd), cmd.slice(0, 80)).toBeLessThanOrEqual(EXEC_BODY_MAX);
+    expect(reaps.length).toBeGreaterThan(1);
+    // Every run is reaped once across the pages, and no page carries a run twice.
+    const reaped = stale.filter(base => reaps.filter(cmd => cmd.includes(`rm -rf ${base}.*`)).length === 1);
+    expect(reaped).toEqual(stale);
+  });
+
   it("a machine holding no run of this factory's is swept without a second word going out", async () => {
     const { machine, runDir } = localGuest();
     const calls: string[] = [];

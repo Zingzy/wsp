@@ -39,6 +39,9 @@ export const TURN_WALL_MS = 6 * 60 * 60_000;
  * all day never carries more than the one it is on: seven finished turns' processes were found alive on one guest,
  * the oldest fourteen hours past its reply, and the box read load 25 while idle (2026-09-08). */
 export const RUN_EXIT_MS = 10_000;
+/** How long a turn's process gets to go on the graceful signal before its group is killed, on either road: what the
+ * guest's reap waits between its TERM and its KILL, and what a host gives the turns on this computer as it stops. */
+export const RUN_STOP_MS = 2_000;
 /** The close code a host sends the clients on its own socket as it stops: the socket did not break under them, the
  * host let it go, so a command waiting on a turn says the host is restarting rather than that the turn failed. */
 export const HOST_STOPPING_CLOSE = 4001;

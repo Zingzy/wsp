@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -116,9 +116,11 @@ describe("a real turn's process group", () => {
   it("a child the command left running is gone when the turn ends, and the stream ends although that child held its stdout", async () => {
     const factory = localExecStream({ root });
     const stream = factory(`sleep 300 & echo $! > ${join(root, "child")}; echo hi`, { env: {} });
+    // Read before the assertion that hangs while the bug is there, so a red run still records what to clean up.
+    const pid = await leftRunning();
     expect(await collect(stream.lines)).toEqual(["hi"]);
     expect(await stream.exited).toBe(0);
-    await gone(await leftRunning());
+    await gone(pid);
   }, 15_000);
 
   it("a turn the idle limit cut takes its whole group with it, and still ends on the cut's words", async () => {
@@ -147,8 +149,24 @@ describe("a real turn's process group", () => {
     expect(await collect(stream.lines)).toEqual(["hi"]);
     expect(await stream.exited).toBe(0);
     // Nothing is left to signal, so no group of a pid this computer has since given to something else is.
-    await expect(endLocalRuns(20)).resolves.toBeUndefined();
+    await expect(endLocalRuns(20)).resolves.toEqual([]);
   });
+
+  it("a turn that goes down on the stop's TERM is not killed by the pid it used to be; only one still running is", async () => {
+    const factory = localExecStream({ root });
+    // The first goes on the TERM and its group id is the kernel's again; the second ignores it, and its children
+    // inherit that, so it is still there when the grace passes.
+    const trapped = join(root, "trapped");
+    const goes = factory("sleep 300", { env: {} });
+    const stays = factory(`trap '' TERM; echo ready > ${trapped}; sleep 300 & wait`, { env: {} });
+    await vi.waitFor(() => expect(existsSync(trapped)).toBe(true), { timeout: 5_000 });
+
+    const killed = await endLocalRuns(400);
+
+    expect(killed).toHaveLength(1);
+    expect(await goes.exited).not.toBe(0);
+    expect(await stays.exited).not.toBe(0);
+  }, 15_000);
 
   it("teardown reaches what the turn started, not the shell alone", async () => {
     const factory = localExecStream({ root });
