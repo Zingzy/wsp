@@ -107,6 +107,8 @@ import type {
   HarnessCatalog,
   HarnessCatalogAnswer,
   HostFolderListing,
+  Preferences,
+  PreferencesPatch,
   RecipeDigest,
   TerminalConfig,
   TerminalScheme,
@@ -143,7 +145,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, applyPreferencesPatch, preferencesFrom, ALREADY_RUNNING, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -956,6 +958,12 @@ export interface Runtime {
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker. */
   readonly status: StatusApi;
+  /** The person's view preferences, one record on this state file, so the desktop app and a browser tab agree. */
+  readonly preferences: {
+    get(): Promise<Preferences>;
+    /** The patch over the record; the record kept and pushed as preferences.changed to every socket. */
+    set(patch: PreferencesPatch): Promise<Preferences>;
+  };
   /** This state file's owner id, stamped on every machine it creates: a machine wearing another one was made by
    * another host standing on the same account. Minted on the first read when the state file has none. */
   owner(): Promise<string>;
@@ -1000,6 +1008,9 @@ const SESSIONS = "sessions";
  * the sweep reads it when it records a machine whose workspace document this store lost, so a restored record keeps
  * that name rather than the one the fork stamped, which the provider takes at create and never updates. */
 const WORKSPACE_NAMES = "workspace-names";
+/** One record under one id: the person's view preferences. */
+const PREFERENCES = "preferences";
+const PREFERENCES_ID = "default";
 
 /** What the timeline shows as the last row of a turn the runtime ended, not the harness. */
 const PAUSED_REASON = "machine paused while the agent was working";
@@ -4407,12 +4418,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return adopted;
   };
 
+  // Sets run one after another: two clients patching different fields at once would otherwise each read the record
+  // before the other's write and the later write would drop the earlier field.
+  let preferenceWrites: Promise<unknown> = Promise.resolve();
+  const preferences: Runtime["preferences"] = {
+    get: async () => preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)),
+    set: patch => {
+      const write = preferenceWrites.then(async () => {
+        const next = applyPreferencesPatch(await preferences.get(), patch);
+        await store.put(PREFERENCES, PREFERENCES_ID, next);
+        bus.emit({ type: "preferences.changed", preferences: next });
+        return next;
+      });
+      preferenceWrites = write.catch(() => undefined);
+      return write;
+    },
+  };
+
   return {
     events: bus,
     backend,
     workspaces,
     projects,
     sessions: sessionsApi,
+    preferences,
     harnesses: {
       list: async workspaceId => {
         // Only a harness with an adapter can run a turn; the rest of the table waits for one.

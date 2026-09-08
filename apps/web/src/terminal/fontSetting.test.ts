@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TERMINAL_FONT_KEY, effectiveTerminalFont, readTerminalFont, readTerminalFontSize, resetTerminalFontSize, stepTerminalFontSize, useTerminalFont, useTerminalViewportConfig, writeTerminalFont } from "./fontSetting";
+import { DEFAULT_PREFERENCES } from "@wsp/protocol";
+import { useStore } from "../protocol/store";
+import { TERMINAL_FONT_KEY, effectiveTerminalFont, readTerminalFont, resetTerminalZoom, stepTerminalZoom, useTerminalFont, useTerminalViewportConfig, writeTerminalFont } from "./fontSetting";
 import { appTerminalFontSize } from "./ghostty/surface";
+
+const zoomOf = (workspaceId: string): number | undefined => useStore.getState().preferences.terminalZoom[workspaceId];
 
 const boot = (terminalFont?: string) => {
   (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, token: "", ...(terminalFont !== undefined ? { terminalFont } : {}) };
@@ -12,6 +16,7 @@ describe("terminal font setting", () => {
   afterEach(() => {
     window.localStorage.clear();
     delete (window as unknown as { __WSP__?: unknown }).__WSP__;
+    useStore.setState({ api: null, preferences: DEFAULT_PREFERENCES });
     vi.restoreAllMocks();
   });
 
@@ -53,33 +58,38 @@ describe("terminal font setting", () => {
     const config = renderHook(() => useTerminalViewportConfig("ws_a"));
     expect(font.result.current).toMatchObject({ family: "", detected: "Hack" });
     const first = config.result.current;
-    expect(first).toEqual({ font: { family: "Hack", size: appTerminalFontSize() }, chosenFont: false });
+    expect(first).toEqual({ font: { family: "Hack" }, chosenFont: false, sizing: { source: "app", zoom: 0 } });
     config.rerender();
     expect(config.result.current).toBe(first);
     act(() => font.result.current.setFamily("Iosevka"));
     expect(font.result.current.family).toBe("Iosevka");
-    expect(config.result.current).toEqual({ font: { family: "Iosevka", size: appTerminalFontSize() }, chosenFont: true });
+    expect(config.result.current).toEqual({ font: { family: "Iosevka" }, chosenFont: true, sizing: { source: "app", zoom: 0 } });
     act(() => window.dispatchEvent(new StorageEvent("storage", { key: TERMINAL_FONT_KEY, newValue: null })));
     window.localStorage.removeItem(TERMINAL_FONT_KEY);
     act(() => window.dispatchEvent(new StorageEvent("storage", { key: TERMINAL_FONT_KEY, newValue: null })));
-    expect(config.result.current).toEqual({ font: { family: "Hack", size: appTerminalFontSize() }, chosenFont: false });
+    expect(config.result.current).toEqual({ font: { family: "Hack" }, chosenFont: false, sizing: { source: "app", zoom: 0 } });
+    // The sizing follows the host's record: the source for every workspace, the zoom for this one.
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, terminalSize: "file", terminalZoom: { ws_a: 2, ws_b: -1 } } }));
+    expect(config.result.current).toEqual({ font: { family: "Hack" }, chosenFont: false, sizing: { source: "file", zoom: 2 } });
   });
 
-  it("the size is one workspace's own, steps by a pixel, stops at the sizes the surface draws and resets to the app's", () => {
-    expect(readTerminalFontSize("ws_a")).toBe(appTerminalFontSize());
-    stepTerminalFontSize("ws_a", 1);
-    expect(readTerminalFontSize("ws_a")).toBe(appTerminalFontSize() + 1);
-    expect(readTerminalFontSize("ws_b")).toBe(appTerminalFontSize());
-    stepTerminalFontSize("ws_a", -40);
-    expect(readTerminalFontSize("ws_a")).toBe(6);
-    stepTerminalFontSize("ws_a", 100);
-    expect(readTerminalFontSize("ws_a")).toBe(32);
-    resetTerminalFontSize("ws_a");
-    expect(readTerminalFontSize("ws_a")).toBe(appTerminalFontSize());
-    // A storage that throws leaves the panes on the app's size instead of failing the render.
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
-    });
-    expect(readTerminalFontSize("ws_a")).toBe(appTerminalFontSize());
+  it("the zoom is one workspace's own on the record, steps by a pixel, stops where the surface's sizes end over the app's base, and a reset drops the workspace's entry", () => {
+    expect(zoomOf("ws_a")).toBeUndefined();
+    stepTerminalZoom("ws_a", 1);
+    expect(zoomOf("ws_a")).toBe(1);
+    expect(zoomOf("ws_b")).toBeUndefined();
+    stepTerminalZoom("ws_a", -40);
+    expect(zoomOf("ws_a")).toBe(6 - appTerminalFontSize());
+    stepTerminalZoom("ws_a", 100);
+    expect(zoomOf("ws_a")).toBe(32 - appTerminalFontSize());
+    stepTerminalZoom("ws_b", -1);
+    expect(useStore.getState().preferences.terminalZoom).toEqual({ ws_a: 32 - appTerminalFontSize(), ws_b: -1 });
+    resetTerminalZoom("ws_a");
+    expect(useStore.getState().preferences.terminalZoom).toEqual({ ws_b: -1 });
+    // A reset of a workspace with no zoom sends nothing.
+    const sets: unknown[] = [];
+    useStore.setState({ api: { setPreferences: async (patch: unknown) => { sets.push(patch); return useStore.getState().preferences; } } as never });
+    resetTerminalZoom("ws_a");
+    expect(sets).toEqual([]);
   });
 });

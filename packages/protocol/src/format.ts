@@ -21,6 +21,11 @@ export function fmtBytes(n: number): string {
 const memGb = (memMb: number): number => Number((memMb / 1024).toFixed(1));
 
 /** A machine size's memory with its unit. */
+/** A size in css pixels, as the settings page states the text and sidebar sizes. */
+export function fmtPx(px: number): string {
+  return `${px} px`;
+}
+
 export function fmtMemGb(memMb: number): string {
   return `${memGb(memMb)} GB`;
 }

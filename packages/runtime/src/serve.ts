@@ -365,6 +365,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;
+            case "preferences.get":
+              send({ id: msg.id, ok: true, preferences: await rt.preferences.get() });
+              return;
+            case "preferences.set":
+              send({ id: msg.id, ok: true, preferences: await rt.preferences.set(msg.patch) });
+              return;
             case "project.plan":
               send({ id: msg.id, ok: true, plan: await bundler(msg.source).plan() });
               return;

@@ -3,7 +3,7 @@
 // and the banner that follows the runtime socket.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type WorkspaceView } from "@wsp/protocol";
 import { App, Shell } from "../src/App.js";
 import { MARK_PATH } from "../src/brand/Brand.js";
 import type { Api } from "../src/protocol/client.js";
@@ -119,6 +119,20 @@ describe("app shell", () => {
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 700 });
     expect(panel.style.width).toBe("640px");
     expect(window.localStorage.getItem(RIGHT_PANEL_WIDTH_STORAGE_KEY)).toBe("640");
+  });
+
+  it("the sidebar opens at the width the host's record holds, follows a change to it, and a cleared width puts the default back", async () => {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarWidth: 312 } });
+    await mountShell();
+    const wrapper = document.querySelector<HTMLElement>("[data-slot='sidebar-wrapper']")!;
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("312px");
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarWidth: 400 } }));
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("400px");
+    // Past the sidebar's own bounds the kept width is held to them.
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarWidth: 900 } }));
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("480px");
+    act(() => useStore.setState({ preferences: DEFAULT_PREFERENCES }));
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("16rem");
   });
 
   it("opens the machine surface from the picker", async () => {

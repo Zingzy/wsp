@@ -91,7 +91,7 @@ async function bootOf(page: Page): Promise<{ wsPort: number; token: string }> {
 }
 
 interface DesktopWindow {
-  wsp: { capturePreview(workspaceId: string): Promise<void>; workspacePreview(workspaceId: string): Promise<string | undefined> };
+  wsp: { capturePreview(workspaceId: string): Promise<void>; workspacePreview(workspaceId: string): Promise<string | undefined>; setTheme(theme: string): void };
 }
 
 function readPreview(page: Page, workspaceId: string): Promise<string | undefined> {
@@ -136,6 +136,18 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(launched.app.windows()).toHaveLength(1);
     await launched.app.close();
     expect(await refused(url)).toBe(true);
+  });
+
+  it("opens dark and moves the window's theme source with the theme the page says", async () => {
+    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
+    const win = await launched.app.firstWindow();
+    await bootOf(win);
+    const source = () => launched!.app.evaluate(({ nativeTheme }) => nativeTheme.themeSource);
+    expect(await source()).toBe("dark");
+    await win.evaluate(() => (window as unknown as DesktopWindow).wsp.setTheme("light"));
+    await vi.waitFor(async () => expect(await source()).toBe("light"));
+    await win.evaluate(() => (window as unknown as DesktopWindow).wsp.setTheme("system"));
+    await vi.waitFor(async () => expect(await source()).toBe("system"));
   });
 
   it("photographs its own page for a workspace and hands the picture back to the page", async () => {

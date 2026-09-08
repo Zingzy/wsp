@@ -5,7 +5,7 @@
 import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionView, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { SIDEBAR_MODE_WORDS } from "../src/actions/format.js";
 import { RECENT_THREAD_LIMIT } from "../src/components/palette/CommandPalette.logic.js";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
@@ -17,7 +17,6 @@ import { AppShell } from "../src/shell/AppShell.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
 import { stepWorkspaceId } from "../src/shell/shellCommands.js";
 import { onComposerFocusRequest, onNewThreadRequest } from "../src/shell/shellRequests.js";
-import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
 
@@ -128,7 +127,7 @@ configure({ asyncUtilTimeout: 10_000 });
 beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
 });
@@ -196,14 +195,29 @@ describe("command palette", () => {
     await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
     expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
     expect(document.querySelectorAll("[data-space-dot]")).toHaveLength(2);
-    expect(window.localStorage.getItem(SIDEBAR_MODE_KEY)).toBe("spaces");
+    expect(useStore.getState().preferences.sidebarMode).toBe("spaces");
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     expect(inPalette().queryByText(SIDEBAR_MODE_WORDS.spaces.title)).toBeNull();
     fireEvent.click(screen.getByText(SIDEBAR_MODE_WORDS.list.title, { selector: "[data-slot=command-item] span" }));
     await waitFor(() => expect(document.querySelector("[data-space-header]")).toBeNull());
     expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(2);
-    expect(window.localStorage.getItem(SIDEBAR_MODE_KEY)).toBe("list");
+    expect(useStore.getState().preferences.sidebarMode).toBe("list");
+  });
+
+  it("the Settings row and its chord open the settings page, whose row names the chord; a workspace row closes it again", async () => {
+    await mountShell();
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    const row = inPalette().getByText("Settings", { selector: "[data-slot=command-item] span" }).closest("[data-slot=command-item]")!;
+    expect(row.textContent).toContain("⌘,");
+    fireEvent.click(row);
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState().settingsOpen).toBe(true);
+    fireEvent.click(document.querySelector("[data-row-id='ws:ws_b']")!);
+    expect(useStore.getState().settingsOpen).toBe(false);
+    mod(",");
+    expect(useStore.getState().settingsOpen).toBe(true);
   });
 
   it("opens the new-workspace dialog through the sidebar", async () => {

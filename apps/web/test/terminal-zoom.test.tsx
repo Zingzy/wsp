@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The terminal's own zoom: with a pane focused the mod chords step that
 // workspace's terminal text size by a pixel and never reach the app's zoom,
-// with nothing focused they keep whatever meaning they had, and the size the
-// panes draw at outlives the mount that set it.
+// with nothing focused they keep whatever meaning they had, and the zoom the
+// panes draw with sits on the host's record, so it outlives the mount that
+// set it.
 import { fireEvent, render, renderHook, waitFor } from "@testing-library/react";
-import type { ShellChord, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type ShellChord, type WorkspaceView } from "@wsp/protocol";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api } from "../src/protocol/client.js";
@@ -46,7 +47,9 @@ function focusPane(): HTMLElement {
   return pane;
 }
 
-const paneSize = () => renderHook(() => useTerminalViewportConfig("ws_a")).result.current.font?.size;
+/** The size a pane draws at over the app's base: the base plus the workspace's zoom off the record. */
+const sizeOf = (workspaceId: string) => appTerminalFontSize() + (renderHook(() => useTerminalViewportConfig(workspaceId)).result.current.sizing?.zoom ?? 0);
+const paneSize = () => sizeOf("ws_a");
 
 /** The chord as a browser delivers it, and whether anything claimed it. */
 function press(key: string, code: string, shiftKey = false): boolean {
@@ -56,7 +59,7 @@ function press(key: string, code: string, shiftKey = false): boolean {
 beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
 });
@@ -133,14 +136,15 @@ describe("the terminal's own zoom", () => {
     expect(paneSize()).toBe(appTerminalFontSize() + 1);
   });
 
-  it("remembers the size per workspace, and a pane mounted later reads it back", async () => {
+  it("remembers the zoom per workspace on the record, and a pane mounted later reads it back", async () => {
     await shell();
     focusPane();
     press("=", "Equal");
     press("=", "Equal");
     press("=", "Equal");
     expect(paneSize()).toBe(appTerminalFontSize() + 3);
-    expect(renderHook(() => useTerminalViewportConfig("ws_b")).result.current.font?.size).toBe(appTerminalFontSize());
+    expect(sizeOf("ws_b")).toBe(appTerminalFontSize());
+    expect(useStore.getState().preferences.terminalZoom).toEqual({ ws_a: 3 });
     document.body.innerHTML = "";
     expect(paneSize()).toBe(appTerminalFontSize() + 3);
   });

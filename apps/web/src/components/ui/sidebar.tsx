@@ -19,7 +19,6 @@ import {
 import { Skeleton } from "./skeleton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./tooltip";
 import { useIsMobile } from "../../hooks/useMediaQuery";
-import { finiteNumber, getLocalStorageItem, setLocalStorageItem } from "../../hooks/useLocalStorage";
 import { resolveSidebarState, type ResponsiveSidebarState } from "./sidebarState";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
@@ -39,6 +38,14 @@ type SidebarContextProps = {
   toggleSidebar: () => void;
 };
 
+/** Where a dragged width is kept and read back, and how a width kept elsewhere (a reset, another client of the same
+ * host) reaches this window: the rail re-applies it on every change. */
+export interface SidebarWidthStore {
+  read(): number | null;
+  write(width: number): void;
+  subscribe(onChange: () => void): () => void;
+}
+
 type SidebarResizableOptions = {
   maxWidth?: number;
   minWidth?: number;
@@ -51,7 +58,7 @@ type SidebarResizableOptions = {
     sidebarRoot: HTMLElement;
     wrapper: HTMLElement;
   }) => boolean;
-  storageKey?: string;
+  width?: SidebarWidthStore;
 };
 
 type SidebarResolvedResizableOptions = {
@@ -66,7 +73,7 @@ type SidebarResolvedResizableOptions = {
     sidebarRoot: HTMLElement;
     wrapper: HTMLElement;
   }) => boolean;
-  storageKey: string | null;
+  width: SidebarWidthStore | null;
 };
 
 type SidebarInstanceContextProps = {
@@ -201,7 +208,7 @@ function Sidebar({
     return {
       maxWidth: options.maxWidth ?? Number.POSITIVE_INFINITY,
       minWidth: options.minWidth ?? SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH,
-      storageKey: options.storageKey ?? null,
+      width: options.width ?? null,
       ...(options.onResize ? { onResize: options.onResize } : {}),
       ...(options.shouldAcceptWidth ? { shouldAcceptWidth: options.shouldAcceptWidth } : {}),
     };
@@ -391,9 +398,7 @@ function SidebarRail({
       resizeState.transitionTargets.forEach((element) => {
         element.style.removeProperty("transition-duration");
       });
-      if (resolvedResizable?.storageKey && typeof window !== "undefined") {
-        setLocalStorageItem(resolvedResizable.storageKey, resizeState.width, finiteNumber);
-      }
+      resolvedResizable?.width?.write(resizeState.width);
       resolvedResizable?.onResize?.(resizeState.width);
       resizeStateRef.current = null;
       if (resizeState.rail.hasPointerCapture(pointerId)) {
@@ -556,25 +561,26 @@ function SidebarRail({
   );
 
   React.useLayoutEffect(() => {
-    if (!resolvedResizable?.storageKey || typeof window === "undefined") return;
+    const store = resolvedResizable?.width;
+    if (!store) return;
     const rail = railRef.current;
     if (!rail) return;
     const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
     if (!wrapper) return;
-
-    let storedWidth: number | null;
-    try {
-      storedWidth = getLocalStorageItem(resolvedResizable.storageKey, finiteNumber);
-    } catch (error) {
-      console.error("Could not restore persisted sidebar width.", error);
-      return;
-    }
-    if (storedWidth === null) return;
-    const clampedWidth = clampSidebarWidth(storedWidth, resolvedResizable);
-    // Hydrate the CSS variable before the browser paints so a restored sidebar
-    // never flashes at the default width first.
-    wrapper.style.setProperty("--sidebar-width", `${clampedWidth}px`);
-    resolvedResizable.onResize?.(clampedWidth);
+    // Before the browser paints, so a kept width never flashes at the default first; a width cleared elsewhere
+    // puts the default back, since the provider's own inline value is gone once this has set the variable.
+    const apply = (): void => {
+      const stored = store.read();
+      if (stored === null) {
+        wrapper.style.setProperty("--sidebar-width", SIDEBAR_WIDTH);
+        return;
+      }
+      const clampedWidth = clampSidebarWidth(stored, resolvedResizable);
+      wrapper.style.setProperty("--sidebar-width", `${clampedWidth}px`);
+      resolvedResizable.onResize?.(clampedWidth);
+    };
+    apply();
+    return store.subscribe(apply);
   }, [resolvedResizable]);
 
   React.useEffect(() => {
