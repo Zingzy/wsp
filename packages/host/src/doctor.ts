@@ -11,10 +11,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, OWNER_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, whoseMachine, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_TEMPLATES_LINE, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine } from "@wsp/protocol";
-import { goldenHead, writeDaemonTokenScript, type GoldenVersion, type Runtime } from "@wsp/runtime";
+import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
+import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir } from "./assets.js";
+import { describeDeleted, describeOrphanOffer, describeOrphans, describeStorage } from "./storage.js";
 import type { CliIO } from "./cli.js";
 
 const execFileAsync = promisify(execFile);
@@ -437,6 +438,29 @@ export async function promoteGoldens(rt: Runtime, io: Pick<CliIO, "log">): Promi
   return counts.filter(([n]) => n > 0).map(([n, word]) => `${n} ${word}`).join(", ");
 }
 
+/** The doctor's storage step: the account listing split by who made each row, every orphan of this host named, and
+ * the offer to delete them, taken on --yes. Rows without this host's mark are named and never passed to a delete,
+ * so another host's golden and a person's own snapshot survive a doctor run with --yes. */
+export async function cleanOrphans(rt: Runtime, io: Pick<CliIO, "log">, yes: boolean, statePath?: string): Promise<string> {
+  let storage: SnapshotStorage | undefined;
+  let plan: AccountOrphans | undefined;
+  try {
+    storage = await rt.golden.storage();
+    plan = await rt.golden.orphans();
+  } catch (e) {
+    return `listing not read: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  if (storage === undefined || plan === undefined) return NO_SNAPSHOT_LISTING;
+  io.log(describeStorage(storage));
+  for (const line of describeOrphans(plan)) io.log(line);
+  if (plan.snapshots.length === 0 && plan.templates.length === 0) return "no orphan of this host";
+  const offer = describeOrphanOffer(plan, yes, statePath);
+  if (!yes) return offer;
+  io.log(offer);
+  const done = await rt.golden.deleteOrphans();
+  return done === undefined ? NO_SNAPSHOT_LISTING : describeDeleted(done);
+}
+
 /** The doctor's teardown check. Only machines this host made count, by the owner stamp every machine wsp creates
  * wears: a second computer on the same account stands its own, and the doctor deleted none of them. Those are one
  * line, named and left alone; this host's own leftovers fail the run. Returns the step's note. */
@@ -453,6 +477,11 @@ export interface DoctorOptions {
   /** Envs baked into golden builds and forks (claude credentials). */
   envs?: Record<string, string>;
   daemonDir?: string;
+  /** Deletes this host's orphan snapshots and templates instead of only naming them. */
+  yes?: boolean;
+  /** The state file whose records decided which rows are orphans; named in the offer, since a run under a different
+   * --state reads the usual file's goldens as recorded by nothing. */
+  statePath?: string;
 }
 
 export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
@@ -479,6 +508,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     io.log("doctor: proving the reach loop against one live machine");
 
     await timings.time("durable goldens", () => promoteGoldens(rt, io), note => note);
+    await timings.time("snapshot storage", () => cleanOrphans(rt, io, opts.yes === true, opts.statePath), note => note);
 
     let golden = "";
     const head = goldenHead(await rt.golden.get());

@@ -84,6 +84,7 @@ usage:
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
                      on this Mac, and Build, then the browser
   wsp doctor         run the reach loop end to end against one live machine
+                     (--yes also deletes the snapshots this host left behind)
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (${MCP_AGENT_IDS}),
@@ -118,7 +119,9 @@ options:
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
                      unless a saved recipe answered copy, so macOS has nothing
-                     to ask either and the sign-ins wait for the app's terminal
+                     to ask either and the sign-ins wait for the app's terminal.
+                     doctor: also delete the snapshots and templates this host
+                     left behind, which is not reversible
   --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
@@ -829,10 +832,14 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   doctor: {
     json: false,
     cliOnly: "forks a live machine and bills while it runs; a person decides that at a terminal",
-    run: async (io, opts) => {
+    run: async (io, opts, values) => {
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);
-      return doctor(rt, io, keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {});
+      return doctor(rt, io, {
+        ...(keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {}),
+        ...(values.yes === true ? { yes: true } : {}),
+        statePath: opts.statePath,
+      });
     },
   },
 };

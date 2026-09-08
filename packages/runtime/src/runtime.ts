@@ -42,7 +42,10 @@ import {
   refreshPreviewToken,
   promoteVersion,
   sealGolden,
-  templateName,
+  goldenName,
+  projectSnapshotName,
+  splitByOwner,
+  snapshotMonthlyUsd,
   templatesOf,
   applyDelta,
   applyGoldenImport,
@@ -73,6 +76,8 @@ import {
   type ReapedMachine,
   type RunOptions,
   type RetentionPlan,
+  type SnapshotRow,
+  type TemplateRow,
   type UnreadStore,
   type VaultOptions,
   type WspError,
@@ -898,8 +903,15 @@ export interface Runtime {
     /** Every project golden this runtime took, oldest first. */
     projects(): Promise<ProjectGolden[]>;
     /** Every snapshot on the account by count, size and monthly cost past the free GB, sized from the provider's
-     * listing; undefined on a backend that cannot list snapshots. */
+     * listing and split by who made each one; undefined on a backend that cannot list snapshots. */
     storage(): Promise<SnapshotStorage | undefined>;
+    /** The snapshots and templates this host made that nothing here records, and the rows left alone beside them;
+     * undefined on a backend that cannot list snapshots. */
+    orphans(): Promise<AccountOrphans | undefined>;
+    /** Deletes what orphans() names, each orphan template before the snapshots (the provider refuses to delete a
+     * snapshot a template stands on). The split is read again first, so nothing recorded since is touched, and
+     * nothing without this host's mark is ever passed to a delete. */
+    deleteOrphans(): Promise<OrphansDeleted | undefined>;
     /** The golden's ancestors older than its head and the head's parent, with what deleting them frees, minus every
      * version a workspace of this runtime was forked from; undefined with no golden or no snapshot listing. */
     retention(name?: string): Promise<RetentionPlan | undefined>;
@@ -918,6 +930,26 @@ export interface Runtime {
   reap(olderThanMs?: number): Promise<SweepResult>;
   /** Writes every transcript still waiting on its debounce; the store is complete once this resolves. */
   close(): Promise<void>;
+}
+
+/** What this host left on the account that nothing here records, and what it deliberately leaves alone beside it.
+ * A snapshot carries no provider metadata, so a row is this host's only by the mark in its name; anything without
+ * that mark is another host's or a person's and is named, never deleted. */
+export interface AccountOrphans {
+  snapshots: SnapshotRow[];
+  templates: TemplateRow[];
+  /** What the orphan snapshots hold, and what deleting them takes off the monthly bill once storage is billed. */
+  freedBytes: number;
+  savesUsdPerMonth: number;
+  /** No mark of this host, so nothing here may touch them. */
+  others: { snapshots: SnapshotRow[]; templates: TemplateRow[] };
+}
+
+export interface OrphansDeleted {
+  snapshots: SnapshotRow[];
+  templates: TemplateRow[];
+  /** One per delete the provider refused; the row stays on the account. */
+  failed: { id: string; name?: string; message: string }[];
 }
 
 const WORKSPACES = "workspaces";
@@ -1407,6 +1439,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The workspaces forked from this snapshot, whatever their phase: the lineage retention must not cut. */
   const forkedFrom = (snapshotId: string): string[] => [...live.values()].filter(e => e.record.golden === snapshotId).map(e => e.record.name);
+
+  /** Every snapshot and template id this state file stands on: each golden's versions and their templates, each
+   * project golden, and the image every live workspace forks from. A row wsp made that is in none of them is an
+   * orphan, whatever its name; a row in one of them is kept even when its name predates the owner mark. */
+  const recordedImages = async (): Promise<Set<string>> => {
+    const ids = new Set<string>();
+    for (const raw of await store.list(GOLDENS)) {
+      for (const v of (raw as GoldenManifest).versions) {
+        ids.add(v.snapshotId);
+        if (v.templateId !== undefined) ids.add(v.templateId);
+      }
+    }
+    for (const raw of await store.list(PROJECT_GOLDENS)) ids.add((raw as ProjectGolden).snapshotId);
+    for (const e of live.values()) ids.add(e.record.golden);
+    return ids;
+  };
 
   /** The manifest holding this snapshot as one of its versions, if any does. */
   const goldenManifestOf = async (snapshotId: string): Promise<GoldenManifest | undefined> => {
@@ -2488,7 +2536,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (project === undefined) throw new Error(`${name} has no project loaded; import one before snapshotting it`);
       if (entry.record.phase !== "running") throw new Error(`${name} is ${entry.record.phase}; only a running first-life machine can be snapshotted`);
       const createdAt = new Date(clock.now()).toISOString();
-      const snapshotId = await entry.ws.checkpoint(`project-${project.name}-${createdAt.replace(/[:.]/g, "-")}`, `snapshot of ${name}`);
+      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(templateHostId, project.name, createdAt.replace(/[:.]/g, "-")), `snapshot of ${name}`);
       const image = await imageOf(entry.record.golden);
       const golden: ProjectGolden = {
         snapshotId,
@@ -3871,8 +3919,64 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async storage() {
+      await ready();
       if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
-      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage);
+      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage, { hostId: templateHostId, recorded: await recordedImages(), now: clock.now() });
+    },
+
+    async orphans() {
+      await ready();
+      if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
+      const read = { hostId: templateHostId, recorded: await recordedImages(), now: clock.now() };
+      const rows = await backend.listSnapshots();
+      const snapshots = splitByOwner(rows, read);
+      const templates = templatesOf(backend);
+      const listed = templates === undefined ? [] : await templates.list();
+      const promoted = splitByOwner(listed, read);
+      const bytesOf = (part: readonly SnapshotRow[]): number => part.reduce((n, r) => n + r.sizeBytes, 0);
+      const totalBytes = bytesOf(rows);
+      const freedBytes = bytesOf(snapshots.orphans);
+      const pricing = backend.pricing.snapshotStorage;
+      return {
+        snapshots: snapshots.orphans,
+        templates: promoted.orphans,
+        freedBytes,
+        savesUsdPerMonth: snapshotMonthlyUsd(totalBytes, pricing) - snapshotMonthlyUsd(totalBytes - freedBytes, pricing),
+        others: { snapshots: snapshots.foreign, templates: promoted.foreign },
+      };
+    },
+
+    async deleteOrphans() {
+      const plan = await golden.orphans();
+      if (plan === undefined) return undefined;
+      const deleted: OrphansDeleted = { snapshots: [], templates: [], failed: [] };
+      // The plan names templates only on a backend that has them, so the road exists wherever the loop runs.
+      const templates = templatesOf(backend);
+      const named = (row: SnapshotRow | TemplateRow): { id: string; name?: string } => ({ id: row.id, ...(row.name !== undefined ? { name: row.name } : {}) });
+      if (templates !== undefined) {
+        for (const t of plan.templates) {
+          try {
+            await templates.delete(t.id);
+            deleted.templates.push(t);
+          } catch (e) {
+            deleted.failed.push({ ...named(t), message: e instanceof Error ? e.message : String(e) });
+          }
+        }
+      }
+      for (const row of plan.snapshots) {
+        try {
+          await backend.deleteSnapshot(row.id);
+          deleted.snapshots.push(row);
+        } catch (e) {
+          // A snapshot the provider already lost is gone either way, which is what the caller asked for.
+          if (isMissing(e)) {
+            deleted.snapshots.push(row);
+            continue;
+          }
+          deleted.failed.push({ ...named(row), message: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      return deleted;
     },
 
     async retention(name) {
@@ -3932,7 +4036,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const v of manifest?.versions ?? []) {
         if (v.templateId !== undefined) continue;
         try {
-          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, templateName(templateHostId, key, v.version));
+          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, goldenName(templateHostId, key, v.version));
           const current = (await store.get(GOLDENS, key)) as GoldenManifest | undefined;
           if (current === undefined) throw new Error(`golden ${key} was dropped while its versions were being promoted`);
           await store.put(GOLDENS, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });

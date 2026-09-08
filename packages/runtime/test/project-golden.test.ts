@@ -21,6 +21,8 @@ afterEach(async () => {
 const SOURCE = "/Users/dev/code/proj";
 const DEST = "/root/work/proj";
 const T0 = Date.parse("2026-09-06T10:00:00.000Z");
+/** templateHost() takes the part after the last colon, so every name this host writes carries the mark "h1". */
+const HOST = "box:h1";
 
 /** The golden the workspaces stand on: one sealed desktop version at head, sized above the provider default. */
 const MANIFEST: GoldenManifest = {
@@ -46,7 +48,7 @@ async function setup(store: Store = memoryStore()): Promise<{ rt: Runtime; backe
   const backend = stubBackend();
   await store.put("goldens", "default", MANIFEST);
   const { clock, advance } = fakeClock(T0);
-  const rt = createRuntime({ backend, store, adapters: {}, clock });
+  const rt = createRuntime({ backend, store, adapters: {}, clock, hostId: HOST });
   return { rt, backend, store, advance };
 }
 
@@ -67,7 +69,7 @@ describe("a project golden", () => {
     expect(ws).not.toHaveProperty("project");
     expect(await rt.workspaces.get(ws.id)).toMatchObject({ project: PROJECT });
     expect((await rt.workspaces.list())[0]).toMatchObject({ project: PROJECT });
-    const again = createRuntime({ backend, store, adapters: {} });
+    const again = createRuntime({ backend, store, adapters: {}, hostId: HOST });
     expect(await again.workspaces.get(ws.id)).toMatchObject({ project: PROJECT });
   });
 
@@ -77,7 +79,7 @@ describe("a project golden", () => {
     advance(5 * 60_000);
     const golden = await rt.workspaces.snapshot(ws.id);
     const expected: ProjectGolden = {
-      snapshotId: "snap_project-proj-2026-09-06T10-06-00-000Z",
+      snapshotId: "snap_wsp-h1-project-proj-2026-09-06T10-06-00-000Z",
       project: PROJECT,
       golden: "snap_golden-v12",
       version: 12,
@@ -92,7 +94,9 @@ describe("a project golden", () => {
     expect(await store.get("workspaces", ws.id)).toMatchObject({ firstLife: true, golden: "snap_golden-v12" });
     advance(60_000);
     const second = await rt.workspaces.snapshot(ws.id);
-    expect(second.snapshotId).toBe("snap_project-proj-2026-09-06T10-07-00-000Z");
+    expect(second.snapshotId).toBe("snap_wsp-h1-project-proj-2026-09-06T10-07-00-000Z");
+    // The mark is what tells a later doctor run this host took it, since a snapshot carries no provider metadata.
+    expect(backend.snapshots.map(r => r.name)).toEqual(["wsp-h1-project-proj-2026-09-06T10-06-00-000Z", "wsp-h1-project-proj-2026-09-06T10-07-00-000Z"]);
     expect((await rt.golden.projects()).map(p => p.snapshotId)).toEqual([expected.snapshotId, second.snapshotId]);
   });
 

@@ -956,6 +956,9 @@ export const SNAPSHOT_GONE_REASON = "its snapshot is gone at the provider";
 /** The doctor's line on a backend whose capabilities lack templates: nothing to promote, nothing wrong. */
 export const NO_TEMPLATES_LINE = "this backend has no templates; goldens stay as snapshots";
 
+/** The doctor's line on a backend that cannot list snapshots: nothing to split, nothing to clean. */
+export const NO_SNAPSHOT_LISTING = "this backend lists no snapshots; nothing to split by owner";
+
 /** The doctor's line for the machines its teardown check found on the account that this host did not make: each
  * named with the host that did, left alone and never a failure, since two computers on one account each stand
  * their own. */

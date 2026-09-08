@@ -33,7 +33,7 @@ describe("SolariBackend", () => {
     expect(b.capabilities.sizes[0]).toMatchObject(b.pricing.defaultSize);
   });
 
-  it("lists every snapshot on the account with the size the provider bills", async () => {
+  it("lists every snapshot on the account with the size the provider bills and the name wsp's owner mark rides on", async () => {
     const f = fakeFetch({
       "GET /snapshots": {
         status: 200,
@@ -41,8 +41,9 @@ describe("SolariBackend", () => {
       },
     });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
+    // A snapshot the provider lists with a null name carries none, which is how a row with no owner reads.
     expect(await b.listSnapshots()).toEqual([
-      { id: "snap_a", sizeBytes: 3839352763, createdAt: "2026-08-31T22:39:02.170Z", parent: null },
+      { id: "snap_a", name: "golden", sizeBytes: 3839352763, createdAt: "2026-08-31T22:39:02.170Z", parent: null },
       { id: "snap_b", sizeBytes: 8_500_000_000, createdAt: "2026-09-04T10:00:00Z", parent: null },
     ]);
     expect(f.mock.calls.map(c => `${c[1]?.method} ${new URL(String(c[0])).pathname}`)).toEqual(["GET /snapshots"]);
@@ -62,11 +63,12 @@ describe("SolariBackend", () => {
     const b = new SolariBackend({ apiKey: "k", fetch: f });
     expect(await b.promoteSnapshot("snap_dl8pcs2yj1fu", "wsp-default-v1")).toBe("tpl_e6f26b64338f4eba");
     expect(JSON.parse(String(f.mock.calls[0]![1]!.body))).toEqual({ name: "wsp-default-v1" });
-    expect(await b.getTemplate("tpl_e6f26b64338f4eba")).toEqual({ id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready" });
+    // createdAt is read for the same reason a snapshot's is: it is what gives a fresh promotion its grace.
+    expect(await b.getTemplate("tpl_e6f26b64338f4eba")).toEqual({ id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready", createdAt: "2026-09-07T17:31:00Z" });
     expect(await b.getTemplate("tpl_bad")).toEqual({ id: "tpl_bad", name: "x", status: "failed", error: "restore copy failed" });
     expect(await b.listTemplates()).toEqual([
       { id: "base", name: "base", status: "ready" },
-      { id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready" },
+      { id: "tpl_e6f26b64338f4eba", name: "wsp-default-v1", status: "ready", createdAt: "2026-09-07T17:31:00Z" },
     ]);
     await b.deleteTemplate("tpl_e6f26b64338f4eba");
     expect(f.mock.calls.map(c => `${c[1]?.method} ${new URL(String(c[0])).pathname}`)).toEqual([

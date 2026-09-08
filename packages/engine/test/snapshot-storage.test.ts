@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { GoldenManifest, GoldenVersion } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { retentionPlan, snapshotStorage } from "../src/snapshot-storage.js";
+import { ownershipOf, retentionPlan, snapshotStorage, splitByOwner } from "../src/snapshot-storage.js";
+import { OWN_GRACE_MS } from "../src/orphans.js";
 import { SNAPSHOT_STORAGE } from "../src/solari-backend.js";
 
 const GB = 1e9;
+const NOW = Date.parse("2026-09-08T12:00:00.000Z");
+/** Past the grace, so only the mark and the record decide. */
+const OLD = new Date(NOW - 3_600_000).toISOString();
 const row = (id: string, gb: number) => ({ id, sizeBytes: gb * GB });
 const version = (n: number, parent?: number): GoldenVersion => ({ version: n, snapshotId: `snap_v${n}`, baseTemplate: "base", setupSha: "s", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 }, ...(parent !== undefined ? { parentSnapshotId: `snap_v${parent}` } : {}) });
 /** Versions sealed before parents were recorded: a linear chain by number. */
@@ -13,9 +17,13 @@ const manifest = (head: number, ...versions: number[]): GoldenManifest => ({ hea
 const chained = (head: number, ...links: [number, number | undefined][]): GoldenManifest => ({ head, versions: links.map(([n, p]) => version(n, p)) });
 const nobody = (): string[] => [];
 
+/** Nothing on the account is recorded, so only the name says whose a row is. */
+const unrecorded = { hostId: "h1", recorded: new Set<string>(), now: NOW };
+const named = (id: string, gb: number, name?: string) => ({ ...row(id, gb), createdAt: OLD, ...(name !== undefined ? { name } : {}) });
+
 describe("snapshot storage", () => {
   it("counts every snapshot on the account and bills the GB past the free tier at the published rate", () => {
-    const s = snapshotStorage([row("a", 7.8), row("b", 8.5), row("c", 20), row("d", 3.84)], SNAPSHOT_STORAGE);
+    const s = snapshotStorage([row("a", 7.8), row("b", 8.5), row("c", 20), row("d", 3.84)], SNAPSHOT_STORAGE, unrecorded);
     expect(s.count).toBe(4);
     expect(s.totalBytes).toBe(40.14 * GB);
     expect(s.monthlyUsd).toBeCloseTo((40.14 - 10) * 0.05, 6);
@@ -23,8 +31,65 @@ describe("snapshot storage", () => {
   });
 
   it("inside the free tier the monthly cost is zero, never negative", () => {
-    expect(snapshotStorage([row("a", 7.8)], SNAPSHOT_STORAGE).monthlyUsd).toBe(0);
-    expect(snapshotStorage([], SNAPSHOT_STORAGE)).toMatchObject({ count: 0, totalBytes: 0, monthlyUsd: 0 });
+    expect(snapshotStorage([row("a", 7.8)], SNAPSHOT_STORAGE, unrecorded).monthlyUsd).toBe(0);
+    expect(snapshotStorage([], SNAPSHOT_STORAGE, unrecorded)).toMatchObject({ count: 0, totalBytes: 0, monthlyUsd: 0 });
+  });
+
+  it("splits the sum by who made each snapshot, so the count on the line says why the account holds them", () => {
+    const rows = [named("s1", 12, "wsp-h1-default-v1"), named("s2", 20, "wsp-h1-default-v9"), named("s3", 21, "golden-v1"), named("s4", 7, "wsp-zz9-default-v1")];
+    const s = snapshotStorage(rows, SNAPSHOT_STORAGE, { hostId: "h1", recorded: new Set(["s1"]), now: NOW });
+    expect(s.kept).toEqual({ count: 1, bytes: 12 * GB });
+    expect(s.orphans).toEqual({ count: 1, bytes: 20 * GB });
+    expect(s.others).toEqual({ count: 2, bytes: 28 * GB });
+    expect(s.kept.bytes + s.orphans.bytes + s.others.bytes).toBe(s.totalBytes);
+  });
+});
+
+describe("who made a snapshot or a template", () => {
+  const recorded = new Set(["s1", "tpl_recorded"]);
+  /** Old enough that the grace below never decides these rows. */
+  const read = { hostId: "h1", recorded, now: NOW };
+
+  it("a row anything records is kept whatever its name, so a snapshot named before the mark existed is never an orphan", () => {
+    expect(ownershipOf({ id: "s1", name: "golden-v1" }, read)).toBe("kept");
+    expect(ownershipOf({ id: "s1" }, read)).toBe("kept");
+  });
+
+  it("this host's mark with nothing recording the id is an orphan", () => {
+    expect(ownershipOf({ id: "s9", name: "wsp-h1-default-v9", createdAt: OLD }, read)).toBe("orphan");
+    expect(ownershipOf({ id: "s9", name: "wsp-h1-project-spoo-2026", createdAt: OLD }, read)).toBe("orphan");
+  });
+
+  it("no mark of this host is foreign, whether it is another host's, a person's own, or a name from before the mark", () => {
+    expect(ownershipOf({ id: "s9", name: "wsp-zz9-default-v1", createdAt: OLD }, read)).toBe("foreign");
+    expect(ownershipOf({ id: "s9", name: "golden-v1", createdAt: OLD }, read)).toBe("foreign");
+    expect(ownershipOf({ id: "s9", name: "base", createdAt: OLD }, read)).toBe("foreign");
+    expect(ownershipOf({ id: "s9", createdAt: OLD }, read)).toBe("foreign");
+  });
+
+  it("the one split serves snapshots and templates alike", () => {
+    const split = splitByOwner([{ id: "tpl_recorded", name: "wsp-h1-default-v1" }, { id: "tpl_old", name: "wsp-h1-old-v1", createdAt: OLD }, { id: "base", name: "base" }], read);
+    expect(split.kept.map(t => t.id)).toEqual(["tpl_recorded"]);
+    expect(split.orphans.map(t => t.id)).toEqual(["tpl_old"]);
+    expect(split.foreign.map(t => t.id)).toEqual(["base"]);
+  });
+
+  it("a marked row the provider listed inside the grace is kept: a seal records its snapshot only after the smoke fork, minutes later", () => {
+    const at = (msAgo: number) => new Date(NOW - msAgo).toISOString();
+    const marked = (createdAt?: string) => ({ id: "s9", name: "wsp-h1-default-v9", ...(createdAt !== undefined ? { createdAt } : {}) });
+    expect(ownershipOf(marked(at(OWN_GRACE_MS - 1)), read)).toBe("kept");
+    expect(ownershipOf(marked(at(0)), read)).toBe("kept");
+    expect(ownershipOf(marked(at(OWN_GRACE_MS + 1)), read)).toBe("orphan");
+    // Deleting a snapshot cannot be undone, so a row whose age the provider did not give is never offered; the
+    // reaper kills an own machine of unknown age, where the cost of waiting is an hourly bill rather than a version.
+    expect(ownershipOf(marked(), read)).toBe("kept");
+    expect(ownershipOf(marked("not a date"), read)).toBe("kept");
+    // A clock behind the provider's reads as age zero, never as a row old enough to delete.
+    expect(ownershipOf(marked(new Date(NOW + 60_000).toISOString()), read)).toBe("kept");
+  });
+
+  it("without this host's mark there is no split at all, rather than one that claims every unmarked row", () => {
+    expect(() => splitByOwner([{ id: "s1", name: "wsp-h1-default-v1" }], { ...read, hostId: "" })).toThrow(/mark/);
   });
 });
 
