@@ -27,7 +27,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, LocalBackend, type MachineBackend, NoProviderBackend, parseSshAddress, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor } from "./doctor.js";
@@ -330,8 +330,8 @@ export function keySources(): KeySources {
 /** What no Solari key means for the command that asked. `refuse` is the road every command that needs a machine
  * takes: nothing it does has any meaning without one. `offer` is wsp init's: at a terminal the key is asked for with
  * the way to skip it, and an empty answer takes the local road, since this computer is a workspace of its own. `local`
- * is the road of up, new --local and doctor --local: init already answered, so nothing is asked and the run goes on
- * with no provider. */
+ * is the road of up, up --service, new --local and doctor --local: init already answered, so nothing is asked and
+ * the run goes on with no provider. */
 export type NoSolari = "refuse" | "offer" | "local";
 
 export async function loadKeys(
@@ -352,8 +352,8 @@ export async function loadKeys(
   const withoutProvider = (): Keys => (anthropic !== undefined ? { anthropic } : {});
   if (ask.noSolari === "local" || (ask.noSolari === "offer" && io.isTTY !== true)) return withoutProvider();
 
-  // The prompt's own refusal travels as it is: the CLI's IOs refuse a secret as auth, and another caller (the desktop's
-  // setup check) recognises the refusal it handed in.
+  // Not wrapped: the CLI's IOs already refuse a secret as the contract's auth class, so a caller with no terminal
+  // to type one on exits on that code rather than on a generic failure.
   solari = (await io.askSecret(`Solari API key\nNo Solari key found.\nconsole.getsolari.com${ask.noSolari === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : ""}`)).trim();
   if (!solari) {
     if (ask.noSolari === "offer") return withoutProvider();
@@ -421,16 +421,16 @@ export const localWorkFolder = (home: string): string => join(home, "wsp-work");
  * made is the one a turn uses, and the work folder is the workspace's own. */
 export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
   const root = localWorkFolder(home);
-  mkdirSync(root, { recursive: true });
   const login = Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined));
   // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
   // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
   // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
   let daemon: Promise<LocalDaemon> | undefined;
   let shutting = false;
+  const backend = new LocalBackend({ root, env });
   return {
-    backend: new LocalBackend({ root, env }),
-    execStream: o => localExecStream({ root, ...o }),
+    backend,
+    execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
     home: id => agentHome(home, id, env),
     env: login,
     daemonRoad: async () => {
@@ -646,7 +646,7 @@ async function init(
   const keys = await loadKeys(say, undefined, { anthropic: false, noSolari: "offer" });
   // A provider with no size to boot a builder on has no image to build, so the run makes this computer the workspace
   // and serves the app on it. Every flag about the golden is about a road this run does not take.
-  if (providerBackend(keys).capabilities.sizes.length === 0) {
+  if (forksNoMachines(providerBackend(keys).capabilities)) {
     if (flags.noLocal) throw usageRefusal(`wsp init: with no provider key ${THIS_COMPUTER} is all this run makes, so --no-local would leave it with nothing. Drop it, or set SOLARI_API_KEY first.`);
     // Every other flag is about a golden: what goes on the image, what forks from it and what lands on that fork.
     // This road builds no image, and the workspace it makes is this computer, whose files are already here.
@@ -727,15 +727,19 @@ export interface ServeOptions {
   openUrl?: UrlOpener;
 }
 
+/** The road the desktop window brings a host up on, which is wsp up's: the state file it serves is one wsp init
+ * wrote, so a computer with no provider key serves the machines it does have rather than being asked for one by a
+ * window that can ask nothing. */
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
-  const keys = await loadKeys(io);
+  const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
   return hostFor(rt, keys, opts, io);
 }
 
 /** Whether the state has anything for the app to show: a sealed golden to fork from, or any workspace record, this
- * computer's included. An empty state is refused with the two ways in rather than served as a blank app. */
-async function servesNothing(rt: Runtime): Promise<boolean> {
+ * computer's included. An empty state is refused with the two ways in rather than served as a blank app. The one
+ * reading of it, so the command line, the service and the desktop's own gate all ask the same question. */
+export async function servesNothing(rt: Runtime): Promise<boolean> {
   return goldenHead(await rt.golden.get()) === undefined && (await rt.workspaces.list()).length === 0;
 }
 
@@ -749,6 +753,14 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | un
     return undefined;
   }
   return hostFor(rt, keys, opts, io);
+}
+
+/** What a host with no Claude key says as it starts. A host that forks machines gives each fork the key as an env,
+ * so a missing one is a fork with no credentials; a host that forks none runs its turns under the person's own
+ * login and their harness's own store, where the sign-in they already made is the one a turn uses. */
+export function noClaudeKeyNote(forksNothing: boolean): string {
+  const what = forksNothing ? "a thread on this computer signs in as your own agents do" : "new workspaces fork without claude credentials";
+  return `note: no ANTHROPIC_API_KEY found; ${what}`;
 }
 
 async function hostFor(
@@ -787,9 +799,7 @@ async function hostFor(
     writeFileSync(pointer, `${home}\n`);
 
     for (const line of addressLines(opts.statePath, handle)) io.log(line);
-    if (keys.anthropic === undefined) {
-      io.log("note: no ANTHROPIC_API_KEY found; new workspaces fork without claude credentials");
-    }
+    if (keys.anthropic === undefined) io.log(noClaudeKeyNote(forksNoMachines(rt.backend.capabilities)));
     return {
       ...handle,
       close: async () => {
@@ -854,17 +864,24 @@ function keyInAFile(name: string, sources: KeySources): boolean {
     .some(layer => (layer[name] ?? "") !== "");
 }
 
-/** A service starts without the shell that installed it, so a key only that shell exported would be gone by then.
- * The line that says so, or nothing when a file already holds the key. */
+/** Whether this shell is the only place a key is: a service starts without that shell, so a key nothing else holds
+ * would be gone by then. A key no shell exported is not lost by a service; there is none, and on this computer that
+ * is wsp init's local road, which serves with no provider at all. One reading for both keys. */
+function onlyInThisShell(name: string, sources: KeySources): boolean {
+  return (sources.env[name] ?? "") !== "" && !keyInAFile(name, sources);
+}
+
+/** The line saying the Solari key would be gone by the time the service starts, or nothing when a file holds it or
+ * no shell does. */
 export function keyOnlyInThisShell(sources: KeySources = keySources()): string | undefined {
-  if (keyInAFile("SOLARI_API_KEY", sources)) return undefined;
+  if (!onlyInThisShell("SOLARI_API_KEY", sources)) return undefined;
   return `wsp up --service: a service starts without your shell, so it reads the Solari key from a file. SOLARI_API_KEY is only in this shell's environment; put it in ${join(sources.home, ".env")} first.`;
 }
 
 /** The Claude key is not needed to serve, so it is a word rather than a refusal; without it every workspace the
  * service forks has no claude credentials, and the installing shell is the one place the reading looks complete. */
 export function claudeKeyOnlyInThisShell(sources: KeySources = keySources()): string | undefined {
-  if ((sources.env["ANTHROPIC_API_KEY"] ?? "") === "" || keyInAFile("ANTHROPIC_API_KEY", sources)) return undefined;
+  if (!onlyInThisShell("ANTHROPIC_API_KEY", sources)) return undefined;
   return `note: ANTHROPIC_API_KEY is only in this shell's environment, so the service starts without it and the workspaces it forks get no claude credentials. Put it in ${join(sources.home, ".env")} to carry it over.`;
 }
 
@@ -879,15 +896,23 @@ export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: 
     io.error(serviceRefusal(held, opts.statePath));
     return 1;
   }
-  const keys = await loadKeys(io, deps.keys, { anthropic: false });
+  // The service serves what wsp init recorded, and with no provider key that is this computer alone: asking for a
+  // key to keep the host up would take the local road away at the next login.
+  const keys = await loadKeys(io, deps.keys, { anthropic: false, noSolari: "local" });
   const shellOnly = keyOnlyInThisShell(deps.keys);
   if (shellOnly !== undefined) {
     io.error(shellOnly);
     return 1;
   }
-  if (await servesNothing(makeRuntime(keys, opts.statePath))) {
-    io.error(NOTHING_TO_SERVE_LINE);
-    return 1;
+  // This runtime answers one question and is thrown away; the host the service starts builds its own.
+  const asked = makeRuntime(keys, opts.statePath);
+  try {
+    if (await servesNothing(asked)) {
+      io.error(NOTHING_TO_SERVE_LINE);
+      return 1;
+    }
+  } finally {
+    await asked.close();
   }
   const claudeOnly = claudeKeyOnlyInThisShell(deps.keys);
   if (claudeOnly !== undefined) io.log(claudeOnly);
