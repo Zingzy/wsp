@@ -126,6 +126,7 @@ describe("a permission prompt relayed into the chat", () => {
     localWiring = {
       backend: new LocalBackend({ root }),
       execStream: o => localExecStream({ root, ...o }),
+      folder: root,
       home: () => join(root, ".claude"),
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
     };
@@ -279,6 +280,7 @@ describe("the access a thread starts at", () => {
     localWiring = {
       backend: new LocalBackend({ root }),
       execStream: o => localExecStream({ root, ...o }),
+      folder: root,
       home: () => join(root, ".claude"),
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
     };

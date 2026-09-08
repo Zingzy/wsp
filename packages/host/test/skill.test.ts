@@ -80,11 +80,14 @@ describe("the wsp skill", () => {
     expect(section).toContain("There is no sign-in for these rows");
   });
 
-  it("the local thread example names the folder its turn works in, since a thread with no cwd opens in the person's home", () => {
+  it("says where a thread on this computer starts, and its example asks nothing of a folder it may not be in", () => {
     const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### thread new"), WSP_SKILL.indexOf("### send"));
-    expect(section).toContain("wsp thread new --in mac --agent codex --cwd /Users/zingzy/wsp-work");
-    expect(section).toContain("a thread with no `--cwd` opens in the person's home folder");
-    expect(section).toContain("the workspace's own work folder (`~/wsp-work`, where `wsp exec` on this computer runs)");
+    expect(section).toContain("wsp thread new --in mac --agent codex \"Say in one line which folder you are in");
+    expect(section).toContain("Its folder is the workspace's own rather than the person's home");
+    // One statement of the order a folder is picked in, so the paragraph cannot say two things about the same start.
+    expect(section).toContain("without it the thread starts in the workspace's imported project folder, else in the workspace's own folder, which on a fork is the machine's home folder");
+    // No constant path stands in for that folder: the host decides it, and a line naming one would go stale.
+    expect(section).not.toContain("~/wsp-work");
   });
 
   it("carries no em dash", () => {

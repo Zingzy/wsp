@@ -574,6 +574,9 @@ export interface LocalWiring {
   /** The launch factory for a turn on this computer, under the limits the registry hands every turn (the turn's own
    * by default, none for the exec verb), so a local turn is cut the way a cloud turn is. */
   execStream: (opts?: MachineExecOptions) => ExecStreamFactory;
+  /** The folder a turn and a command on this computer start in when the caller names none: the workspace's own, not
+   * the person's home, which is one `cd` away and holds the checkouts they work in themselves. */
+  folder: string;
   home: (agentId: string) => string;
   env: Readonly<Record<string, string>>;
   /** Where this computer's daemon listens and the token that opens it, in the shape a cloud fork's preview route
@@ -1314,6 +1317,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   interface KindModule {
     backend: MachineBackend;
     execStream: (machine: Machine, opts?: MachineExecOptions) => ExecStreamFactory;
+    /** The folder a turn and a command start in on this kind when the caller names none; undefined leaves it to the
+     * machine's own road, which for a guest is the home the login shell lands in. */
+    folder: string | undefined;
     home: (agentId: string) => string;
     env: Readonly<Record<string, string>>;
     /** Whether a request relayed from a machine may drive a workspace of this kind; a local one answers only this computer. */
@@ -1342,11 +1348,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return local.daemonRoad();
   };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
-    cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true, hasDaemon: entry => Boolean(entry.machine.previewUrl), daemonRoad: cloudRoad },
+    cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), folder: undefined, home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true, hasDaemon: entry => Boolean(entry.machine.previewUrl), daemonRoad: cloudRoad },
     local:
       local === undefined
         ? undefined
-        : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), home: local.home, env: local.env, relayed: false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
+        : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), folder: local.folder, home: local.home, env: local.env, relayed: false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
     const found = modules[kind];
@@ -1355,6 +1361,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const backendFor = (kind: WorkspaceKind): MachineBackend => moduleOf(kind).backend;
   const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry.machine, o);
+  /** The folder a turn or a command runs in: the one the caller named, else the kind's own. Every road that starts a
+   * process on a machine reads it here, so the folder a turn opens in and the one a command runs in cannot differ. */
+  const folderFor = (entry: LiveWorkspace, cwd: string | undefined): string | undefined => cwd ?? moduleOf(entry.record.kind).folder;
   /** The capability a verb reads before it runs: a machine whose capability is false refuses the verb with the one
    * sentence, which reads for the local computer, the only machine short of these capabilities today. */
   const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes">, action: string): void => {
@@ -2937,7 +2946,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id, origin);
       const { adapter } = adapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
-      const inner = execFactoryFor(entry, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(cwd, argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
+      const inner = execFactoryFor(entry, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(folderFor(entry, cwd), argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
       let endWith: (reason: string) => void = () => {};
       const ended = new Promise<{ reason: string }>(resolve => {
         endWith = reason => resolve({ reason });
@@ -3735,7 +3744,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           refuse();
         }
         const turnId = randomUUID();
-        const cwd = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? o.cwd;
+        const cwd = folderFor(entry, (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? o.cwd);
         const afterCut = resume !== undefined && cutBefore(workspaceId, threadId);
         // Created before adapter.start so events that fire synchronously during
         // start() still land on the view. A resume id was announced by the harness

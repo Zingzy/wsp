@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NOTHING_TO_SERVE_LINE } from "@wsp/protocol";
+import { NOTHING_TO_SERVE_LINE, type ExecStream } from "@wsp/protocol";
 import { cli, localWiring, localWorkFolder, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -16,6 +16,15 @@ const PAGE = `<!doctype html>
 <script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>
 </body></html>
 `;
+
+/** Everything a command printed, read the way a client reads it: over execStream, the road serve.ts answers the exec
+ * verb with, which wraps the argv in a cd of its own where the in-process exec method never sees that wrapper. */
+async function printed(stream: ExecStream): Promise<string> {
+  let out = "";
+  for await (const line of stream.lines) out += line;
+  await stream.exited;
+  return out;
+}
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 function quietIO(lines: string[] = [], errors: string[] = []): CliIO {
@@ -120,15 +129,21 @@ describe("wsp up", () => {
     // Made when the wiring is built, so the first turn has somewhere to be rather than failing on a missing folder.
     const wiring = localWiring(home);
     expect(existsSync(work)).toBe(true);
-    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath), adapters: {}, local: wiring });
+    // The exec road asks for the default agent's adapter, for the environment a command runs under; nothing here
+    // starts a turn through it.
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath), adapters: { claude: () => ({ steers: false, start: () => { throw new Error("no turn in this case"); } }) }, local: wiring });
     runtimes.push(rt);
     // The one thing that decides where an agent's shell begins: a turn that started in the home folder is one cd
-    // from the checkouts the person works in themselves. Both sides read through realpath: macOS reaches its temp
-    // dir through a symlink, so a shell's pwd and the path built here are two spellings of one folder.
-    expect(realpathSync((await rt.workspaces.exec("ws_l", "pwd")).stdout.trim())).toBe(realpathSync(work));
-    expect((await rt.workspaces.exec("ws_l", "printf mine > seen.txt")).exitCode).toBe(0);
+    // from the checkouts the person works in themselves. The road a client takes is execStream, which wraps the argv
+    // in a cd of its own, so it is the road asked here; the in-process method never sees that wrapper. Both sides
+    // read through realpath: macOS reaches its temp dir through a symlink, so a shell's pwd and the path built here
+    // are two spellings of one folder.
+    expect(realpathSync((await printed(await rt.workspaces.execStream("ws_l", ["pwd"]))).trim())).toBe(realpathSync(work));
+    await printed(await rt.workspaces.execStream("ws_l", ["sh", "-c", "printf mine > seen.txt"]));
     expect(existsSync(join(work, "seen.txt"))).toBe(true);
     expect(existsSync(join(home, "seen.txt"))).toBe(false);
+    // And the folder the turn road resolves is that same one, read off the wiring the host built.
+    expect(wiring.folder).toBe(work);
     // The harness's own store stays the person's, wherever their store variable puts it: a sign-in they made is the
     // one a turn uses, so nothing of it moved under the work folder.
     expect(wiring.home("claude").startsWith(work)).toBe(false);
