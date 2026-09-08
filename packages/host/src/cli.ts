@@ -17,6 +17,7 @@ import {
   goldenHead,
   hostIdentity,
   jsonFileStore,
+  endLocalRuns,
   localExecStream,
   type GoldenRecipe,
   type GoldenVersion,
@@ -415,6 +416,9 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
       shutting = true;
       const started = daemon;
       daemon = undefined;
+      // A turn here leads a process group of its own, so it no longer goes with the terminal's Ctrl-C: this host is
+      // the only thing that knows where its turns are, and nothing can re-open one once it is gone.
+      await endLocalRuns();
       await started?.then(d => d.close(), () => {});
     },
   };
@@ -469,9 +473,11 @@ function collectThisComputer(onRung: (rung: Rung, rows: number) => void): Promis
   return collect(nodeHost(), { onRung });
 }
 
-/** Ctrl-C and a service stop both end with the lock removed. `once` leaves a
- * second signal to node's default exit, so a close that hangs cannot trap the terminal. */
-function stopOnSignals(handle: HostHandle, io: CliIO): void {
+/** Every way a host is told to go ends the same: the lock removed and this computer's turns ended. A hangup is one
+ * of them, and the one node would otherwise take its default exit on, which would leave a turn running: a turn leads
+ * a process group of its own, so a closing terminal window no longer reaches it and the close is what does. `once`
+ * leaves a second signal to node's default exit, so a close that hangs cannot trap the terminal. */
+export function stopOnSignals(handle: HostHandle, io: CliIO): void {
   let stopping: Promise<void> | undefined;
   const stop = (): void => {
     stopping ??= handle.close().then(
@@ -482,8 +488,7 @@ function stopOnSignals(handle: HostHandle, io: CliIO): void {
       },
     );
   };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.once(signal, stop);
 }
 
 /** A folder a `~/`-relative answer or a flag named: where it is, and whether there is one there. The one place both

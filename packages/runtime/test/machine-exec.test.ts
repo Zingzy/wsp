@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXEC_ENV, INLINE_EXEC_MS, MachineUnreached, type ExecResult, type Machine } from "@wsp/engine";
 import { EXEC_BODY_MAX, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
@@ -739,6 +739,70 @@ describe("machineExecStream reaping a real turn's process group", () => {
     await vi.waitFor(() => expect(() => process.kill(childPid, 0)).toThrow(), { timeout: 5000 });
     expect(readdirSync(runDir)).toEqual([]);
   }, 15_000);
+});
+
+describe("machineExecStream sweeping the runs a connecting host does not hold", () => {
+  it("ends every claimed run but the ones it is named, takes their files, and leaves a named run running", async () => {
+    const { machine, runDir } = localGuest();
+    const factory = machineExecStream(machine, { pollMs: 20, runDir });
+    // Nothing iterates either stream, as a host that went down under its own reader did not.
+    const held = factory("sleep 300", { env: {} });
+    const orphan = factory("sleep 300", { env: {} });
+    const leader = async (base: string): Promise<number> => {
+      await vi.waitFor(() => expect(existsSync(`${base}.pid`)).toBe(true), { timeout: 5_000 });
+      const pid = Number(readFileSync(`${base}.pid`, "utf8").trim());
+      expect(pid).toBeGreaterThan(0);
+      children.push(pid);
+      return pid;
+    };
+    const heldPid = await leader(held.run!);
+    const orphanPid = await leader(orphan.run!);
+    const filesOf = (base: string): string[] => readdirSync(runDir).filter(name => name.startsWith(basename(base)));
+    // A claim of a shape this factory could not have minted is the guest's, not a run of ours to end.
+    mkdirSync(join(runDir, "notarun.d"));
+
+    expect(await factory.sweep!([held.run!])).toEqual([orphan.run!]);
+
+    await vi.waitFor(() => expect(() => process.kill(orphanPid, 0)).toThrow(), { timeout: 5_000 });
+    expect(filesOf(orphan.run!)).toEqual([]);
+    expect(() => process.kill(heldPid, 0)).not.toThrow();
+    expect(filesOf(held.run!).length).toBeGreaterThan(0);
+
+    // The same host, holding nothing: the run it was reading is a run nobody reads.
+    expect(await factory.sweep!([])).toEqual([held.run!]);
+    await vi.waitFor(() => expect(() => process.kill(heldPid, 0)).toThrow(), { timeout: 5_000 });
+    expect(readdirSync(runDir)).toEqual(["notarun.d"]);
+  }, 30_000);
+
+  it("a machine holding two hundred stale runs is swept a page at a time, every page under the exec body cap", async () => {
+    const stale = Array.from({ length: 200 }, (_, i) => `/tmp/wsp-run/${i.toString(16).padStart(12, "0")}`);
+    const calls: string[] = [];
+    const machine = {
+      id: "crowded",
+      exec: (cmd: string) => {
+        calls.push(cmd);
+        return Promise.resolve({ exitCode: 0, stdout: cmd.startsWith("for d in") ? `${stale.map(base => `${base}.d`).join("\n")}\n` : "", stderr: "" });
+      },
+    } as unknown as Machine;
+
+    expect(await machineExecStream(machine).sweep!([])).toEqual(stale);
+
+    const reaps = calls.slice(1);
+    // Measured as the wire body the backend sends, the way every other call this file holds under the cap is.
+    for (const cmd of calls) expect(solariBody(cmd), cmd.slice(0, 80)).toBeLessThanOrEqual(EXEC_BODY_MAX);
+    expect(reaps.length).toBeGreaterThan(1);
+    // Every run is reaped once across the pages, and no page carries a run twice.
+    const reaped = stale.filter(base => reaps.filter(cmd => cmd.includes(`rm -rf ${base}.*`)).length === 1);
+    expect(reaped).toEqual(stale);
+  });
+
+  it("a machine holding no run of this factory's is swept without a second word going out", async () => {
+    const { machine, runDir } = localGuest();
+    const calls: string[] = [];
+    const counted = { id: "local", exec: (cmd: string, o?: { timeoutMs?: number }) => (calls.push(cmd), machine.exec(cmd, o)) } as unknown as Machine;
+    expect(await machineExecStream(counted, { runDir }).sweep!([])).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
 });
 
 describe("machineExecStream feeding a real process over the input channel", () => {

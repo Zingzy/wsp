@@ -28,11 +28,14 @@
 // question travels the launch road's reach window, and only the machine's own
 // answer that the claim is gone may end a run: a probe nothing answered says
 // nothing about the run it was sent to find, and killing that process group
-// would end the very turn the attach exists to save.
+// would end the very turn the attach exists to save. The same fact cuts the
+// other way once a host has finished connecting: a run no row of that host
+// holds is a harness process nobody will ever read again, so the sweep ends
+// every claim on the machine that the caller did not name.
 
 import { randomBytes } from "node:crypto";
-import { INLINE_EXEC_MS, MachineUnreached, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
-import { EXEC_CHUNK_BYTES, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
+import { INLINE_EXEC_MS, MachineUnreached, execFits, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
+import { EXEC_CHUNK_BYTES, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
 export interface MachineExecOptions {
@@ -70,6 +73,10 @@ const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** What a launch mints a run's name from, so a handle read back off the sessions index is checked against the shape
  * this code writes before it reaches shell text: a value that has been to a file on disk is no longer this code's. */
 const RUN_ID = /^[0-9a-f]{12}$/;
+/** How often the reap looks at the group it asked to go, while it waits out the one stop grace both roads give. */
+const GRACE_POLL_MS = 200;
+/** That grace as the shell's own counter, since a guest has no seq to lean on. */
+const GRACE_CHECKS = Array.from({ length: Math.round(RUN_STOP_MS / GRACE_POLL_MS) }, (_, i) => String(i + 1)).join(" ");
 
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
@@ -83,6 +90,14 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
   /** The one path that says a run is on the machine: the launch makes it, the reap takes it with the rest of the
    * run's files, and every road that asks whether a run is still there asks about this one. */
   const claim = (base: string): string => `${base}.d`;
+  /** What ending one run comes to on the guest, in the shell both the reader's own reap and the connect sweep run:
+   * the recorded process group gets TERM, then KILL once the stop grace passes, and the run's files go. */
+  const reapScript = (b: string): string =>
+    `P=$(cat ${b}.pid 2>/dev/null); ` +
+    `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
+    `for i in ${GRACE_CHECKS}; do kill -0 -- -$P 2>/dev/null || break; sleep ${GRACE_POLL_MS / 1000}; done; ` +
+    `kill -KILL -- -$P 2>/dev/null; fi; ` +
+    `rm -rf ${b}.*`;
   /** A handle this factory could have minted: the run directory it launches into and a name of its own shape. */
   const minted = (run: string): boolean => run.startsWith(`${runDir}/`) && RUN_ID.test(run.slice(runDir.length + 1));
 
@@ -124,16 +139,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
     // Runs after the last poll read the log, so the group's stragglers cannot cost the turn a line.
     const reap = (): Promise<void> =>
-      machine
-        .exec(
-          `P=$(cat ${base}.pid 2>/dev/null); ` +
-            `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
-            `for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 -- -$P 2>/dev/null || break; sleep 0.2; done; ` +
-            `kill -KILL -- -$P 2>/dev/null; fi; ` +
-            `rm -rf ${base}.*; true`,
-          { timeoutMs: execTimeoutMs },
-        )
-        .then(() => undefined, () => undefined);
+      machine.exec(`${reapScript(base)}; true`, { timeoutMs: execTimeoutMs }).then(() => undefined, () => undefined);
 
     // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
     const pollCmd = (offset: number): string =>
@@ -308,6 +314,34 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     if (res.stdout.includes("WSP_RUN")) return open(run, input, Promise.resolve());
     if (res.stdout.includes("WSP_GONE")) return "gone";
     throw new Error(`the machine did not answer whether it still holds ${run}: exit ${res.exitCode}: ${res.stderr}`);
+  };
+
+  factory.sweep = async keep => {
+    // The claims are what the machine holds, so the machine is asked what is there rather than told; the shape a
+    // handle must have to be one of this factory's is read here, by the same predicate the attach road reads, so
+    // nothing the guest wrote into the run directory reaches shell text on the strength of being there.
+    const listed = await machine.exec(`for d in ${runDir}/*.d; do [ -d "$d" ] && printf '%s\\n' "$d"; done`, { timeoutMs: execTimeoutMs });
+    const kept = new Set(keep);
+    const stale = listed.stdout
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.endsWith(".d"))
+      .map(line => line.slice(0, -".d".length))
+      .filter(base => minted(base) && !kept.has(base));
+    if (stale.length === 0) return [];
+    // Each run's group is ended beside the others, not after them: every reap waits out its own stop grace, and a
+    // machine holding a day of them would spend that grace once per run in a connect that has to end.
+    const page = (bases: readonly string[]): string => `${bases.map(base => `{ ${reapScript(base)}; } &`).join(" ")} wait; true`;
+    // The machine holding the most stale runs is the one this exists for, and it is the one whose command would pass
+    // the exec body cap and be refused whole, so the reaps go a page at a time under the same rule every upload reads.
+    const pages: string[][] = [[]];
+    for (const base of stale) {
+      const last = pages.at(-1)!;
+      if (last.length > 0 && !execFits(page([...last, base]))) pages.push([base]);
+      else last.push(base);
+    }
+    for (const bases of pages) await machine.exec(page(bases), { timeoutMs: execTimeoutMs });
+    return stale;
   };
 
   return factory;

@@ -4,7 +4,7 @@
 // thread.started names the thread a resume takes, items start and complete
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
-import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, titlePrompt } from "@wsp/protocol";
+import { RUN_EXIT_MS, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, endAfterResult, endRun, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
@@ -46,6 +46,9 @@ export interface CodexAdapterDeps {
   login: string;
   baseEnv?: Readonly<Record<string, string | undefined>>;
   interruptGraceMs?: number;
+  /** How long the CLI gets to exit on its own after its turn's result, before its process and its tree are ended
+   * for it. */
+  resultExitMs?: number;
   /** How long a run of Reconnecting error events with no turn progress may last before the turn is failed. */
   reconnectStallMs?: number;
 }
@@ -194,20 +197,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
 
     const emit = (event: AdapterEvent): void => o.onEvent(event);
 
-    /** SIGTERM, then SIGKILL once the grace window passes without an exit. */
-    const escalate = async (): Promise<void> => {
-      stream.teardown();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timedOut = await Promise.race([
-        stream.exited.then(() => false),
-        new Promise<boolean>(resolve => {
-          timer = setTimeout(() => resolve(true), deps.interruptGraceMs ?? INTERRUPT_GRACE_MS);
-        }),
-      ]);
-      if (timer !== undefined) clearTimeout(timer);
-      if (timedOut) stream.kill();
-      await stream.exited;
-    };
+    const escalate = (): Promise<void> => endRun(stream, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS);
+    /** Armed at the turn's result: the CLI ends its own process there, and one that does not is ended with its tree. */
+    const endAfter = (): void => void endAfterResult(stream, deps.resultExitMs ?? RUN_EXIT_MS, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
     const progress = (): void => {
       if (stallTimer !== undefined) clearTimeout(stallTimer);
       stallTimer = undefined;
@@ -255,6 +247,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
               sawResult = true;
               turnResult = { status: "completed", durationMs: Date.now() - startedAt, ...(lastText !== undefined ? { text: lastText } : {}), ...(rec(event.usage) !== undefined ? { usage: rec(event.usage) } : {}) };
               emit({ type: "turn.done", sessionId: threadId, result: turnResult });
+              endAfter();
               break;
             }
             case "turn.failed": {
@@ -263,6 +256,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
               words = failureWords(message, deps.login) ?? words;
               turnResult = { status: "failed", durationMs: Date.now() - startedAt, error: words ?? message };
               emit({ type: "turn.done", sessionId: threadId, result: turnResult });
+              endAfter();
               break;
             }
             case "error": {

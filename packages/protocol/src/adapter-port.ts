@@ -103,9 +103,11 @@ export interface ExecStream {
   /** What a later host process attaches to this run by, on a factory whose runs outlive the process that launched
    * them; absent where they do not, and a turn on such a factory dies with its host. */
   readonly run?: string;
-  /** Graceful stop: SIGTERM. */
+  /** Graceful stop: SIGTERM to the process and to everything it started. A harness leaves its own children behind
+   * when it goes (MCP servers under npx were seen holding 90 MB each for the machine's life), so a signal that
+   * reaches the leader alone is not a stop. */
   teardown(): void;
-  /** SIGKILL. */
+  /** SIGKILL to the process and to everything it started. */
   kill(): void;
   /** Appends one line to the process's stdin channel, or answers gone when the process already ended where it runs;
    * rejects once the stream ended or when it was started without one. */
@@ -130,6 +132,47 @@ export interface ExecStreamFactory {
    * may take what is left of it. A machine that answers nothing rejects, since silence says nothing about the run
    * and must leave it running. Absent on a factory whose runs die with the process that launched them. */
   attach?(run: string, options: { input: boolean }): Promise<ExecStream | "gone">;
+  /** Ends every run of this road the machine still holds that is not named in `keep`, and answers the ones it ended.
+   * A host that went down mid-turn, and a turn whose row this host could not re-open, leave a harness process nobody
+   * reads holding the machine's memory for its life, so a host that connects ends the runs it does not own. The runs
+   * it does own are named rather than found, since only this host knows which reader it just opened. Absent on a
+   * factory whose runs die with the process that launched them. */
+  sweep?(keep: readonly string[]): Promise<readonly string[]>;
+}
+
+/** Settles false when the process exited inside `ms`, true when it is still running once `ms` passed. */
+async function outlasted(stream: ExecStream, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const waited = await Promise.race([
+    stream.exited.then(() => false),
+    new Promise<boolean>(resolve => {
+      timer = setTimeout(() => resolve(true), ms);
+    }),
+  ]);
+  if (timer !== undefined) clearTimeout(timer);
+  return waited;
+}
+
+/**
+ * The one road a turn's process leaves by, whatever launched it and whatever ended the turn: SIGTERM to it and to
+ * everything it started, then SIGKILL to whatever is still there once the grace window passes. Settles when the
+ * process is gone. A graceful stop can be acknowledged while background tasks keep the harness alive, which is why
+ * the kill is not conditional on the harness's own word that it is going.
+ */
+export async function endRun(stream: ExecStream, graceMs: number): Promise<void> {
+  stream.teardown();
+  if (await outlasted(stream, graceMs)) stream.kill();
+  await stream.exited;
+}
+
+/**
+ * The result is the turn's end, but not the process's: the harness exits on the EOF the runtime closes its channel
+ * with, and one that does not exit is a process nobody reads holding the machine's memory (seven were found alive on
+ * one guest, the oldest fourteen hours past its turn's reply). This waits `waitMs` for the harness to go on its own
+ * and ends it and its tree when it has not.
+ */
+export async function endAfterResult(stream: ExecStream, waitMs: number, graceMs: number): Promise<void> {
+  if (await outlasted(stream, waitMs)) await endRun(stream, graceMs);
 }
 
 /** One model as an adapter reads it off its binary: the values the CLI takes, without the words the runtime's table

@@ -136,6 +136,20 @@ describe("wsp up", () => {
     await rt.close();
   });
 
+  it("closing the wiring ends the turns running on this computer and what those turns started", async () => {
+    const wiring = localWiring(home);
+    const pidFile = join(home, "child.pid");
+    const stream = wiring.execStream()(`sleep 300 & echo $! > ${pidFile}; sleep 300`, { env: {} });
+    await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 5_000 });
+    const child = Number(readFileSync(pidFile, "utf8").trim());
+    expect(child).toBeGreaterThan(0);
+
+    await wiring.close!();
+
+    expect(await stream.exited).not.toBe(0);
+    await vi.waitFor(() => expect(() => process.kill(child, 0)).toThrow(), { timeout: 5_000 });
+  }, 15_000);
+
   it("the panes of a local workspace dial a daemon this host starts on the first ask and closes with the runtime", async () => {
     stateFile({
       workspaces: {
