@@ -16,7 +16,8 @@
 // terminal over a fake daemon wire, the host answering a translucent Ghostty
 // config, so the pane's material can be measured with each tab active;
 // ?sidebar=<px> opens the sidebar at that remembered width so the rows can
-// be measured at several.
+// be measured at several; ?spaces=1 opens it in the Spaces body, one
+// workspace under its header with a dot per workspace at the bottom.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DESKTOP_MAC_CLASS, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -28,6 +29,7 @@ import { useRightPanelStore } from "../../src/rightPanelStore";
 import { AppShell } from "../../src/shell/AppShell";
 import { openPanelTerminal } from "../../src/shell/shellCommands";
 import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
+import { SIDEBAR_MODE_KEY } from "../../src/sidebar/sidebarMode";
 import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
 import "../../src/index.css";
@@ -157,6 +159,8 @@ useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(show
 // ?sidebar=<px> is the width the shell remembers; it is written here, after a test's init script has cleared storage.
 const sidebarWidth = params.get("sidebar");
 if (sidebarWidth !== null) window.localStorage.setItem("wsp:sidebar-width", sidebarWidth);
+// ?spaces=1 is the remembered sidebar body, on the same road and for the same reason as the width.
+if (params.get("spaces") === "1") window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
 useStore.getState().bind(api);
 // The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
 useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });

@@ -6,11 +6,13 @@
 // handed, so the list is testable without the dialog.
 import { ArrowDownIcon, ArrowUpIcon, MessageSquareIcon, PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
+import { sidebarActions } from "../../actions/sidebarActions.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
 import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
 import { cn } from "../../lib/utils.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
+import type { SidebarMode } from "../../sidebar/sidebarMode.js";
 import { compactTimeLabel, dotClassForTone } from "../../sidebar/workspaceRows.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
 
@@ -23,6 +25,8 @@ export interface PaletteHandlers {
   /** One step down the sidebar's workspaces, and back up; both wrap. */
   readonly nextWorkspace: () => void;
   readonly previousWorkspace: () => void;
+  /** Which body the sidebar draws; the row that runs this comes from the sidebar registry, as the section menu's does. */
+  readonly setSidebarMode: (mode: SidebarMode) => void;
 }
 
 export interface PaletteItemsInput {
@@ -31,6 +35,7 @@ export interface PaletteItemsInput {
   /** What the person typed; the thread search runs over it, the at-rest list ignores it. */
   readonly query: string;
   readonly canCreate: boolean;
+  readonly sidebarMode: SidebarMode;
   readonly handlers: PaletteHandlers;
   readonly verbs: WorkspaceVerbs;
 }
@@ -46,8 +51,9 @@ const sync = (fn: () => void) => async (): Promise<void> => {
   fn();
 };
 
-/** A registry action as a palette row: its refusal is the row's description and its disabled state. */
-function workspaceItem(action: ResolvedAction, project: SidebarProjectSnapshot): CommandPaletteActionItem {
+/** A registry action as a palette row, whichever registry it came from: its refusal is the row's description and its
+ * disabled state, and what the row says about itself otherwise is the caller's line. */
+function actionItem(action: ResolvedAction, description: string): CommandPaletteActionItem {
   const Icon = action.icon;
   return {
     kind: "action",
@@ -55,7 +61,7 @@ function workspaceItem(action: ResolvedAction, project: SidebarProjectSnapshot):
     searchTerms: [action.title, ...action.searchTerms],
     icon: Icon ? <Icon className={ITEM_ICON_CLASS} /> : null,
     title: action.title,
-    description: action.refusal ?? project.displayName,
+    description: action.refusal ?? description,
     disabled: action.refusal !== null,
     ...(action.shortcutCommand !== undefined ? { shortcutCommand: action.shortcutCommand } : {}),
     run: action.run,
@@ -78,8 +84,10 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     },
   ];
   if (selected !== null) {
-    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status), input.verbs).map(action => workspaceItem(action, selected)));
+    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status), input.verbs).map(action => actionItem(action, selected.displayName)));
   }
+
+  items.push(...resolveActions(sidebarActions, { mode: input.sidebarMode }, { setMode: handlers.setSidebarMode }).map(action => actionItem(action, action.hint ?? "")));
 
   const oneWorkspace = input.projects.length < 2;
   items.push(
