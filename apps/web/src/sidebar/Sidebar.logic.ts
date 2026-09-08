@@ -89,7 +89,7 @@ export function resolveThreadRowClassName(input: {
 
   return cn(
     baseClassName,
-    "text-sidebar-muted-foreground/80 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+    "text-[var(--sidebar-row-rest)] hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
   );
 }
 

@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from "playwright";
 
+/** WCAG contrast between two opaque colours, for pairs a test already holds rather than reads off an element. */
+export const wcagContrast = (a: readonly number[], b: readonly number[]): number => {
+  const lum = (rgb: readonly number[]): number => {
+    const f = (v: number): number => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * f(rgb[0]!) + 0.7152 * f(rgb[1]!) + 0.0722 * f(rgb[2]!);
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x) as [number, number];
+  return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+};
+
 /** WCAG contrast of each element's text over what it sits on, translucent layers composited up to the first opaque one. */
 export const textContrast = (page: Page, selector: string): Promise<number[]> =>
   page.locator(selector).evaluateAll(els =>

@@ -41,6 +41,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTER } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
+import { textContrast } from "./contrast";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -290,6 +291,20 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       // No cost, no state word and no open word on any card: the state is read off the preview and the sidebar.
       for (const text of await cards.evaluateAll(els => els.map(el => el.textContent ?? ""))) expect(text).not.toMatch(/\$|Running|Paused|Gone|open/);
       expect(await page!.locator("[data-workspace-card][aria-selected=true]").getAttribute("data-workspace-card")).toBe("ws_b");
+      // No card here has a picture yet, so every well is the empty one. Its fill cannot hold an edge on a
+      // light card (1.02 against the white under it), so the hairline is what says where the box is, and
+      // it has to be there on both surfaces.
+      const wells = await page!.locator("[data-card-preview]").evaluateAll(els =>
+        els.map(el => {
+          const shadows = getComputedStyle(el).boxShadow.match(/(rgba?\([^)]*\)|color\([^)]*\))/g) ?? [];
+          return { empty: el.hasAttribute("data-card-preview-empty"), rings: shadows.filter(c => !/[,/]\s*0\)$/.test(c)).length };
+        }),
+      );
+      expect(wells).toHaveLength(3);
+      for (const well of wells) {
+        expect(well.empty, `a card's well is not the empty one in ${theme}`).toBe(true);
+        expect(well.rings, `the empty well carries no hairline in ${theme}`).toBeGreaterThan(0);
+      }
       await page!.screenshot({ path: join(SHOTS_DIR, `workspace-switcher-${theme}.png`) });
       console.info(`workspace switcher screenshot: ${join(SHOTS_DIR, `workspace-switcher-${theme}.png`)}`);
       await page!.keyboard.press("Tab");
@@ -1081,12 +1096,16 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(style.border).toBe("0px");
       expect(style.shadow).toBe("none");
       expect(style.font.toLowerCase()).toMatch(/mono/);
-      // The line's ink is the muted foreground beside it, not a colour of its own.
+      // The line's ink is the muted foreground beside it, not a colour of its own: the same grey the
+      // counts on the rows are mixed from, and only the part of it differs, since a sentence is read
+      // through where a count is glanced at and the whisper the counts take sits under AA on purpose.
       const [lineColor, metaColor] = await Promise.all([
         line.evaluate(el => getComputedStyle(el).color),
         page!.locator("[data-row-id='ws:ws_a'] [data-workspace-meta]").first().evaluate(el => getComputedStyle(el).color),
       ]);
-      expect(lineColor).toBe(metaColor);
+      const hueOf = (color: string): string => color.replace(/\s*\/\s*[\d.]+\s*\)$/, ")");
+      expect(hueOf(lineColor)).toBe(hueOf(metaColor));
+      expect(lineColor).not.toBe(metaColor);
       expect((await page!.locator("[data-row-id='ws:ws_a'] [data-workspace-state]").textContent())?.trim()).toBe("");
       expect((await page!.locator("[data-row-id='ws:ws_b'] [data-workspace-state]").textContent())?.trim()).toBe("Paused");
       const path = join(SHOTS_DIR, `sidebar-offline-${theme}.png`);
@@ -1409,24 +1428,28 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
-  it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it", async () => {
-    await open("dark");
-    const before = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
-    expect(await page!.locator("header [data-slot=sidebar-trigger]").count()).toBe(0);
-    await page!.locator("[data-slot=sidebar-header] [data-slot=sidebar-trigger]").click();
-    await page!.waitForSelector("[data-sidebar-state=collapsed]");
-    // The row animates padding-left over 200 ms; the read waits for the toggle to land.
-    await page!.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().x - x) < 1, before.x);
-    const after = await box("header [data-slot=sidebar-trigger]");
-    expect(Math.abs(after.x - before.x)).toBeLessThan(1);
-    expect(Math.abs(after.y - before.y)).toBeLessThan(1);
-    const crumb = await box("header [data-thread-breadcrumb]");
-    expect(Math.abs(crumb.x - (after.x + after.width + (await rowGap("header [data-header-row]"))))).toBeLessThan(1);
-    expect(await page!.locator("header [data-thread-breadcrumb]").evaluate(el => el.textContent)).toBe("api/Reply with exactly the word hi.");
-    const path = join(SHOTS_DIR, "header-collapsed-dark.png");
-    await page!.screenshot({ path, clip: { x: 0, y: 0, width: 600, height: 120 } });
-    console.info(`collapsed header screenshot: ${path}`);
-  }, 30_000);
+  it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      const before = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
+      expect(await page!.locator("header [data-slot=sidebar-trigger]").count()).toBe(0);
+      await page!.locator("[data-slot=sidebar-header] [data-slot=sidebar-trigger]").click();
+      await page!.waitForSelector("[data-sidebar-state=collapsed]");
+      // The row animates padding-left over 200 ms; the read waits for the toggle to land.
+      await page!.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().x - x) < 1, before.x);
+      const after = await box("header [data-slot=sidebar-trigger]");
+      expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+      expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+      const crumb = await box("header [data-thread-breadcrumb]");
+      expect(Math.abs(crumb.x - (after.x + after.width + (await rowGap("header [data-header-row]"))))).toBeLessThan(1);
+      expect(await page!.locator("header [data-thread-breadcrumb]").evaluate(el => el.textContent)).toBe("api/Reply with exactly the word hi.");
+      const ratios = await textContrast(page!, "header [data-thread-breadcrumb] .text-muted-foreground");
+      for (const ratio of ratios) expect(ratio, `the collapsed header's quiet crumb reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
+      const path = join(SHOTS_DIR, `header-collapsed-${theme}.png`);
+      await page!.screenshot({ path, clip: { x: 0, y: 0, width: 600, height: 120 } });
+      console.info(`collapsed header screenshot: ${path}`);
+    }
+  }, 60_000);
   /** One row's name slot: the row's height, where the name starts, where the slot at the right edge ends, and the
    * name's own font, read the same way whether the slot holds the text or the one name box. `selector` picks the row
    * and `nameSelector` the text it wears, so a workspace row and a thread row are read by the same rule. */
@@ -1571,6 +1594,55 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       await page!.waitForSelector("[data-row-name-input]", { state: "detached" });
       expect((await wsSlot()).text).toBe("the name he typed");
       expect((await wsSlot()).rowHeight).toBe(plain.rowHeight);
+    }
+  }, 60_000);
+
+  // The sidebar paints its quiet text in four tiers, three of them at part opacity. An alpha buys
+  // less contrast over a light surface than over a dark one, so the two themes have to be measured
+  // against each other and not only against a floor: with one light token behind them the tiers
+  // read 4.62, 4.47, 2.68 and 2.10 to 1 where the dark side's read 8.33, 5.43, 4.35 and 3.00.
+  // A sentence drawn in the whisper tier is not a count: the offline line is one, and so are the line
+  // for what the runtime is doing to a daemon and the one for a drop with memory near full. They take
+  // the prose ink, which clears AA on both surfaces, while the counts beside them keep the whisper.
+  it("a sentence in a row's meta line takes the prose ink and reads at AA in both themes, and the counts beside it keep the whisper", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&offline=1`);
+      await page!.waitForSelector("[data-sidebar-offline]");
+      const prose = await textContrast(page!, "[data-sidebar-offline]");
+      const counts = await textContrast(page!, "[data-app-sidebar] [data-workspace-meta]");
+      console.info(`${theme}: the offline sentence reads at ${prose.map(r => r.toFixed(2)).join(", ")}, the counts beside it at ${counts.map(r => r.toFixed(2)).join(", ")} to 1`);
+      expect(prose.length).toBeGreaterThan(0);
+      for (const ratio of prose) expect(ratio, `the offline sentence reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
+      // The counts stay the whisper they were: this raises the sentences, not the tier.
+      expect(counts.length).toBeGreaterThan(0);
+      for (const ratio of counts) expect(ratio, `a count reads at ${ratio} in ${theme}`).toBeLessThan(4.5);
+    }
+  }, 60_000);
+
+  it("the sidebar's ink reads the same in light as in dark: the two tiers that carry words at AA, the whispered ones on the dark side's ink", async () => {
+    const TIERS = {
+      "a thread's title once it is idle": "[data-app-sidebar] .text-sidebar-muted-foreground",
+      "the word on a row at rest": "[data-app-sidebar] [data-slot=sidebar-menu-button]:not([data-active=true])",
+      "the state word beside a thread": "[data-sidebar-row] .hidden.md\\:inline",
+      "the row's meta line": "[data-app-sidebar] .text-\\[var\\(--top-row-meta\\)\\]",
+    } as const;
+    // The first two carry words a person reads, so their bar is AA. The last two are the whisper the
+    // rows are designed around and sit under AA in both themes on purpose, so their bar is the ink
+    // their dark twin already ships: they are the tiers an alpha over a light surface loses.
+    const AT_AA = ["a thread's title once it is idle", "the word on a row at rest"];
+    const read: Record<"dark" | "light", Record<string, number>> = { dark: {}, light: {} };
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      for (const [tier, selector] of Object.entries(TIERS)) {
+        const ratios = await textContrast(page!, selector);
+        expect(ratios.length, `${tier} drew nothing to measure in ${theme}`).toBeGreaterThan(0);
+        read[theme][tier] = Math.min(...ratios);
+      }
+      console.info(`${theme}: ${Object.entries(read[theme]).map(([tier, ratio]) => `${tier} ${ratio.toFixed(2)}`).join(", ")} to 1`);
+    }
+    for (const tier of Object.keys(TIERS)) {
+      if (AT_AA.includes(tier)) expect(read.light[tier], `${tier} reads at ${read.light[tier]} in light`).toBeGreaterThanOrEqual(4.5);
+      else expect(read.light[tier], `${tier} reads at ${read.light[tier]} in light against ${read.dark[tier]} in dark`).toBeGreaterThanOrEqual(read.dark[tier]! - 0.2);
     }
   }, 60_000);
 });

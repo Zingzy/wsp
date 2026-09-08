@@ -10,7 +10,8 @@
 // refusal line above the box can be measured for the running, paused and gone
 // workspaces and the model picker's agent marks for their size and colour;
 // ?ws=ws_a&linger=1 replays a turn that replied but whose process has not
-// exited; ?shell=desktop puts a desktop bridge on the page so the workspace
+// exited; ?ws=ws_a&chat=1 replays one whose reply is markdown of every kind the
+// chat draws, so the message body and its code blocks can be measured; ?shell=desktop puts a desktop bridge on the page so the workspace
 // switch chord reaches it; ?mac=1 marks the html the way the macOS preload
 // does; ?panel=terminal opens the right panel with a Browser tab and a
 // terminal over a fake daemon wire, the host answering a translucent Ghostty
@@ -117,6 +118,41 @@ const lingering: SessionEvent[] = [
   { type: "session.done", ...linger, result: { status: "completed", durationMs: 900, costUsd: 0.001 } },
 ];
 
+// ?chat=1 replays one answered turn whose reply is the markdown the chat actually has to draw: prose, a
+// sentence with inline code in it, a fenced block the highlighter colours, a quote, a list and a table. It is
+// the surface the ticket names, and the parts that can go wrong in light are the ones that carry their own
+// ground: a code block, an inline code chip and a quote's rule all sit on a near-white card.
+const chatTurn = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_2", threadId: "thr_chat" };
+const CHAT_MARKDOWN = [
+  "Bumped the lockfile and ran the gate. The failing file was `apps/web/test/tokens.test.ts`, which pins",
+  "the stylesheet's additions, so the new token needed the snapshot taken again.",
+  "",
+  "```ts",
+  'const ROW_META_CLASS = "font-mono text-[11px] tabular-nums";',
+  "export function metaLine(project: Project): string {",
+  "  // A machine wsp does not drive says what it is instead of what it costs.",
+  "  return driven(project) ? costLine(project) : machineLine(project);",
+  "}",
+  "```",
+  "",
+  "> The gate runs once, on the branch merged with origin/main in a fresh worktree.",
+  "",
+  "- `pnpm test` green without creds",
+  "- `tsc --noEmit` clean",
+  "",
+  "| file | tests | state |",
+  "| --- | --- | --- |",
+  "| tokens.test.ts | 5 | green |",
+  "| sidebar.test.tsx | 55 | green |",
+  "",
+  "Full notes in [the tracker](https://example.invalid/439).",
+].join("\n");
+const chatHistory: SessionEvent[] = [
+  { type: "session.start", ...chatTurn, prompt: "Bump the lockfile and run the gate." },
+  { type: "session.delta", ...chatTurn, kind: "text", text: CHAT_MARKDOWN },
+  { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
+];
+
 const api: Api = {
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
@@ -136,7 +172,7 @@ const api: Api = {
   startSession: async o => ({ id: "s2", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
-  sessionHistory: async id => (id === "ws_a" && params.get("linger") === "1" ? lingering : []),
+  sessionHistory: async id => (id !== "ws_a" ? [] : params.get("chat") === "1" ? chatHistory : params.get("linger") === "1" ? lingering : []),
   listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
   snapshotStorage: async () => null,
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),

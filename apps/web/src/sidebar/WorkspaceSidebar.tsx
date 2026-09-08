@@ -38,7 +38,7 @@ import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, TWO_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
@@ -442,7 +442,7 @@ export function WorkspaceSidebar() {
         />
       </div>
       {offline ? (
-        <p data-sidebar-offline className={cn(ROW_META_CLASS, "px-2 pt-1 leading-4")}>
+        <p data-sidebar-offline className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
           {PROVIDER_UNREACHED_LINE}
         </p>
       ) : null}
@@ -564,9 +564,9 @@ function ThreadGroupRow({ rowId, label, count, open, onToggle }: { rowId: string
         onClick={onToggle}
         className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-hidden ring-ring focus-visible:ring-2"
       >
-        <span className="text-xs font-medium text-muted-foreground/50">{open ? label : `${label} (${count})`}</span>
+        <span className="text-xs font-medium text-sidebar-whisper/50">{open ? label : `${label} (${count})`}</span>
         <span className="h-px flex-1 bg-sidebar-border/60" />
-        <ChevronDownIcon aria-hidden className={cn("size-3 text-muted-foreground/50 transition-transform", open && "rotate-180")} />
+        <ChevronDownIcon aria-hidden className={cn("size-3 text-sidebar-whisper/50 transition-transform", open && "rotate-180")} />
       </button>
     </SidebarMenuSubItem>
   );

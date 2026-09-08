@@ -204,6 +204,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--contrast-sidebar-foreground);
   --color-sidebar-muted-foreground: var(--contrast-sidebar-muted-foreground);
+  --color-sidebar-whisper: var(--contrast-sidebar-whisper);
   --color-sidebar-control-surface: var(--sidebar-control-surface);
   --color-sidebar-row-hover: var(--sidebar-row-hover);
   --color-sidebar-row-active: var(--sidebar-row-active);
@@ -999,7 +1000,19 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
      portaled mobile sheets and settings navigation outside the app sidebar. */
   --sidebar: var(--color-zinc-50);
   --sidebar-foreground: var(--foreground);
-  --sidebar-muted-foreground: var(--muted-foreground);
+  /* The ink the sidebar paints whole: a thread's title once it is idle, the word on a row at
+     rest. One step darker than the app's muted ink, which puts it at the 7:1 the dark sidebar's
+     has on its own surface; at the app's zinc-500 it read 4.62:1 against the dark side's 8.33:1.
+     Only the light side is stepped: on a dark surface the app's own muted ink already reads there. */
+  --sidebar-muted-foreground: var(--color-zinc-600);
+  /* The base the sidebar's whispered tiers mix an alpha from: the row's meta line, the state word
+     beside a thread at 70 percent, the Idle rule at 50. They sit under AA in both themes on
+     purpose, so what matters is that the two themes whisper at the same ink, and an alpha over a
+     light surface loses far more than the same alpha over a dark one. A step below the ink painted
+     whole covers that loss, and it is a base of its own so stepping it cannot reach the text drawn
+     at full opacity beside it: the brand lockup, a folder path, the line saying a space has no
+     threads yet. */
+  --sidebar-whisper: var(--color-zinc-700);
   --sidebar-control-surface: var(--color-zinc-100);
   --sidebar-row-hover: var(--color-zinc-25);
   --sidebar-row-active: var(--color-white);
@@ -1017,6 +1030,29 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --terminal-foreground: var(--foreground);
   --terminal-cursor: rgb(38 56 78);
   --terminal-selection-background: rgb(37 63 99 / 20%);
+  /* The pane's sixteen ANSI slots when the person's Ghostty file names none of its own. Every slot
+     is ink a program can print, so every slot reads on the pane it is drawn against: the twelve
+     hues keep libghostty's hue and take a lightness that clears 4.8:1 for a normal and 6.5:1 for a
+     bright, at the chroma the hue still holds there, and the four greys are a ramp per pane rather
+     than one ramp shared by both. On this side the two white slots are the ink that has to move,
+     since a program printing white on a light pane is ordinary emphasis and libghostty's #c5c8c6
+     and #eaeaea read at 1.64:1 and 1.17:1 here; black and bright black already read. */
+  --terminal-ansi-0: #1d1f21;
+  --terminal-ansi-1: #cc3944;
+  --terminal-ansi-2: #6f752b;
+  --terminal-ansi-3: #8a6c2c;
+  --terminal-ansi-4: #2e75aa;
+  --terminal-ansi-5: #ac3bcb;
+  --terminal-ansi-6: #307c74;
+  --terminal-ansi-7: #6f7270;
+  --terminal-ansi-8: #666666;
+  --terminal-ansi-9: #a92e36;
+  --terminal-ansi-10: #586122;
+  --terminal-ansi-11: #6b5b22;
+  --terminal-ansi-12: #235d9c;
+  --terminal-ansi-13: #8b30af;
+  --terminal-ansi-14: #26665c;
+  --terminal-ansi-15: #525252;
 
   @variant dark {
     color-scheme: dark;
@@ -1049,6 +1085,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --update-foreground: var(--color-blue-400);
     --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
     --sidebar: var(--card);
+    --sidebar-muted-foreground: var(--muted-foreground);
+    --sidebar-whisper: var(--sidebar-muted-foreground);
     --sidebar-control-surface: var(--muted);
     --sidebar-row-hover: var(--accent);
     --sidebar-row-active: var(--accent);
@@ -1058,6 +1096,27 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --agent-gemini: #8e75b2;
     --terminal-cursor: rgb(180 203 255);
     --terminal-selection-background: rgb(180 203 255 / 25%);
+    /* The twelve hues are libghostty's own, drawn for this pane and reading from 4.76:1 up. The two
+       black slots are the ink that has to move on this side: libghostty leaves them at #1d1f21 and
+       #666666, which read at 1.20:1 and 3.45:1 on a near-black pane, so a program printing black or
+       bright black writes into the background. Lifted onto the pane, keeping the ramp black below
+       bright black below white below bright white. */
+    --terminal-ansi-0: #797b7d;
+    --terminal-ansi-1: #cc6666;
+    --terminal-ansi-2: #b5bd68;
+    --terminal-ansi-3: #f0c674;
+    --terminal-ansi-4: #81a2be;
+    --terminal-ansi-5: #b294bb;
+    --terminal-ansi-6: #8abeb7;
+    --terminal-ansi-7: #c5c8c6;
+    --terminal-ansi-8: #949494;
+    --terminal-ansi-9: #d54e53;
+    --terminal-ansi-10: #b9ca4a;
+    --terminal-ansi-11: #e7c547;
+    --terminal-ansi-12: #7aa6da;
+    --terminal-ansi-13: #c397d8;
+    --terminal-ansi-14: #70c0b1;
+    --terminal-ansi-15: #eaeaea;
   }
 }
 
@@ -1077,7 +1136,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --input: var(--color-zinc-300);
   --sidebar: var(--color-zinc-50);
   --sidebar-foreground: var(--color-zinc-800);
-  --sidebar-muted-foreground: var(--color-zinc-500);
+  --sidebar-muted-foreground: var(--color-zinc-600);
+  --sidebar-whisper: var(--color-zinc-700);
   --sidebar-control-surface: var(--color-zinc-100);
   --sidebar-row-hover: var(--color-zinc-25);
   --sidebar-row-active: var(--color-white);
@@ -1099,6 +1159,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --sidebar: var(--card);
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);
+    --sidebar-whisper: var(--sidebar-muted-foreground);
     --sidebar-control-surface: var(--muted);
     --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 8%, transparent);
     --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 11%, transparent);
@@ -1168,6 +1229,9 @@ html[data-theme-id]:not([data-theme-id=""]) {
   --sidebar: var(--app-theme-sidebar);
   --sidebar-foreground: var(--app-theme-sidebar-foreground);
   --sidebar-muted-foreground: var(--app-theme-sidebar-muted-foreground);
+  /* A theme names one quiet ink for its sidebar; the whispered tiers mix from that, not from the
+     neutral step the default light palette takes. */
+  --sidebar-whisper: var(--app-theme-sidebar-muted-foreground);
   --sidebar-control-surface: var(--app-theme-sidebar-control-surface);
   --sidebar-row-hover: var(--app-theme-sidebar-row-hover);
   --sidebar-row-active: var(--app-theme-sidebar-row-active);
@@ -1340,6 +1404,7 @@ html[data-theme-id] [data-app-sidebar] {
   --sidebar: var(--app-theme-sidebar);
   --sidebar-foreground: var(--app-theme-sidebar-foreground);
   --sidebar-muted-foreground: var(--app-theme-sidebar-muted-foreground);
+  --sidebar-whisper: var(--app-theme-sidebar-muted-foreground);
   --sidebar-control-surface: var(--app-theme-sidebar-control-surface);
   --sidebar-row-hover: var(--app-theme-sidebar-row-hover);
   --sidebar-row-active: var(--app-theme-sidebar-row-active);
@@ -1461,6 +1526,11 @@ html[data-theme-id] [data-app-sidebar] {
       var(--sidebar-muted-foreground) var(--appearance-contrast-base),
       var(--sidebar)
     ),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-sidebar-whisper: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--sidebar-whisper) var(--appearance-contrast-base), var(--sidebar)),
     var(--appearance-contrast-target) var(--appearance-contrast-boost)
   );
   --contrast-sidebar-border: color-mix(
@@ -2040,12 +2110,32 @@ code {
   --header-frame-inset: calc(69px + var(--header-gap) - var(--workspace-titlebar-control-size) / 2);
 }
 
-/* The counts in the top rows: the muted text at part opacity.
+/* The counts in the top rows: the sidebar's quiet text at part opacity.
    Declared where the contrast tokens are, so the sidebar's own step-ups
-   reach it. */
+   reach it. Two surfaces read it, the sidebar's rows and the workspace
+   switcher's cards, and the switcher is portaled outside [data-app-sidebar]:
+   it takes the root's copy, which is why this token is declared on both and
+   cannot be scoped to the sidebar alone. */
 :root,
 [data-app-sidebar] {
-  --top-row-meta: color-mix(in srgb, var(--contrast-muted-foreground) var(--top-row-meta-alpha), transparent);
+  --top-row-meta: color-mix(in srgb, var(--contrast-sidebar-whisper) var(--top-row-meta-alpha), transparent);
+  /* A meta line that carries a sentence rather than a figure: the line for a provider out of
+     reach, what the runtime is doing to a machine's daemon, a drop with memory near full. The
+     whisper the counts take reads at 2.90:1 in light and 3.00:1 in dark, which is right for a
+     number the eye lands on and wrong for a sentence someone has to read through, so prose takes
+     a higher part of the same ink and clears AA on both surfaces. */
+  --sidebar-prose: color-mix(in srgb, var(--contrast-sidebar-whisper) 75%, transparent);
+  /* The word a sidebar row at rest carries, the search row's included. The dark sidebar holds it
+     at 80 percent of its quiet ink and still reads at 5.43:1; on a light surface that same 80
+     percent lands at 4.47:1, and at 4.14:1 over the search row's tint, so light takes the ink
+     whole. Zinc-600 whole still reads a step behind the zinc-800 a selected row's name takes. */
+  --sidebar-row-rest: var(--contrast-sidebar-muted-foreground);
+
+  @variant dark {
+    /* oklab, not srgb: this is the space the utility's own 80 percent mixed in, and the dark side
+       is meant to come out of this pass with the pixels it went in with. */
+    --sidebar-row-rest: color-mix(in oklab, var(--contrast-sidebar-muted-foreground) 80%, transparent);
+  }
 }
 
 /* Over the glass the sidebar's quiet text and glyphs have no solid card

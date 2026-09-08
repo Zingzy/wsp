@@ -22,8 +22,8 @@ import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, workspaceRowId } from "./rowGrammar.js";
-import { dotClassForTone, spaceHeaderLines, stateSlotWord } from "./workspaceRows.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, workspaceRowId } from "./rowGrammar.js";
+import { dotClassForTone, metaSentences, spaceHeaderLines, stateSlotWord } from "./workspaceRows.js";
 
 export function SpaceHeader({
   project,
@@ -54,6 +54,8 @@ export function SpaceHeader({
   /** Opens the box here, as the menu's Rename does; absent where the rename is refused, so the name is text alone. */
   onRenameOpen?: (() => void) | undefined;
 }) {
+  // Which of the header's lines are sentences rather than figures; they take the ink that reads at AA.
+  const prose = metaSentences({ project, outOfMemory });
   return (
     <SidebarMenuButton
       size="lg"
@@ -92,7 +94,7 @@ export function SpaceHeader({
           </span>
         </span>
         {spaceHeaderLines({ project, cost, outOfMemory, nowMs }).map(line => (
-          <span key={line} data-space-meta className={cn(ROW_META_CLASS, "truncate")} title={line}>
+          <span key={line} data-space-meta className={cn(prose.includes(line) ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={line}>
             {line}
           </span>
         ))}
