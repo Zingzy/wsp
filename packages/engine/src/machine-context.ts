@@ -160,10 +160,12 @@ export const ALIAS_PROBES: Record<string, string> = {
     "    set name (string split -m1 '=' -- $rest)[1]",
     "  end",
     "  set -l w",
-    `  for t in (string split ' ' -- (string trim -l -c "'\\"\\\\" -- $def))`,
+    // fish's own alias listing prints each body through `string escape`, whose style differs by fish version
+    // (quoted here, backslashed there), so the body is read back with its inverse instead of trimming quotes.
+    "  for t in (string split ' ' -- (string unescape -- $def))",
     "    if string match -qr '^[A-Za-z_][A-Za-z0-9_]*=' -- $t; continue; end",
     `    if contains -- $t ${ALIAS_PREFIX.split("|").join(" ")}; continue; end`,
-    "    set w $t; break",
+    "    set w (string trim -l -c \\\\ -- $t); break",
     "  end",
     "  string match -qr '^[A-Za-z0-9_][A-Za-z0-9_.+-]*$' -- $w; or continue",
     '  type -q -- $w; or echo "ALIAS $name $w"',
