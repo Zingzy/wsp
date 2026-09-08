@@ -20,6 +20,7 @@ import {
   openBrowserRefusal,
   openTerminalRefusal,
   phaseButtonWord,
+  phaseCannot,
   phaseHint,
   phaseRefusal,
   phaseWord,
@@ -88,9 +89,9 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb(phaseWord(stateOf(target)).split(" ")[0]!, target.displayName),
     buttonWord: target => phaseButtonWord(stateOf(target)),
     hint: target => phaseHint(stateOf(target)),
-    // A machine wsp neither forked nor pays for takes neither verb, in the runtime's own sentence, so what this
-    // offers and what that throws say the same thing.
-    refusal: target => (kindWords(target.kind).driven ? phaseRefusal(stateOf(target)) : localMachineRefusal(target.displayName, "be paused")),
+    // A machine wsp neither forked nor pays for takes neither verb, in the runtime's own sentence and the verb this
+    // slot's own button offers, so what is offered and what would be thrown say the same thing.
+    refusal: target => (kindWords(target.kind).driven ? phaseRefusal(stateOf(target)) : localMachineRefusal(target.displayName, phaseCannot(stateOf(target)))),
     run: (target, verbs) => verbs.togglePhase(target.id),
   },
   {

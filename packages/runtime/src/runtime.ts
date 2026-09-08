@@ -1245,7 +1245,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** Whether a request relayed from a machine may drive a workspace of this kind; a local one answers only this computer. */
     relayed: boolean;
     /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
-     * route to find out: a cloud fork needs one, this computer's daemon is on it. */
+     * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
+     * word and the status poller read it before this seam existed. */
     hasDaemon: (entry: LiveWorkspace) => boolean;
     /** The road to this machine's daemon: where it listens, when the route expires and the token that opens it. A
      * cloud fork's preview route with the token this runtime wrote on the guest; this computer's loopback daemon
@@ -1267,7 +1268,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return local.daemonRoad();
   };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
-    cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true, hasDaemon: entry => entry.machine.previewUrl !== undefined, daemonRoad: cloudRoad },
+    cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true, hasDaemon: entry => Boolean(entry.machine.previewUrl), daemonRoad: cloudRoad },
     local:
       local === undefined
         ? undefined
