@@ -18,6 +18,8 @@
 // ?sidebar=<px> opens the sidebar at that remembered width so the rows can
 // be measured at several; ?spaces=1 opens it in the Spaces body, one
 // workspace under its header with a dot per workspace at the bottom;
+// ?archived=1 gives the first workspace two threads quiet for days, so the
+// Archived group nested in its idle shelf can be measured shut and opened;
 // ?images=<n> puts n images in the composer so the thumbnail row above the
 // text can be measured; ?settings=1 puts the settings page in the centre,
 // with the theme rule mounted so a pick on it moves the page's theme as the
@@ -68,11 +70,21 @@ const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
 // one; ws_b has only idle ones, the shape that used to draw no Idle header at all, one of them on Codex so both a
 // coloured and a monochrome agent mark sit in the shots.
+// Two of the first workspace's threads quiet for days, added only with ?archived=1 so every other case keeps the
+// four rows it measures: past the protocol's threshold they fold into the Archived group under that workspace's
+// idle shelf, which is what the group's own case reads.
+const archived: SessionView[] = params.get("archived") !== "1"
+  ? []
+  : [
+      { id: "s5", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Rotate the daemon token and restart the host.", startedBy: "person", startedAt: Date.now() - 3 * 24 * 60 * 60_000, endedAt: Date.now() - 2 * 24 * 60 * 60_000 },
+      { id: "s6", workspaceId: "ws_a", harness: "codex", status: "interrupted", prompt: "Drop the preview shim from the packing list.", startedBy: "cli", startedAt: Date.now() - 9 * 24 * 60 * 60_000, endedAt: Date.now() - 8 * 24 * 60 * 60_000 },
+    ];
 const sessions: SessionView[] = [
   { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000 },
   { id: "s2", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Reply with exactly the word hi.", startedBy: "cli", startedAt: Date.now() - 30 * 60_000, endedAt: Date.now() - 24 * 60_000 },
   { id: "s3", workspaceId: "ws_b", harness: "codex", status: "completed", prompt: "Bump the lockfile and run the gate.", startedBy: "cli", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 },
   { id: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
+  ...archived,
 ];
 
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one. Codex
