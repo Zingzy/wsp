@@ -17,6 +17,7 @@ export {
   localWiring,
   makeRuntime,
   serve,
+  servesNothing,
   stopOnSignals,
   terminalIO,
   wspHome,

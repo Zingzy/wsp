@@ -61,6 +61,7 @@ import {
   plural,
   fmtThreads,
   foldThreads,
+  forksNoMachines,
   foreignFlagLine,
   forgetNotice,
   goldenHead,
@@ -75,6 +76,7 @@ import {
   machineWord,
   needsRebuild,
   noAdapterLine,
+  NO_PROVIDER_LINE,
   notAFileLine,
   notAnImageLine,
   notifyLine,
@@ -621,8 +623,25 @@ function workspaceLine(w: WorkspaceView): string[] {
   return [w.name, w.id, kind.machine ?? w.machineId, kind.driven ? workspaceWord(workspaceState({ phase: w.phase })) : "", w.project !== undefined ? shortenedFront(w.project.dest, FOLDER_WIDTH) : ""];
 }
 
+/** What the host's provider offers, read from the host rather than from a key: the one place a verb learns what this
+ * computer can fork. */
+async function capabilitiesOf(client: HostClient): Promise<Capabilities> {
+  return (await client.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities;
+}
+
+/** The same, read first by every road that would mint a machine, since a host whose provider offers no size mints
+ * none: the one sentence naming what to do stands in place of a stage line for a machine nobody will get, and in
+ * place of a missing golden or a missing project golden, each of which would otherwise name a road that cannot be
+ * taken here (wsp init seals nothing without a provider, and no workspace on such a host can be snapshotted). */
+async function forkable(client: HostClient): Promise<Capabilities> {
+  const capabilities = await capabilitiesOf(client);
+  if (forksNoMachines(capabilities)) throw new Error(NO_PROVIDER_LINE);
+  return capabilities;
+}
+
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
 export async function createFromHead(client: HostClient, out: Out, name: string, size?: string): Promise<WorkspaceCreateResult> {
+  await forkable(client);
   const { manifest } = await client.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
   const head = goldenHead(manifest);
   if (head === undefined) throw new Error("no golden yet; run wsp init");
@@ -630,8 +649,7 @@ export async function createFromHead(client: HostClient, out: Out, name: string,
 }
 
 /** The size a --size word names, checked against what the host's provider offers before anything is minted. */
-async function sizeChosen(client: HostClient, word: string): Promise<WorkspaceSize> {
-  const { capabilities } = await client.request<{ capabilities: Capabilities }>("capabilities.get");
+function sizeChosen(capabilities: Capabilities, word: string): WorkspaceSize {
   const size = sizeFromWord(word);
   if (size === undefined || !offeredSize(capabilities.sizes, size)) throw usageRefusal(sizeRefusal(word, capabilities.sizes));
   return size;
@@ -639,6 +657,7 @@ async function sizeChosen(client: HostClient, word: string): Promise<WorkspaceSi
 
 /** The project golden a person names: by snapshot id, else the newest whose project carries that name. */
 export async function projectGoldenOf(client: HostClient, ref: string): Promise<ProjectGolden> {
+  await forkable(client);
   const { projectGoldens } = await client.request<{ projectGoldens: ProjectGolden[] }>("projectGoldens.list");
   const byId = projectGoldens.find(g => g.snapshotId === ref);
   if (byId !== undefined) return byId;
@@ -660,7 +679,10 @@ export function projectGoldenLine(g: ProjectGolden): string {
 
 /** `size` is the --size word; absent, the workspace takes the golden's size. */
 export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string): Promise<WorkspaceCreateResult> {
-  const chosen = size === undefined ? undefined : await sizeChosen(client, size);
+  // Read before a frame is followed, so a host that mints nothing says so once and streams no stage for a machine
+  // that will never exist.
+  const capabilities = await forkable(client);
+  const chosen = size === undefined ? undefined : sizeChosen(capabilities, size);
   const pushed = pushedFrames(client);
   await client.events();
   pushed.follow(

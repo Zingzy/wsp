@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NOTHING_TO_SERVE_LINE, type ExecStream } from "@wsp/protocol";
-import { cli, localWiring, localWorkFolder, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
+import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
@@ -88,7 +88,7 @@ describe("wsp up", () => {
       `app         http://127.0.0.1:${handle.port}`,
       `runtime ws  ws://127.0.0.1:${handle.wsPort} (token: ${tokenPath})`,
       `state       ${statePath}`,
-      "note: no ANTHROPIC_API_KEY found; new workspaces fork without claude credentials",
+      noClaudeKeyNote(false),
     ]);
     expect(readFileSync(tokenPath, "utf8")).toBe(handle.authToken);
   });
