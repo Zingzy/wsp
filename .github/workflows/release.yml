@@ -1,8 +1,8 @@
 name: release
 
-# A pushed v1.2.3 tag is the only thing that builds bundles. Nothing here reaches
-# npm: the command line package is published by hand, because that needs the one
-# time password.
+# A pushed v1.2.3 tag is the whole release: the draft with its notes, the mac
+# zips, the linux AppImage, the command line package on npm through trusted
+# publishing, and the draft turned into a release once every part landed.
 on:
   push:
     tags:
@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 env:
   NODE_VERSION: "22"
@@ -107,3 +108,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.draft.outputs.version }}
         run: gh release upload "$GITHUB_REF_NAME" "wsp-$VERSION.AppImage" --clobber
+
+  npm:
+    name: Command line package on npm
+    needs: draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing: the package on npm trusts this repository and this
+      # workflow file, so the runner's identity token is the credential and no
+      # npm token exists anywhere. It needs an npm newer than node 22 ships.
+      - run: npm install -g npm@latest
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
+      - name: Publish
+        run: pnpm --filter @zingzy/wsp exec npm publish --provenance --access public
+
+  publish:
+    name: Publish the release
+    needs: [draft, mac, linux, npm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Turn the draft into a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
