@@ -8,10 +8,13 @@
 // focus, and Tab and the digits with mod are the browser's inside a tab, where
 // keybindings.ts drops them. The Tab pair is bound twice, once per sidebar
 // body, since in Spaces the one workspace on screen makes its threads what a
-// walk steps through; the arrows carry the workspace switch in both bodies,
-// and they are the only chords of it a browser tab leaves to the page. The
-// arrows come first so a lookup walking the table from the end still labels
-// the switch with its Tab chord where that chord reaches.
+// walk steps through; the mod arrows carry the workspace switch in both
+// bodies, and they reach the page in a browser tab, where the Tab pair does
+// not. They hold mod on purpose: an Option arrow alone is the word move in
+// every text field on macOS, and a switch that lands the caret in a composer
+// would then work once. The arrows come first so a lookup walking the table
+// from the end still labels the switch with its Tab chord where that chord
+// reaches.
 import {
   MAX_KEYBINDINGS_COUNT,
   MAX_WHEN_EXPRESSION_DEPTH,
@@ -46,8 +49,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalOwnsMod" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
-  { key: "alt+arrowleft", command: "workspace.previous", when: "!terminalFocus" },
-  { key: "alt+arrowright", command: "workspace.next", when: "!terminalFocus" },
+  { key: "mod+alt+arrowleft", command: "workspace.previous", when: "!terminalFocus" },
+  { key: "mod+alt+arrowright", command: "workspace.next", when: "!terminalFocus" },
   { key: "ctrl+tab", command: "workspace.next", when: "!terminalFocus && !spacesMode" },
   { key: "ctrl+shift+tab", command: "workspace.previous", when: "!terminalFocus && !spacesMode" },
   { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus && spacesMode" },

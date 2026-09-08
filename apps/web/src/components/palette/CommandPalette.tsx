@@ -142,6 +142,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
             highlightedItemValue={highlightedItemValue}
             isActionsOnly={query.startsWith(">")}
             keybindings={keybindings}
+            shortcuts={{ context: { spacesMode: sidebarMode === "spaces" } }}
             onExecuteItem={executeItem}
           />
         </CommandPaletteContent>

@@ -12,7 +12,6 @@ import {
 } from "./keybindingTypes.js";
 import { isDesktopShell } from "./lib/desktopShell.js";
 import { isMacPlatform } from "./lib/utils.js";
-import { readSidebarMode } from "./sidebar/sidebarMode.js";
 
 export interface ShortcutEventLike {
   type?: string;
@@ -45,8 +44,8 @@ export interface ShortcutMatchContext {
   /** The desktop shell holds the page, so the chords a browser keeps for its own tabs reach it. */
   desktopShell: boolean;
   /** The sidebar is drawing Spaces, one workspace at a time, so the chord that walks a list of workspaces walks
-   * that workspace's threads instead. Read from the stored mode, so every surface labels a chord as the body it
-   * is looking at means it. */
+   * that workspace's threads instead. Passed in by whoever already holds the mode, never read from storage here:
+   * this runs on every keydown the window sees, including every character typed into a composer. */
   spacesMode: boolean;
   [key: string]: boolean;
 }
@@ -189,7 +188,7 @@ function resolveContext(
     previewFocus: false,
     previewOpen: false,
     desktopShell: isDesktopShell(),
-    spacesMode: readSidebarMode() === "spaces",
+    spacesMode: false,
     ...options?.context,
     terminalFocus,
     terminalOwnsMod: terminalFocus && !isMacPlatform(platform),

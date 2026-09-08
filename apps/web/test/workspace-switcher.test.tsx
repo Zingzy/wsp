@@ -73,9 +73,10 @@ function fakeApi(): Api {
 }
 
 const tab = (mods: { shiftKey?: boolean } = {}) => fireEvent.keyDown(window, { key: "Tab", code: "Tab", ctrlKey: true, ...mods });
-const optionArrow = (name: "ArrowLeft" | "ArrowRight") => fireEvent.keyDown(window, { key: name, code: name, altKey: true });
+/** The switch between spaces, as macOS spells it here; the platform is mocked to MacIntel for the file. */
+const spaceArrow = (name: "ArrowLeft" | "ArrowRight") => fireEvent.keyDown(window, { key: name, code: name, metaKey: true, altKey: true });
 const release = () => fireEvent.keyUp(window, { key: "Control" });
-const releaseOption = () => fireEvent.keyUp(window, { key: "Alt" });
+const releaseSpaceArrow = () => fireEvent.keyUp(window, { key: "Alt" });
 const escape = () => fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
 
 /** The desktop shell, told apart by the bridge its preload puts on the page. */
@@ -409,12 +410,12 @@ describe("loadPagePreviews", () => {
   });
 });
 
-describe("the card the option arrows put up", () => {
+describe("the card the space arrows put up", () => {
   it("is the same card, and it ends on the option coming up rather than on the key the other chord holds", async () => {
     await mountShell();
     const { asks, off } = watchComposerFocus("ws_b");
     try {
-      optionArrow("ArrowRight");
+      spaceArrow("ArrowRight");
       await waitFor(() => expect(overlay()).not.toBeNull());
       expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
       expect(highlightedCard()).toBe("ws_b");
@@ -422,7 +423,7 @@ describe("the card the option arrows put up", () => {
       release();
       await settle();
       expect(useWorkspaceSwitcher.getState().open).toBe(true);
-      releaseOption();
+      releaseSpaceArrow();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
       expect(overlay()).toBeNull();
       expect(asks).toEqual(["ws_b"]);
@@ -433,9 +434,9 @@ describe("the card the option arrows put up", () => {
 
   it("walks back on the left arrow, and a browser tab gets it too, where the Tab pair is the browser's", async () => {
     await mountShell();
-    optionArrow("ArrowLeft");
+    spaceArrow("ArrowLeft");
     await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
-    releaseOption();
+    releaseSpaceArrow();
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_c"));
     tab();
     await settle();
@@ -467,10 +468,10 @@ describe("the card the option arrows put up", () => {
       tab();
       await settle();
       expect(useWorkspaceSwitcher.getState().open).toBe(false);
-      optionArrow("ArrowRight");
+      spaceArrow("ArrowRight");
       await waitFor(() => expect(overlay()).not.toBeNull());
       expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
-      releaseOption();
+      releaseSpaceArrow();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
     } finally {
       restore();

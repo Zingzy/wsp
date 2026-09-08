@@ -4,8 +4,8 @@
 // and the Tab pair means what the sidebar body it is read in means by it.
 import { describe, expect, it } from "vitest";
 import { compileResolvedKeybindingsConfig, DEFAULT_KEYBINDINGS, DEFAULT_RESOLVED_KEYBINDINGS, parseKeybindingShortcut, parseKeybindingWhenExpression } from "../src/keybindingDefaults.js";
-import { browserTabClaimsShortcut, eventHoldKeys, formatShortcutLabel, resolveShortcutCommand, shortcutLabelForCommand, type ShortcutEventLike } from "../src/keybindings.js";
 import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
+import { browserTabClaimsShortcut, eventHoldKeys, formatShortcutLabel, resolveShortcutCommand, shortcutLabelForCommand, type ShortcutEventLike } from "../src/keybindings.js";
 
 const MAC = "MacIntel";
 const LINUX = "Linux x86_64";
@@ -158,8 +158,8 @@ describe("workspace switch", () => {
     expect(resolve(tab({ shiftKey: true }), LINUX)).toBeNull();
     expect(resolve(digit(2, { metaKey: true }), MAC)).toBeNull();
     expect(resolve(digit(2, { ctrlKey: true }), LINUX)).toBeNull();
-    // The option arrows are left, since a browser tab keeps no arrow chord; they are the switch a tab still offers.
-    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC })).toBe("⌥Right");
+    // The mod arrows are left, since a browser tab keeps no arrow chord; they are the switch a tab still offers.
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC })).toBe("⌥⌘Right");
     expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.select.2", { platform: MAC })).toBeNull();
   });
 
@@ -187,7 +187,9 @@ describe("the switch chords per sidebar body", () => {
   const DESKTOP = { desktopShell: true };
   const SPACES = { desktopShell: true, spacesMode: true };
   const tab = (mods: Partial<ShortcutEventLike> = {}) => key("Tab", { ctrlKey: true, code: "Tab", ...mods });
-  const arrow = (name: "ArrowLeft" | "ArrowRight", mods: Partial<ShortcutEventLike> = {}) => key(name, { altKey: true, code: name, ...mods });
+  /** The switch between spaces as each platform's mod spells it: Command with Option on macOS, Control with Alt elsewhere. */
+  const arrow = (name: "ArrowLeft" | "ArrowRight", platform: string, mods: Partial<ShortcutEventLike> = {}) =>
+    key(name, { altKey: true, code: name, ...(platform === MAC ? { metaKey: true } : { ctrlKey: true }), ...mods });
 
   it("gives the Tab pair the workspaces in the list and the space's threads in Spaces", () => {
     expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
@@ -197,26 +199,29 @@ describe("the switch chords per sidebar body", () => {
     expect(resolve(tab(), LINUX, SPACES)).toBe("thread.next");
   });
 
-  it("moves between workspaces on the option arrows in both bodies, and in a browser tab, which keeps no arrow", () => {
+  it("moves between workspaces on the mod arrows in both bodies, and in a browser tab, which keeps no arrow", () => {
     const bodies: Record<string, boolean>[] = [DESKTOP, SPACES, {}, { spacesMode: true }];
     for (const context of bodies) {
-      expect(resolve(arrow("ArrowRight"), MAC, context)).toBe("workspace.next");
-      expect(resolve(arrow("ArrowLeft"), MAC, context)).toBe("workspace.previous");
-      expect(resolve(arrow("ArrowRight"), LINUX, context)).toBe("workspace.next");
+      expect(resolve(arrow("ArrowRight", MAC), MAC, context)).toBe("workspace.next");
+      expect(resolve(arrow("ArrowLeft", MAC), MAC, context)).toBe("workspace.previous");
+      expect(resolve(arrow("ArrowRight", LINUX), LINUX, context)).toBe("workspace.next");
+      expect(resolve(arrow("ArrowLeft", LINUX), LINUX, context)).toBe("workspace.previous");
     }
   });
 
   it("leaves the arrows to a focused terminal, as it leaves it the Tab pair", () => {
-    expect(resolve(arrow("ArrowRight"), MAC, { ...DESKTOP, terminalFocus: true })).toBeNull();
-    expect(resolve(arrow("ArrowLeft"), LINUX, { ...DESKTOP, terminalFocus: true })).toBeNull();
+    expect(resolve(arrow("ArrowRight", MAC), MAC, { ...DESKTOP, terminalFocus: true })).toBeNull();
+    expect(resolve(arrow("ArrowLeft", LINUX), LINUX, { ...DESKTOP, terminalFocus: true })).toBeNull();
     expect(resolve(tab(), MAC, { ...SPACES, terminalFocus: true })).toBeNull();
   });
 
-  it("takes no arrow that is not the option's own", () => {
+  it("takes no arrow short of the whole chord, so an Option arrow is still the text field's word move", () => {
     expect(resolve(key("ArrowRight", { code: "ArrowRight" }), MAC, DESKTOP)).toBeNull();
+    expect(resolve(key("ArrowRight", { code: "ArrowRight", altKey: true }), MAC, DESKTOP)).toBeNull();
+    expect(resolve(key("ArrowLeft", { code: "ArrowLeft", altKey: true }), MAC, DESKTOP)).toBeNull();
     expect(resolve(key("ArrowRight", { code: "ArrowRight", metaKey: true }), MAC, DESKTOP)).toBeNull();
-    expect(resolve(arrow("ArrowRight", { shiftKey: true }), MAC, DESKTOP)).toBeNull();
-    expect(resolve(arrow("ArrowRight", { ctrlKey: true }), MAC, DESKTOP)).toBeNull();
+    expect(resolve(arrow("ArrowRight", MAC, { shiftKey: true }), MAC, DESKTOP)).toBeNull();
+    expect(resolve(arrow("ArrowRight", MAC), LINUX, DESKTOP)).toBeNull();
   });
 
   it("labels each command as the body it is read in means it", () => {
@@ -225,23 +230,18 @@ describe("the switch chords per sidebar body", () => {
     expect(label("workspace.next", DESKTOP)).toBe("⌃Tab");
     expect(label("workspace.previous", DESKTOP)).toBe("⌃⇧Tab");
     expect(label("thread.next", DESKTOP)).toBeNull();
-    expect(label("workspace.next", SPACES)).toBe("⌥Right");
-    expect(label("workspace.previous", SPACES)).toBe("⌥Left");
+    expect(label("workspace.next", SPACES)).toBe("⌥⌘Right");
+    expect(label("workspace.previous", SPACES)).toBe("⌥⌘Left");
     expect(label("thread.next", SPACES)).toBe("⌃Tab");
     expect(label("thread.previous", SPACES)).toBe("⌃⇧Tab");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: LINUX, context: SPACES })).toBe("Ctrl+Alt+Right");
   });
 
-  it("reads the body off the stored mode where a caller names none", () => {
+  it("reads as the list where a caller names no body, and reads no storage of its own to find one", () => {
     window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
     try {
-      expect(resolve(tab(), MAC, DESKTOP)).toBe("thread.next");
-    } finally {
-      window.localStorage.removeItem(SIDEBAR_MODE_KEY);
-    }
-    expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "nonsense");
-    try {
       expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
+      expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.next", { platform: MAC, context: DESKTOP })).toBeNull();
     } finally {
       window.localStorage.removeItem(SIDEBAR_MODE_KEY);
     }

@@ -549,7 +549,8 @@ describe("a workspace row's name box", () => {
     const input = await nameBox();
     expect(input.value).toBe("api");
     expect(document.activeElement).toBe(input);
-    expect(input.closest("[data-space-header]")).toBe(header);
+    // The block swaps a button for a plain box while it holds the field, since an input may not sit inside a button.
+    expect(input.closest("[data-space-header]")).toBe(document.querySelector("[data-space-header]"));
     fireEvent.change(input, { target: { value: "the name he typed" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "the name he typed"));

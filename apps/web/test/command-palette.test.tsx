@@ -89,9 +89,11 @@ const mod = (key: string, mods: { shiftKey?: boolean; altKey?: boolean } = {}, t
   fireEvent.keyDown(target, { key, code: `Key${key.toUpperCase()}`, metaKey: true, ...mods });
 
 const ctrlTab = (mods: { shiftKey?: boolean } = {}) => fireEvent.keyDown(window, { key: "Tab", code: "Tab", ctrlKey: true, ...mods });
-const optionArrow = (name: "ArrowLeft" | "ArrowRight") => fireEvent.keyDown(window, { key: name, code: name, altKey: true });
-/** The option's own hold let go, which is what commits a walk the arrows opened. */
-const optionUp = () => fireEvent.keyUp(window, { key: "Alt" });
+/** The switch between spaces, as macOS spells it here; the platform is mocked to MacIntel for the file. */
+const spaceArrow = (name: "ArrowLeft" | "ArrowRight", target: Element | Window = window) =>
+  fireEvent.keyDown(target, { key: name, code: name, metaKey: true, altKey: true });
+/** One of that chord's hold keys let go, which is what commits a walk the arrows opened. */
+const spaceArrowUp = () => fireEvent.keyUp(window, { key: "Alt" });
 /** The hold let go, which is what commits the switch; the walk itself only moves the overlay's highlight. */
 const ctrlUp = () => fireEvent.keyUp(window, { key: "Control" });
 const digit = (n: number) => fireEvent.keyDown(window, { key: String(n), code: `Digit${n}`, metaKey: true });
@@ -305,10 +307,10 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).toBeNull());
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
-    // A browser tab keeps Tab and the digits for its own tabs; the option arrows it leaves to the page, so they
+    // A browser tab keeps Tab and the digits for its own tabs; the mod arrows it leaves to the page, so they
     // are the switch it still shows.
-    expect(chordOn("Next workspace")).toBe("⌥Right");
-    expect(chordOn("Previous workspace")).toBe("⌥Left");
+    expect(chordOn("Next workspace")).toBe("⌥⌘Right");
+    expect(chordOn("Previous workspace")).toBe("⌥⌘Left");
     expect(chordOn("api")).toBeNull();
   });
 
@@ -484,18 +486,18 @@ describe("default shortcuts", () => {
     expect(useStore.getState().selectedId).toBe("ws_a");
   });
 
-  it("the option arrows walk the workspaces in either body, and a browser tab gets them too", async () => {
+  it("the mod arrows walk the workspaces in either body, and a browser tab gets them too", async () => {
     await mountShell();
     expect(useStore.getState().selectedId).toBe("ws_a");
-    optionArrow("ArrowRight");
-    optionUp();
+    spaceArrow("ArrowRight");
+    spaceArrowUp();
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
-    optionArrow("ArrowLeft");
-    optionUp();
+    spaceArrow("ArrowLeft");
+    spaceArrowUp();
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
     window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
-    optionArrow("ArrowRight");
-    optionUp();
+    spaceArrow("ArrowRight");
+    spaceArrowUp();
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
   });
 
@@ -578,7 +580,7 @@ describe("default shortcuts", () => {
       await waitFor(() => expect(palette()).not.toBeNull());
       expect(chordOn("Next thread")).toBe("⌃Tab");
       expect(chordOn("Previous thread")).toBe("⌃⇧Tab");
-      expect(chordOn("Next workspace")).toBe("⌥Right");
+      expect(chordOn("Next workspace")).toBe("⌥⌘Right");
     } finally {
       restore();
     }
@@ -665,21 +667,23 @@ describe("typing contexts", () => {
     await waitFor(() => expect(sidebarOpen()).toBe("false"));
   });
 
-  it("leaves an option arrow to a focused editable, where it is the platform's own word jump", async () => {
+  it("switches twice in a row from inside a text field, where a bare option arrow is still that field's word move", async () => {
     await mountShell();
-    const box = document.createElement("div");
-    box.setAttribute("contenteditable", "true");
+    const box = document.createElement("textarea");
     document.body.appendChild(box);
     box.focus();
     try {
-      fireEvent.keyDown(box, { key: "ArrowRight", code: "ArrowRight", altKey: true });
-      optionUp();
+      // The composer takes the caret after every switch, so the second press of the chord is the one that proves it.
+      spaceArrow("ArrowRight", box);
+      spaceArrowUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      spaceArrow("ArrowRight", box);
+      spaceArrowUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+      fireEvent.keyDown(box, { key: "ArrowLeft", code: "ArrowLeft", altKey: true });
+      fireEvent.keyUp(window, { key: "Alt" });
       await settle();
       expect(useStore.getState().selectedId).toBe("ws_a");
-      // The same chord outside one still switches, so the walk is the editable's alone and not gone.
-      optionArrow("ArrowRight");
-      optionUp();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
     } finally {
       box.remove();
     }

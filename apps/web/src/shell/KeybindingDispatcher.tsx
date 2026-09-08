@@ -15,14 +15,19 @@ import { desktopBridge } from "../lib/desktopShell.js";
 import { isPreviewFocused } from "../lib/previewFocus.js";
 import { isTerminalFocused } from "../lib/terminalFocus.js";
 import { useSelectedWorkspaceId } from "../protocol/store.js";
+import { useSidebarMode } from "../sidebar/sidebarMode.js";
 import { cancelWorkspaceSwitch, commitWorkspaceSwitch, runShellCommand, type ShellCommandTarget } from "./shellCommands.js";
 import { releasesSwitchHold, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
 
 export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: { keybindings?: ResolvedKeybindingsConfig }) {
   const { toggleSidebar } = useSidebar();
   const workspaceId = useSelectedWorkspaceId();
+  const [sidebarMode] = useSidebarMode();
   const target = useRef<ShellCommandTarget>({ workspaceId, toggleSidebar });
   target.current = { workspaceId, toggleSidebar };
+  // Which body a chord is read in, held per render rather than looked up per keydown; the listeners are bound once.
+  const spacesMode = useRef(sidebarMode === "spaces");
+  spacesMode.current = sidebarMode === "spaces";
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -35,7 +40,7 @@ export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDING
         return;
       }
       const command = resolveShortcutCommand(event, keybindings, {
-        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
+        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused(), spacesMode: spacesMode.current },
       });
       if (command === null) return;
       // An unchorded key inside an input is the user's text, whatever a rule says.
@@ -85,7 +90,7 @@ export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDING
     window.addEventListener("focusout", scheduleReport);
     const stopChords = onShellChord(chord => {
       const command = resolveShortcutCommand(chord, keybindings, {
-        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
+        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused(), spacesMode: spacesMode.current },
       });
       if (command !== null) runShellCommand(command, target.current, eventHoldKeys(chord));
     });

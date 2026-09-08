@@ -345,8 +345,10 @@ export function WorkspaceSidebar() {
           outOfMemory={outOfMemory[project.id]}
           nowMs={nowMs}
           actions={actions}
+          active={selectedId === project.id && selectedThreadId === null}
           renaming={naming}
           saving={naming && renaming?.saving === true}
+          onSelect={() => select(project.id)}
           onRename={name => void sendName(workspaceRowId(project.id), () => renameWorkspace({ workspaceId: project.id, name }))}
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actions, "rename"))}

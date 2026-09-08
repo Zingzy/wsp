@@ -98,14 +98,19 @@ function orderedWorkspaceIds(): string[] {
   return sidebarProjects().map(project => project.id);
 }
 
+/** A thread row a walk can land on: one the runtime stamped a thread id on, which is the one field the walk's
+    list, its compare against what is open and its select all read. */
+export type WalkableThread = SidebarThreadSnapshot & { readonly threadId: string };
+
 /** The threads of the workspace Spaces has on screen that a walk can land on, in the order the sidebar draws
     them. The chord and the palette's rows read this one list, so a row that says it is disabled and a chord that
     does nothing agree. A row the runtime stamped no thread id on pins the workspace alone, so a walk that landed
     on it could never step off it. */
-export function threadWalk(projects: ReadonlyArray<SidebarProjectSnapshot>, selectedId: string | null): SidebarThreadSnapshot[] {
+export function threadWalk(projects: ReadonlyArray<SidebarProjectSnapshot>, selectedId: string | null): WalkableThread[] {
   const spaceId = spaceWorkspaceId(projects.map(project => project.id), selectedId);
   const project = projects.find(candidate => candidate.id === spaceId);
-  return project === undefined ? [] : sidebarThreadOrder(project.threads).filter(thread => thread.threadId !== null);
+  if (project === undefined) return [];
+  return sidebarThreadOrder(project.threads).filter((thread): thread is WalkableThread => thread.threadId !== null);
 }
 
 /** One step along an order that wraps at both ends, or null where there is nowhere else to go, which is what
@@ -135,8 +140,8 @@ export function goToAdjacentWorkspace(step: 1 | -1): void {
  * else to go, as the palette's disabled row says. */
 export function cycleThreadInSpace(step: 1 | -1): void {
   const threads = threadWalk(sidebarProjects(), useStore.getState().selectedId);
-  const next = stepInOrder(threads.map(thread => thread.id), useStore.getState().selectedThreadId, step);
-  const thread = threads.find(candidate => candidate.id === next);
+  const next = stepInOrder(threads.map(thread => thread.threadId), useStore.getState().selectedThreadId, step);
+  const thread = threads.find(candidate => candidate.threadId === next);
   if (thread !== undefined) goToWorkspace(thread.workspaceId, thread.threadId);
 }
 

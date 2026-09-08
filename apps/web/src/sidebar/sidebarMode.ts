@@ -4,7 +4,7 @@
 // pick is this computer's, kept on the road the sidebar's width is kept on,
 // so the palette, the section menu and the sidebar itself read one value and
 // every surface follows a toggle at once.
-import { getLocalStorageItem, useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
+import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 
 export type SidebarMode = "list" | "spaces";
 
@@ -29,15 +29,6 @@ export function useSidebarMode(): [SidebarMode, (mode: SidebarMode) => void] {
   return useLocalStorage(SIDEBAR_MODE_KEY, DEFAULT_SIDEBAR_MODE, sidebarModeCodec);
 }
 
-/** The mode for the readers that are not components: the shortcut context reads it on every chord, and a value
- * nobody here wrote reads as the default rather than throwing under a keystroke. */
-export function readSidebarMode(): SidebarMode {
-  try {
-    return getLocalStorageItem(SIDEBAR_MODE_KEY, sidebarModeCodec) ?? DEFAULT_SIDEBAR_MODE;
-  } catch {
-    return DEFAULT_SIDEBAR_MODE;
-  }
-}
 
 /** The workspace Spaces has on screen: the selected one, or the first in the sidebar's order while what is
  * selected is not a workspace of it. The body and the chords that walk inside it read this one rule. */

@@ -1039,23 +1039,36 @@ describe("Spaces mode", () => {
     expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("thread:s4");
   });
 
-  it("Enter on the header opens a thread on that workspace, and does nothing where that is refused", async () => {
+  it("is the rows' own button, so what activates a row activates it, and it opens the workspace as its row does in the list", async () => {
     const asked: string[] = [];
     const off = onNewThreadRequest(request => asked.push(request.workspaceId));
     try {
-      await mountSpaces(fakeApi(THREE, statuses()));
-      spaceHeader()!.focus();
-      fireEvent.keyDown(spaceHeader()!, { key: "Enter" });
-      await waitFor(() => expect(asked).toEqual(["ws_a"]));
-      // A machine that is gone takes no thread, so the header's Enter is the same refusal its menu row carries.
-      act(() => useStore.getState().select("ws_c"));
-      await waitFor(() => expect(within(spaceHeader()!).getByText("old")).toBeDefined());
-      fireEvent.keyDown(spaceHeader()!, { key: "Enter" });
-      await act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
-      expect(asked).toEqual(["ws_a"]);
+      await mountSpaces(fakeApi(THREE, statuses(), [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) })]));
+      // A real button is what makes Space and Enter both activate it, which jsdom cannot deliver for itself.
+      expect(spaceHeader()!.tagName).toBe("BUTTON");
+      expect(spaceHeader()!.getAttribute("type")).toBe("button");
+      expect(spaceHeader()!.tabIndex).toBe(0);
+      act(() => useStore.getState().select("ws_a", "s1"));
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("s1"));
+      expect(spaceHeader()!.getAttribute("data-active")).toBe("false");
+      fireEvent.click(spaceHeader()!);
+      // The list's own row does exactly this on a click, and the same key road reaches both.
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBeNull());
+      expect(useStore.getState().selectedId).toBe("ws_a");
+      await waitFor(() => expect(spaceHeader()!.getAttribute("data-active")).toBe("true"));
+      // Opening a thread stays on its own roads: the menu, the palette and the new-thread chord.
+      expect(asked).toEqual([]);
     } finally {
       off();
     }
+  });
+
+  it("hands the name box a plain box to sit in, since an input may not sit inside a button", async () => {
+    const api = { ...fakeApi(THREE, statuses()), renameWorkspace: vi.fn(async (id: string, name: string) => ({ ...view(id, name) })) };
+    await mountSpaces(api);
+    act(() => requestRenameWorkspace("ws_a"));
+    await screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename });
+    expect(spaceHeader()!.tagName).toBe("DIV");
   });
 
   it("the header grows the sidebar's one name box: the palette's ask and a double-click both open it in the name's slot", async () => {

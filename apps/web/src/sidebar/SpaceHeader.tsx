@@ -6,16 +6,18 @@
 // sidebar's one name box in the same slot, as it does on a row, so the mode
 // keeps one editor and one grammar. The words come from workspaceRows.ts; the
 // block carries the workspace's menu, since in this mode no row of its own is
-// on screen to right-click. It carries a row's keyboard reach with it: the id
-// every row wears, so the arrow walk stops here, Enter for the action the
-// row's own glyph carries, and the menu key, which a browser sends as a
+// on screen to right-click. It is a row in every other way too: the same
+// button the rows are drawn with, wearing the id the walk stops on, so Space
+// and Enter both open the workspace here as they do on its row in the list,
+// and the menu key reaches the actions, since a browser sends that key as a
 // context menu on whatever has focus.
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { MouseEvent } from "react";
 import type { MemoryReading } from "@wsp/protocol";
-import { openContextMenu, runAction } from "../actions/contextMenu.js";
+import { openContextMenu } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
-import { actionById, type ResolvedAction } from "../actions/registry.js";
+import type { ResolvedAction } from "../actions/registry.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
+import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, workspaceRowId } from "./rowGrammar.js";
@@ -27,8 +29,10 @@ export function SpaceHeader({
   outOfMemory,
   nowMs,
   actions,
+  active,
   renaming,
   saving,
+  onSelect,
   onRename,
   onRenameCancel,
   onRenameOpen,
@@ -39,29 +43,32 @@ export function SpaceHeader({
   outOfMemory: MemoryReading | undefined;
   nowMs: number;
   actions: ReadonlyArray<ResolvedAction>;
+  /** The workspace itself is what is open, not one of its threads, as it is for a row in the list. */
+  active: boolean;
   /** The name is being typed on this header: the name slot holds the box instead of the text. */
   renaming: boolean;
   /** That name is on its way to the runtime: the field stays exactly as it is and takes no second Enter. */
   saving: boolean;
+  onSelect: () => void;
   onRename: (name: string) => void;
   onRenameCancel: () => void;
   /** Opens the box here, as the menu's Rename does; absent where the rename is refused, so the name is text alone. */
   onRenameOpen?: (() => void) | undefined;
 }) {
-  const newThread = actionById(actions, "new-thread");
-  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.key !== "Enter" || newThread.refusal !== null) return;
-    event.preventDefault();
-    void runAction(newThread);
-  };
   return (
-    <div
+    <SidebarMenuButton
+      size="lg"
+      // An input may not sit inside a button, so a header being renamed is a plain box with the same grammar.
+      render={renaming ? <div /> : <button type="button" />}
+      isActive={active}
       data-space-header
       data-sidebar-row
       data-row-id={workspaceRowId(project.id)}
-      className="mb-1 flex items-start gap-[var(--sidebar-control-gap)] border-b border-sidebar-border/60 px-2 pt-1.5 pb-2 text-sm outline-hidden ring-ring focus-visible:ring-2"
-      // A header holding the box is the box's own stop and takes no menu over it, as a row being named does not.
-      {...(renaming ? {} : { tabIndex: 0, onKeyDown, onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions) })}
+      // The bottom two corners stay square so the hairline under the block runs the sidebar's width; the top two
+      // carry the row's radius, which is the shape the focus ring takes.
+      className="mb-1 h-auto items-start gap-[var(--sidebar-control-gap)] rounded-t-lg rounded-b-none border-b border-sidebar-border/60 px-2 pt-1.5 pb-2 text-sm"
+      // A header holding the box takes no menu over it, as a row being named does not.
+      {...(renaming ? {} : { onClick: onSelect, onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions) })}
     >
       <span aria-hidden className={ROW_LEAD_CLASS}>
         <span className={cn("size-2 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />
@@ -92,6 +99,6 @@ export function SpaceHeader({
           </span>
         ))}
       </span>
-    </div>
+    </SidebarMenuButton>
   );
 }
