@@ -6,13 +6,14 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
-import { onNewThreadRequest, requestProjectTrip } from "../src/shell/shellRequests.js";
+import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
@@ -989,5 +990,51 @@ describe("Spaces mode", () => {
     expect(useStore.getState().selectedId).toBe("ws_b");
     expect(screen.getByText("bump the lockfile")).toBeDefined();
     expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
+  });
+
+  it("before the first status the header carries no machine line: nothing draws a bare OS word", async () => {
+    await mountSpaces(fakeApi([API], []));
+    await waitFor(() => expect(headerLines()).toEqual(["$0.00 today"]));
+  });
+
+  it("the two lines the row gives a whole line to lead the header's, and the rest stay under them", async () => {
+    await mountSpaces(fakeApi(THREE, statuses()));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(15.5 * 60_000) }), daemonNote: DAEMON_UPDATING } }));
+    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { idleAt: iso(15.5 * 60_000) }) }));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+  });
+
+  it("a machine that stopped answering with memory near full says so at the top of its header", async () => {
+    const GiB = 1024 ** 3;
+    resetLive();
+    await mountSpaces(fakeApi([API], [status(API, { reach: { state: "unreachable" } })]));
+    act(() => {
+      getLive("ws_a").feedStatus("live");
+      getLive("ws_a").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
+      getLive("ws_a").feedStatus("connecting");
+    });
+    await waitFor(() => expect(headerLines()[0]).toBe("out of memory, 3.6 of 3.9 GB"));
+    expect(headerLines()).toContain("2 vCPU · 4 GB · Linux");
+    act(() => getLive("ws_a").feedStatus("live"));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+  });
+
+  it("the header grows the sidebar's one name box: the palette's ask and a double-click both open it in the name's slot", async () => {
+    const api = { ...fakeApi(THREE, statuses()), renameWorkspace: vi.fn(async (id: string, name: string) => ({ ...view(id, name) })) };
+    await mountSpaces(api);
+    act(() => requestRenameWorkspace("ws_a"));
+    const asked = (await screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename })) as HTMLInputElement;
+    expect(asked.value).toBe("api");
+    expect(asked.closest("[data-space-header]")).not.toBeNull();
+    fireEvent.keyDown(asked, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    fireEvent.doubleClick(document.querySelector("[data-space-name]")!);
+    const typed = (await screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename })) as HTMLInputElement;
+    fireEvent.change(typed, { target: { value: "renamed in spaces" } });
+    fireEvent.keyDown(typed, { key: "Enter" });
+    await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "renamed in spaces"));
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
   });
 });

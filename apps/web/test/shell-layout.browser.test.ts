@@ -19,8 +19,8 @@
 // state word in its slot at the right edge only off running, the meta line
 // in one order cut from the right, no import or export glyph, the thread
 // title up to a fixed time column, and the Spaces body draws one workspace
-// under its header with a dot per workspace at the sidebar's bottom. Vite serves test/shell to Playwright's
-// browser, so like the glyph test it runs
+// under its header with a dot per workspace at the sidebar's bottom. Vite
+// serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
 import { existsSync, mkdirSync } from "node:fs";
@@ -640,6 +640,12 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today"]);
         await page!.locator("[data-space-dot][aria-label=api]").click();
         await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "api");
+        // The pointer leaves the row and its hover fades out before the shot, so what is saved is the rest state:
+        // no dot carries a fill of its own.
+        await page!.mouse.move(600, 700);
+        await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-space-dot]")!).backgroundColor === "rgba(0, 0, 0, 0)");
+        const atRest = await page!.locator("[data-space-dot]").evaluateAll(els => els.map(el => getComputedStyle(el).backgroundColor));
+        expect(atRest).toEqual(["rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)"]);
         const path = join(SHOTS_DIR, `sidebar-spaces-${width}-${theme}.png`);
         await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
         console.info(`sidebar spaces screenshot: ${path}`);

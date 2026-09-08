@@ -3,13 +3,13 @@
 // under each, over the adapter's SidebarProjectSnapshot. The search row, the
 // Workspaces section row that shuts them all and opens the new-workspace
 // dialog, the settled shelf, the Spaces body with one workspace's rows under
-// its header and a dot per workspace at the bottom, keyboard traversal, the rebuild of a zombie or
-// gone machine, the forget of a gone one and the project trips' dialogs live
-// here; the rows are WorkspaceRow and ThreadRow beside this file, and the
-// logic comes from the copied t3code files. Every action a row carries, as a
-// button or in its right-click menu, comes from the workspace and thread
-// registries. The surface itself is the shell's sidebar-glass: nothing here
-// paints a background.
+// its header and a dot per workspace at the bottom, keyboard traversal, the
+// rebuild of a zombie or gone machine, the forget of a gone one and the
+// project trips' dialogs live here; the rows are WorkspaceRow and ThreadRow
+// beside this file, and the logic comes from the copied t3code files. Every
+// action a row carries, as a button or in its right-click menu, comes from
+// the workspace and thread registries. The surface itself is the shell's
+// sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
@@ -331,13 +331,26 @@ export function WorkspaceSidebar() {
     );
   };
 
-  /** The one workspace the Spaces body holds: its header block, then its rows in the list's own grammar. */
+  /** The one workspace the Spaces body holds: its header block, then its rows in the list's own grammar. The header
+   * takes the same name box the row has, keyed the same way, so a rename asked for anywhere reaches one editor. */
   const spaceItem = (visibleProject: VisibleProject) => {
     const { project } = visibleProject;
     const { actions, newThreadAction, machine } = blockOf(project);
+    const naming = renaming?.rowId === workspaceRowId(project.id);
     return (
       <SidebarMenuItem key={project.id}>
-        <SpaceHeader project={project} cost={costs[project.id] ?? null} nowMs={nowMs} actions={actions} />
+        <SpaceHeader
+          project={project}
+          cost={costs[project.id] ?? null}
+          outOfMemory={outOfMemory[project.id]}
+          nowMs={nowMs}
+          actions={actions}
+          renaming={naming}
+          saving={naming && renaming?.saving === true}
+          onRename={name => void sendName(workspaceRowId(project.id), () => renameWorkspace({ workspaceId: project.id, name }))}
+          onRenameCancel={() => setRenaming(null)}
+          onRenameOpen={openerOf(actionById(actions, "rename"))}
+        />
         {threadsOf(visibleProject, newThreadAction, machine, false)}
       </SidebarMenuItem>
     );
@@ -470,7 +483,7 @@ export function WorkspaceSidebar() {
             {toast}
           </div>
         ) : null}
-        {mode === "spaces" && visible.length > 0 ? <SpaceDots projects={projects} currentId={currentSpace?.project.id ?? null} onSelect={select} /> : null}
+        {mode === "spaces" && visible.length > 0 ? <SpaceDots projects={visible.map(v => v.project)} currentId={currentSpace?.project.id ?? null} onSelect={select} /> : null}
       </SidebarChromeFooter>
       {dialog ? (
         <NewWorkspaceDialog

@@ -45,7 +45,7 @@ export interface WorkspaceMetaInput {
  * to the machine's daemon, or a drop with memory near full, takes the whole line while it lasts: it is the one thing
  * on the row a person may be waiting on. */
 export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
-  const note = project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
+  const note = daemonNote(project);
   if (note !== undefined) return note;
   if (outOfMemory !== undefined) return outOfMemoryRowLine(outOfMemory);
   return [
@@ -58,6 +58,12 @@ export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: Workspa
     .join(" · ");
 }
 
+/** What the runtime is doing to this machine's daemon, or why its last attempt failed; the status leads where one
+ * has arrived, and nothing is being done when it is absent. */
+export function daemonNote(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string | undefined {
+  return project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
+}
+
 /** What a workspace has cost since the meter's midnight, in cents; the sidebar row and the switcher card read the one rule. */
 export function accruedTodayLabel(accruedUsd: number | null): string | null {
   return accruedUsd === null ? null : `$${accruedUsd.toFixed(2)} today`;
@@ -66,19 +72,22 @@ export function accruedTodayLabel(accruedUsd: number | null): string | null {
 /** The awake rate as every sidebar surface prints it, to the tenth of a cent; null before the meter's first tick. */
 export const rateLabel = (rateUsdPerHour: number | null): string | null => (rateUsdPerHour === null ? null : `$${rateUsdPerHour.toFixed(3)}/hr`);
 
-/** The Spaces header's lines under the name, in the ticket's order: what the machine is, what it costs, when it
- * naps. The machine line names the size the status carries and the OS word; the cost line leads with the same
- * honest zero the row's line does and adds the rate only while the machine bills; the nap line is there only when
- * the runtime scheduled one, so a header never says "active" at a person. */
-export function spaceHeaderLines({ project, cost, nowMs }: Omit<WorkspaceMetaInput, "outOfMemory">): string[] {
+/** The Spaces header's lines under the name. The two the row's meta line gives a whole line to lead, since the one
+ * workspace on screen is where a person waits on them: what the runtime is doing to the daemon, then a drop with
+ * memory near full. Then what the machine is, what it costs, and when it naps. A line nothing is known for is left
+ * out rather than drawn half: no size yet means no machine line, as no nap scheduled means no nap line. The cost
+ * line leads with the same honest zero the row's does and carries the rate only while the machine bills. */
+export function spaceHeaderLines({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
   const nap = idleCountdownLabel(project.status, nowMs);
   return [
-    [project.status === null ? null : fmtSize(project.status.size), MACHINE_OS_WORD].filter((part): part is string => part !== null).join(" · "),
+    daemonNote(project) ?? null,
+    outOfMemory === undefined ? null : outOfMemoryRowLine(outOfMemory),
+    project.status === null ? null : `${fmtSize(project.status.size)} · ${MACHINE_OS_WORD}`,
     [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]
       .filter((part): part is string => part !== null)
       .join(" · "),
-    ...(nap === null || nap === NO_NAP_SCHEDULED ? [] : [nap]),
-  ];
+    nap === NO_NAP_SCHEDULED ? null : nap,
+  ].filter((line): line is string => line !== null);
 }
 
 /** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. */
