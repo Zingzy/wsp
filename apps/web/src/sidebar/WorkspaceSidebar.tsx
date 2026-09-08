@@ -10,7 +10,7 @@
 // registries. The surface itself is the shell's sidebar-glass: nothing here
 // paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -146,7 +146,15 @@ export function WorkspaceSidebar() {
   openDialogRef.current = openDialog;
   useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current()), []);
   useEffect(() => onForgetWorkspaceRequest(({ workspaceId }) => setForgetting(workspaceId)), []);
-  useEffect(() => onRenameWorkspaceRequest(({ workspaceId }) => setRenaming({ rowId: workspaceRowId(workspaceId), saving: false })), []);
+  useEffect(
+    () =>
+      onRenameWorkspaceRequest(({ workspaceId }) => {
+        // The row is the only editor, so a box asked for from the palette opens a section that was shut.
+        setAllCollapsed(false);
+        setRenaming({ rowId: workspaceRowId(workspaceId), saving: false });
+      }),
+    [],
+  );
   useEffect(() => onProjectTripRequest(request => setTrip({ ...request, key: Date.now() })), []);
 
   const create = async (name: string, start: WorkspaceStart, size?: WorkspaceSize): Promise<void> => {
@@ -321,8 +329,13 @@ export function WorkspaceSidebar() {
                     const newThreadAction = actionById(actionsOf, "new-thread");
                     // The machine every thread of this workspace runs on: what a rename has to reach.
                     const machine = { state: workspaceState(workspace), ...(workspace.reason !== null ? { goneWords: workspace.reason } : {}) };
+                    const naming = renaming?.rowId === workspaceRowId(project.id);
                     return (
-                      <SidebarMenuItem key={project.id} onContextMenu={event => void openContextMenu(event, actionsOf, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") })}>
+                      <SidebarMenuItem
+                        key={project.id}
+                        // A row holding the box takes no menu over it, as a thread row being named does not.
+                        {...(naming ? {} : { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actionsOf, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") }) })}
+                      >
                         <WorkspaceRow
                           project={project}
                           cost={costs[project.id] ?? null}
@@ -332,8 +345,8 @@ export function WorkspaceSidebar() {
                           active={selectedId === project.id && selectedThreadId === null}
                           collapsed={isCollapsed}
                           rebuildAsked={rebuildAsked}
-                          renaming={renaming?.rowId === workspaceRowId(project.id)}
-                          saving={renaming?.rowId === workspaceRowId(project.id) && renaming.saving}
+                          renaming={naming}
+                          saving={naming && renaming?.saving === true}
                           onSelect={() => select(project.id)}
                           onToggleCollapsed={() => toggleCollapsed(project.id)}
                           onRename={name => void sendName(workspaceRowId(project.id), () => renameWorkspace({ workspaceId: project.id, name }))}

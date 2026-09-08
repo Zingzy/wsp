@@ -379,6 +379,13 @@ export const useStore = create<State>((set, get) => {
     },
     applyEvent(e) {
       switch (e.type) {
+        case "workspace.renamed":
+          // The record alone changed: the row and its status take the name, and nothing about the machine moves.
+          set(s => ({
+            workspaces: s.workspaces.map(w => (w.id === e.workspaceId ? { ...w, name: e.name } : w)),
+            statuses: s.statuses[e.workspaceId] ? { ...s.statuses, [e.workspaceId]: { ...s.statuses[e.workspaceId]!, name: e.name } } : s.statuses,
+          }));
+          return;
         case "workspace.deleted":
           set(s => {
             const { [e.workspaceId]: _s, ...statuses } = s.statuses;

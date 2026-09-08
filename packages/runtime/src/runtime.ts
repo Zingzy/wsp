@@ -752,11 +752,15 @@ export interface Runtime {
     updateImage(id: string): Promise<WorkspaceView>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
     rebuild(id: string): Promise<WorkspaceView>;
-    /** Names the workspace, under the rules a fork's name takes: unique on this host, so a name another workspace
-     * holds, one a fork is landing under and a blank one are refused (kind conflict) naming the holder. A name the
-     * workspace already carries answers with the record untouched. Threads on the machine are addressed by id and
-     * run on through it; the machine's own metadata keeps the name it was forked under, since the provider takes
-     * metadata at create and its API offers no update, and the next fork or rebuild stamps the new one. */
+    /** Names the workspace, under the rules a fork's name takes: the space around the name is dropped, and a name
+     * another workspace holds, one a fork is landing under and a blank one are refused (kind conflict) naming the
+     * holder. A name the workspace already carries answers with the record untouched. The record alone changes, so
+     * this goes out as workspace.renamed and never as workspace.created, which the awake meter and the auto-nap
+     * window read as the machine coming up. Threads on the machine are addressed by id and run on through it. The
+     * machine's own metadata keeps the name it was forked under, since the provider takes metadata at create and
+     * its API offers no update; the next fork or rebuild stamps the new one, and the name is kept here beside the
+     * records so a sweep that records this machine after the store lost its workspace document restores it under
+     * the name a person gave rather than the fork's. */
     rename(id: string, name: string): Promise<WorkspaceView>;
     /** Snapshots the running machine as a project golden: the golden it stands on plus the project as it is now, so a
      * fork of the snapshot starts a task with the project in place. Refused in one sentence when the workspace is not
@@ -913,6 +917,10 @@ const recipeKey = (name: string, version: number): string => `${name}@v${version
 const TRANSCRIPTS = "transcripts";
 /** One document per workspace: the turns sessions.list serves, read back at boot so the rows outlive the process. */
 const SESSIONS = "sessions";
+/** The name a person gave a workspace, keyed by its id, which its machines carry as a label across every rebuild:
+ * the sweep reads it when it records a machine whose workspace document this store lost, so a restored record keeps
+ * that name rather than the one the fork stamped, which the provider takes at create and never updates. */
+const WORKSPACE_NAMES = "workspace-names";
 
 /** What the timeline shows as the last row of a turn the runtime ended, not the harness. */
 const PAUSED_REASON = "machine paused while the agent was working";
@@ -945,6 +953,12 @@ const SESSION_INDEX_CAP = 200;
 /** A turn boundary waits this long for more before the transcript is written; measured at one put per
  * event, 5000 events cost 4 s of memory-store clones and 6.6 s of file rewrites after the last turn. */
 export const TRANSCRIPT_FLUSH_MS = 250;
+
+/** One workspace's name as a person set it here, kept beside the workspace records so a restore can read it. */
+interface NamedWorkspace {
+  workspaceId: string;
+  name: string;
+}
 
 interface TranscriptRecord {
   workspaceId: string;
@@ -1828,6 +1842,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     indexFlushes.delete(id);
     await store.delete(WORKSPACES, id);
     await store.delete(TRANSCRIPTS, id);
+    await store.delete(WORKSPACE_NAMES, id);
     await store.delete(SESSIONS, id);
     await store.delete(CREATES, `workspace/${id}`);
     await store.deleteBlob(VAULTS, id);
@@ -2239,21 +2254,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return notices.length > 0 ? { ...v, notice: notices.join(" ") } : v;
   };
 
+  /** The name a workspace takes from what was typed: the space around it is no part of a name. The fork and the
+   * rename both read it here, so a name is never stored with spaces a person would have to type back for `--in`. */
+  const nameGiven = (name: string): string => name.trim();
   /** Names whose fork is between its check and its first machine: held here so two forks asked for together cannot both land. */
   const forking = new Set<string>();
   /** Why a fork of this name is refused, or nothing when the name is free: one entry holds it, whatever it is doing
    * (a delete in flight says so), or a fork of it is under way. A name never names two workspaces, and a fork and a
    * delete of one name never interleave. */
   const nameRefusal = (name: string): string | undefined => {
-    if (name.trim() === "") return BLANK_NAME_REFUSAL;
+    if (nameGiven(name) === "") return BLANK_NAME_REFUSAL;
     const entry = [...live.values()].find(e => e.record.name === name);
     if (entry !== undefined) return entry.deleting ? nameDeletingRefusal(name) : nameTakenRefusal(name);
     return forking.has(name) ? nameTakenRefusal(name) : undefined;
   };
 
   const workspaces: Runtime["workspaces"] = {
-    async create(o) {
+    async create(opts) {
       await ready();
+      const o = { ...opts, name: nameGiven(opts.name) };
       const refusal = nameRefusal(o.name);
       if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
       forking.add(o.name);
@@ -2408,16 +2427,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return view(entry.record);
     },
 
-    async rename(id, name) {
+    async rename(id, typed) {
       const entry = await entryOf(id);
+      const name = nameGiven(typed);
       if (entry.record.name === name) return view(entry.record);
       const refusal = nameRefusal(name);
       if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
       entry.record.name = name;
       await persist(entry.record);
-      const named = view(entry.record);
-      bus.emit({ type: "workspace.created", workspace: named });
-      return named;
+      await store.put(WORKSPACE_NAMES, id, { workspaceId: id, name } satisfies NamedWorkspace);
+      bus.emit({ type: "workspace.renamed", workspaceId: id, name });
+      return view(entry.record);
     },
 
     async snapshot(id) {
@@ -3938,7 +3958,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const stamped = row.labels[WORKSPACE_LABEL];
       if (stamped !== undefined && live.has(stamped)) continue;
       const id = stamped ?? `ws_${randomBytes(4).toString("hex")}`;
-      const named = row.labels[NAME_LABEL];
+      // The name a person typed here outranks the one the fork stamped: the label is what the machine was forked
+      // under, and no provider road updates it.
+      const kept = stamped === undefined ? undefined : ((await store.get(WORKSPACE_NAMES, stamped)) as NamedWorkspace | undefined)?.name;
+      const named = kept ?? row.labels[NAME_LABEL];
       const bornAt = row.labels[CREATED_AT_LABEL];
       const record: WorkspaceRecord = {
         id,

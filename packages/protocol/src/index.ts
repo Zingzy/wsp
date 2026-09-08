@@ -541,8 +541,9 @@ export type SessionEvent = z.infer<typeof SessionEvent>;
 
 // --- workspace / port / inbox events ----------------------------------------
 
-/** A workspace record as the runtime holds it now, for a client to put in place of the row it has: a create that
- * landed, a record the sweep restored from the provider's listing, a name a person typed. */
+/** A machine this runtime now has: a create that landed, or a record the sweep restored from the provider's
+ * listing. Readers that meter the machine (the awake stretch, the auto-nap window) take it as the machine coming
+ * up, so a change to a record a client already holds is never this event. */
 export const WorkspaceCreatedEvent = z.object({ type: z.literal("workspace.created"), workspace: WorkspaceView });
 /** The awaited steps of a create in the order the runtime reaches them; `failed` ends a create that threw. */
 export const WorkspaceCreateStage = z.enum(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
@@ -577,6 +578,9 @@ export const WorkspaceUpgradedEvent = z.object({
   workspaceId: z.string(),
   machineId: z.string(),
 });
+/** A person named the workspace: its record alone changed, and every client puts the name on the row it holds. The
+ * machine was not touched, so nothing that meters it reads this. */
+export const WorkspaceRenamedEvent = z.object({ type: z.literal("workspace.renamed"), workspaceId: z.string(), name: z.string() });
 export const WorkspaceDeletedEvent = z.object({ type: z.literal("workspace.deleted"), workspaceId: z.string() });
 /** The provider stopped knowing the machine: the workspace's phase is gone from here until a rebuild or a delete.
  * Sessions on it ended, the rate is 0, the idle window is dropped; reason carries the provider's words. */
@@ -1191,6 +1195,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceNappedEvent.extend(sequenced),
   WorkspaceWokenEvent.extend(sequenced),
   WorkspaceUpgradedEvent.extend(sequenced),
+  WorkspaceRenamedEvent.extend(sequenced),
   WorkspaceDeletedEvent.extend(sequenced),
   WorkspaceGoneEvent.extend(sequenced),
   WorkspaceStatusEvent.extend(sequenced),

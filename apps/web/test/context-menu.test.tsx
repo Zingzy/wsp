@@ -36,6 +36,7 @@ import { provideDaemonWire } from "../src/files/wire.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
+import { requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
@@ -536,6 +537,27 @@ describe("a workspace row's name box", () => {
     fireEvent.keyDown(still, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
     expect(screen.getByText("api")).toBeDefined();
+  });
+
+  it("a box asked for while the Workspaces section is shut opens that section, so it lands on a row a person can see", async () => {
+    const api = fakeApi([{ ...API }], [statusOf(API)]);
+    await mountSidebar(api, "api");
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }));
+    await waitFor(() => expect(document.querySelector("[data-row-id='ws:ws_a']")).toBeNull());
+
+    requestRenameWorkspace("ws_a");
+    const input = await nameBox();
+    expect(input.value).toBe("api");
+    expect(input.closest("[data-sidebar-row]")).toBe(rowOf2("ws:ws_a"));
+  });
+
+  it("a row holding the box takes no menu over it, as a thread row being named does not", async () => {
+    const api = fakeApi([{ ...API }], [statusOf(API)]);
+    await mountSidebar(api, "api");
+    await openFromMenu();
+    rightClick(rowOf2("ws:ws_a"));
+    await new Promise(r => setTimeout(r, 20));
+    expect(menu()).toBeNull();
   });
 
   it("one row at a time holds the box: opening a workspace's closes a thread's", async () => {
