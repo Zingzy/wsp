@@ -36,7 +36,7 @@ import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, threadRowId, workspaceRowId } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
@@ -260,11 +260,14 @@ export function WorkspaceSidebar() {
   };
 
   /** The rows under one workspace, whichever body draws them: the line that opens its first thread while it has
-   * none, the working rows, the idle shelf under its own header, then the archive under that. The list and Spaces
-   * both read this, so the row grammar has one home. */
+   * none, the working rows, then the idle shelf under its own header with the archive nested inside it. The list
+   * and Spaces both read this, so the row grammar has one home. */
   const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, machine: RowMachine, shut: boolean) => {
     const settledOpen = !settledCollapsed.includes(project.id);
     const archivedOpen = archivedOpenIds.includes(project.id);
+    /** Everything the shelf holds, the archived rows included, since shutting it hides the archive with them: the
+     * count on a shut shelf is what it took away, not only the rows it draws itself. */
+    const shelved = settled.length + archived.length;
     return (
       <>
         {newThreadAction.refusal === null && project.threads.length === 0 ? (
@@ -283,17 +286,17 @@ export function WorkspaceSidebar() {
             </SidebarMenuSubItem>
           </SidebarMenuSub>
         ) : null}
-        {!shut && active.length + settled.length + archived.length > 0 ? (
+        {!shut && active.length + shelved > 0 ? (
           <SidebarMenuSub>
             {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), machine))}
-            {settled.length > 0 ? (
-              <ThreadGroupRow rowId={`settled:${project.id}`} label="Idle" count={settled.length} open={settledOpen} onToggle={() => toggleSettled(project.id)} />
+            {shelved > 0 ? (
+              <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} onToggle={() => toggleSettled(project.id)} />
             ) : null}
             {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine)) : null}
-            {archived.length > 0 ? (
-              <ThreadGroupRow rowId={`archived:${project.id}`} label="Archived" count={archived.length} open={archivedOpen} onToggle={() => toggleArchived(project.id)} />
+            {settledOpen && archived.length > 0 ? (
+              <ThreadGroupRow rowId={groupRowId("archived", project.id)} label="Archived" count={archived.length} open={archivedOpen} onToggle={() => toggleArchived(project.id)} />
             ) : null}
-            {archivedOpen ? archived.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine)) : null}
+            {settledOpen && archivedOpen ? archived.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine)) : null}
           </SidebarMenuSub>
         ) : null}
       </>

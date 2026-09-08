@@ -158,9 +158,9 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
-    // Every workspace with an idle thread gets the Idle header, whether or not one of its threads is working; the
-    // one idle two days is past the archive threshold, so its workspace gets the Archived group shut instead.
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "archived:ws_b"]);
+    // The one idle two days is past the archive threshold, so it sits in the Archived group nested in its
+    // workspace's shelf, shut, rather than as a row on the shelf itself.
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "settled:ws_b", "archived:ws_b"]);
     expect(rowOf("fix the port list").textContent).toContain("3m");
     expect(rowOf("upgrade node").textContent).toContain("50m");
     fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
@@ -170,7 +170,9 @@ describe("rows from the fixture wire", () => {
     expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined();
     expect(within(rowOf("59094224-bb3d")).getByLabelText("Ended")).toBeDefined();
     expect(within(rowOf("upgrade node")).queryByLabelText(/Idle|Completed/)).toBeNull();
-    expect(screen.getAllByRole("button", { name: /^Idle/ })).toHaveLength(1);
+    // Both workspaces head their shelf, whether or not one of their threads is working: ws_b's holds nothing but
+    // the nested archive, and a shelf that holds only that is still a shelf.
+    expect(screen.getAllByRole("button", { name: "Idle" })).toHaveLength(2);
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
@@ -385,9 +387,41 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Archived (1)" })).toBeDefined());
-    expect(rowIds()).toEqual(["ws:ws_a", "archived:ws_a"]);
-    // No idle shelf to head, since every row it would hold has fallen past it.
-    expect(screen.queryByRole("button", { name: /^Idle/ })).toBeNull();
+    // The shelf still heads them even with nothing of its own to draw, since the archive nests inside it and has
+    // to hang from something; shutting it counts the archived thread it takes away.
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "archived:ws_a"]);
+    fireEvent.click(screen.getByRole("button", { name: "Idle" }));
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a"]);
+    expect(screen.getByRole("button", { name: "Idle (1)" })).toBeDefined();
+  });
+
+  it("the archive nests inside the idle shelf: shutting the shelf hides the archived header and its rows too", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [
+          session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-26 * 60 * 60_000), endedAt: iso(-25 * 60 * 60_000) }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Archived (1)" })).toBeDefined());
+    // Open the archive first, so what the shelf hides is a group that was showing its rows.
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a", "thread:s2"]);
+    // Shutting the shelf takes the archive down with it: no thread row of either kind, and no archived header.
+    fireEvent.click(screen.getByRole("button", { name: /^Idle/ }));
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a"]);
+    expect(screen.queryByText("upgrade node")).toBeNull();
+    expect(screen.queryByText("bump the lockfile")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull();
+    // The shelf counts every thread it hides, the archived one included.
+    expect(screen.getByRole("button", { name: "Idle (2)" })).toBeDefined();
+    // Opening it again gives the archive back as it was left, open.
+    fireEvent.click(screen.getByRole("button", { name: /^Idle/ }));
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a", "thread:s2"]);
   });
 
   it("an idle thread's title reads in the muted foreground; a working one's does not", async () => {

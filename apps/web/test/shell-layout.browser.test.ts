@@ -707,14 +707,15 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       // The two threads it holds are not drawn; the working row and the one idle row are.
       expect(shut.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2"]);
       for (const thread of shut.threads) expect(thread.y).toBeLessThan(shut.archived.y);
-      // One row grammar with the header above it: same height, same left edge, same muted word, and the group
-      // header is a plain row, not a chip or a badge, so it carries no fill, no border and no rounding of its own.
+      // One row grammar with the header above it: same height, same left edge, same muted word, same rounding, and
+      // the group header is a plain row, not a chip or a badge, so it carries no fill and no border of its own.
       expect(shut.archived.height).toBe(32);
       expect(shut.archived.height).toBe(shut.idle.height);
       expect(shut.archived.x).toBe(shut.idle.x);
       expect(shut.archived.color).toBe(shut.idle.color);
       expect(shut.archived.size).toBe(shut.idle.size);
       expect(shut.archived.weight).toBe(shut.idle.weight);
+      expect(shut.archived.radius).toBe(shut.idle.radius);
       expect(shut.archived.background).toBe("rgba(0, 0, 0, 0)");
       expect(shut.archived.border).toBe("0px");
       expect(shut.archived.right).toBeLessThanOrEqual(shut.sidebar);
