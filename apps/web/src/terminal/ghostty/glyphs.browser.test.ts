@@ -4,26 +4,17 @@
 // notdef box. Vite serves the surface to Playwright's browser, so like the
 // live tests it runs only when asked for (WSP_RENDER=1) and skips without
 // Playwright's Chromium on the machine.
-import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type Browser, type Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startVite, stopRender, type ViteChild } from "../../../test/vite-child";
+import { launchRender, renderSkipped, stopRender } from "../../../test/render-browser";
+import { startVite, type ViteChild } from "../../../test/vite-child";
 import type { CellSignature } from "../../../test/glyphs/probe";
 import { DEFAULT_TERMINAL_TEXT_FACES, TERMINAL_SYMBOLS_FACE } from "./fontChain";
 
 // jsdom's URL resolves relative references against the page origin, so the path is built with node:path.
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const browserPath = ((): string | undefined => {
-  try {
-    return chromium.executablePath();
-  } catch {
-    return undefined;
-  }
-})();
-const hasBrowser = browserPath !== undefined && existsSync(browserPath);
-const skipped = process.env["WSP_RENDER"] !== "1" ? "WSP_RENDER is not 1" : !hasBrowser ? "Playwright's Chromium is not installed" : undefined;
 
 const NOTDEF = "\u{10FFFD}";
 // nf-fa folder, nf-custom folder, nf-md file, nf-oct git-branch: none of them in any platform text face
@@ -31,9 +22,9 @@ const NOTDEF = "\u{10FFFD}";
 const ICONS = ["\uF07B", "\uE5FF", "\u{F0219}", "\uF418"];
 
 // The default reporter prints nothing for a skipped suite but its arrow; this line is what a gate log shows.
-if (skipped !== undefined) console.info(`glyph render test skipped: ${skipped}`);
+if (renderSkipped !== undefined) console.info(`glyph render test skipped: ${renderSkipped}`);
 
-describe.skipIf(skipped !== undefined)("Nerd Font glyphs through the pane in Chromium", () => {
+describe.skipIf(renderSkipped !== undefined)("Nerd Font glyphs through the pane in Chromium", () => {
   let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
@@ -41,7 +32,7 @@ describe.skipIf(skipped !== undefined)("Nerd Font glyphs through the pane in Chr
   beforeAll(async () => {
     vite = await startVite(WEB_DIR, "/test/glyphs/index.html");
     const url = `${vite.base}/test/glyphs/index.html`;
-    browser = await chromium.launch();
+    browser = await launchRender();
     page = await browser.newPage();
     await page.goto(url);
   }, 60_000);
