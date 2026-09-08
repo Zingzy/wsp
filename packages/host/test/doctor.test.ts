@@ -176,9 +176,9 @@ describe("stageDaemonBundle", () => {
     const started = JSON.parse(stdout.split("\n")[0]!) as { path: string; host: string; openSocketPath: string };
     expect(started).toEqual({ path: TOOLS_PATH, host: "0.0.0.0", openSocketPath: "/root/.wsp/open.sock" });
     expect(stdout).toContain("wsp-daemon listening on 0.0.0.0:7070");
-    // This computer has no Linux /proc and the test is not root: neither the score nor the priority can be written,
-    // the log says so once each, and the daemon starts anyway.
-    expect(stderr.split("\n").filter(l => l.length > 0)).toEqual([expect.stringMatching(/^oom_score_adj not set: /), expect.stringMatching(/^priority not set: /)]);
+    // Both writes are best-effort: they land as root on a Linux /proc and fail anywhere else, so the run may warn
+    // about either, says nothing else, and starts the daemon with the golden's PATH regardless.
+    expect(stderr.split("\n").filter(l => l.length > 0 && !/^(oom_score_adj|priority) not set: /.test(l))).toEqual([]);
   });
 
   it("start.mjs writes the daemon's own memory-killer score and nice value before the daemon loads, so every relaunch road gives them", () => {
