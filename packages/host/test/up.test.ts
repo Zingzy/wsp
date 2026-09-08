@@ -162,9 +162,7 @@ describe("wsp up", () => {
 
   it("closing the wiring ends the turns running on this computer and what those turns started", async () => {
     const wiring = localWiring(home);
-    // A turn runs on a workspace, and recording one takes this computer as a machine, which is what makes the
-    // folder its commands start in.
-    await wiring.backend.get("local");
+    // Launched off the wiring alone, with no workspace record loaded: the road makes the folder the turn starts in.
     const pidFile = join(home, "child.pid");
     const stream = wiring.execStream()(`sleep 300 & echo $! > ${pidFile}; sleep 300`, { env: {} });
     await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 5_000 });

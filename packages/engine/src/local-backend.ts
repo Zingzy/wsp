@@ -136,11 +136,19 @@ export class LocalBackend implements MachineBackend {
     throw new Error("this computer already exists; a local workspace is not created, it is the machine wsp already runs on");
   }
 
-  async get(): Promise<Machine> {
-    // Made here and not at construction: a host builds this backend to answer whether it has anything to serve, and
-    // a computer that has never been set up must be left as it was. Taking this computer as a machine is what a
-    // recorded local workspace does, and its commands start in this folder.
+  /** The folder a command on this computer starts in, made on the first ask and not at construction: a host builds
+   * this backend to answer whether it has anything to serve, and a computer that has never been set up must be left
+   * as it was. The one place the folder is made, so a turn launched off the wiring alone and one launched through a
+   * loaded workspace record land in the same made folder. */
+  workFolder(): string {
     mkdirSync(this.folder, { recursive: true });
+    return this.folder;
+  }
+
+  /** Taking this computer as a machine is what a recorded local workspace does, and its commands start in the
+   * folder, so the folder is made here. */
+  async get(): Promise<Machine> {
+    this.workFolder();
     return this.machine;
   }
 

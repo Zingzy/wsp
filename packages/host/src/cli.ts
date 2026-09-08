@@ -427,9 +427,10 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
   let daemon: Promise<LocalDaemon> | undefined;
   let shutting = false;
+  const backend = new LocalBackend({ root, env });
   return {
-    backend: new LocalBackend({ root, env }),
-    execStream: o => localExecStream({ root, ...o }),
+    backend,
+    execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
     home: id => agentHome(home, id, env),
     env: login,
     daemonRoad: async () => {
