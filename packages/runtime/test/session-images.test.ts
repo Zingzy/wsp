@@ -6,7 +6,7 @@
 // road can be read byte for byte.
 import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { imagePathIn, noImagesLine, threadImagesDir, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
+import { imagePathIn, noImagesLine, stillWorkingRefusal, threadImagesDir, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -284,6 +284,117 @@ describe("two sends with images on one thread", () => {
     expect(backend.machines[0]!.execLog).not.toContain(`rm -rf ${quoted(dirOf("req_b"))}`);
     codex.end(1);
     await until(() => backend.machines[0]!.execLog.includes(`rm -rf ${quoted(dirOf("req_b"))}`));
+  });
+});
+
+describe("a send that landed its images and is then refused", () => {
+  /** An adapter whose turn replies and then lingers: turn.done lands, so the row reads replied, but the process has
+   * not exited and finished is still pending, which is the state a send into that thread is refused in. */
+  function lingering(road: AttachmentRoad, steers = false): { factory: HarnessAdapterFactory; starts: HarnessStartOptions[]; steered: string[]; reply: () => void; exit: () => void } {
+    const starts: HarnessStartOptions[] = [];
+    const steered: string[] = [];
+    let replied: (() => void) | undefined;
+    let exited: (() => void) | undefined;
+    const factory: HarnessAdapterFactory = () => ({
+      steers,
+      attachments: road,
+      start: (options: HarnessStartOptions) => {
+        starts.push(options);
+        options.onEvent({ type: "session.start", sessionId: SESSION_ID });
+        const result: TurnResult = { status: "completed", text: "done" };
+        const finished = new Promise<TurnResult>(resolve => {
+          replied = () => options.onEvent({ type: "turn.done", sessionId: SESSION_ID, result });
+          exited = () => {
+            options.onEvent({ type: "session.end", sessionId: SESSION_ID, exitCode: 0, sawResult: true });
+            resolve(result);
+          };
+        });
+        return {
+          localId: SESSION_ID,
+          finished,
+          interrupt: async () => {},
+          ...(steers ? { steer: async (prompt: string) => (steered.push(prompt), "accepted" as const) } : {}),
+        };
+      },
+    });
+    return { factory, starts, steered, reply: () => replied!(), exit: () => exited!() };
+  }
+
+  /** A machine whose untar can be held, so a send's images are on it while the turn that refuses the send opens: the
+   * refusal has to come after the landing, which is the window this is about. Armed only after the workspace is
+   * created, since a create lands the daemon the same way. */
+  function heldLanding(): { backend: StubBackend; arm: () => void; release: () => void } {
+    const backend = stubBackend();
+    let armed = false;
+    let release: (() => void) | undefined;
+    const held = new Promise<void>(resolve => (release = resolve));
+    const plain = backend.execImpl;
+    backend.execImpl = async (m, cmd) => {
+      if (armed && cmd.includes("tar xzf")) await held;
+      return plain(m, cmd);
+    };
+    return { backend, arm: () => (armed = true), release: () => release!() };
+  }
+
+  it("takes its folder off the machine before the refusal leaves, since no turn will ever do it", async () => {
+    const codex = lingering("file");
+    const { backend, arm, release } = heldLanding();
+    const { rt, ws } = await workspaceOn({ codex: codex.factory }, backend);
+    arm();
+    const first = await rt.sessions.start(ws.id, { harness: "codex", prompt: "A" });
+    const threadId = first.view().threadId!;
+    const dirOf = (requestId: string): string => turnImagesDir(threadId, requestId, "unused");
+    // B queues behind A, wakes when A's process exits, and is landing its images when the next turn opens.
+    const second = rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "B", attachments: [png(0xbb)], requestId: "req_b" });
+    codex.reply();
+    codex.exit();
+    await first.finished;
+    await until(() => backend.machines[0]!.execLog.some(cmd => cmd.includes("tar xzf")));
+    // A turn opens on the thread and replies while its process lingers: the state a send is refused in.
+    const third = await rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "C" });
+    codex.reply();
+    release();
+    await expect(second).rejects.toThrow(stillWorkingRefusal(threadId));
+    // B's images were on the machine before the refusal was known, and B has no turn to take them off, so B does.
+    await until(() => backend.machines[0]!.execLog.includes(`rm -rf ${quoted(dirOf("req_b"))}`));
+    codex.exit();
+    await third.finished;
+  });
+
+  it("a refused send that carried no image asks the machine for nothing", async () => {
+    const codex = lingering("file");
+    const { rt, ws, since } = await workspaceOn({ codex: codex.factory });
+    const first = await rt.sessions.start(ws.id, { harness: "codex", prompt: "A" });
+    const threadId = first.view().threadId!;
+    codex.reply();
+    await expect(rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "B" })).rejects.toThrow(stillWorkingRefusal(threadId));
+    expect(since().execs.filter(cmd => cmd.startsWith("rm -rf "))).toEqual([]);
+    codex.exit();
+    await first.finished;
+  });
+
+  it("a send whose message a turn steers takes its folder too: the words went into that turn and the images nowhere", async () => {
+    // A harness that takes a message mid-turn, as Claude Code's does; a steer carries the words and not the bytes.
+    const claude = lingering("file", true);
+    const { backend, arm, release } = heldLanding();
+    const { rt, ws } = await workspaceOn({ claude: claude.factory }, backend);
+    arm();
+    const first = await rt.sessions.start(ws.id, { prompt: "A" });
+    const threadId = first.view().threadId!;
+    claude.reply();
+    claude.exit();
+    await first.finished;
+    // B lands into a thread with nothing running, and a turn opens under it while it is landing.
+    const second = rt.sessions.start(ws.id, { thread: threadId, prompt: "B", attachments: [png(0xbb)], requestId: "req_b" });
+    await until(() => backend.machines[0]!.execLog.some(cmd => cmd.includes("tar xzf")));
+    const third = await rt.sessions.start(ws.id, { thread: threadId, prompt: "C" });
+    release();
+    expect((await second).outcome).toBe("steered");
+    expect(claude.steered).toEqual(["B"]);
+    await until(() => backend.machines[0]!.execLog.includes(`rm -rf ${quoted(turnImagesDir(threadId, "req_b", "unused"))}`));
+    claude.reply();
+    claude.exit();
+    await third.finished;
   });
 });
 

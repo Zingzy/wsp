@@ -3426,74 +3426,84 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
       // turn holding the second's picture.
       const sendDir = turnImagesDir(threadId, o.requestId, randomUUID());
-      // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time. Nothing
-      // below this loop may await: the wait ends the moment no turn is running, and every line from there to
-      // runTurn, which registers this one, is one synchronous run. The images land inside it for that reason, and
-      // the wait is entered again after them, since landing them is a trip to the machine.
-      for (;;) {
-        const running = runningOn(threadId);
-        if (running === undefined) {
-          if (landed) break;
-          landed = true;
-          ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, o.attachments ?? []));
-          continue;
+      // Every road out of the window between the landing and runTurn is in here, since the turn that would take
+      // this send's images off the machine is the one that does not exist on any of them: a refusal after the wait,
+      // a steer that took the message instead, a start that never opened. The finally covers the steer, which
+      // leaves by returning rather than by throwing.
+      let handedOver = false;
+      try {
+        // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time. Nothing
+        // below this loop may await: the wait ends the moment no turn is running, and every line from there to
+        // runTurn, which registers this one, is one synchronous run. The images land inside it for that reason, and
+        // the wait is entered again after them, since landing them is a trip to the machine.
+        for (;;) {
+          const running = runningOn(threadId);
+          if (running === undefined) {
+            if (landed) break;
+            landed = true;
+            ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, o.attachments ?? []));
+            continue;
+          }
+          // The turn replied and its process has not exited: it takes no message and waiting on it would block the
+          // caller for however long the harness lingers, so the send is refused in words naming the thread.
+          if (running.turnLive?.reply !== undefined) throw new Error(stillWorkingRefusal(threadId));
+          if (adapter.steers && running.handle.steer !== undefined && (await running.handle.steer(o.prompt)) === "accepted") {
+            recordSteer(running, running.handle.id, o);
+            return { ...running.handle, outcome: "steered" };
+          }
+          if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+          outcome = "queued";
+          await running.handle.finished.catch(() => {});
+          refuse();
         }
-        // The turn replied and its process has not exited: it takes no message and waiting on it would block the
-        // caller for however long the harness lingers, so the send is refused in words naming the thread.
-        if (running.turnLive?.reply !== undefined) throw new Error(stillWorkingRefusal(threadId));
-        if (adapter.steers && running.handle.steer !== undefined && (await running.handle.steer(o.prompt)) === "accepted") {
-          recordSteer(running, running.handle.id, o);
-          return { ...running.handle, outcome: "steered" };
-        }
-        if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
-        outcome = "queued";
-        await running.handle.finished.catch(() => {});
-        refuse();
+        const turnId = randomUUID();
+        const cwd = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? o.cwd;
+        const afterCut = resume !== undefined && cutBefore(workspaceId, threadId);
+        // Created before adapter.start so events that fire synchronously during
+        // start() still land on the view. A resume id was announced by the harness
+        // in an earlier turn, so the row carries it before this one answers.
+        const sessionView: SessionView = {
+          id: "",
+          workspaceId,
+          harness,
+          status: "running",
+          startedBy: o.startedBy ?? "person",
+          threadId,
+          prompt: o.prompt,
+          startedAt: Date.now(),
+          ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : carriedTitle(threadId)),
+          ...(resume !== undefined ? { claudeSessionId: resume } : {}),
+          ...(cwd !== undefined ? { cwd } : {}),
+          ...picks,
+          ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
+        };
+        const handle = runTurn({
+          entry,
+          view: sessionView,
+          threadId,
+          turnId,
+          ...(notify !== undefined ? { notify } : {}),
+          outcome,
+          opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
+          ...(imagesDir !== undefined ? { imagesDir } : {}),
+          ...(resume !== undefined ? { resume } : {}),
+          open: onEvent =>
+            adapter.start({
+              prompt: o.prompt,
+              ...(resume !== undefined ? { resume } : {}),
+              ...(cwd !== undefined ? { cwd } : {}),
+              ...picks,
+              ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
+              ...(title !== undefined ? { title } : {}),
+              ...(images.length > 0 ? { images } : {}),
+              onEvent,
+            }),
+        });
+        handedOver = true;
+        return handle;
+      } finally {
+        if (!handedOver && imagesDir !== undefined) dropImages(entry, imagesDir);
       }
-      const turnId = randomUUID();
-      const cwd = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? o.cwd;
-      const afterCut = resume !== undefined && cutBefore(workspaceId, threadId);
-      // Created before adapter.start so events that fire synchronously during
-      // start() still land on the view. A resume id was announced by the harness
-      // in an earlier turn, so the row carries it before this one answers.
-      const sessionView: SessionView = {
-        id: "",
-        workspaceId,
-        harness,
-        status: "running",
-        startedBy: o.startedBy ?? "person",
-        threadId,
-        prompt: o.prompt,
-        startedAt: Date.now(),
-        ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : carriedTitle(threadId)),
-        ...(resume !== undefined ? { claudeSessionId: resume } : {}),
-        ...(cwd !== undefined ? { cwd } : {}),
-        ...picks,
-        ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
-      };
-      const handle = runTurn({
-        entry,
-        view: sessionView,
-        threadId,
-        turnId,
-        ...(notify !== undefined ? { notify } : {}),
-        outcome,
-        opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
-        ...(imagesDir !== undefined ? { imagesDir } : {}),
-        ...(resume !== undefined ? { resume } : {}),
-        open: onEvent =>
-          adapter.start({
-            prompt: o.prompt,
-            ...(resume !== undefined ? { resume } : {}),
-            ...(cwd !== undefined ? { cwd } : {}),
-            ...picks,
-            ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
-            ...(title !== undefined ? { title } : {}),
-            ...(images.length > 0 ? { images } : {}),
-            onEvent,
-          }),
-      });
-      return handle;
     },
 
     async list(workspaceId) {
