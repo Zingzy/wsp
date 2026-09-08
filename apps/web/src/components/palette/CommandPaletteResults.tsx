@@ -1,7 +1,7 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/CommandPaletteResults.tsx at 57a66608 (MIT).
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
 import { ChevronRightIcon } from "lucide-react";
-import { shortcutLabelForCommand } from "../../keybindings.js";
+import { shortcutLabelForCommand, type ShortcutMatchOptions } from "../../keybindings.js";
 import {
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
@@ -86,6 +86,9 @@ interface CommandPaletteResultsProps {
   highlightedItemValue?: string | null;
   isActionsOnly: boolean;
   keybindings: ResolvedKeybindingsConfig;
+  /** The focus context the chords are read in, as a menu takes it: a command bound per sidebar body labels as the
+   * body the palette is looking at means it. */
+  shortcuts?: ShortcutMatchOptions;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
 }
 
@@ -115,6 +118,7 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
                   item={item}
                   key={item.value}
                   keybindings={props.keybindings}
+                  shortcuts={props.shortcuts}
                   isActive={props.highlightedItemValue === item.value}
                   onExecuteItem={props.onExecuteItem}
                 />
@@ -163,10 +167,11 @@ function CommandPaletteResultRow(props: {
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
   isActive: boolean;
   keybindings: ResolvedKeybindingsConfig;
+  shortcuts?: ShortcutMatchOptions;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
 }) {
   const shortcutLabel = props.item.shortcutCommand
-    ? shortcutLabelForCommand(props.keybindings, props.item.shortcutCommand)
+    ? shortcutLabelForCommand(props.keybindings, props.item.shortcutCommand, props.shortcuts)
     : null;
 
   return (

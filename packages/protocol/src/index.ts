@@ -1617,7 +1617,7 @@ export type DaemonEvent = z.infer<typeof DaemonEvent>;
 export const TicketPurpose = z.enum(["connect"]);
 export type TicketPurpose = z.infer<typeof TicketPurpose>;
 
-export const RuntimeRequest = z.discriminatedUnion("op", [
+const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
   z.object({ id: reqId, op: z.literal("ticket.issue"), purpose: TicketPurpose }),
   /** Replies with an EventsSubscribeReply, then pushes events on this socket. With `after`, the seq of the last event
@@ -1707,9 +1707,6 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     contextWindow: z.string().optional(),
     /** Absent reads as person: the app never sends it, the command line sends cli, the MCP server sends agent. */
     startedBy: SessionOrigin.optional(),
-    /** Where the request reached the host from: here or relayed from a machine; a local workspace refuses relayed.
-     * Absent reads here, and today every client on this computer sends here in practice. */
-    origin: WorkspaceOrigin.optional(),
     /** Minted by the client per send and echoed on the turn's session.start, so the client knows which start is its own. */
     requestId: z.string().optional(),
     /** A thread id, or NOTIFY_ME: registered on the thread this start opens, so every turn's end on it sends one line
@@ -1840,6 +1837,11 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
     agents: z.array(z.string()).optional(),
   }),
 ]);
+
+/** Every request carries where it reached the host from: here, this computer's own app, CLI or MCP, or relayed from
+ * a machine. It rides the envelope beside the id rather than each op, so a verb added later carries it without
+ * saying so. Absent reads here, and today every client on this computer is here in practice. */
+export const RuntimeRequest = z.intersection(RuntimeOp, z.object({ origin: WorkspaceOrigin.optional() }));
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 
 /** What a workspaces.exec pushes to the socket that asked. exitCode is null when the command was ended without

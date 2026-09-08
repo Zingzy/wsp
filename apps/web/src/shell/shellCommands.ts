@@ -7,13 +7,16 @@
 // itself opens only from its own tab strip. Every pty comes from the link.
 // The workspace switch walks the sidebar's own order and lands in the new
 // workspace's composer; the chord's walk stays inside the switcher overlay
-// until the hold is let go.
-import { sidebarWorkspaceOrder } from "../adapt/index.js";
+// until the hold is let go. In Spaces the same walk one level down, over the
+// threads of the workspace on screen, lands on a thread the same way.
+import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
 import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, type WorkspaceSelectSlot } from "../keybindingTypes.js";
 import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
 import { useStore } from "../protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
+import { sidebarThreadOrder } from "../sidebar/Sidebar.logic.js";
+import { spaceWorkspaceId } from "../sidebar/sidebarMode.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { resetTerminalFontSize, stepTerminalFontSize } from "../terminal/fontSetting.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
@@ -83,18 +86,37 @@ export function splitActivePanelTerminal(workspaceId: string, direction: SplitDi
   return splitPanelTerminal(workspaceId, active.id, direction);
 }
 
-/** The workspace ids in sidebar order. The creation rows a fork draws above them are left out: a creation
-    row has no workspace to switch to, and counting one would move every slot under the person's fingers
+/** The sidebar's own snapshots, in its own order. The creation rows a fork draws above them are left out: a
+    creation row has no workspace to switch to, and counting one would move every slot under the person's fingers
     while a fork is in flight. */
-function orderedWorkspaceIds(): string[] {
+function sidebarProjects(): SidebarProjectSnapshot[] {
   const { workspaces, statuses, sessions } = useStore.getState();
-  return sidebarWorkspaceOrder({ workspaces, statuses, sessions });
+  return deriveSidebarProjects({ workspaces, statuses, sessions });
+}
+
+function orderedWorkspaceIds(): string[] {
+  return sidebarProjects().map(project => project.id);
+}
+
+/** A thread row a walk can land on: one the runtime stamped a thread id on, which is the one field the walk's
+    list, its compare against what is open and its select all read. */
+export type WalkableThread = SidebarThreadSnapshot & { readonly threadId: string };
+
+/** The threads of the workspace Spaces has on screen that a walk can land on, in the order the sidebar draws
+    them. The chord and the palette's rows read this one list, so a row that says it is disabled and a chord that
+    does nothing agree. A row the runtime stamped no thread id on pins the workspace alone, so a walk that landed
+    on it could never step off it. */
+export function threadWalk(projects: ReadonlyArray<SidebarProjectSnapshot>, selectedId: string | null): WalkableThread[] {
+  const spaceId = spaceWorkspaceId(projects.map(project => project.id), selectedId);
+  const project = projects.find(candidate => candidate.id === spaceId);
+  if (project === undefined) return [];
+  return sidebarThreadOrder(project.threads).filter((thread): thread is WalkableThread => thread.threadId !== null);
 }
 
 /** One step along an order that wraps at both ends, or null where there is nowhere else to go, which is what
     the palette's disabled rows say. A current id the order does not hold (a creation row) steps in from the
     end it came from. */
-export function stepWorkspaceId(ids: ReadonlyArray<string>, currentId: string | null, step: 1 | -1): string | null {
+export function stepInOrder(ids: ReadonlyArray<string>, currentId: string | null, step: 1 | -1): string | null {
   if (ids.length === 0) return null;
   const at = currentId === null ? -1 : ids.indexOf(currentId);
   if (at === -1) return (step === 1 ? ids[0] : ids[ids.length - 1]) ?? null;
@@ -102,21 +124,32 @@ export function stepWorkspaceId(ids: ReadonlyArray<string>, currentId: string | 
   return next === currentId ? null : next;
 }
 
-/** Selects the workspace and puts the caret in its composer: the chords and the palette's rows land the same way. */
-export function goToWorkspace(workspaceId: string): void {
-  useStore.getState().select(workspaceId);
+/** Selects the workspace, and one of its threads where the caller names one, then puts the caret in its composer:
+ * the chords and the palette's rows land the same way. */
+export function goToWorkspace(workspaceId: string, threadId: string | null = null): void {
+  useStore.getState().select(workspaceId, threadId);
   requestComposerFocus(workspaceId);
 }
 
 export function goToAdjacentWorkspace(step: 1 | -1): void {
-  const next = stepWorkspaceId(orderedWorkspaceIds(), useStore.getState().selectedId, step);
+  const next = stepInOrder(orderedWorkspaceIds(), useStore.getState().selectedId, step);
   if (next !== null) goToWorkspace(next);
+}
+
+/** One step through the threads of the workspace Spaces has on screen; nothing happens where there is nowhere
+ * else to go, as the palette's disabled row says. */
+export function cycleThreadInSpace(step: 1 | -1): void {
+  const threads = threadWalk(sidebarProjects(), useStore.getState().selectedId);
+  const next = stepInOrder(threads.map(thread => thread.threadId), useStore.getState().selectedThreadId, step);
+  const thread = threads.find(candidate => candidate.threadId === next);
+  if (thread !== undefined) goToWorkspace(thread.workspaceId, thread.threadId);
 }
 
 /** The switch chord's step. The first one puts the overlay up over the workspace it would land on and the rest walk
  * it; nothing is selected until the hold is let go, so a walk past a workspace never mounts its threads and a tap,
- * which is a step and a release, still switches at once. */
-export function cycleWorkspaceSwitcher(step: 1 | -1): void {
+ * which is a step and a release, still switches at once. The hold comes from the chord that stepped, so the walk
+ * ends on the key that is really down whichever of the switch chords opened it. */
+export function cycleWorkspaceSwitcher(step: 1 | -1, hold: ReadonlyArray<string>): void {
   const switcher = useWorkspaceSwitcher.getState();
   if (switcher.open) {
     switcher.step(step);
@@ -124,9 +157,9 @@ export function cycleWorkspaceSwitcher(step: 1 | -1): void {
   }
   const ids = orderedWorkspaceIds();
   const selectedId = useStore.getState().selectedId;
-  const next = stepWorkspaceId(ids, selectedId, step);
+  const next = stepInOrder(ids, selectedId, step);
   if (next === null) return;
-  switcher.openAt(ids, ids.indexOf(next), selectedId);
+  switcher.openAt(ids, ids.indexOf(next), selectedId, hold);
 }
 
 /** The hold let go: the highlighted workspace becomes the open one. */
@@ -148,7 +181,8 @@ export function goToWorkspaceInSlot(slot: WorkspaceSelectSlot): void {
   if (target !== undefined) goToWorkspace(target);
 }
 
-export function runShellCommand(command: KeybindingCommand, target: ShellCommandTarget): void {
+/** The hold is the modifiers the chord that ran the command is carrying; the switch's walk ends when one comes up. */
+export function runShellCommand(command: KeybindingCommand, target: ShellCommandTarget, hold: ReadonlyArray<string>): void {
   if (isWorkspaceSelectCommand(command)) {
     goToWorkspaceInSlot(workspaceSelectSlot(command));
     return;
@@ -191,10 +225,16 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       if (workspaceId) requestNewThread({ workspaceId });
       return;
     case "workspace.next":
-      cycleWorkspaceSwitcher(1);
+      cycleWorkspaceSwitcher(1, hold);
       return;
     case "workspace.previous":
-      cycleWorkspaceSwitcher(-1);
+      cycleWorkspaceSwitcher(-1, hold);
+      return;
+    case "thread.next":
+      cycleThreadInSpace(1);
+      return;
+    case "thread.previous":
+      cycleThreadInSpace(-1);
       return;
     default: {
       const _exhaustive: never = command;

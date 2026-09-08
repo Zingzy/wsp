@@ -8,7 +8,6 @@
 import { act, cleanup, configure, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView, WorkspaceView } from "@wsp/protocol";
-import { compileResolvedKeybindingsConfig } from "../src/keybindingDefaults.js";
 import { deriveSidebarProjects } from "../src/adapt/index.js";
 import { buildSwitcherCards } from "../src/components/switcher/switcherCards.js";
 import type { Api } from "../src/protocol/client.js";
@@ -18,7 +17,8 @@ import { ROW_META_CLASS } from "../src/sidebar/rowGrammar.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onComposerFocusRequest } from "../src/shell/shellRequests.js";
 import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
-import { stepSwitcherAt, SWITCHER_PAINT_DELAY_MS, switchHoldKeys, useWorkspaceSwitcher } from "../src/shell/workspaceSwitcher.js";
+import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
+import { releasesSwitchHold, stepSwitcherAt, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../src/shell/workspaceSwitcher.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 
 const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] };
@@ -73,7 +73,10 @@ function fakeApi(): Api {
 }
 
 const tab = (mods: { shiftKey?: boolean } = {}) => fireEvent.keyDown(window, { key: "Tab", code: "Tab", ctrlKey: true, ...mods });
+/** The switch between spaces, as macOS spells it here; the platform is mocked to MacIntel for the file. */
+const spaceArrow = (name: "ArrowLeft" | "ArrowRight") => fireEvent.keyDown(window, { key: name, code: name, metaKey: true, altKey: true });
 const release = () => fireEvent.keyUp(window, { key: "Control" });
+const releaseSpaceArrow = () => fireEvent.keyUp(window, { key: "Alt" });
 const escape = () => fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
 
 /** The desktop shell, told apart by the bridge its preload puts on the page. */
@@ -407,6 +410,84 @@ describe("loadPagePreviews", () => {
   });
 });
 
+describe("the card the space arrows put up", () => {
+  it("is the same card, and it ends on the option coming up rather than on the key the other chord holds", async () => {
+    await mountShell();
+    const restore = asDesktopShell();
+    const { asks, off } = watchComposerFocus("ws_b");
+    try {
+      spaceArrow("ArrowRight");
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
+      expect(highlightedCard()).toBe("ws_b");
+      // The other switch chord's own hold is not this walk's, so letting it go leaves the card up.
+      release();
+      await settle();
+      expect(useWorkspaceSwitcher.getState().open).toBe(true);
+      releaseSpaceArrow();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      expect(overlay()).toBeNull();
+      expect(asks).toEqual(["ws_b"]);
+    } finally {
+      off();
+      restore();
+    }
+  });
+
+  it("walks back on the left arrow, and puts nothing up in a browser tab, which keeps that chord and the Tab pair", async () => {
+    await mountShell();
+    const restore = asDesktopShell();
+    try {
+      spaceArrow("ArrowLeft");
+      await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
+      releaseSpaceArrow();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_c"));
+    } finally {
+      restore();
+    }
+    spaceArrow("ArrowLeft");
+    tab();
+    await settle();
+    expect(useWorkspaceSwitcher.getState().open).toBe(false);
+    expect(useStore.getState().selectedId).toBe("ws_c");
+  });
+
+  it("keeps Shift for the step back, so letting Shift go mid-walk commits nothing", async () => {
+    await mountShell();
+    const restore = asDesktopShell();
+    try {
+      tab({ shiftKey: true });
+      await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
+      fireEvent.keyUp(window, { key: "Shift" });
+      await settle();
+      expect(useWorkspaceSwitcher.getState().open).toBe(true);
+      expect(useStore.getState().selectedId).toBe("ws_a");
+      release();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_c"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("stays the cross-workspace jump in Spaces, where the Tab pair is the space's own threads", async () => {
+    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    await mountShell();
+    const restore = asDesktopShell();
+    try {
+      tab();
+      await settle();
+      expect(useWorkspaceSwitcher.getState().open).toBe(false);
+      spaceArrow("ArrowRight");
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
+      releaseSpaceArrow();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe("stepSwitcherAt", () => {
   it("wraps at both ends and always moves, since the key has to answer once the overlay is up", () => {
     expect(stepSwitcherAt(3, 0, 1)).toBe(1);
@@ -417,24 +498,13 @@ describe("stepSwitcherAt", () => {
   });
 });
 
-describe("switchHoldKeys", () => {
-  it("reads the hold off the chord table, not a key of its own", () => {
-    expect(switchHoldKeys(undefined, { platform: "MacIntel", context: { desktopShell: true } })).toEqual(["Control"]);
-    expect(switchHoldKeys(undefined, { platform: "Linux x86_64", context: { desktopShell: true } })).toEqual(["Control"]);
-    expect(switchHoldKeys(undefined, { platform: "MacIntel", context: { desktopShell: false } })).toEqual([]);
-  });
-
-  it("is the modifiers both directions carry, so a step back is held by the same key that commits", () => {
-    const shifted = compileResolvedKeybindingsConfig([
-      { key: "alt+tab", command: "workspace.next" },
-      { key: "alt+shift+tab", command: "workspace.previous" },
-    ]);
-    expect(switchHoldKeys(shifted, { platform: "MacIntel", context: { desktopShell: true } })).toEqual(["Alt"]);
-    const apart = compileResolvedKeybindingsConfig([
-      { key: "ctrl+tab", command: "workspace.next" },
-      { key: "alt+shift+tab", command: "workspace.previous" },
-    ]);
-    expect(switchHoldKeys(apart, { platform: "MacIntel", context: { desktopShell: true } })).toEqual([]);
+describe("releasesSwitchHold", () => {
+  it("ends the walk on a key the chord that opened it was holding, and on nothing else", () => {
+    expect(releasesSwitchHold({ open: true, hold: ["Control"] }, "Control")).toBe(true);
+    expect(releasesSwitchHold({ open: true, hold: ["Alt"] }, "Alt")).toBe(true);
+    expect(releasesSwitchHold({ open: true, hold: ["Control"] }, "Alt")).toBe(false);
+    expect(releasesSwitchHold({ open: true, hold: ["Control"] }, "Shift")).toBe(false);
+    expect(releasesSwitchHold({ open: false, hold: ["Control"] }, "Control")).toBe(false);
   });
 });
 

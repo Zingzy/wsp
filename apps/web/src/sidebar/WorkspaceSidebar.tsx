@@ -31,6 +31,7 @@ import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
 import { catalogIn, useCapabilities, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, type ProjectTripRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
@@ -41,7 +42,7 @@ import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
-import { useSidebarMode } from "./sidebarMode.js";
+import { spaceWorkspaceId, useSidebarMode } from "./sidebarMode.js";
 import { SpaceDots } from "./SpaceDots.js";
 import { SpaceHeader } from "./SpaceHeader.js";
 import { SPACE_LEAVING_SELECTOR, SpaceSlide } from "./SpaceSlide.js";
@@ -147,8 +148,8 @@ export function WorkspaceSidebar() {
   const visible = useMemo(() => visibleProjects(projects), [projects]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const sectionActions = useMemo(() => resolveActions(sidebarActions, { mode }, { setMode }), [mode, setMode]);
-  // Spaces draws the selected workspace, and the first one in the sidebar's order until something is selected.
-  const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === selectedId) ?? visible[0] ?? null);
+  const spaceId = spaceWorkspaceId(projects.map(project => project.id), selectedId);
+  const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === spaceId) ?? null);
   const tripTarget = trip === null ? undefined : workspaces.find(w => w.id === trip.workspaceId);
   const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting);
 
@@ -350,6 +351,7 @@ export function WorkspaceSidebar() {
           actions={actions}
           renaming={naming}
           saving={naming && renaming?.saving === true}
+          onSelect={() => select(project.id)}
           onRename={name => void sendName(workspaceRowId(project.id), () => renameWorkspace({ workspaceId: project.id, name }))}
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actions, "rename"))}
@@ -396,20 +398,15 @@ export function WorkspaceSidebar() {
     e.preventDefault();
   };
 
-  /** A two-finger swipe over the workspaces moves a space, the way the arrows and the dots do; it rides that group
-   * alone, so the search row above it and the forwards under it still scroll as they are. The gesture it belongs to
-   * lives across the wheel events that make it up, so a swipe that keeps going moves one space and no more. */
+  /** A two-finger swipe over the workspaces moves a space, and it lands where the arrows land, through the one verb
+   * they run: the swipe is another way to ask, not another rule. It rides that group alone, so the search row above
+   * it and the forwards under it still scroll as they are, and the gesture it belongs to lives across the wheel
+   * events that make it up, so a swipe that keeps going moves one space and no more. */
   const swipe = useRef(NO_SWIPE);
   const onWheel = (e: WheelEvent<HTMLElement>): void => {
     const read = readSwipe(swipe.current, { deltaX: e.deltaX, deltaY: e.deltaY, at: e.timeStamp });
     swipe.current = read.gesture;
-    if (read.step === 0) return;
-    const next = resolveAdjacentThreadId({
-      threadIds: visible.map(v => v.project.id),
-      currentThreadId: currentSpace?.project.id ?? null,
-      direction: read.step === 1 ? "next" : "previous",
-    });
-    if (next !== null) select(next);
+    if (read.step !== 0) goToAdjacentWorkspace(read.step);
   };
 
   const offline = useMemo(() => computerOffline(Object.values(statuses)), [statuses]);
