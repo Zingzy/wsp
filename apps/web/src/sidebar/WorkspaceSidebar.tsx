@@ -2,9 +2,10 @@
 // The left region: workspaces (machines) first, their sessions as threads
 // under each, over the adapter's SidebarProjectSnapshot. The search row, the
 // Workspaces section row that shuts them all and opens the new-workspace
-// dialog, the settled shelf, the Spaces body with one workspace's rows under
-// its header and a dot per workspace at the bottom, the slide and the
-// two-finger swipe that move between them, keyboard traversal, the
+// dialog, the settled shelf with the archive nested in it, the Spaces body
+// with one workspace's rows under its header and a dot per workspace at the
+// bottom, the slide and the two-finger swipe that move between them,
+// keyboard traversal, the
 // rebuild of a zombie or gone machine, the forget of a gone one and the
 // project trips' dialogs live here; the rows are WorkspaceRow and ThreadRow
 // beside this file, and the logic comes from the copied t3code files. Every
@@ -38,10 +39,10 @@ import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, threadRowId, workspaceRowId } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
-import { resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
+import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { useSidebarMode, useSpaceWorkspaceId } from "./sidebarMode.js";
 import { SpaceDots } from "./SpaceDots.js";
@@ -54,6 +55,9 @@ import { NEW_THREAD_SHORTCUT, NEW_THREAD_TITLE, compactTimeLabel, defaultWorkspa
 
 /** Which workspaces have their idle shelf shut, so a shelf is open until this workspace's own chevron shuts it. */
 const SETTLED_COLLAPSED_KEY = "wsp:sidebar-settled-collapsed";
+/** The archive is the other way about: it holds the rows a person has stopped looking at, so it is shut until this
+ * workspace's own chevron opens it, and the list remembers the ones that were opened. */
+const ARCHIVED_OPEN_KEY = "wsp:sidebar-archived-open";
 const NOTHING_COLLAPSED: ReadonlyArray<string> = [];
 const workspaceIdsCodec: Codec<ReadonlyArray<string>> = {
   decode: raw => {
@@ -80,11 +84,16 @@ interface VisibleProject {
   readonly project: SidebarProjectSnapshot;
   readonly active: ReadonlyArray<SidebarThreadSnapshot>;
   readonly settled: ReadonlyArray<SidebarThreadSnapshot>;
+  readonly archived: ReadonlyArray<SidebarThreadSnapshot>;
 }
 
-/** Each workspace's threads split into the working ones and the settled shelf. */
-function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>): VisibleProject[] {
-  return projects.map(project => ({ project, ...splitSidebarThreads(project.threads) }));
+/** Each workspace's threads split into the working ones, the settled shelf, and the ones the shelf has held long
+ * enough to archive. The archive is a reading of the clock, so it comes from the same minute tick the countdowns do. */
+function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>, nowMs: number): VisibleProject[] {
+  return projects.map(project => {
+    const { active, settled } = splitSidebarThreads(project.threads);
+    return { project, active, ...foldArchivedThreads(settled, nowMs) };
+  });
 }
 
 interface DialogState {
@@ -120,6 +129,7 @@ export function WorkspaceSidebar() {
 
   const [mode, setMode] = useSidebarMode();
   const [settledCollapsed, setSettledCollapsed] = useLocalStorage(SETTLED_COLLAPSED_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
+  const [archivedOpenIds, setArchivedOpenIds] = useLocalStorage(ARCHIVED_OPEN_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [allCollapsed, setAllCollapsed] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
@@ -148,7 +158,7 @@ export function WorkspaceSidebar() {
   const defaultVerbs = useWorkspaceVerbs();
 
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
-  const visible = useMemo(() => visibleProjects(projects), [projects]);
+  const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const sectionActions = useMemo(() => resolveActions(sidebarActions, { mode }, { setMode }), [mode, setMode]);
   const spaceId = useSpaceWorkspaceId();
@@ -214,6 +224,10 @@ export function WorkspaceSidebar() {
     setSettledCollapsed(prev => (prev.includes(id) ? prev.filter(other => other !== id) : [...prev, id]));
   };
 
+  const toggleArchived = (id: string): void => {
+    setArchivedOpenIds(prev => (prev.includes(id) ? prev.filter(other => other !== id) : [...prev, id]));
+  };
+
   /** The name a person typed on a row, whichever kind of row it is: the store takes it while the field stays as it
    * is, and the field closes only once the store has it. A refusal leaves the name in the field to try again, with
    * the reason in the toast, so nothing a person typed is lost to a message. */
@@ -255,10 +269,15 @@ export function WorkspaceSidebar() {
   };
 
   /** The rows under one workspace, whichever body draws them: the line that opens its first thread while it has
-   * none, the working rows, then the idle shelf under its own header. The list and Spaces both read this, so the
-   * row grammar has one home. */
-  const threadsOf = ({ project, active, settled }: VisibleProject, newThreadAction: ResolvedAction, machine: RowMachine, shut: boolean, rail?: WorkspaceTint | undefined) => {
+   * none, the working rows, then the idle shelf under its own header with the archive nested inside it. The list
+   * and Spaces both read this, so the row grammar has one home. The rail takes the workspace's hue in the list,
+   * where it is the one place the hue draws; Spaces passes none, since there the whole surface carries it. */
+  const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, machine: RowMachine, shut: boolean, rail?: WorkspaceTint | undefined) => {
     const settledOpen = !settledCollapsed.includes(project.id);
+    const archivedOpen = archivedOpenIds.includes(project.id);
+    /** Everything the shelf holds, the archived rows included, since shutting it hides the archive with them: the
+     * count on a shut shelf is what it took away, not only the rows it draws itself. */
+    const shelved = settled.length + archived.length;
     return (
       <>
         {newThreadAction.refusal === null && project.threads.length === 0 ? (
@@ -277,28 +296,17 @@ export function WorkspaceSidebar() {
             </SidebarMenuSubItem>
           </SidebarMenuSub>
         ) : null}
-        {!shut && active.length + settled.length > 0 ? (
+        {!shut && active.length + shelved > 0 ? (
           <SidebarMenuSub {...tintAttr(rail)}>
             {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), machine))}
-            {settled.length > 0 ? (
-              <SidebarMenuSubItem data-thread-selection-safe>
-                <button
-                  type="button"
-                  data-sidebar-row
-                  data-row-id={`settled:${project.id}`}
-                  aria-expanded={settledOpen}
-                  onClick={() => toggleSettled(project.id)}
-                  className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-hidden ring-ring focus-visible:ring-2"
-                >
-                  <span className="text-xs font-medium text-muted-foreground/50">
-                    {settledOpen ? "Idle" : `Idle (${settled.length})`}
-                  </span>
-                  <span className="h-px flex-1 bg-sidebar-border/60" />
-                  <ChevronDownIcon aria-hidden className={cn("size-3 text-muted-foreground/50 transition-transform", settledOpen && "rotate-180")} />
-                </button>
-              </SidebarMenuSubItem>
+            {shelved > 0 ? (
+              <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} onToggle={() => toggleSettled(project.id)} />
             ) : null}
             {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine)) : null}
+            {settledOpen && archived.length > 0 ? (
+              <ThreadGroupRow rowId={groupRowId("archived", project.id)} label="Archived" count={archived.length} open={archivedOpen} onToggle={() => toggleArchived(project.id)} />
+            ) : null}
+            {settledOpen && archivedOpen ? archived.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine)) : null}
           </SidebarMenuSub>
         ) : null}
       </>
@@ -548,6 +556,28 @@ export function WorkspaceSidebar() {
         />
       ) : null}
     </>
+  );
+}
+
+/** The header over one group of thread rows, which shuts and opens it: the word alone while the group is open, the
+ * word with its count while it is shut, so a shut group still says how much it holds. The idle shelf and the archive
+ * under it are one row, so neither can drift from the other. */
+function ThreadGroupRow({ rowId, label, count, open, onToggle }: { rowId: string; label: string; count: number; open: boolean; onToggle: () => void }) {
+  return (
+    <SidebarMenuSubItem data-thread-selection-safe>
+      <button
+        type="button"
+        data-sidebar-row
+        data-row-id={rowId}
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-hidden ring-ring focus-visible:ring-2"
+      >
+        <span className="text-xs font-medium text-muted-foreground/50">{open ? label : `${label} (${count})`}</span>
+        <span className="h-px flex-1 bg-sidebar-border/60" />
+        <ChevronDownIcon aria-hidden className={cn("size-3 text-muted-foreground/50 transition-transform", open && "rotate-180")} />
+      </button>
+    </SidebarMenuSubItem>
   );
 }
 
