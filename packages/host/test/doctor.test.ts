@@ -10,10 +10,10 @@ import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { TOOLS_PATH } from "@wsp/engine";
-import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ } from "@wsp/protocol";
-import { createRuntime, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type Runtime } from "@wsp/runtime";
+import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
-import { isReserved } from "@wsp/engine";
+import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
 import {
   connectDaemonSocket,
   deployDaemon,
@@ -29,6 +29,8 @@ import {
   packBundle,
   cleanOrphans,
   doctor,
+  localDoctor,
+  localPrompt,
   promoteGoldens,
   stageDaemonBundle,
   tarPackCommand,
@@ -36,6 +38,7 @@ import {
   type DaemonSocket,
 } from "../src/doctor.js";
 import { redact } from "../src/init-log.js";
+import type { CliIO } from "../src/cli.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 
@@ -717,5 +720,117 @@ describe("connectDaemonSocket", () => {
       for (const client of server.clients) client.terminate();
       await new Promise<void>(r => server.close(() => r()));
     }
+  });
+});
+
+describe("the doctor's local road", () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const d of roots.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  /** A scripted harness on this computer: it describes itself the way a binary that answered does, and a turn runs
+   * one real command through the local exec stream, so a reply landing proves the local backend drove it. */
+  const scripted = (over: { probe?: HarnessCatalogAnswer } = {}): HarnessAdapterFactory => ctx => ({
+    steers: false,
+    probeCatalog: async () => (over.probe === undefined ? { version: "9.9.9", models: [], efforts: [], permissionModes: [] } : over.probe),
+    start: ({ prompt, onEvent }) => {
+      const sessionId = "11111111-1111-4111-8111-111111111111";
+      const asked = prompt.slice(prompt.lastIndexOf(": ") + 2);
+      const finished = (async () => {
+        const stream = ctx.execStream(`printf %s ${asked}`, { env: { ...ctx.env } });
+        let out = "";
+        for await (const line of stream.lines) out += line;
+        await stream.exited;
+        onEvent({ type: "session.start", sessionId });
+        const result = { status: "completed", text: out } as const;
+        onEvent({ type: "turn.done", sessionId, result });
+        onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        return result;
+      })();
+      return { localId: sessionId, finished, interrupt: async () => {} };
+    },
+  });
+
+  const localRuntime = (adapters: Record<string, HarnessAdapterFactory>): { rt: Runtime; root: string } => {
+    const root = tmp("wsp-doctor-local-");
+    roots.push(root);
+    return {
+      root,
+      // The provider module of a host with no key: a local road that reaches it would refuse rather than pass.
+      rt: createRuntime({
+        backend: new NoProviderBackend(),
+        store: memoryStore(),
+        adapters,
+        local: { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" } },
+        hostId: "box:h1",
+      }),
+    };
+  };
+
+  const record = (): CliIO & { lines: string[] } => {
+    const lines: string[] = [];
+    return { lines, log: l => lines.push(l), error: l => lines.push(l), ask: noPrompt, askSecret: noPrompt };
+  };
+
+  it("makes this computer a workspace, runs a thread on it, reads the reply back, and leaves the state as it found it", async () => {
+    const { rt } = localRuntime({ claude: scripted() });
+    const io = record();
+    expect(await localDoctor(rt, io)).toBe(0);
+    const out = io.lines.join("\n");
+    expect(out).toContain("doctor: proving a thread on this computer, with no machine and nothing billing");
+    expect(out).toContain("Claude Code 9.9.9");
+    expect(out).toContain("Claude Code answered with the word it was asked for");
+    expect(out).toContain("the workspace this run made is forgotten");
+    expect(out).toContain("DOCTOR PASS: this computer is a workspace, a thread ran on it and its reply came back.");
+    // The doctor left nothing behind: the state has no more workspaces than it started with.
+    expect(await rt.workspaces.list()).toEqual([]);
+    await rt.close();
+  });
+
+  it("the word it asks for is fresh each run, so a reply that carries it was written by this run's turn", () => {
+    const first = localPrompt("wsp-aaaaaa");
+    expect(first).toBe("Reply with exactly this word and nothing else: wsp-aaaaaa");
+    expect(localPrompt("wsp-bbbbbb")).not.toBe(first);
+  });
+
+  it("a workspace this host already holds is the one it runs on, and it stays afterwards", async () => {
+    const { rt } = localRuntime({ claude: scripted() });
+    const held = await rt.workspaces.createLocal("mac");
+    const io = record();
+    expect(await localDoctor(rt, io)).toBe(0);
+    expect(io.lines.join("\n")).toContain("mac (already here)");
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([held.id]);
+    await rt.close();
+  });
+
+  it("with no agent describing itself here it fails with what each one said, and takes back the workspace it made", async () => {
+    const { rt } = localRuntime({ claude: scripted({ probe: { refused: "not signed in" } }) });
+    const io = record();
+    expect(await localDoctor(rt, io)).toBe(1);
+    expect(io.lines.join("\n")).toContain("DOCTOR FAIL: no agent on this computer described itself (Claude Code: not signed in)");
+    expect(await rt.workspaces.list()).toEqual([]);
+    await rt.close();
+  });
+
+  it("a reply that does not carry the word fails the run rather than passing on a turn that said anything", async () => {
+    const wrong: HarnessAdapterFactory = () => ({
+      steers: false,
+      probeCatalog: async () => ({ version: "9.9.9", models: [], efforts: [], permissionModes: [] }),
+      start: ({ onEvent }) => {
+        const sessionId = "22222222-2222-4222-8222-222222222222";
+        const result = { status: "completed", text: "sure thing" } as const;
+        onEvent({ type: "session.start", sessionId });
+        onEvent({ type: "turn.done", sessionId, result });
+        onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        return { localId: sessionId, finished: Promise.resolve(result), interrupt: async () => {} };
+      },
+    });
+    const { rt } = localRuntime({ claude: wrong });
+    const io = record();
+    expect(await localDoctor(rt, io)).toBe(1);
+    expect(io.lines.join("\n")).toContain('DOCTOR FAIL: the reply did not carry the word this run asked for: "sure thing"');
+    expect(await rt.workspaces.list()).toEqual([]);
+    await rt.close();
   });
 });

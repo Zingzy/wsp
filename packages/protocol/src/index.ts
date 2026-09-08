@@ -2068,7 +2068,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * ExecEvent frames to this socket only: exec.output per line, exec.exit last. The socket closing ends the
    * command, and so does the machine going away under it (deleted, paused, or unanswering: exec.exit then carries
    * the reason as its error); nothing else does, there is no deadline. cwd is the folder the command runs in, absolute;
-   * absent, the home folder, as a harness turn's is. */
+   * absent, the folder the workspace's kind names, as a harness turn's is. The reply carries that folder back as its
+   * own cwd, absent only where the kind names none and the machine's own home is where the shell landed. */
   z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1), cwd: z.string().optional() }),
   /** Replies with { listing: HostFolderListing }: one level of this computer's own folders, for the picker a browser
    * tab has instead of the desktop shell's dialog. `dir` absent lists the first root and a folder inside the roots
@@ -2278,7 +2279,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { NO_REBUILD_NEEDED, actionRefusal, computerOffline, goneRefusal, imageMoveRefusal, isBilling, kindWords, machineWord, needsRebuild, reachShown, sendRefusal, workspaceKind, workspaceState, workspaceWord, WORKSPACE_KIND_WORDS, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { actionRefusal, computerOffline, goneRefusal, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";

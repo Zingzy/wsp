@@ -6,7 +6,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { exitClassOf } from "@wsp/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HELP, cli, forkCommandFor, jsonCliIO, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO } from "../src/cli.js";
 
 const SOLARI = "slr_live_fake_solari_key";
@@ -64,7 +64,7 @@ interface FakeIO extends CliIO {
   output: string[];
 }
 
-function fakeIO(answers: string[]): FakeIO {
+function fakeIO(answers: string[], isTTY = false): FakeIO {
   const queue = [...answers];
   const output: string[] = [];
   const next = (question: string): Promise<string> => {
@@ -75,6 +75,7 @@ function fakeIO(answers: string[]): FakeIO {
   };
   return {
     output,
+    isTTY,
     log: l => output.push(l),
     error: l => output.push(l),
     ask: next,
@@ -90,6 +91,8 @@ let dir: string;
 let cwd: string;
 let home: string;
 afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   rmSync(dir, { recursive: true, force: true });
 });
 function setup(): void {
@@ -203,6 +206,65 @@ describe("loadKeys", () => {
     setup();
     await expect(loadKeys(fakeIO(["   "]), { env: {}, cwd, home })).rejects.toThrow(/Solari API key/);
     expect(existsSync(join(home, ".env"))).toBe(false);
+  });
+
+  it("init offers the key at a terminal, and an empty answer is the answer: no provider key, and the question said so", async () => {
+    setup();
+    const io = fakeIO([""], true);
+    expect(await loadKeys(io, { env: {}, cwd, home }, { anthropic: false, noSolari: "offer" })).toEqual({});
+    expect(stripVTControlCharacters(io.output[0]!)).toBe(
+      "Solari API key\nNo Solari key found.\nconsole.getsolari.com\nEnter with nothing skips the cloud: this computer alone becomes your workspace, and nothing is sealed.",
+    );
+    // Nothing is written: there is no key to save.
+    expect(existsSync(join(home, ".env"))).toBe(false);
+  });
+
+  it("init with nobody at a keyboard asks nothing at all", async () => {
+    setup();
+    const io = fakeIO([]);
+    expect(await loadKeys(io, { env: {}, cwd, home }, { anthropic: false, noSolari: "offer" })).toEqual({});
+    expect(io.output).toEqual([]);
+  });
+
+  it("the local road asks nothing even at a terminal: init already answered, and up, new --local and doctor --local seal nothing to skip", async () => {
+    setup();
+    const io = fakeIO([], true);
+    expect(await loadKeys(io, { env: { ANTHROPIC_API_KEY: ANTHROPIC }, cwd, home }, { anthropic: false, noSolari: "local" })).toEqual({ anthropic: ANTHROPIC });
+    expect(io.output).toEqual([]);
+  });
+
+  it("the Claude key rides the local road: it is the agents' key, not the provider's, and a thread here uses it", async () => {
+    setup();
+    const io = fakeIO([""], true);
+    expect(await loadKeys(io, { env: { ANTHROPIC_API_KEY: ANTHROPIC }, cwd, home }, { anthropic: false, noSolari: "offer" })).toEqual({ anthropic: ANTHROPIC });
+  });
+
+  it("the local road is the caller's to ask for: every other command still refuses an empty answer", async () => {
+    setup();
+    await expect(loadKeys(fakeIO([""], true), { env: {}, cwd, home }, { anthropic: false }).then(() => "ok", exitClassOf)).resolves.toBe("auth");
+  });
+
+  it("a key that is there answers the local road too, with nothing asked", async () => {
+    setup();
+    const io = fakeIO([]);
+    expect(await loadKeys(io, { env: { SOLARI_API_KEY: SOLARI }, cwd, home }, { anthropic: false, noSolari: "local" })).toEqual({ solari: SOLARI });
+    expect(io.output).toEqual([]);
+  });
+
+  it("the flags about a golden are refused on the local road rather than taken and ignored", async () => {
+    setup();
+    // Pinned off this computer's key layers: a Solari key on the Mac running the suite would make this a real init that boots a machine.
+    vi.stubEnv("SOLARI_API_KEY", "");
+    vi.stubEnv("WSP_HOME", home);
+    vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    const io = fakeIO([]);
+    for (const flag of [["--no-local"], ["--first-workspace", "proj"], ["--import", cwd], ["--recipe", "r.json"], ["--project", cwd]]) {
+      const code = await cli(["init", "--state", join(home, "state.json"), ...flag], io);
+      expect([flag.join(" "), code]).toEqual([flag.join(" "), 3]);
+    }
+    expect(io.output.join("\n")).toContain("--no-local would leave it with nothing");
+    expect(io.output.join("\n")).toContain("--first-workspace would do nothing here");
+    expect(io.output.join("\n")).toContain("--import would do nothing here");
   });
 
   it("the save question names the file only when WSP_HOME is not the default", () => {

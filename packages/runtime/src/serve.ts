@@ -379,7 +379,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 if (running) stream.teardown();
               });
               const push = (e: ExecEvent): void => send(e);
-              send({ id: msg.id, ok: true, execId });
+              // The folder rides the reply, so the client prints where the command ran instead of restating the rule.
+              send({ id: msg.id, ok: true, execId, ...(stream.ranIn !== undefined ? { cwd: stream.ranIn } : {}) });
               void (async () => {
                 let error: string | undefined;
                 try {

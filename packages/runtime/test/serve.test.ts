@@ -716,11 +716,15 @@ describe("serveRuntime workspaces.exec", () => {
 
     const inFolder = await c.request("workspaces.exec", { workspaceId, argv: ["git", "status"], cwd: "/root/work/my proj" });
     expect(inFolder.ok).toBe(true);
+    // The reply says where it ran, so a client prints that rather than restating the rule the runtime holds.
+    expect(inFolder["cwd"]).toBe("/root/work/my proj");
     await until(() => c.events.some(e => e.type === "exec.exit" && e["execId"] === inFolder["execId"]));
     expect(scripts().at(-1)).toContain("export PATH='/usr/bin'\ncd '/root/work/my proj' && 'git' 'status'\necho $? > ");
 
     const bare = await c.request("workspaces.exec", { workspaceId, argv: ["git", "status"] });
     expect(bare.ok).toBe(true);
+    // A fork's kind names no folder, so the reply names none either and its shell lands in the machine's own home.
+    expect(bare).not.toHaveProperty("cwd");
     await until(() => c.events.some(e => e.type === "exec.exit" && e["execId"] === bare["execId"]));
     expect(scripts().at(-1)).toContain("export PATH='/usr/bin'\ncd ~ && 'git' 'status'\necho $? > ");
     c.close();

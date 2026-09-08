@@ -12,10 +12,10 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ProjectGolden, Recipe, ThreadView, WorkspaceView, type ExitClass } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ProjectGolden, Recipe, ThreadView, WorkspaceView, workspaceKind, type ExitClass } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { serve } from "../src/cli.js";
+import { localWiring, serve } from "../src/cli.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
 import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
 import { WSP_SKILL, instructionsOf } from "../src/skill.js";
@@ -84,7 +84,7 @@ describe("the MCP server over the host", () => {
     await store.put("goldens", "default", SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter } });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user")) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     // The host has its keys; the server never reads any.
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -125,7 +125,7 @@ describe("the MCP server over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"]): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend, store, adapters });
+    rt = createRuntime({ backend, store, adapters, local: localWiring(join(dir, "user")) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_mcp_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -230,6 +230,29 @@ describe("the MCP server over the host", () => {
     const { workspaces } = listed.structured as { workspaces: WorkspaceView[] };
     expect(workspaces.map(w => WorkspaceView.parse(w).id)).toEqual([ws!.id]);
     expect(JSON.parse(listed.text)).toEqual(listed.structured);
+  });
+
+  it("new with local makes this computer, workspaces lists it beside a fork with kind local and no image, and thread_new takes it by name like any workspace", async () => {
+    await call("new", { name: "alpha" });
+    const made = await call("new", { local: true, name: "mac" });
+    expect(made.isError).toBe(false);
+    const listed = await call("workspaces");
+    const { workspaces } = listed.structured as { workspaces: WorkspaceView[] };
+    expect(workspaces.map(w => [w.name, workspaceKind(WorkspaceView.parse(w)), w.golden !== ""])).toEqual([
+      ["alpha", "cloud", true],
+      ["mac", "local", false],
+    ]);
+    // The listing's own words say a workspace need not be a machine, so a caller holding only the tools reads it here.
+    const served = (await client!.listTools()).tools.find(t => t.name === "workspaces")!.description!;
+    expect(served).toContain("or this computer itself, which forks from no golden and runs while the host does");
+
+    const opened = await call("thread_new", { workspace: "mac", task: "say pong" });
+    expect(opened.isError).toBe(false);
+    expect(opened.text).toBe("re: say pong");
+    const local = workspaces.find(w => w.name === "mac")!;
+    expect(opened.structured).toMatchObject({ workspaceId: local.id, harness: "claude", outcome: "started" });
+    const rows = (await call("threads")).structured as { threads: { workspaceName: string; startedBy: string }[] };
+    expect(rows.threads.map(t => [t.workspaceName, t.startedBy])).toEqual([["mac", "agent"]]);
   });
 
   it("fork makes a sibling from the source's golden version, by name or id, and a task opens its first thread", async () => {

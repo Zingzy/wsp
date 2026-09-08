@@ -14,6 +14,10 @@ export function workspaceKind(view: Pick<WorkspaceView, "kind">): WorkspaceKind 
   return view.kind ?? "cloud";
 }
 
+/** Whether this workspace is this computer. Asked by every surface that offers to make one (the app's sidebar and
+ * palette, wsp init's workspace step), and written once so the two cannot disagree about what counts. */
+export const isLocalWorkspace = (view: Pick<WorkspaceView, "kind">): boolean => workspaceKind(view) === "local";
+
 /** What a workspace's kind changes about the words a client shows for it. */
 export interface WorkspaceKindWords {
   /** What the machine is, on the sidebar row's second line and at the head of the Machine tab's lineage; null for a
