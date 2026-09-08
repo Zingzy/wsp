@@ -27,7 +27,7 @@ vi.mock("../src/components/ui/popover.js", () => ({
 
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
 import { ContextMenuHost } from "../src/actions/ContextMenuHost.js";
-import { FILE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { WorkspaceTerminalDrawer } from "../src/components/WorkspaceTerminalDrawer.js";
 import { useDiffRevealStore } from "../src/diffs/reveal.js";
@@ -37,6 +37,7 @@ import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { requestRenameWorkspace } from "../src/shell/shellRequests.js";
+import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
@@ -282,6 +283,24 @@ describe("a workspace row's menu", () => {
   });
 });
 
+describe("the Workspaces section's menu", () => {
+  it("holds the sidebar's body toggle alone, and choosing it turns the body into one workspace under its header", async () => {
+    await mountSidebar(fakeApi([API, OLD], [statusOf(API), statusOf(OLD)]), "api");
+    expect(document.querySelector("[data-space-header]")).toBeNull();
+    rightClick(screen.getByRole("button", { name: "Workspaces" }));
+    await screen.findByRole("menu");
+    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.spaces.title]);
+    fireEvent.click(item(SIDEBAR_MODE_WORDS.spaces.title));
+    await waitFor(() => expect(menu()).toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
+    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
+    // The menu then names the way back, from the one registry entry: nothing spells the two words twice.
+    rightClick(screen.getByRole("button", { name: "Workspaces" }));
+    await screen.findByRole("menu");
+    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.list.title]);
+  });
+});
+
 describe("a thread row's menu", () => {
   it("offers stop and copy link; stop interrupts the runtime's session, copy link writes the thread's address", async () => {
     const api = fakeApi([API], [statusOf(API)], [RUNNING]);
@@ -477,6 +496,19 @@ describe("a thread row's menu", () => {
 
 describe("a workspace row's name box", () => {
   const nameBox = () => screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename }) as Promise<HTMLInputElement>;
+  /** The Spaces body draws no workspace row, and the current name reads twice (header and dot), so the shared
+   * mount's one-name wait cannot be used: the header arriving is what says the body is up. */
+  const mountSpaces = async (api: FakeApi): Promise<void> => {
+    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.getState().bind(api);
+    render(
+      <SidebarProvider defaultOpen>
+        <WorkspaceSidebar />
+        <ContextMenuHost />
+      </SidebarProvider>,
+    );
+    await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
+  };
   const openFromMenu = async (): Promise<HTMLInputElement> => {
     rightClick(rowOf2("ws:ws_a"));
     await screen.findByRole("menu");
@@ -500,6 +532,27 @@ describe("a workspace row's name box", () => {
     await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "the name he typed"));
     await waitFor(() => expect(screen.getByText("the name he typed")).toBeDefined());
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("in Spaces the header grows the same box: the menu opens it in the name's own slot and Enter names the workspace", async () => {
+    const api = fakeApi([{ ...API }], [statusOf(API)]);
+    await mountSpaces(api);
+    // No workspace row on screen at all, so the header is the only editor there can be.
+    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
+    const header = document.querySelector<HTMLElement>("[data-space-header]")!;
+    rightClick(header);
+    await screen.findByRole("menu");
+    expect(labels()).toContain(WORKSPACE_WORDS.rename);
+    fireEvent.click(item(WORKSPACE_WORDS.rename));
+    const input = await nameBox();
+    expect(input.value).toBe("api");
+    expect(document.activeElement).toBe(input);
+    expect(input.closest("[data-space-header]")).toBe(header);
+    fireEvent.change(input, { target: { value: "the name he typed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "the name he typed"));
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    expect(within(document.querySelector<HTMLElement>("[data-space-header]")!).getByText("the name he typed")).toBeDefined();
   });
 
   it("a double-click on the name opens the same box", async () => {

@@ -30,6 +30,9 @@ export function fmtSize(size: WorkspaceSize): string {
   return `${size.cpu} vCPU · ${fmtMemGb(size.memMb)}`;
 }
 
+/** Every machine wsp forks is a cloud Linux box; the word has one home until a machine's kind can vary it. */
+export const MACHINE_OS_WORD = "Linux";
+
 /** A size as the --size flag and the fork tools spell it: vCPUs, an x, memory in GB ("2x4", "2x0.5"). */
 export function sizeWord(size: WorkspaceSize): string {
   return `${size.cpu}x${memGb(size.memMb)}`;
