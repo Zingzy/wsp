@@ -3,9 +3,38 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import type { MachineState, ReachState, WorkspacePhase, WorkspaceStatus } from "./index.js";
+import { THIS_COMPUTER } from "./format.js";
+import type { MachineState, ReachState, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
+
+/** A workspace's kind as every client must read it: a record written before local workspaces existed carries none
+ * and is a provider fork. The one place an absent kind is resolved. */
+export function workspaceKind(view: Pick<WorkspaceView, "kind">): WorkspaceKind {
+  return view.kind ?? "cloud";
+}
+
+/** What a workspace's kind changes about the words a client shows for it. */
+export interface WorkspaceKindWords {
+  /** What the machine is, on the sidebar row's second line and at the head of the Machine tab's lineage; null for a
+   * kind whose rows show what it cost and which image it forked from there instead. */
+  machine: string | null;
+  /** Whether wsp forks this machine, pauses it, wakes it, resizes it and pays for it by the hour, or it is a machine
+   * that already exists and simply runs while the host does. The state word beside the name, the state dot, the
+   * spend, the rate, the nap countdown, the usage chart and the pause and upgrade buttons all ride this. */
+  driven: boolean;
+}
+
+/** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
+ * machine) is a row here. */
+export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
+  cloud: { machine: null, driven: true },
+  local: { machine: THIS_COMPUTER, driven: false },
+};
+
+export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
+  return WORKSPACE_KIND_WORDS[kind];
+}
 
 export interface WorkspaceStateInput {
   phase: WorkspacePhase;

@@ -67,18 +67,24 @@ describe("the viewport with the person's Ghostty config", () => {
     expect(mount.className).not.toContain("bg-[var(--terminal-background)]");
   });
 
-  it("a file naming a size draws at the app's own text size, not the file's: the size is on the wire and the pane ignores it", async () => {
-    const { options, surface } = await open(async () => ({ ...FILE, fontFamily: [], fontSize: 16 }));
+  it("a file naming a size draws at the app's own text size while the preference says the app's; with the file as the source the pane takes the file's, and the flip reaches the surface without a remount", async () => {
+    const { options, surface, create, setConfig } = await open(async () => ({ ...FILE, fontFamily: [], fontSize: 16 }));
     expect(options.font).toEqual({ size: appTerminalFontSize() });
     expect(surface.textSize).toBe(appTerminalFontSize());
+    const setFont = vi.spyOn(surface, "setFont");
+    setConfig({ sizing: { source: "file", zoom: 0 } });
+    await vi.waitFor(() => expect(setFont).toHaveBeenCalledWith({ size: 16 }));
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
-  it("the pane's own size opens the surface at it, and a step of it reaches the surface without a remount", async () => {
-    const { options, surface, create, setConfig } = await open(async () => ({ ...FILE, fontFamily: [], fontSize: 16 }), { font: { size: 12 } });
-    expect(options.font).toEqual({ size: 12 });
+  it("the workspace's zoom opens the surface over the base, and a step of it reaches the surface without a remount", async () => {
+    const { options, surface, create, setConfig } = await open(async () => ({ ...FILE, fontFamily: [], fontSize: 16 }), { sizing: { source: "app", zoom: -2 } });
+    expect(options.font).toEqual({ size: appTerminalFontSize() - 2 });
     const setFont = vi.spyOn(surface, "setFont");
-    setConfig({ font: { size: 13 } });
-    await vi.waitFor(() => expect(setFont).toHaveBeenCalledWith({ size: 13 }));
+    setConfig({ sizing: { source: "app", zoom: -1 } });
+    await vi.waitFor(() => expect(setFont).toHaveBeenCalledWith({ size: appTerminalFontSize() - 1 }));
+    setConfig({ sizing: { source: "file", zoom: -1 } });
+    await vi.waitFor(() => expect(setFont).toHaveBeenCalledWith({ size: 15 }));
     expect(create).toHaveBeenCalledTimes(1);
   });
 

@@ -109,6 +109,8 @@ import type {
   HarnessCatalog,
   HarnessCatalogAnswer,
   HostFolderListing,
+  Preferences,
+  PreferencesPatch,
   RecipeDigest,
   TerminalConfig,
   TerminalScheme,
@@ -150,7 +152,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, preferencesFrom, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -557,6 +559,12 @@ export interface LocalWiring {
   execStream: (opts?: MachineExecOptions) => ExecStreamFactory;
   home: (agentId: string) => string;
   env: Readonly<Record<string, string>>;
+  /** Where this computer's daemon listens and the token that opens it, in the shape a cloud fork's preview route
+   * arrives in, so the panes and the status probe read one view. The host starts that daemon on the first call and
+   * closes it in close(); a host that wires none leaves the local workspace's panes with nothing to dial. */
+  daemonRoad?: () => Promise<DaemonReachView>;
+  /** Frees whatever the wiring holds open on this computer when the runtime closes. */
+  close?: () => Promise<void>;
 }
 
 export interface RuntimeOptions {
@@ -987,6 +995,12 @@ export interface Runtime {
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker; its list leaves out the workspaces the
    * caller's origin may not drive, as workspaces.list does. */
   readonly status: OriginStatusApi;
+  /** The person's view preferences, one record on this state file, so the desktop app and a browser tab agree. */
+  readonly preferences: {
+    get(): Promise<Preferences>;
+    /** The patch over the record; the record kept and pushed as preferences.changed to every socket. */
+    set(patch: PreferencesPatch): Promise<Preferences>;
+  };
   /** This state file's owner id, stamped on every machine it creates: a machine wearing another one was made by
    * another host standing on the same account. Minted on the first read when the state file has none. */
   owner(): Promise<string>;
@@ -1031,6 +1045,9 @@ const SESSIONS = "sessions";
  * the sweep reads it when it records a machine whose workspace document this store lost, so a restored record keeps
  * that name rather than the one the fork stamped, which the provider takes at create and never updates. */
 const WORKSPACE_NAMES = "workspace-names";
+/** One record under one id: the person's view preferences. */
+const PREFERENCES = "preferences";
+const PREFERENCES_ID = "default";
 
 /** What the timeline shows as the last row of a turn the runtime ended, not the harness. */
 const PAUSED_REASON = "machine paused while the agent was working";
@@ -1120,12 +1137,6 @@ const HELD_TTL_MS = 15 * 60_000;
 const HEARTBEAT_MS = 5 * 60_000;
 
 const isCapRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind === "concurrency";
-/** Whether a workspace still holds one of the account's machine slots: a napped or gone one holds none. Read off
- * the record's phase alone, since a refusal has no time to ask the provider about every workspace. */
-const holdsSlot = (record: WorkspaceRecord): boolean => {
-  const state = workspaceState({ phase: record.phase });
-  return state !== "paused" && state !== "gone";
-};
 
 function pidAlive(pid: number): boolean {
   try {
@@ -1269,15 +1280,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     env: Readonly<Record<string, string>>;
     /** Whether a request relayed from a machine may drive a workspace of this kind; a local one answers only this computer. */
     relayed: boolean;
+    /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
+     * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
+     * word and the status poller read it before this seam existed. */
+    hasDaemon: (entry: LiveWorkspace) => boolean;
+    /** The road to this machine's daemon: where it listens, when the route expires and the token that opens it. A
+     * cloud fork's preview route with the token this runtime wrote on the guest; this computer's loopback daemon
+     * with the token it holds in memory. Throws with the backend's own words when the machine has no road. */
+    daemonRoad: (entry: LiveWorkspace) => Promise<DaemonReachView>;
   }
   const cloudHome = (id: string): string => {
     const home = guestAgentHomes()[id];
     if (home === undefined) throw new Error(`the catalog has no home for ${id}`);
     return home;
   };
+  const cloudRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
+    const reach = await entry.ws.daemonReach();
+    const token = await daemonTokenOf(entry.machine);
+    return { url: reach.url, expiresAt: reach.expiresAt, ...(token !== undefined ? { daemonToken: token } : {}) };
+  };
+  const localRoad = async (): Promise<DaemonReachView> => {
+    if (local?.daemonRoad === undefined) throw new Error("this host wired no daemon for its local workspace, so nothing on this computer can be dialled");
+    return local.daemonRoad();
+  };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
-    cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true },
-    local: local === undefined ? undefined : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), home: local.home, env: local.env, relayed: false },
+    cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true, hasDaemon: entry => Boolean(entry.machine.previewUrl), daemonRoad: cloudRoad },
+    local:
+      local === undefined
+        ? undefined
+        : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), home: local.home, env: local.env, relayed: false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
     const found = modules[kind];
@@ -1290,6 +1321,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * sentence, which reads for the local computer, the only machine short of these capabilities today. */
   const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes">, action: string): void => {
     if (backendFor(entry.record.kind).capabilities[can] !== true) throw new Error(localMachineRefusal(entry.record.name, action));
+  };
+  /** Whether a workspace holds one of the account's machine slots: only a kind whose machines the provider can nap
+   * does, the same capability the pause and wake refusals read, so this computer is never counted against the cap
+   * nor named beside the two moves that free a slot. Phase decides the rest off the record alone, since a refusal
+   * has no time to ask the provider about every workspace. */
+  const holdsSlot = (record: WorkspaceRecord): boolean => {
+    if (backendFor(record.kind).capabilities.ramPreservingPause !== true) return false;
+    const state = workspaceState({ phase: record.phase });
+    return state !== "paused" && state !== "gone";
   };
   /** The one rule about where a request came from, read by every verb and every list that serves workspaces: a
    * request relayed from a machine drives and sees only the kinds whose module takes one, so this computer's own
@@ -1602,8 +1642,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * would reset its idle timer for a fact the runtime already knows. The nap
    * countdown rides along as the poller sends it: a client replaces the whole
    * status, so leaving it out would blank the row until the next poll. */
-  /** The reach a status pushed for a running machine claims: the edge answers where the backend mints a route. */
-  const reachOf = (entry: LiveWorkspace): ReachState => (entry.machine.previewUrl ? "reachable" : "unsupported");
+  /** The reach a status pushed for a running machine claims: the daemon answers wherever this kind has a road to it. */
+  const reachOf = (entry: LiveWorkspace): ReachState => (moduleOf(entry.record.kind).hasDaemon(entry) ? "reachable" : "unsupported");
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
     const size = entry.record.size;
     const idleAt = entry.record.phase === "running" ? idle.idleAt(entry.record.id) : undefined;
@@ -2805,9 +2845,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async daemonReach(id, origin) {
       const entry = await entryOf(id, origin);
-      const reach = await entry.ws.daemonReach();
-      const daemonToken = await daemonTokenOf(entry.machine);
-      return { url: reach.url, expiresAt: reach.expiresAt, ...(daemonToken !== undefined ? { daemonToken } : {}) };
+      return moduleOf(entry.record.kind).daemonRoad(entry);
     },
 
     async portReach(id, port, origin) {
@@ -4462,7 +4500,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         rateUsdPerHour: backendFor(e.record.kind).pricing.rateUsdPerHour(e.record.size),
         generation: e.generation,
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
-        ...(e.machine.previewUrl ? { daemonReach: () => e.ws.daemonReach() } : {}),
+        ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
         providerState: () => e.machine.state(),
         ...(e.machine.metrics !== undefined ? { metrics: e.machine.metrics.bind(e.machine) } : {}),
         exec: (cmd, o) => e.machine.exec(cmd, o),
@@ -4530,12 +4568,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return adopted;
   };
 
+  // Sets run one after another: two clients patching different fields at once would otherwise each read the record
+  // before the other's write and the later write would drop the earlier field.
+  let preferenceWrites: Promise<unknown> = Promise.resolve();
+  const preferences: Runtime["preferences"] = {
+    get: async () => preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)),
+    set: patch => {
+      const write = preferenceWrites.then(async () => {
+        const next = applyPreferencesPatch(await preferences.get(), patch);
+        await store.put(PREFERENCES, PREFERENCES_ID, next);
+        bus.emit({ type: "preferences.changed", preferences: next });
+        return next;
+      });
+      preferenceWrites = write.catch(() => undefined);
+      return write;
+    },
+  };
+
   return {
     events: bus,
     backend,
     workspaces,
     projects,
     sessions: sessionsApi,
+    preferences,
     status: {
       ...status,
       list: async (o, origin) => (await status.list(o)).filter(row => drivesId(row.id, origin)),
@@ -4635,6 +4691,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     close: async () => {
       idle.close();
+      await local?.close?.();
       closed = true;
       beat?.();
       beat = undefined;

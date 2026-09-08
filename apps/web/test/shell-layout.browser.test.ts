@@ -21,10 +21,12 @@
 // state word in its slot at the right edge only off running, the meta line
 // in one order cut from the right, no import or export glyph, the thread
 // title up to a fixed time column, the Spaces body draws one workspace
-// under its header with a dot per workspace at the sidebar's bottom, and the
+// under its header with a dot per workspace at the sidebar's bottom, the
 // move to another space travels that body out the way it was pushed and the
 // next one in from the other side while the header and the dots row hold
-// still, or swaps it with no travel for a reader who asked for less motion. Vite
+// still, or swaps it with no travel for a reader who asked for less motion,
+// and a mixed list of a local machine and two cloud ones keeps that one
+// grammar with the kind's glyph in the local lead. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -34,7 +36,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type ConsoleMessage, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
+import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTER } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
@@ -236,29 +238,25 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
-  it("in the desktop window the terminal draws at the Ghostty file's font-size: a file saying 16 gives cells a 16 px monospace line fits, not the app's 11 px mono", async () => {
-    await page!.goto(`${base}?theme=dark&ws=ws_a&mac=1&panel=terminal`);
-    await page!.waitForSelector("[data-terminal-translucent] canvas");
-    await page!.waitForFunction(() => (window as unknown as { surfaces: unknown[] }).surfaces.length > 0);
-    const read = await page!.evaluate(() => {
-      const [surface] = (window as unknown as { surfaces: { textSize: number; cellHeight: number }[] }).surfaces;
-      // A monospace line at the file's size and at the app's mono size, as the page lays them out.
-      const lineOf = (px: number): number => {
-        const span = document.createElement("span");
-        span.style.cssText = `position:absolute;font:400 ${px}px monospace;line-height:normal;white-space:pre`;
-        span.textContent = "Mg";
-        document.body.append(span);
-        const height = span.getBoundingClientRect().height;
-        span.remove();
-        return height;
-      };
-      return { textSize: surface!.textSize, cellHeight: surface!.cellHeight, line16: lineOf(16), line11: lineOf(11) };
-    });
-    console.info(`terminal size from a font-size 16 file: ${JSON.stringify(read)}`);
-    expect(read.textSize).toBe(16);
-    expect(read.cellHeight).toBeGreaterThanOrEqual(read.line16);
-    expect(read.cellHeight).toBeLessThan(read.line16 + 5);
-    expect(read.cellHeight).toBeGreaterThan(read.line11 + 4);
+  it("in the desktop window the terminal draws at the app's own text size over a file saying 16, and at the file's 16 once the record says the size comes from the file", async () => {
+    const read = async (query: string) => {
+      await page!.goto(`${base}?theme=dark&ws=ws_a&mac=1&panel=terminal${query}`);
+      await page!.waitForSelector("[data-terminal-translucent] canvas");
+      await page!.waitForFunction(() => (window as unknown as { surfaces: unknown[] }).surfaces.length > 0);
+      return page!.evaluate(() => {
+        const [surface] = (window as unknown as { surfaces: { textSize: number; cellHeight: number }[] }).surfaces;
+        const app = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--font-size-terminal"));
+        return { textSize: surface!.textSize, cellHeight: surface!.cellHeight, app };
+      });
+    };
+    const fromApp = await read("");
+    console.info(`terminal size with the app as the source: ${JSON.stringify(fromApp)}`);
+    expect(fromApp.textSize).toBe(fromApp.app);
+    const fromFile = await read("&size=file");
+    console.info(`terminal size with the file as the source: ${JSON.stringify(fromFile)}`);
+    expect(fromFile.textSize).toBe(16);
+    // The cells grow with the text: the file's 16 over the app's 14 is two pixels of text and at least that of cell.
+    expect(fromFile.cellHeight - fromApp.cellHeight).toBeGreaterThanOrEqual(2);
   }, 60_000);
 
   it("holding the switch chord puts the switcher up over the shell, one card per workspace of three parts, and the highlight moves nothing", async () => {
@@ -665,6 +663,50 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       }
     }
   }, 120_000);
+
+  it("a mixed list keeps one row grammar: this computer's row leads with the kind's glyph, says what it is and shows no state word, while the cloud rows beside it keep their dot, spend and word, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&local=1`);
+      await page!.waitForSelector("[data-row-id='ws:ws_m']");
+      const local = page!.locator("[data-row-id='ws:ws_m']");
+      const cloud = page!.locator("[data-row-id='ws:ws_a']");
+      const paused = page!.locator("[data-row-id='ws:ws_b']");
+      // One glyph in the lead where it means something: the laptop, no dot beside it, no chip and no badge.
+      expect(await local.locator("[data-workspace-lead]").getAttribute("data-workspace-lead")).toBe("glyph");
+      expect(await local.locator("[data-workspace-lead] svg").count()).toBe(1);
+      expect(await cloud.locator("[data-workspace-lead]").getAttribute("data-workspace-lead")).toBe("dot");
+      expect(await page!.locator("[data-slot=badge]").count()).toBe(0);
+      expect((await local.locator("[data-workspace-meta]").textContent())?.trim()).toBe(THIS_COMPUTER);
+      expect((await local.locator("[data-workspace-state]").textContent())?.trim()).toBe("");
+      expect((await cloud.locator("[data-workspace-meta]").textContent())?.trim()).toContain("$0.110/hr");
+      expect((await paused.locator("[data-workspace-state]").textContent())?.trim()).toBe("Paused");
+      // Uniform rows: one height for every kind, the lead slots and the names in one column.
+      const rows = await page!.locator("[data-row-id^='ws:']").evaluateAll(list =>
+        list.map(row => {
+          const lead = row.querySelector<HTMLElement>("[data-workspace-lead]")!;
+          const name = row.querySelector<HTMLElement>("[data-workspace-name]")!;
+          return { height: row.getBoundingClientRect().height, lead: lead.getBoundingClientRect(), nameX: name.getBoundingClientRect().x };
+        }),
+      );
+      for (const row of rows) {
+        expect(row.height).toBe(rows[0]!.height);
+        expect(Math.abs(row.lead.x - rows[0]!.lead.x)).toBeLessThan(0.5);
+        expect(Math.abs(row.lead.width - rows[0]!.lead.width)).toBeLessThan(0.5);
+        expect(Math.abs(row.nameX - rows[0]!.nameX)).toBeLessThan(0.5);
+      }
+      // This computer's line is short enough to be drawn whole at the default width.
+      expect(await local.locator("[data-workspace-meta]").evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
+      // The glyph reads at the weight of the neutral dot it stands in for, never a colour of its own.
+      const [glyph, neutralDot] = await Promise.all([
+        local.locator("[data-workspace-lead] svg").evaluate(el => getComputedStyle(el).color),
+        page!.locator("[data-row-id='ws:ws_c'] [data-workspace-lead] > span").evaluate(el => getComputedStyle(el).backgroundColor),
+      ]);
+      expect(glyph).toBe(neutralDot);
+      const path = join(SHOTS_DIR, `sidebar-mixed-kinds-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`mixed-kind sidebar screenshot: ${path}`);
+    }
+  }, 30_000);
 
   it("moving to another space travels the body out the way it was pushed and the next one in, over a still header and dots row, and reduced motion swaps it at once, in both themes", async () => {
     // The travel is read off the animation itself, seeked rather than raced: a frame sampled on a loaded machine

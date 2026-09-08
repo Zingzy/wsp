@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -14,7 +14,6 @@ import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
-import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
 import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
@@ -86,7 +85,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -373,6 +372,27 @@ describe("rows from the fixture wire", () => {
     expect(meta.children).toHaveLength(0);
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
     await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · $0.110/hr · active"));
+  });
+
+  it("this computer's row: the laptop glyph where the state dot goes, no state word, and what the machine is on the meta line, beside cloud rows that keep all three", async () => {
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    await mount(fakeApi([API, WEB, MAC], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB), { ...status(MAC), kind: "local", rateUsdPerHour: 0 }]), "api");
+    await waitFor(() => expect(rowOf("zingzy-mac")).toBeDefined());
+    const lead = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-lead]")!;
+    expect(lead(rowOf("zingzy-mac")).dataset["workspaceLead"]).toBe("glyph");
+    expect(lead(rowOf("zingzy-mac")).querySelector("svg")).not.toBeNull();
+    expect(lead(rowOf("api")).dataset["workspaceLead"]).toBe("dot");
+    expect(lead(rowOf("api")).querySelector("svg")).toBeNull();
+    expect(metaOf(rowOf("zingzy-mac")).textContent).toBe("this computer");
+    expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
+    // The cloud rows beside it are untouched: the spend, the countdown and the paused word all still read.
+    expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · $0.110/hr · naps in 14m");
+    expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
+    // One row grammar for both kinds: the same lead slot and the same height.
+    const boxOf = (row: HTMLElement) => [...row.firstElementChild!.classList].filter(c => /^(size-|mt-)/.test(c)).sort();
+    expect(boxOf(rowOf("zingzy-mac"))).toEqual(boxOf(rowOf("api")));
+    const heightOf = (row: HTMLElement) => [...row.classList].filter(c => /^(h-|py-)/.test(c)).sort();
+    expect(heightOf(rowOf("zingzy-mac"))).toEqual(heightOf(rowOf("api")));
   });
 
   it("every two-line row is one height, the thread rows share the workspace rows' grammar, and the Idle row is the kit row", async () => {
@@ -924,7 +944,7 @@ describe("Spaces mode", () => {
   // The current workspace's name reads twice on screen, in the header and on its own dot, so the shared mount's
   // one-name wait cannot be used here; the header arriving is what says the body is up.
   async function mountSpaces(api: FakeApi): Promise<FakeApi> {
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
     useStore.getState().bind(api);
     render(
       <SidebarProvider defaultOpen>
@@ -997,6 +1017,26 @@ describe("Spaces mode", () => {
     expect(useStore.getState().selectedId).toBe("ws_b");
     expect(screen.getByText("bump the lockfile")).toBeDefined();
     expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
+  });
+
+  it("this computer's header says what the machine is where a fork's size reads, through the one machine line", async () => {
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    useStore.setState({ selectedId: "ws_m" });
+    await mountSpaces(fakeApi([API, MAC], [status(API), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]));
+    await waitFor(() => expect(within(spaceHeader()!).getByText("zingzy-mac")).toBeDefined());
+    // The machine words alone: nothing wsp does not pay for, so no cost line and no rate under them.
+    expect(headerLines()).toEqual(["this computer"]);
+    expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
+    // A tick on this computer's meter changes nothing there either.
+    act(() =>
+      useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_m", phase: "running", rateUsdPerHour: 0, awakeMs: 120_000, accruedUsd: 0, at: new Date(NOW).toISOString() }),
+    );
+    await waitFor(() => expect(headerLines()).toEqual(["this computer"]));
+    // The fork beside it keeps every line it had: the size and the OS word, then the spend with its rate. Both
+    // bodies carry a header while one travels out, so the lines are read once the body asked for is there alone.
+    fireEvent.click(dots()[0]!);
+    await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr"]));
   });
 
   it("a space asked for while the body is still travelling turns it around and never draws one workspace twice", async () => {

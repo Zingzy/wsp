@@ -3,7 +3,7 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import { MACHINE_OS_WORD, fmtSize, isBilling, outOfMemoryRowLine, workspaceState, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { MACHINE_OS_WORD, fmtSize, isBilling, kindWords, outOfMemoryRowLine, workspaceKind, workspaceState, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -43,11 +43,14 @@ export interface WorkspaceMetaInput {
  * note, the nap countdown last. The cost always leads, an honest zero before the meter's first tick, so no row draws
  * a blank line. The width cuts it from the right; nothing here decides what to leave out. What the runtime is doing
  * to the machine's daemon, or a drop with memory near full, takes the whole line while it lasts: it is the one thing
- * on the row a person may be waiting on. */
+ * on the row a person may be waiting on. A machine wsp does not drive spends nothing and naps never, so its line
+ * says what the machine is instead. */
 export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
   const note = daemonNote(project);
   if (note !== undefined) return note;
   if (outOfMemory !== undefined) return outOfMemoryRowLine(outOfMemory);
+  const machine = machineLine(project);
+  if (!kindWords(workspaceKind(project.workspace)).driven && machine !== null) return machine;
   return [
     accruedTodayLabel(cost?.accruedUsd ?? 0),
     isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null,
@@ -56,6 +59,16 @@ export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: Workspa
   ]
     .filter((part): part is string => part !== null)
     .join(" · ");
+}
+
+/** What the machine is, the one line the row and the Spaces header both read: the kind's own words where it has
+ * them (this computer), else the size the provider built and the OS every fork runs. Null before a status carries a
+ * size, so a surface leaves the line out rather than drawing it half. The row shows it only for a kind wsp does not
+ * drive, which has no spend to show there instead; a fork's size reads in the header and the Machine tab. */
+export function machineLine(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string | null {
+  const kind = kindWords(workspaceKind(project.workspace));
+  if (kind.machine !== null) return kind.machine;
+  return project.status === null ? null : `${fmtSize(project.status.size)} · ${MACHINE_OS_WORD}`;
 }
 
 /** What the runtime is doing to this machine's daemon, or why its last attempt failed; the status leads where one
@@ -76,22 +89,28 @@ export const rateLabel = (rateUsdPerHour: number | null): string | null => (rate
  * workspace on screen is where a person waits on them: what the runtime is doing to the daemon, then a drop with
  * memory near full. Then what the machine is, what it costs, and when it naps. A line nothing is known for is left
  * out rather than drawn half: no size yet means no machine line, as no nap scheduled means no nap line. The cost
- * line leads with the same honest zero the row's does and carries the rate only while the machine bills. */
+ * line leads with the same honest zero the row's does and carries the rate only while the machine bills. A kind
+ * with its own words for what the machine is says them where a fork's size reads, through the one machine line, and
+ * a machine wsp does not drive stops there: it spends nothing and naps never, so a rate under the words for what
+ * the machine is would name an hour nobody is charged for. */
 export function spaceHeaderLines({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
-  const nap = idleCountdownLabel(project.status, nowMs);
-  return [
-    daemonNote(project) ?? null,
-    outOfMemory === undefined ? null : outOfMemoryRowLine(outOfMemory),
-    project.status === null ? null : `${fmtSize(project.status.size)} · ${MACHINE_OS_WORD}`,
-    [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]
-      .filter((part): part is string => part !== null)
-      .join(" · "),
-    nap === NO_NAP_SCHEDULED ? null : nap,
-  ].filter((line): line is string => line !== null);
+  const lines: (string | null)[] = [daemonNote(project) ?? null, outOfMemory === undefined ? null : outOfMemoryRowLine(outOfMemory), machineLine(project)];
+  if (kindWords(workspaceKind(project.workspace)).driven) {
+    const nap = idleCountdownLabel(project.status, nowMs);
+    lines.push(
+      [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]
+        .filter((part): part is string => part !== null)
+        .join(" · "),
+      nap === NO_NAP_SCHEDULED ? null : nap,
+    );
+  }
+  return lines.filter((line): line is string => line !== null);
 }
 
-/** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. */
-export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "indicator">): string {
+/** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. A
+ * machine wsp does not drive has no state of its own to name, so its slot stays empty whatever the reach says. */
+export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "indicator" | "workspace">): string {
+  if (!kindWords(workspaceKind(project.workspace)).driven) return "";
   return project.state === "running" ? "" : project.indicator.label;
 }
 

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One machine's row, two lines at every width. Line one: the state dot, the
+// One machine's row, two lines at every width. Line one: the lead slot, the
 // name, and at the right edge a slot as wide as two glyphs holding the
 // state's word in muted mono only while the state is not running (the dot
-// says running); on hover the word yields and the row's two glyphs, the
+// says running). The lead holds the state dot for a machine wsp drives and
+// the kind's own glyph for one it does not, which has no state to report.
+// On hover the word yields and the row's two glyphs, the
 // collapse chevron and new thread, take the slot, so nothing moves. Line
 // two: the one mono meta line over the row's whole width, cut from the right
 // and whole in its title. Renaming turns the name into the sidebar's one name
@@ -12,7 +14,7 @@
 // word: a gone row's forget and rebuild, a zombie's rebuild alone. The words
 // come from workspaceRows.ts and the actions from the workspace registry.
 import { ChevronDownIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
-import { needsRebuild, type MemoryReading } from "@wsp/protocol";
+import { needsRebuild, workspaceKind, type MemoryReading } from "@wsp/protocol";
 import { runAction } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
 import { actionById, rowLabelOf, type ResolvedAction } from "../actions/registry.js";
@@ -20,6 +22,7 @@ import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
+import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, workspaceRowId } from "./rowGrammar.js";
 import { NEW_THREAD_TITLE, dotClassForTone, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
@@ -31,6 +34,8 @@ const INNER_GLYPH_CLASS = cn(GLYPH_CLASS, "right-7");
 const LIVE_ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
 const DEAD_ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-14";
 const STATE_SLOT_CLASS = "min-w-11 shrink-0 text-right";
+/** A kind's own glyph reads at the weight of the neutral dot it stands in for, so no row's lead is louder than another's. */
+const LEAD_GLYPH_CLASS = "text-muted-foreground/60";
 const YIELDING_SLOT_CLASS = "transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0";
 
 export function WorkspaceRow({
@@ -70,6 +75,7 @@ export function WorkspaceRow({
   onRenameOpen?: (() => void) | undefined;
 }) {
   const dead = needsRebuild({ phase: project.phase, machineState: project.machineState, reach: project.reach });
+  const KindGlyph = workspaceKindGlyph(workspaceKind(project.workspace));
   const gone = project.state === "gone";
   const meta = workspaceMetaLine({ project, cost, outOfMemory, nowMs });
   const forgetAction = actionById(actions, "forget");
@@ -87,8 +93,12 @@ export function WorkspaceRow({
         className={cn(TWO_LINE_ROW_CLASS, dead ? DEAD_ROW_CLASS : LIVE_ROW_CLASS)}
         {...(renaming ? {} : { onClick: onSelect })}
       >
-        <span aria-hidden className={ROW_LEAD_CLASS}>
-          <span className={cn("size-2 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />
+        <span aria-hidden className={ROW_LEAD_CLASS} data-workspace-lead={KindGlyph === null ? "dot" : "glyph"}>
+          {KindGlyph === null ? (
+            <span className={cn("size-2 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />
+          ) : (
+            <KindGlyph className={cn("size-3.5", LEAD_GLYPH_CLASS)} />
+          )}
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
           <span className="flex items-center gap-2">
