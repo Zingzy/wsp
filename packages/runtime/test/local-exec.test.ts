@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { turnCutLine } from "@wsp/protocol";
 import { endLocalRuns, localExecStream } from "../src/local-exec.js";
+import { gone, grandchild, sweepStrays } from "./strays.js";
 
 async function collect(lines: AsyncIterable<string>): Promise<string[]> {
   const out: string[] = [];
@@ -19,6 +20,7 @@ describe("local exec stream", () => {
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
+    sweepStrays();
   });
 
   it("streams stdout and stderr by line and answers with the exit code", async () => {
@@ -63,6 +65,36 @@ describe("local exec stream", () => {
     expect(turnCutLine("idle", 130, 120)).toMatch(/with no output for 0m$/);
   });
 
+  it("a child that prints nothing while the tree it started burns a core is not cut at the idle limit", async () => {
+    const marker = join(root, "busy.pid");
+    // The tree is read once the stream has been quiet for half the limit, so the limit leaves room for the pair of
+    // readings a rate takes.
+    const factory = localExecStream({ root, idleMs: 600, deadlineMs: 30_000, pollMs: 20 });
+    const stream = factory(`( while :; do :; done ) & echo $! > ${marker}; sleep 1.6; echo still working; sleep 20`, { env: {} });
+    const busy = await grandchild(marker);
+    // The line lands more than two idle limits into a silent turn, so only the tree's work can have held the turn
+    // open. A cut turn never delivers it: its own words wait on the child's streams closing, which a grandchild
+    // holding the inherited pipe never lets happen.
+    const first = stream.lines[Symbol.asyncIterator]().next();
+    const late = new Promise<string>(resolve => setTimeout(() => resolve("nothing reached the reader"), 5_000));
+    expect(await Promise.race([first, late])).toEqual({ value: "still working", done: false });
+    stream.kill();
+    expect(await stream.exited).not.toBe(0);
+    await gone(busy);
+  }, 20_000);
+
+  it("a child that prints nothing while the tree it started sleeps is cut at the idle limit, and the cut leaves no grandchild", async () => {
+    const marker = join(root, "idle.pid");
+    const factory = localExecStream({ root, idleMs: 400, deadlineMs: 30_000, pollMs: 20 });
+    const stream = factory(`sleep 20 & echo $! > ${marker}; sleep 20`, { env: {} });
+    const sleeping = await grandchild(marker);
+    const reading = collect(stream.lines).then(() => undefined, (e: unknown) => e as Error);
+    // The cut takes the group, so the grandchild is gone before the cut's own words reach the reader.
+    await gone(sleeping);
+    expect((await reading)?.message).toMatch(/^stopped after \d+m \d\ds with no output for 0m$/);
+    expect(await stream.exited).toBeNull();
+  }, 20_000);
+
   it("a child that keeps writing past the wall is cut at the cap", async () => {
     const factory = localExecStream({ root, idleMs: 60_000, deadlineMs: 150, pollMs: 10 });
     const stream = factory("while true; do echo tick; sleep 0.02; done", { env: {} });
@@ -86,32 +118,16 @@ describe("local exec stream", () => {
 
 describe("a real turn's process group", () => {
   let root: string;
-  /** Every pid a test read out of the turn, so a red run leaves no sleep behind on this computer. */
-  const started: number[] = [];
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "wsp-localexec-group-"));
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
-    for (const pid of started.splice(0)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        continue;
-      }
-    }
+    sweepStrays();
   });
 
   /** The pid the command wrote for what it left running, once it has. */
-  const leftRunning = async (): Promise<number> => {
-    const file = join(root, "child");
-    await vi.waitFor(() => expect(readFileSync(file, "utf8").trim()).not.toBe(""), { timeout: 5_000 });
-    const pid = Number(readFileSync(file, "utf8").trim());
-    expect(pid).toBeGreaterThan(0);
-    started.push(pid);
-    return pid;
-  };
-  const gone = (pid: number): Promise<void> => vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 5_000 });
+  const leftRunning = (): Promise<number> => grandchild(join(root, "child"));
 
   it("a child the command left running is gone when the turn ends, and the stream ends although that child held its stdout", async () => {
     const factory = localExecStream({ root });

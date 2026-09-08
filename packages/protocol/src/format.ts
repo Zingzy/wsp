@@ -475,7 +475,8 @@ function fmtLimit(ms: number): string {
   return ms >= 3_600_000 && ms % 3_600_000 === 0 ? `${ms / 3_600_000}h` : `${Math.round(ms / 60_000)}m`;
 }
 
-/** Which rule ended a turn: idle is no byte from the harness for the limit, wall is the cap on one turn's run. */
+/** Which rule ended a turn: idle is the turn doing nothing at all for the limit, TURN_IDLE_MS's own rule, and wall
+ * is the cap on one turn's run. */
 export type TurnCutRule = "idle" | "wall";
 
 /** The one line every client shows for a turn the runtime cut: which rule, how long the turn ran, the limit. */

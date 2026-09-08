@@ -722,9 +722,9 @@ function overSsh(env: Record<string, string | undefined>): boolean {
   return env["SSH_CONNECTION"] !== undefined || env["SSH_TTY"] !== undefined || env["SSH_CLIENT"] !== undefined;
 }
 
-/** The shell's own code for a death by that signal. */
-function exitCodeOf(sig: "SIGINT" | "SIGTERM"): number {
-  return sig === "SIGINT" ? 130 : 143;
+/** The shell's own code for a death by that signal; the serving host's stop reads it for the same reason. */
+export function exitCodeOf(sig: "SIGINT" | "SIGTERM" | "SIGHUP"): number {
+  return sig === "SIGINT" ? 130 : sig === "SIGHUP" ? 129 : 143;
 }
 
 /** Resolves after ms, or at once when the signal aborts. */

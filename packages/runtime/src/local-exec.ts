@@ -3,37 +3,41 @@
 // real child process on this computer, not the guest's detached-and-polled
 // road. machineExecStream is written for a Linux guest reached over REST
 // (setsid, base64 -w0, /proc), which cannot drive a binary on this Mac, so a
-// local machine has its own factory. A turn is one child: bash -c the command,
-// its stdout and stderr merged to the line stream in arrival order, its exit
-// code on `exited`. A stream started with an input channel gets the child's
-// stdin, seeded with the launch's lines and appended to by write(); one
-// started without gets no stdin at all, so the binary reads EOF rather than
-// hanging on a silent open pipe. The turn runs under the same two limits a
-// cloud turn does, idle and wall, read from the one rule machine-exec reads,
-// so a hung agent ends with the same line on either kind. The child leads a
-// process group of its own and every signal goes to that group, never to the
-// leader alone: a harness leaves its own children behind when it goes, and a
-// grandchild that outlives the leader holds the inherited stdout pipe, so a
-// signal to the leader alone left the stream unended and the harness running
-// (seven such processes were found on one box, the oldest fourteen hours past
-// its turn's reply). The group is taken at every ending, the leader's own exit
-// included, which is what the cloud road's reap does at the same point. Its own
-// group also means a turn no longer takes the terminal's Ctrl-C with the host,
-// so the host ends what is running here as it stops (endLocalRuns). The run
-// dies with the host that launched it, so the factory offers no attach and no
-// sweep.
+// local machine has its own factory. A turn is one command: bash -c it, its
+// stdout and stderr merged to the line stream in arrival order, its exit code
+// on `exited`. A stream started with an input channel gets the child's stdin,
+// seeded with the launch's lines and appended to by write(); one started
+// without gets no stdin at all, so the binary reads EOF rather than hanging on
+// a silent open pipe. The child leads a process group of its own and every
+// signal goes to that group, never to the leader alone: a harness leaves its
+// own children behind when it goes, and a grandchild that outlives the leader
+// holds the inherited stdout pipe, so a signal to the leader alone left the
+// stream unended and the harness running (seven such processes were found on
+// one box, the oldest fourteen hours past its turn's reply) and left a cut
+// turn's test workers and packagers burning that box's cores. The group is
+// taken at every ending, the leader's own exit included, which is what the
+// cloud road's reap does at the same point. Its own group also means a turn no
+// longer goes with the terminal's Ctrl-C, so the host ends what is running
+// here as it stops (endLocalRuns); the host owns those signals and this module
+// handles none. The turn runs under the same two limits a cloud turn does,
+// idle and wall, read from the one rule machine-exec reads, so a hung agent
+// ends with the same line on either kind, and the idle limit reads the same
+// activity on both: bytes, the person's messages, and the work the turn's own
+// tree is doing while it prints nothing. The run dies with the host that
+// launched it, so the factory offers no attach and no sweep.
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
-import { turnCut, type MachineExecOptions } from "./machine-exec.js";
+import { readsWork, turnActivity, turnCut, type MachineExecOptions } from "./machine-exec.js";
 
 export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "deadlineMs" | "now" | "pollMs"> {
   /** The folder the child starts in; the command may cd elsewhere, as a harness turn's does. */
   root: string;
 }
 
-/** How often the limits are read against the clock; the cloud road reads them at its poll. */
+/** How often the limits are read against the clock, and the turn's tree with them; the cloud road reads both at its
+ * poll. */
 const CHECK_MS = 1_000;
 /** Every process group a turn on this computer is running in, across every factory this process made: a turn leads
  * a group of its own, so nothing else on this computer knows where to find it. A group is dropped the moment its
@@ -67,6 +71,39 @@ export async function endLocalRuns(graceMs = RUN_STOP_MS): Promise<readonly numb
   const killed = ending.filter(pid => groups.has(pid));
   for (const pid of killed) signalGroup(pid, "SIGKILL");
   return killed;
+}
+
+/** Cumulative CPU as ps prints it, in the ticks the activity clock counts: `[dd-][hh:]mm:ss[.cc]`, where this Mac's
+ * ps carries hundredths and Linux's whole seconds. Anything else reads as no CPU at all. */
+function cpuTicks(time: string): number {
+  const dash = time.indexOf("-");
+  const days = dash === -1 ? 0 : Number(time.slice(0, dash));
+  let seconds = 0;
+  for (const part of time.slice(dash + 1).split(":")) seconds = seconds * 60 + Number(part);
+  const ticks = Math.round((days * 86_400 + seconds) * 100);
+  return Number.isSafeInteger(ticks) ? ticks : 0;
+}
+
+/** The work the turn's own process group has done, as this computer's ps reports it: the group's cumulative CPU,
+ * which is every process the turn started and nothing else. Neither ps reports a process's I/O, so a local turn's
+ * reading is CPU alone where a guest's counts bytes moved too. Nothing here may reach the timer that calls it:
+ * node hands only five errnos to a spawn's async error path and throws the rest (EPERM where ps is out of reach,
+ * ENOMEM on a full box) straight out of execFile, so both roads answer with no reading, and a turn whose tree
+ * cannot be read is left on its stream alone. */
+function readGroupWork(pgid: number, then: (ticks: number | undefined) => void): void {
+  const sum = (stdout: string): number => {
+    let ticks = 0;
+    for (const row of stdout.split("\n")) {
+      const [group = "", time = ""] = row.trim().split(/\s+/);
+      if (Number(group) === pgid) ticks += cpuTicks(time);
+    }
+    return ticks;
+  };
+  try {
+    execFile("ps", ["-eo", "pgid=,time="], (err, stdout) => then(err === null ? sum(stdout) : undefined));
+  } catch {
+    then(undefined);
+  }
 }
 
 /** One complete line at a time out of a growing byte stream: what precedes each newline is yielded, the tail waits
@@ -144,17 +181,21 @@ export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
       // Its own process group, so a signal can reach what the turn started without reaching this host.
       detached: true,
     }) as ChildProcessWithoutNullStreams;
+    const pgid = child.pid;
+    if (pgid !== undefined) groups.add(pgid);
 
-    if (child.pid !== undefined) groups.add(child.pid);
+    /** Nothing goes out once the stream settled, since the group id is then a pid this computer is free to hand to
+     * someone else; while it runs, every signal goes to the group and never to the leader alone. */
     const signal = (sig: NodeJS.Signals): void => {
-      if (child.pid !== undefined) signalGroup(child.pid, sig);
+      if (pgid === undefined || finished !== undefined) return;
+      signalGroup(pgid, sig);
     };
 
     const lines = new Lines();
     const startedAt = now();
-    let lastByteAt = startedAt;
+    const activity = turnActivity(startedAt);
     const feed = (which: "out" | "err", b: Buffer): void => {
-      lastByteAt = now();
+      activity.touch(now());
       lines.feed(which, b.toString("utf8"));
     };
     child.stdout.on("data", (b: Buffer) => feed("out", b));
@@ -169,15 +210,25 @@ export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
     const settle = (code: number | null): void => {
       if (finished !== undefined) return;
       clearInterval(check);
-      if (child.pid !== undefined) groups.delete(child.pid);
+      if (pgid !== undefined) groups.delete(pgid);
       finished = cut === undefined ? code : null;
       if (cut === undefined) lines.end();
       else lines.fail(cut);
       resolveExit(finished);
     };
     // A limit that passes kills the turn's group; the close that follows ends the stream with the cut's words.
+    let reading = false;
     const check = setInterval(() => {
-      cut = turnCut(limits, now() - startedAt, now() - lastByteAt);
+      const at = now();
+      const quietMs = activity.quietMs(at);
+      if (pgid !== undefined && !reading && readsWork(limits.idleMs, quietMs)) {
+        reading = true;
+        readGroupWork(pgid, ticks => {
+          reading = false;
+          if (ticks !== undefined) activity.read(ticks, at);
+        });
+      }
+      cut = turnCut(limits, at - startedAt, quietMs);
       if (cut !== undefined) {
         clearInterval(check);
         signal("SIGKILL");
@@ -206,7 +257,7 @@ export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
         return new Promise<"written" | "gone">(resolve => {
           child.stdin.write(`${line}\n`, err => {
             // The person just acted, so the turn gets its idle time over, as on a cloud turn.
-            if (!err) lastByteAt = now();
+            if (!err) activity.touch(now());
             resolve(err ? "gone" : "written");
           });
         });
