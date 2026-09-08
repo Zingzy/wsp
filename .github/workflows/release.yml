@@ -34,8 +34,9 @@ jobs:
         run: |
           version="$(node packages/wspx/scripts/tag-version.mjs "$GITHUB_REF_NAME")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      # The right-click Open paragraph is for bundles no identity signed, and the certificate is what signs them.
       - name: Write the notes
-        run: node packages/wspx/scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
+        run: node packages/wspx/scripts/release-notes.mjs "$GITHUB_REF_NAME" ${{ secrets.CSC_LINK != '' && '--signed' || '' }} > notes.md
       - name: Open the draft
         env:
           GH_TOKEN: ${{ github.token }}
@@ -62,11 +63,26 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @wsp/desktop run build:mac
+      # The certificate and the Apple account that sign and notarize the bundles reach this step alone. Unset, each
+      # arrives empty and the build signs ad hoc; electron-builder takes an empty CSC_LINK for a certificate and fails
+      # importing it, so that one is unset, while the other four read empty as unset.
+      - name: Build the bundles
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$CSC_LINK" ]; then unset CSC_LINK; fi
+          pnpm --filter @wsp/desktop run build:mac
       # The screen smoke measures a real Mac's window and fails on a hosted runner's display; it runs in the merge
-      # gate on a Mac. Here the packaged tree is checked without a screen.
+      # gate on a Mac. Here each bundle's signature and the packaged tree are checked without a screen, and with a
+      # certificate the check insists on a notarized, stapled bundle.
       - name: Check the packaged trees
-        run: pnpm --filter @wsp/desktop exec vitest run --minWorkers=1 --maxWorkers=1 test/pty-native.test.ts
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+        run: pnpm --filter @wsp/desktop exec vitest run --minWorkers=1 --maxWorkers=1 test/signing.test.ts test/pty-native.test.ts
       - name: Zip each bundle
         env:
           VERSION: ${{ needs.draft.outputs.version }}

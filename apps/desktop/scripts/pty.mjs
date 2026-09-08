@@ -21,6 +21,12 @@ export function ptyPackage() {
   return dirname(createRequire(here.resolve("@wsp/daemon/package.json")).resolve("node-pty/package.json"));
 }
 
+/** Where node-pty's native build for `target` sits under an app directory: the one directory node-pty's loader reads
+ * for a process of that platform and arch, holding pty.node and the spawn-helper it execs. */
+export function ptyBuild(appDir, target) {
+  return join(appDir, "node_modules", "node-pty", "prebuilds", target);
+}
+
 /** node-pty's runtime files under <appDir>/node_modules, carrying one native build: the one for `target`, under
  * prebuilds/<target>, which is the directory node-pty's loader reads for a process of that platform and arch.
  * Called once per packaged tree, since a tree runs one target and a build makes several of them from one machine.
@@ -44,6 +50,6 @@ export function stagePty(from, appDir, target = hostTarget()) {
   // node-pty's mocha files ride in its lib, and one of them requires a package the app has not got.
   cpSync(join(from, "lib"), join(out, "lib"), { recursive: true, filter: p => !p.endsWith(".test.js") && !p.endsWith(".map") });
   // Debug symbols beside a windows prebuild are 50 MB the app never reads.
-  cpSync(native, join(out, "prebuilds", target), { recursive: true, filter: p => !p.endsWith(".pdb") });
+  cpSync(native, ptyBuild(appDir, target), { recursive: true, filter: p => !p.endsWith(".pdb") });
   return out;
 }

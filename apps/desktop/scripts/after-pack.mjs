@@ -6,21 +6,25 @@
 // every tree the building machine's build. The daemon travels as an extra
 // resource because it is the same on every target; this one is not.
 import { execFileSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Arch } from "electron-builder";
-import { ptyPackage, stagePty } from "./pty.mjs";
+import { ptyBuild, ptyPackage, stagePty } from "./pty.mjs";
 
 export default function afterPack(context) {
   const target = `${context.electronPlatformName}-${Arch[context.arch]}`;
-  stagePty(ptyPackage(), context.packager.getResourcesDir(context.appOutDir), target);
+  const resources = context.packager.getResourcesDir(context.appOutDir);
+  stagePty(ptyPackage(), resources, target);
   console.log(`staged node-pty for ${target} in ${context.appOutDir}`);
   if (context.electronPlatformName === "darwin") {
-    // The bundle is not signed by a developer yet (identity null), so it still carries Electron's own ad-hoc
-    // signature, which no longer covers the resources staged above; Gatekeeper reads a quarantined download of that
-    // as damaged and offers no way in. A fresh ad-hoc signature over the whole bundle makes it an unsigned app again,
-    // the kind a right-click Open admits.
+    // Electron's own signature no longer covers the staged resources, and Gatekeeper opens a quarantined download of
+    // that as damaged; electron-builder signs after this hook when the keychain holds an identity, replacing all this.
+    const entitlements = join(context.packager.projectDir, context.packager.platformSpecificBuildOptions.entitlements);
+    const sign = (file, ...more) => execFileSync("codesign", ["--force", ...more, "--options", "runtime", "--entitlements", entitlements, "--sign", "-", file], { stdio: "inherit" });
+    // A deep sign reaches nested bundles and frameworks, not the Mach-O files under Resources.
+    for (const file of readdirSync(ptyBuild(resources, target))) sign(join(ptyBuild(resources, target), file));
     const app = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
-    execFileSync("codesign", ["--force", "--deep", "--sign", "-", app], { stdio: "inherit" });
+    sign(app, "--deep");
     console.log(`re-signed ${app} ad hoc`);
   }
 }
