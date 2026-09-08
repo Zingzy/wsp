@@ -7,6 +7,8 @@ import {
   RecipeSource,
   Capabilities,
   GoldenVersion,
+  DAEMON_ROOTS_PATH,
+  rootsPathIn,
   DAEMON_VERSION,
   daemonVersionOf,
   DaemonAuthRequest,
@@ -809,6 +811,17 @@ describe("daemon files and diff ops", () => {
     expect(DaemonResponse.parse(err)).toEqual(err);
     expect(DaemonErrorResponse.parse({ id: 1, ok: false, error: "plain" })).toEqual({ id: 1, ok: false, error: "plain" });
     expect(() => DaemonErrorResponse.parse({ ...err, code: "whatever" })).toThrow();
+  });
+
+  it("names the roots file beside a home, and the guest's is that rule answered at /root", () => {
+    expect(rootsPathIn("/root")).toBe("/root/.wsp/roots");
+    // The value, not the expression: the runtime writes this exact path into a guest and DAEMON_CONTENT_SHA hashes it,
+    // so a home-derived answer that moved it would redeploy every machine or reach none.
+    expect(DAEMON_ROOTS_PATH).toBe("/root/.wsp/roots");
+    expect(DAEMON_ROOTS_PATH).toBe(rootsPathIn("/root"));
+    expect(rootsPathIn("/Users/z")).toBe("/Users/z/.wsp/roots");
+    expect(rootsPathIn("/Users/z/")).toBe("/Users/z/.wsp/roots");
+    expect(rootsPathIn("/")).toBe("/.wsp/roots");
   });
 });
 

@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, titleLine } from "./format.js";
+import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTint } from "./workspace-look.js";
 
@@ -1771,8 +1772,9 @@ export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
 
 /** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it
- * when a project lands, the daemon reads it on every files and diff op and browses those folders beside its home. */
-export const DAEMON_ROOTS_PATH = "/root/.wsp/roots";
+ * when a project lands, the daemon reads it on every files and diff op and browses those folders beside its home.
+ * The guest's home is /root, so this is rootsPathIn answered there; the value is hashed into DAEMON_CONTENT_SHA. */
+export const DAEMON_ROOTS_PATH = rootsPathIn("/root");
 
 /** The version a hello announces, 1 when it carries none. */
 export function daemonVersionOf(hello: { version?: number }): number {
@@ -2227,7 +2229,7 @@ export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { LOOK_PARTS, WORKSPACE_GLYPHS, WORKSPACE_TINTS, WorkspaceGlyph, WorkspaceLook, WorkspaceTint, type LookPart } from "./workspace-look.js";
-export { underProject } from "./project-path.js";
+export { rootsPathIn, underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";

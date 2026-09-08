@@ -13,7 +13,7 @@ import { platform } from "node:os";
 import { join } from "node:path";
 import { portSourceFor, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
-import type { DaemonEvent, DaemonReachView } from "@wsp/protocol";
+import { rootsPathIn, type DaemonEvent, type DaemonReachView } from "@wsp/protocol";
 
 /** Loopback only: a firewall prompt on macOS or Windows is a wall a local workspace must never hit, and nothing off
  * this computer has any business on its daemon. */
@@ -42,7 +42,10 @@ export class LocalDaemon {
     // The inbox dir must exist before the watcher reads it; a cloud guest ships one, this computer makes its own.
     const inboxDir = join(opts.root, ".wsp-inbox");
     mkdirSync(inboxDir, { recursive: true });
-    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, root: opts.root, inboxDir, portsSource: portSourceFor(platform()) });
+    // This daemon's root is the person's home, so rootsPathIn names its roots file; the option's default names the
+    // guest's, /root, which on a Linux computer is another user's folder and answers EACCES on every op.
+    const rootsPath = rootsPathIn(opts.root);
+    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, root: opts.root, inboxDir, rootsPath, portsSource: portSourceFor(platform()) });
     return new LocalDaemon(handle, token, opts.root);
   }
 

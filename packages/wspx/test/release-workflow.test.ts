@@ -21,6 +21,9 @@ describe("the release workflow", () => {
     expect(workflow).toContain("npm publish --provenance --access public");
     expect(workflow).toContain("id-token: write");
     expect(workflow).not.toContain("NPM_TOKEN");
+    // setup-node with a registry-url writes an .npmrc that reads NODE_AUTH_TOKEN, so that name is the other road a
+    // credential could arrive by and neither is allowed to appear.
+    expect(workflow).not.toContain("NODE_AUTH_TOKEN");
     expect(workflow).not.toContain("pnpm release");
     expect(workflow).toContain("--draft");
     expect(workflow).toContain("--draft=false");
