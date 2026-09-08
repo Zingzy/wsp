@@ -53,4 +53,31 @@ describe("buildCommand", () => {
     expect(buildCommand({ prompt: "x", permissionMode: "danger-full-access" })).toContain("--dangerously-bypass-approvals-and-sandbox");
     expect(() => buildCommand({ prompt: "x", permissionMode: "yolo" })).toThrow("permissionMode must be one of read-only, workspace-write, danger-full-access");
   });
+
+  it("passes one -i per image, in the message's order, and still reads the prompt from stdin", () => {
+    const command = buildCommand({ prompt: "what is this?", images: ["/root/.wsp/threads/thr_1/images/1.png", "/root/.wsp/threads/thr_1/images/2.jpg"] });
+    expect(command).toContain("-i '/root/.wsp/threads/thr_1/images/1.png' -i '/root/.wsp/threads/thr_1/images/2.jpg' -");
+    expect(command).toContain(`<<'WSP_PROMPT_END'\nwhat is this?\nWSP_PROMPT_END`);
+  });
+
+  it("a resumed turn carries its images too, since resume takes the same flag", () => {
+    const command = buildCommand({ prompt: "and this?", resume: "01a07eb8-df2d-7051-bace-d55c9283c26d", images: ["/root/.wsp/threads/thr_1/images/1.png"] });
+    expect(command).toContain("codex exec resume 01a07eb8-df2d-7051-bace-d55c9283c26d");
+    expect(command).toContain("-i '/root/.wsp/threads/thr_1/images/1.png' -");
+  });
+
+  it("a turn with no image carries no flag", () => {
+    expect(buildCommand({ prompt: "x", images: [] })).not.toContain("-i ");
+    expect(buildCommand({ prompt: "x" })).not.toContain("-i ");
+  });
+
+  it("refuses a path that is not one absolute path on the machine, since the flag would read a dash as the next flag", () => {
+    expect(() => buildCommand({ prompt: "x", images: ["--help"] })).toThrow("must be one absolute path");
+    expect(() => buildCommand({ prompt: "x", images: ["shot.png"] })).toThrow("must be one absolute path");
+    expect(() => buildCommand({ prompt: "x", images: ["/tmp/a\n/tmp/b"] })).toThrow("must be one absolute path");
+  });
+
+  it("quotes a path with a space rather than letting it become two values", () => {
+    expect(buildCommand({ prompt: "x", images: ["/root/my shots/1.png"] })).toContain("-i '/root/my shots/1.png'");
+  });
 });

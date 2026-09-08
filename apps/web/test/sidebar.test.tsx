@@ -6,13 +6,15 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
-import { onNewThreadRequest, requestProjectTrip } from "../src/shell/shellRequests.js";
+import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
+import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
@@ -101,6 +103,10 @@ const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTML
 const rowIds = () => Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-row]")).map(r => r.dataset["rowId"]);
 const stateSlot = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>("[data-workspace-state]")!;
 const metaOf = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>("[data-workspace-meta]")!;
+const spaceHeader = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-space-header]");
+const headerLines = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-header] [data-space-meta]")).map(l => l.textContent ?? "");
+const dots = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-dot]"));
+const workspaceRowIds = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='ws:']")).map(r => r.dataset["rowId"] ?? "");
 
 const API = view("ws_a", "api");
 const WEB = view("ws_b", "web", "napping");
@@ -901,5 +907,134 @@ describe("Solari out of reach from this computer", () => {
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "unreachable", offline: true } }) }));
     await screen.findByText(PROVIDER_UNREACHED_LINE);
     expect(stateSlot(rowOf("api")).textContent).toBe("Unreachable");
+  });
+});
+
+describe("Spaces mode", () => {
+  const THREE = [API, WEB, view("ws_c", "old", "gone")];
+  const statuses = () => [status(API, { idleAt: iso(15.5 * 60_000) }), status(WEB), status(THREE[2]!, { machineState: "gone" as const, reach: { state: "gone" as const } })];
+
+  // The current workspace's name reads twice on screen, in the header and on its own dot, so the shared mount's
+  // one-name wait cannot be used here; the header arriving is what says the body is up.
+  async function mountSpaces(api: FakeApi): Promise<FakeApi> {
+    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.getState().bind(api);
+    render(
+      <SidebarProvider defaultOpen>
+        <WorkspaceSidebar />
+      </SidebarProvider>,
+    );
+    await waitFor(() => expect(spaceHeader()).not.toBeNull());
+    return api;
+  }
+
+  it("the list is what the sidebar draws with nothing remembered: every workspace's row and no header or dots", async () => {
+    await mount(fakeApi(THREE, statuses()), "api");
+    await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_b", "ws:ws_c"]));
+    expect(spaceHeader()).toBeNull();
+    expect(dots()).toHaveLength(0);
+  });
+
+  it("a remembered Spaces pick draws one workspace's rows under its header, the others only as dots", async () => {
+    await mountSpaces(
+      fakeApi(THREE, statuses(), [
+        session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
+        session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) }),
+      ]),
+    );
+    // No workspace row at all: the header stands in for the one on screen, the dots for the rest.
+    expect(workspaceRowIds()).toEqual([]);
+    expect(within(spaceHeader()!).getByText("api")).toBeDefined();
+    // Only that workspace's threads, in the list's own grammar.
+    expect(rowIds()).toEqual(["thread:s1"]);
+    expect(screen.queryByText("bump the lockfile")).toBeNull();
+    expect(dots().map(d => d.getAttribute("aria-label"))).toEqual(["api", "web", "old"]);
+    // The current dot is the only one carrying its name, so it is the wide one.
+    expect(dots().map(d => d.textContent)).toEqual(["api", "", ""]);
+    expect(dots()[0]!.getAttribute("aria-current")).toBe("true");
+    expect(dots()[1]!.getAttribute("aria-current")).toBeNull();
+  });
+
+  it("the header's lines are the machine, what it cost today with its rate, and the nap countdown only when one is set", async () => {
+    await mountSpaces(fakeApi(THREE, statuses()));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    act(() =>
+      useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
+    );
+    await waitFor(() => expect(headerLines()[1]).toBe("$0.29 today · $0.110/hr"));
+    // Every line is muted mono, cut from the right and whole in its title; the state word takes the name's line, as a row's does.
+    for (const line of document.querySelectorAll<HTMLElement>("[data-space-header] [data-space-meta]")) {
+      expect(line.className).toContain("font-mono");
+      expect(line.className).toContain("truncate");
+      expect(line.className).not.toMatch(/border|bg-|badge|chip|rounded/);
+      expect(line.getAttribute("title")).toBe(line.textContent);
+    }
+    expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
+    // With no nap scheduled the line is gone rather than reading "active"; a paused machine bills nothing, so no rate.
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.29 today · $0.110/hr"]));
+  });
+
+  it("a paused workspace's header drops the rate, and its state word takes the name's line", async () => {
+    useStore.setState({ selectedId: "ws_b" });
+    await mountSpaces(fakeApi(THREE, statuses()));
+    await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
+    expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today"]);
+    expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("Paused");
+  });
+
+  it("a click on another workspace's dot moves the body to it", async () => {
+    await mountSpaces(fakeApi(THREE, statuses(), [session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) })]));
+    fireEvent.click(dots()[1]!);
+    await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    expect(screen.getByText("bump the lockfile")).toBeDefined();
+    expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
+  });
+
+  it("before the first status the header carries no machine line: nothing draws a bare OS word", async () => {
+    await mountSpaces(fakeApi([API], []));
+    await waitFor(() => expect(headerLines()).toEqual(["$0.00 today"]));
+  });
+
+  it("the two lines the row gives a whole line to lead the header's, and the rest stay under them", async () => {
+    await mountSpaces(fakeApi(THREE, statuses()));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(15.5 * 60_000) }), daemonNote: DAEMON_UPDATING } }));
+    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { idleAt: iso(15.5 * 60_000) }) }));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+  });
+
+  it("a machine that stopped answering with memory near full says so at the top of its header", async () => {
+    const GiB = 1024 ** 3;
+    resetLive();
+    await mountSpaces(fakeApi([API], [status(API, { reach: { state: "unreachable" } })]));
+    act(() => {
+      getLive("ws_a").feedStatus("live");
+      getLive("ws_a").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
+      getLive("ws_a").feedStatus("connecting");
+    });
+    await waitFor(() => expect(headerLines()[0]).toBe("out of memory, 3.6 of 3.9 GB"));
+    expect(headerLines()).toContain("2 vCPU · 4 GB · Linux");
+    act(() => getLive("ws_a").feedStatus("live"));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+  });
+
+  it("the header grows the sidebar's one name box: the palette's ask and a double-click both open it in the name's slot", async () => {
+    const api = { ...fakeApi(THREE, statuses()), renameWorkspace: vi.fn(async (id: string, name: string) => ({ ...view(id, name) })) };
+    await mountSpaces(api);
+    act(() => requestRenameWorkspace("ws_a"));
+    const asked = (await screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename })) as HTMLInputElement;
+    expect(asked.value).toBe("api");
+    expect(asked.closest("[data-space-header]")).not.toBeNull();
+    fireEvent.keyDown(asked, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    fireEvent.doubleClick(document.querySelector("[data-space-name]")!);
+    const typed = (await screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename })) as HTMLInputElement;
+    fireEvent.change(typed, { target: { value: "renamed in spaces" } });
+    fireEvent.keyDown(typed, { key: "Enter" });
+    await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "renamed in spaces"));
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
   });
 });

@@ -453,3 +453,24 @@ describe("deriveSession: a thread's end told where its start said", () => {
     expect(model.workEntries.filter(w => w.sourceActivityKind === "runtime.notify").map(w => w.label)).toEqual(["told you"]);
   });
 });
+
+describe("a person's message that carried images", () => {
+  const records = [
+    { mediaType: "image/png", bytes: 1_258_291, name: "shot.png" },
+    { mediaType: "image/webp", bytes: 4096 },
+  ];
+
+  it("keeps the runtime's records and the request id on the message, so the client that sent them can draw them", () => {
+    const model = deriveSession([{ ...start, attachments: records, requestId: "req_1" }, done, end]);
+    const user = model.messages.find(m => m.role === "user")!;
+    expect(user.text).toBe("do it");
+    expect(user.attachments).toEqual(records);
+    expect(user.requestId).toBe("req_1");
+  });
+
+  it("carries neither on a turn that had no image", () => {
+    const user = deriveSession([start, done, end]).messages.find(m => m.role === "user")!;
+    expect(user.attachments).toBeUndefined();
+    expect(user.requestId).toBeUndefined();
+  });
+});

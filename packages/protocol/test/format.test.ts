@@ -213,6 +213,24 @@ describe("one copy of the rule", () => {
   });
 });
 
+describe("one copy of the image caps", () => {
+  const HOME = join("packages", "protocol", "src", "attachments.ts");
+  // The caps as a person reads them and as the code counts them: what a message may carry, and what one image may
+  // weigh. A second spelling anywhere drifts from the constant the code enforces, which is how "10 MB each" came to
+  // sit beside a rule that says 10.0 MB. attachments.ts exports IMAGES_MAX, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS and
+  // IMAGE_TYPE_WORDS for every sentence to read.
+  const RULE = /\b10(\.0)? ?MB\b|10 \* 1024 \* 1024|\b(five|5) images\b|PNG, JPEG, GIF or WebP|image\/png,\s*image\/jpeg/;
+
+  it("no source file outside attachments.ts spells an image cap or the type list out again", () => {
+    const copies = sourceFiles().filter(rel => rel !== HOME && RULE.test(readFileSync(join(ROOT, rel), "utf8")));
+    expect(copies).toEqual([]);
+  });
+
+  it("attachments.ts is where they are written, so the rule is watching something real", () => {
+    expect(RULE.test(readFileSync(join(ROOT, HOME), "utf8"))).toBe(true);
+  });
+});
+
 describe("one registry for the tools a harness reports", () => {
   const HOME = join("packages", "protocol", "src", "format.ts");
   // One row per tool name there carries its line, the input field a client shows for the call and the kind of item it is.
@@ -236,6 +254,7 @@ describe("where the composer's model lists came from, in one line", () => {
     permissionModes: [],
     steers: false,
     renames: false,
+    images: false,
   };
 
   it("names the agent's own binary and its own pin when its table stood in, never another agent's", () => {

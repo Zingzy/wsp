@@ -9,7 +9,9 @@
 // uncut and without growing the row, collapsing the sidebar leaves the
 // page header's left padding alone, a send refusal above the composer is
 // one muted mono line in a slot the composer keeps at one height whether or
-// not a line is in it, a right-click on a workspace row opens the in-app menu
+// not a line is in it, images pasted into the composer are one row of square
+// thumbnails above the text inside the box, each with its own remove,
+// a right-click on a workspace row opens the in-app menu
 // at the pointer in the tooltip skin, inside the viewport, Rename turns a
 // thread row's title and a workspace row's name into one field in the same
 // slot at the same row height, and the switch
@@ -18,8 +20,9 @@
 // workspace and thread rows keep one grammar: one height per row kind, the
 // state word in its slot at the right edge only off running, the meta line
 // in one order cut from the right, no import or export glyph, the thread
-// title up to a fixed time column. Vite serves test/shell to Playwright's
-// browser, so like the glyph test it runs
+// title up to a fixed time column, and the Spaces body draws one workspace
+// under its header with a dot per workspace at the sidebar's bottom. Vite
+// serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
 import { existsSync, mkdirSync } from "node:fs";
@@ -568,6 +571,90 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 120_000);
 
+  it("the Spaces body is one workspace under its header with a dot per workspace at the bottom, at three widths in both themes", async () => {
+    const readSpaces = () =>
+      page!.evaluate(() => {
+        const header = document.querySelector<HTMLElement>("[data-space-header]")!;
+        const name = header.querySelector<HTMLElement>("[data-space-name]")!;
+        const row = document.querySelector<HTMLElement>("[data-space-dots]")!;
+        const sidebar = document.querySelector<HTMLElement>("[data-slot=sidebar]")!.getBoundingClientRect();
+        const thread = document.querySelector<HTMLElement>("[data-row-id^='thread:']")!.getBoundingClientRect();
+        return {
+          workspaceRows: document.querySelectorAll("[data-row-id^='ws:']").length,
+          threads: Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='thread:']")).map(r => r.getAttribute("data-row-id")),
+          name: name.textContent ?? "",
+          nameX: name.getBoundingClientRect().x,
+          state: header.querySelector<HTMLElement>("[data-space-state]")!.textContent ?? "",
+          lines: Array.from(header.querySelectorAll<HTMLElement>("[data-space-meta]")).map(line => {
+            const b = line.getBoundingClientRect();
+            const style = getComputedStyle(line);
+            return { text: line.textContent ?? "", mono: /mono/i.test(style.fontFamily), size: style.fontSize, right: b.right, overflow: line.scrollWidth > line.clientWidth };
+          }),
+          headerBottom: header.getBoundingClientRect().bottom,
+          threadTop: thread.top,
+          dots: Array.from(row.querySelectorAll<HTMLElement>("[data-space-dot]")).map(dot => {
+            const b = dot.getBoundingClientRect();
+            return { label: dot.getAttribute("aria-label") ?? "", current: dot.hasAttribute("data-space-dot-current"), text: dot.textContent ?? "", x: b.x, right: b.right, y: b.y, width: b.width, height: b.height };
+          }),
+          rowBox: { y: row.getBoundingClientRect().y, bottom: row.getBoundingClientRect().bottom, right: row.getBoundingClientRect().right, height: row.getBoundingClientRect().height },
+          sidebar: { x: sidebar.x, right: sidebar.right, bottom: sidebar.bottom },
+        };
+      });
+    for (const width of [240, 300, 360]) {
+      for (const theme of ["dark", "light"] as const) {
+        await page!.goto(`${base}?theme=${theme}&spaces=1&sidebar=${width}`);
+        await page!.waitForSelector("[data-space-header]");
+        await page!.waitForFunction(w => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - w) < 1, width);
+        const read = await readSpaces();
+        console.info(`spaces at ${width} ${theme}: ${JSON.stringify(read)}`);
+        // One workspace on screen: no workspace row anywhere, and only that workspace's threads under the header.
+        expect(read.workspaceRows).toBe(0);
+        expect(read.threads).toEqual(["thread:s1", "thread:s2"]);
+        expect(read.name).toBe("api");
+        expect(read.state).toBe("");
+        expect(read.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB · Linux", "$0.29 today · $0.110/hr", "naps in 15m"]);
+        // The meta lines are the rows' own muted mono, and every one of them stays inside the sidebar at every width.
+        for (const line of read.lines) {
+          expect(line.mono).toBe(true);
+          expect(line.size).toBe("11px");
+          expect(line.right).toBeLessThanOrEqual(read.sidebar.right);
+          expect(line.overflow).toBe(false);
+        }
+        expect(read.headerBottom).toBeLessThanOrEqual(read.threadTop);
+        // One dot per workspace, on one line at the sidebar's bottom, inside its width.
+        expect(read.dots.map(dot => dot.label)).toEqual(["api", "web", "old"]);
+        expect(read.dots.map(dot => dot.current)).toEqual([true, false, false]);
+        expect(read.dots.map(dot => dot.text)).toEqual(["api", "", ""]);
+        expect(new Set(read.dots.map(dot => Math.round(dot.y))).size).toBe(1);
+        expect(new Set(read.dots.map(dot => Math.round(dot.height))).size).toBe(1);
+        const [current, ...rest] = read.dots as [(typeof read.dots)[number], ...(typeof read.dots)[number][]];
+        for (const dot of rest) expect(current.width).toBeGreaterThan(dot.width);
+        expect(read.rowBox.right).toBeLessThanOrEqual(read.sidebar.right);
+        expect(read.rowBox.bottom).toBeLessThanOrEqual(read.sidebar.bottom);
+        expect(read.rowBox.y).toBeGreaterThan(read.headerBottom);
+        expect(read.dots.at(-1)!.right).toBeLessThanOrEqual(read.sidebar.right);
+        // A click on another workspace's dot moves the body to it and the name onto that dot.
+        await page!.locator("[data-space-dot][aria-label=web]").click();
+        await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "web");
+        const moved = await readSpaces();
+        expect(moved.dots.map(dot => dot.text)).toEqual(["", "web", ""]);
+        expect(moved.state).toBe("Paused");
+        expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today"]);
+        await page!.locator("[data-space-dot][aria-label=api]").click();
+        await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "api");
+        // The pointer leaves the row and its hover fades out before the shot, so what is saved is the rest state:
+        // no dot carries a fill of its own.
+        await page!.mouse.move(600, 700);
+        await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-space-dot]")!).backgroundColor === "rgba(0, 0, 0, 0)");
+        const atRest = await page!.locator("[data-space-dot]").evaluateAll(els => els.map(el => getComputedStyle(el).backgroundColor));
+        expect(atRest).toEqual(["rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)"]);
+        const path = join(SHOTS_DIR, `sidebar-spaces-${width}-${theme}.png`);
+        await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+        console.info(`sidebar spaces screenshot: ${path}`);
+      }
+    }
+  }, 120_000);
+
   it("a status toast with a 200-character token stays inside the sidebar's width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);
     const toast = encodeURIComponent(`Stopped the builder ${token} to make room at the machine cap.`);
@@ -712,6 +799,51 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         expect(state.box).toEqual(idle.box);
         expect(state.shell).toEqual(idle.shell);
       }
+    }
+  }, 60_000);
+
+  it("the composer's images are a row of square thumbnails above the text, each with its own remove, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
+      await page!.waitForSelector("[data-composer-image-picker]");
+      const empty = await box("[data-chat-composer]");
+      // The picker sits in the footer's left group, first, before the model and access pickers.
+      const order = await page!.locator("[data-chat-composer-footer]").evaluate(el =>
+        [...el.querySelectorAll("button")].map(b => b.getAttribute("aria-label") ?? b.textContent?.trim() ?? ""),
+      );
+      expect(order[0]).toBe("Add an image");
+      expect(await page!.locator("[data-composer-images]").count()).toBe(0);
+
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a&images=3`);
+      await page!.waitForSelector("[data-composer-images] [data-chat-image]");
+      await page!.waitForFunction(() => document.querySelectorAll("[data-composer-images] [data-chat-image]").length === 3);
+      const thumbs = await page!.locator("[data-composer-images] [data-chat-image]").evaluateAll(els =>
+        els.map(el => {
+          const r = el.getBoundingClientRect();
+          const button = el.querySelector("button")!;
+          const s = getComputedStyle(button);
+          return { width: Math.round(r.width), height: Math.round(r.height), top: Math.round(r.top), radius: s.borderTopLeftRadius, removes: el.querySelectorAll("[aria-label^=Remove]").length };
+        }),
+      );
+      expect(thumbs).toHaveLength(3);
+      // One square per image, all on one line, each with its own remove: a uniform row, not three shapes.
+      expect(new Set(thumbs.map(t => `${t.width}x${t.height}`)).size).toBe(1);
+      expect(thumbs[0]!.width).toBe(thumbs[0]!.height);
+      expect(new Set(thumbs.map(t => t.top)).size).toBe(1);
+      expect(new Set(thumbs.map(t => t.radius)).size).toBe(1);
+      expect(thumbs.map(t => t.removes)).toEqual([1, 1, 1]);
+      // The row is above the text, inside the box, and the box grew by the row rather than the row escaping it.
+      const row = await box("[data-composer-images]");
+      const editor = await box("[data-chat-composer-form] [contenteditable]");
+      const shell = await box("[data-slot=composer-shell]");
+      expect(row.y + row.height).toBeLessThanOrEqual(editor.y);
+      expect(row.y).toBeGreaterThan(shell.y);
+      expect(row.x + row.width).toBeLessThanOrEqual(shell.x + shell.width);
+      const grown = await box("[data-chat-composer]");
+      expect(grown.height).toBeGreaterThan(empty.height);
+      const path = join(SHOTS_DIR, `composer-images-${theme}.png`);
+      await page!.locator("[data-chat-composer]").screenshot({ path });
+      console.info(`composer images screenshot: ${path}`);
     }
   }, 60_000);
 

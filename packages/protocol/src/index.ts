@@ -5,6 +5,7 @@
 // handlers are the reference implementation they mirror.
 
 import { z } from "zod";
+import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, titleLine } from "./format.js";
 import { shellQuote } from "./shell-quote.js";
 
@@ -360,6 +361,10 @@ export const HarnessCatalog = z.object({
    * false where the runtime's table alone answers, since only the adapter on a machine knows. Read it through
    * keepsRename, which reads a table row as no answer rather than as a no. */
   renames: z.boolean(),
+  /** Whether a message to this harness may carry an image; false where the runtime's table alone answers, since only
+   * the adapter on a machine knows. Read it through readsImages, which reads a table row as no answer rather than as
+   * a no: the composer offers the picker and the runtime answers with the agent's name if it turns out to read none. */
+  images: z.boolean(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -377,6 +382,13 @@ export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
  * rename and the runtime answers unsupported if the adapter turns out to carry no write. */
 export function keepsRename(catalog: HarnessCatalog | null | undefined): boolean {
   return catalog === null || catalog === undefined || catalog.source === "table" || catalog.renames;
+}
+
+/** Whether a message to this harness may carry an image, as far as this catalog knows. The answer is the adapter's on
+ * the machine, so a row the runtime's table stood in for is not a no: the client offers the picker and the runtime
+ * refuses in the agent's name if the adapter turns out to read none. */
+export function readsImages(catalog: HarnessCatalog | null | undefined): boolean {
+  return catalog === null || catalog === undefined || catalog.source === "table" || catalog.images;
 }
 
 /** The option a list marks as its default, if one is: what an unpicked picker shows and an unnamed start runs. */
@@ -493,6 +505,9 @@ export const SessionStartEvent = z.object({
   ...sessionScope,
   /** The user's turn; set by the runtime (the adapter never sees it) so a replayed transcript shows it. */
   prompt: z.string().optional(),
+  /** The images the person's message carried, as records: their type, their weight and their name, never their
+   * pixels, which reach the harness and nothing else. Absent on a turn that carried none. */
+  attachments: z.array(ImageRecord).optional(),
   /** The id the client minted for the sessions.start that opened this turn, stamped by the runtime; absent when the
    * client sent none. Two clients sending the same text at the same moment are told apart by this, not the prompt. */
   requestId: z.string().optional(),
@@ -1700,6 +1715,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
     /** The name the thread is opened under, as a person's: it stands in every client at once, the harness is told it
      * too so its own UI says the same, and no generated title ever replaces it. Refused when it is blank. */
     title: z.string().optional(),
+    /** The images the message carries, in the order the person added them; refused with imagesRefusal's line over the
+     * caps, and refused naming the agent before the machine is asked when that agent's adapter reads no image. */
+    attachments: z.array(ImageAttachment).optional(),
   }),
   /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
    * from the binaries on its machine where they answer; without one, from the runtime's table. */
@@ -1959,6 +1977,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 export { actionRefusal, computerOffline, goneRefusal, imageMoveRefusal, isBilling, needsRebuild, reachShown, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
+export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";
 export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
@@ -1967,4 +1986,4 @@ export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
 export { catalogRefused } from "./adapter-port.js";
-export type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

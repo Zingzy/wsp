@@ -5,9 +5,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { act, fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LegendListRef } from "@legendapp/list/react";
-import type { SessionEvent } from "@wsp/protocol";
+import type { ImageRecord, SessionEvent } from "@wsp/protocol";
 import { MessagesTimeline, WORK_TONES } from "./MessagesTimeline";
 import { deriveSession, type TimelineEntry, type TurnSummary, type WorkLogEntry, type WorkLogTone } from "./adapt";
+import { imageFactsOf, imageOf, useComposerImagesStore } from "./composerImages";
+
+// jsdom has no object URLs; a thumbnail only needs one string per image.
+URL.createObjectURL = (): string => "blob:wsp/1";
+URL.revokeObjectURL = (): void => {};
 
 globalThis.ResizeObserver = class {
   observe() {}
@@ -147,6 +152,13 @@ function buildUserTimelineEntry(text: string) {
       streaming: false,
     },
   };
+}
+
+/** A person's message that carried images: the runtime's records, and the request id whichever client made the send
+ * still holds their bytes under. */
+function buildUserTimelineEntryWithImages(text: string, attachments: ImageRecord[], requestId?: string) {
+  const entry = buildUserTimelineEntry(text);
+  return { ...entry, message: { ...entry.message, attachments, ...(requestId !== undefined ? { requestId } : {}) } };
 }
 
 function buildAssistantTimelineEntry(text: string) {
@@ -1116,6 +1128,45 @@ describe("MessagesTimeline", () => {
     expect(within(expandedGroup as HTMLElement).getByText("Command")).toBeTruthy();
     expect((expandedGroup as HTMLElement).querySelector("pre")?.textContent).toBe("ls");
   });
+
+  it("a person's message with images this client did not send shows one muted mono line per image, the words the command line prints", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntryWithImages("what does this show?", [{ mediaType: "image/png", bytes: 1_258_291, name: "shot.png" }])]}
+      />,
+    );
+    expect(markup).toContain("[image 1.2 MB png]");
+    expect(markup).toContain("what does this show?");
+    // No pixels to draw: the runtime keeps the records and never the bytes.
+    expect(markup).not.toContain("<img");
+  });
+
+  it("shows the thumbnails when this client holds the bytes it sent, and each opens the image at full size", async () => {
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])], "shot.png", { type: "image/png" });
+    const image = await imageOf(file, (await imageFactsOf(file))!);
+    act(() => useComposerImagesStore.setState({ sent: { req_1: [image] } }));
+    const view = render(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntryWithImages("what does this show?", [{ mediaType: "image/png", bytes: 12, name: "shot.png" }], "req_1")]}
+      />,
+    );
+    const thumb = view.container.querySelector<HTMLElement>("[data-chat-image-row=true] [data-chat-image='shot.png'] img");
+    expect(thumb).not.toBeNull();
+    expect(view.container.textContent).not.toContain("[image");
+    fireEvent.click(view.getByRole("button", { name: "Open image 1 at full size" }));
+    const full = await vi.waitFor(() => document.querySelector<HTMLImageElement>("[data-slot=dialog-popup] img")!);
+    expect(full.getAttribute("src")).toBe(thumb!.getAttribute("src"));
+    act(() => useComposerImagesStore.setState({ sent: {} }));
+    view.unmount();
+  });
+
+  it("a message with no image draws no image row at all", () => {
+    const markup = renderToStaticMarkup(<MessagesTimeline {...buildProps()} timelineEntries={[buildUserTimelineEntry("plain")]} />);
+    expect(markup).not.toContain("data-chat-image-row");
+  });
+
 });
 
 describe("a notice row: the cut-turn row and the notify row", () => {

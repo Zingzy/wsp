@@ -18,6 +18,7 @@ import {
   type GoldenManifest,
   type GoldenVersion,
   HostFolderListing,
+  type ImageAttachment,
   TerminalConfig,
   type TerminalScheme,
   type PortProbeView,
@@ -359,6 +360,9 @@ export interface StartSessionOptions {
   effort?: string;
   permissionMode?: string;
   contextWindow?: string;
+  /** The images the message carries. The host refuses over the caps and refuses naming the agent when that agent
+   * reads no image, both before its machine is asked for anything. */
+  attachments?: readonly ImageAttachment[];
 }
 
 export interface ImportProjectOptions {
