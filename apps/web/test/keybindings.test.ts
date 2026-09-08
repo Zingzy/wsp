@@ -121,6 +121,20 @@ describe("chords a browser tab cannot take", () => {
     }
   });
 
+  it("takes Command and Option with a side arrow on macOS, and leaves the same chord to the page off it", () => {
+    expect(claims("mod+alt+arrowleft", MAC)).toBe(true);
+    expect(claims("mod+alt+arrowright", MAC)).toBe(true);
+    expect(claims("mod+alt+arrowleft", LINUX)).toBe(false);
+    expect(claims("mod+alt+arrowright", LINUX)).toBe(false);
+    // Only that pair, only with that hold: the up and down arrows, a bare Option arrow, a shifted one and the
+    // panel toggle's own Option chord all stay the page's.
+    expect(claims("mod+alt+arrowup", MAC)).toBe(false);
+    expect(claims("alt+arrowright", MAC)).toBe(false);
+    expect(claims("mod+alt+shift+arrowright", MAC)).toBe(false);
+    expect(claims("ctrl+alt+arrowright", MAC)).toBe(false);
+    expect(claims("mod+alt+b", MAC)).toBe(false);
+  });
+
   it("takes a digit only with the platform's own mod, so Control with a digit stays the page's on macOS", () => {
     expect(claims("ctrl+1", MAC)).toBe(false);
     expect(claims("cmd+1", MAC)).toBe(true);
@@ -158,8 +172,7 @@ describe("workspace switch", () => {
     expect(resolve(tab({ shiftKey: true }), LINUX)).toBeNull();
     expect(resolve(digit(2, { metaKey: true }), MAC)).toBeNull();
     expect(resolve(digit(2, { ctrlKey: true }), LINUX)).toBeNull();
-    // The mod arrows are left, since a browser tab keeps no arrow chord; they are the switch a tab still offers.
-    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC })).toBe("⌥⌘Right");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC })).toBeNull();
     expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.select.2", { platform: MAC })).toBeNull();
   });
 
@@ -199,13 +212,24 @@ describe("the switch chords per sidebar body", () => {
     expect(resolve(tab(), LINUX, SPACES)).toBe("thread.next");
   });
 
-  it("moves between workspaces on the mod arrows in both bodies, and in a browser tab, which keeps no arrow", () => {
-    const bodies: Record<string, boolean>[] = [DESKTOP, SPACES, {}, { spacesMode: true }];
-    for (const context of bodies) {
+  it("moves between workspaces on the mod arrows in both bodies of the desktop shell", () => {
+    for (const context of [DESKTOP, SPACES]) {
       expect(resolve(arrow("ArrowRight", MAC), MAC, context)).toBe("workspace.next");
       expect(resolve(arrow("ArrowLeft", MAC), MAC, context)).toBe("workspace.previous");
       expect(resolve(arrow("ArrowRight", LINUX), LINUX, context)).toBe("workspace.next");
       expect(resolve(arrow("ArrowLeft", LINUX), LINUX, context)).toBe("workspace.previous");
+    }
+  });
+
+  it("hands the arrows back in a browser tab on macOS, where they are its own tab switch, and keeps them off it", () => {
+    const tabs: Record<string, boolean>[] = [{}, { spacesMode: true }];
+    for (const context of tabs) {
+      expect(resolve(arrow("ArrowRight", MAC), MAC, context)).toBeNull();
+      expect(resolve(arrow("ArrowLeft", MAC), MAC, context)).toBeNull();
+      expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC, context })).toBeNull();
+      // Off macOS the same chord is Control with Alt, which reaches the page, so the switch stays bound there.
+      expect(resolve(arrow("ArrowRight", LINUX), LINUX, context)).toBe("workspace.next");
+      expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: LINUX, context })).toBe("Ctrl+Alt+Right");
     }
   });
 

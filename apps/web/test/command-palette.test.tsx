@@ -307,10 +307,10 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).toBeNull());
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
-    // A browser tab keeps Tab and the digits for its own tabs; the mod arrows it leaves to the page, so they
-    // are the switch it still shows.
-    expect(chordOn("Next workspace")).toBe("⌥⌘Right");
-    expect(chordOn("Previous workspace")).toBe("⌥⌘Left");
+    // A browser tab on macOS keeps Tab, the digits and the mod arrows for its own tabs, so the switch has no
+    // chord to show there at all and the row is a click alone.
+    expect(chordOn("Next workspace")).toBeNull();
+    expect(chordOn("Previous workspace")).toBeNull();
     expect(chordOn("api")).toBeNull();
   });
 
@@ -486,19 +486,28 @@ describe("default shortcuts", () => {
     expect(useStore.getState().selectedId).toBe("ws_a");
   });
 
-  it("the mod arrows walk the workspaces in either body, and a browser tab gets them too", async () => {
+  it("the mod arrows walk the workspaces in either body, and a browser tab on macOS keeps them for its own tabs", async () => {
     await mountShell();
-    expect(useStore.getState().selectedId).toBe("ws_a");
-    spaceArrow("ArrowRight");
-    spaceArrowUp();
-    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+    const restore = asDesktopShell();
+    try {
+      expect(useStore.getState().selectedId).toBe("ws_a");
+      spaceArrow("ArrowRight");
+      spaceArrowUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      spaceArrow("ArrowLeft");
+      spaceArrowUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+      window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+      spaceArrow("ArrowRight");
+      spaceArrowUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+    } finally {
+      restore();
+    }
     spaceArrow("ArrowLeft");
     spaceArrowUp();
-    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
-    spaceArrow("ArrowRight");
-    spaceArrowUp();
-    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+    await settle();
+    expect(useStore.getState().selectedId).toBe("ws_b");
   });
 
   it("in Spaces the Tab pair walks the threads of the workspace on screen, wrapping, and lands the caret", async () => {
@@ -669,6 +678,7 @@ describe("typing contexts", () => {
 
   it("switches twice in a row from inside a text field, where a bare option arrow is still that field's word move", async () => {
     await mountShell();
+    const restore = asDesktopShell();
     const box = document.createElement("textarea");
     document.body.appendChild(box);
     box.focus();
@@ -686,6 +696,7 @@ describe("typing contexts", () => {
       expect(useStore.getState().selectedId).toBe("ws_a");
     } finally {
       box.remove();
+      restore();
     }
   });
 });

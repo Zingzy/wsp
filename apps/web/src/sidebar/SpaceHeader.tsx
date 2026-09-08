@@ -10,7 +10,9 @@
 // button the rows are drawn with, wearing the id the walk stops on, so Space
 // and Enter both open the workspace here as they do on its row in the list,
 // and the menu key reaches the actions, since a browser sends that key as a
-// context menu on whatever has focus.
+// context menu on whatever has focus. It rests plain: it is the one workspace
+// on screen, so a tint saying that one is open would say nothing, and which
+// workspace this is lives in the dots row instead.
 import type { MouseEvent } from "react";
 import type { MemoryReading } from "@wsp/protocol";
 import { openContextMenu } from "../actions/contextMenu.js";
@@ -29,7 +31,6 @@ export function SpaceHeader({
   outOfMemory,
   nowMs,
   actions,
-  active,
   renaming,
   saving,
   onSelect,
@@ -43,8 +44,6 @@ export function SpaceHeader({
   outOfMemory: MemoryReading | undefined;
   nowMs: number;
   actions: ReadonlyArray<ResolvedAction>;
-  /** The workspace itself is what is open, not one of its threads, as it is for a row in the list. */
-  active: boolean;
   /** The name is being typed on this header: the name slot holds the box instead of the text. */
   renaming: boolean;
   /** That name is on its way to the runtime: the field stays exactly as it is and takes no second Enter. */
@@ -60,7 +59,6 @@ export function SpaceHeader({
       size="lg"
       // An input may not sit inside a button, so a header being renamed is a plain box with the same grammar.
       render={renaming ? <div /> : <button type="button" />}
-      isActive={active}
       data-space-header
       data-sidebar-row
       data-row-id={workspaceRowId(project.id)}

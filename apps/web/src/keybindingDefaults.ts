@@ -9,12 +9,12 @@
 // keybindings.ts drops them. The Tab pair is bound twice, once per sidebar
 // body, since in Spaces the one workspace on screen makes its threads what a
 // walk steps through; the mod arrows carry the workspace switch in both
-// bodies, and they reach the page in a browser tab, where the Tab pair does
-// not. They hold mod on purpose: an Option arrow alone is the word move in
+// bodies. They hold mod on purpose: an Option arrow alone is the word move in
 // every text field on macOS, and a switch that lands the caret in a composer
-// would then work once. The arrows come first so a lookup walking the table
-// from the end still labels the switch with its Tab chord where that chord
-// reaches.
+// would then work once. On macOS that same chord is a browser's own tab
+// switch, so keybindings.ts drops it in a tab as it drops the Tab pair. The
+// arrows come first so a lookup walking the table from the end still labels
+// the switch with its Tab chord where that chord reaches.
 import {
   MAX_KEYBINDINGS_COUNT,
   MAX_WHEN_EXPRESSION_DEPTH,

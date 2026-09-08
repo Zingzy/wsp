@@ -644,9 +644,12 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         await page!.locator("[data-space-dot][aria-label=api]").click();
         await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "api");
         // The pointer leaves the row and its hover fades out before the shot, so what is saved is the rest state:
-        // no dot carries a fill of its own.
+        // no dot carries a fill of its own. Every dot is waited on, not the first: the case hovers two of them, and
+        // their fades run on their own clocks.
         await page!.mouse.move(600, 700);
-        await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-space-dot]")!).backgroundColor === "rgba(0, 0, 0, 0)");
+        await page!.waitForFunction(() =>
+          [...document.querySelectorAll("[data-space-dot]")].every(el => getComputedStyle(el).backgroundColor === "rgba(0, 0, 0, 0)"),
+        );
         const atRest = await page!.locator("[data-space-dot]").evaluateAll(els => els.map(el => getComputedStyle(el).backgroundColor));
         expect(atRest).toEqual(["rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)"]);
         const path = join(SHOTS_DIR, `sidebar-spaces-${width}-${theme}.png`);

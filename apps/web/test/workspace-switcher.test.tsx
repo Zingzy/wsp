@@ -413,6 +413,7 @@ describe("loadPagePreviews", () => {
 describe("the card the space arrows put up", () => {
   it("is the same card, and it ends on the option coming up rather than on the key the other chord holds", async () => {
     await mountShell();
+    const restore = asDesktopShell();
     const { asks, off } = watchComposerFocus("ws_b");
     try {
       spaceArrow("ArrowRight");
@@ -429,18 +430,26 @@ describe("the card the space arrows put up", () => {
       expect(asks).toEqual(["ws_b"]);
     } finally {
       off();
+      restore();
     }
   });
 
-  it("walks back on the left arrow, and a browser tab gets it too, where the Tab pair is the browser's", async () => {
+  it("walks back on the left arrow, and puts nothing up in a browser tab, which keeps that chord and the Tab pair", async () => {
     await mountShell();
+    const restore = asDesktopShell();
+    try {
+      spaceArrow("ArrowLeft");
+      await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
+      releaseSpaceArrow();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_c"));
+    } finally {
+      restore();
+    }
     spaceArrow("ArrowLeft");
-    await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
-    releaseSpaceArrow();
-    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_c"));
     tab();
     await settle();
     expect(useWorkspaceSwitcher.getState().open).toBe(false);
+    expect(useStore.getState().selectedId).toBe("ws_c");
   });
 
   it("keeps Shift for the step back, so letting Shift go mid-walk commits nothing", async () => {

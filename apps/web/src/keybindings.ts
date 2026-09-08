@@ -125,19 +125,27 @@ function holdsModAlone(shortcut: KeybindingShortcut, platform: string): boolean 
 // sidebar slots this shell binds: WORKSPACE_SELECT_SLOTS moves on its own.
 const BROWSER_TAB_DIGITS: ReadonlySet<string> = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 
+/** The side arrows a macOS browser keeps for its own tabs, held with Command and Option. */
+const BROWSER_TAB_ARROWS: ReadonlySet<string> = new Set(["arrowleft", "arrowright"]);
+
 /**
- * The chords a browser keeps for switching its own tabs: Control with Tab, and
- * the platform's mod with a digit. A page in a tab never receives them, so the
- * rules must not fire on them and no label may offer them there. The desktop
- * shell has no tab strip and the page gets them. Control with a digit is not
- * one of them: macOS browsers leave those to the page.
+ * The chords a browser keeps for switching its own tabs: Control with Tab, the
+ * platform's mod with a digit, and on macOS Command and Option with a side
+ * arrow. A page in a tab never receives them, so the rules must not fire on
+ * them and no label may offer them there. The desktop shell has no tab strip
+ * and the page gets them. Two chords that look like these are not: Control
+ * with a digit, which macOS browsers leave to the page, and Control with Alt
+ * and an arrow, which is what the mod arrows come to off macOS and reaches the
+ * page there.
  */
 export function browserTabClaimsShortcut(
   shortcut: KeybindingShortcut,
   platform = navigator.platform,
 ): boolean {
-  if (shortcut.altKey) return false;
   const { metaKey, ctrlKey } = effectiveModifiers(shortcut, platform);
+  if (shortcut.altKey) {
+    return isMacPlatform(platform) && BROWSER_TAB_ARROWS.has(shortcut.key) && holdsModAlone(shortcut, platform) && !shortcut.shiftKey;
+  }
   if (shortcut.key === "tab") return ctrlKey && !metaKey;
   return BROWSER_TAB_DIGITS.has(shortcut.key) && holdsModAlone(shortcut, platform) && !shortcut.shiftKey;
 }

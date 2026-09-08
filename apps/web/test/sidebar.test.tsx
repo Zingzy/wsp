@@ -1055,7 +1055,9 @@ describe("Spaces mode", () => {
       // The list's own row does exactly this on a click, and the same key road reaches both.
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBeNull());
       expect(useStore.getState().selectedId).toBe("ws_a");
-      await waitFor(() => expect(spaceHeader()!.getAttribute("data-active")).toBe("true"));
+      // Selecting leaves it plain: the one workspace on screen has nothing to say by being tinted, and the wide
+      // dot is where the sidebar says which workspace this is. The list's rows keep their own tint.
+      expect(spaceHeader()!.getAttribute("data-active")).toBe("false");
       // Opening a thread stays on its own roads: the menu, the palette and the new-thread chord.
       expect(asked).toEqual([]);
     } finally {
