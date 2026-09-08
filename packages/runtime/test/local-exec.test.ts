@@ -1,28 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { turnCutLine } from "@wsp/protocol";
 import { localExecStream } from "../src/local-exec.js";
+import { grandchild, sweepStrays } from "./strays.js";
 
 async function collect(lines: AsyncIterable<string>): Promise<string[]> {
   const out: string[] = [];
   for await (const line of lines) out.push(line);
   return out;
-}
-
-/** The pid of a grandchild a test recorded from the child's own file: the tests assert these are gone, and killing
- * them here keeps a red run from leaving a core burning on this computer. */
-const strays: number[] = [];
-
-/** The pid a command wrote to `file` once it is there, recorded for the sweep. */
-async function grandchild(file: string): Promise<number> {
-  await vi.waitFor(() => expect(existsSync(file)).toBe(true), { timeout: 5_000 });
-  const pid = Number(readFileSync(file, "utf8").trim());
-  expect(pid).toBeGreaterThan(0);
-  strays.push(pid);
-  return pid;
 }
 
 describe("local exec stream", () => {
@@ -32,13 +20,7 @@ describe("local exec stream", () => {
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
-    for (const pid of strays.splice(0)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        continue;
-      }
-    }
+    sweepStrays();
   });
 
   it("streams stdout and stderr by line and answers with the exit code", async () => {
@@ -85,12 +67,17 @@ describe("local exec stream", () => {
 
   it("a child that prints nothing while the tree it started burns a core is not cut at the idle limit", async () => {
     const marker = join(root, "busy.pid");
-    const factory = localExecStream({ root, idleMs: 400, deadlineMs: 30_000, pollMs: 20 });
+    // The tree is read once the stream has been quiet for half the limit, so the limit leaves room for the pair of
+    // readings a rate takes.
+    const factory = localExecStream({ root, idleMs: 600, deadlineMs: 30_000, pollMs: 20 });
     const stream = factory(`( while :; do :; done ) & echo $! > ${marker}; sleep 1.6; echo still working; sleep 20`, { env: {} });
     const busy = await grandchild(marker);
-    // The line lands four idle limits into a silent turn, so only the tree's work can have held the turn open.
+    // The line lands more than two idle limits into a silent turn, so only the tree's work can have held the turn
+    // open. A cut turn never delivers it: its own words wait on the child's streams closing, which a grandchild
+    // holding the inherited pipe never lets happen.
     const first = stream.lines[Symbol.asyncIterator]().next();
-    expect(await first).toEqual({ value: "still working", done: false });
+    const late = new Promise<string>(resolve => setTimeout(() => resolve("nothing reached the reader"), 5_000));
+    expect(await Promise.race([first, late])).toEqual({ value: "still working", done: false });
     stream.kill();
     expect(await stream.exited).not.toBe(0);
     await vi.waitFor(() => expect(() => process.kill(busy, 0)).toThrow(), { timeout: 5_000 });
@@ -101,9 +88,11 @@ describe("local exec stream", () => {
     const factory = localExecStream({ root, idleMs: 400, deadlineMs: 30_000, pollMs: 20 });
     const stream = factory(`sleep 20 & echo $! > ${marker}; sleep 20`, { env: {} });
     const sleeping = await grandchild(marker);
-    await expect(collect(stream.lines)).rejects.toThrow(/^stopped after \d+m \d\ds with no output for 0m$/);
-    expect(await stream.exited).toBeNull();
+    const reading = collect(stream.lines).then(() => undefined, (e: unknown) => e as Error);
+    // The cut takes the group, so the grandchild is gone before the cut's own words reach the reader.
     await vi.waitFor(() => expect(() => process.kill(sleeping, 0)).toThrow(), { timeout: 5_000 });
+    expect((await reading)?.message).toMatch(/^stopped after \d+m \d\ds with no output for 0m$/);
+    expect(await stream.exited).toBeNull();
   }, 20_000);
 
   it("a child that keeps writing past the wall is cut at the cap", async () => {

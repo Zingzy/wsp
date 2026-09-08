@@ -106,9 +106,12 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
       }
       const from = Number(cmd.match(/tail -c \+(\d+)/)?.[1] ?? "1") - 1;
       const chunk = log.subarray(from, from + 262144);
+      // The work field is what the poll asked for: a poll that carries no read leaves $W empty, as the guest's own
+      // printf does for an unset variable.
+      const asked = cmd.includes("awk -v p=");
       return {
         exitCode: 0,
-        stdout: `${chunk.toString("base64")}\n${sentinel} ${exitFile} ${alive ? "up" : "down"} ${work}\n`,
+        stdout: `${chunk.toString("base64")}\n${sentinel} ${exitFile} ${alive ? "up" : "down"} ${asked ? work : ""}\n`,
         stderr: "",
       };
     }
@@ -479,13 +482,23 @@ describe("machineExecStream", () => {
     expect(guest.files()).toEqual([]);
   });
 
-  it("the poll asks the guest for the run group's own work, and the read it sends counts that group's CPU and megabytes and nothing else", async () => {
+  it("the poll asks for the group's work only once the stream has been quiet for half the idle limit, and never on a stream with no idle limit", async () => {
     const { backend, machine } = await makeMachine();
-    const guest = scriptGuest(backend, [{ append: "hi\n", exit: 0 }, {}]);
-    const stream = machineExecStream(machine, { pollMs: 5 })("claude -p 'hi'", { env: {} });
+    const { guest, clock } = minuteGuest(backend, 0, 8 * 60_000, CORE_MINUTE);
+    const stream = machineExecStream(machine, { pollMs: 1, now: () => clock.now })("claude -p 'hi'", { env: {} });
     for await (const _ of stream.lines) void _;
-    const poll = guest.calls.find(c => c.includes("__WSP_EOF_"))!;
-    expect(poll).toContain(`W=$(awk -v p="$P" ${shellQuote(GROUP_WORK_AWK)} /proc/[0-9]*/stat 2>/dev/null)`);
+    // One poll a minute on a silent stream, so the first five are inside the half of a ten minute limit.
+    const polls = guest.calls.filter(c => c.includes("__WSP_EOF_"));
+    expect(polls.slice(0, 5).some(c => c.includes("awk -v p="))).toBe(false);
+    expect(polls[5]).toContain(`W=$(awk -v p="$P" ${shellQuote(GROUP_WORK_AWK)} /proc/[0-9]*/stat 2>/dev/null)`);
+
+    // The exec verb hands both limits infinite on purpose, and no reading could cut such a stream.
+    const forever = await makeMachine();
+    const exec = scriptGuest(forever.backend, [{}, {}, { append: "built\n", exit: 0 }, {}]);
+    const run = machineExecStream(forever.machine, { pollMs: 1, idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })("pnpm build", { env: {} });
+    for await (const _ of run.lines) void _;
+    expect(exec.calls.filter(c => c.includes("__WSP_EOF_")).length).toBeGreaterThan(2);
+    expect(exec.calls.some(c => c.includes("awk -v p="))).toBe(false);
 
     // The same program over a fake /proc: two processes in the group, one outside it, one named like a stat field.
     const dir = mkdtempSync(join(tmpdir(), "wsp-proc-"));

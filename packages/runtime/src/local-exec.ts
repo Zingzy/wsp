@@ -13,19 +13,21 @@
 // the harness starts test workers and packagers that a signal to the shell
 // alone leaves burning the computer's cores, so teardown, kill and a cut all
 // end the group. A group of its own is a group no terminal signal reaches, so
-// this process ends every group it started as it exits; a host killed outright
-// leaves a turn running where the shared group would have taken it down, which
-// is the trade the tree is worth. The turn runs under the same two limits a
-// cloud turn does, idle and wall, read from the one rule machine-exec reads,
-// so a hung agent ends with the same line on either kind, and the idle limit
-// reads the same activity on both: bytes, the person's messages, and the work
-// the turn's own tree is doing while it prints nothing. Nothing outlives the
-// host on purpose, so the factory offers no attach.
+// this process ends every group it started when it stops: on the way out of a
+// clean exit, and on a terminal signal nothing else is listening for, which is
+// the second Ctrl-C the host leaves to node's own death. Only a host killed
+// outright leaves a turn behind, as it did before the group. The turn runs
+// under the same two limits a cloud turn does, idle and wall, read from the
+// one rule machine-exec reads, so a hung agent ends with the same line on
+// either kind, and the idle limit reads the same activity on both: bytes, the
+// person's messages, and the work the turn's own tree is doing while it prints
+// nothing. Nothing outlives the host on purpose, so the factory offers no
+// attach.
 
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
-import { turnActivity, turnCut, type MachineExecOptions } from "./machine-exec.js";
+import { readsWork, turnActivity, turnCut, type MachineExecOptions } from "./machine-exec.js";
 
 export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "deadlineMs" | "now" | "pollMs"> {
   /** The folder the child starts in; the command may cd elsewhere, as a harness turn's does. */
@@ -49,40 +51,59 @@ function cpuTicks(time: string): number {
 
 /** The work the turn's own process group has done, as this computer's ps reports it: the group's cumulative CPU,
  * which is every process the turn started and nothing else. Neither ps reports a process's I/O, so a local turn's
- * reading is CPU alone where a guest's counts bytes moved too. A computer with no ps, and a group whose last
- * process is gone, both answer nothing and leave the idle clock on bytes. */
+ * reading is CPU alone where a guest's counts bytes moved too. Nothing here may reach the timer that calls it:
+ * node hands only five errnos to a spawn's async error path and throws the rest (EPERM where ps is out of reach,
+ * ENOMEM on a full box) straight out of execFile, so both roads answer with no reading, and a turn whose tree
+ * cannot be read is left on its stream alone. */
 function readGroupWork(pgid: number, then: (ticks: number | undefined) => void): void {
-  execFile("ps", ["-eo", "pgid=,time="], (err, stdout) => {
-    if (err !== null) {
-      then(undefined);
-      return;
-    }
+  const sum = (stdout: string): number => {
     let ticks = 0;
     for (const row of stdout.split("\n")) {
       const [group = "", time = ""] = row.trim().split(/\s+/);
       if (Number(group) === pgid) ticks += cpuTicks(time);
     }
-    then(ticks);
-  });
+    return ticks;
+  };
+  try {
+    execFile("ps", ["-eo", "pgid=,time="], (err, stdout) => then(err === null ? sum(stdout) : undefined));
+  } catch {
+    then(undefined);
+  }
 }
 
-/** Every turn group this process started that is still running, and the one hook that ends them as it goes: a group
- * of the turn's own outlives the host, where a child in the host's group went down with it. */
+/** Every turn group this process started that is still running, and how they end when the host does: a group of the
+ * turn's own outlives its host, where a child in the host's group went down with it under the terminal's own
+ * signal. A clean stop reaches them through `exit`. A signal does not: node runs no exit handler when it dies by
+ * one, and the host leaves a second Ctrl-C to that death on purpose so a close that hangs cannot trap the terminal,
+ * which is exactly when a turn is still running. So a signal nobody else is listening for is this host's death:
+ * the groups go first, then the signal is raised again for node to die by. */
 const liveGroups = new Set<number>();
 let hooked = false;
-function endGroupsOnExit(pgid: number): void {
+function endLiveGroups(): void {
+  for (const group of liveGroups) {
+    try {
+      process.kill(-group, "SIGKILL");
+    } catch {
+      continue;
+    }
+  }
+  liveGroups.clear();
+}
+function endGroupsWithHost(pgid: number): void {
   liveGroups.add(pgid);
   if (hooked) return;
   hooked = true;
-  process.once("exit", () => {
-    for (const group of liveGroups) {
-      try {
-        process.kill(-group, "SIGKILL");
-      } catch {
-        continue;
-      }
-    }
-  });
+  process.once("exit", endLiveGroups);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    const onSignal = (): void => {
+      // Another listener means the host is closing itself and owns this signal, teardown, exit hook and all.
+      if (process.listenerCount(signal) > 1) return;
+      endLiveGroups();
+      process.removeListener(signal, onSignal);
+      process.kill(process.pid, signal);
+    };
+    process.on(signal, onSignal);
+  }
 }
 
 /** One complete line at a time out of a growing byte stream: what precedes each newline is yielded, the tail waits
@@ -161,12 +182,13 @@ export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     }) as ChildProcessWithoutNullStreams;
     const pgid = child.pid;
-    if (pgid !== undefined) endGroupsOnExit(pgid);
+    if (pgid !== undefined) endGroupsWithHost(pgid);
 
     /** The whole group, not the shell that leads it: a SIGKILL to the leader alone left this turn's test workers and
-     * packagers running on a machine until it sat at load 25 (2026-09-08). */
+     * packagers running on a machine until it sat at load 25 (2026-09-08). Nothing goes out once the child has been
+     * reaped, since the group id is a pid the computer is free to hand to someone else. */
     const endGroup = (signal: "SIGTERM" | "SIGKILL"): void => {
-      if (pgid === undefined) return;
+      if (pgid === undefined || finished !== undefined) return;
       try {
         process.kill(-pgid, signal);
       } catch {
@@ -203,14 +225,15 @@ export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
     let reading = false;
     const check = setInterval(() => {
       const at = now();
-      if (pgid !== undefined && !reading) {
+      const quietMs = activity.quietMs(at);
+      if (pgid !== undefined && !reading && readsWork(limits.idleMs, quietMs)) {
         reading = true;
         readGroupWork(pgid, ticks => {
           reading = false;
           if (ticks !== undefined) activity.read(ticks, at);
         });
       }
-      cut = turnCut(limits, at - startedAt, activity.quietMs(at));
+      cut = turnCut(limits, at - startedAt, quietMs);
       if (cut !== undefined) {
         clearInterval(check);
         endGroup("SIGKILL");

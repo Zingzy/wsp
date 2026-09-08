@@ -109,6 +109,14 @@ export function turnActivity(startedAt: number): TurnActivity {
   };
 }
 
+/** Whether the turn's tree is worth reading at this moment: there is an idle limit for a reading to hold open, and
+ * the stream has been quiet long enough that the cut is in sight. A turn that is printing is already alive on its
+ * bytes, and a stream run with no idle limit (the exec verb hands both limits infinite on purpose) would pay for a
+ * reading every second for the life of a build and could not be cut by any answer it got. */
+export function readsWork(idleMs: number, quietMs: number): boolean {
+  return Number.isFinite(idleMs) && quietMs >= idleMs / 2;
+}
+
 /** What the guest counts a run's work by, given the run's process group id in `p`: for every process in that group,
  * the CPU ticks it has burned and the megabytes it has read or written, summed into one number the next poll is
  * compared with. /proc is the only road to it, since the guests have no pgrep, and the comm field is stripped by its
@@ -187,12 +195,14 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         .then(() => undefined, () => undefined);
 
     // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete. The
-    // group's work rides the same poll, so a turn working in silence costs no exec of its own.
-    const pollCmd = (offset: number): string =>
+    // group's work rides the same poll when it is worth reading, so a turn working in silence costs no exec of its
+    // own and a stream nothing could cut asks the guest for nothing; unasked, $W is empty and the reader sees no
+    // reading.
+    const pollCmd = (offset: number, work: boolean): string =>
       `E=$(cat ${base}.exit 2>/dev/null); ` +
       `tail -c +${offset + 1} ${base}.log 2>/dev/null | head -c ${EXEC_CHUNK_BYTES} | base64 -w0; ` +
       `P=$(cat ${base}.pid 2>/dev/null); ` +
-      `W=$(awk -v p="$P" ${shellQuote(GROUP_WORK_AWK)} /proc/[0-9]*/stat 2>/dev/null); ` +
+      (work ? `W=$(awk -v p="$P" ${shellQuote(GROUP_WORK_AWK)} /proc/[0-9]*/stat 2>/dev/null); ` : "") +
       `printf '\\n${sentinel} %s %s %s\\n' "$E" ` +
       `"$([ -n "$P" ] && kill -0 "$P" 2>/dev/null && echo up || echo down)" "$W"`;
 
@@ -218,7 +228,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           return;
         }
         const at = now();
-        const cut = turnCut({ idleMs, deadlineMs }, at - startedAt, activity.quietMs(at));
+        const quietMs = activity.quietMs(at);
+        const cut = turnCut({ idleMs, deadlineMs }, at - startedAt, quietMs);
         if (cut !== undefined) {
           await reap();
           finish(null);
@@ -227,7 +238,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
         let res: ExecResult;
         try {
-          res = await machine.exec(pollCmd(offset), { timeoutMs: execTimeoutMs });
+          res = await machine.exec(pollCmd(offset, readsWork(idleMs, quietMs)), { timeoutMs: execTimeoutMs });
         } catch {
           // Machine likely napping; polls recover after wake (P10 semantics).
           await sleep(pollMs);
