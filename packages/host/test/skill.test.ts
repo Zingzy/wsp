@@ -80,6 +80,16 @@ describe("the wsp skill", () => {
     expect(section).toContain("There is no sign-in for these rows");
   });
 
+  it("says where a thread on this computer starts, and its example asks nothing of a folder it may not be in", () => {
+    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### thread new"), WSP_SKILL.indexOf("### send"));
+    expect(section).toContain("wsp thread new --in mac --agent codex \"Say in one line which folder you are in");
+    expect(section).toContain("Its folder is the workspace's own rather than the person's home");
+    // One statement of the order a folder is picked in, so the paragraph cannot say two things about the same start.
+    expect(section).toContain("without it the thread starts in the workspace's imported project folder, else in the workspace's own folder, which on a fork is the machine's home folder");
+    // No constant path stands in for that folder: the host decides it, and a line naming one would go stale.
+    expect(section).not.toContain("~/wsp-work");
+  });
+
   it("carries no em dash", () => {
     expect(WSP_SKILL).not.toContain("\u2014");
   });
@@ -170,17 +180,20 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).toContain("then `wsp up`, which you run yourself when nothing serves");
     expect(INSTRUCTIONS).not.toContain("their own terminal");
     expect(INSTRUCTIONS).toContain("prefer the `wsp` command line");
+    // An agent holding only the tools reads here that a workspace need not be a machine, and which listing shows both.
+    expect(INSTRUCTIONS).toContain("This computer is a workspace too, the one `wsp new --local` makes");
+    expect(INSTRUCTIONS).toContain("Start with `wsp workspaces` to see every workspace");
     // Everything but the rules is one line, so a client that shows the instructions as a paragraph shows them whole.
     expect(INSTRUCTIONS.split("\n").filter(line => !line.startsWith("- "))).toHaveLength(1);
     expect(INSTRUCTIONS).not.toContain("## ");
   });
 
-  it("the rules for running work on a machine are seven lines stated as facts about machines, and the instructions carry the same lines", () => {
+  it("the rules for running work on a machine are eight lines stated as facts about machines, and the instructions carry the same lines", () => {
     const from = WSP_SKILL.indexOf(`\n${RULES_HEADING}\n`);
     expect(from, RULES_HEADING).toBeGreaterThan(-1);
     const section = WSP_SKILL.slice(from, WSP_SKILL.indexOf("\n## ", from + 1));
     const rules = section.split("\n").filter(line => line.startsWith("- "));
-    expect(rules).toHaveLength(7);
+    expect(rules).toHaveLength(8);
     // The one home: the instructions end on the same lines, so neither door can state a rule the other does not.
     expect(INSTRUCTIONS.split("\n").slice(1)).toEqual(rules);
     // Whole sentences a reader with no history can act on: no ticket number, no date, nothing that happened once.
@@ -188,8 +201,12 @@ describe("the wsp skill", () => {
       expect(rule, rule.slice(0, 40)).toMatch(/\.$/);
       expect(rule, rule.slice(0, 40)).not.toMatch(/#\d|\bticket\b|\b20\d\d\b/);
     }
-    // The seven, each by the fact it turns on: the golden, the count, the worktree, the send, the restart, the
-    // pause, the person reading along.
+    // The eight, each by the fact it turns on: which kind of workspace the work goes on, the golden, the count, the
+    // worktree, the send, the restart, the pause, the person reading along.
+    expect(section).toContain("the one `wsp new --local` makes");
+    expect(section).toContain("a quick subtask or a second harness");
+    expect(section).toContain("Fork a cloud workspace for builds that run beside each other");
+    expect(section).toContain("anything that should not touch this computer");
     expect(section).toContain("`wsp snapshot <workspace>`");
     expect(section).toContain("`wsp new <name> --from <that golden>`");
     expect(section).toContain("on 2 vCPU and 4 GB one thread runs tests or a build at a time");

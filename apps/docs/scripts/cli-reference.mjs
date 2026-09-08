@@ -20,7 +20,7 @@ const help = (args) => {
 
 const version = help(["--version"]).trim();
 const main = help(["--help"]).trimEnd();
-const verbs = ["up", "init", "recipe", "threads", "new", "fork", "snapshot", "pause", "wake", "rename", "forget", "delete", "thread", "send", "stop", "exec", "folders", "import", "export", "terminal", "mcp"];
+const verbs = ["up", "init", "recipe", "workspaces", "threads", "new", "fork", "snapshot", "pause", "wake", "rename", "forget", "delete", "thread", "send", "stop", "exec", "folders", "import", "export", "terminal", "mcp"];
 
 const sections = verbs
   .map(verb => {

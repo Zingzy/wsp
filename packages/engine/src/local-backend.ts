@@ -163,7 +163,12 @@ export class LocalBackend implements MachineBackend {
 
   private readonly machine: LocalMachine;
 
+  /** The folder every command on this computer starts in when the caller names none, published so the roads that
+   * launch one through the runtime read the same folder this backend's own machine runs in. */
+  readonly folder: string;
+
   constructor(opts: LocalBackendOptions) {
+    this.folder = opts.root;
     this.machine = new LocalMachine(opts.root, opts.env ?? process.env);
   }
 

@@ -23,8 +23,12 @@ const PORT_NAMES = [
   "endAfterResult",
   "endRun",
 ];
-/** Matches whatever keywords a declaration uses, so a duplicate written as an interface, class or const cannot hide from a type-only pattern. */
-const declarationOf = (name: string): RegExp => new RegExp(`^export (?:\\w+ )+${name}\\b`, "m");
+/** Matches whatever keywords a declaration uses, so a duplicate written as an interface, class or const cannot hide
+ * from a type-only pattern. The name has to sit where a declaration puts it, right after the keyword: a pattern that
+ * took any run of words before it read `export interface X extends ExecStream` as declaring ExecStream, which is a
+ * type that uses the port rather than a second copy of it. */
+export const declarationOf = (name: string): RegExp =>
+  new RegExp(String.raw`^export (?:default |declare |abstract |async )*(?:interface|type|class|const|let|var|function|enum) ${name}\b`, "m");
 
 const read = (rel: string): string => readFileSync(join(ROOT, rel), "utf8");
 
@@ -51,6 +55,23 @@ function filesOf(pkg: string): string[] {
 const wspImports = (rel: string): string[] => [...read(rel).matchAll(/from "(@wsp\/[^"]+)"/g)].map(m => m[1]!);
 
 describe("the harness adapter port", () => {
+  it("reads the declared name off the keyword, so a type that extends a port name is not a second declaration of it", () => {
+    // What tripped this: a runtime type that carries a port stream plus a field of its own.
+    expect(declarationOf("ExecStream").test("export interface RunningExec extends ExecStream {")).toBe(false);
+    expect(declarationOf("ExecStream").test("export type RunningExec = ExecStream & { readonly ranIn?: string };")).toBe(false);
+    expect(declarationOf("ExecStream").test("export class Runs implements ExecStream {")).toBe(false);
+    // And a second declaration of the name is still caught, in whatever keywords it is written.
+    for (const line of ["export interface ExecStream {", "export type ExecStream = never;", "export class ExecStream {", "export const ExecStream = 1;", "export declare function ExecStream(): void;"]) {
+      expect(declarationOf("ExecStream").test(line), line).toBe(true);
+    }
+    // The forms the port file itself uses, each read by its own name.
+    expect(declarationOf("endRun").test("export async function endRun(stream: ExecStream, graceMs: number): Promise<void> {")).toBe(true);
+    expect(declarationOf("catalogRefused").test("export function catalogRefused(answer: HarnessCatalogAnswer): answer is HarnessCatalogRefusal {")).toBe(true);
+    expect(declarationOf("AdapterEvent").test("export type AdapterEvent =")).toBe(true);
+    // A name that only opens another one is not that other one.
+    expect(declarationOf("ExecStream").test("export interface ExecStreamFactory {")).toBe(false);
+  });
+
   it("is declared in one file, and that file is in the protocol", () => {
     const sources = sourceFiles();
     for (const name of PORT_NAMES) {

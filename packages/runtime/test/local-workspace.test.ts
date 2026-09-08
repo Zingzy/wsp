@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { relayedRefusal, type PortForward } from "@wsp/protocol";
+import { inFolder, relayedRefusal, type PortForward } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -30,6 +30,28 @@ const echoAdapter: HarnessAdapterFactory = ctx => ({
       await stream.exited;
       onEvent({ type: "session.start", sessionId });
       onEvent({ type: "turn.delta", sessionId, kind: "text", text: out });
+      const result = { status: "completed", text: out } as const;
+      onEvent({ type: "turn.done", sessionId, result });
+      onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+      return result;
+    })();
+    return { localId: sessionId, finished, interrupt: async () => {} };
+  },
+});
+
+/** An adapter that builds its command the way the real ones do, `inFolder(cwd, ...)` around the binary, and answers
+ * with the folder that command landed in: the reply is the folder the runtime resolved for the turn, read off the
+ * machine rather than off the argument. */
+const pwdAdapter: HarnessAdapterFactory = ctx => ({
+  steers: false,
+  start: ({ cwd, onEvent }) => {
+    const sessionId = "22222222-2222-4222-8222-222222222222";
+    const finished = (async () => {
+      const stream = ctx.execStream(inFolder(cwd, "pwd"), { env: { ...ctx.env } });
+      let out = "";
+      for await (const line of stream.lines) out += line;
+      await stream.exited;
+      onEvent({ type: "session.start", sessionId });
       const result = { status: "completed", text: out } as const;
       onEvent({ type: "turn.done", sessionId, result });
       onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
@@ -116,6 +138,29 @@ describe("local workspace", () => {
     expect(handed.length).toBeGreaterThan(1);
     expect(handed.slice(0, -1).every(o => o === undefined)).toBe(true);
     expect(handed.at(-1)).toEqual({ idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY });
+  });
+
+  it("a turn over the wire starts in the workspace's own folder, never the person's home, and the thread's row names it", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: pwdAdapter }, local: localWiring });
+    const ws = await rt.workspaces.createLocal("mac");
+    const result = await (await rt.sessions.start(ws.id, { prompt: "where are you" })).finished;
+    expect(realpathSync(result.text!.trim())).toBe(realpathSync(root));
+    const [session] = await rt.sessions.list(ws.id);
+    expect(session!.cwd).toBe(root);
+    await rt.close();
+  });
+
+  it("a command over the wire, the road wsp exec takes, starts in that same folder", async () => {
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    const stream = await rt.workspaces.execStream(ws.id, ["pwd"]);
+    // The stream says which folder it resolved, so the client that prints it never restates the rule.
+    expect(stream.ranIn).toBe(root);
+    let out = "";
+    for await (const line of stream.lines) out += line;
+    expect(await stream.exited).toBe(0);
+    expect(realpathSync(out.trim())).toBe(realpathSync(root));
+    await rt.close();
   });
 
   it("exec runs on this computer and returns the exit code; files read and write under the folder", async () => {
