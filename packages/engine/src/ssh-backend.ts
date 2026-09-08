@@ -8,6 +8,10 @@
 // script over the ssh client, which is the only thing here that knows the
 // machine is not in this process.
 
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CATALOG_AGENTS } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
 import type { Capabilities } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
@@ -90,15 +94,35 @@ export type SshTransport = (reach: SshReach, script: string, opts: { timeoutMs?:
  * mattering: a machine that is off must fail rather than hang a turn. */
 export const SSH_CONNECT_TIMEOUT_S = 10;
 
+/** How long an idle master connection is kept after the last command through it. A turn polls its log every second
+ * and a half, so without one every poll is a key exchange and a line in the machine's auth log (measured: seven
+ * logins for one 2.4 second turn); with one, a turn is one login and the master goes when the work stops. */
+export const SSH_CONTROL_PERSIST_S = 60;
+
+/** The socket the master connection for one machine listens on, under the temp folder this computer already owns.
+ * Named by a hash of the dial rather than by the address, since a unix socket path is capped near 104 characters
+ * and a host name is not; one per user, host and port, so two records of one machine share the master and two
+ * machines never do. */
+export function sshControlPath(reach: SshReach, dir: string = tmpdir()): string {
+  return join(dir, `wsp-ssh-${createHash("sha256").update(`${reach.user}@${reach.host}:${reach.port}`).digest("hex").slice(0, 16)}.sock`);
+}
+
 /** The ssh client's argv for one script. BatchMode keeps a machine that wants a passphrase from stopping a
  * background host at a prompt nobody can see; the script runs under `bash -c` as it does on a guest, never a login
- * shell, which would reset PATH. */
-export function sshArgs(reach: SshReach, script: string, opts: { hostKey?: boolean } = {}): string[] {
+ * shell, which would reset PATH. Every command rides one master connection per machine, so a turn's polls are one
+ * login rather than one each. */
+export function sshArgs(reach: SshReach, script: string, opts: { hostKey?: boolean; controlDir?: string } = {}): string[] {
   return [
     "-n",
     "-T",
     "-o",
     "BatchMode=yes",
+    "-o",
+    "ControlMaster=auto",
+    "-o",
+    `ControlPath=${sshControlPath(reach, opts.controlDir)}`,
+    "-o",
+    `ControlPersist=${SSH_CONTROL_PERSIST_S}`,
     // Nobody can answer a host key prompt on a host that runs in the background, and a key that changed is still
     // refused; the first dial records the key it was given and the person is shown it to compare.
     "-o",
@@ -151,10 +175,16 @@ function clientWords(text: string): string {
  * The PATH is a login shell's, asked for on purpose and once: on the person's own machine the tools a turn runs are
  * where their own shell finds them, not where a golden put them. Linux answers the first branch of each pair,
  * macOS the second. */
+export const SSH_STORE_VARS: readonly string[] = CATALOG_AGENTS.map(a => a.stateHomeEnv).filter((name): name is string => name !== undefined && /^[A-Z_][A-Z0-9_]*$/.test(name));
+
+/** The one login shell the read opens: the PATH a turn runs under, and the store variable each harness reads, so a
+ * machine whose person points their harness at another folder is signed in for a turn the way it is for them. */
+const LOGIN_READ = ["printf \"path %s\\n\" \"$PATH\"", ...SSH_STORE_VARS.map(name => `printf "store:${name} %s\\n" "$${name}"`)].join("; ");
+
 export const SSH_READ_SCRIPT = [
   'printf "home %s\\n" "$HOME"',
   'printf "user %s\\n" "$(id -un)"',
-  'printf "path %s\\n" "$(bash -lc \'printf %s "$PATH"\' 2>/dev/null)"',
+  `bash -lc ${shellQuote(LOGIN_READ)} 2>/dev/null`,
   'printf "cpu %s\\n" "$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"',
   'printf "memkb %s\\n" "$(awk \'/MemTotal/{print $2}\' /proc/meminfo 2>/dev/null || echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 )))"',
 ].join("\n");
@@ -175,16 +205,51 @@ export async function readSshMachine(reach: SshReach, transport: SshTransport = 
   if (res.exitCode !== 0) throw new Error(`${reach.user}@${reach.host} did not answer over ssh: ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`);
   const values = readValues(res.stdout);
   const home = values["home"];
-  if (home === undefined || !home.startsWith("/")) throw new Error(`${reach.user}@${reach.host} answered over ssh with no home folder for ${reach.user}`);
+  if (home === undefined || !isPlainPath(home)) throw new Error(homeRefusal(reach, home));
+  const stores: Record<string, string> = {};
+  for (const name of SSH_STORE_VARS) {
+    const folder = values[`store:${name}`];
+    // A store the person points elsewhere is a path a turn's command carries, so it is held to the same rule the
+    // home is: a plain absolute path, or the harness's default under the home stands instead.
+    if (folder !== undefined && folder !== "" && isPlainPath(folder)) stores[name] = folder;
+  }
   const cpu = Number(values["cpu"] ?? 0);
   const memMb = Math.round(Number(values["memkb"] ?? 0) / 1024);
   const path = values["path"];
   const hostKey = hostKeyOf(res.stderr);
   return {
-    login: { HOME: home, USER: values["user"] ?? reach.user, PATH: path === undefined || path === "" ? DEFAULT_REMOTE_PATH : path },
+    login: { ...stores, HOME: home, USER: values["user"] ?? reach.user, PATH: path === undefined || path === "" ? DEFAULT_REMOTE_PATH : path },
     shape: { cpu, memMb },
     ...(hostKey !== undefined ? { hostKey } : {}),
   };
+}
+
+/** Every folder a turn's paths are built from is held to this: absolute, and made of what a path is made of. A
+ * machine can answer with anything, and what it answers lands in the commands a turn runs there, so a home carrying
+ * a semicolon, a quote, a backtick or a glob is refused at the one door rather than quoted at each of twenty places
+ * (the paths are quoted too; this is what keeps a machine from deciding what those paths mean). A space is a path
+ * on macOS and stays allowed. */
+export function isPlainPath(path: string): boolean {
+  return path.startsWith("/") && /^[A-Za-z0-9 ._+@:,/-]+$/.test(path) && !path.includes("//");
+}
+
+function homeRefusal(reach: SshReach, home: string | undefined): string {
+  const said = home === undefined || home === "" ? "no home folder" : `${JSON.stringify(home)}, which is not a plain path`;
+  return `${reach.user}@${reach.host} answered over ssh with ${said} for ${reach.user}`;
+}
+
+/** Loopback names and addresses, and the suffix a Mac gives its own name on the local network: what a dial that
+ * names the computer wsp runs on looks like. */
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
+
+/** Whether this dial reaches the computer wsp is running on: the same machine as the local workspace, under another
+ * name. A request relayed from a machine may drive a workspace over ssh, and this is the one such workspace it may
+ * not, since it is this computer wearing another kind's clothes. `names` is what this computer answers to. */
+export function sshDialsThisComputer(reach: SshReach, names: readonly string[]): boolean {
+  const host = reach.host.toLowerCase().replace(/\.$/, "");
+  if (LOOPBACK.has(host) || host.startsWith("127.")) return true;
+  const own = names.map(n => n.toLowerCase().replace(/\.$/, "")).filter(n => n !== "");
+  return own.some(name => host === name || host === `${name}.local` || `${host}.local` === name);
 }
 
 /** What a turn's PATH falls back to when the machine's own login shell printed none: what a POSIX login gives

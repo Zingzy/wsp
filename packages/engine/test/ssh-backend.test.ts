@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { SSH_READ_SCRIPT, SshBackend, parseSshAddress, parseSshMachineId, hostKeyOf, sshArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyOf, sshArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -113,6 +113,48 @@ describe("ssh backend", () => {
   it("a client that logged no key leaves the machine without an identity of its own rather than inventing one", () => {
     expect(hostKeyOf("debug1: Authenticating to box\n")).toBeUndefined();
     expect(hostKeyOf("debug1: Server host key: ssh-rsa SHA256:zzz\ndebug1: next line\n")).toBe("ssh-rsa SHA256:zzz");
+  });
+
+  it("the machine's own words for its home are held to a plain path, since every path a turn runs is built from it", async () => {
+    const home = (answer: string): Promise<unknown> => {
+      const transport: SshTransport = async () => ({ exitCode: 0, stdout: `home ${answer}\nuser dev\npath /usr/bin\ncpu 1\nmemkb 1024\n`, stderr: "" });
+      return new SshBackend({ transport }).adopt(REACH).then(a => a.login["HOME"], (e: unknown) => (e as Error).message);
+    };
+    // What a machine answering with shell in its home would land in the launch: refused at the one door instead.
+    expect(await home("/home/dev x; touch /tmp/pwned")).toContain("is not a plain path");
+    expect(await home("/home/$(id -un)")).toContain("is not a plain path");
+    expect(await home("/home/dev`whoami`")).toContain("is not a plain path");
+    expect(await home("relative/home")).toContain("is not a plain path");
+    expect(await home("")).toContain("no home folder");
+    // A space is a home on macOS and stays a home: the paths built from it are quoted where they land in a command.
+    expect(await home("/Users/John Smith")).toBe("/Users/John Smith");
+    expect(await home("/root")).toBe("/root");
+  });
+
+  it("the store folder each harness reads is asked of the machine's own login shell, and held to the same rule", async () => {
+    const read = (line: string): Promise<Record<string, string>> => {
+      const transport: SshTransport = async () => ({ exitCode: 0, stdout: `home /root\nuser root\npath /usr/bin\n${line}cpu 1\nmemkb 1024\n`, stderr: "" });
+      return new SshBackend({ transport }).adopt(REACH).then(a => ({ ...a.login }));
+    };
+    expect(SSH_STORE_VARS).toContain("CLAUDE_CONFIG_DIR");
+    // The read asks a login shell for each store variable the catalog names, in the same call that asks for PATH.
+    expect(SSH_READ_SCRIPT).toContain("bash -lc");
+    expect(SSH_READ_SCRIPT).toContain('printf "store:CLAUDE_CONFIG_DIR %s');
+    expect(await read("store:CLAUDE_CONFIG_DIR /root/.claude-cfg\n")).toMatchObject({ HOME: "/root", CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
+    // A machine that names none leaves the harness on its default, and one that names shell is left there too.
+    expect((await read(""))["CLAUDE_CONFIG_DIR"]).toBeUndefined();
+    expect((await read("store:CLAUDE_CONFIG_DIR /root/x; id\n"))["CLAUDE_CONFIG_DIR"]).toBeUndefined();
+  });
+
+  it("every command to one machine rides one master connection, and two machines never share one", () => {
+    const args = sshArgs(REACH, "true");
+    expect(args).toContain("ControlMaster=auto");
+    expect(args).toContain(`ControlPersist=${SSH_CONTROL_PERSIST_S}`);
+    expect(args).toContain(`ControlPath=${sshControlPath(REACH)}`);
+    // One socket per machine, named by the dial and short enough for a unix socket whatever the host name is.
+    expect(sshControlPath({ ...REACH, keyPath: "/tmp/k/other" })).toBe(sshControlPath(REACH));
+    expect(sshControlPath({ ...REACH, port: 22 })).not.toBe(sshControlPath(REACH));
+    expect(sshControlPath({ user: "dev", host: "a".repeat(200), port: 22 }, "/tmp").length).toBeLessThan(100);
   });
 
   it("exec and run carry the script to the machine, and run streams each line", async () => {

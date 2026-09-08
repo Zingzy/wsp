@@ -33,6 +33,8 @@ import {
   parseMergeOutput,
   plural,
   agentHomes,
+  parseSshMachineId,
+  sshDialsThisComputer,
   agentsOnMachine,
   guestAgentHomes,
   guestTmpPath,
@@ -1372,8 +1374,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     home: (entry: LiveWorkspace, agentId: string) => string;
     /** The login environment a turn runs under there, read the same way. */
     env: (entry: LiveWorkspace) => Readonly<Record<string, string>>;
-    /** Whether a request relayed from a machine may drive a workspace of this kind; a local one answers only this computer. */
-    relayed: boolean;
+    /** Whether a request relayed from a machine may drive this workspace; a local one answers only this computer,
+     * and so does a machine of another kind whose dial names this computer. The machine id is absent on the one
+     * road that asks before a machine exists, a fork's create, where only the kind can answer. */
+    relayed: (machineId: string | undefined) => boolean;
     /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
      * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
      * word and the status poller read it before this seam existed. */
@@ -1400,15 +1404,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The login a machine that already existed answered with, off its own record. A record written before its kind
    * read one is a record no such kind ever wrote. */
   const loginOf = (entry: LiveWorkspace): Readonly<Record<string, string>> => entry.record.login ?? {};
+  /** Where a harness keeps its sessions on a machine reached over ssh: the folder that machine's own login names
+   * for it, else the catalog's default under the home it answered with. */
+  const sshHome = (entry: LiveWorkspace, agentId: string): string => {
+    const login = loginOf(entry);
+    const home = login["HOME"] ?? "/";
+    return agentHomes(home, login)[agentId] ?? join(home, `.${agentId}`);
+  };
   const sshRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
     throw new Error(noSshDaemonLine(entry.record.name));
   };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
-    cloud: { backend, execStream: (entry, o) => machineExecStream(entry.machine, o), home: (_entry, id) => cloudHome(id), env: () => GUEST_LOGIN_ENV, relayed: true, hasDaemon: entry => Boolean(entry.machine.previewUrl), daemonRoad: cloudRoad },
+    cloud: { backend, execStream: (entry, o) => machineExecStream(entry.machine, o), home: (_entry, id) => cloudHome(id), env: () => GUEST_LOGIN_ENV, relayed: () => true, hasDaemon: entry => Boolean(entry.machine.previewUrl), daemonRoad: cloudRoad },
     local:
       local === undefined
         ? undefined
-        : { backend: local.backend, execStream: (_entry, o) => local.execStream(o), home: (_entry, id) => local.home(id), env: () => local.env, relayed: false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
+        : { backend: local.backend, execStream: (_entry, o) => local.execStream(o), home: (_entry, id) => local.home(id), env: () => local.env, relayed: () => false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
     ssh:
       ssh === undefined
         ? undefined
@@ -1418,12 +1429,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // shares: on the person's own machine another account's /tmp folder is theirs, and a turn that cannot
             // write in it would launch nothing.
             execStream: (entry, o) => machineExecStream(entry.machine, { ...o, runDir: posix.join(loginOf(entry)["HOME"] ?? "/tmp", ".wsp", "run") }),
-            // The machine is the person's own, so each harness reads the store their own shell would under the home
-            // the machine answered with; the catalog's rule for where that is written once and read here.
-            home: (entry, id) => agentHomes(loginOf(entry)["HOME"] ?? "/")[id] ?? join(loginOf(entry)["HOME"] ?? "/", `.${id}`),
+            // The machine is the person's own, so each harness reads the store their own shell would: the folder
+            // their store variable names on that machine when it named one, else the default under the home it
+            // answered with. The catalog's rule for both is agentHomes, the same call the local kind makes.
+            home: (entry, id) => sshHome(entry, id),
             env: loginOf,
-            // A machine wsp reaches is a machine: a request relayed from one drives it, as it drives a fork.
-            relayed: true,
+            // A machine wsp reaches is a machine, so a request relayed from one drives it as it drives a fork. The
+            // one exception is a dial that names the computer wsp runs on: that is this computer under another
+            // kind's name, and the local kind's refusal is the whole reason the rule exists.
+            relayed: machineId => {
+              const reach = machineId === undefined ? undefined : parseSshMachineId(machineId);
+              return reach !== undefined && !sshDialsThisComputer(reach, [hostname()]);
+            },
             hasDaemon: () => false,
             daemonRoad: sshRoad,
           },
@@ -1453,13 +1470,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * request relayed from a machine drives and sees only the kinds whose module takes one, so this computer's own
    * workspace answers nothing relayed. Today no machine has a road into the host, so nothing relays yet; the rule
    * holds when one appears. */
-  const drives = (kind: WorkspaceKind, origin: WorkspaceOrigin | undefined): boolean => origin !== "relayed" || moduleOf(kind).relayed;
+  const drives = (record: { kind: WorkspaceKind; machineId?: string }, origin: WorkspaceOrigin | undefined): boolean => origin !== "relayed" || moduleOf(record.kind).relayed(record.machineId);
   /** The rule as a sentence: what this request is refused with for that record, or nothing when it may drive it.
    * A record this host does not hold, which a port forward's target may be since the host forwards a builder's
    * ports too, is nobody's to refuse for. */
-  const refusalFor = (record: Pick<WorkspaceRecord, "kind" | "name"> | undefined, origin: WorkspaceOrigin | undefined): string | undefined =>
-    record !== undefined && !drives(record.kind, origin) ? relayedRefusal(record.name) : undefined;
-  const refuseRelayed = (record: Pick<WorkspaceRecord, "kind" | "name"> | undefined, origin: WorkspaceOrigin | undefined): void => {
+  const refusalFor = (record: { kind: WorkspaceKind; name: string; machineId?: string } | undefined, origin: WorkspaceOrigin | undefined): string | undefined =>
+    record !== undefined && !drives(record, origin) ? relayedRefusal(record.name) : undefined;
+  const refuseRelayed = (record: { kind: WorkspaceKind; name: string; machineId?: string } | undefined, origin: WorkspaceOrigin | undefined): void => {
     const line = refusalFor(record, origin);
     if (line !== undefined) throw new Error(line);
   };
@@ -2851,7 +2868,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async list(origin) {
       await ready();
-      return [...live.values()].filter(e => !e.creating && drives(e.record.kind, origin)).map(e => view(e.record));
+      return [...live.values()].filter(e => !e.creating && drives(e.record, origin)).map(e => view(e.record));
     },
 
     async nap(id, origin) {

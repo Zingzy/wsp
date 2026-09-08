@@ -146,17 +146,21 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? realRetryClock.sleep;
 
+  /** Every path this file puts in shell text goes through here first. The run folder is the machine's own answer on
+   * a kind that has one (a home read over ssh), so a word in it must not be read as shell; a glob or a brace that
+   * the shell has to expand keeps its own place outside the quotes. */
+  const q = (path: string): string => shellQuote(path);
   /** The one path that says a run is on the machine: the launch makes it, the reap takes it with the rest of the
    * run's files, and every road that asks whether a run is still there asks about this one. */
   const claim = (base: string): string => `${base}.d`;
   /** What ending one run comes to on the guest, in the shell both the reader's own reap and the connect sweep run:
    * the recorded process group gets TERM, then KILL once the stop grace passes, and the run's files go. */
   const reapScript = (b: string): string =>
-    `P=$(cat ${b}.pid 2>/dev/null); ` +
+    `P=$(cat ${q(b)}.pid 2>/dev/null); ` +
     `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
     `for i in ${GRACE_CHECKS}; do kill -0 -- -$P 2>/dev/null || break; sleep ${GRACE_POLL_MS / 1000}; done; ` +
     `kill -KILL -- -$P 2>/dev/null; fi; ` +
-    `rm -rf ${b}.*`;
+    `rm -rf ${q(b)}.*`;
   /** A handle this factory could have minted: the run directory it launches into and a name of its own shape. */
   const minted = (run: string): boolean => run.startsWith(`${runDir}/`) && RUN_ID.test(run.slice(runDir.length + 1));
 
@@ -189,7 +193,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       void opened
         .catch(() => undefined)
         .then(() =>
-          machine.exec(`P=$(cat ${base}.pid 2>/dev/null); [ -n "$P" ] && kill -${sig} -- -$P 2>/dev/null; true`, {
+          machine.exec(`P=$(cat ${q(base)}.pid 2>/dev/null); [ -n "$P" ] && kill -${sig} -- -$P 2>/dev/null; true`, {
             timeoutMs: execTimeoutMs,
           }),
         )
@@ -205,9 +209,9 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     // own and a stream nothing could cut asks the guest for nothing; unasked, $W is empty and the reader sees no
     // reading.
     const pollCmd = (offset: number, work: boolean): string =>
-      `E=$(cat ${base}.exit 2>/dev/null); ` +
-      `tail -c +${offset + 1} ${base}.log 2>/dev/null | head -c ${EXEC_CHUNK_BYTES} | base64 -w0; ` +
-      `P=$(cat ${base}.pid 2>/dev/null); ` +
+      `E=$(cat ${q(base)}.exit 2>/dev/null); ` +
+      `tail -c +${offset + 1} ${q(base)}.log 2>/dev/null | head -c ${EXEC_CHUNK_BYTES} | base64 -w0; ` +
+      `P=$(cat ${q(base)}.pid 2>/dev/null); ` +
       (work ? `W=$(awk -v p="$P" ${shellQuote(GROUP_WORK_AWK)} /proc/[0-9]*/stat 2>/dev/null); ` : "") +
       `printf '\\n${sentinel} %s %s %s\\n' "$E" ` +
       `"$([ -n "$P" ] && kill -0 "$P" 2>/dev/null && echo up || echo down)" "$W"`;
@@ -308,7 +312,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         // The guest knows the command ended the moment its exit file exists, up to a poll before this side does,
         // and a reap in flight has taken the claim with the rest of the run.
         const res = await putFiles(machine, [{ path: `${base}.in`, text: `${line}\n`, append: true }], {
-          before: [`{ [ -e ${base}.exit ] || [ ! -d ${claim(base)} ]; } && { echo WSP_GONE; exit 0; }`],
+          before: [`{ [ -e ${q(base)}.exit ] || [ ! -d ${q(claim(base))} ]; } && { echo WSP_GONE; exit 0; }`],
           after: ["echo WSP_OK"],
           timeoutMs: execTimeoutMs,
         });
@@ -323,7 +327,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         inputClosed = true;
         void opened
           .catch(() => undefined)
-          .then(() => machine.exec(`P=$(cat ${base}.tail 2>/dev/null); [ -n "$P" ] && kill -TERM "$P" 2>/dev/null; true`, { timeoutMs: execTimeoutMs }))
+          .then(() => machine.exec(`P=$(cat ${q(base)}.tail 2>/dev/null); [ -n "$P" ] && kill -TERM "$P" 2>/dev/null; true`, { timeoutMs: execTimeoutMs }))
           .catch(() => undefined);
       },
       exited,
@@ -342,8 +346,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     // is written before the tail is killed, so a poll that sees it reads a finished log.
     const run =
       input === undefined
-        ? `${command}\necho $? > ${base}.exit\n`
-        : `( tail -n +1 -f ${base}.in > ${base}.fifo & echo $! > ${base}.tail )\n{ ${command}\n} < ${base}.fifo\necho $? > ${base}.exit\nkill $(cat ${base}.tail) 2>/dev/null\n`;
+        ? `${command}\necho $? > ${q(base)}.exit\n`
+        : `( tail -n +1 -f ${q(base)}.in > ${q(base)}.fifo & echo $! > ${q(base)}.tail )\n{ ${command}\n} < ${q(base)}.fifo\necho $? > ${q(base)}.exit\nkill $(cat ${q(base)}.tail) 2>/dev/null\n`;
     // The turn's processes are what the kernel takes first when memory runs out: the work outgrew the machine, and
     // the daemon and the guest agent are how anyone hears of it.
     const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${workScoreLine()}\n${exports}\n${run}` }];
@@ -356,8 +360,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second
           // a no-op. A mkdir that fails for any other reason (a run folder another login on the machine owns) fails
           // the launch: read as a replay it would answer launched and leave the reader polling a log nobody writes.
-          before: [`mkdir ${claim(base)} 2>/dev/null || { [ -d ${claim(base)} ] && { echo WSP_LAUNCHED; exit 0; }; echo "no run folder on this machine: ${claim(base)}" >&2; exit 1; }`],
-          after: [...(input === undefined ? [] : [`mkfifo ${base}.fifo`]), `setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`],
+          before: [`mkdir ${q(claim(base))} 2>/dev/null || { [ -d ${q(claim(base))} ] && { echo WSP_LAUNCHED; exit 0; }; echo ${q(`no run folder on this machine: ${claim(base)}`)} >&2; exit 1; }`],
+          after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), `setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo WSP_LAUNCHED`],
           timeoutMs: execTimeoutMs,
         }),
       { now, sleep },
@@ -376,7 +380,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
   factory.attach = async (run, { input }) => {
     if (!minted(run)) throw new Error(`${run} is not a run this host could have launched`);
-    const res = await untilReached(() => machine.exec(`[ -d ${claim(run)} ] && echo WSP_RUN || echo WSP_GONE`, { timeoutMs: execTimeoutMs }), { now, sleep });
+    const res = await untilReached(() => machine.exec(`[ -d ${q(claim(run))} ] && echo WSP_RUN || echo WSP_GONE`, { timeoutMs: execTimeoutMs }), { now, sleep });
     // Only these two answers say anything about the run. Anything else is the machine failing to answer the
     // question, which is the unreached road, not a run to end: the reader is built and the run swept on WSP_GONE
     // alone, so nothing here can take a live turn's process group with it.
@@ -389,7 +393,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     // The claims are what the machine holds, so the machine is asked what is there rather than told; the shape a
     // handle must have to be one of this factory's is read here, by the same predicate the attach road reads, so
     // nothing the guest wrote into the run directory reaches shell text on the strength of being there.
-    const listed = await machine.exec(`for d in ${runDir}/*.d; do [ -d "$d" ] && printf '%s\\n' "$d"; done`, { timeoutMs: execTimeoutMs });
+    const listed = await machine.exec(`for d in ${q(runDir)}/*.d; do [ -d "$d" ] && printf '%s\\n' "$d"; done`, { timeoutMs: execTimeoutMs });
     const kept = new Set(keep);
     const stale = listed.stdout
       .split("\n")

@@ -8,11 +8,17 @@ import { stubBackend } from "./stub-backend.js";
 
 /** Two machines a person could reach over ssh, each with a home and a PATH of its own, so a road that reads one
  * machine's facts for another is a failure rather than a coincidence. */
-const MACHINES: Record<string, { home: string; user: string; path: string; cpu: number; memkb: number; key: string }> = {
+const MACHINES: Record<string, { home: string; user: string; path: string; cpu: number; memkb: number; key: string; store?: string }> = {
   box: { home: "/home/dev", user: "dev", path: "/home/dev/.local/bin:/usr/bin", cpu: 8, memkb: 16_384_000, key: "ssh-ed25519 SHA256:boxboxboxboxboxboxboxboxboxboxboxboxbox" },
   // The same machine as box, under the address a person might use for it instead: one machine, one host key.
   "10.0.0.9": { home: "/home/dev", user: "dev", path: "/home/dev/.local/bin:/usr/bin", cpu: 8, memkb: 16_384_000, key: "ssh-ed25519 SHA256:boxboxboxboxboxboxboxboxboxboxboxboxbox" },
   "10.0.0.7": { home: "/root", user: "root", path: "/root/.bun/bin:/usr/bin", cpu: 2, memkb: 4_096_000, key: "ssh-ed25519 SHA256:sevensevensevensevensevensevenseven" },
+  // A machine whose person points their harness at another folder, which is where their sign-in is.
+  moved: { home: "/root", user: "root", path: "/usr/bin", cpu: 1, memkb: 1_024_000, key: "ssh-ed25519 SHA256:movedmovedmovedmovedmovedmoved", store: "/root/.claude-cfg" },
+  // A machine whose home is a path with a space in it, which is a home on macOS.
+  spaced: { home: "/Users/John Smith", user: "john", path: "/usr/bin", cpu: 4, memkb: 8_192_000, key: "ssh-ed25519 SHA256:spacedspacedspacedspacedspaced" },
+  // The computer wsp is running on, reached the way any other machine is.
+  "127.0.0.1": { home: "/root", user: "root", path: "/usr/bin", cpu: 2, memkb: 4_096_000, key: "ssh-ed25519 SHA256:hereherehereherehereherehere" },
 };
 
 /** An ssh client that never leaves this computer: each machine answers the read with its own facts, every script it
@@ -26,7 +32,8 @@ function fakeSsh(answer: (script: string, reach: SshReach) => Partial<ExecResult
     if (script === SSH_READ_SCRIPT) {
       // The client logs what the connection saw on stderr when the read asks it to; that is where the host key is read.
       const log = opts.hostKey === true ? `debug1: Server host key: ${machine.key}\ndebug1: Authenticating to ${reach.host}\n` : "";
-      return { exitCode: 0, stdout: `home ${machine.home}\nuser ${machine.user}\npath ${machine.path}\ncpu ${machine.cpu}\nmemkb ${machine.memkb}\n`, stderr: log };
+      const store = machine.store === undefined ? "" : `store:CLAUDE_CONFIG_DIR ${machine.store}\n`;
+      return { exitCode: 0, stdout: `home ${machine.home}\nuser ${machine.user}\npath ${machine.path}\n${store}cpu ${machine.cpu}\nmemkb ${machine.memkb}\n`, stderr: log };
     }
     return { exitCode: 0, stdout: "", stderr: "", ...answer(script, reach) };
   };
@@ -157,6 +164,34 @@ describe("ssh workspace", () => {
     expect(seen.every(c => c.env["USER"] === "dev" || c.env["USER"] === "root")).toBe(true);
   });
 
+  it("a turn reads the store its harness reads on that machine, not the one under its home", async () => {
+    const { wiring } = fakeSsh();
+    const rt = runtime(wiring);
+    const moved = await rt.workspaces.createSsh("root@moved");
+    const plain = await rt.workspaces.createSsh("root@10.0.0.7");
+    // The machine's own login shell names CLAUDE_CONFIG_DIR, so the turn reads the folder the person's sign-in is in.
+    expect((await (await rt.sessions.start(moved.id, { prompt: "hi" })).finished).text).toContain("/root/.claude-cfg under");
+    // A machine that names none keeps the catalog's default under the home it answered with.
+    expect((await (await rt.sessions.start(plain.id, { prompt: "hi" })).finished).text).toContain("/root/.claude under");
+  });
+
+  it("a home with a space in it runs, because every path built from it is one quoted word", async () => {
+    const { wiring, carried } = fakeSsh(script => (script.includes("WSP_LAUNCHED") ? { stdout: "WSP_LAUNCHED\n" } : {}));
+    const rt = runtime(wiring);
+    const ws = await rt.workspaces.createSsh("john@spaced");
+    const stream = await rt.workspaces.execStream(ws.id, ["true"]);
+    const launched = async (): Promise<string | undefined> => {
+      for (let i = 0; i < 100 && carried.every(c => !c.script.includes("WSP_LAUNCHED")); i++) await new Promise(r => setTimeout(r, 10));
+      return carried.map(c => c.script).find(script => script.includes("WSP_LAUNCHED"));
+    };
+    const script = await launched();
+    stream.kill();
+    expect(script).toContain("'/Users/John Smith/.wsp/run");
+    // With every quoted span cut out, the folder is not there at all: nothing carries it as bare words, where the
+    // shell would read the space as the end of the path and a semicolon as the end of the command.
+    expect((script ?? "").replace(/'[^']*'/g, "")).not.toContain("/Users/John Smith");
+  });
+
   it("exec runs on the machine over the connection and answers with its exit code", async () => {
     const { wiring, carried } = fakeSsh(script => (script === "exit 4" ? { exitCode: 4 } : { stdout: "pong" }));
     const rt = runtime(wiring);
@@ -206,6 +241,21 @@ describe("ssh workspace", () => {
     await rt.workspaces.touch(ws.id, "relayed");
     // And the sentence a kind that refuses one gives is not this kind's: nothing here reads it.
     expect(relayedRefusal("box")).not.toContain(OVER_SSH);
+  });
+
+  it("an ssh workspace whose dial names this computer answers only this computer, as the local kind does", async () => {
+    const { wiring } = fakeSsh();
+    const rt = runtime(wiring);
+    const here = await rt.workspaces.createSsh("root@127.0.0.1", { name: "loopback" });
+    const elsewhere = await rt.workspaces.createSsh("dev@box");
+    // It is this computer under another kind's name, so the rule the local kind carries is the rule it gets.
+    await expect(rt.workspaces.get(here.id, "relayed")).rejects.toThrow(relayedRefusal("loopback"));
+    await expect(rt.workspaces.exec(here.id, "true", undefined, "relayed")).rejects.toThrow(relayedRefusal("loopback"));
+    expect((await rt.workspaces.list("relayed")).map(w => w.name)).toEqual(["box"]);
+    // Every other machine over ssh is a machine, and a relayed request drives it.
+    expect((await rt.workspaces.get(elsewhere.id, "relayed")).name).toBe("box");
+    // From this computer both answer.
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["box", "loopback"]);
   });
 
   it("delete drops the record and frees the name; the machine is the person's and is never stopped", async () => {

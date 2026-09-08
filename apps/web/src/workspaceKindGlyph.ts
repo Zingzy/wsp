@@ -4,13 +4,13 @@
 // tab's header. A machine wsp drives shows the dot, which says what state it
 // is in; a machine that simply exists shows what it is instead, since it has
 // no state of its own to report. Adding a kind is a row in this table.
-import { LaptopIcon, ServerIcon, type LucideIcon } from "lucide-react";
+import { HardDriveIcon, LaptopIcon, type LucideIcon } from "lucide-react";
 import type { WorkspaceKind } from "@wsp/protocol";
 
 const GLYPHS: Record<WorkspaceKind, LucideIcon | null> = {
   cloud: null,
   local: LaptopIcon,
-  ssh: ServerIcon,
+  ssh: HardDriveIcon,
 };
 
 /** The kind's glyph, or null where the state dot is the lead. */

@@ -69,6 +69,7 @@ import {
   imageTypeOf,
   imagesRefusal,
   importConsented,
+  MACHINE_LEFT,
   importRequest,
   kindWords,
   machineWord,
@@ -588,7 +589,7 @@ export async function deleteWorkspace(client: HostClient, d: Dropping): Promise<
 }
 
 export function deletedLine(d: Dropping): string {
-  const machine = driven(d.workspace) ? `machine ${d.workspace.machineId} is gone at the provider` : "its machine is left as it is";
+  const machine = driven(d.workspace) ? `machine ${d.workspace.machineId} is gone at the provider` : `its ${MACHINE_LEFT}`;
   return `deleted ${d.workspace.name} ${d.workspace.id}: ${machine}, and its record and ${fmtThreads(d.threads)} are gone from this computer`;
 }
 

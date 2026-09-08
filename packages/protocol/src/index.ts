@@ -1871,10 +1871,11 @@ export type DaemonEvent = z.infer<typeof DaemonEvent>;
 export const TicketPurpose = z.enum(["connect", "relay"]);
 export type TicketPurpose = z.infer<typeof TicketPurpose>;
 
-/** Where a socket redeeming a ticket of each purpose reached the host from. A connect ticket is minted over a socket
- * that already carries this computer's token, so its origin is whatever its requests say (here in practice); a relay
- * ticket is minted for a machine, so every request on it is relayed however the client fills the field in. */
-export const TICKET_ORIGIN: Record<TicketPurpose, WorkspaceOrigin | undefined> = { connect: undefined, relay: "relayed" };
+/** Where a socket redeeming a ticket of each purpose reached the host from, named for every purpose there is. The
+ * host stamps this over whatever the client's own frames say, so a purpose that names none would be a socket whose
+ * origin its holder decides: the door refuses one rather than falling back to the wire, and a purpose added later
+ * has to say what it is here before any socket may redeem it. */
+export const TICKET_ORIGIN: Record<TicketPurpose, WorkspaceOrigin> = { connect: "here", relay: "relayed" };
 
 const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),

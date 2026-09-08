@@ -371,8 +371,12 @@ export function forgetNotice(threads: number): string {
  * the provider, a machine that already existed is left as it is, and either way the record and the threads go from
  * here. `driven` is the kind's own word for which of the two it is, named by every caller so a road that forgets it
  * cannot land on the wrong half. */
+/** What a delete does to a machine wsp did not fork: nothing. The one phrase, read by the question a client asks
+ * before a delete and by the line the command line prints after; each supplies the "its" its own sentence needs. */
+export const MACHINE_LEFT = "machine is left as it is";
+
 export function deleteNotice(threads: number, driven: boolean): string {
-  const machine = driven ? "Its machine is deleted at the provider" : "Its machine is left as it is";
+  const machine = driven ? "Its machine is deleted at the provider" : `Its ${MACHINE_LEFT}`;
   return `${machine}; its record and ${fmtThreads(threads)} leave this computer.`;
 }
 

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { alreadyRecorded, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, THIS_COMPUTER, type PortForward } from "@wsp/protocol";
+import { alreadyRecorded, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, THIS_COMPUTER, TICKET_ORIGIN, type PortForward } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -249,6 +249,11 @@ describe("local workspace", () => {
       const connect = await here.request("ticket.issue", { purpose: "connect" });
       const mine = await WsClient.connect(srv.port, { ticket: connect["ticket"] as string });
       expect((await mine.request("workspaces.get", { workspaceId: ws.id }))["workspace"]).toMatchObject({ name: "mac" });
+      // The door reads the table, not the wire: a socket on a connect ticket is this computer's own whatever its
+      // frames claim, so the workspace answers it even when it says it is relayed.
+      expect((await mine.request("workspaces.get", { workspaceId: ws.id, origin: "relayed" }))["workspace"]).toMatchObject({ name: "mac" });
+      // Every purpose the table holds names an origin, so no socket is ever let in on the origin its client picked.
+      expect(TICKET_ORIGIN).toEqual({ connect: "here", relay: "relayed" });
       here.close();
       machine.close();
       mine.close();

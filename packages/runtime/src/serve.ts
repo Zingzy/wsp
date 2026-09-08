@@ -110,16 +110,18 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     let authed = false;
     // What this socket is, decided when it is let in and never again: the ticket it redeemed says whether its
     // requests reached the host from a machine. Origin rides the wire from the client, so a socket that lied about
-    // it would drive what only this computer may; the host stamps the road's own answer over what arrives.
+    // it would drive what only this computer may; the host stamps the road's own answer over what arrives. A ticket
+    // whose purpose the table does not answer for is refused at the door rather than let in on the client's word.
     let stamped: WorkspaceOrigin | undefined;
     if (ticketParam !== null) {
       const ticket = tickets.get(ticketParam);
       tickets.delete(ticketParam); // single-use, spent even when expired
-      if (!ticket || now() > ticket.expiresAt) {
+      const origin = ticket === undefined ? undefined : TICKET_ORIGIN[ticket.purpose];
+      if (ticket === undefined || origin === undefined || now() > ticket.expiresAt) {
         ws.close(4401, "unauthorized");
         return;
       }
-      stamped = TICKET_ORIGIN[ticket.purpose];
+      stamped = origin;
       authed = true;
     }
 

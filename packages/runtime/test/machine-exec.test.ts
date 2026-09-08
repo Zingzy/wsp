@@ -81,7 +81,7 @@ function scriptGuest(backend: StubBackend, steps: Step[]) {
       // A signal to the group takes the leader and what it spawned; one to a pid takes that pid alone.
       if (cmd.includes("-- -$P")) child = false;
       if (!cmd.includes(".tail")) alive = false;
-      const rm = /rm -rf ([^ ]+)\.\*/.exec(cmd);
+      const rm = /rm -rf '([^']+)'\.\*/.exec(cmd);
       if (rm) {
         claimed = false;
         for (const path of [...disk.keys()]) if (path.startsWith(`${rm[1]}.`)) disk.delete(path);
@@ -201,11 +201,11 @@ describe("machineExecStream", () => {
     expect(guest.files()).toEqual([]);
     expect(guest.kills).toHaveLength(1);
     const reap = guest.kills[0]!;
-    expect(reap).toMatch(/^P=\$\(cat \/tmp\/wsp-run\/[a-f0-9]{12}\.pid 2>\/dev\/null\); /);
+    expect(reap).toMatch(/^P=\$\(cat '\/tmp\/wsp-run\/[a-f0-9]{12}'\.pid 2>\/dev\/null\); /);
     expect(reap.indexOf("kill -TERM -- -$P")).toBeGreaterThan(-1);
     expect(reap.indexOf("kill -TERM -- -$P")).toBeLessThan(reap.indexOf("kill -KILL -- -$P"));
-    expect(reap.indexOf("kill -KILL -- -$P")).toBeLessThan(reap.indexOf("rm -rf /tmp/wsp-run/"));
-    expect(reap).toMatch(/rm -rf \/tmp\/wsp-run\/[a-f0-9]{12}\.\*; true$/);
+    expect(reap.indexOf("kill -KILL -- -$P")).toBeLessThan(reap.indexOf("rm -rf '/tmp/wsp-run/"));
+    expect(reap).toMatch(/rm -rf '\/tmp\/wsp-run\/[a-f0-9]{12}'\.\*; true$/);
     const polls = guest.calls.filter(c => c.includes("__WSP_EOF_"));
     expect(guest.calls.indexOf(reap)).toBeGreaterThan(guest.calls.indexOf(polls.at(-1)!));
   });
@@ -228,7 +228,7 @@ describe("machineExecStream", () => {
     expect(await stream.exited).toBe(0);
     const launch = launchCalls(guest.calls);
     expect(launch).toHaveLength(1);
-    expect(launch[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\nmkdir \/tmp\/wsp-run\/[0-9a-f]{12}\.d 2>\/dev\/null \|\| \{ \[ -d \/tmp\/wsp-run\/[0-9a-f]{12}\.d \] && \{ echo WSP_LAUNCHED; exit 0; \}; echo "no run folder on this machine: \/tmp\/wsp-run\/[0-9a-f]{12}\.d" >&2; exit 1; \}\nset -o pipefail\nprintf %s '[A-Za-z0-9+/=]+' \| base64 -d > '\/tmp\/wsp-run\/[0-9a-f]{12}\.sh' \|\| exit 1\nsetsid bash /);
+    expect(launch[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\nmkdir '\/tmp\/wsp-run\/[0-9a-f]{12}\.d' 2>\/dev\/null \|\| \{ \[ -d '\/tmp\/wsp-run\/[0-9a-f]{12}\.d' \] && \{ echo WSP_LAUNCHED; exit 0; \}; echo 'no run folder on this machine: \/tmp\/wsp-run\/[0-9a-f]{12}\.d' >&2; exit 1; \}\nset -o pipefail\nprintf %s '[A-Za-z0-9+/=]+' \| base64 -d > '\/tmp\/wsp-run\/[0-9a-f]{12}\.sh' \|\| exit 1\nsetsid bash /);
     expect(solariBody(launch[0]!)).toBeLessThanOrEqual(EXEC_BODY_MAX);
   });
 
@@ -245,7 +245,8 @@ describe("machineExecStream", () => {
     const launch = launchCalls(guest.calls);
     expect(launch.filter(c => c.endsWith("echo WSP_PIECE"))).toHaveLength(4);
     expect(launch).toHaveLength(5);
-    expect(guest.getScript()).toBe(`${workScoreLine()}\nexport CLAUDE_CONFIG_DIR='/root/.claude-cfg'\n${BIG_COMMAND}\necho $? > ${launch.at(-1)!.match(/> '([^']*)\.sh'/)![1]}.exit\n`);
+    // The exit file is written under the same base as the script, and its path is quoted like every other.
+    expect(guest.getScript()).toBe(`${workScoreLine()}\nexport CLAUDE_CONFIG_DIR='/root/.claude-cfg'\n${BIG_COMMAND}\necho $? > '${launch.at(-1)!.match(/> '([^']*)\.sh'/)![1]}'.exit\n`);
   });
 
   it("the run script puts the turn's processes at the work score before anything else, so a build that outgrows the machine dies before the daemon", async () => {
@@ -326,13 +327,14 @@ describe("machineExecStream", () => {
     for await (const _ of stream.lines) void _;
     expect(await stream.exited).toBe(0);
     expect(guest.getInput()).toBe('{"type":"user","text":"go"}\n');
-    const base = guest.getLaunch().match(/mkfifo (\/tmp\/r\/[a-f0-9]+)\.fifo/)?.[1];
+    // Every path in the script is one quoted word, so a run folder with a space in it feeds the same command.
+    const base = guest.getLaunch().match(/mkfifo '(\/tmp\/r\/[a-f0-9]+)'\.fifo/)?.[1];
     expect(base).toBeDefined();
     const script = guest.getScript();
-    expect(script).toContain(`( tail -n +1 -f ${base}.in > ${base}.fifo & echo $! > ${base}.tail )`);
-    expect(script).toContain(`} < ${base}.fifo`);
+    expect(script).toContain(`( tail -n +1 -f '${base}'.in > '${base}'.fifo & echo $! > '${base}'.tail )`);
+    expect(script).toContain(`} < '${base}'.fifo`);
     expect(script).toContain("cd ~ && claude -p --input-format stream-json");
-    expect(script.indexOf(`echo $? > ${base}.exit`)).toBeLessThan(script.indexOf(`kill $(cat ${base}.tail)`));
+    expect(script.indexOf(`echo $? > '${base}'.exit`)).toBeLessThan(script.indexOf(`kill $(cat '${base}'.tail)`));
   });
 
   it("a seeded prompt over the cap goes up in pieces ahead of the launch, every exec body under the cap, and the input file decodes byte for byte", async () => {
@@ -347,7 +349,7 @@ describe("machineExecStream", () => {
     const launch = launchCalls(guest.calls);
     expect(launch.filter(c => c.endsWith("echo WSP_PIECE"))).toHaveLength(4);
     expect(launch).toHaveLength(5);
-    expect(launch.at(-1)).toMatch(/mkdir \/tmp\/wsp-run\/[a-f0-9]+\.d 2>\/dev\/null \|\| \{ \[ -d \/tmp\/wsp-run\/[a-f0-9]+\.d \] && \{ echo WSP_LAUNCHED; exit 0; \}; echo "no run folder on this machine: \/tmp\/wsp-run\/[a-f0-9]+\.d" >&2; exit 1; \}\nset -o pipefail\n.*\nmkfifo \/tmp\/wsp-run\/[a-f0-9]+\.fifo\nsetsid bash /s);
+    expect(launch.at(-1)).toMatch(/mkdir '\/tmp\/wsp-run\/[a-f0-9]+\.d' 2>\/dev\/null \|\| \{ \[ -d '\/tmp\/wsp-run\/[a-f0-9]+\.d' \] && \{ echo WSP_LAUNCHED; exit 0; \}; echo 'no run folder on this machine: \/tmp\/wsp-run\/[a-f0-9]+\.d' >&2; exit 1; \}\nset -o pipefail\n.*\nmkfifo '\/tmp\/wsp-run\/[a-f0-9]+'\.fifo\nsetsid bash /s);
     expect(guest.getInput()).toBe(`${prompt}\n`);
     expect(guest.getScript()).toContain("claude -p --input-format stream-json");
   });
@@ -376,7 +378,7 @@ describe("machineExecStream", () => {
     now = 900;
     expect(await stream.write("late")).toBe("gone");
     expect(guest.writes).toHaveLength(1);
-    expect(guest.writes[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\n\{ \[ -e \/tmp\/wsp-run\/[a-f0-9]+\.exit \] \|\| \[ ! -d \/tmp\/wsp-run\/[a-f0-9]+\.d \]; \} && \{ echo WSP_GONE; exit 0; \}\nset -o pipefail\n\[ -e '\/tmp\/wsp-run\/[a-f0-9]+\.in\.a[0-9a-f]{12}' \] \|\| \{ printf %s '[A-Za-z0-9+/=]+' \| base64 -d >> '\/tmp\/wsp-run\/[a-f0-9]+\.in' && : > '[^']+'; \} \|\| exit 1\necho WSP_OK$/);
+    expect(guest.writes[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\n\{ \[ -e '\/tmp\/wsp-run\/[a-f0-9]+'\.exit \] \|\| \[ ! -d '\/tmp\/wsp-run\/[a-f0-9]+\.d' \]; \} && \{ echo WSP_GONE; exit 0; \}\nset -o pipefail\n\[ -e '\/tmp\/wsp-run\/[a-f0-9]+\.in\.a[0-9a-f]{12}' \] \|\| \{ printf %s '[A-Za-z0-9+/=]+' \| base64 -d >> '\/tmp\/wsp-run\/[a-f0-9]+\.in' && : > '[^']+'; \} \|\| exit 1\necho WSP_OK$/);
     expect(guest.getInput()).toBe("first\n");
     now = 1100;
     await expect(first).rejects.toThrow(/^stopped after 0m 01s with no output for 0m$/);
@@ -392,7 +394,7 @@ describe("machineExecStream", () => {
     for await (const _ of stream.lines) void _;
     const before = guest.kills.filter(k => !k.includes("rm -rf"));
     expect(before).toHaveLength(1);
-    expect(before[0]).toMatch(/P=\$\(cat \/tmp\/wsp-run\/[a-f0-9]+\.tail 2>\/dev\/null\); \[ -n "\$P" \] && kill -TERM "\$P"/);
+    expect(before[0]).toMatch(/P=\$\(cat '\/tmp\/wsp-run\/[a-f0-9]+'\.tail 2>\/dev\/null\); \[ -n "\$P" \] && kill -TERM "\$P"/);
     expect(before[0]).not.toContain("-- -");
     stream.closeInput();
     expect(guest.kills.filter(k => !k.includes("rm -rf"))).toHaveLength(1);
@@ -878,7 +880,7 @@ describe("machineExecStream sweeping the runs a connecting host does not hold", 
       id: "crowded",
       exec: (cmd: string) => {
         calls.push(cmd);
-        return Promise.resolve({ exitCode: 0, stdout: cmd.startsWith("for d in") ? `${stale.map(base => `${base}.d`).join("\n")}\n` : "", stderr: "" });
+        return Promise.resolve({ exitCode: 0, stdout: cmd.startsWith("for d in ") ? `${stale.map(base => `${base}.d`).join("\n")}\n` : "", stderr: "" });
       },
     } as unknown as Machine;
 
@@ -889,7 +891,7 @@ describe("machineExecStream sweeping the runs a connecting host does not hold", 
     for (const cmd of calls) expect(solariBody(cmd), cmd.slice(0, 80)).toBeLessThanOrEqual(EXEC_BODY_MAX);
     expect(reaps.length).toBeGreaterThan(1);
     // Every run is reaped once across the pages, and no page carries a run twice.
-    const reaped = stale.filter(base => reaps.filter(cmd => cmd.includes(`rm -rf ${base}.*`)).length === 1);
+    const reaped = stale.filter(base => reaps.filter(cmd => cmd.includes(`rm -rf '${base}'.*`)).length === 1);
     expect(reaped).toEqual(stale);
   });
 
