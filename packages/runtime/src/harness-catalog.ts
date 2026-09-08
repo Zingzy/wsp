@@ -82,18 +82,18 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
   fromTable({
     harness: "codex",
     label: "Codex",
-    // The models and their efforts as the app-server's model/list answered them, and low as the effort it reports
-    // for the default model; the sandbox modes are the choices `codex --help` prints for -s. No codex model runs at
-    // two context windows, so it takes no window at all.
+    // The models and their efforts as the app-server's model/list answered them, each with the effort it reports for
+    // that model; the sandbox modes are the choices `codex --help` prints for -s. No codex model runs at two context
+    // windows, so it takes no window at all.
     pin: { read: "app-server", version: "0.153.0", date: "2026-09-07" },
     // The oldest generation model/list still offers, and the cheapest of them.
     smallModel: "gpt-5.2",
     models: [
-      { ...option("gpt-5.6-sol", "GPT-5.6-Sol"), isDefault: true, efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] },
-      { ...option("gpt-5.6-terra", "GPT-5.6-Terra"), efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] },
-      { ...option("gpt-5.6-luna", "GPT-5.6-Luna"), efforts: ["low", "medium", "high", "xhigh", "max"] },
-      { ...option("gpt-5.5", "GPT-5.5"), efforts: ["low", "medium", "high", "xhigh"] },
-      { ...option("gpt-5.2", "GPT-5.2"), efforts: ["low", "medium", "high", "xhigh"] },
+      { ...option("gpt-5.6-sol", "GPT-5.6-Sol"), isDefault: true, efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "low" },
+      { ...option("gpt-5.6-terra", "GPT-5.6-Terra"), efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "medium" },
+      { ...option("gpt-5.6-luna", "GPT-5.6-Luna"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "medium" },
+      { ...option("gpt-5.5", "GPT-5.5"), efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" },
+      { ...option("gpt-5.2", "GPT-5.2"), efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" },
     ],
     efforts: levels(["low", "medium", "high", "xhigh", "max", "ultra"], "low"),
     permissionModes: [
@@ -150,7 +150,8 @@ export function smallestModel(catalog: HarnessCatalog | undefined): string | und
 
 /** The binary's lists in the wire shape: its values and defaults win, the table lends labels and descriptions it knows.
  * A model whose efforts the binary did not name keeps none of its own, so every effort the catalog lists stays open to
- * it; the effort marked default is the one the binary reports for the model it would run, else the table's own mark. */
+ * it; each model carries the effort the binary reports for it, and the catalog's own mark is the one it reports for
+ * the model it would run, else the table's mark, which effortsFor reads for a model that names none. */
 export function catalogFromProbe(table: HarnessCatalog, probe: HarnessCatalogProbe): HarnessCatalog {
   const known = (list: readonly HarnessOption[], value: string): HarnessOption | undefined => list.find(o => o.value === value);
   const models: HarnessModel[] = probe.models.map(m => ({
@@ -159,6 +160,7 @@ export function catalogFromProbe(table: HarnessCatalog, probe: HarnessCatalogPro
     ...(m.description !== undefined ? { description: m.description } : {}),
     ...(m.isDefault ? { isDefault: true } : {}),
     ...(m.efforts !== undefined ? { efforts: [...m.efforts] } : {}),
+    ...(m.defaultEffort !== undefined ? { defaultEffort: m.defaultEffort } : {}),
     contextWindows: [...m.contextWindows],
   }));
   // The binary named the effort its default model runs at, so its mark replaces the table's; where it named none the

@@ -315,6 +315,9 @@ export type HarnessOption = z.infer<typeof HarnessOption>;
  * empty means the model takes none and the composer hides that section for it. */
 export const HarnessModel = HarnessOption.extend({
   efforts: z.array(z.string()).optional(),
+  /** The effort this model runs at when a turn names none, where the binary reports one per model rather than one
+   * for the harness; read through effortsFor, which falls back to the catalog's own mark. */
+  defaultEffort: z.string().optional(),
   contextWindows: z.array(z.string()).optional(),
 });
 export type HarnessModel = z.infer<typeof HarnessModel>;
@@ -370,9 +373,22 @@ function narrowed(all: ReadonlyArray<HarnessOption>, subset: ReadonlyArray<strin
   return subset === undefined ? [...all] : all.filter(o => subset.includes(o.value));
 }
 
-/** The efforts a model takes: its own subset of the catalog's, in the catalog's order, else all of them. */
+/** The efforts a model takes: its own subset of the catalog's, in the catalog's order, else all of them, with the
+ * one this pick runs at when a turn names none marked. The picked model's own default wins where the binary named
+ * one, and the catalog's mark stands only for a model that names none, so the mark is the default of this pick and
+ * not of the harness. A model that names a default its own list does not carry marks nothing, as a catalog whose
+ * binary does. This is the one rule for that: the composer's effort picker and startPicks both read it. */
 export function effortsFor(catalog: HarnessCatalog, model: HarnessModel | null): HarnessOption[] {
-  return narrowed(catalog.efforts, model?.efforts);
+  const options = narrowed(catalog.efforts, model?.efforts);
+  const own = model?.defaultEffort;
+  if (own === undefined) return options;
+  return options.map(({ isDefault: _harness, ...rest }) => (rest.value === own ? { ...rest, isDefault: true } : rest));
+}
+
+/** The model a pick names, as the catalog knows it; a slug the catalog does not list still counts, named by itself. */
+export function modelOf(catalog: HarnessCatalog, value: string | undefined): HarnessModel | null {
+  if (value === undefined) return null;
+  return catalog.models.find(m => m.value === value) ?? { value, label: value };
 }
 
 /** None without a model: the window rides the model as a suffix, so there is nothing to offer it on. */
@@ -396,22 +412,24 @@ function listed(subject: string, word: string, options: ReadonlyArray<HarnessOpt
 
 function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined): void {
   if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model);
-  const chosen = model === undefined ? null : catalog.models.find(m => m.value === model) ?? { value: model, label: model };
+  const chosen = modelOf(catalog, model);
   if (catalog.efforts.length > 0) listed(chosen?.efforts !== undefined ? chosen.label : catalog.harness, "effort", effortsFor(catalog, chosen), picks.effort);
   if (catalog.permissionModes.length > 0) listed(catalog.harness, "access mode", catalog.permissionModes, picks.permissionMode);
 }
 
 /** The picks a start runs with, checked against the catalog: a value a list does not carry is refused naming the
  * list in the composer's words, and a list the CLI leaves empty (no such flag, or open values) takes any value. A
- * start that opens a thread without a model runs the one the catalog marks default, so every door runs what the
- * composer shows; a resume keeps the thread's own model. Without a catalog (a harness the runtime has no table row
- * for) every value passes and no default is filled. Only the three picks come out, whatever else rides in. */
+ * start that opens a thread without a model runs the one the catalog marks default, and without an effort the one
+ * effortsFor marks for that model, so every door runs what the composer shows; a resume keeps the thread's own.
+ * Without a catalog (a harness the runtime has no table row for) every value passes and no default is filled. Only
+ * the three picks come out, whatever else rides in. */
 export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPicks, opensThread: boolean): StartPicks {
   const model = picks.model ?? (opensThread && catalog !== undefined ? markedDefault(catalog.models)?.value : undefined);
   if (catalog !== undefined) checkedAgainst(catalog, picks, model);
+  const effort = picks.effort ?? (opensThread && catalog !== undefined ? markedDefault(effortsFor(catalog, modelOf(catalog, model)))?.value : undefined);
   return {
     ...(model !== undefined ? { model } : {}),
-    ...(picks.effort !== undefined ? { effort: picks.effort } : {}),
+    ...(effort !== undefined ? { effort } : {}),
     ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}),
   };
 }
@@ -550,6 +568,9 @@ export type SessionEvent = z.infer<typeof SessionEvent>;
 
 // --- workspace / port / inbox events ----------------------------------------
 
+/** A machine this runtime now has: a create that landed, or a record the sweep restored from the provider's
+ * listing. Readers that meter the machine (the awake stretch, the auto-nap window) take it as the machine coming
+ * up, so a change to a record a client already holds is never this event. */
 export const WorkspaceCreatedEvent = z.object({ type: z.literal("workspace.created"), workspace: WorkspaceView });
 /** The awaited steps of a create in the order the runtime reaches them; `failed` ends a create that threw. */
 export const WorkspaceCreateStage = z.enum(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
@@ -584,6 +605,9 @@ export const WorkspaceUpgradedEvent = z.object({
   workspaceId: z.string(),
   machineId: z.string(),
 });
+/** A person named the workspace: its record alone changed, and every client puts the name on the row it holds. The
+ * machine was not touched, so nothing that meters it reads this. */
+export const WorkspaceRenamedEvent = z.object({ type: z.literal("workspace.renamed"), workspaceId: z.string(), name: z.string() });
 export const WorkspaceDeletedEvent = z.object({ type: z.literal("workspace.deleted"), workspaceId: z.string() });
 /** The provider stopped knowing the machine: the workspace's phase is gone from here until a rebuild or a delete.
  * Sessions on it ended, the rate is 0, the idle window is dropped; reason carries the provider's words. */
@@ -1198,6 +1222,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceNappedEvent.extend(sequenced),
   WorkspaceWokenEvent.extend(sequenced),
   WorkspaceUpgradedEvent.extend(sequenced),
+  WorkspaceRenamedEvent.extend(sequenced),
   WorkspaceDeletedEvent.extend(sequenced),
   WorkspaceGoneEvent.extend(sequenced),
   WorkspaceStatusEvent.extend(sequenced),
@@ -1605,6 +1630,10 @@ export const RuntimeRequest = z.discriminatedUnion("op", [
    * files across, the way a resize does. The person asks for it; nothing moves a machine they are working on.
    * Refused (kind "conflict") for a workspace forked from a project golden, whose disk the move would throw away. */
   z.object({ id: reqId, op: z.literal("workspaces.updateImage"), workspaceId: z.string() }),
+  /** Names the workspace and replies with its fresh { workspace }. The name is unique on this host, so one another
+   * workspace holds, one a fork is landing under and a blank one are refused (kind "conflict"); a name the workspace
+   * already carries comes back untouched. Threads running on the machine are untouched. */
+  z.object({ id: reqId, op: z.literal("workspaces.rename"), workspaceId: z.string(), name: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Drops a workspace whose machine the provider no longer has: the record, its transcripts and its sessions leave the
    * store, workspace.deleted follows, and nothing is asked of the provider. Refused with the reason (kind "conflict")

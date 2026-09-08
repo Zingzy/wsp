@@ -61,10 +61,26 @@ const sessions: SessionView[] = [
   { id: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
 ];
 
-// Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one.
+// Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one. Codex
+// carries the effort lists its app-server reports, each model with the effort that model runs at, so the effort
+// picker draws its default against a pick rather than against the binary.
 const catalogs: HarnessCatalog[] = [
   { harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }], efforts: [], contextWindows: [], permissionModes: [], steers: true, renames: true },
-  { harness: "codex", label: "Codex", source: "table", version: "app-server 0.153.0, 2026-09-07", models: [{ value: "gpt-5.6-sol", label: "GPT-5.6-Sol", isDefault: true }], efforts: [], contextWindows: [], permissionModes: [], steers: false, renames: false },
+  {
+    harness: "codex",
+    label: "Codex",
+    source: "table",
+    version: "app-server 0.153.0, 2026-09-07",
+    models: [
+      { value: "gpt-5.6-sol", label: "GPT-5.6-Sol", isDefault: true, efforts: ["low", "medium", "high"], defaultEffort: "low" },
+      { value: "gpt-5.5", label: "GPT-5.5", efforts: ["low", "medium", "high"], defaultEffort: "medium" },
+    ],
+    efforts: [{ value: "low", label: "Low", isDefault: true }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }],
+    contextWindows: [],
+    permissionModes: [],
+    steers: false,
+    renames: false,
+  },
 ];
 
 const linger = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_linger" };
@@ -101,6 +117,12 @@ const api: Api = {
     const row = sessions.find(s => s.id === sessionId);
     if (row !== undefined) row.harnessTitle = title;
     return { outcome: "renamed" };
+  },
+  // The runtime holds the name on this computer, so the next listing carries it; the shell fixture does the same.
+  renameWorkspace: async (id, name) => {
+    const row = workspaces.find(w => w.id === id)!;
+    row.name = name;
+    return row;
   },
   listHarnesses: async () => catalogs,
   subscribe: () => () => {},

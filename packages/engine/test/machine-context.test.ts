@@ -508,12 +508,30 @@ describe("the guest scripts on a local bash", () => {
     expect(aliasLines(out)).toEqual(MISSING);
   }, 30_000);
 
-  it.skipIf(shellOf("fish") === undefined)("the fish alias probe does the same on this machine's fish, from a fake config dir", async () => {
+  /** What fish prints for the same aliases, each body escaped as its own `alias` listing escapes it: quoted when it
+   * holds a space, backslashed when it holds a backslash. A fixture, so the probe is read against the rule and not
+   * against whichever fish and whichever config this machine happens to carry. */
+  const FISH_LISTING = [
+    "alias g git",
+    "alias ll 'ls -la'",
+    "alias o open-not-here",
+    "alias s 'sudo not-here-either'",
+    "alias e 'FOO=1 not-here-third'",
+    "alias q \\\\not-here-fourth\\ --flag",
+    "alias abs /Applications/Nowhere.app/Contents/MacOS/nowhere",
+    "alias grp '{ grep -rn . ; }'",
+  ].join("\n");
+
+  it.skipIf(shellOf("fish") === undefined)("the fish alias probe names only aliases whose first word is a missing command, over a fixed listing (skipped: this machine has no fish)", async () => {
     const roots = fakeGuest();
-    mkdirSync(join(roots.home, ".config/fish"), { recursive: true });
-    writeFileSync(join(roots.home, ".config/fish/config.fish"), `${ALIASES.filter(([, v]) => !v.includes("{")).map(([k, v]) => `alias ${k} '${v.replace(/'/g, "\\'")}'`).join("\n")}\n`);
-    const out = await runIn(shellOf("fish")!, ["-lic", ALIAS_PROBES.fish!], { HOME: roots.home, XDG_CONFIG_HOME: join(roots.home, ".config") });
-    expect(aliasLines(out)).toEqual(MISSING);
+    const bin = join(roots.home, "bin");
+    mkdirSync(bin, { recursive: true });
+    for (const cmd of ["git", "ls"]) writeFileSync(join(bin, cmd), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    // The listing arrives as a variable and PATH holds only the two commands the fixture calls present, so neither
+    // the answer nor fish's startup reads anything of this machine's.
+    const script = `function alias; string split \\n -- $WSP_FISH_ALIASES; end\n${ALIAS_PROBES.fish!}`;
+    const { stdout } = await bash(shellOf("fish")!, ["--no-config", "-c", script], { env: { PATH: bin, HOME: roots.home, WSP_FISH_ALIASES: FISH_LISTING }, maxBuffer: 4 * 1024 * 1024 });
+    expect(aliasLines(stdout)).toEqual(MISSING);
   }, 30_000);
 
   it("a bounded command is killed at its bound and the script goes on", async () => {

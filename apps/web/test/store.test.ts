@@ -563,6 +563,20 @@ describe("store workspaces", () => {
     expect(useStore.getState().statuses["ws_a"]?.machineId).toBe("m3");
   });
 
+  it("renamed carries the name onto the row and its status, and moves nothing about the machine", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    const was = useStore.getState().statuses["ws_a"]!;
+    emit({ type: "workspace.renamed", workspaceId: "ws_a", name: "the name he typed" });
+    expect(useStore.getState().workspaces[0]!.name).toBe("the name he typed");
+    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ name: "the name he typed", phase: was.phase, machineId: was.machineId, machineState: was.machineState });
+    // A workspace no row holds is not invented by a name.
+    emit({ type: "workspace.renamed", workspaceId: "ws_gone", name: "nobody" });
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a"]);
+    expect(useStore.getState().statuses["ws_gone"]).toBeUndefined();
+  });
+
   it("gone carries the phase and the provider's words onto the view and its status", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
     useStore.getState().bind(api);

@@ -27,6 +27,13 @@ export interface ReapOptions {
 
 export type Whose = "own" | "foreign" | "none";
 
+/** Whose machine a row is, by the owner stamp every machine wsp creates wears. The one place this is decided: the
+ * sweep kills only its own, the doctor counts only its own, and both leave another host's on the account alone. */
+export function whoseMachine(labels: Record<string, string>, owner: string): Whose {
+  const stamp = labels[OWNER_LABEL];
+  return stamp === undefined ? "none" : stamp === owner ? "own" : "foreign";
+}
+
 export interface ReapedMachine {
   id: string;
   /** Off the listing; a machine killed from its record alone has none. */
@@ -72,7 +79,7 @@ export interface ReapResult {
  * reserved experiment is never touched, and a row the provider no longer runs or holds paused is not a machine. */
 export function lostWorkspace(m: ListedMachine, owner: string, now: number): boolean {
   if (m.state !== "running" && m.state !== "paused") return false;
-  if (isReserved(m.labels) || m.labels[WSP_LABEL] !== "1" || m.labels[OWNER_LABEL] !== owner) return false;
+  if (isReserved(m.labels) || m.labels[WSP_LABEL] !== "1" || whoseMachine(m.labels, owner) !== "own") return false;
   if (m.labels[BUILDER_LABEL] === "1" || m.labels[SMOKE_LABEL] === "1") return false;
   const createdAt = Date.parse(m.labels[CREATED_AT_LABEL] ?? "");
   return Number.isNaN(createdAt) || now - createdAt >= OWN_GRACE_MS;
@@ -112,7 +119,7 @@ export async function reap(opts: ReapOptions): Promise<ReapResult> {
     if (known.has(m.id)) continue;
     const builder = m.labels[BUILDER_LABEL] === "1";
     const owner = m.labels[OWNER_LABEL];
-    const whose: Whose = owner === undefined ? "none" : owner === opts.owner ? "own" : "foreign";
+    const whose = whoseMachine(m.labels, opts.owner);
     const createdAt = Date.parse(m.labels[CREATED_AT_LABEL] ?? "");
     const ageMs = Number.isNaN(createdAt) ? undefined : now - createdAt;
     const backstopMs = whose === "own" ? OWN_GRACE_MS : builder ? BUILDER_IDLE_MS : olderThanMs;

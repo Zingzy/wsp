@@ -768,6 +768,9 @@ export function nameDeletingRefusal(name: string): string {
   return `${name} is being deleted; wait for the delete to finish, then fork it again`;
 }
 
+/** The refusal a fork or a rename gets for a blank name: a person and an agent both address a workspace by its name. */
+export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
+
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how
  * long it was given in all, and what the provider reads about the machine after it, or that the provider could not
  * be read. The person's road is to try again; the runtime never leaves the row at Pausing or Waking. */
@@ -955,6 +958,14 @@ export const NO_TEMPLATES_LINE = "this backend has no templates; goldens stay as
 
 /** The doctor's line on a backend that cannot list snapshots: nothing to split, nothing to clean. */
 export const NO_SNAPSHOT_LISTING = "this backend lists no snapshots; nothing to split by owner";
+
+/** The doctor's line for the machines its teardown check found on the account that this host did not make: each
+ * named with the host that did, left alone and never a failure, since two computers on one account each stand
+ * their own. */
+export function otherHostsMachinesLine(machines: readonly { id: string; owner?: string }[]): string {
+  const named = machines.map(m => `${m.id} (${m.owner === undefined ? "no owner" : `owner ${m.owner}`})`);
+  return `left alone ${plural(machines.length, "machine")} this host did not make: ${named.join(", ")}`;
+}
 
 /** The one sentence every road that leaves a builder running says: its id, what it costs, how to attach to it
  * again, and that the sweep ends it. */

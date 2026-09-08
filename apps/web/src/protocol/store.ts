@@ -116,6 +116,10 @@ interface State {
    * reloaded so the sidebar shows it. True once the store took the name; an answer that named nothing and a failure
    * are false and a toast, so the caller can leave the name where a person can still see it. */
   renameThread(opts: { sessionId: string; workspaceId: string; harness: string; title: string }): Promise<boolean>;
+  /** Names the workspace through the runtime, which holds the name on this computer, and puts the record it answers
+   * with in place of the row. True once the runtime took the name; a refusal (a name another workspace holds, a blank
+   * one) is false and a toast, so the caller can leave the name where a person can still see it. */
+  renameWorkspace(opts: { workspaceId: string; name: string }): Promise<boolean>;
   /** Asks the runtime for the catalogs as the workspace's machine reports them; a refusal leaves the table's in place. */
   loadHarnesses(workspaceId: string): Promise<void>;
 }
@@ -325,6 +329,17 @@ export const useStore = create<State>((set, get) => {
         return false;
       }
     },
+    async renameWorkspace({ workspaceId, name }) {
+      const api = get().api;
+      if (!api?.renameWorkspace) return false;
+      try {
+        get().applyWorkspace(await api.renameWorkspace(workspaceId, name));
+        return true;
+      } catch (e: unknown) {
+        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+        return false;
+      }
+    },
     async loadHarnesses(workspaceId) {
       const api = get().api;
       if (!api?.listHarnesses) return;
@@ -364,6 +379,13 @@ export const useStore = create<State>((set, get) => {
     },
     applyEvent(e) {
       switch (e.type) {
+        case "workspace.renamed":
+          // The record alone changed: the row and its status take the name, and nothing about the machine moves.
+          set(s => ({
+            workspaces: s.workspaces.map(w => (w.id === e.workspaceId ? { ...w, name: e.name } : w)),
+            statuses: s.statuses[e.workspaceId] ? { ...s.statuses, [e.workspaceId]: { ...s.statuses[e.workspaceId]!, name: e.name } } : s.statuses,
+          }));
+          return;
         case "workspace.deleted":
           set(s => {
             const { [e.workspaceId]: _s, ...statuses } = s.statuses;

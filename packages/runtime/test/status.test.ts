@@ -543,6 +543,55 @@ describe("accrued cost", () => {
   });
 });
 
+describe("a rename and the machine's own accounting", () => {
+  const usd = (rateUsdPerHour: number, ms: number): number => (rateUsdPerHour * ms) / 3_600_000;
+
+  it("leaves the awake meter and the accrued spend where they were: a rename is a record changing, never a machine coming up", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const rate = backend.pricing.rateUsdPerHour(backend.pricing.defaultSize);
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    const stop = rt.status.watch();
+    for (let i = 0; i < 3; i++) await tickCost(fc, costs);
+    const before = costs.at(-1)!;
+    expect(before).toMatchObject({ phase: "running", awakeMs: 3 * TICK_MS });
+
+    await rt.workspaces.rename(ws.id, "the name he typed");
+
+    // The stretch the machine is already running is not re-opened: the next tick counts on from where it was.
+    await tickCost(fc, costs);
+    const after = costs.at(-1)!;
+    expect(after.awakeMs).toBe(4 * TICK_MS);
+    expect(after.accruedUsd).toBeCloseTo(usd(rate, 4 * TICK_MS), 10);
+    expect(after.accruedUsd).toBeGreaterThan(before.accruedUsd);
+    // Nothing in the stored line ever runs backwards, which is what a re-opened stretch writes into it.
+    const history = await rt.status.history(ws.id);
+    expect(history.map(p => p.awakeMs)).toEqual([...history.map(p => p.awakeMs)].sort((a, b) => a - b));
+    stop();
+    await rt.close();
+  });
+
+  it("leaves the auto-nap window where it was: a rename is not a person acting in the workspace", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const windowMs = 20 * 60_000;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle: { defaultWindowMs: windowMs } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const armed = (await rt.status.list())[0]!.idleAt;
+    expect(armed).toBeDefined();
+
+    fc.advance(5 * 60_000);
+    await rt.workspaces.rename(ws.id, "the name he typed");
+
+    // The window still fires when the create armed it: a rename touched no machine.
+    expect((await rt.status.list())[0]!.idleAt).toBe(armed);
+    await rt.close();
+  });
+});
+
 describe("status.history", () => {
   /** A store whose writes to the cost history collection are counted. */
   function countingStore(): { store: Store; puts: () => number; deletes: () => number } {

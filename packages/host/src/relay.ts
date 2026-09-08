@@ -646,6 +646,18 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
 
   const workspaceTarget = (id: string, name: string): Target => ({ id, name, reach: () => rt.workspaces.daemonReach(id) });
 
+  /** The workspace was named: every row and every log line for it reads the name it carries now. The link's target
+   * and a url forward's are two objects once that forward has outlived a nap, so both are named, and each open
+   * forward is announced again so a client's row follows without waiting for the next open or close. */
+  const rename = (id: string, name: string): void => {
+    const link = links.get(id);
+    if (link) link.target.name = name;
+    for (const f of allForwards(id)) {
+      f.target.name = name;
+      emit({ type: "forward.open", forward: viewOf(f) });
+    }
+  };
+
   const onRuntimeEvent = (e: EventUnion): void => {
     switch (e.type) {
       case "workspace.created":
@@ -657,6 +669,9 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         void drop(e.workspaceId, e.type === "workspace.woken" ? "the workspace woke" : "the workspace moved to a new machine", "pause", e.type === "workspace.woken" ? "the wake" : "it moved to a new machine").then(() =>
           rt.workspaces.get(e.workspaceId).then(w => add(workspaceTarget(w.id, w.name)), () => {}),
         );
+        return;
+      case "workspace.renamed":
+        rename(e.workspaceId, e.name);
         return;
       case "workspace.napped":
         void drop(e.workspaceId, "the workspace napped", "pause");

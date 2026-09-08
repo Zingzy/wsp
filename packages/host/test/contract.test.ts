@@ -111,6 +111,9 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(imported.code).toBe(0);
     expect(objects(imported.io)).toEqual([{ plan: expect.objectContaining({ files: 1 }) }, { imported: expect.objectContaining({ files: 1 }) }]);
     covered.set("import", objects(imported.io).at(-1));
+    // Renamed and named back, so the rest of this run still addresses it as alpha.
+    expect(await last("rename", "rename", "alpha", "renamed")).toMatchObject({ was: "alpha", workspace: { name: "renamed" } });
+    await last("rename", "rename", "renamed", "alpha");
     // A snapshot takes a first-life machine, so it comes before the pause that resumes it.
     await last("snapshot", "snapshot", "alpha");
     await last("pause", "pause", "alpha");

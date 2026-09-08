@@ -134,12 +134,13 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "recipe", "recipe_scan", "send", "snapshot", "stop", "terminal_config", "thread_new", "thread_rename", "threads", "threads_wait", "wake", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "recipe", "recipe_scan", "rename", "send", "snapshot", "stop", "terminal_config", "thread_new", "thread_rename", "threads", "threads_wait", "wake", "workspaces"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "name", "size"]);
+    expect(Object.keys((tools.find(t => t.name === "rename")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["name", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "model", "notify", "task", "title", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "size", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "detach", "effort", "message", "model", "thread"]);
@@ -424,8 +425,8 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "plan"]]);
     const bare = await call("thread_new", { workspace: "alpha", task: "hello" });
     expect(bare.isError).toBe(false);
-    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-opus-5" });
-    expect(claude.starts.at(-1)!.effort).toBeUndefined();
+    // The model and the effort the composer shows for it, since a tool that names neither runs what the app would.
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-opus-5", effort: "high" });
     const threadId = (bare.structured as { threadId: string }).threadId;
     const sent = await call("send", { thread: threadId, message: "now think", model: "claude-fable-5-1", effort: "max" });
     expect(sent.isError).toBe(false);

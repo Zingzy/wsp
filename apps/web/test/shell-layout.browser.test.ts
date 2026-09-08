@@ -10,8 +10,9 @@
 // page header's left padding alone, a send refusal above the composer is
 // one muted mono line in a slot the composer keeps at one height whether or
 // not a line is in it, a right-click on a workspace row opens the in-app menu
-// at the pointer in the tooltip skin, inside the viewport, Rename turns the
-// thread row's title into a field in the same slot at the same row height, and the switch
+// at the pointer in the tooltip skin, inside the viewport, Rename turns a
+// thread row's title and a workspace row's name into one field in the same
+// slot at the same row height, and the switch
 // chord held down puts the workspace switcher up, its cards three parts
 // each, without moving the shell under it, and at three sidebar widths the
 // workspace and thread rows keep one grammar: one height per row kind, the
@@ -777,6 +778,60 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
+  it("the effort picker marks the default of the model picked, not of the agent, in both themes", async () => {
+    const read = async (): Promise<{ label: string; marked: string[]; checked: string[]; badge: { mono: boolean; bare: boolean; muted: boolean } }> => {
+      const label = await page!.locator("[data-composer-picker='effort']").evaluate(el => el.textContent ?? "");
+      return page!.locator("[data-slot=menu-popup] [data-composer-option]").evaluateAll(
+        (els, buttonLabel) => {
+          const badgeOf = (el: Element) => [...el.querySelectorAll("span")].find(s => s.textContent === "default");
+          const marked = els.filter(el => badgeOf(el) !== undefined).map(el => el.getAttribute("data-composer-option") ?? "");
+          const badge = badgeOf(els.find(el => badgeOf(el) !== undefined)!)!;
+          const s = getComputedStyle(badge);
+          const row = getComputedStyle(els[0]!);
+          return {
+            label: buttonLabel,
+            marked,
+            checked: els.filter(el => el.getAttribute("aria-checked") === "true").map(el => el.getAttribute("data-composer-option") ?? ""),
+            badge: { mono: s.fontFamily.toLowerCase().includes("mono"), bare: s.boxShadow === "none", muted: s.color !== row.color },
+          };
+        },
+        label,
+      );
+    };
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
+      await page!.waitForSelector("[data-composer-picker='model']");
+      await page!.locator("[data-composer-picker='model']").click();
+      await page!.waitForSelector("[data-composer-model-menu]");
+      await page!.locator("[data-composer-harness='codex']").click();
+      await page!.waitForSelector("[data-composer-picker='effort'][data-value='low']");
+      await page!.locator("[data-composer-picker='effort']").click();
+      await page!.waitForSelector("[data-slot=menu-popup] [data-composer-option='medium']");
+      const sol = await read();
+      await page!.keyboard.press("Escape");
+      await page!.locator("[data-composer-picker='model']").click();
+      await page!.locator("[data-composer-option='gpt-5.5']").click();
+      await page!.waitForSelector("[data-composer-picker='effort'][data-value='medium']");
+      await page!.locator("[data-composer-picker='effort']").click();
+      await page!.waitForSelector("[data-slot=menu-popup] [data-composer-option='medium']");
+      const picked = await read();
+      console.info(`effort default at ${theme}: ${JSON.stringify({ sol, picked })}`);
+      // The app-server reports low for GPT-5.6-Sol and medium for GPT-5.5, so the mark moves with the pick.
+      expect(sol.label).toBe("Low");
+      expect(sol.marked).toEqual(["low"]);
+      expect(sol.checked).toEqual(["low"]);
+      expect(picked.label).toBe("Medium");
+      expect(picked.marked).toEqual(["medium"]);
+      expect(picked.checked).toEqual(["medium"]);
+      // The word is muted mono on nothing, the same caption the model menu marks its default with.
+      expect(picked.badge).toEqual({ mono: true, bare: true, muted: true });
+      const path = join(SHOTS_DIR, `composer-effort-${theme}.png`);
+      await page!.screenshot({ path });
+      console.info(`composer effort screenshot: ${path}`);
+      await page!.keyboard.press("Escape");
+    }
+  }, 60_000);
+
   it("each tab's footer is one muted mono line naming that agent's own binary and pin, at the popup's width, in both themes", async () => {
     interface Footer {
       text: string;
@@ -854,25 +909,30 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     await page!.screenshot({ path, clip: { x: 0, y: 0, width: 600, height: 120 } });
     console.info(`collapsed header screenshot: ${path}`);
   }, 30_000);
-  /** The thread row's title slot: the row's height, where the title starts, where the time column ends, and the
-   * title's own font, read the same way whether the slot holds the text or the field. */
-  const titleSlot = async (): Promise<{ rowHeight: number; titleX: number; timeRight: number; font: string; size: string; text: string; value: string; focused: boolean }> =>
-    page!.locator("[data-row-id^='thread:']").first().evaluate(row => {
-      const input = row.querySelector<HTMLInputElement>("[data-thread-title-input]");
-      const title = input ?? row.querySelector<HTMLElement>("[data-thread-title]")!;
-      const time = row.querySelector<HTMLElement>("[data-thread-title] ~ span, [data-thread-title-input] ~ span")!;
-      const s = getComputedStyle(title);
+  /** One row's name slot: the row's height, where the name starts, where the slot at the right edge ends, and the
+   * name's own font, read the same way whether the slot holds the text or the one name box. `selector` picks the row
+   * and `nameSelector` the text it wears, so a workspace row and a thread row are read by the same rule. */
+  const nameSlot = async (
+    selector: string,
+    nameSelector: string,
+  ): Promise<{ rowHeight: number; nameX: number; slotRight: number; font: string; size: string; text: string; value: string; focused: boolean }> =>
+    page!.locator(selector).first().evaluate((row: HTMLElement, of: string) => {
+      const input = row.querySelector<HTMLInputElement>("[data-row-name-input]");
+      const name = input ?? row.querySelector<HTMLElement>(of)!;
+      const slot = row.querySelector<HTMLElement>(`${of} ~ span, [data-row-name-input] ~ span`)!;
+      const s = getComputedStyle(name);
       return {
         rowHeight: row.getBoundingClientRect().height,
-        titleX: title.getBoundingClientRect().x,
-        timeRight: time.getBoundingClientRect().right,
+        nameX: name.getBoundingClientRect().x,
+        slotRight: slot.getBoundingClientRect().right,
         font: s.fontFamily,
         size: s.fontSize,
-        text: title.textContent ?? "",
+        text: name.textContent ?? "",
         value: input?.value ?? "",
         focused: document.activeElement === input,
       };
-    });
+    }, nameSelector);
+  const titleSlot = () => nameSlot("[data-row-id^='thread:']", "[data-thread-title]");
 
   it("a right-click on a workspace row opens the in-app menu at the pointer in the tooltip skin, kept inside the viewport, and Escape closes it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
@@ -897,8 +957,8 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(skin.z).toBe("130");
       expect(skin.arrows).toBe(0);
       expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(12);
-      // Rebuild, the two project trips (this fake host has no folder ops), rename, fork and forget.
-      expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(6);
+      // Rebuild, the two project trips (this fake host has no folder ops), fork and forget.
+      expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(5);
       // The first row that can run holds focus, so the keyboard is already in the menu.
       expect(await page!.locator("[data-context-menu] [role=menuitem]").first().evaluate(el => document.activeElement === el)).toBe(true);
       const path = join(SHOTS_DIR, `sidebar-context-menu-${theme}.png`);
@@ -926,11 +986,11 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       // keeps its place, and the field wears the title's own font and size.
       const titled = await titleSlot();
       await page!.locator("[data-context-menu] [role=menuitem]", { hasText: "Rename thread" }).click();
-      await page!.waitForSelector("[data-thread-title-input]");
+      await page!.waitForSelector("[data-row-name-input]");
       const named = await titleSlot();
       expect(named.rowHeight).toBe(titled.rowHeight);
-      expect(named.titleX).toBe(titled.titleX);
-      expect(named.timeRight).toBe(titled.timeRight);
+      expect(named.nameX).toBe(titled.nameX);
+      expect(named.slotRight).toBe(titled.slotRight);
       expect(named.font).toBe(titled.font);
       expect(named.size).toBe(titled.size);
       expect(named.value).toBe(titled.text);
@@ -940,14 +1000,59 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       const typed = await titleSlot();
       expect(typed.value).toBe("the name he typed");
       expect(typed.rowHeight).toBe(titled.rowHeight);
-      expect(typed.timeRight).toBe(titled.timeRight);
+      expect(typed.slotRight).toBe(titled.slotRight);
       const namePath = join(SHOTS_DIR, `thread-row-renaming-${theme}.png`);
       await page!.screenshot({ path: namePath, clip: { x: 0, y: 0, width: 520, height: 300 } });
       console.info(`thread row renaming screenshot: ${namePath}`);
       await page!.keyboard.press("Escape");
-      await page!.waitForSelector("[data-thread-title-input]", { state: "detached" });
+      await page!.waitForSelector("[data-row-name-input]", { state: "detached" });
       expect((await titleSlot()).text).toBe(titled.text);
       await page!.waitForSelector("[data-context-menu]", { state: "detached" });
+    }
+  }, 60_000);
+
+  it("Rename turns a workspace row's name into the same field in the same slot, from the menu and from a double-click, in both themes", async () => {
+    const wsSlot = () => nameSlot("[data-row-id='ws:ws_a']", "[data-workspace-name]");
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      const plain = await wsSlot();
+      const row = await box("[data-row-id='ws:ws_a']");
+      await page!.mouse.click(row.x + 40, row.y + row.height / 4, { button: "right" });
+      await page!.waitForSelector("[data-context-menu]");
+      await page!.locator("[data-context-menu] [role=menuitem]", { hasText: "Rename workspace" }).click();
+      await page!.waitForSelector("[data-row-name-input]");
+
+      // The field takes the name's place: the row keeps its height, the name starts where it started, the state slot
+      // at the right edge keeps its place, and the field wears the name's own font and size.
+      const named = await wsSlot();
+      expect(named.rowHeight).toBe(plain.rowHeight);
+      expect(named.nameX).toBe(plain.nameX);
+      expect(named.slotRight).toBe(plain.slotRight);
+      expect(named.font).toBe(plain.font);
+      expect(named.size).toBe(plain.size);
+      expect(named.value).toBe(plain.text);
+      expect(named.focused).toBe(true);
+      await page!.keyboard.type("the name he typed");
+      const typed = await wsSlot();
+      expect(typed.value).toBe("the name he typed");
+      expect(typed.rowHeight).toBe(plain.rowHeight);
+      expect(typed.slotRight).toBe(plain.slotRight);
+      const path = join(SHOTS_DIR, `workspace-row-renaming-${theme}.png`);
+      await page!.screenshot({ path, clip: { x: 0, y: 0, width: 520, height: 300 } });
+      console.info(`workspace row renaming screenshot: ${path}`);
+
+      await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[data-row-name-input]", { state: "detached" });
+      expect((await wsSlot()).text).toBe(plain.text);
+
+      // A double-click on the name opens the same box, and Enter names the workspace: the row reads the new name.
+      await page!.locator("[data-row-id='ws:ws_a'] [data-workspace-name]").dblclick();
+      await page!.waitForSelector("[data-row-name-input]");
+      await page!.keyboard.type("the name he typed");
+      await page!.keyboard.press("Enter");
+      await page!.waitForSelector("[data-row-name-input]", { state: "detached" });
+      expect((await wsSlot()).text).toBe("the name he typed");
+      expect((await wsSlot()).rowHeight).toBe(plain.rowHeight);
     }
   }, 60_000);
 });
