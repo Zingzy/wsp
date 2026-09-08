@@ -19,6 +19,7 @@
 // ?sidebar=<px> opens the sidebar at that remembered width so the rows can
 // be measured at several; ?spaces=1 opens it in the Spaces body, one
 // workspace under its header with a dot per workspace at the bottom;
+// ?tint=1 gives the first two workspaces a hue and a glyph of their own;
 // ?archived=1 gives the first workspace two threads quiet for days, so the
 // Archived group nested in its idle shelf can be measured shut and opened;
 // ?images=<n> puts n images in the composer so the thumbnail row above the
@@ -68,6 +69,12 @@ const cloud = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("w
 // ?local=1 adds this computer to the list, so a mixed list can be measured: two cloud rows and one local beside them.
 const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
 const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
+// ?tint=1 gives the first two workspaces a hue and a glyph and leaves the third with neither, so one page holds two
+// tinted spaces and a plain one.
+if (params.get("tint") === "1") {
+  Object.assign(workspaces[0]!, { tint: "cyan", glyph: "flask" });
+  Object.assign(workspaces[1]!, { tint: "violet", glyph: "rocket" });
+}
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
 // one; ws_b has only idle ones, the shape that used to draw no Idle header at all, one of them on Codex so both a
 // coloured and a monochrome agent mark sit in the shots.
@@ -187,6 +194,19 @@ const api: Api = {
   renameWorkspace: async (id, name) => {
     const row = workspaces.find(w => w.id === id)!;
     row.name = name;
+    return row;
+  },
+  // The look sits on the record beside the name, so the fixture writes it there and answers with the row.
+  setWorkspaceLook: async (id, look) => {
+    const row = workspaces.find(w => w.id === id)!;
+    if (look.tint !== undefined) {
+      if (look.tint === null) delete row.tint;
+      else row.tint = look.tint;
+    }
+    if (look.glyph !== undefined) {
+      if (look.glyph === null) delete row.glyph;
+      else row.glyph = look.glyph;
+    }
     return row;
   },
   listHarnesses: async () => catalogs,

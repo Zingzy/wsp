@@ -2183,3 +2183,82 @@ html.desktop-mac :has([data-terminal-translucent]) {
 html.desktop-mac:has([data-terminal-translucent]) :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not(:has([data-terminal-translucent])), [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
   background: var(--background);
 }
+
+/* One workspace's own hue, by the id its record carries. Six one-word ids, each
+   a token with a step per theme: no one lightness clears the readable floor
+   against both a near-white and a near-black sidebar, so the light theme takes
+   the darker step and the dark theme the lighter one. The six sit 27 degrees
+   apart and none comes within 43 of the green that means running or 44 of the
+   red that means danger, so a workspace's colour never speaks the state
+   language. Every surface drawn in a workspace's colour reads --space-tint, so
+   a component names no colour and the hue has one home. */
+:root {
+  --space-tint-cyan: oklch(0.501 0.077 206);
+  --space-tint-azure: oklch(0.504 0.094 233);
+  --space-tint-blue: oklch(0.517 0.19 260);
+  --space-tint-violet: oklch(0.537 0.246 287);
+  --space-tint-purple: oklch(0.541 0.241 314);
+  --space-tint-magenta: oklch(0.537 0.209 341);
+  /* How much of the hue goes into the sidebar's own colour in Spaces mode:
+     enough to tell two spaces apart, quiet enough to leave the rows their
+     contrast. The dark theme takes far more because its sidebar is black and
+     the mix runs in oklab, where a few percent off black paints nothing. The
+     second number is the alpha the hue lies at over the macOS window material,
+     which has no colour to mix into. */
+  --space-wash: 10%;
+  --space-wash-material: 7%;
+
+  @variant dark {
+    --space-tint-cyan: oklch(0.625 0.096 206);
+    --space-tint-azure: oklch(0.629 0.117 233);
+    --space-tint-blue: oklch(0.64 0.174 260);
+    --space-tint-violet: oklch(0.65 0.178 287);
+    --space-tint-purple: oklch(0.664 0.234 314);
+    --space-tint-magenta: oklch(0.67 0.261 341);
+    --space-wash: 30%;
+    --space-wash-material: 11%;
+  }
+}
+
+[data-space-tint="cyan"] {
+  --space-tint: var(--space-tint-cyan);
+}
+
+[data-space-tint="azure"] {
+  --space-tint: var(--space-tint-azure);
+}
+
+[data-space-tint="blue"] {
+  --space-tint: var(--space-tint-blue);
+}
+
+[data-space-tint="violet"] {
+  --space-tint: var(--space-tint-violet);
+}
+
+[data-space-tint="purple"] {
+  --space-tint: var(--space-tint-purple);
+}
+
+[data-space-tint="magenta"] {
+  --space-tint: var(--space-tint-magenta);
+}
+
+/* Spaces mode tints the sidebar's own surface. The inner layer is the one both
+   the glass recipe and the macOS vibrancy leave to the app, so the mix happens
+   in one place; over the window's own material there is no token to mix into,
+   only the material behind it. The mix runs in oklab, which keeps the paint
+   inside sRGB where a mix in sRGB leaves it and the screen clamps. */
+[data-app-sidebar][data-space-tint] > [data-slot="sidebar-inner"] {
+  background: color-mix(in oklab, var(--space-tint) var(--space-wash), var(--sidebar));
+}
+
+.desktop-mac [data-app-sidebar][data-space-tint] > [data-slot="sidebar-inner"] {
+  background: color-mix(in oklab, var(--space-tint) var(--space-wash-material), transparent);
+}
+
+/* In the list body the hue draws in one place only: the rail the thread rows of
+   a tinted workspace hang from. */
+[data-slot="sidebar-menu-sub"][data-space-tint] {
+  border-color: var(--space-tint);
+}

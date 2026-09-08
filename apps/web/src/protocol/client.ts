@@ -35,6 +35,7 @@ import {
   type SnapshotRollbackResult,
   type SnapshotStorage,
   type WorkspaceCreateResult,
+  type WorkspaceLook,
   type WorkspaceSize,
   WorkspaceCostEvent,
   type WorkspaceStatus,
@@ -269,6 +270,9 @@ export interface Api {
    * refused with that reason and nothing is renamed. Optional so fixtures that never rename need not fake it; a client
    * without it offers no rename. */
   renameWorkspace?(id: string, name: string): Promise<WorkspaceView>;
+  /** Sets the workspace's hue, its glyph, or both on the host. A key left out keeps that fact as it is and null clears
+   * it. Optional so fixtures that never pick a look need not fake it; a client without it offers no picker. */
+  setWorkspaceLook?(id: string, look: WorkspaceLook): Promise<WorkspaceView>;
   /** The guest ports the host forwards to this computer's loopback; forward.open and forward.close keep the list current. Optional so fixtures without forwards need not fake it. */
   listForwards?(): Promise<PortForward[]>;
   stopForward?(workspaceId: string, port: number): Promise<void>;
@@ -426,6 +430,7 @@ export function makeApi(c: ProtocolClient): Api {
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
     forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),
     renameWorkspace: async (id, name) => (await c.request<{ workspace: WorkspaceView }>("workspaces.rename", { workspaceId: id, name })).workspace,
+    setWorkspaceLook: async (id, look) => (await c.request<{ workspace: WorkspaceView }>("workspaces.look", { workspaceId: id, ...look })).workspace,
     // Parsed, not trusted: a reply without the list must not become the list.
     listForwards: async () => PortForward.array().parse((await c.request<{ forwards?: unknown }>("forwards.list")).forwards),
     stopForward: async (workspaceId, port) => void (await c.request("forwards.stop", { workspaceId, port })),

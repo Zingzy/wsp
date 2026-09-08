@@ -14,6 +14,7 @@ import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
 import { THEME_WORDS } from "../../web/src/settings/format.js";
+import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
@@ -321,21 +322,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const menus = await launched.app.evaluate(() => (globalThis as { __menus?: { type?: string; label?: string; enabled?: boolean; toolTip?: string; accelerator?: string | null }[][] }).__menus ?? []);
     expect(menus).toHaveLength(1);
     const rows = menus[0]!;
-    expect(rows.filter(r => r.type !== "separator").map(r => r.label)).toEqual([
-      WORKSPACE_WORDS.pause,
-      WORKSPACE_WORDS.rebuild,
-      WORKSPACE_WORDS.newThread,
-      WORKSPACE_WORDS.openTerminal,
-      WORKSPACE_WORDS.openBrowser,
-      WORKSPACE_WORDS.openMachine,
-      WORKSPACE_WORDS.importProject,
-      WORKSPACE_WORDS.exportProject,
-      WORKSPACE_WORDS.rename,
-      WORKSPACE_WORDS.fork,
-      WORKSPACE_WORDS.copyId,
-      WORKSPACE_WORDS.forget,
-    ]);
-    expect(rows.filter(r => r.type === "separator")).toHaveLength(5);
+    // The rows the registry says, in its order and parted where its groups part, so an action added to the registry
+    // never brings this case with it. Labels and separator places are read as one list: a separator that moved is a
+    // failure here, not only a wrong count.
+    expect(menuShapeOf(rows)).toEqual(workspaceMenuShape(first));
     expect(rows.find(r => r.label === WORKSPACE_WORDS.rename)).toMatchObject({ enabled: true });
     expect(rows.find(r => r.label === WORKSPACE_WORDS.openTerminal)).toMatchObject({ enabled: true, accelerator: "CommandOrControl+J" });
     // The shell's page got the native menu, not the in-app one.

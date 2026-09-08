@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceTint } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -1185,4 +1185,10 @@ export function terminalConfigLines(config: TerminalConfig): string[] {
     ["background-blur", config.backgroundBlur?.toString()],
   ];
   return [`Read ${config.files.join(", ")}`, ...rows.filter(([, value]) => value !== undefined).map(([key, value]) => `${key} = ${value}`)];
+}
+
+/** A tint's or a glyph's id as a picker names it. The ids are one word each, so the word is the id with its first
+ * letter up; a second table of names would drift from the list the wire validates against. */
+export function lookWord(id: WorkspaceTint | WorkspaceGlyph): string {
+  return id.charAt(0).toUpperCase() + id.slice(1);
 }
