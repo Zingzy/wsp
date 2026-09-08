@@ -6,6 +6,11 @@ import {
   backgroundTasksLine,
   biggerSizeLine,
   catalogSourceLine,
+  PERMISSION_DENIED_LINE,
+  permissionAskLine,
+  permissionModeOptionLabel,
+  permissionOutcomeLine,
+  permissionUnansweredLine,
   noModelsLine,
   type HarnessCatalog,
   MEMORY_NEAR_FULL,
@@ -1155,5 +1160,37 @@ describe("terminalConfigLines", () => {
       "background-opacity = 0.85",
       "background-blur = 20",
     ]);
+  });
+});
+
+describe("the words a relayed permission prompt shows", () => {
+  it("leads with the tool and what it is about, and drops the detail where the harness named none", () => {
+    expect(permissionAskLine("Write", "out.txt")).toBe("Permission for Write: out.txt");
+    expect(permissionAskLine("Bash")).toBe("Permission for Bash");
+    expect(permissionAskLine("Bash", "")).toBe("Permission for Bash");
+    // The options under it are the question, so the line never asks one.
+    expect(permissionAskLine("Write", "out.txt")).not.toContain("?");
+  });
+
+  it("says how a closed prompt closed, naming the option a person picked", () => {
+    expect(permissionOutcomeLine("allowed", "Allow")).toBe("Allowed: Allow");
+    expect(permissionOutcomeLine("allowed")).toBe("Allowed");
+    expect(permissionOutcomeLine("denied", "Deny")).toBe("Denied: Deny");
+    // Nobody picked either of these, so neither names an option.
+    expect(permissionOutcomeLine("unanswered")).toBe("Nobody answered; denied");
+    expect(permissionOutcomeLine("cancelled")).toBe("Cancelled with the turn");
+    expect(permissionOutcomeLine("unanswered", "Deny")).toBe("Nobody answered; denied");
+  });
+
+  it("tells the agent nobody answered rather than that a person refused, since the two are different facts", () => {
+    const waited = permissionUnansweredLine(5 * 60_000);
+    expect(waited).toContain("5m");
+    expect(waited).toContain("wsp denied it");
+    expect(waited).not.toContain("the person");
+    expect(PERMISSION_DENIED_LINE).toBe("the person denied this in the chat");
+  });
+
+  it("a mode option reads as an allow that also stops the asking, in the picker's own words for the mode", () => {
+    expect(permissionModeOptionLabel("Accept edits")).toBe("Allow, then Accept edits");
   });
 });

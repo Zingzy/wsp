@@ -23,6 +23,8 @@ describe("SolariBackend", () => {
       callbackRelay: true,
       snapshotListing: true,
       templates: true,
+      // A fork wsp made and can rebuild: nothing on it is the person's, so a turn runs without asking.
+      kept: false,
       sizes: [
         { cpu: 2, memMb: 4096, rateUsdPerHour: expect.closeTo(0.11, 10) },
         { cpu: 2, memMb: 8192, rateUsdPerHour: expect.closeTo(0.15, 10) },

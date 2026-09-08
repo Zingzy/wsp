@@ -57,6 +57,7 @@ import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ChatImageRow } from "./ChatImages";
 import { useSentImages } from "./composerImages";
+import { PermissionPromptRow } from "./PermissionPromptRow";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
@@ -94,6 +95,7 @@ import { formatWorkspaceRelativePath } from "../../lib/filePathDisplay";
 
 const NOOP_OPEN_TURN_DIFF = (_turnId: TurnId, _filePath?: string) => {};
 const NOOP_REVERT_USER_MESSAGE = (_messageId: MessageId) => {};
+const NOOP_ANSWER_PERMISSION = (_sessionId: string, _askId: string, _optionId: string) => {};
 const NOOP_ANCHOR_READY = (_messageId: MessageId, _anchorIndex: number) => {};
 const NOOP_IS_AT_END_CHANGE = (_isAtEnd: boolean) => {};
 const NOOP_MANUAL_NAVIGATION = () => {};
@@ -123,6 +125,7 @@ interface TimelineRowSharedState {
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   onToggleWorkEntry: (anchorKey: string) => void;
+  onAnswerPermission: (sessionId: string, askId: string, optionId: string) => void;
   workGroupViewState: WorkGroupViewState;
 }
 
@@ -186,6 +189,8 @@ export interface MessagesTimelineProps {
   onOpenTurnDiff?: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId?: ReadonlyMap<MessageId, number>;
   onRevertUserMessage?: (messageId: MessageId) => void;
+  /** Answers a relayed permission prompt; the turn it blocks runs or is refused as the option says. */
+  onAnswerPermission?: (sessionId: string, askId: string, optionId: string) => void;
   isRevertingCheckpoint?: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenFile?: (path: string, line?: number) => void;
@@ -227,6 +232,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff = NOOP_OPEN_TURN_DIFF,
   revertTurnCountByUserMessageId = EMPTY_REVERT_TURN_COUNTS,
   onRevertUserMessage = NOOP_REVERT_USER_MESSAGE,
+  onAnswerPermission = NOOP_ANSWER_PERMISSION,
   isRevertingCheckpoint = false,
   onImageExpand,
   onOpenFile,
@@ -486,6 +492,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
       onRevertUserMessage,
+      onAnswerPermission,
       onImageExpand,
       onOpenFile,
       onOpenTurnDiff,
@@ -504,6 +511,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
       onRevertUserMessage,
+      onAnswerPermission,
       onImageExpand,
       onOpenFile,
       onOpenTurnDiff,
@@ -933,6 +941,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <AssistantTimelineRow row={row} />
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
+      {row.kind === "permission" ? <PermissionTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
     </div>
@@ -1102,6 +1111,11 @@ function ProposedPlanTimelineRow({
       />
     </div>
   );
+}
+
+function PermissionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "permission" }> }) {
+  const ctx = use(TimelineRowCtx);
+  return <PermissionPromptRow permission={row.permission} onAnswer={ctx.onAnswerPermission} />;
 }
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {

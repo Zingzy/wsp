@@ -38,6 +38,8 @@ import {
   RuntimeErrorResponse,
   RuntimeRequest,
   RuntimeResponse,
+  SESSION_EVENT_TYPES,
+  SessionAnswerResult,
   SessionEvent,
   SessionInterruptResult,
   SessionSteerResult,
@@ -177,6 +179,69 @@ describe("protocol event union", () => {
     expect(SessionEvent.parse(plain)).toEqual(plain);
     expect(() => SessionEvent.parse({ ...steered, prompt: undefined })).toThrow();
     expect(() => SessionEvent.parse({ ...steered, prompt: 7 })).toThrow();
+  });
+});
+
+describe("a relayed permission prompt on the wire", () => {
+  const ask = {
+    type: "session.permission",
+    workspaceId: "ws_1",
+    sessionId: "s1",
+    turnId: "turn_0001",
+    threadId: "thread_0001",
+    at: 1757320000000,
+    askId: "d9aa99d3-be4e-4a2b-8766-1b9494cde4f6",
+    toolName: "Write",
+    toolUseId: "toolu_1",
+    input: '{"file_path":"/root/out.txt","content":"hi"}',
+    detail: "out.txt",
+    options: [
+      { id: "allow", label: "Allow", effect: "allow" },
+      { id: "deny", label: "Deny", effect: "deny" },
+      { id: "mode:acceptEdits", label: "Allow, then Accept edits", effect: "mode", mode: "acceptEdits" },
+    ],
+    waitMs: 300_000,
+  };
+  const closed = { type: "session.permission.closed", workspaceId: "ws_1", sessionId: "s1", turnId: "turn_0001", threadId: "thread_0001", at: 1757320005000, askId: ask.askId, outcome: "allowed", optionId: "allow" };
+
+  it("both halves are session events, so a transcript replays a prompt and how it closed", () => {
+    for (const e of [ask, closed]) {
+      expect(SessionEvent.parse(e)).toEqual(e);
+      expect(EventUnion.parse(JSON.parse(JSON.stringify(e)))).toEqual(e);
+      expect(EventUnion.parse({ ...e, seq: 12 })).toEqual({ ...e, seq: 12 });
+    }
+    // Every session type is read off the union, so an added event is never missed by a client's own list.
+    expect([...SESSION_EVENT_TYPES]).toContain("session.permission");
+    expect([...SESSION_EVENT_TYPES]).toContain("session.permission.closed");
+    expect(SESSION_EVENT_TYPES.has("session.queued" as never)).toBe(false);
+  });
+
+  it("a prompt with nothing the harness did not name still parses, and one missing what it must name does not", () => {
+    const { detail: _d, toolUseId: _t, waitMs: _w, ...bare } = ask;
+    expect(SessionEvent.parse(bare)).toEqual(bare);
+    for (const key of ["askId", "toolName", "input", "options"] as const) {
+      expect(() => SessionEvent.parse({ ...ask, [key]: undefined })).toThrow();
+    }
+    expect(() => SessionEvent.parse({ ...ask, options: [{ id: "allow", label: "Allow", effect: "maybe" }] })).toThrow();
+  });
+
+  it("a close names its outcome from the four, and the option only where one closed it", () => {
+    for (const outcome of ["allowed", "denied", "unanswered", "cancelled"]) expect(SessionEvent.parse({ ...closed, outcome })).toMatchObject({ outcome });
+    expect(() => SessionEvent.parse({ ...closed, outcome: "timedout" })).toThrow();
+    const { optionId: _o, ...noOption } = closed;
+    expect(SessionEvent.parse(noOption)).toEqual(noOption);
+    expect(() => SessionEvent.parse({ ...closed, askId: undefined })).toThrow();
+  });
+
+  it("the answer op and its outcomes are on the wire, so a client can name an option and read what came of it", () => {
+    const req = { id: 31, op: "sessions.answer", sessionId: "s1", askId: ask.askId, optionId: "allow" };
+    expect(RuntimeRequest.parse(req)).toEqual(req);
+    expect(() => RuntimeRequest.parse({ ...req, askId: undefined })).toThrow();
+    expect(() => RuntimeRequest.parse({ ...req, optionId: undefined })).toThrow();
+    for (const outcome of ["answered", "gone", "unsupported", "not-found", "no-option"]) {
+      expect(SessionAnswerResult.parse({ outcome })).toEqual({ outcome });
+    }
+    expect(() => SessionAnswerResult.parse({ outcome: "denied" })).toThrow();
   });
 });
 
@@ -370,8 +435,8 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
 });
 
 describe("backend capabilities", () => {
-  it("requires every flag, containers, callbackRelay, templates and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+  it("requires every flag, containers, callbackRelay, templates, kept and the sizes list included, so no backend can leave one unstated", () => {
+    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { containers: _c, ...missing } = full;
     expect(() => Capabilities.parse(missing)).toThrow();
@@ -379,6 +444,9 @@ describe("backend capabilities", () => {
     expect(() => Capabilities.parse(noTemplates)).toThrow();
     const { callbackRelay: _r, ...noRelay } = full;
     expect(() => Capabilities.parse(noRelay)).toThrow();
+    // A backend that never says whether its machine is the person's own would have every turn's access decided for it.
+    const { kept: _k, ...noKept } = full;
+    expect(() => Capabilities.parse(noKept)).toThrow();
     const { sizes: _s, ...noSizes } = full;
     expect(() => Capabilities.parse(noSizes)).toThrow();
     expect(() => Capabilities.parse({ ...full, sizes: [{ cpu: 2, memMb: 4096 }] })).toThrow();

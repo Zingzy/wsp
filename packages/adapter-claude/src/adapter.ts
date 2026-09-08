@@ -3,8 +3,9 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { backgroundTasksLine, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult, TurnStatus } from "@wsp/protocol";
+import { backgroundTasksLine, fmtDuration, harnessExitLine, PERMISSION_DENY, titlePrompt } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, PermissionAsk, PermissionOutcome, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult, TurnStatus } from "@wsp/protocol";
+import { controlAnswerLine, controlErrorLine, controlLine } from "./permissions.js";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
@@ -29,6 +30,10 @@ export interface StartOptions {
 
 export type SteerOutcome = "accepted" | "not-running";
 
+/** What answering a permission prompt came to: the CLI took the answer, or the prompt is no longer open (answered
+ * already, withdrawn by the CLI, or its turn is over). */
+export type AnswerOutcome = "answered" | "gone";
+
 export interface ClaudeSession {
   /** Registry key, fixed before spawn (self-generated UUID, or the resume id). */
   readonly localId: string;
@@ -42,6 +47,11 @@ export interface ClaudeSession {
   interrupt(): Promise<void>;
   /** Writes a user message into the running turn; not-running before system/init and once result was seen or the process is gone. */
   steer(prompt: string): Promise<SteerOutcome>;
+  /** Answers a permission prompt this turn raised, by the ask's own id and one of the options it carried; the tool
+   * call it blocks runs or is refused as the option says. The caller names the outcome, since only it knows whether
+   * this is the person's pick or its own answer for a prompt nobody came to, and denyMessage is what the agent
+   * reads as the call's result when the option refuses it. */
+  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<AnswerOutcome>;
 }
 
 export interface AdapterDeps {
@@ -294,6 +304,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let harnessCwd: string | undefined;
     let shellCwd: string | undefined;
     let backgroundTasks = 0;
+    /** The prompts this turn raised and nobody has answered yet, by the CLI's own request id. The CLI runs nothing
+     * while one is open, so an entry here is what the turn is waiting on. */
+    const pending = new Map<string, PermissionAsk>();
+
+    const closeAsk = (askId: string, outcome: PermissionOutcome, optionId?: string): void => {
+      pending.delete(askId);
+      onEvent({ type: "permission.close", sessionId: claudeSessionId, askId, outcome, ...(optionId !== undefined ? { optionId } : {}) });
+    };
 
     const finished = (async (): Promise<TurnResult> => {
       let streamError: string | undefined;
@@ -303,6 +321,25 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (event === undefined) {
             const text = raw.trim();
             if (text.length > 0 && stderrTail.push(text) > STDERR_TAIL_LINES) stderrTail.shift();
+            continue;
+          }
+          const control = controlLine(event);
+          if (control !== undefined) {
+            switch (control.kind) {
+              case "ask":
+                pending.set(control.ask.askId, control.ask);
+                onEvent({ type: "permission.ask", sessionId: claudeSessionId, ask: control.ask });
+                break;
+              case "cancel":
+                // The CLI withdrew its own question (its turn was interrupted, or another client answered it).
+                if (pending.has(control.requestId)) closeAsk(control.requestId, "cancelled");
+                break;
+              case "unknown":
+                // The CLI waits on every control request it sends, so one this adapter cannot serve is refused
+                // rather than left open.
+                void stream.write(controlErrorLine(control.requestId, control.subtype));
+                break;
+            }
             continue;
           }
           const tasks = backgroundTasksOf(event);
@@ -345,6 +382,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       }
       const exitCode = await stream.exited;
       exited = true;
+      // The process is gone, so nothing can answer these; the rows say so rather than waiting for an answer that
+      // has nowhere to land.
+      for (const askId of [...pending.keys()]) closeAsk(askId, "cancelled");
       if (turnResult === undefined) {
         turnResult =
           emptyResult !== undefined
@@ -375,6 +415,17 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         const wrote = await stream.write(userMessageLine(prompt, claudeSessionId));
         // The turn may have ended while the write travelled; the line then sits unread and the caller starts a turn.
         return wrote === "written" && running() ? "accepted" : "not-running";
+      },
+      answer: async (askId, { optionId, outcome, denyMessage }) => {
+        const ask = pending.get(askId);
+        if (ask === undefined || exited) return "gone";
+        // Taken off the map before the write, so two answers racing on one prompt cannot both reach the CLI, which
+        // ignores the second and would leave a second closed row behind it.
+        pending.delete(askId);
+        const wrote = await stream.write(controlAnswerLine(ask, optionId, denyMessage));
+        if (wrote !== "written") return "gone";
+        onEvent({ type: "permission.close", sessionId: claudeSessionId, askId, outcome, optionId });
+        return "answered";
       },
       interrupt: async () => {
         // t3code landmine: a graceful interrupt can be acknowledged while

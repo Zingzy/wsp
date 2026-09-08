@@ -10,7 +10,9 @@
 // refusal line above the box can be measured for the running, paused and gone
 // workspaces and the model picker's agent marks for their size and colour;
 // ?ws=ws_a&linger=1 replays a turn that replied but whose process has not
-// exited; ?shell=desktop puts a desktop bridge on the page so the workspace
+// exited; ?local=1&ws=ws_m&perm=1 replays a turn on this computer with one
+// permission prompt answered and one still open, so the relayed prompt row can
+// be laid out and photographed in both states; ?shell=desktop puts a desktop bridge on the page so the workspace
 // switch chord reaches it; ?mac=1 marks the html the way the macOS preload
 // does; ?panel=terminal opens the right panel with a Browser tab and a
 // terminal over a fake daemon wire, the host answering a translucent Ghostty
@@ -98,6 +100,42 @@ const catalogs: HarnessCatalog[] = [
   },
 ];
 
+/** A turn on this computer with a permission prompt open and one already answered, so the row can be laid out and
+ * photographed in both states; the local kind is what starts a thread at the access its harness asks in. */
+const perm = { workspaceId: MAC.id, sessionId: "s_perm", turnId: "turn_perm", threadId: "thr_perm" };
+const permOptions = [
+  { id: "allow", label: "Allow", effect: "allow" as const },
+  { id: "deny", label: "Deny", effect: "deny" as const },
+  { id: "mode:acceptEdits", label: "Allow, then Accept edits", effect: "mode" as const, mode: "acceptEdits" },
+];
+const prompting: SessionEvent[] = [
+  { type: "session.start", ...perm, prompt: "Add a health route and run the tests." },
+  { type: "session.delta", ...perm, kind: "text", text: "I will add the route, then run the suite." },
+  {
+    type: "session.permission",
+    ...perm,
+    askId: "ask_done",
+    toolName: "Write",
+    toolUseId: "toolu_1",
+    input: JSON.stringify({ file_path: "/Users/zingzy/api/src/health.ts", content: "export const health = () => ({ ok: true });\n" }),
+    detail: "health.ts",
+    options: permOptions,
+    waitMs: 300_000,
+  },
+  { type: "session.permission.closed", ...perm, askId: "ask_done", outcome: "allowed", optionId: "allow" },
+  {
+    type: "session.permission",
+    ...perm,
+    askId: "ask_open",
+    toolName: "Bash",
+    toolUseId: "toolu_2",
+    input: JSON.stringify({ command: "pnpm exec vitest run packages/api/test/health.test.ts", description: "Run the health route's test" }),
+    detail: "pnpm exec vitest run",
+    options: permOptions,
+    waitMs: 300_000,
+  },
+];
+
 const linger = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_linger" };
 const lingering: SessionEvent[] = [
   { type: "session.start", ...linger, prompt: "Start the dev server in the background and reply when it is up." },
@@ -120,11 +158,12 @@ const api: Api = {
   nap: async id => workspaces.find(w => w.id === id)!,
   wake: async id => workspaces.find(w => w.id === id)!,
   upgrade: async id => workspaces.find(w => w.id === id)!,
-  capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] }),
+  capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] }),
   startSession: async o => ({ id: "s2", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
-  sessionHistory: async id => (id === "ws_a" && params.get("linger") === "1" ? lingering : []),
+  sessionHistory: async id => (id === "ws_a" && params.get("linger") === "1" ? lingering : id === MAC.id && params.get("perm") === "1" ? prompting : []),
+  answerPermission: async () => "answered",
   listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
   snapshotStorage: async () => null,
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),

@@ -99,14 +99,25 @@ describe("buildCommand", () => {
     expect(cmd).not.toContain("--dangerously-skip-permissions");
   });
 
-  it("no permission mode and bypassPermissions both skip permissions; default sends no permission flag at all", () => {
-    expect(buildCommand({ sessionId })).toContain("--dangerously-skip-permissions");
-    const bypass = buildCommand({ sessionId, permissionMode: "bypassPermissions" });
-    expect(bypass).toContain("--dangerously-skip-permissions");
-    expect(bypass).not.toContain("--permission-mode");
-    const plain = buildCommand({ sessionId, permissionMode: "default" });
-    expect(plain).not.toContain("--dangerously-skip-permissions");
-    expect(plain).not.toContain("--permission-mode");
+  it("no permission mode and bypassPermissions both skip permissions, and neither routes prompts here", () => {
+    for (const cmd of [buildCommand({ sessionId }), buildCommand({ sessionId, permissionMode: "bypassPermissions" })]) {
+      expect(cmd).toContain("--dangerously-skip-permissions");
+      expect(cmd).not.toContain("--permission-mode");
+      expect(cmd).not.toContain("--permission-prompt-tool");
+    }
+  });
+
+  it("default names itself and routes its prompts to this host, so the person's own settings do not decide the turn", () => {
+    const cmd = buildCommand({ sessionId, permissionMode: "default" });
+    expect(cmd).toContain("--permission-mode 'default'");
+    expect(cmd).toContain("--permission-prompt-tool stdio");
+    expect(cmd).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("every mode that can prompt routes its prompts here", () => {
+    for (const mode of ["acceptEdits", "plan", "manual", "dontAsk", "auto"]) {
+      expect(buildCommand({ sessionId, permissionMode: mode })).toContain("--permission-prompt-tool stdio");
+    }
   });
 
   it("a context window rides the model as the CLI's own suffix; 200k is the plain slug", () => {

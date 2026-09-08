@@ -41,11 +41,20 @@ export function ChatView({
   const select = useStore(s => s.select);
   const thread = useChatThread(workspaceId, threadId);
   const openFile = useRightPanelStore(s => s.openFile);
+  const api = useStore(s => s.api);
   const listRef = useRef<LegendListRef | null>(null);
   const { view } = thread;
   const empty = view.entries.length === 0 && !view.running;
   const cwd = view.cwd ?? undefined;
   const onOpenFile = useCallback((path: string, line?: number) => openFile(workspaceId, path, line), [openFile, workspaceId]);
+  // The prompt row's own options: the answer travels straight to the runtime and the row closes on the event the
+  // runtime records, never on the reply here, so two clients watching one prompt end up saying the same thing.
+  const onAnswerPermission = useCallback(
+    (sessionId: string, askId: string, optionId: string) => {
+      void api?.answerPermission?.(sessionId, askId, optionId);
+    },
+    [api],
+  );
   // A Working thread on a machine that is not running is a contradiction: the row says what it waits for instead.
   const phase = status?.phase ?? workspace?.phase ?? null;
   const machineState = status?.machineState ?? null;
@@ -86,6 +95,7 @@ export function ChatView({
             turns={view.turns}
             threadKey={threadId === null ? workspaceId : `${workspaceId}/${threadId}`}
             onImageExpand={noopImageExpand}
+            onAnswerPermission={onAnswerPermission}
             onOpenFile={onOpenFile}
             markdownCwd={cwd}
             workspaceRoot={cwd}

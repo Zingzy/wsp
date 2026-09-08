@@ -373,12 +373,22 @@ function statePathFrom(flag?: string): string {
   return resolve(flag ?? defaultStatePath());
 }
 
+/** The folder every turn and every exec on this computer starts in, made when it is first used. Not the person's
+ * home: a turn that starts there is one `cd` from the checkouts they work in themselves, and the first build thread
+ * run on a local workspace committed inside the person's own repo from there (measured 2026-09-08). Their own
+ * folders stay reachable, as they are to any shell they open, but nothing starts a turn in one. */
+export const localWorkFolder = (home: string): string => join(home, "wsp-work");
+
 /** This computer as a workspace: the local backend, a real child process per turn under the turn's limits, each
- * harness's own store (the one their store variable names, else the default under their home), and the person's own
- * login environment for every turn, the same one wsp exec runs under, so the keys and tools a terminal gives an agent
- * reach it here too. The adapters strip their own agent-session variables from it, as they do on a fork. */
-export function localWiring(root = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
-  const homes = agentHomes(root, env);
+ * harness's own store (the one their store variable names, else the default under the person's home), and the
+ * person's own login environment for every turn, the same one wsp exec runs under, so the keys and tools a terminal
+ * gives an agent reach it here too. The adapters strip their own agent-session variables from it, as they do on a
+ * fork. The person's home and the folder work starts in are two facts: the stores are theirs, so a sign-in they
+ * made is the one a turn uses, and the work folder is the workspace's own. */
+export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
+  const root = localWorkFolder(home);
+  mkdirSync(root, { recursive: true });
+  const homes = agentHomes(home, env);
   const login = Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined));
   // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer. The
   // module is loaded on that dial too, since it reaches @wsp/daemon and node-pty; the desktop's Electron bundle
@@ -388,10 +398,12 @@ export function localWiring(root = homedir(), env: Readonly<Record<string, strin
   return {
     backend: new LocalBackend({ root, env }),
     execStream: o => localExecStream({ root, ...o }),
-    home: id => homes[id] ?? join(root, `.${id}`),
+    home: id => homes[id] ?? join(home, `.${id}`),
     env: login,
     daemonRoad: async () => {
-      const started = await (daemon ??= import("./local-daemon.js").then(m => m.LocalDaemon.start({ root })));
+      // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
+      // turn's own folder is the workspace's.
+      const started = await (daemon ??= import("./local-daemon.js").then(m => m.LocalDaemon.start({ root: home })));
       // A dial that lands while the host is closing must leave no socket behind: a listening one keeps this process up.
       if (shutting) {
         await started.close().catch(() => {});

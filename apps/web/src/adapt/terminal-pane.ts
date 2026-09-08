@@ -13,6 +13,9 @@ export type TerminalPaneState =
   | { readonly kind: "reauth" }
   /** The runtime's reach tracker spent its budget: the provider says running, the guest answers nothing. */
   | { readonly kind: "not-answering"; readonly outOfMemory?: MemoryReading }
+  /** There is no daemon on this machine to dial: the host wired none for its kind, or the machine carries no route
+   * to one. Nothing is reconnecting, so the pane says the daemon is absent instead of promising it back. */
+  | { readonly kind: "no-daemon" }
   | { readonly kind: "paused"; readonly pausing: boolean }
   | { readonly kind: "waking" }
   | { readonly kind: "gone" };
@@ -40,6 +43,8 @@ export function terminalPaneState(input: TerminalPaneInput): TerminalPaneState {
       return input.reach === "zombie" ? { kind: "not-answering", ...oom } : { kind: "reconnecting", ...oom };
     case "running":
       if (input.socket === "live") return { kind: "live" };
+      // The runtime says this machine has no daemon road at all, so no amount of dialling would open a terminal.
+      if (input.reach === "unsupported") return { kind: "no-daemon" };
       return input.socket === "reauth-needed" ? { kind: "reauth" } : { kind: "reconnecting", ...oom };
     default: {
       const _exhaustive: never = input.state;
@@ -59,6 +64,8 @@ export function terminalPaneTitle(pane: TerminalPaneState): string | null {
       return "The machine refused a stale daemon token; reconnecting with the one wsp holds now";
     case "not-answering":
       return pane.outOfMemory ? outOfMemoryLine(pane.outOfMemory) : "The machine is not answering";
+    case "no-daemon":
+      return NO_DAEMON_TITLE;
     case "paused":
       return `${pane.pausing ? "Pausing" : "Paused"}. The shell is kept; wake the workspace to continue`;
     case "waking":
@@ -74,6 +81,13 @@ export function terminalPaneTitle(pane: TerminalPaneState): string | null {
 
 const REBUILD_HINT = "Rebuild it from the Machine panel";
 
+/** What a pane says for a machine with no daemon at all. One sentence stating the fact, with no return promised and
+ * nothing to wait for: a pane that read "reconnecting" for a workspace that never had a daemon road was the bug
+ * (seen on a local workspace before its daemon landed).  */
+const NO_DAEMON_TITLE = "There is no daemon on this machine";
+const NO_DAEMON_LINE = "There is no daemon on this machine, so no terminal opens here";
+const NO_DAEMON_TYPING = "Typing is refused: there is no daemon on this machine";
+
 /** The lines under the pane's title, in the order they are shown. A drop with memory near full says so and names
  * the next size up before anything else; the rebuild is the last thing offered, and only once the runtime gave up
  * on the machine or the provider lost it. The size line needs the machine's size and the provider's table, which
@@ -85,6 +99,8 @@ export function terminalPaneHints(pane: TerminalPaneState, size: WorkspaceSize |
       return pane.outOfMemory ? [outOfMemoryLine(pane.outOfMemory), ...bigger] : [];
     case "not-answering":
       return pane.outOfMemory ? [...bigger, REBUILD_HINT] : [REBUILD_HINT];
+    case "no-daemon":
+      return [];
     case "gone":
       return [REBUILD_HINT];
     case "live":
@@ -110,6 +126,8 @@ export function terminalEmptyLine(pane: TerminalPaneState): string | null {
       return "The machine refused a stale daemon token; terminals open once the link carries the current one";
     case "not-answering":
       return "The machine is not answering; terminals open when it does";
+    case "no-daemon":
+      return NO_DAEMON_LINE;
     case "paused":
       return `Workspace is ${pane.pausing ? "pausing" : "paused"}; wake it to open a terminal`;
     case "waking":
@@ -134,6 +152,8 @@ export function terminalInputRefusal(pane: TerminalPaneState): string | null {
       return "Typing is refused until the machine takes the current daemon token";
     case "not-answering":
       return "Typing is refused: the machine is not answering";
+    case "no-daemon":
+      return NO_DAEMON_TYPING;
     case "paused":
       return `Typing is refused: the workspace is ${pane.pausing ? "pausing" : "paused"}`;
     case "waking":

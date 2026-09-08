@@ -32,12 +32,16 @@ export interface PaletteHandlers {
   readonly previousThread: () => void;
   /** Which body the sidebar draws; the row that runs this comes from the sidebar registry, as the section menu's does. */
   readonly setSidebarMode: (mode: SidebarMode) => void;
+  /** Makes this computer the host's local workspace, or selects the one it already is; the sidebar registry's row runs it. */
+  readonly newLocalWorkspace: () => void;
   readonly openSettings: () => void;
 }
 
 export interface PaletteItemsInput {
   readonly projects: ReadonlyArray<SidebarProjectSnapshot>;
   readonly selectedId: string | null;
+  /** Whether this computer already is a workspace; the sidebar registry's row reads it. */
+  readonly hasLocal: boolean;
   /** What the person typed; the thread search runs over it, the at-rest list ignores it. */
   readonly query: string;
   readonly canCreate: boolean;
@@ -93,7 +97,13 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status), input.verbs).map(action => actionItem(action, selected.displayName)));
   }
 
-  items.push(...resolveActions(sidebarActions, { mode: input.sidebarMode }, { setMode: handlers.setSidebarMode }).map(action => actionItem(action, action.hint ?? "")));
+  items.push(
+    ...resolveActions(
+      sidebarActions,
+      { mode: input.sidebarMode, hasLocal: input.hasLocal, connected: input.canCreate },
+      { setMode: handlers.setSidebarMode, newLocal: handlers.newLocalWorkspace },
+    ).map(action => actionItem(action, action.hint ?? "")),
+  );
 
   const oneWorkspace = input.projects.length < 2;
   const walk = threadWalk(input.projects, selectedId);

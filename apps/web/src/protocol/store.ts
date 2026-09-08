@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, applyPreferencesPatch, foldThreads, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, applyPreferencesPatch, foldThreads, threadFromHash, workspaceFromHash, workspaceKind, type Capabilities, type HarnessCatalog, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -107,6 +107,10 @@ interface State {
    * and follows it through the stage events; resolves with the runtime's id for the new workspace, or null when the
    * create was refused. */
   createWorkspace(name: string, golden?: string, size?: WorkspaceSize): Promise<string | null>;
+  /** Makes this computer the host's local workspace and selects it, or selects the one it already is: there is one
+   * per host, so a second pick is a selection, not a create. Null when the road is not there or the host refused,
+   * whose own sentence lands as the toast. */
+  createLocalWorkspace(): Promise<string | null>;
   /** Runs a failed creation again under the same row. */
   retryCreation(key: string): Promise<void>;
   dismissCreation(key: string): void;
@@ -322,6 +326,27 @@ export const useStore = create<State>((set, get) => {
       const key = `creating:${++creationSeq}`;
       set(s => ({ creations: [...s.creations, { key, name, ...(golden !== undefined ? { golden } : {}), ...(size !== undefined ? { size } : {}), workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key, selectedThreadId: null }));
       return runCreation(key, name, golden, size);
+    },
+    async createLocalWorkspace() {
+      const api = get().api;
+      if (api?.createLocalWorkspace === undefined) return null;
+      // One local workspace per host: the second pick is the row this computer already is.
+      const existing = get().workspaces.find(w => workspaceKind(w) === "local");
+      if (existing !== undefined) {
+        get().select(existing.id);
+        return existing.id;
+      }
+      try {
+        const workspace = await api.createLocalWorkspace();
+        set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
+        get().select(workspace.id);
+        return workspace.id;
+      } catch (e) {
+        // This computer forks nothing and boots nothing, so there is no creation row to carry a refusal: the host's
+        // own sentence is what the person reads, as the command line gives it.
+        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+        return null;
+      }
     },
     async retryCreation(key) {
       const creation = get().creations.find(c => c.key === key);

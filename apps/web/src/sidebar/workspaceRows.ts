@@ -30,6 +30,15 @@ export function reachNote(reach: ReachState | null): string | null {
   return reach === "slow" ? "edge slow" : null;
 }
 
+/** The row's line for a daemon that is not there, on a kind whose row shows no state word: nothing on the row would
+ * otherwise say it, and it was readable only on the Machine tab's Reach. no-daemon is a machine that answers with
+ * nothing on the daemon's port, unsupported one with no daemon road at all; the two are different facts and the
+ * line says which. Null for every other reach, and for a kind whose state word already carries this. */
+export function daemonGoneLine(reach: ReachState | null): string | null {
+  if (reach === "no-daemon") return "no daemon answering";
+  return reach === "unsupported" ? "no daemon on this machine" : null;
+}
+
 export interface WorkspaceMetaInput {
   readonly project: Pick<SidebarProjectSnapshot, "state" | "status" | "workspace" | "reach">;
   /** The meter's last tick for this workspace; null before the first. */
@@ -49,8 +58,13 @@ export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: Workspa
   const note = daemonNote(project);
   if (note !== undefined) return note;
   if (outOfMemory !== undefined) return outOfMemoryRowLine(outOfMemory);
+  const undriven = !kindWords(workspaceKind(project.workspace)).driven;
+  // A row with no state word has nowhere else to say its daemon is gone, and it is the thing a person waiting on a
+  // terminal is waiting on; a driven kind's state word already reads Unreachable for it.
+  const noDaemon = undriven ? daemonGoneLine(project.reach) : null;
+  if (noDaemon !== null) return noDaemon;
   const machine = machineLine(project);
-  if (!kindWords(workspaceKind(project.workspace)).driven && machine !== null) return machine;
+  if (undriven && machine !== null) return machine;
   return [
     accruedTodayLabel(cost?.accruedUsd ?? 0),
     isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null,
@@ -94,8 +108,14 @@ export const rateLabel = (rateUsdPerHour: number | null): string | null => (rate
  * a machine wsp does not drive stops there: it spends nothing and naps never, so a rate under the words for what
  * the machine is would name an hour nobody is charged for. */
 export function spaceHeaderLines({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
-  const lines: (string | null)[] = [daemonNote(project) ?? null, outOfMemory === undefined ? null : outOfMemoryRowLine(outOfMemory), machineLine(project)];
-  if (kindWords(workspaceKind(project.workspace)).driven) {
+  const driven = kindWords(workspaceKind(project.workspace)).driven;
+  const lines: (string | null)[] = [
+    daemonNote(project) ?? null,
+    outOfMemory === undefined ? null : outOfMemoryRowLine(outOfMemory),
+    driven ? null : daemonGoneLine(project.reach),
+    machineLine(project),
+  ];
+  if (driven) {
     const nap = idleCountdownLabel(project.status, nowMs);
     lines.push(
       [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]

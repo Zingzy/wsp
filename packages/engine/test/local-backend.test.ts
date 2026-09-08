@@ -14,7 +14,7 @@ describe("local backend", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("every capability a provider fork has and a computer does not is false, and it offers no sizes", () => {
+  it("every capability a provider fork has and a computer does not is false, it offers no sizes, and it says the machine is kept", () => {
     const backend = new LocalBackend({ root });
     expect(backend.capabilities).toEqual({
       liveCloneForks: false,
@@ -26,6 +26,9 @@ describe("local backend", () => {
       callbackRelay: false,
       snapshotListing: false,
       templates: false,
+      // This computer is the person's own: its files and sign-ins outlive every turn, so a thread on it starts at
+      // the access its harness asks for rather than at skip-everything. The one fact that road reads.
+      kept: true,
       sizes: [],
     });
     expect(backend.pricing.rateUsdPerHour({ cpu: 2, memMb: 4096 })).toBe(0);

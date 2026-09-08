@@ -172,3 +172,11 @@ export const noDiffLine = (fileName: string, scopeLabel: string): string => `${f
 /** A row button on the object's own row names the object: Forget api, New thread in api. */
 export const rowVerb = (verb: string, name: string): string => `${verb} ${name}`;
 export const rowNewThread = (name: string): string => `New thread in ${name}`;
+
+/** What the road to this computer says under its name: what a pick will do, since there is one local workspace per
+ * host and the second pick is a selection, and why it cannot be picked at all. */
+export const THIS_COMPUTER_HINTS = {
+  fresh: "This computer itself, no machine to fork",
+  existing: "Already a workspace; go to it",
+  offline: "Not connected to wsp",
+} as const;

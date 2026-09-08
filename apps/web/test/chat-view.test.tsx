@@ -61,7 +61,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] }),
+    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] }),
     listSessions: async () => [],
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspaces[0]!,
@@ -350,5 +350,89 @@ describe("ChatView", () => {
     const mounted = document.querySelectorAll("[data-timeline-root]").length;
     expect(mounted).toBeGreaterThan(0);
     expect(mounted).toBeLessThan(turns);
+  });
+
+  it("relays a permission prompt as its own row, answers it from the chat, and closes the row on the runtime's event", async () => {
+    const sc = { workspaceId: WS, sessionId: "sess_perm", turnId: "turn_perm" };
+    const ask = {
+      type: "session.permission" as const,
+      ...sc,
+      at: T0 + 500,
+      askId: "ask_1",
+      toolName: "Write",
+      toolUseId: "toolu_1",
+      input: '{"file_path":"/root/out.txt","content":"hi"}',
+      detail: "out.txt",
+      options: [
+        { id: "allow", label: "Allow", effect: "allow" as const },
+        { id: "deny", label: "Deny", effect: "deny" as const },
+        { id: "mode:acceptEdits", label: "Allow, then Accept edits", effect: "mode" as const, mode: "acceptEdits" },
+      ],
+      waitMs: 300_000,
+    };
+    const history: SessionEvent[] = [{ type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "write it" }, ask];
+    const { api, emit } = fixtureApi([workspace], { [WS]: history });
+    const answered: { sessionId: string; askId: string; optionId: string }[] = [];
+    api.answerPermission = async (sessionId, askId, optionId) => {
+      answered.push({ sessionId, askId, optionId });
+      return "answered";
+    };
+    await setup(api);
+
+    const row = await waitFor(() => document.querySelector<HTMLElement>('[data-permission-prompt="ask_1"]')!);
+    expect(row.getAttribute("data-permission-open")).toBe("true");
+    expect(within(row).getByText("Permission for Write: out.txt")).toBeDefined();
+    // The tool's own input reads as the muted mono every tool row wears, values not braces.
+    const input = within(row).getByText("file_path: /root/out.txt content: hi");
+    expect(input.className).toContain("font-mono");
+    expect(input.className).toContain("text-muted-foreground");
+    // Every option the harness offered, as buttons: nothing here is a chip or a badge.
+    expect([...row.querySelectorAll("[data-permission-option]")].map(b => b.textContent)).toEqual(["Allow", "Deny", "Allow, then Accept edits"]);
+
+    fireEvent.click(row.querySelector('[data-permission-option="allow"]')!);
+    await waitFor(() => expect(answered).toEqual([{ sessionId: "sess_perm", askId: "ask_1", optionId: "allow" }]));
+    // The row closes on the runtime's event, not on the reply here, so two clients watching one prompt agree.
+    expect(document.querySelector('[data-permission-prompt="ask_1"]')!.getAttribute("data-permission-open")).toBe("true");
+
+    emit({ type: "session.permission.closed", ...sc, at: T0 + 900, askId: "ask_1", outcome: "allowed", optionId: "allow" });
+    await waitFor(() => expect(document.querySelector('[data-permission-prompt="ask_1"]')!.getAttribute("data-permission-open")).toBe("false"));
+    const closed = document.querySelector<HTMLElement>('[data-permission-prompt="ask_1"]')!;
+    expect(closed.querySelectorAll("[data-permission-option]")).toHaveLength(0);
+    expect(within(closed).getByText("Allowed: Allow")).toBeDefined();
+    expect(closed.querySelector("[data-permission-outcome]")!.getAttribute("data-permission-outcome")).toBe("allowed");
+  });
+
+  it("a prompt nobody answered reads as denied by wsp, and one that went with its turn as cancelled", async () => {
+    const sc = { workspaceId: WS, sessionId: "sess_perm2", turnId: "turn_perm2" };
+    const ask = (askId: string) => ({
+      type: "session.permission" as const,
+      ...sc,
+      at: T0 + 500,
+      askId,
+      toolName: "Bash",
+      input: '{"command":"rm -rf build"}',
+      options: [
+        { id: "allow", label: "Allow", effect: "allow" as const },
+        { id: "deny", label: "Deny", effect: "deny" as const },
+      ],
+      waitMs: 300_000,
+    });
+    const history: SessionEvent[] = [
+      { type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "clean it" },
+      ask("ask_wait"),
+      { type: "session.permission.closed", ...sc, at: T0 + 900, askId: "ask_wait", outcome: "unanswered" },
+      ask("ask_stop"),
+      { type: "session.permission.closed", ...sc, at: T0 + 1_000, askId: "ask_stop", outcome: "cancelled" },
+    ];
+    const { api } = fixtureApi([workspace], { [WS]: history });
+    await setup(api);
+    const waited = await waitFor(() => document.querySelector<HTMLElement>('[data-permission-prompt="ask_wait"]')!);
+    expect(within(waited).getByText("Nobody answered; denied")).toBeDefined();
+    // A prompt with no detail leads on the tool alone.
+    expect(within(waited).getByText("Permission for Bash")).toBeDefined();
+    const stopped = document.querySelector<HTMLElement>('[data-permission-prompt="ask_stop"]')!;
+    expect(within(stopped).getByText("Cancelled with the turn")).toBeDefined();
+    // Neither offers an option any more: there is nothing left to pick.
+    for (const row of [waited, stopped]) expect(row.querySelectorAll("[data-permission-option]")).toHaveLength(0);
   });
 });
