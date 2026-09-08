@@ -70,7 +70,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     rebuild: vi.fn(async (id: string) => ({ ...view(id, "?", "running"), machineId: "m_rebuilt" })),
     forget: vi.fn(async (_id: string) => {}),
     upgrade: vi.fn(async (id: string) => view(id, "?", "running")),
-    capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] })),
+    capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] })),
     startSession: vi.fn(async (o: { workspaceId: string }) => session("s_x", o.workspaceId)),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: NOW + 3_600_000 })),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
@@ -815,7 +815,7 @@ describe("new workspace dialog", () => {
   it("offers the provider's sizes with the golden's checked, and a picked size reaches the create; left alone, none does", async () => {
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
     const api = fakeApi([API], [status(API)]);
-    api.capabilities = vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }] }));
+    api.capabilities = vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }] }));
     api.getGolden = async () => ({ head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "t", setupSha: "s", createdAt: "c", smoke: { cmd: "true", exitCode: 0 }, size: { cpu: 2, memMb: 4096 } }] });
     api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_new", name));
     await mount(api, "api");

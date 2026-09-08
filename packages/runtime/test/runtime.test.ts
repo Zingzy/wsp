@@ -598,17 +598,18 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
-  it("a start without picks hands the harness the model and effort the catalog marks, the ones the composer shows, and nothing else", async () => {
+  it("a start without picks hands the harness the model, effort and access the catalog marks, the ones the composer shows, and nothing else", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
-    expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "model", "effort", "onEvent"]);
+    expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "model", "effort", "permissionMode", "onEvent"]);
     const view = handle.view();
     expect(view.model).toBe("claude-opus-5");
     expect(view.effort).toBe("high");
-    // The CLI's own default still applies to the access mode, which no catalog reads off a binary.
-    expect(view.permissionMode).toBeUndefined();
+    // The access is named too: unnamed, it reached the adapter as nothing, which every adapter here reads as its
+    // own skip-everything flag, so what the picker showed and what the CLI ran could differ.
+    expect(view.permissionMode).toBe("bypassPermissions");
     m.done("done");
     m.end();
     await handle.finished;

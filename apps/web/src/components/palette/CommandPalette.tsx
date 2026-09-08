@@ -4,6 +4,7 @@
 // The workspace rows come from the workspace registry, so they run what the
 // sidebar's buttons and menus run.
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { workspaceKind } from "@wsp/protocol";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { deriveSidebarProjects } from "../../adapt/index.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
@@ -41,6 +42,9 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const sessions = useStore(s => s.sessions);
   const select = useStore(s => s.select);
   const openSettings = useStore(s => s.openSettings);
+  const createLocalWorkspace = useStore(s => s.createLocalWorkspace);
+  // One local workspace per host: the row the section registry gives says whether a pick makes it or goes to it.
+  const hasLocal = workspaces.some(w => workspaceKind(w) === "local");
   const selectedId = useSelectedWorkspaceId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
   const [sidebarMode, setSidebarMode] = useSidebarMode();
@@ -73,13 +77,15 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       nextThread: () => cycleThreadInSpace(1),
       previousThread: () => cycleThreadInSpace(-1),
       setSidebarMode,
+      // This computer forks nothing and boots nothing, so it needs no dialog: the host names it after itself.
+      newLocalWorkspace: () => void createLocalWorkspace(),
       openSettings,
     }),
-    [openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
+    [createLocalWorkspace, openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, sidebarMode, handlers, verbs }),
-    [api, handlers, projects, query, selectedId, sidebarMode, verbs],
+    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, hasLocal, sidebarMode, handlers, verbs }),
+    [api, handlers, hasLocal, projects, query, selectedId, sidebarMode, verbs],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {

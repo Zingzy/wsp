@@ -12,7 +12,28 @@
 // these into the SessionEvent shapes in index.ts that clients read, which is
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
 // declared once there and imported back here.
-import type { DeltaKind, SessionHarness, TurnResult } from "./index.js";
+import type { DeltaKind, PermissionOption, PermissionOutcome, SessionHarness, TurnResult } from "./index.js";
+
+/** The id every adapter's ask carries for "run this call" and for "refuse it", so the runtime's own answers (the
+ * deny it sends when nobody answered in time) name an option without knowing which CLI raised the prompt. Options
+ * beyond these two are the harness's own, ids and all. */
+export const PERMISSION_ALLOW = "allow";
+export const PERMISSION_DENY = "deny";
+
+/** One permission prompt a harness raised mid-turn, as its adapter reads it off the CLI's own channel. The turn is
+ * blocked on it: the CLI runs nothing until an option comes back, so every ask is answered, by the person or by the
+ * runtime's wait. `askId` is the adapter's own handle for it, whatever the CLI keys its request by. */
+export interface PermissionAsk {
+  askId: string;
+  toolName: string;
+  toolUseId?: string;
+  /** The tool's input as the CLI sent it, JSON, the same text a tool_use delta carries. */
+  input: string;
+  /** The CLI's own one phrase for the call; absent where it named none. */
+  detail?: string;
+  /** Allow and deny always, plus whatever else the CLI suggested for this call. */
+  options: readonly PermissionOption[];
+}
 
 export type AdapterEvent =
   | {
@@ -35,6 +56,15 @@ export type AdapterEvent =
       cwd?: string;
     }
   | { type: "turn.done"; sessionId: string; result: TurnResult }
+  | { type: "permission.ask"; sessionId: string; ask: PermissionAsk }
+  | {
+      type: "permission.close";
+      sessionId: string;
+      askId: string;
+      outcome: PermissionOutcome;
+      /** The option that closed it, where one did. */
+      optionId?: string;
+    }
   | { type: "session.end"; sessionId: string; exitCode: number | null; sawResult: boolean };
 
 /** What re-opening a turn a harness is still running on the machine takes: the run its stream reported, the session

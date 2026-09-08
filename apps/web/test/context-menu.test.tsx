@@ -51,7 +51,7 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
 });
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] };
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] };
 
 type FakeApi = Api & {
   nap: ReturnType<typeof vi.fn>;
@@ -401,12 +401,12 @@ describe("a workspace's colour and icon", () => {
 });
 
 describe("the Workspaces section's menu", () => {
-  it("holds the sidebar's body toggle alone, and choosing it turns the body into one workspace under its header", async () => {
+  it("holds the sidebar's body toggle and the road to this computer, and choosing the toggle turns the body into one workspace under its header", async () => {
     await mountSidebar(fakeApi([API, OLD], [statusOf(API), statusOf(OLD)]), "api");
     expect(document.querySelector("[data-space-header]")).toBeNull();
     rightClick(screen.getByRole("button", { name: "Workspaces" }));
     await screen.findByRole("menu");
-    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.spaces.title]);
+    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.spaces.title, "This computer"]);
     fireEvent.click(item(SIDEBAR_MODE_WORDS.spaces.title));
     await waitFor(() => expect(menu()).toBeNull());
     await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
@@ -415,7 +415,30 @@ describe("the Workspaces section's menu", () => {
     // The menu then names the way back, from the one registry entry: nothing spells the two words twice.
     rightClick(screen.getByRole("button", { name: "Workspaces" }));
     await screen.findByRole("menu");
-    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.list.title]);
+    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.list.title, "This computer"]);
+  });
+
+  it("the road to this computer makes it once and goes to it after, and a client without the road offers it refused", async () => {
+    const api = fakeApi([API, OLD], [statusOf(API), statusOf(OLD)]);
+    const local: WorkspaceView = { ...API, id: "ws_mac", name: "zingzys-mac", kind: "local", machineId: "local", golden: "" };
+    const calls: number[] = [];
+    api.createLocalWorkspace = async () => {
+      calls.push(1);
+      return local;
+    };
+    await mountSidebar(api, "api");
+    rightClick(screen.getByRole("button", { name: "Workspaces" }));
+    await screen.findByRole("menu");
+    fireEvent.click(item("This computer"));
+    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_mac"));
+    expect(calls).toHaveLength(1);
+
+    // One per host: the row now says it goes to the workspace this computer already is.
+    rightClick(screen.getByRole("button", { name: "Workspaces" }));
+    await screen.findByRole("menu");
+    fireEvent.click(item("This computer"));
+    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_mac"));
+    expect(calls).toHaveLength(1);
   });
 });
 

@@ -175,7 +175,7 @@ function fixtureApi(opts: { table: HarnessCatalog[]; machine?: HarnessCatalog[] 
     nap: async () => workspace,
     wake: async () => workspace,
     upgrade: async () => workspace,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] }),
+    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] }),
     listSessions: async () => opts.sessions ?? [],
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspace,

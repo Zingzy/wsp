@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NOTHING_TO_SERVE_LINE } from "@wsp/protocol";
-import { cli, localWiring, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
+import { cli, localWiring, localWorkFolder, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
@@ -108,6 +108,32 @@ describe("wsp up", () => {
     handles.push(handle);
     expect((await fetch(`http://127.0.0.1:${handle.port}/`)).status).toBe(200);
     expect((await rt.workspaces.list()).map(w => [w.name, w.kind])).toEqual([["mac", "local"]]);
+  });
+
+  it("a turn on this computer starts in the workspace's own work folder, never in the person's home", async () => {
+    stateFile({
+      workspaces: {
+        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), spec: {}, firstLife: false, idleWindowMs: null },
+      },
+    });
+    const work = localWorkFolder(home);
+    // Made when the wiring is built, so the first turn has somewhere to be rather than failing on a missing folder.
+    const wiring = localWiring(home);
+    expect(existsSync(work)).toBe(true);
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath), adapters: {}, local: wiring });
+    runtimes.push(rt);
+    // The one thing that decides where an agent's shell begins: a turn that started in the home folder is one cd
+    // from the checkouts the person works in themselves. Both sides read through realpath: macOS reaches its temp
+    // dir through a symlink, so a shell's pwd and the path built here are two spellings of one folder.
+    expect(realpathSync((await rt.workspaces.exec("ws_l", "pwd")).stdout.trim())).toBe(realpathSync(work));
+    expect((await rt.workspaces.exec("ws_l", "printf mine > seen.txt")).exitCode).toBe(0);
+    expect(existsSync(join(work, "seen.txt"))).toBe(true);
+    expect(existsSync(join(home, "seen.txt"))).toBe(false);
+    // The harness's own store stays the person's, wherever their store variable puts it: a sign-in they made is the
+    // one a turn uses, so nothing of it moved under the work folder.
+    expect(wiring.home("claude").startsWith(work)).toBe(false);
+    expect(localWiring(home, { HOME: home }).home("claude")).toBe(join(home, ".claude"));
+    await rt.close();
   });
 
   it("the panes of a local workspace dial a daemon this host starts on the first ask and closes with the runtime", async () => {

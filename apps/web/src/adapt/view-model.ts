@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { ImageRecord, MachineState, ReachState, SessionOrigin, SessionStatus, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { ImageRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -80,8 +80,29 @@ export interface ProposedPlan {
   readonly implementedAt: string | null;
 }
 
+/** One permission prompt the harness relayed into the chat, as its row reads it: the tool it wants to run, the
+ * options a person may pick, and, once it is closed, how it closed. The turn is blocked while outcome is null, so an
+ * open row is what the thread is waiting on. */
+export interface PermissionPrompt {
+  readonly askId: string;
+  readonly turnId: string | null;
+  /** The runtime's session id, what sessions.answer takes. */
+  readonly sessionId: string;
+  readonly toolName: string;
+  /** The tool's input as the harness sent it, JSON. */
+  readonly input: string;
+  readonly detail?: string;
+  readonly options: ReadonlyArray<PermissionOption>;
+  readonly createdAt: string;
+  /** Null while nobody has answered; the outcome the wire recorded once one is closed. */
+  readonly outcome: PermissionOutcome | null;
+  /** The option that closed it, where one did. */
+  readonly optionId: string | null;
+}
+
 export type TimelineEntry =
   | { readonly id: string; readonly kind: "message"; readonly createdAt: string; readonly message: ChatMessage }
+  | { readonly id: string; readonly kind: "permission"; readonly createdAt: string; readonly permission: PermissionPrompt }
   | { readonly id: string; readonly kind: "proposed-plan"; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
   | { readonly id: string; readonly kind: "work"; readonly createdAt: string; readonly entry: WorkLogEntry };
 
@@ -154,6 +175,7 @@ export type MessagesTimelineRow =
       readonly assistantCopyStreaming: boolean;
     }
   | { readonly kind: "proposed-plan"; readonly id: string; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
+  | { readonly kind: "permission"; readonly id: string; readonly createdAt: string; readonly permission: PermissionPrompt }
   | { readonly kind: "working"; readonly id: string; readonly createdAt: string | null }
   | { readonly kind: "thinking"; readonly id: string; readonly createdAt: string | null };
 

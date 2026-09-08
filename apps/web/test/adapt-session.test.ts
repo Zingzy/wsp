@@ -474,3 +474,87 @@ describe("a person's message that carried images", () => {
     expect(user.requestId).toBeUndefined();
   });
 });
+
+describe("deriveSession: a permission prompt relayed into the chat", () => {
+  const scoped = { workspaceId: "ws_t", sessionId: "sess_t", turnId: "turn_p" };
+  const options = [
+    { id: "allow", label: "Allow", effect: "allow" as const },
+    { id: "deny", label: "Deny", effect: "deny" as const },
+    { id: "mode:acceptEdits", label: "Allow, then Accept edits", effect: "mode" as const, mode: "acceptEdits" },
+  ];
+  const ask: SessionEvent = {
+    type: "session.permission",
+    ...scoped,
+    at: 2_000,
+    askId: "ask_1",
+    toolName: "Write",
+    toolUseId: "toolu_1",
+    input: '{"file_path":"/root/out.txt","content":"hi"}',
+    detail: "out.txt",
+    options,
+    waitMs: 300_000,
+  };
+  const closed = (over: Partial<Extract<SessionEvent, { type: "session.permission.closed" }>> = {}): SessionEvent => ({
+    type: "session.permission.closed",
+    ...scoped,
+    at: 3_000,
+    askId: "ask_1",
+    outcome: "allowed",
+    optionId: "allow",
+    ...over,
+  });
+  const opening: SessionEvent[] = [{ type: "session.start", ...scoped, at: 1_000, prompt: "write it" }];
+
+  it("becomes its own timeline row, still open, carrying the session the answer names and every option", () => {
+    const model = deriveSession([...opening, ask]);
+    const rows = model.timeline.filter(e => e.kind === "permission");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: "permission:ask_1", kind: "permission", createdAt: new Date(2_000).toISOString() });
+    expect(rows[0]!.kind === "permission" ? rows[0]!.permission : null).toEqual({
+      askId: "ask_1",
+      turnId: "turn_p",
+      sessionId: "sess_t",
+      // The runtime's session id, what sessions.answer takes, not the harness's own.
+      toolName: "Write",
+      toolUseId: "toolu_1",
+      input: '{"file_path":"/root/out.txt","content":"hi"}',
+      detail: "out.txt",
+      options,
+      createdAt: new Date(2_000).toISOString(),
+      // Null is what an open prompt reads as: the turn is waiting on it.
+      outcome: null,
+      optionId: null,
+    });
+  });
+
+  it("its close lands on the row it opened, not on a second row after the work the answer let through", () => {
+    const model = deriveSession([...opening, ask, { type: "session.delta", ...scoped, at: 2_500, kind: "text", text: "Writing." }, closed()]);
+    const rows = model.timeline.filter(e => e.kind === "permission");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind === "permission" ? rows[0]!.permission : null).toMatchObject({ outcome: "allowed", optionId: "allow" });
+    // The row stays where the prompt was raised, above the reply the answer let through.
+    expect(model.timeline.findIndex(e => e.kind === "permission")).toBeLessThan(model.timeline.length - 1);
+  });
+
+  it("carries every outcome, and a close with no option (the wait, a cancel) leaves the option null", () => {
+    for (const outcome of ["allowed", "denied", "unanswered", "cancelled"] as const) {
+      const row = deriveSession([...opening, ask, closed({ outcome })]).timeline.find(e => e.kind === "permission");
+      expect(row!.kind === "permission" ? row!.permission.outcome : null).toBe(outcome);
+    }
+    const { optionId: _o, ...noOption } = closed({ outcome: "unanswered" }) as Extract<SessionEvent, { type: "session.permission.closed" }>;
+    const row = deriveSession([...opening, ask, noOption]).timeline.find(e => e.kind === "permission");
+    expect(row!.kind === "permission" ? row!.permission : null).toMatchObject({ outcome: "unanswered", optionId: null });
+  });
+
+  it("a close for a prompt this transcript never held changes nothing, since history is capped and may start mid-turn", () => {
+    const model = deriveSession([...opening, closed({ askId: "ask_gone" })]);
+    expect(model.timeline.filter(e => e.kind === "permission")).toEqual([]);
+    expect(model.turns).toHaveLength(1);
+  });
+
+  it("reaches the timeline rows the chat renders as its own kind, in the order it was raised", () => {
+    const model = deriveSession([...opening, ask, closed()]);
+    const rows = deriveMessagesTimelineRows({ timelineEntries: model.timeline, turns: model.turns, isWorking: false, activeTurnStartedAt: null });
+    expect(rows.filter(r => r.kind === "permission").map(r => r.id)).toEqual(["permission:ask_1"]);
+  });
+});
