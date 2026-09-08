@@ -539,7 +539,9 @@ export interface GoldenExec {
  * `createLocal` is refused. The one place the local variant is registered beside the cloud default. */
 export interface LocalWiring {
   backend: MachineBackend;
-  execStream: ExecStreamFactory;
+  /** The launch factory for a turn on this computer, under the limits the registry hands every turn (the turn's own
+   * by default, none for the exec verb), so a local turn is cut the way a cloud turn is. */
+  execStream: (opts?: MachineExecOptions) => ExecStreamFactory;
   home: (agentId: string) => string;
   env: Readonly<Record<string, string>>;
 }
@@ -1244,7 +1246,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
     cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true },
-    local: local === undefined ? undefined : { backend: local.backend, execStream: () => local.execStream, home: local.home, env: local.env, relayed: false },
+    local: local === undefined ? undefined : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), home: local.home, env: local.env, relayed: false },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
     const found = modules[kind];

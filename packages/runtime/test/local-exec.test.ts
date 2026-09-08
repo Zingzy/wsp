@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { turnCutLine } from "@wsp/protocol";
 import { localExecStream } from "../src/local-exec.js";
 
 async function collect(lines: AsyncIterable<string>): Promise<string[]> {
@@ -49,6 +51,29 @@ describe("local exec stream", () => {
     const stream = factory("true", { env: {} });
     await expect(stream.write("x")).rejects.toThrow("no input channel");
     await stream.exited;
+  });
+
+  it("a child that never writes is cut at the idle limit with the same line a cloud turn gets, and exited reads null", async () => {
+    const factory = localExecStream({ root, idleMs: 120, deadlineMs: 60_000, pollMs: 10 });
+    const stream = factory("sleep 30", { env: {} });
+    const started = Date.now();
+    await expect(collect(stream.lines)).rejects.toThrow(/^stopped after \d+m \d\ds with no output for 0m$/);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(await stream.exited).toBeNull();
+    expect(turnCutLine("idle", 130, 120)).toMatch(/with no output for 0m$/);
+  });
+
+  it("a child that keeps writing past the wall is cut at the cap", async () => {
+    const factory = localExecStream({ root, idleMs: 60_000, deadlineMs: 150, pollMs: 10 });
+    const stream = factory("while true; do echo tick; sleep 0.02; done", { env: {} });
+    await expect(collect(stream.lines)).rejects.toThrow(/at the 0m cap on one turn$/);
+    expect(await stream.exited).toBeNull();
+  });
+
+  it("the defaults are the turn's own limits, so a quick command is never cut", async () => {
+    const stream = localExecStream({ root })("printf ok", { env: {} });
+    expect(await collect(stream.lines)).toEqual(["ok"]);
+    expect(await stream.exited).toBe(0);
   });
 
   it("kill ends the child", async () => {

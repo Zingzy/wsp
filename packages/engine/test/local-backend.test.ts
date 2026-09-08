@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -78,13 +79,15 @@ describe("local backend", () => {
   it("the moves only a provider fork takes are refused, and it serves no preview or signed URL", async () => {
     const backend = new LocalBackend({ root });
     const machine = await backend.get();
-    expect(() => machine.snapshot("x")).toThrow();
-    expect(() => machine.pause()).toThrow();
-    expect(() => machine.resume()).toThrow();
+    // Each refusal is a rejection, never a synchronous throw, so a caller's .catch sees it.
+    await expect(machine.snapshot("x")).rejects.toThrow();
+    await expect(machine.pause()).rejects.toThrow();
+    await expect(machine.resume()).rejects.toThrow();
     expect(machine.previewUrl).toBeUndefined();
-    expect(() => machine.downloadUrl("/x")).toThrow();
-    expect(() => machine.uploadUrl("/x")).toThrow();
-    expect(() => backend.create()).toThrow();
+    await expect(machine.downloadUrl("/x")).rejects.toThrow();
+    await expect(machine.uploadUrl("/x")).rejects.toThrow();
+    await expect(backend.create()).rejects.toThrow();
+    await expect(backend.deleteSnapshot()).rejects.toThrow();
     // Deleting a local workspace drops its record only: kill is a no-op, never a stop.
     await expect(machine.kill()).resolves.toBeUndefined();
     expect(await machine.state()).toBe("running");

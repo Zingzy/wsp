@@ -372,15 +372,18 @@ function statePathFrom(flag?: string): string {
   return resolve(flag ?? defaultStatePath());
 }
 
-/** This computer as a workspace: the local backend, a real child process per turn, each harness's own store under the
- * person's home, and a turn's environment their own so a tool on their PATH runs and their sign-ins are read. */
-export function localWiring(root = homedir()): LocalWiring {
-  const homes = agentHomes(root);
+/** This computer as a workspace: the local backend, a real child process per turn under the turn's limits, each
+ * harness's own store (the one their store variable names, else the default under their home), and the person's own
+ * login environment for every turn, the same one wsp exec runs under, so the keys and tools a terminal gives an agent
+ * reach it here too. The adapters strip their own agent-session variables from it, as they do on a fork. */
+export function localWiring(root = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
+  const homes = agentHomes(root, env);
+  const login = Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined));
   return {
-    backend: new LocalBackend({ root }),
-    execStream: localExecStream({ root }),
+    backend: new LocalBackend({ root, env }),
+    execStream: o => localExecStream({ root, ...o }),
     home: id => homes[id] ?? join(root, `.${id}`),
-    env: { PATH: process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin", HOME: root },
+    env: login,
   };
 }
 

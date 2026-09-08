@@ -58,17 +58,15 @@ async function runShell(root: string, env: Readonly<Record<string, string | unde
       timedOut = true;
       child.kill("SIGKILL");
     }, opts.timeoutMs);
+    const text = (b: Buffer): string => b.toString("utf8");
     child.stdout.on("data", (b: Buffer) => {
-      const s = b.toString("utf8");
-      stdout += s;
-      feed(s);
+      const chunk = text(b);
+      stdout += chunk;
+      feed(chunk);
     });
     child.stderr.on("data", (b: Buffer) => {
-      stderr += s(b);
+      stderr += text(b);
     });
-    function s(b: Buffer): string {
-      return b.toString("utf8");
-    }
     const done = (exitCode: number): void => {
       if (timer !== undefined) clearTimeout(timer);
       if (opts.onLine !== undefined && pending !== "") opts.onLine(pending);
@@ -106,15 +104,15 @@ export class LocalMachine implements Machine {
     return runShell(this.root, this.env, script, { timeoutMs: opts.deadlineMs, ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}) });
   }
 
-  snapshot(): Promise<string> {
+  async snapshot(): Promise<string> {
     throw new Error("this computer cannot be snapshotted");
   }
 
-  pause(): Promise<void> {
+  async pause(): Promise<void> {
     throw new Error("this computer cannot be paused");
   }
 
-  resume(): Promise<void> {
+  async resume(): Promise<void> {
     throw new Error("this computer cannot be resumed");
   }
 
@@ -129,11 +127,11 @@ export class LocalMachine implements Machine {
     return { ...localShape() };
   }
 
-  downloadUrl(): Promise<string> {
+  async downloadUrl(): Promise<string> {
     throw new Error("this computer serves no signed download URL; its files are read on it directly");
   }
 
-  uploadUrl(): Promise<string> {
+  async uploadUrl(): Promise<string> {
     throw new Error("this computer serves no signed upload URL; its files are written on it directly");
   }
 }
@@ -166,7 +164,7 @@ export class LocalBackend implements MachineBackend {
     this.machine = new LocalMachine(opts.root, opts.env ?? process.env);
   }
 
-  create(): Promise<Machine> {
+  async create(): Promise<Machine> {
     throw new Error("this computer already exists; a local workspace is not created, it is the machine wsp already runs on");
   }
 

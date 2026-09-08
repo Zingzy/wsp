@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import { relayedRefusal } from "@wsp/protocol";
+import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -37,15 +39,21 @@ describe("local workspace", () => {
   let root: string;
   let store: Store;
   let localWiring: LocalWiring;
+  /** Every options object the registry handed the local factory, in order. */
+  let handed: (MachineExecOptions | undefined)[];
   const runtime = (): Runtime =>
     createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: localWiring });
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "wsp-localws-"));
     store = memoryStore();
+    handed = [];
     localWiring = {
       backend: new LocalBackend({ root }),
-      execStream: localExecStream({ root }),
+      execStream: o => {
+        handed.push(o);
+        return localExecStream({ root, ...o });
+      },
       home: () => join(root, ".claude"),
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
     };
@@ -78,6 +86,19 @@ describe("local workspace", () => {
     const result = await handle.finished;
     expect(result.status).toBe("completed");
     expect(result.text).toBe("pong");
+  });
+
+  it("the registry hands the local factory the same limits a cloud turn gets: the turn's own by default, none for the exec verb", async () => {
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    await (await rt.sessions.start(ws.id, { prompt: "say pong" })).finished;
+    const stream = await rt.workspaces.execStream(ws.id, ["true"]);
+    for await (const _line of stream.lines) void _line;
+    await stream.exited;
+    // The adapter is built once per road that asks it something (catalog, title, the turn), each with the turn's own limits.
+    expect(handed.length).toBeGreaterThan(1);
+    expect(handed.slice(0, -1).every(o => o === undefined)).toBe(true);
+    expect(handed.at(-1)).toEqual({ idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY });
   });
 
   it("exec runs on this computer and returns the exit code; files read and write under the folder", async () => {
