@@ -17,3 +17,5 @@ export const ROW_LEAD_CLASS = "mt-0.5 flex size-3.5 shrink-0 items-center justif
 
 export const workspaceRowId = (workspaceId: string): string => `ws:${workspaceId}`;
 export const threadRowId = (threadId: string): string => `thread:${threadId}`;
+/** The header over a group of one workspace's thread rows: the idle shelf, and the archive nested inside it. */
+export const groupRowId = (group: "settled" | "archived", workspaceId: string): string => `${group}:${workspaceId}`;

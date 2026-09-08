@@ -152,7 +152,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, preferencesFrom, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, preferencesFrom, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -160,7 +160,7 @@ import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
-import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
+import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import type { Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
 
@@ -600,6 +600,8 @@ export interface RuntimeOptions {
   nap?: { pauseDeadlineMs?: number };
   /** How long one read of the provider gets after a pause or a resume missed its deadline (tests shrink it). */
   providerReadMs?: number;
+  /** How long a gone verdict waits before it reads the machine's state once more (tests shrink it; 0 reads at once). */
+  goneConfirmMs?: number;
   /** The token every daemon this runtime reaches is given; minted fresh per process when absent (tests pin one). */
   daemonToken?: string;
   /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
@@ -626,6 +628,13 @@ const PAUSE_DEADLINE_MS = 4 * 60_000;
 const WAKE_DEADLINE_MS = 6 * 60_000;
 /** One read of the provider after a missed deadline; the client sets no request timeout of its own. */
 const PROVIDER_READ_MS = 30_000;
+/** The pause a gone verdict takes before it reads the state once more. A verdict ends every turn on the machine and
+ * their unpushed work with them, and the provider answered one call 404 over a machine a direct read found running
+ * two minutes later (2026-09-08), so the verdict is worth a second read. */
+const GONE_CONFIRM_MS = 5_000;
+/** What a gone sighting came to: the record settled gone, the state read found the machine there after all, or the
+ * record moved out from under the read (a rebuild, or another road settled it first) and the sighting is stale. */
+type GoneOutcome = "settled" | "not-gone" | "moot";
 /** A resume the runtime stopped waiting on can still land: one read this long after a wake gave up finds it. */
 const WAKE_LATE_READ_MS = 3 * 60_000;
 /** A daemon that is up answers the hello on connect; a machine whose daemon is gone costs this once on each side of an update. */
@@ -1351,6 +1360,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const pauseDeadlineMs = opts.nap?.pauseDeadlineMs ?? PAUSE_DEADLINE_MS;
   const wakeDeadlineMs = opts.wake?.deadlineMs ?? WAKE_DEADLINE_MS;
   const providerReadMs = opts.providerReadMs ?? PROVIDER_READ_MS;
+  const goneConfirmMs = opts.goneConfirmMs ?? GONE_CONFIRM_MS;
   const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
   const clock = opts.clock ?? realClock;
   /** Each provider move the guest has to cooperate with: the state it leaves the machine in, and the state a
@@ -2087,10 +2097,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         try {
           await entry.ws.nap();
         } catch (e) {
-          if (isMissing(e)) {
-            await settleGone(entry, goneWords(entry.record.machineId, { by: "pause", at: clock.now(), answer: providerSaid(e) }));
-            throw e;
-          }
+          // A 404 the pause answered with is a sighting like any other: it settles only where the state read agrees,
+          // and a machine still running takes the road any other refused pause takes.
+          if (isMissing(e) && (await settleGone(entry, goneWords(entry.record.machineId, { by: "pause", at: clock.now(), answer: providerSaid(e) }))) !== "not-gone") throw e;
           entry.record.phase = entry.ws.currentPhase;
           await persist(entry.record);
           await emitStatus(entry, reachOf(entry), e instanceof Error ? e.message : String(e));
@@ -2159,11 +2168,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     })();
     return entry.adopting;
   };
+  /** The state read a gone verdict is checked against, a short wait after the call that made it: a read that answers
+   * with a state the machine is still in unmakes the verdict, and a 404 or a read nothing answered leaves it, since
+   * only a live answer is news. */
+  const goneUnmadeBy = async (machine: Machine): Promise<MachineState | undefined> => {
+    if (goneConfirmMs > 0) await new Promise<void>(resolve => void clock.schedule(() => resolve(), goneConfirmMs, { unref: true }));
+    const read = await machine.state().catch(() => undefined);
+    return read === undefined || read === "gone" ? undefined : read;
+  };
   /** The one road to gone, whichever call found the provider no longer knew the machine (deleted behind wsp, or
-   * expired): the record follows the fact and stays there. The gone event closes the awake stretch with a cost tick
-   * at this instant, drops the idle window and ends the sessions; the row and the one log line carry the words;
-   * rebuild and delete are the roads out. */
-  const settleGone = async (entry: LiveWorkspace, reason: string): Promise<void> => {
+   * expired): the state read is asked once more, and where it agrees the record follows the fact and stays there.
+   * The gone event closes the awake stretch with a cost tick at this instant, drops the idle window and ends the
+   * sessions; the row and the one log line carry the words; rebuild and delete are the roads out. */
+  const settleGone = async (entry: LiveWorkspace, reason: string): Promise<GoneOutcome> => {
+    const machineId = entry.record.machineId;
+    const alive = await goneUnmadeBy(entry.machine);
+    if (alive !== undefined) {
+      console.warn(`workspace ${entry.record.id} is not gone: ${reason}, and the state read that followed said ${alive}`);
+      return "not-gone";
+    }
+    if (entry.record.phase === "gone" || entry.record.machineId !== machineId) return "moot";
     entry.record.phase = "gone";
     entry.record.gone = reason;
     await persist(entry.record);
@@ -2171,12 +2195,37 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     console.warn(goneLogLine(entry.record.id, reason));
     bus.emit({ type: "workspace.gone", workspaceId: entry.record.id, machineId: entry.record.machineId, reason });
     await emitStatus(entry, "gone", reason);
+    return "settled";
   };
   /** A sighting from outside a verb (the poll, the sweep): a nap or a wake in flight meets the machine itself and
    * settles what it finds, so the sighting defers to it. */
   const adoptGone = async (entry: LiveWorkspace, reason: string): Promise<void> => {
     if (entry.record.phase === "gone" || entry.napping || entry.waking) return;
-    await settleGone(entry, reason);
+    // The poll pushed a gone row before the confirming read answered; a verdict that did not hold corrects it here
+    // rather than leaving the screen wrong until the next poll.
+    if ((await settleGone(entry, reason)) === "not-gone") await emitStatus(entry, reachOf(entry), NOT_GONE);
+  };
+  /** A record marked gone over a machine the provider still holds: the state read by id is the word on gone, so the
+   * record follows it back rather than leaving a rebuild to abandon a healthy machine that would bill on unrecorded.
+   * The phase the record left gone for, or undefined when this read moved nothing. */
+  const recoverGone = async (entry: LiveWorkspace): Promise<"running" | "napping" | undefined> => {
+    if (entry.record.phase !== "gone" || entry.napping || entry.waking) return undefined;
+    const read = await entry.machine.state().catch(() => undefined);
+    const phase = read === undefined ? undefined : phaseLeavingGone(read);
+    if (phase === undefined) return undefined;
+    if (phase === "running") {
+      entry.ws.noteRunning();
+      followMachine(entry);
+    } else {
+      entry.ws.notePaused();
+      entry.record.phase = phase;
+      delete entry.record.gone;
+    }
+    await persist(entry.record);
+    if (phase === "running") bus.emit({ type: "workspace.woken", workspaceId: entry.record.id, machineId: entry.record.machineId, resurrected: false });
+    else bus.emit({ type: "workspace.napped", workspaceId: entry.record.id, found: true });
+    await emitStatus(entry, phase === "running" ? reachOf(entry) : "napping", NOT_GONE);
+    return phase;
   };
   bus.on("workspace.status", e => {
     if (e.type !== "workspace.status") return;
@@ -2325,20 +2374,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         });
         // The state rides on the view get() just fetched; a second read would reset the provider's idle timer.
         const atProvider = missing !== undefined ? "gone" : (machine.seen?.state ?? (await machine.state()));
-        // The record follows the provider whatever word it was left with: paused means the pause landed or the
+        // A record left gone leaves it on the one predicate every road out of gone reads, and on nothing else. Any
+        // other record follows the provider whatever word it was left with: paused means the pause landed or the
         // resume never did, running means the pause never took or the resume landed with nobody left to write it.
         // Only a machine still starting leaves the stored word standing, and a pausing one then reads napping: a
         // wake resumes it either way.
         const phase: WorkspacePhase =
-          missing !== undefined || atProvider === "gone" || stored.phase === "gone"
-            ? "gone"
-            : atProvider === "paused"
-              ? "napping"
-              : atProvider === "running"
-                ? "running"
-                : stored.phase === "pausing"
-                  ? "napping"
-                  : stored.phase;
+          stored.phase === "gone"
+            ? (phaseLeavingGone(atProvider) ?? "gone")
+            : atProvider === "gone"
+              ? "gone"
+              : atProvider === "paused"
+                ? "napping"
+                : atProvider === "running"
+                  ? "running"
+                  : stored.phase === "pausing"
+                    ? "napping"
+                    : stored.phase;
         const record: WorkspaceRecord = {
           ...stored,
           kind,
@@ -2347,6 +2399,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
         };
         if (phase === "gone") record.gone = stored.gone ?? goneWords(stored.machineId, { by: "record load", at: clock.now(), ...(missing !== undefined ? { answer: missing } : {}) });
+        else delete record.gone;
         attach(record, machine);
         if (phase !== stored.phase) {
           if (phase === "gone") console.warn(goneLogLine(stored.id, record.gone!));
@@ -2619,7 +2672,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async wake(id, origin) {
       const entry = await entryOf(id, origin);
       if (entry.waking) return entry.waking;
-      if (entry.record.phase === "gone") throw new Error(goneRefusal("wake", entry.record.gone));
+      if (entry.record.phase === "gone") {
+        const left = await recoverGone(entry);
+        if (left === undefined) throw new Error(goneRefusal("wake", entry.record.gone));
+        // A record that left gone for napping is a machine the provider holds paused: the wake goes on and resumes it.
+        if (left === "running") return view(entry.record);
+      }
       if (entry.napping) await entry.napping.catch(() => {});
       // A wake nobody should need is the one sign the provider paused the machine on its own, or lost it, and a wake of
       // a machine the provider runs would be refused with its words: one read settles any, and the record follows the fact.
@@ -2630,8 +2688,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           answer = providerSaid(e);
           return "gone";
         });
-        if (read === "gone") {
-          await settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), ...(answer !== undefined ? { answer } : {}) }));
+        if (read === "gone" && (await settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), ...(answer !== undefined ? { answer } : {}) }))) !== "not-gone") {
           throw new Error(goneRefusal("wake", entry.record.gone));
         }
         if (read === "paused") await adoptPause(entry);
@@ -2715,6 +2772,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id, origin);
       refuseCannot(entry, "liveCloneForks", "be rebuilt");
       if (entry.waking) await entry.waking.catch(() => {});
+      if ((await recoverGone(entry)) !== undefined) return view(entry.record);
       const old = entry.record.machineId;
       const vaulted = (await store.getBlob(VAULTS, id)) !== undefined;
       await entry.ws.rebuild();
@@ -4671,7 +4729,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // read that finds the machine gone settles its record here rather than at the next poll or verb.
       const listed = new Set(listing.map(row => row.id));
       for (const entry of [...live.values()]) {
-        if (entry.creating || entry.napping || entry.waking || entry.deleting || entry.record.phase === "gone" || listed.has(entry.record.machineId)) continue;
+        if (entry.creating || entry.napping || entry.waking || entry.deleting) continue;
+        // A machine the listing still carries under a record marked gone is read once: the read is what decides,
+        // and one that says running gives the record its machine back.
+        if (listed.has(entry.record.machineId)) {
+          if (entry.record.phase === "gone") await recoverGone(entry);
+          continue;
+        }
+        if (entry.record.phase === "gone") continue;
         let answer: string | undefined;
         const read = await entry.machine.state().catch((e: unknown) => {
           if (!isMissing(e)) return undefined;

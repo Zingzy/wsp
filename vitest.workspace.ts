@@ -41,4 +41,5 @@ export default [
     },
   },
   here("./apps/web/vite.config.ts"),
+  here("./apps/www/vite.config.ts"),
 ];

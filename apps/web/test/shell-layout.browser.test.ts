@@ -21,9 +21,14 @@
 // state word in its slot at the right edge only off running, the meta line
 // in one order cut from the right, no import or export glyph, the thread
 // title up to a fixed time column, the Spaces body draws one workspace
-// under its header with a dot per workspace at the sidebar's bottom, and a
-// mixed list of a local machine and two cloud ones keeps that one grammar
-// with the kind's glyph in the local lead. Vite
+// under its header with a dot per workspace at the sidebar's bottom, the
+// move to another space travels that body out the way it was pushed and the
+// next one in from the other side while the header and the dots row hold
+// still, or swaps it with no travel for a reader who asked for less motion,
+// a mixed list of a local machine and two cloud ones keeps that one
+// grammar with the kind's glyph in the local lead, and the threads quiet for
+// over a day sit in an Archived group shut inside that workspace's idle
+// shelf, in the shelf header's own row grammar. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -31,10 +36,11 @@ import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type ConsoleMessage, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTER } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
+import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
 import { textContrast } from "./contrast";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
@@ -49,6 +55,9 @@ const browserPath = ((): string | undefined => {
 })();
 const hasBrowser = browserPath !== undefined && existsSync(browserPath);
 const skipped = process.env["WSP_RENDER"] !== "1" ? "WSP_RENDER is not 1" : !hasBrowser ? "Playwright's Chromium is not installed" : undefined;
+/** What React says when one body is drawn as both panes. The case that watches for it wants this line and not
+ * whatever else a browser puts on the console. */
+const DUPLICATE_KEY = "two children with the same key";
 
 interface Box {
   x: number;
@@ -715,6 +724,337 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       console.info(`mixed-kind sidebar screenshot: ${path}`);
     }
   }, 30_000);
+
+  it("moving to another space travels the body out the way it was pushed and the next one in, over a still header and dots row, and reduced motion swaps it at once, in both themes", async () => {
+    // The travel is read off the animation itself, seeked rather than raced: a frame sampled on a loaded machine
+    // says nothing about where the body was at the halfway mark.
+    const travel = (label: string) =>
+      page!.evaluate(async ({ name, ms }) => {
+        const track = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-space-track]");
+        const still = (): { dots: DOMRect; section: DOMRect } => ({
+          dots: document.querySelector<HTMLElement>("[data-space-dots]")!.getBoundingClientRect(),
+          section: document.querySelector<HTMLElement>("button[aria-label='Workspaces']")!.getBoundingClientRect(),
+        });
+        const before = still();
+        document.querySelector<HTMLElement>(`[data-space-dot][aria-label=${name}]`)!.click();
+        // React runs the travel's effect a task after the click, so the animation is waited for rather than assumed;
+        // it is seeked below, so the few milliseconds spent here do not reach the readings.
+        for (let i = 0; i < 100 && (track()?.getAnimations().length ?? 0) === 0; i++) await new Promise(resolve => setTimeout(resolve, 1));
+        const el = track();
+        const [animation] = el?.getAnimations() ?? [];
+        if (el === null || animation === undefined) return null;
+        const x = (): number => {
+          const shape = getComputedStyle(el).transform;
+          return shape === "none" ? 0 : new DOMMatrixReadOnly(shape).m41;
+        };
+        const at = (time: number): number => {
+          animation.currentTime = time;
+          return x();
+        };
+        animation.pause();
+        const style = getComputedStyle(el);
+        const read = {
+          width: el.getBoundingClientRect().width,
+          start: at(0),
+          mid: at(ms / 2),
+          end: at(ms),
+          duration: style.animationDuration,
+          easing: style.animationTimingFunction,
+          panes: document.querySelectorAll("[data-space-pane]").length,
+          leaving: document.querySelector<HTMLElement>("[data-space-leaving] [data-space-name]")?.textContent ?? "",
+          staying: document.querySelector<HTMLElement>("[data-space-pane]:not([data-space-leaving]) [data-space-name]")?.textContent ?? "",
+          moved: (() => {
+            const now = still();
+            return { dots: Math.abs(now.dots.x - before.dots.x) + Math.abs(now.dots.y - before.dots.y), section: Math.abs(now.section.x - before.section.x) + Math.abs(now.section.y - before.section.y) };
+          })(),
+        };
+        animation.play();
+        return read;
+      }, { name: label, ms: SPACE_SLIDE_MS });
+    const settled = () =>
+      page!.evaluate(() => ({
+        panes: document.querySelectorAll("[data-space-pane]").length,
+        transform: getComputedStyle(document.querySelector<HTMLElement>("[data-space-track]")!).transform,
+        name: document.querySelector<HTMLElement>("[data-space-name]")?.textContent ?? "",
+      }));
+
+    for (const theme of ["dark", "light"] as const) {
+      // Headless Chromium asks for less motion unless it is told otherwise, and that is the other half of this case.
+      await page!.emulateMedia({ reducedMotion: "no-preference" });
+      await page!.goto(`${base}?theme=${theme}&spaces=1`);
+      await page!.waitForSelector("[data-space-header]");
+      // Pushed forward: the body that was on screen travels left and the next one follows it in from the right.
+      const forward = await travel("web");
+      console.info(`space travel forward ${theme}: ${JSON.stringify(forward)}`);
+      expect(forward).not.toBeNull();
+      expect(forward!.duration).toBe(`${SPACE_SLIDE_MS / 1000}s`);
+      expect(forward!.easing).toBe("ease-out");
+      expect(forward!.panes).toBe(2);
+      expect(forward!.leaving).toBe("api");
+      expect(forward!.staying).toBe("web");
+      // The track holds both bodies, so it is twice the sidebar's body and the travel is half of it.
+      expect(Math.abs(forward!.start)).toBeLessThan(1);
+      expect(Math.abs(forward!.end + forward!.width / 2)).toBeLessThan(1);
+      // Halfway through the clock it is between the two, and never past the body it is going to: no bounce.
+      expect(forward!.mid).toBeLessThan(-1);
+      expect(forward!.mid).toBeGreaterThan(forward!.end + 1);
+      // The sidebar's own header row and the dots row do not move under it.
+      expect(forward!.moved.dots).toBeLessThan(1);
+      expect(forward!.moved.section).toBeLessThan(1);
+      await page!.waitForFunction(() => document.querySelectorAll("[data-space-pane]").length === 1);
+      const rested = await settled();
+      expect(rested).toEqual({ panes: 1, transform: "none", name: "web" });
+
+      // Pushed the other way: the travel runs in reverse, ending on the body that has come back.
+      const back = await travel("api");
+      console.info(`space travel back ${theme}: ${JSON.stringify(back)}`);
+      expect(back).not.toBeNull();
+      expect(back!.leaving).toBe("web");
+      expect(back!.staying).toBe("api");
+      expect(Math.abs(back!.start + back!.width / 2)).toBeLessThan(1);
+      expect(Math.abs(back!.end)).toBeLessThan(1);
+      expect(back!.mid).toBeGreaterThan(back!.start + 1);
+      expect(back!.mid).toBeLessThan(-1);
+      await page!.waitForFunction(() => document.querySelectorAll("[data-space-pane]").length === 1);
+      expect(await settled()).toEqual({ panes: 1, transform: "none", name: "api" });
+
+      // Asked for less motion, the body swaps with nothing moving: one pane, no animation, no transform.
+      await page!.emulateMedia({ reducedMotion: "reduce" });
+      await page!.goto(`${base}?theme=${theme}&spaces=1`);
+      await page!.waitForSelector("[data-space-header]");
+      const swap = await page!.evaluate(async () => {
+        const track = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-track]")!;
+        document.querySelector<HTMLElement>("[data-space-dot][aria-label=web]")!.click();
+        // Watched over the window a travel would have opened in: no second body ever comes up, and nothing animates.
+        let mostPanes = 0;
+        let animations = 0;
+        for (let i = 0; i < 60; i++) {
+          await new Promise(resolve => setTimeout(resolve, 1));
+          mostPanes = Math.max(mostPanes, document.querySelectorAll("[data-space-pane]").length);
+          animations = Math.max(animations, track().getAnimations().length);
+        }
+        return { mostPanes, animations, transform: getComputedStyle(track()).transform, name: document.querySelector<HTMLElement>("[data-space-name]")?.textContent ?? "" };
+      });
+      console.info(`space swap with reduced motion ${theme}: ${JSON.stringify(swap)}`);
+      expect(swap).toEqual({ mostPanes: 1, animations: 0, transform: "none", name: "web" });
+      await page!.emulateMedia({ reducedMotion: null });
+    }
+  }, 60_000);
+
+  it("a space asked for mid-travel turns the body around from where it is, draws no body twice, and the track clips sideways only, in both themes", async () => {
+    const TURN_AFTER_MS = 80;
+    for (const theme of ["dark", "light"] as const) {
+      await page!.emulateMedia({ reducedMotion: "no-preference" });
+      await page!.goto(`${base}?theme=${theme}&spaces=1`);
+      await page!.waitForSelector("[data-space-header]");
+      const errors: string[] = [];
+      const listen = (message: ConsoleMessage): void => {
+        if (message.type() === "error" && message.text().includes(DUPLICATE_KEY)) errors.push(message.text());
+      };
+      page!.on("console", listen);
+      // Every frame of a travel turned around after 80 ms: where the track is, and which bodies are on screen.
+      const run = await page!.evaluate(async turnAfter => {
+        const track = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-track]")!;
+        const readX = (): number => {
+          const shape = getComputedStyle(track()).transform;
+          const matrix = /^matrix\(([^)]*)\)$/.exec(shape);
+          return matrix === null ? 0 : Number(matrix[1]!.split(",")[4]);
+        };
+        const frame = () => ({ at: performance.now(), x: readX(), names: Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane] [data-space-name]")).map(name => name.textContent ?? "") });
+        const click = (name: string): void => document.querySelector<HTMLElement>(`[data-space-dot][aria-label=${name}]`)!.click();
+        const paint = (): Promise<unknown> => new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
+        const frames: ReturnType<typeof frame>[] = [];
+        click("web");
+        // The travel comes up in the click's own render, but a browser under load can hold that render back, and two
+        // clicks landing in one render would be no travel at all rather than a travel turned around.
+        for (let i = 0; i < 200 && document.querySelectorAll("[data-space-pane]").length < 2; i++) await new Promise(resolve => setTimeout(resolve, 1));
+        const started = performance.now();
+        while (performance.now() - started < turnAfter) {
+          await paint();
+          frames.push(frame());
+        }
+        click("api");
+        while (performance.now() - started < turnAfter + 400) {
+          await paint();
+          frames.push(frame());
+        }
+        const wrapper = document.querySelector<HTMLElement>("[data-space-slide]")!;
+        const clip = getComputedStyle(wrapper);
+        return {
+          frames,
+          width: track().getBoundingClientRect().width,
+          leftOver: track().style.getPropertyValue("--space-slide-from"),
+          clip: { x: clip.overflowX, y: clip.overflowY, scrolls: wrapper.scrollHeight > wrapper.clientHeight },
+        };
+      }, TURN_AFTER_MS);
+      page!.off("console", listen);
+
+      const deepest = Math.max(...run.frames.map(read => -read.x));
+      const steps = run.frames.slice(1).map((read, i) => ({ px: Math.abs(read.x - run.frames[i]!.x), ms: read.at - run.frames[i]!.at }));
+      const fastest = Math.max(...steps.filter(step => step.ms > 0).map(step => step.px / step.ms));
+      console.info(`space turn ${theme}: ${JSON.stringify({ deepest, fastest, frames: run.frames.length, width: run.width, leftOver: run.leftOver, clip: run.clip, last: run.frames.at(-1) })}`);
+      // The page keeps its own counsel: a body drawn twice under one key is a React error in the console.
+      expect(errors).toEqual([]);
+      // No frame ever draws one workspace as both bodies.
+      expect(run.frames.filter(read => read.names.length === 2 && read.names[0] === read.names[1])).toEqual([]);
+      // The body turned around where it had got to: it never reaches the far side it was heading for.
+      expect(deepest).toBeGreaterThan(20);
+      expect(deepest).toBeLessThan(run.width / 2 - 20);
+      // And it never jumps: five times the travel's own average speed is far under a teleport and far over a frame.
+      expect(fastest).toBeLessThan((5 * (run.width / 2)) / SPACE_SLIDE_MS);
+      // It settles on the space asked for, at rest, with the offset it was handed dropped again.
+      expect(run.frames.at(-1)).toMatchObject({ x: 0, names: ["api"] });
+      expect(run.leftOver).toBe("");
+      // The track clips sideways only, so the wrapper is no scroll container of its own.
+      expect(run.clip).toEqual({ x: "clip", y: "visible", scrolls: false });
+    }
+  }, 60_000);
+
+  it("a third space asked for mid-travel runs its own full travel from where the body is, in both themes", async () => {
+    const TURN_AFTER_MS = 80;
+    for (const theme of ["dark", "light"] as const) {
+      await page!.emulateMedia({ reducedMotion: "no-preference" });
+      await page!.goto(`${base}?theme=${theme}&spaces=1`);
+      await page!.waitForSelector("[data-space-header]");
+      // Every frame of a travel to web that is asked for old 80 ms in: where each body sits across the sidebar's
+      // body, and the clock of the animation drawing the track. A body's own edge is the reading that counts, since
+      // the track moves a pane's width under a travel that changes which pane holds a body, and the track's
+      // transform alone cannot tell that apart from the body jumping.
+      const run = await page!.evaluate(async turnAfter => {
+        const track = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-track]")!;
+        const frame = () => {
+          const across = document.querySelector<HTMLElement>("[data-space-slide]")!.getBoundingClientRect().left;
+          return {
+            at: performance.now(),
+            bodies: Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane]")).map(pane => ({ name: pane.querySelector<HTMLElement>("[data-space-name]")?.textContent ?? "", x: pane.getBoundingClientRect().left - across })),
+            clocks: track()
+              .getAnimations()
+              .map(animation => Number(animation.currentTime ?? 0)),
+          };
+        };
+        const click = (name: string): void => document.querySelector<HTMLElement>(`[data-space-dot][aria-label=${name}]`)!.click();
+        const paint = (): Promise<unknown> => new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
+        const frames: ReturnType<typeof frame>[] = [];
+        click("web");
+        // The travel comes up in the click's own render, but a browser under load can hold that render back, and two
+        // clicks landing in one render would be one travel rather than a travel taken over.
+        for (let i = 0; i < 200 && document.querySelectorAll("[data-space-pane]").length < 2; i++) await new Promise(resolve => setTimeout(resolve, 1));
+        const started = performance.now();
+        while (performance.now() - started < turnAfter) {
+          await paint();
+          frames.push(frame());
+        }
+        click("old");
+        while (performance.now() - started < turnAfter + 500) {
+          await paint();
+          frames.push(frame());
+        }
+        return { frames, width: track().getBoundingClientRect().width };
+      }, TURN_AFTER_MS);
+
+      const pane = run.width / 2;
+      const took = run.frames.findIndex(read => read.bodies.some(body => body.name === "old"));
+      const swap = run.frames[took]!;
+      const arrived = run.frames.findIndex((read, i) => i >= took && read.bodies.some(body => body.name === "old" && Math.abs(body.x) < 1));
+      const tookMs = arrived < 0 ? null : run.frames[arrived]!.at - swap.at;
+      console.info(`space third ${theme}: ${JSON.stringify({ pane, clockAtSwap: swap.clocks, enteredAt: swap.bodies.find(body => body.name === "old")?.x, tookMs, frames: run.frames.length, last: run.frames.at(-1) })}`);
+      // The travel taken over is drawn by an animation of its own, on its own clock, not by the one already running.
+      expect(swap.clocks).toHaveLength(1);
+      expect(swap.clocks[0]).toBeLessThan(40);
+      // The space asked for comes in from off the sidebar's edge, not from part of the way across it.
+      expect(swap.bodies.find(body => body.name === "old")!.x).toBeGreaterThan(0.75 * pane);
+      // And it takes a whole travel to arrive, rather than finishing early on a clock it inherited.
+      expect(tookMs).toBeGreaterThan(0.85 * SPACE_SLIDE_MS);
+      expect(tookMs).toBeLessThan(1.4 * SPACE_SLIDE_MS);
+      // It settles on that space alone, at rest at the sidebar's edge.
+      expect(run.frames.at(-1)!.bodies).toEqual([{ name: "old", x: 0 }]);
+    }
+  }, 60_000);
+
+  it("the Archived group sits shut under the idle shelf, one row grammar with the Idle header and no colour of its own, and opens to rows of the same height, in both themes", async () => {
+    const readGroups = () =>
+      page!.evaluate(() => {
+        const read = (rowId: string) => {
+          const row = document.querySelector<HTMLElement>(`[data-row-id='${rowId}']`)!;
+          const word = row.querySelector<HTMLElement>("span")!;
+          const box = row.getBoundingClientRect();
+          const style = getComputedStyle(word);
+          const rowStyle = getComputedStyle(row);
+          return {
+            text: (row.textContent ?? "").trim(),
+            expanded: row.getAttribute("aria-expanded"),
+            y: box.y,
+            height: box.height,
+            x: box.x,
+            right: box.right,
+            color: style.color,
+            size: style.fontSize,
+            weight: style.fontWeight,
+            background: rowStyle.backgroundColor,
+            border: rowStyle.borderBottomWidth,
+            radius: rowStyle.borderBottomRightRadius,
+          };
+        };
+        // Only the first workspace's own block: the other two draw their own thread rows further down the list.
+        const block = document.querySelector<HTMLElement>("[data-row-id='ws:ws_a']")!.closest<HTMLElement>("[data-sidebar='menu-item']")!;
+        return {
+          idle: read("settled:ws_a"),
+          archived: read("archived:ws_a"),
+          threads: Array.from(block.querySelectorAll<HTMLElement>("[data-row-id^='thread:']")).map(row => ({
+            id: row.getAttribute("data-row-id"),
+            y: row.getBoundingClientRect().y,
+            height: row.getBoundingClientRect().height,
+          })),
+          sidebar: document.querySelector<HTMLElement>("[data-slot=sidebar]")!.getBoundingClientRect().right,
+        };
+      });
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&archived=1&sidebar=300`);
+      await page!.waitForSelector("[data-row-id='archived:ws_a']");
+      const shut = await readGroups();
+      console.info(`archived group ${theme} shut: ${JSON.stringify(shut)}`);
+      // Shut, carrying its count, and under the idle shelf it belongs to rather than above it.
+      expect(shut.archived.expanded).toBe("false");
+      expect(shut.archived.text).toBe("Archived (2)");
+      expect(shut.idle.text).toBe("Idle");
+      expect(shut.archived.y).toBeGreaterThan(shut.idle.y);
+      // The two threads it holds are not drawn; the working row and the one idle row are.
+      expect(shut.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2"]);
+      for (const thread of shut.threads) expect(thread.y).toBeLessThan(shut.archived.y);
+      // One row grammar with the header above it: same height, same left edge, same muted word, same rounding, and
+      // the group header is a plain row, not a chip or a badge, so it carries no fill and no border of its own.
+      expect(shut.archived.height).toBe(32);
+      expect(shut.archived.height).toBe(shut.idle.height);
+      expect(shut.archived.x).toBe(shut.idle.x);
+      expect(shut.archived.color).toBe(shut.idle.color);
+      expect(shut.archived.size).toBe(shut.idle.size);
+      expect(shut.archived.weight).toBe(shut.idle.weight);
+      expect(shut.archived.radius).toBe(shut.idle.radius);
+      expect(shut.archived.background).toBe("rgba(0, 0, 0, 0)");
+      expect(shut.archived.border).toBe("0px");
+      expect(shut.archived.right).toBeLessThanOrEqual(shut.sidebar);
+      const path = join(SHOTS_DIR, `sidebar-archived-shut-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar archived shut screenshot: ${path}`);
+      // One click opens it, and what it holds are ordinary thread rows at the ordinary thread-row height.
+      await page!.locator("[data-row-id='archived:ws_a']").click();
+      await page!.waitForFunction(
+        () => document.querySelector("[data-row-id='ws:ws_a']")!.closest("[data-sidebar='menu-item']")!.querySelectorAll("[data-row-id^='thread:']").length === 4,
+      );
+      const open = await readGroups();
+      console.info(`archived group ${theme} open: ${JSON.stringify(open)}`);
+      expect(open.archived.expanded).toBe("true");
+      expect(open.archived.text).toBe("Archived");
+      expect(open.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2", "thread:s5", "thread:s6"]);
+      expect(new Set(open.threads.map(t => Math.round(t.height))).size).toBe(1);
+      for (const id of ["thread:s5", "thread:s6"]) {
+        expect(open.threads.find(t => t.id === id)!.y).toBeGreaterThan(open.archived.y);
+      }
+      const openPath = join(SHOTS_DIR, `sidebar-archived-open-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path: openPath });
+      console.info(`sidebar archived open screenshot: ${openPath}`);
+    }
+  }, 60_000);
 
   it("a status toast with a 200-character token stays inside the sidebar's width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);

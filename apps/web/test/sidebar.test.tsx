@@ -14,6 +14,7 @@ import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
+import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
@@ -105,6 +106,12 @@ const metaOf = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>
 const spaceHeader = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-space-header]");
 const headerLines = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-header] [data-space-meta]")).map(l => l.textContent ?? "");
 const dots = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-dot]"));
+const panes = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane]"));
+const paneNames = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane] [data-space-name]")).map(n => n.textContent ?? "");
+/** What React says when one body is drawn as both panes: the one console line the reversal case is about. */
+const DUPLICATE_KEY = "two children with the same key";
+/** The name in the header of the body that is staying: the pane not marked as the one on its way out. */
+const spaceName = (): string => document.querySelector<HTMLElement>("[data-space-pane]:not([data-space-leaving]) [data-space-name]")?.textContent ?? "";
 const workspaceRowIds = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='ws:']")).map(r => r.dataset["rowId"] ?? "");
 
 const API = view("ws_a", "api");
@@ -157,17 +164,21 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
-    // Every workspace with an idle thread gets the Idle header, whether or not one of its threads is working.
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "settled:ws_b", "thread:s3"]);
+    // The one idle two days is past the archive threshold, so it sits in the Archived group nested in its
+    // workspace's shelf, shut, rather than as a row on the shelf itself.
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "settled:ws_b", "archived:ws_b"]);
     expect(rowOf("fix the port list").textContent).toContain("3m");
     expect(rowOf("upgrade node").textContent).toContain("50m");
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
     // a session without a prompt falls back to the harness session id
     expect(rowOf("59094224-bb3d").textContent).toContain("2d");
     // status pills: the running one works, the one that never settled ended, the idle one is plain
     expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined();
     expect(within(rowOf("59094224-bb3d")).getByLabelText("Ended")).toBeDefined();
     expect(within(rowOf("upgrade node")).queryByLabelText(/Idle|Completed/)).toBeNull();
-    expect(screen.getAllByRole("button", { name: /^Idle/ })).toHaveLength(2);
+    // Both workspaces head their shelf, whether or not one of their threads is working: ws_b's holds nothing but
+    // the nested archive, and a shelf that holds only that is still a shelf.
+    expect(screen.getAllByRole("button", { name: "Idle" })).toHaveLength(2);
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
@@ -320,6 +331,103 @@ describe("rows from the fixture wire", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Idle/ }));
     expect(screen.queryByText("upgrade node")).toBeNull();
     expect(screen.getByRole("button", { name: "Idle (3)" })).toBeDefined();
+  });
+
+  it("threads idle past the archive threshold fold into an Archived group under Idle, shut, carrying their count", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [
+          session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-2 * 24 * 60 * 60_000), endedAt: iso(-25 * 60 * 60_000) }),
+          session("s3", "ws_a", { status: "interrupted", prompt: "drop the old shim", startedAt: iso(-9 * 24 * 60 * 60_000), endedAt: iso(-8 * 24 * 60 * 60_000) }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
+    // The archive sits under the idle shelf, shut, and the two threads quiet for over a day are not drawn.
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a"]);
+    const archived = (): HTMLElement => document.querySelector<HTMLElement>("[data-row-id='archived:ws_a']")!;
+    expect(archived().getAttribute("aria-expanded")).toBe("false");
+    expect(archived().textContent).toContain("Archived (2)");
+    expect(screen.queryByText("bump the lockfile")).toBeNull();
+    // One click opens it, and the rows arrive newest end first, as the shelf orders its own.
+    fireEvent.click(archived());
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a", "thread:s2", "thread:s3"]);
+    expect(archived().textContent).toContain("Archived");
+    expect(archived().textContent).not.toContain("(2)");
+    expect(window.localStorage.getItem("wsp:sidebar-archived-open")).toBe('["ws_a"]');
+    fireEvent.click(archived());
+    expect(screen.queryByText("bump the lockfile")).toBeNull();
+    expect(window.localStorage.getItem("wsp:sidebar-archived-open")).toBe("[]");
+  });
+
+  it("one click on an archived thread's row opens that thread", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [
+          session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "bump the lockfile", threadId: "thr_old", startedAt: iso(-3 * 24 * 60 * 60_000), endedAt: iso(-2 * 24 * 60 * 60_000) }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Archived (1)" })).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
+    fireEvent.click(rowOf("bump the lockfile"));
+    expect(useStore.getState().selectedId).toBe("ws_a");
+    expect(useStore.getState().selectedThreadId).toBe("thr_old");
+  });
+
+  it("a workspace whose threads are every one archived still draws the group rather than an empty workspace", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-9 * 24 * 60 * 60_000), endedAt: iso(-8 * 24 * 60 * 60_000) })],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Archived (1)" })).toBeDefined());
+    // The shelf still heads them even with nothing of its own to draw, since the archive nests inside it and has
+    // to hang from something; shutting it counts the archived thread it takes away.
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "archived:ws_a"]);
+    fireEvent.click(screen.getByRole("button", { name: "Idle" }));
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a"]);
+    expect(screen.getByRole("button", { name: "Idle (1)" })).toBeDefined();
+  });
+
+  it("the archive nests inside the idle shelf: shutting the shelf hides the archived header and its rows too", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [
+          session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-26 * 60 * 60_000), endedAt: iso(-25 * 60 * 60_000) }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Archived (1)" })).toBeDefined());
+    // Open the archive first, so what the shelf hides is a group that was showing its rows.
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a", "thread:s2"]);
+    // Shutting the shelf takes the archive down with it: no thread row of either kind, and no archived header.
+    fireEvent.click(screen.getByRole("button", { name: /^Idle/ }));
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a"]);
+    expect(screen.queryByText("upgrade node")).toBeNull();
+    expect(screen.queryByText("bump the lockfile")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull();
+    // The shelf counts every thread it hides, the archived one included.
+    expect(screen.getByRole("button", { name: "Idle (2)" })).toBeDefined();
+    // Opening it again gives the archive back as it was left, open.
+    fireEvent.click(screen.getByRole("button", { name: /^Idle/ }));
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a", "thread:s2"]);
   });
 
   it("an idle thread's title reads in the muted foreground; a working one's does not", async () => {
@@ -1025,10 +1133,77 @@ describe("Spaces mode", () => {
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_m", phase: "running", rateUsdPerHour: 0, awakeMs: 120_000, accruedUsd: 0, at: new Date(NOW).toISOString() }),
     );
     await waitFor(() => expect(headerLines()).toEqual(["this computer"]));
-    // The fork beside it keeps every line it had: the size and the OS word, then the spend with its rate.
+    // The fork beside it keeps every line it had: the size and the OS word, then the spend with its rate. Both
+    // bodies carry a header while one travels out, so the lines are read once the body asked for is there alone.
     fireEvent.click(dots()[0]!);
     await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
-    expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr"]);
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr"]));
+  });
+
+  it("a space asked for while the body is still travelling turns it around and never draws one workspace twice", async () => {
+    const errors: string[] = [];
+    const console_ = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      const line = args.map(String).join(" ");
+      if (line.includes(DUPLICATE_KEY)) errors.push(line);
+    });
+    try {
+      await mountSpaces(fakeApi(THREE, statuses()));
+      fireEvent.click(dots()[1]!);
+      expect(paneNames()).toEqual(["api", "web"]);
+      // Straight back while that travel is still running: React says "two children with the same key" if the
+      // workspace now on screen is still the one the travel calls the leaver.
+      fireEvent.click(dots()[0]!);
+      expect(errors).toEqual([]);
+      expect(paneNames()).toEqual(["api", "web"]);
+      expect(document.querySelector<HTMLElement>("[data-space-leaving] [data-space-name]")!.textContent).toBe("web");
+      await waitFor(() => expect(panes()).toHaveLength(1));
+      expect(spaceName()).toBe("api");
+      expect(errors).toEqual([]);
+    } finally {
+      console_.mockRestore();
+    }
+  });
+
+  it("a two-finger swipe across the body moves a space, out one way and back the other", async () => {
+    await mountSpaces(fakeApi(THREE, statuses(), [session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) })]));
+    const body = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-slide]")!;
+    fireEvent.wheel(body(), { deltaX: 80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    // The workspace that left is still drawn while the body travels, out of the keyboard's reach and off the
+    // accessibility tree, and it is gone once the travel is over.
+    const leaving = document.querySelector<HTMLElement>("[data-space-leaving]")!;
+    expect(panes()).toHaveLength(2);
+    expect(within(leaving).getByText("api")).toBeDefined();
+    expect(leaving.getAttribute("aria-hidden")).toBe("true");
+    expect(leaving.hasAttribute("inert")).toBe(true);
+    expect(spaceName()).toBe("web");
+    await waitFor(() => expect(panes()).toHaveLength(1));
+    expect(screen.getByText("bump the lockfile")).toBeDefined();
+    expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
+    // The quiet after the fingers lift ends the gesture, so the next swipe is read as its own.
+    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
+    fireEvent.wheel(body(), { deltaX: -80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_a");
+    await waitFor(() => expect(panes()).toHaveLength(1));
+    expect(spaceName()).toBe("api");
+  });
+
+  it("one swipe moves one space however long the fingers keep going, and a scroll down the sidebar moves nothing", async () => {
+    await mountSpaces(fakeApi(THREE, statuses()));
+    const body = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-slide]")!;
+    for (const deltaX of [80, 80, 80]) fireEvent.wheel(body(), { deltaX, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    await waitFor(() => expect(panes()).toHaveLength(1));
+    expect(spaceName()).toBe("web");
+    // A gesture of its own, straight down the rows: nothing moves.
+    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
+    for (const deltaY of [120, 120]) fireEvent.wheel(body(), { deltaX: 0, deltaY });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    expect(panes()).toHaveLength(1);
+    // The workspaces carry the swipe, not the whole sidebar: over the search row the same push moves nothing.
+    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
+    fireEvent.wheel(document.querySelector<HTMLElement>("[data-sidebar-search]")!, { deltaX: 80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
   });
 
   it("before the first status the header carries no machine line: nothing draws a bare OS word", async () => {

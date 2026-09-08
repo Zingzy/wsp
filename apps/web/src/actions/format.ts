@@ -100,7 +100,6 @@ export function phaseRefusal(state: WorkspaceState): string | null {
   }
 }
 
-export const NO_REBUILD_NEEDED = "Rebuild replaces a gone or zombie machine; this one answers";
 export const CLIENT_CANNOT_REBUILD = "This client cannot rebuild machines";
 export const CLIENT_CANNOT_FORGET = "This client cannot forget workspaces";
 export const NEW_THREAD_WAITS = "New threads wait for the rebuild";
