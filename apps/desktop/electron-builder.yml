@@ -18,7 +18,13 @@ mac:
   target:
     - target: dir
       arch: [arm64, x64]
-  identity: null
+  # No identity is named: a Developer ID Application certificate in the keychain (CSC_LINK imports one) signs, and
+  # without one electron-builder skips signing and scripts/after-pack.mjs signs ad hoc.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Runs only after an identity signed, and only with APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID set.
+  notarize: true
   category: public.app-category.developer-tools
   icon: build/icon.icns
 win:
