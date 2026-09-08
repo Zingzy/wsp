@@ -2,10 +2,23 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { SysSample } from "@wsp/protocol";
-import { bytesOfLabel, diskTier, percentLabel } from "../src/components/machine/format.js";
+import { bytesOfLabel, diskTier, percentLabel, reachLabel } from "../src/components/machine/format.js";
 import { getLive, LIVE_WINDOW, outOfMemoryReading, resetLive, useOutOfMemoryReading, useOutOfMemoryReadings } from "../src/machine/live.js";
 
 const sample = (i: number): SysSample => ({ type: "sys.sample", cpu: i, load1: 0.5, mem: { used: i, total: 100 }, disk: { used: i, total: 100 }, at: 1_000 + i });
+
+describe("the Reach row's word", () => {
+  it("a kind whose machines serve no daemon says what the machine is, where the bare state word would read as a fault", () => {
+    // The same table the sidebar row reads: on this kind unsupported is not a state that passes, it is the machine.
+    expect(reachLabel("unsupported", "ssh")).toBe("none on a machine over ssh");
+    // This computer's daemon can be missing for a while, so its row keeps the state word.
+    expect(reachLabel("unsupported", "local")).toBe("unsupported");
+    expect(reachLabel("unsupported", "cloud")).toBe("unsupported");
+    // Every other state reads as it does on every kind.
+    expect(reachLabel("reachable", "ssh")).toBe("reachable");
+    expect(reachLabel("no-daemon", "ssh")).toBe("no daemon");
+  });
+});
 
 describe("disk tier", () => {
   it("turns at 50, 65 and 75 percent of the disk, on the number only", () => {

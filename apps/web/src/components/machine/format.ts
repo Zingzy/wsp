@@ -2,7 +2,7 @@
 // Words the machine surface puts next to wire values. Phase is the product
 // word (Running, Paused, Waking); machine state is the provider word and only
 // shows when it diverges from what the phase implies.
-import { fmtBytes, workspaceState, workspaceWord, type MachineState, type ReachState, type WorkspacePhase } from "@wsp/protocol";
+import { fmtBytes, kindWords, machineWord, workspaceState, workspaceWord, type MachineState, type ReachState, type WorkspaceKind, type WorkspacePhase } from "@wsp/protocol";
 
 export const money = (n: number, digits = 4): string => `$${n.toFixed(digits)}`;
 
@@ -41,7 +41,11 @@ export function divergentMachineState(phase: WorkspacePhase, state: MachineState
   }
 }
 
-export function reachLabel(state: ReachState): string {
+/** The Reach row's word. A kind whose machines serve no daemon at all reads what the machine is instead of the bare
+ * `unsupported`, from the same table the sidebar row reads: on that kind it is not a state that passes, it is what
+ * the machine is. */
+export function reachLabel(state: ReachState, kind: WorkspaceKind = "cloud"): string {
+  if (state === "unsupported" && !kindWords(kind).daemon) return `none on ${machineWord(kind)}`;
   switch (state) {
     case "slow":
       return "edge slow";

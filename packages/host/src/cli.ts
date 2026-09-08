@@ -24,10 +24,11 @@ import {
   type LocalWiring,
   type Machine,
   type Runtime,
+  type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, NOTHING_TO_SERVE_LINE, THIS_COMPUTER, TURN_END_WORDS, WS_PORT_OFFSET, authRefusal, fmtDuration, portsAsked, shellQuote, usageRefusal, type PortsAsked } from "@wsp/protocol";
-import { agentHomes, LocalBackend, NoProviderBackend, type MachineBackend } from "@wsp/engine";
+import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
+import { agentHome, agentHomes, LocalBackend, type MachineBackend, NoProviderBackend, parseSshAddress, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
@@ -421,7 +422,6 @@ export const localWorkFolder = (home: string): string => join(home, "wsp-work");
 export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
   const root = localWorkFolder(home);
   mkdirSync(root, { recursive: true });
-  const homes = agentHomes(home, env);
   const login = Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined));
   // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
   // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
@@ -431,7 +431,7 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   return {
     backend: new LocalBackend({ root, env }),
     execStream: o => localExecStream({ root, ...o }),
-    home: id => homes[id] ?? join(home, `.${id}`),
+    home: id => agentHome(home, id, env),
     env: login,
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
@@ -452,6 +452,29 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
       // the only thing that knows where its turns are, and nothing can re-open one once it is gone.
       await endLocalRuns();
       await started?.then(d => d.close(), () => {});
+    },
+  };
+}
+
+/** The machines this computer reaches over ssh: the ssh client here dials them with the person's own key, and one
+ * dial both proves a machine answers and reads what its record stands on. Nothing is kept between dials; a record's
+ * id is the whole address. */
+export function sshWiring(): SshWiring {
+  const backend = new SshBackend();
+  return {
+    backend,
+    adopt: async (address, opts) => {
+      const reach = parseSshAddress(address, opts);
+      const { machine, login, shape, hostKey } = await backend.adopt(reach);
+      return {
+        machine,
+        name: sshMachineName(reach),
+        login,
+        shape,
+        // What the machine answered about itself, so the same machine under another address, port or key is the
+        // workspace it already is; a client that logged no key leaves the record on its address alone.
+        ...(hostKey !== undefined ? { identity: sshIdentity(hostKey, login.USER), hostKey } : {}),
+      };
     },
   };
 }
@@ -483,6 +506,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
   return createRuntime({
     backend: providerBackend(keys),
     local: localWiring(),
+    ssh: sshWiring(),
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,

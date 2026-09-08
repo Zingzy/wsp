@@ -701,7 +701,7 @@ describe("serveRuntime workspaces.exec", () => {
     await new Promise(r => setTimeout(r, 50));
     const kills = backend.machines[0]!.execLog.filter(cmd => cmd.includes("kill -TERM") || cmd.includes("kill -KILL"));
     expect(kills).toHaveLength(1);
-    expect(kills[0]).toMatch(/kill -TERM -- -\$P .*kill -KILL -- -\$P .*rm -rf \/tmp\/wsp-run\/[a-f0-9]{12}\.\*/);
+    expect(kills[0]).toMatch(/kill -TERM -- -\$P .*kill -KILL -- -\$P .*rm -rf '\/tmp\/wsp-run\/[a-f0-9]{12}'\.\*/);
   });
 
   it("runs the command in the folder the request names, quoted for the machine's shell; without one, in the home, as a harness turn does", async () => {

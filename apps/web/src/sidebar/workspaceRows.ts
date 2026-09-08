@@ -48,9 +48,17 @@ export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput,
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
     // A row with no state word has nowhere else to say its daemon is gone, and it is the thing a person waiting on
-    // a terminal is waiting on; a driven kind's state word already reads Unreachable for it.
-    kindWords(workspaceKind(project.workspace)).driven ? undefined : daemonGoneLine(project.reach),
+    // a terminal is waiting on; a driven kind's state word already reads Unreachable for it, and a kind that serves
+    // no daemon at all is not missing one, so its row says what the machine is instead.
+    daemonMissing(project) ? daemonGoneLine(project.reach) : undefined,
   ].filter((line): line is string => line !== undefined);
+}
+
+/** Whether this row is one a missing daemon is worth a line on: a kind wsp drives says it in its state word, and a
+ * kind whose machines serve none has nothing missing. */
+function daemonMissing(project: Pick<SidebarProjectSnapshot, "workspace">): boolean {
+  const kind = kindWords(workspaceKind(project.workspace));
+  return !kind.driven && kind.daemon;
 }
 
 export interface WorkspaceMetaInput {

@@ -1494,7 +1494,7 @@ describe("a turn the host comes back to", () => {
     expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
 
     expect(guest.reaps).toHaveLength(1);
-    expect(guest.reaps[0]).toContain(`rm -rf ${orphan}.*`);
+    expect(guest.reaps[0]).toContain(`rm -rf '${orphan}'.*`);
     expect(guest.reaps[0]).not.toContain(run);
     await rt2.close();
   });
@@ -1511,7 +1511,7 @@ describe("a turn the host comes back to", () => {
     await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "failed");
 
     expect(guest.reaps).toHaveLength(1);
-    expect(guest.reaps[0]).toContain(`rm -rf ${run}.*`);
+    expect(guest.reaps[0]).toContain(`rm -rf '${run}'.*`);
     await rt2.close();
   });
 
