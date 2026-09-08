@@ -120,10 +120,15 @@ export function isBilling(state: WorkspaceState): boolean {
 }
 
 /** Rebuild is the one action left: the machine is gone, or a zombie the provider still calls running. Every
- * surface that offers the rebuild (sidebar row, palette, Machine tab) asks this and nothing else. */
+ * surface that offers the rebuild (sidebar row, palette, Machine tab, the command line and its tool) asks this and
+ * nothing else. */
 export function needsRebuild(input: WorkspaceStateInput): boolean {
   return workspaceState(input) === "gone" || input.reach === "zombie";
 }
+
+/** The one sentence for a rebuild asked of a machine that still answers, so the row's disabled tooltip and the
+ * command line refuse in the same words. A caller holding only the record reads no reach, so this is its gone rule. */
+export const NO_REBUILD_NEEDED = "Rebuild replaces a gone or zombie machine; this one answers";
 
 /** The one sentence for a verb a gone machine cannot take (send, wake, fork), with the provider's words when the
  * caller holds them; rebuild and delete are the roads out. */

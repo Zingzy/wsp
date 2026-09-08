@@ -2,7 +2,7 @@
 // The workspace's actions, one registry: what a workspace row, the palette,
 // the Machine tab and the row's context menu offer for one machine.
 import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { isBilling, needsRebuild, workspaceState, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NO_REBUILD_NEEDED, isBilling, needsRebuild, workspaceState, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
@@ -11,7 +11,6 @@ import {
   CLIENT_CANNOT_RENAME_WORKSPACE,
   FORGET_HINT,
   NEW_THREAD_WAITS,
-  NO_REBUILD_NEEDED,
   NO_WORKSPACE_FORK,
   PROJECTS_WAIT,
   REBUILD_HINT,
