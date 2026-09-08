@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ptyBuild } from "../scripts/pty.mjs";
 
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 
@@ -38,4 +39,9 @@ export function executableIn(tree: PackagedTree): string {
 
 export function resourcesIn(tree: PackagedTree): string {
   return join(dist, tree.dir, tree.resources);
+}
+
+/** Where a tree carries node-pty's native build for its own target. */
+export function ptyBuildIn(tree: PackagedTree): string {
+  return ptyBuild(resourcesIn(tree), tree.target);
 }
