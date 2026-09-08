@@ -13,8 +13,7 @@ files:
 extraResources:
   - from: build/app/node_modules/@wsp/daemon
     to: node_modules/@wsp/daemon
-  - from: build/app/node_modules/node-pty
-    to: node_modules/node-pty
+afterPack: scripts/after-pack.mjs
 mac:
   target:
     - target: dir

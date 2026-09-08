@@ -162,7 +162,7 @@ describe("PtySession cwd", () => {
 describe("node-pty's spawn-helper after install", () => {
   it("is executable in every prebuild node-pty ships", () => {
     const prebuilds = join(dirname(createRequire(import.meta.url).resolve("node-pty/package.json")), "prebuilds");
-    const helpers = readdirSync(prebuilds)
+    const helpers = (existsSync(prebuilds) ? readdirSync(prebuilds) : [])
       .map(target => join(prebuilds, target, "spawn-helper"))
       .filter(helper => existsSync(helper));
     expect(helpers.length).toBeGreaterThan(0);

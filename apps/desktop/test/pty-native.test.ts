@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // node-pty's native module is loaded by a require of a path relative to its own lib, so it cannot ride inside the
-// main bundle. These hold the layout that carries it instead: staged beside the bundle, on the parent walk the
-// bundle's resolver takes, with a build for the arch the app runs on.
+// main bundle. These hold the layout that carries it instead: one native build per packaged tree, for the target
+// that tree runs, on the parent walk the bundle's resolver takes.
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { stagePty } from "../scripts/pty.mjs";
+import { hostTarget, ptyPackage, stagePty } from "../scripts/pty.mjs";
 import { packaged, resourcesIn, type PackagedTree } from "./packaged.js";
 
-const HERE = `${process.platform}-${process.arch}`;
-/** node-pty is the daemon's dependency, resolved from the daemon's folder the way the stage resolves it. */
-const NODE_PTY = dirname(createRequire(fileURLToPath(new URL("../../../packages/daemon/package.json", import.meta.url))).resolve("node-pty/package.json"));
+const HERE: string = hostTarget();
+const NODE_PTY: string = ptyPackage();
+/** A target node-pty ships no prebuild for and no machine compiles here: what a mac asked for the AppImage's build. */
+const FOREIGN = "linux-arm64";
 
 /** What the app's own main bundle does with node-pty: a bare import from a file one directory below the staged
  * package, then a shell through the pty it opens. */
@@ -35,32 +35,48 @@ afterEach(() => {
   for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("staging node-pty beside the bundle", () => {
-  it("lays a native build under the one directory node-pty's loader looks in for this machine", () => {
-    const out = stagePty(NODE_PTY, tempApp());
+describe("staging node-pty for one target", () => {
+  it("lays that target's build under the one directory node-pty's loader reads", () => {
+    const out = stagePty(NODE_PTY, tempApp(), HERE);
     expect(existsSync(join(out, "prebuilds", HERE, "pty.node"))).toBe(true);
   });
 
-  it("carries no other platform's prebuilds", () => {
-    const out = stagePty(NODE_PTY, tempApp());
-    expect(readdirSync(join(out, "prebuilds")).filter(t => !t.startsWith(`${process.platform}-`))).toEqual([]);
+  it("carries the asked-for target and no other, so one build's trees cannot share a native", () => {
+    const mine = stagePty(NODE_PTY, tempApp(), HERE);
+    expect(readdirSync(join(mine, "prebuilds"))).toEqual([HERE]);
+    const theirs = stagePty(NODE_PTY, tempApp(), "darwin-arm64");
+    expect(readdirSync(join(theirs, "prebuilds"))).toEqual(["darwin-arm64"]);
+    expect(existsSync(join(theirs, "prebuilds", "darwin-arm64", "spawn-helper"))).toBe(true);
+  });
+
+  it("stages this machine's target when asked for none", () => {
+    expect(readdirSync(join(stagePty(NODE_PTY, tempApp()), "prebuilds"))).toEqual([HERE]);
   });
 
   it("takes only what the app runs out of node-pty's lib", () => {
-    const out = stagePty(NODE_PTY, tempApp());
+    const out = stagePty(NODE_PTY, tempApp(), HERE);
     expect(readdirSync(join(out, "lib")).filter(f => f.endsWith(".test.js") || f.endsWith(".map"))).toEqual([]);
   });
 
-  it("names this machine when node-pty has no build for it", () => {
-    const bare = tempApp();
-    cpSync(join(NODE_PTY, "package.json"), join(bare, "package.json"));
-    cpSync(join(NODE_PTY, "lib"), join(bare, "lib"), { recursive: true });
-    expect(() => stagePty(bare, tempApp())).toThrow(new RegExp(`no build for ${HERE}`));
+  it("refuses a target this machine has no build for instead of shipping a dead tree", () => {
+    expect(() => stagePty(NODE_PTY, tempApp(), FOREIGN)).toThrow(new RegExp(`no build for ${FOREIGN}`));
+  });
+
+  // node-pty's own build/Release answers for whichever arch compiled it, and its loader reads that directory before
+  // the prebuilds, so it must never be shipped as another target's build.
+  it("never reads a source build for a target that is not this machine", () => {
+    const source = tempApp();
+    cpSync(join(NODE_PTY, "package.json"), join(source, "package.json"));
+    cpSync(join(NODE_PTY, "lib"), join(source, "lib"), { recursive: true });
+    mkdirSync(join(source, "build", "Release"), { recursive: true });
+    writeFileSync(join(source, "build", "Release", "pty.node"), "");
+    expect(() => stagePty(source, tempApp(), FOREIGN)).toThrow(new RegExp(`no build for ${FOREIGN}`));
+    expect(readdirSync(join(stagePty(source, tempApp(), HERE), "prebuilds"))).toEqual([HERE]);
   });
 
   it("lets a bundle one directory below it resolve node-pty and run a shell in a pty", () => {
     const app = tempApp();
-    stagePty(NODE_PTY, app);
+    stagePty(NODE_PTY, app, HERE);
     mkdirSync(join(app, "main"), { recursive: true });
     writeFileSync(join(app, "main", "probe.mjs"), PROBE);
     expect(execFileSync(process.execPath, [join(app, "main", "probe.mjs")], { encoding: "utf8", timeout: 30_000 })).toContain("wsp-pty-ok");
@@ -73,6 +89,10 @@ const nativeIn = (tree: PackagedTree): string => join(resourcesIn(tree), "node_m
 describe("node-pty in the packaged app", () => {
   it.skipIf(built.length === 0)("every packaged tree carries pty.node for the arch it runs on", () => {
     expect(Object.fromEntries(built.map(tree => [tree.target, existsSync(nativeIn(tree))]))).toEqual(Object.fromEntries(built.map(tree => [tree.target, true])));
+  });
+
+  it.skipIf(built.length === 0)("carries no build but its own tree's, so no tree can load another's", () => {
+    expect(Object.fromEntries(built.map(tree => [tree.target, readdirSync(dirname(dirname(nativeIn(tree))))]))).toEqual(Object.fromEntries(built.map(tree => [tree.target, [tree.target]])));
   });
 
   it.skipIf(!built.some(tree => tree.target === HERE))("ships a native module this machine can load", () => {

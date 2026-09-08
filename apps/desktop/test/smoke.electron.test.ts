@@ -10,10 +10,10 @@ import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
-import { executableIn, treeHere } from "./packaged.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
 import { THEME_WORDS } from "../../web/src/settings/format.js";
+import { executableIn, treeHere } from "./packaged.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
