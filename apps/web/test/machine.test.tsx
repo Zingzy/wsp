@@ -1153,6 +1153,70 @@ describe("live", () => {
   });
 });
 
+describe("this computer as a workspace", () => {
+  const MAC: WorkspaceView = { id: "ws_m", name: "zingzy-mac", machineId: "local", phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" };
+
+  /** The same mount, with a local record and this computer's own shape on its status. */
+  async function mountLocal() {
+    const api = fakeApi([MAC]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(MAC), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId={MAC.id} />);
+    await waitFor(() => expect(fact("size")).toBe("10 vCPU · 16 GB"));
+    return api;
+  }
+
+  it("shows this computer's CPU and memory the way it shows a fork's, and its state and reach beside them", async () => {
+    await mountLocal();
+    expect(fact("state")).toBe("Running");
+    expect(fact("reach")).toBe("reachable");
+    expect(fact("machine-id")).toBe("local");
+  });
+
+  it("nothing wsp does not drive: no awake meter, no auto-nap row, no idle-window line and no usage section", async () => {
+    await mountLocal();
+    expect(document.querySelector('[data-k="awake"]')).toBeNull();
+    expect(document.querySelector('[data-k="idle"]')).toBeNull();
+    expect(document.querySelector('[data-k="rate"]')).toBeNull();
+    expect(document.querySelector('[data-k="accrued"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("The idle window is fixed");
+    expect(document.body.textContent).not.toContain("Usage");
+  });
+
+  it("the lineage says this computer and lists no golden: it forks from no image", async () => {
+    const api = await mountLocal();
+    expect(fact("machine")).toBe("this computer");
+    expect(marks("machine")).toEqual(["now"]);
+    expect(document.querySelector('[data-k="golden"]')).toBeNull();
+    expect(api.listSnapshots).not.toHaveBeenCalled();
+  });
+
+  it("the header wears the kind's glyph where a fork wears its phase dot", async () => {
+    const lead = (): Element => document.querySelector('[data-k="machine-id"]')!.closest("div")!.firstElementChild!;
+    await mountLocal();
+    expect(lead().tagName).toBe("svg");
+    cleanup();
+    await mount([view("ws_a", "api")]);
+    expect(lead().className).toContain("rounded-full");
+  });
+
+  it("no machine buttons: this computer takes none of pause, wake, upgrade or forget, so the tab ends at its facts", async () => {
+    await mountLocal();
+    expect(screen.queryByRole("button", { name: /pause|wake/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "upgrade zingzy-mac" })).toBeNull();
+    expect(document.body.textContent).not.toContain("cannot resize");
+  });
+
+  it("a cloud fork keeps every one of them", async () => {
+    await mount([view("ws_a", "api")]);
+    expect(document.querySelector('[data-k="idle"]')).not.toBeNull();
+    expect(document.querySelector('[data-k="rate"]')).not.toBeNull();
+    expect(fact("golden")).toBe("snap_golden01");
+    expect(document.querySelector('[data-k="machine"]')).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pause api" })).not.toBeNull();
+  });
+});
+
 describe("daemon version", () => {
   it("the machine tab offers nothing about a daemon older than the app: the runtime replaces it and the machine's row says so", async () => {
     await mount([view("ws_a", "api")]);

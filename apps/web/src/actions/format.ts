@@ -60,25 +60,23 @@ export function phaseWord(state: WorkspaceState): string {
   return isBilling(state) ? WORKSPACE_WORDS.pause : WORKSPACE_WORDS.wake;
 }
 
+/** The phase slot's two words per state: what its button offers, and the verb a machine that cannot take the move
+ * is refused for, in the runtime's own words. One table, so a state whose button changes cannot leave the refusal
+ * beside it naming the other verb. */
+const PHASE_SLOT: Record<WorkspaceState, { button: string; cannot: string }> = {
+  running: { button: "Pause", cannot: "be paused" },
+  unreachable: { button: "Pause", cannot: "be paused" },
+  paused: { button: "Wake", cannot: "be woken" },
+  gone: { button: "Wake", cannot: "be woken" },
+  pausing: { button: "Pausing…", cannot: "be paused" },
+  waking: { button: "Waking…", cannot: "be woken" },
+};
+
 /** The word the phase button on the machine's own surface shows: the verb, or the moving state while it moves. */
-export function phaseButtonWord(state: WorkspaceState): string {
-  switch (state) {
-    case "running":
-    case "unreachable":
-      return "Pause";
-    case "paused":
-    case "gone":
-      return "Wake";
-    case "pausing":
-      return "Pausing…";
-    case "waking":
-      return "Waking…";
-    default: {
-      const _exhaustive: never = state;
-      return "";
-    }
-  }
-}
+export const phaseButtonWord = (state: WorkspaceState): string => PHASE_SLOT[state].button;
+
+/** The verb the machine cannot take, for the one sentence a machine wsp does not drive refuses with. */
+export const phaseCannot = (state: WorkspaceState): string => PHASE_SLOT[state].cannot;
 
 export const phaseHint = (state: WorkspaceState): string => (isBilling(state) ? "Suspend the VM and keep the disk" : "Boot the VM from its disk");
 export const FORGET_HINT = "The machine is gone; forget the workspace to drop it from this computer";
