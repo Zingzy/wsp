@@ -956,6 +956,14 @@ export const SNAPSHOT_GONE_REASON = "its snapshot is gone at the provider";
 /** The doctor's line on a backend whose capabilities lack templates: nothing to promote, nothing wrong. */
 export const NO_TEMPLATES_LINE = "this backend has no templates; goldens stay as snapshots";
 
+/** The doctor's line for the machines its teardown check found on the account that this host did not make: each
+ * named with the host that did, left alone and never a failure, since two computers on one account each stand
+ * their own. */
+export function otherHostsMachinesLine(machines: readonly { id: string; owner?: string }[]): string {
+  const named = machines.map(m => `${m.id} (${m.owner === undefined ? "no owner" : `owner ${m.owner}`})`);
+  return `left alone ${plural(machines.length, "machine")} this host did not make: ${named.join(", ")}`;
+}
+
 /** The one sentence every road that leaves a builder running says: its id, what it costs, how to attach to it
  * again, and that the sweep ends it. */
 export function builderStaysLine(builderId: string, rateUsdPerHour: number, attachCommand: string): string {
