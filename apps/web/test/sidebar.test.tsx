@@ -108,6 +108,7 @@ const spaceHeader = (): HTMLElement | null => document.querySelector<HTMLElement
 const headerLines = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-header] [data-space-meta]")).map(l => l.textContent ?? "");
 const dots = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-dot]"));
 const panes = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane]"));
+const paneNames = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane] [data-space-name]")).map(n => n.textContent ?? "");
 /** The name in the header of the body that is staying: the pane not marked as the one on its way out. */
 const spaceName = (): string => document.querySelector<HTMLElement>("[data-space-pane]:not([data-space-leaving]) [data-space-name]")?.textContent ?? "";
 const workspaceRowIds = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='ws:']")).map(r => r.dataset["rowId"] ?? "");
@@ -996,6 +997,27 @@ describe("Spaces mode", () => {
     expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
   });
 
+  it("a space asked for while the body is still travelling turns it around and never draws one workspace twice", async () => {
+    const errors: string[] = [];
+    const console_ = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void errors.push(args.map(String).join(" ")));
+    try {
+      await mountSpaces(fakeApi(THREE, statuses()));
+      fireEvent.click(dots()[1]!);
+      expect(paneNames()).toEqual(["api", "web"]);
+      // Straight back while that travel is still running: React says "two children with the same key" if the
+      // workspace now on screen is still the one the travel calls the leaver.
+      fireEvent.click(dots()[0]!);
+      expect(errors).toEqual([]);
+      expect(paneNames()).toEqual(["api", "web"]);
+      expect(document.querySelector<HTMLElement>("[data-space-leaving] [data-space-name]")!.textContent).toBe("web");
+      await waitFor(() => expect(panes()).toHaveLength(1));
+      expect(spaceName()).toBe("api");
+      expect(errors).toEqual([]);
+    } finally {
+      console_.mockRestore();
+    }
+  });
+
   it("a two-finger swipe across the body moves a space, out one way and back the other", async () => {
     await mountSpaces(fakeApi(THREE, statuses(), [session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) })]));
     const body = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-slide]")!;
@@ -1032,6 +1054,10 @@ describe("Spaces mode", () => {
     for (const deltaY of [120, 120]) fireEvent.wheel(body(), { deltaX: 0, deltaY });
     expect(useStore.getState().selectedId).toBe("ws_b");
     expect(panes()).toHaveLength(1);
+    // The workspaces carry the swipe, not the whole sidebar: over the search row the same push moves nothing.
+    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
+    fireEvent.wheel(document.querySelector<HTMLElement>("[data-sidebar-search]")!, { deltaX: 80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
   });
 
   it("before the first status the header carries no machine line: nothing draws a bare OS word", async () => {

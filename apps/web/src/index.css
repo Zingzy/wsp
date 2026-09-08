@@ -261,14 +261,22 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
       opacity: 1;
     }
   }
+  /* A travel turned around mid-flight hands the track's own offset over as --space-slide-from, so it carries on from
+     where it is instead of jumping to the side it would have started from at rest. */
   @keyframes space-slide-forward {
+    from {
+      transform: translateX(var(--space-slide-from, 0px));
+    }
     to {
       transform: translateX(-50%);
     }
   }
   @keyframes space-slide-back {
     from {
-      transform: translateX(-50%);
+      transform: translateX(var(--space-slide-from, -50%));
+    }
+    to {
+      transform: translateX(0);
     }
   }
   @keyframes squiggle {

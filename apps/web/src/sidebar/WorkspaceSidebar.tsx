@@ -396,7 +396,8 @@ export function WorkspaceSidebar() {
     e.preventDefault();
   };
 
-  /** A two-finger swipe over the body moves a space, the way the arrows and the dots do; the gesture it belongs to
+  /** A two-finger swipe over the workspaces moves a space, the way the arrows and the dots do; it rides that group
+   * alone, so the search row above it and the forwards under it still scroll as they are. The gesture it belongs to
    * lives across the wheel events that make it up, so a swipe that keeps going moves one space and no more. */
   const swipe = useRef(NO_SWIPE);
   const onWheel = (e: WheelEvent<HTMLElement>): void => {
@@ -447,9 +448,9 @@ export function WorkspaceSidebar() {
   return (
     <>
       <SidebarChromeHeader />
-      <div ref={rootRef} onKeyDown={onKeyDown} onWheel={mode === "spaces" ? onWheel : undefined} className="flex min-h-0 flex-1 flex-col">
+      <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
         <SidebarContent fixedHeader={search}>
-          <SidebarGroup className="pt-0">
+          <SidebarGroup className="pt-0" onWheel={mode === "spaces" ? onWheel : undefined}>
             <SectionRow
               label="Workspaces"
               count={projects.length + creations.length}

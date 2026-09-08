@@ -32,7 +32,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type ConsoleMessage, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
@@ -773,6 +773,75 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       console.info(`space swap with reduced motion ${theme}: ${JSON.stringify(swap)}`);
       expect(swap).toEqual({ mostPanes: 1, animations: 0, transform: "none", name: "web" });
       await page!.emulateMedia({ reducedMotion: null });
+    }
+  }, 60_000);
+
+  it("a space asked for mid-travel turns the body around from where it is, draws no body twice, and the track clips sideways only, in both themes", async () => {
+    const TURN_AFTER_MS = 80;
+    for (const theme of ["dark", "light"] as const) {
+      await page!.emulateMedia({ reducedMotion: "no-preference" });
+      await page!.goto(`${base}?theme=${theme}&spaces=1`);
+      await page!.waitForSelector("[data-space-header]");
+      const errors: string[] = [];
+      const listen = (message: ConsoleMessage): void => {
+        if (message.type() === "error") errors.push(message.text());
+      };
+      page!.on("console", listen);
+      // Every frame of a travel turned around after 80 ms: where the track is, and which bodies are on screen.
+      const run = await page!.evaluate(async turnAfter => {
+        const track = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-track]")!;
+        const readX = (): number => {
+          const shape = getComputedStyle(track()).transform;
+          const matrix = /^matrix\(([^)]*)\)$/.exec(shape);
+          return matrix === null ? 0 : Number(matrix[1]!.split(",")[4]);
+        };
+        const frame = () => ({ at: performance.now(), x: readX(), names: Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane] [data-space-name]")).map(name => name.textContent ?? "") });
+        const click = (name: string): void => document.querySelector<HTMLElement>(`[data-space-dot][aria-label=${name}]`)!.click();
+        const paint = (): Promise<unknown> => new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
+        const frames: ReturnType<typeof frame>[] = [];
+        click("web");
+        // The travel comes up in the click's own render, but a browser under load can hold that render back, and two
+        // clicks landing in one render would be no travel at all rather than a travel turned around.
+        for (let i = 0; i < 200 && document.querySelectorAll("[data-space-pane]").length < 2; i++) await new Promise(resolve => setTimeout(resolve, 1));
+        const started = performance.now();
+        while (performance.now() - started < turnAfter) {
+          await paint();
+          frames.push(frame());
+        }
+        click("api");
+        while (performance.now() - started < turnAfter + 400) {
+          await paint();
+          frames.push(frame());
+        }
+        const wrapper = document.querySelector<HTMLElement>("[data-space-slide]")!;
+        const clip = getComputedStyle(wrapper);
+        return {
+          frames,
+          width: track().getBoundingClientRect().width,
+          leftOver: track().style.getPropertyValue("--space-slide-from"),
+          clip: { x: clip.overflowX, y: clip.overflowY, scrolls: wrapper.scrollHeight > wrapper.clientHeight },
+        };
+      }, TURN_AFTER_MS);
+      page!.off("console", listen);
+
+      const deepest = Math.max(...run.frames.map(read => -read.x));
+      const steps = run.frames.slice(1).map((read, i) => ({ px: Math.abs(read.x - run.frames[i]!.x), ms: read.at - run.frames[i]!.at }));
+      const fastest = Math.max(...steps.filter(step => step.ms > 0).map(step => step.px / step.ms));
+      console.info(`space turn ${theme}: ${JSON.stringify({ deepest, fastest, frames: run.frames.length, width: run.width, leftOver: run.leftOver, clip: run.clip, last: run.frames.at(-1) })}`);
+      // The page keeps its own counsel: a body drawn twice under one key is a React error in the console.
+      expect(errors).toEqual([]);
+      // No frame ever draws one workspace as both bodies.
+      expect(run.frames.filter(read => read.names.length === 2 && read.names[0] === read.names[1])).toEqual([]);
+      // The body turned around where it had got to: it never reaches the far side it was heading for.
+      expect(deepest).toBeGreaterThan(20);
+      expect(deepest).toBeLessThan(run.width / 2 - 20);
+      // And it never jumps: five times the travel's own average speed is far under a teleport and far over a frame.
+      expect(fastest).toBeLessThan((5 * (run.width / 2)) / SPACE_SLIDE_MS);
+      // It settles on the space asked for, at rest, with the offset it was handed dropped again.
+      expect(run.frames.at(-1)).toMatchObject({ x: 0, names: ["api"] });
+      expect(run.leftOver).toBe("");
+      // The track clips sideways only, so the wrapper is no scroll container of its own.
+      expect(run.clip).toEqual({ x: "clip", y: "visible", scrolls: false });
     }
   }, 60_000);
 
