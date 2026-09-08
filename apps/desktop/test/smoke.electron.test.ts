@@ -81,7 +81,9 @@ async function launch(env: Record<string, string | undefined>, prepare: (home: s
   const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_PORT: "0", WSP_WS_PORT: "0", ...env };
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(merged)) if (v !== undefined) clean[k] = v;
-  const app = await electron.launch({ executablePath: builtApp(), cwd, env: clean });
+  // Playwright emulates a light prefers-color-scheme in the renderer unless told not to; the page's system theme has to
+  // read the Mac's own appearance, the one the window's glass is drawn from, or the two sides split in the shot.
+  const app = await electron.launch({ executablePath: builtApp(), cwd, env: clean, colorScheme: null });
   return { app, home };
 }
 
