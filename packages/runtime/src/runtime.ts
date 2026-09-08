@@ -32,6 +32,7 @@ import {
   tarOf,
   parseMergeOutput,
   plural,
+  agentHome,
   agentHomes,
   parseSshMachineId,
   sshDialsThisComputer,
@@ -161,7 +162,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, noKindLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -1417,13 +1418,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The login a machine that already existed answered with, off its own record. A record written before its kind
    * read one is a record no such kind ever wrote. */
   const loginOf = (entry: LiveWorkspace): Readonly<Record<string, string>> => entry.record.login ?? {};
+  /** The home the machine answered with, which every path a turn uses over ssh is built from: the run folder and
+   * each harness's store. Read in one place and refused when a record carries none, since the roads below would
+   * otherwise each pick a folder of their own, and a run folder guessed under /tmp is the shared one this kind's
+   * own folder exists to avoid. The dial that records a workspace refuses a machine whose home is not a plain
+   * absolute path, so a record without one is one no ssh road wrote. */
+  const sshHomeDir = (entry: LiveWorkspace): string => {
+    const home = loginOf(entry)["HOME"];
+    if (home === undefined) throw new Error(noMachineHomeLine(entry.record.name));
+    return home;
+  };
   /** Where a harness keeps its sessions on a machine reached over ssh: the folder that machine's own login names
    * for it, else the catalog's default under the home it answered with. */
-  const sshHome = (entry: LiveWorkspace, agentId: string): string => {
-    const login = loginOf(entry);
-    const home = login["HOME"] ?? "/";
-    return agentHomes(home, login)[agentId] ?? join(home, `.${agentId}`);
-  };
+  const sshHome = (entry: LiveWorkspace, agentId: string): string => agentHome(sshHomeDir(entry), agentId, loginOf(entry));
   const sshRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
     throw new Error(noSshDaemonLine(entry.record.name));
   };
@@ -1441,7 +1448,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // The run's script, log and exit code live under the machine's own home, not a folder every login on it
             // shares: on the person's own machine another account's /tmp folder is theirs, and a turn that cannot
             // write in it would launch nothing.
-            execStream: (entry, o) => machineExecStream(entry.machine, { ...o, runDir: posix.join(loginOf(entry)["HOME"] ?? "/tmp", ".wsp", "run") }),
+            execStream: (entry, o) => machineExecStream(entry.machine, { ...o, runDir: posix.join(sshHomeDir(entry), ".wsp", "run") }),
             // A turn lands where the person's own login lands. wsp makes no folder on a machine it only reaches, so
             // there is none of its own to start in, and a thread that wants another says so in its own cwd.
             folder: undefined,

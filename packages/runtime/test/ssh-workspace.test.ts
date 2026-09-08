@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { SSH_READ_SCRIPT, SshBackend, parseSshAddress, parseSshMachineId, sshIdentity, sshMachineName, type ExecResult, type SshReach, type SshTransport } from "@wsp/engine";
-import { OVER_SSH, alreadyRecorded, machineWord, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { OVER_SSH, alreadyRecorded, machineWord, noMachineHomeLine, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type Runtime, type SshWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -241,6 +241,23 @@ describe("ssh workspace", () => {
     await rt.workspaces.touch(ws.id, "relayed");
     // And the sentence a kind that refuses one gives is not this kind's: nothing here reads it.
     expect(relayedRefusal("box")).not.toContain(OVER_SSH);
+  });
+
+  it("a record with no home for its machine is refused, not run under a folder guessed for it", async () => {
+    const { wiring, carried } = fakeSsh();
+    const store = memoryStore();
+    const rt = runtime(wiring, store);
+    const ws = await rt.workspaces.createSsh("dev@box");
+    // A record the dial would never have written: the door refuses a machine that names no plain home, so the roads
+    // that build a path from it say so in one sentence rather than each landing somewhere of their own.
+    const record = (await store.get("workspaces", ws.id)) as { login: Record<string, string> };
+    const { HOME: _dropped, ...rest } = record.login;
+    await store.put("workspaces", ws.id, { ...record, login: rest });
+    const second = runtime(fakeSsh().wiring, store);
+    const said = await second.sessions.start(ws.id, { prompt: "hi" }).then(() => "it ran", (e: unknown) => (e as Error).message);
+    expect(said).toBe(noMachineHomeLine("box"));
+    // Nothing was carried to the machine, and no run folder under a shared /tmp was named.
+    expect(carried.every(c => !c.script.includes("/tmp/wsp-run") && !c.script.includes("/tmp/.wsp"))).toBe(true);
   });
 
   it("an ssh workspace whose dial names this computer answers only this computer, as the local kind does", async () => {

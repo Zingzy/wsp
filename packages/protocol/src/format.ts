@@ -367,14 +367,14 @@ export function forgetNotice(threads: number): string {
   return `Its record and ${fmtThreads(threads)} leave this computer; the machine is already gone.`;
 }
 
-/** What deleting a workspace takes, the one sentence every client's confirmation shows: a machine wsp forked goes at
- * the provider, a machine that already existed is left as it is, and either way the record and the threads go from
- * here. `driven` is the kind's own word for which of the two it is, named by every caller so a road that forgets it
- * cannot land on the wrong half. */
 /** What a delete does to a machine wsp did not fork: nothing. The one phrase, read by the question a client asks
  * before a delete and by the line the command line prints after; each supplies the "its" its own sentence needs. */
 export const MACHINE_LEFT = "machine is left as it is";
 
+/** What deleting a workspace takes, the one sentence every client's confirmation shows: a machine wsp forked goes at
+ * the provider, a machine that already existed is left as it is, and either way the record and the threads go from
+ * here. `driven` is the kind's own word for which of the two it is, named by every caller so a road that forgets it
+ * cannot land on the wrong half. */
 export function deleteNotice(threads: number, driven: boolean): string {
   const machine = driven ? "Its machine is deleted at the provider" : `Its ${MACHINE_LEFT}`;
   return `${machine}; its record and ${fmtThreads(threads)} leave this computer.`;
@@ -827,6 +827,13 @@ export function sshHostKeyNotice(hostKey: string): string {
 /** What a verb is refused with when this host wired no module for the kind it names. */
 export function noKindLine(kind: string): string {
   return `this host has no ${kind} backend wired, so it serves no ${kind} workspace`;
+}
+
+/** What a road is refused with when the record names no home on its machine: every path a turn runs there is built
+ * from it, and the dial that records a workspace refuses a machine that names none, so a record without one is one
+ * to make again rather than one to guess a folder for. */
+export function noMachineHomeLine(name: string): string {
+  return `${name} carries no home folder for its machine; record it again with wsp new --ssh`;
 }
 
 /** What the roads that need a daemon are refused with on a machine reached over ssh: the connection carries a

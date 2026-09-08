@@ -28,7 +28,7 @@ import {
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
-import { agentHomes, LocalBackend, type MachineBackend, NoProviderBackend, parseSshAddress, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
+import { agentHome, agentHomes, LocalBackend, type MachineBackend, NoProviderBackend, parseSshAddress, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
@@ -422,7 +422,6 @@ export const localWorkFolder = (home: string): string => join(home, "wsp-work");
 export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
   const root = localWorkFolder(home);
   mkdirSync(root, { recursive: true });
-  const homes = agentHomes(home, env);
   const login = Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined));
   // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
   // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
@@ -432,7 +431,7 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   return {
     backend: new LocalBackend({ root, env }),
     execStream: o => localExecStream({ root, ...o }),
-    home: id => homes[id] ?? join(home, `.${id}`),
+    home: id => agentHome(home, id, env),
     env: login,
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a

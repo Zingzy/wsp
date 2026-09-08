@@ -9,7 +9,7 @@ import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { ProjectCarry } from "@wsp/protocol";
-import { PROJECT_STATE_RESOLVERS, agentHomes, countProjectState, guestAgentHomes, moveProjectState, parseMergeOutput, parseStateListing, resolveProjectPath, stateListing, storeCopy, underProject, type MergeOutput, type ProjectStateResolver, type UnreadStore } from "../src/project-state/index.js";
+import { PROJECT_STATE_RESOLVERS, agentHome, agentHomes, countProjectState, guestAgentHomes, moveProjectState, parseMergeOutput, parseStateListing, resolveProjectPath, stateListing, storeCopy, underProject, type MergeOutput, type ProjectStateResolver, type UnreadStore } from "../src/project-state/index.js";
 import { mergeScript } from "../src/project-state/merge.js";
 import { rewriteJsonl } from "../src/project-state/resolver.js";
 import { PY_PREAMBLE } from "../src/project-state/py.js";
@@ -1032,6 +1032,15 @@ describe("countProjectState", () => {
     expect(Object.keys(guest)).toEqual(CATALOG_AGENTS.map(a => a.id));
     expect(guest["claude"]).toBe("/root/.claude-cfg");
     expect(guest["codex"]).toBe("/root/.codex");
+  });
+
+  it("one harness's home under a home directory is one rule, read by every kind whose machine answers with a home", () => {
+    // The folder the person's own store variable names wins, else the catalog's, and an id the catalog does not
+    // carry gets a folder of its own name rather than nothing.
+    expect(agentHome("/Users/me", "claude")).toBe("/Users/me/.claude");
+    expect(agentHome("/Users/me", "claude", { CLAUDE_CONFIG_DIR: "/Users/me/.claude-cfg" })).toBe("/Users/me/.claude-cfg");
+    expect(agentHome("/root", "codex")).toBe("/root/.codex");
+    expect(agentHome("/root", "nobody")).toBe("/root/.nobody");
   });
 });
 

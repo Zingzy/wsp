@@ -9,7 +9,8 @@
 // machine is not in this process.
 
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
@@ -99,11 +100,29 @@ export const SSH_CONNECT_TIMEOUT_S = 10;
  * logins for one 2.4 second turn); with one, a turn is one login and the master goes when the work stops. */
 export const SSH_CONTROL_PERSIST_S = 60;
 
-/** The socket the master connection for one machine listens on, under the temp folder this computer already owns.
- * Named by a hash of the dial rather than by the address, since a unix socket path is capped near 104 characters
- * and a host name is not; one per user, host and port, so two records of one machine share the master and two
- * machines never do. */
-export function sshControlPath(reach: SshReach, dir: string = tmpdir()): string {
+/** The folder the master connections listen in: wsp's own under the person's home, never a folder every login on
+ * this computer shares. Whoever holds a control socket holds every command that rides it, and a shared temp folder
+ * is world writable on Linux with a name anyone can work out, so another account could sit on the path first. */
+export function sshControlDir(home: string = homedir()): string {
+  return join(home, ".wsp", "ssh");
+}
+
+/** The mode that folder is made and kept at: the person's own and nobody else's. */
+export const SSH_CONTROL_DIR_MODE = 0o700;
+
+/** Makes it before a dial can need it, and tightens one that was left looser, since a folder already there at other
+ * modes would hand the sockets to whoever made it. */
+export function makeSshControlDir(home?: string): string {
+  const dir = sshControlDir(home);
+  mkdirSync(dir, { recursive: true, mode: SSH_CONTROL_DIR_MODE });
+  chmodSync(dir, SSH_CONTROL_DIR_MODE);
+  return dir;
+}
+
+/** The socket the master connection for one machine listens on. Named by a hash of the dial rather than by the
+ * address, since a unix socket path is capped near 104 characters and a host name is not; one per user, host and
+ * port, so two records of one machine share the master and two machines never do. */
+export function sshControlPath(reach: SshReach, dir: string = sshControlDir()): string {
   return join(dir, `wsp-ssh-${createHash("sha256").update(`${reach.user}@${reach.host}:${reach.port}`).digest("hex").slice(0, 16)}.sock`);
 }
 
@@ -140,9 +159,10 @@ export function sshArgs(reach: SshReach, script: string, opts: { hostKey?: boole
   ];
 }
 
-/** The ssh client on this computer, carrying one script to the machine. */
+/** The ssh client on this computer, carrying one script to the machine. The folder its master socket lives in is
+ * made here, on the way out, so no dial can be the first thing to need it. */
 export const sshClient: SshTransport = (reach, script, opts) =>
-  runChild("ssh", sshArgs(reach, script, { ...(opts.hostKey !== undefined ? { hostKey: opts.hostKey } : {}) }), {
+  runChild("ssh", sshArgs(reach, script, { controlDir: makeSshControlDir(), ...(opts.hostKey !== undefined ? { hostKey: opts.hostKey } : {}) }), {
     env: process.env,
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}),
@@ -171,16 +191,19 @@ function clientWords(text: string): string {
     .trim();
 }
 
-/** What one dial reads off a machine before its record exists: its login environment and the size the row shows.
- * The PATH is a login shell's, asked for on purpose and once: on the person's own machine the tools a turn runs are
- * where their own shell finds them, not where a golden put them. Linux answers the first branch of each pair,
- * macOS the second. */
+/** The store variable each harness reads, by name, as the catalog gives them. The shape rule is what keeps a
+ * catalog entry out of the read as shell: the name is interpolated into a printf inside the login shell, so a name
+ * that is not a plain variable name is left out rather than carried there. */
 export const SSH_STORE_VARS: readonly string[] = CATALOG_AGENTS.map(a => a.stateHomeEnv).filter((name): name is string => name !== undefined && /^[A-Z_][A-Z0-9_]*$/.test(name));
 
 /** The one login shell the read opens: the PATH a turn runs under, and the store variable each harness reads, so a
  * machine whose person points their harness at another folder is signed in for a turn the way it is for them. */
 const LOGIN_READ = ["printf \"path %s\\n\" \"$PATH\"", ...SSH_STORE_VARS.map(name => `printf "store:${name} %s\\n" "$${name}"`)].join("; ");
 
+/** What one dial reads off a machine before its record exists: its login environment and the size the row shows.
+ * The PATH and the stores come from a login shell, asked for on purpose and once: on the person's own machine the
+ * tools a turn runs and the folder their harness reads are where their own shell finds them, not where a golden put
+ * them. Linux answers the first branch of each size pair, macOS the second. */
 export const SSH_READ_SCRIPT = [
   'printf "home %s\\n" "$HOME"',
   'printf "user %s\\n" "$(id -un)"',

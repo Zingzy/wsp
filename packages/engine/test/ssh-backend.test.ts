@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { SSH_CONTROL_PERSIST_S, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyOf, sshArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyOf, sshArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -155,6 +158,25 @@ describe("ssh backend", () => {
     expect(sshControlPath({ ...REACH, keyPath: "/tmp/k/other" })).toBe(sshControlPath(REACH));
     expect(sshControlPath({ ...REACH, port: 22 })).not.toBe(sshControlPath(REACH));
     expect(sshControlPath({ user: "dev", host: "a".repeat(200), port: 22 }, "/tmp").length).toBeLessThan(100);
+  });
+
+  it("the master sockets live in a folder only the person can read, made and kept at that mode", () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-ssh-home-"));
+    try {
+      // Whoever holds a control socket holds every command that rides it, so the folder is wsp's own and nobody
+      // else's: not the shared temp folder, whose name anyone could work out and sit on first.
+      const dir = makeSshControlDir(home);
+      expect(dir).toBe(join(home, ".wsp", "ssh"));
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      expect(sshControlPath(REACH, dir).startsWith(`${dir}/`)).toBe(true);
+      // With no home named it is the person's own, never the folder every login on this computer shares.
+      expect(sshControlDir()).toBe(join(homedir(), ".wsp", "ssh"));
+      // A folder left looser by something else is tightened rather than trusted.
+      chmodSync(dir, 0o755);
+      expect(statSync(makeSshControlDir(home)).mode & 0o777).toBe(0o700);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("exec and run carry the script to the machine, and run streams each line", async () => {
