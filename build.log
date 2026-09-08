@@ -1,0 +1,546 @@
+Scope: 12 of 16 workspace projects
+packages/protocol build$ tsup src/index.ts --format esm --dts
+packages/protocol build: CLI Building entry: src/index.ts
+packages/protocol build: CLI Using tsconfig: tsconfig.json
+packages/protocol build: CLI tsup v8.5.1
+packages/protocol build: CLI Target: es2022
+packages/protocol build: ESM Build start
+packages/protocol build: DTS Build start
+packages/protocol build: ESM dist/index.js 126.36 KB
+packages/protocol build: ESM ⚡️ Build success in 418ms
+packages/protocol build: DTS ⚡️ Build success in 2469ms
+packages/protocol build: DTS dist/index.d.ts 451.82 KB
+packages/protocol build: Done
+packages/adapter-claude build$ tsup src/index.ts --format esm --dts
+packages/adapter-codex build$ tsup src/index.ts --format esm --dts
+packages/catalog build$ tsup src/index.ts --format esm --dts
+packages/daemon build$ tsup src/index.ts src/bin.ts --format esm --dts
+packages/adapter-codex build: CLI Building entry: src/index.ts
+packages/adapter-codex build: CLI Using tsconfig: tsconfig.json
+packages/adapter-codex build: CLI tsup v8.5.1
+packages/adapter-codex build: CLI Target: es2022
+packages/adapter-codex build: ESM Build start
+packages/adapter-claude build: CLI Building entry: src/index.ts
+packages/adapter-claude build: CLI Using tsconfig: tsconfig.json
+packages/adapter-claude build: CLI tsup v8.5.1
+packages/daemon build: CLI Building entry: src/bin.ts, src/index.ts
+packages/daemon build: CLI Using tsconfig: tsconfig.json
+packages/daemon build: CLI tsup v8.5.1
+packages/adapter-claude build: CLI Target: es2022
+packages/daemon build: CLI Target: es2022
+packages/adapter-claude build: ESM Build start
+packages/daemon build: ESM Build start
+packages/catalog build: CLI Building entry: src/index.ts
+packages/catalog build: CLI Using tsconfig: tsconfig.json
+packages/catalog build: CLI tsup v8.5.1
+packages/catalog build: CLI Target: es2022
+packages/catalog build: ESM Build start
+packages/adapter-codex build: ESM dist/index.js 21.36 KB
+packages/adapter-codex build: ESM ⚡️ Build success in 59ms
+packages/adapter-claude build: ESM dist/index.js 28.29 KB
+packages/adapter-claude build: ESM ⚡️ Build success in 61ms
+packages/catalog build: ESM dist/index.js 90.89 KB
+packages/catalog build: ESM ⚡️ Build success in 73ms
+packages/daemon build: ESM dist/index.js          2.00 KB
+packages/daemon build: ESM dist/bin.js            591.00 B
+packages/daemon build: ESM dist/chunk-FEYWF2YU.js 272.83 KB
+packages/daemon build: ESM ⚡️ Build success in 125ms
+packages/adapter-codex build: DTS Build start
+packages/daemon build: DTS Build start
+packages/catalog build: DTS Build start
+packages/adapter-claude build: DTS Build start
+packages/adapter-codex build: DTS ⚡️ Build success in 2283ms
+packages/adapter-codex build: DTS dist/index.d.ts 9.15 KB
+packages/adapter-codex build: Done
+packages/adapter-claude build: DTS ⚡️ Build success in 2497ms
+packages/adapter-claude build: DTS dist/index.d.ts 13.72 KB
+packages/adapter-claude build: Done
+packages/catalog build: DTS ⚡️ Build success in 2832ms
+packages/catalog build: DTS dist/index.d.ts 50.07 KB
+packages/catalog build: Done
+packages/daemon build: DTS ⚡️ Build success in 3430ms
+packages/daemon build: DTS dist/bin.d.ts   13.00 B
+packages/daemon build: DTS dist/index.d.ts 22.76 KB
+packages/daemon build: Done
+packages/collect build$ tsup src/index.ts src/live.ts --format esm --dts
+packages/engine build$ tsup src/index.ts --format esm --dts
+packages/collect build: CLI Building entry: src/index.ts, src/live.ts
+packages/collect build: CLI Using tsconfig: tsconfig.json
+packages/collect build: CLI tsup v8.5.1
+packages/collect build: CLI Target: es2022
+packages/collect build: ESM Build start
+packages/engine build: CLI Building entry: src/index.ts
+packages/engine build: CLI Using tsconfig: tsconfig.json
+packages/engine build: CLI tsup v8.5.1
+packages/engine build: CLI Target: es2022
+packages/engine build: ESM Build start
+packages/collect build: ESM dist/live.js           500.00 B
+packages/collect build: ESM dist/index.js          46.75 KB
+packages/collect build: ESM dist/chunk-EFGVPS2R.js 201.94 KB
+packages/collect build: ESM ⚡️ Build success in 30ms
+packages/engine build: ESM dist/index.js 230.37 KB
+packages/engine build: ESM ⚡️ Build success in 39ms
+packages/collect build: DTS Build start
+packages/engine build: DTS Build start
+packages/engine build: DTS ⚡️ Build success in 2357ms
+packages/engine build: DTS dist/index.d.ts 116.92 KB
+packages/engine build: Done
+packages/collect build: DTS ⚡️ Build success in 2846ms
+packages/collect build: DTS dist/live.d.ts  13.00 B
+packages/collect build: DTS dist/index.d.ts 52.14 KB
+packages/collect build: Done
+packages/runtime build$ tsup src/index.ts --format esm --dts
+packages/runtime build: CLI Building entry: src/index.ts
+packages/runtime build: CLI Using tsconfig: tsconfig.json
+packages/runtime build: CLI tsup v8.5.1
+packages/runtime build: CLI Target: es2022
+packages/runtime build: ESM Build start
+packages/runtime build: ESM dist/index.js 214.06 KB
+packages/runtime build: ESM ⚡️ Build success in 19ms
+packages/runtime build: DTS Build start
+packages/runtime build: DTS ⚡️ Build success in 790ms
+packages/runtime build: DTS dist/index.d.ts 63.62 KB
+packages/runtime build: Done
+apps/wspx build$ tsup src/main.ts --format esm
+apps/web build$ pnpm --filter @wsp/protocol --filter @wsp/catalog build && tsc -b && vite build
+apps/wspx build: CLI Building entry: src/main.ts
+apps/wspx build: CLI Using tsconfig: tsconfig.json
+apps/wspx build: CLI tsup v8.5.1
+apps/wspx build: CLI Target: es2022
+apps/wspx build: ESM Build start
+apps/wspx build: ESM dist/main.js 15.87 KB
+apps/wspx build: ESM ⚡️ Build success in 10ms
+apps/wspx build: Done
+apps/web build: Scope: 2 of 16 workspace projects
+apps/web build: ../../packages/protocol build$ tsup src/index.ts --format esm --dts
+apps/web build: ../../packages/protocol build: CLI Building entry: src/index.ts
+apps/web build: ../../packages/protocol build: CLI Using tsconfig: tsconfig.json
+apps/web build: ../../packages/protocol build: CLI tsup v8.5.1
+apps/web build: ../../packages/protocol build: CLI Target: es2022
+apps/web build: ../../packages/protocol build: ESM Build start
+apps/web build: ../../packages/protocol build: ESM dist/index.js 126.36 KB
+apps/web build: ../../packages/protocol build: ESM ⚡️ Build success in 16ms
+apps/web build: ../../packages/protocol build: DTS Build start
+apps/web build: ../../packages/protocol build: DTS ⚡️ Build success in 1341ms
+apps/web build: ../../packages/protocol build: DTS dist/index.d.ts 451.82 KB
+apps/web build: ../../packages/protocol build: Done
+apps/web build: ../../packages/catalog build$ tsup src/index.ts --format esm --dts
+apps/web build: ../../packages/catalog build: CLI Building entry: src/index.ts
+apps/web build: ../../packages/catalog build: CLI Using tsconfig: tsconfig.json
+apps/web build: ../../packages/catalog build: CLI tsup v8.5.1
+apps/web build: ../../packages/catalog build: CLI Target: es2022
+apps/web build: ../../packages/catalog build: ESM Build start
+apps/web build: ../../packages/catalog build: ESM dist/index.js 90.89 KB
+apps/web build: ../../packages/catalog build: ESM ⚡️ Build success in 13ms
+apps/web build: ../../packages/catalog build: DTS Build start
+apps/web build: ../../packages/catalog build: DTS ⚡️ Build success in 669ms
+apps/web build: ../../packages/catalog build: DTS dist/index.d.ts 50.07 KB
+apps/web build: ../../packages/catalog build: Done
+apps/web build: vite v5.4.21 building for production...
+apps/web build: transforming...
+apps/web build: Found 5 warnings while optimizing generated CSS:
+apps/web build: Issue #1:
+apps/web build: [2m│     overflow-y: auto;[22m
+apps/web build: [2m│   }[22m
+apps/web build: [2m│[22m   @supports not (backdrop-filter:blur(1px))  or  (-webkit-backdrop-filter:blur(1px)) {
+apps/web build: [2m┆[22m                                            [33m[2m^--[22m Unexpected token Ident("or")[39m
+apps/web build: [2m┆[22m
+apps/web build: [2m│     .not-supports-\[\(backdrop-filter\:blur\(1px\)\)_or_\(-webkit-backdrop-filter\:blur\(1px\)\)\]\:bg-\(--chat-composer-attached-surface\) {[22m
+apps/web build: [2m│       background-color: var(--chat-composer-attached-surface);[22m
+apps/web build: Issue #2:
+apps/web build: [2m│     backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,);[22m
+apps/web build: [2m│   }[22m
+apps/web build: [2m│[22m   @supports not (backdrop-filter:blur(1px))  or  (-webkit-backdrop-filter:blur(1px)) {
+apps/web build: [2m┆[22m                                            [33m[2m^--[22m Unexpected token Ident("or")[39m
+apps/web build: [2m┆[22m
+apps/web build: [2m│     .not-supports-\[\(backdrop-filter\:blur\(1px\)\)_or_\(-webkit-backdrop-filter\:blur\(1px\)\)\]\:group-has-data-\[composer-banner-surface\=attached\]\/composer-surface\:bg-\(--chat-composer-glass-surface\):is(:where(.group\/composer-surface):has([data-composer-banner-surface="attached"]) *) {[22m
+apps/web build: [2m│       background-color: var(--chat-composer-glass-surface);[22m
+apps/web build: Issue #3:
+apps/web build: [2m│     bottom: calc(0.5px * -1);[22m
+apps/web build: [2m│   }[22m
+apps/web build: [2m│[22m   @supports not (backdrop-filter:blur(1px))  or  (-webkit-backdrop-filter:blur(1px)) {
+apps/web build: [2m┆[22m                                            [33m[2m^--[22m Unexpected token Ident("or")[39m
+apps/web build: [2m┆[22m
+apps/web build: [2m│     .not-supports-\[\(backdrop-filter\:blur\(1px\)\)_or_\(-webkit-backdrop-filter\:blur\(1px\)\)\]\:before\:bg-\(--chat-composer-attached-surface\)::before {[22m
+apps/web build: [2m│       content: var(--tw-content);[22m
+apps/web build: Issue #4:
+apps/web build: [2m│ }[22m
+apps/web build: [2m│ @layer base {[22m
+apps/web build: [2m│[22m   ::highlight(assistant-citation) {
+apps/web build: [2m┆[22m               [33m[2m^--[22m 'highlight' is not recognized as a valid pseudo-element. Did you mean ':highlight' (pseudo-class) or is this a typo?[39m
+apps/web build: [2m┆[22m
+apps/web build: [2m│     background-color: var(--primary);[22m
+apps/web build: [2m│     @supports (color: color-mix(in lab, red, red)) {[22m
+apps/web build: Issue #5:
+apps/web build: [2m│     }[22m
+apps/web build: [2m│   }[22m
+apps/web build: [2m│[22m   ::highlight(assistant-citation-comment) {
+apps/web build: [2m┆[22m               [33m[2m^--[22m 'highlight' is not recognized as a valid pseudo-element. Did you mean ':highlight' (pseudo-class) or is this a typo?[39m
+apps/web build: [2m┆[22m
+apps/web build: [2m│     background-color: var(--primary);[22m
+apps/web build: [2m│     @supports (color: color-mix(in lab, red, red)) {[22m
+apps/web build: ✓ 3552 modules transformed.
+apps/web build: rendering chunks...
+apps/web build: computing gzip size...
+apps/web build: dist/index.html                                                   0.64 kB │ gzip:   0.37 kB
+apps/web build: dist/assets/probe-wp2fy4UG.wasm                                   4.21 kB
+apps/web build: dist/assets/probe-B1z7zwrp.woff2                                  4.21 kB
+apps/web build: dist/assets/worker-StKNjxZD.js                                  207.08 kB
+apps/web build: dist/assets/ghostty-vt-DdA0Zryv.wasm                            630.93 kB
+apps/web build: dist/assets/SymbolsNerdFontMono-Regular-aK5vsLov.woff2        1,177.58 kB
+apps/web build: dist/assets/index-Cos5x--O.css                                  339.30 kB │ gzip:  47.62 kB
+apps/web build: dist/assets/codeowners-Bp6g37R7.js                                0.55 kB │ gzip:   0.32 kB
+apps/web build: dist/assets/shellsession-BADoaaVG.js                              0.71 kB │ gzip:   0.43 kB
+apps/web build: dist/assets/tsv-B_m7g4N7.js                                       0.74 kB │ gzip:   0.34 kB
+apps/web build: dist/assets/html-derivative-DlHx6ybY.js                           0.90 kB │ gzip:   0.50 kB
+apps/web build: dist/assets/git-rebase-r7XF79zn.js                                0.98 kB │ gzip:   0.44 kB
+apps/web build: dist/assets/qmldir-C8lEn-DE.js                                    1.00 kB │ gzip:   0.45 kB
+apps/web build: dist/assets/csv-fuZLfV_i.js                                       1.14 kB │ gzip:   0.37 kB
+apps/web build: dist/assets/git-commit-F4YmCXRG.js                                1.23 kB │ gzip:   0.53 kB
+apps/web build: dist/assets/xsl-CtQFsRM5.js                                       1.39 kB │ gzip:   0.52 kB
+apps/web build: dist/assets/dotenv-Da5cRb03.js                                    1.42 kB │ gzip:   0.53 kB
+apps/web build: dist/assets/sparql-rVzFXLq3.js                                    1.48 kB │ gzip:   0.82 kB
+apps/web build: dist/assets/ini-BEwlwnbL.js                                       1.53 kB │ gzip:   0.50 kB
+apps/web build: dist/assets/wenyan-BV7otONQ.js                                    1.65 kB │ gzip:   1.09 kB
+apps/web build: dist/assets/fortran-fixed-form-CkoXwp7k.js                        1.67 kB │ gzip:   0.69 kB
+apps/web build: dist/assets/docker-BcOcwvcX.js                                    1.74 kB │ gzip:   0.60 kB
+apps/web build: dist/assets/desktop-BmXAJ9_W.js                                   1.83 kB │ gzip:   0.76 kB
+apps/web build: dist/assets/hxml-2-FPmUDs.js                                      1.89 kB │ gzip:   0.90 kB
+apps/web build: dist/assets/jssm-C2t-YnRu.js                                      2.24 kB │ gzip:   0.62 kB
+apps/web build: dist/assets/reg-C-SQnVFl.js                                       2.35 kB │ gzip:   0.70 kB
+apps/web build: dist/assets/edge-FbVlp4U3.js                                      2.36 kB │ gzip:   0.70 kB
+apps/web build: dist/assets/diff-D97Zzqfu.js                                      2.57 kB │ gzip:   0.70 kB
+apps/web build: dist/assets/gleam-BspZqrRM.js                                     2.58 kB │ gzip:   0.82 kB
+apps/web build: dist/assets/erb-DXfck5VN.js                                       2.61 kB │ gzip:   0.84 kB
+apps/web build: dist/assets/hy-DFXneXwc.js                                        2.64 kB │ gzip:   1.18 kB
+apps/web build: dist/assets/json-Cp-IABpG.js                                      2.82 kB │ gzip:   0.78 kB
+apps/web build: dist/assets/openscad-C4EeE6gA.js                                  2.82 kB │ gzip:   1.01 kB
+apps/web build: dist/assets/log-2UxHyX5q.js                                       2.85 kB │ gzip:   0.90 kB
+apps/web build: dist/assets/cairo-KRGpt6FW.js                                     2.94 kB │ gzip:   0.81 kB
+apps/web build: dist/assets/berry-uYugtg8r.js                                     3.01 kB │ gzip:   0.81 kB
+apps/web build: dist/assets/jsonl-DcaNXYhu.js                                     3.01 kB │ gzip:   0.79 kB
+apps/web build: dist/assets/jsonc-Des-eS-w.js                                     3.11 kB │ gzip:   0.80 kB
+apps/web build: dist/assets/logo-BtOb2qkB.js                                      3.13 kB │ gzip:   1.47 kB
+apps/web build: dist/assets/po-BTJTHyun.js                                        3.24 kB │ gzip:   0.91 kB
+apps/web build: dist/assets/json5-C9tS-k6U.js                                     3.25 kB │ gzip:   0.83 kB
+apps/web build: dist/assets/mipsasm-CKIfxQSi.js                                   3.26 kB │ gzip:   1.18 kB
+apps/web build: dist/assets/tasl-QIJgUcNo.js                                      3.29 kB │ gzip:   0.85 kB
+apps/web build: dist/assets/rbs-CpoqiR4B.js                                       3.31 kB │ gzip:   0.73 kB
+apps/web build: dist/assets/rel-C3B-1QV4.js                                       3.35 kB │ gzip:   1.11 kB
+apps/web build: dist/assets/genie-D0YGMca9.js                                     3.36 kB │ gzip:   1.21 kB
+apps/web build: dist/assets/vala-CsfeWuGM.js                                      3.37 kB │ gzip:   1.19 kB
+apps/web build: dist/assets/splunk-BtCnVYZw.js                                    3.44 kB │ gzip:   1.52 kB
+apps/web build: dist/assets/fluent-C4IJs8-o.js                                    3.61 kB │ gzip:   0.90 kB
+apps/web build: dist/assets/ssh-config-_ykCGR6B.js                                3.62 kB │ gzip:   1.60 kB
+apps/web build: dist/assets/jsonnet-DFQXde-d.js                                   3.62 kB │ gzip:   1.05 kB
+apps/web build: dist/assets/kdl-DV7GczEv.js                                       3.63 kB │ gzip:   1.04 kB
+apps/web build: dist/assets/glsl-DplSGwfg.js                                      3.63 kB │ gzip:   1.41 kB
+apps/web build: dist/assets/hurl-irOxFIW8.js                                      3.65 kB │ gzip:   1.16 kB
+apps/web build: dist/assets/narrat-DRg8JJMk.js                                    3.67 kB │ gzip:   1.11 kB
+apps/web build: dist/assets/turtle-BsS91CYL.js                                    3.70 kB │ gzip:   0.98 kB
+apps/web build: dist/assets/sdbl-DVxCFoDh.js                                      3.83 kB │ gzip:   2.01 kB
+apps/web build: dist/assets/zenscript-DVFEvuxE.js                                 3.91 kB │ gzip:   1.28 kB
+apps/web build: dist/assets/ron-D8l8udqQ.js                                       3.91 kB │ gzip:   0.98 kB
+apps/web build: dist/assets/gn-n2N0HUVH.js                                        4.00 kB │ gzip:   1.49 kB
+apps/web build: dist/assets/pascal-D93ZcfNL.js                                    4.15 kB │ gzip:   1.67 kB
+apps/web build: dist/assets/tcl-dwOrl1Do.js                                       4.43 kB │ gzip:   1.52 kB
+apps/web build: dist/assets/nextflow-C-mBbutL.js                                  4.51 kB │ gzip:   1.17 kB
+apps/web build: dist/assets/rosmsg-BJDFO7_C.js                                    4.52 kB │ gzip:   1.06 kB
+apps/web build: dist/assets/http-jrhK8wxY.js                                      4.55 kB │ gzip:   1.12 kB
+apps/web build: dist/assets/polar-C0HS_06l.js                                     4.67 kB │ gzip:   1.12 kB
+apps/web build: dist/assets/fennel-BYunw83y.js                                    4.77 kB │ gzip:   1.53 kB
+apps/web build: dist/assets/bibtex-CHM0blh-.js                                    4.80 kB │ gzip:   0.83 kB
+apps/web build: dist/assets/llvm-BZoOZj88.js                                      5.04 kB │ gzip:   2.01 kB
+apps/web build: dist/assets/wgsl-Dx-B1_4e.js                                      5.14 kB │ gzip:   1.39 kB
+apps/web build: dist/assets/gdresource-TyuKm33G.js                                5.29 kB │ gzip:   1.34 kB
+apps/web build: dist/assets/qml-3beO22l8.js                                       5.34 kB │ gzip:   1.38 kB
+apps/web build: dist/assets/zig-VOosw3JB.js                                       5.34 kB │ gzip:   1.55 kB
+apps/web build: dist/assets/dax-CEL-wOlO.js                                       5.37 kB │ gzip:   2.23 kB
+apps/web build: dist/assets/bicep-Bmn6On1c.js                                     5.38 kB │ gzip:   1.15 kB
+apps/web build: dist/assets/xml-sdJ4AIDG.js                                       5.38 kB │ gzip:   1.21 kB
+apps/web build: dist/assets/awk-DMzUqQB5.js                                       5.46 kB │ gzip:   1.38 kB
+apps/web build: dist/assets/jinja-f2NsQr07.js                                     5.69 kB │ gzip:   1.40 kB
+apps/web build: dist/assets/lean-BZvkOJ9d.js                                      5.77 kB │ gzip:   1.92 kB
+apps/web build: dist/assets/powerquery-CEu0bR-o.js                                5.90 kB │ gzip:   1.52 kB
+apps/web build: dist/assets/shaderlab-Dg9Lc6iA.js                                 5.92 kB │ gzip:   2.08 kB
+apps/web build: dist/assets/cypher-COkxafJQ.js                                    5.96 kB │ gzip:   1.73 kB
+apps/web build: dist/assets/coq-C7JzOVbR.js                                       5.98 kB │ gzip:   1.95 kB
+apps/web build: dist/assets/vb-Cu-pLBUe.js                                        6.08 kB │ gzip:   2.33 kB
+apps/web build: dist/assets/min-dark-CafNBF8u.js                                  6.29 kB │ gzip:   1.71 kB
+apps/web build: dist/assets/gdshader-DkwncUOv.js                                  6.33 kB │ gzip:   1.73 kB
+apps/web build: dist/assets/ara-BRHolxvo.js                                       6.36 kB │ gzip:   1.81 kB
+apps/web build: dist/assets/verilog-nZwndyjY.js                                   6.41 kB │ gzip:   1.92 kB
+apps/web build: dist/assets/clojure-P80f7IUj.js                                   6.41 kB │ gzip:   1.42 kB
+apps/web build: dist/assets/postcss-CXtECtnM.js                                   6.42 kB │ gzip:   1.91 kB
+apps/web build: dist/assets/red-hvxz__6c.js                                       6.42 kB │ gzip:   1.63 kB
+apps/web build: dist/assets/toml-vGWfd6FD.js                                      6.43 kB │ gzip:   1.28 kB
+apps/web build: dist/assets/proto-C7zT0LnQ.js                                     6.55 kB │ gzip:   1.42 kB
+apps/web build: dist/assets/chapel-DTp_pixX.js                                    6.62 kB │ gzip:   1.85 kB
+apps/web build: dist/assets/solarized-light-Dlz6yCKv.js                           6.63 kB │ gzip:   1.76 kB
+apps/web build: dist/assets/r-Cf5RLm7j.js                                         6.74 kB │ gzip:   1.84 kB
+apps/web build: dist/assets/talonscript-CkByrt1z.js                               6.76 kB │ gzip:   1.49 kB
+apps/web build: dist/assets/riscv-BM1_JUlF.js                                     6.91 kB │ gzip:   1.98 kB
+apps/web build: dist/assets/min-light-CTRr51gU.js                                 6.97 kB │ gzip:   1.89 kB
+apps/web build: dist/assets/soy-8wufbnw4.js                                       6.98 kB │ gzip:   1.66 kB
+apps/web build: dist/assets/solarized-dark-CpvCGNkr.js                            7.00 kB │ gzip:   1.83 kB
+apps/web build: dist/assets/scheme-C98Dy4si.js                                    7.17 kB │ gzip:   2.05 kB
+apps/web build: dist/assets/hlsl-D3lLCCz7.js                                      7.26 kB │ gzip:   2.19 kB
+apps/web build: dist/assets/qss-IeuSbFQv.js                                       7.47 kB │ gzip:   2.58 kB
+apps/web build: dist/assets/prisma-Vru482bI.js                                    7.74 kB │ gzip:   1.48 kB
+apps/web build: dist/assets/systemd-4A_iFExJ.js                                   7.87 kB │ gzip:   2.55 kB
+apps/web build: dist/assets/regexp-CDVJQ6XC.js                                    7.99 kB │ gzip:   1.42 kB
+apps/web build: dist/assets/monokai-BRVnQi9A.js                                   8.03 kB │ gzip:   1.94 kB
+apps/web build: dist/assets/haml-D5jkg6IW.js                                      8.26 kB │ gzip:   1.81 kB
+apps/web build: dist/assets/vue-html-AaS7Mt5G.js                                  8.47 kB │ gzip:   1.68 kB
+apps/web build: dist/assets/plsql-ChMvpjG-.js                                     8.51 kB │ gzip:   3.00 kB
+apps/web build: dist/assets/dart-bE4Kk8sk.js                                      8.62 kB │ gzip:   2.00 kB
+apps/web build: dist/assets/horizon-BUw7H-hv.js                                   8.78 kB │ gzip:   1.96 kB
+apps/web build: dist/assets/kotlin-BdnUsdx6.js                                    8.79 kB │ gzip:   2.13 kB
+apps/web build: dist/assets/horizon-bright-CUuTKBJd.js                            8.79 kB │ gzip:   1.97 kB
+apps/web build: dist/assets/make-CHLpvVh8.js                                      8.96 kB │ gzip:   1.77 kB
+apps/web build: dist/assets/andromeeda-C4gqWexZ.js                                9.02 kB │ gzip:   2.36 kB
+apps/web build: dist/assets/sas-DEy46yEz.js                                       9.06 kB │ gzip:   3.81 kB
+apps/web build: dist/assets/dark-plus-C3mMm8J8.js                                 9.10 kB │ gzip:   2.10 kB
+apps/web build: dist/assets/slack-dark-BthQWCQV.js                                9.12 kB │ gzip:   1.97 kB
+apps/web build: dist/assets/smithy-cds9vsN8.js                                    9.13 kB │ gzip:   1.53 kB
+apps/web build: dist/assets/sass-Cj5Yp3dK.js                                      9.29 kB │ gzip:   2.49 kB
+apps/web build: dist/assets/plastic-3e1v2bzS.js                                   9.30 kB │ gzip:   1.98 kB
+apps/web build: dist/assets/slack-ochin-DqwNpetd.js                               9.43 kB │ gzip:   2.10 kB
+apps/web build: dist/assets/gherkin-DyxjwDmM.js                                   9.54 kB │ gzip:   5.05 kB
+apps/web build: dist/assets/tex-D96PA37w.js                                       9.67 kB │ gzip:   3.06 kB
+apps/web build: dist/assets/jison-wvAkD_A8.js                                     9.68 kB │ gzip:   1.85 kB
+apps/web build: dist/assets/cmake-D1j8_8rp.js                                     9.86 kB │ gzip:   3.37 kB
+apps/web build: dist/assets/light-plus-B7mTdjB0.js                                9.94 kB │ gzip:   2.27 kB
+apps/web build: dist/assets/hcl-BWvSN4gD.js                                      10.05 kB │ gzip:   1.93 kB
+apps/web build: dist/assets/pkl-u5AG7uiY.js                                      10.37 kB │ gzip:   1.38 kB
+apps/web build: dist/assets/beancount-k_qm7-4y.js                                10.37 kB │ gzip:   1.44 kB
+apps/web build: dist/assets/nextflow-groovy-vE_lwT2v.js                          10.44 kB │ gzip:   2.14 kB
+apps/web build: dist/assets/raku-DXvB9xmW.js                                     10.46 kB │ gzip:   2.94 kB
+apps/web build: dist/assets/dream-maker-BtqSS_iP.js                              10.47 kB │ gzip:   2.25 kB
+apps/web build: dist/assets/yaml-Buea-lGh.js                                     10.51 kB │ gzip:   2.27 kB
+apps/web build: dist/assets/rst-bs7f0vWN.js                                      10.67 kB │ gzip:   2.42 kB
+apps/web build: dist/assets/elm-DbKCFpqz.js                                      10.97 kB │ gzip:   2.12 kB
+apps/web build: dist/assets/github-light-DAi9KRSo.js                             11.18 kB │ gzip:   2.51 kB
+apps/web build: dist/assets/just-Cwhn7H3k.js                                     11.23 kB │ gzip:   2.80 kB
+apps/web build: dist/assets/prolog-CbFg5uaA.js                                   11.36 kB │ gzip:   3.83 kB
+apps/web build: dist/assets/terraform-BETggiCN.js                                11.39 kB │ gzip:   2.51 kB
+apps/web build: dist/assets/github-dark-DHJKELXO.js                              11.41 kB │ gzip:   2.55 kB
+apps/web build: dist/assets/puppet-BMWR74SV.js                                   11.44 kB │ gzip:   2.11 kB
+apps/web build: dist/assets/laserwave-DUszq2jm.js                                11.50 kB │ gzip:   2.58 kB
+apps/web build: dist/assets/wasm-MzD3tlZU.js                                     12.01 kB │ gzip:   2.19 kB
+apps/web build: dist/assets/surrealql-Cjom0U5J.js                                12.02 kB │ gzip:   3.30 kB
+apps/web build: dist/assets/hjson-D5-asLiD.js                                    12.05 kB │ gzip:   1.64 kB
+apps/web build: dist/assets/handlebars-BpdQsYii.js                               12.15 kB │ gzip:   2.38 kB
+apps/web build: dist/assets/apache-Pmp26Uib.js                                   12.46 kB │ gzip:   3.72 kB
+apps/web build: dist/assets/vesper-DRje8inN.js                                   12.73 kB │ gzip:   1.98 kB
+apps/web build: dist/assets/bat-CickPsom.js                                      12.89 kB │ gzip:   3.23 kB
+apps/web build: dist/assets/fish-BvzEVeQv.js                                     13.04 kB │ gzip:   1.74 kB
+apps/web build: dist/assets/nsis-BlV79W_Q.js                                     13.13 kB │ gzip:   4.07 kB
+apps/web build: dist/assets/v-BGw2Nkan.js                                        13.33 kB │ gzip:   2.77 kB
+apps/web build: dist/assets/vitesse-light-CVO1_9PV.js                            13.62 kB │ gzip:   3.04 kB
+apps/web build: dist/assets/aurora-x-D-2ljcwZ.js                                 13.66 kB │ gzip:   2.28 kB
+apps/web build: dist/assets/vitesse-black-Bkuqu6BP.js                            13.68 kB │ gzip:   3.06 kB
+apps/web build: dist/assets/vitesse-dark-D0r3Knsf.js                             13.76 kB │ gzip:   3.06 kB
+apps/web build: dist/assets/pug-DKIMFp6K.js                                      13.84 kB │ gzip:   2.58 kB
+apps/web build: dist/assets/synthwave-84-CbfX1IO0.js                             14.04 kB │ gzip:   2.87 kB
+apps/web build: dist/assets/smalltalk-BOQMe2GC.js                                14.13 kB │ gzip:   2.16 kB
+apps/web build: dist/assets/github-light-default-D7oLnXFd.js                     14.16 kB │ gzip:   3.04 kB
+apps/web build: dist/assets/github-light-high-contrast-BfjtVDDH.js               14.28 kB │ gzip:   3.02 kB
+apps/web build: dist/assets/clarity-Dn5IMItf.js                                  14.36 kB │ gzip:   2.51 kB
+apps/web build: dist/assets/github-dark-dimmed-DH5Ifo-i.js                       14.43 kB │ gzip:   3.13 kB
+apps/web build: dist/assets/github-dark-default-Cuk6v7N8.js                      14.44 kB │ gzip:   3.13 kB
+apps/web build: dist/assets/github-dark-high-contrast-E3gJ1_iC.js                14.60 kB │ gzip:   3.09 kB
+apps/web build: dist/assets/gnuplot-DdkO51Og.js                                  14.78 kB │ gzip:   3.27 kB
+apps/web build: dist/assets/rust-B1yitclQ.js                                     15.07 kB │ gzip:   2.72 kB
+apps/web build: dist/assets/kusto-wEQ09or8.js                                    15.17 kB │ gzip:   3.92 kB
+apps/web build: dist/assets/nix-CwoSXNpI.js                                      15.51 kB │ gzip:   2.48 kB
+apps/web build: dist/assets/lua-BaeVxFsk.js                                      15.54 kB │ gzip:   3.16 kB
+apps/web build: dist/assets/actionscript-3-B3316cI-.js                           15.54 kB │ gzip:   2.71 kB
+apps/web build: dist/assets/abap-BdImnpbu.js                                     15.85 kB │ gzip:   5.91 kB
+apps/web build: dist/assets/matlab-D7o27uSR.js                                   16.09 kB │ gzip:   3.06 kB
+apps/web build: dist/assets/luau-BnpPk5vE.js                                     16.14 kB │ gzip:   3.55 kB
+apps/web build: dist/assets/cue-D82EKSYY.js                                      16.20 kB │ gzip:   2.06 kB
+apps/web build: dist/assets/elixir-CkH2-t6x.js                                   16.32 kB │ gzip:   2.80 kB
+apps/web build: dist/assets/solidity-DijEV5ha.js                                 16.41 kB │ gzip:   3.16 kB
+apps/web build: dist/assets/odin-BBf5iR-q.js                                     16.51 kB │ gzip:   2.94 kB
+apps/web build: dist/assets/ts-tags-D351s5mN.js                                  16.57 kB │ gzip:   2.07 kB
+apps/web build: dist/assets/kanagawa-wave-DFGoQZhC.js                            17.12 kB │ gzip:   2.93 kB
+apps/web build: dist/assets/kanagawa-lotus-C3DzagqV.js                           17.12 kB │ gzip:   2.93 kB
+apps/web build: dist/assets/kanagawa-dragon-BuwD2xS4.js                          17.12 kB │ gzip:   2.95 kB
+apps/web build: dist/assets/move-el3G9tDJ.js                                     17.66 kB │ gzip:   3.06 kB
+apps/web build: dist/assets/graphql-ChdNCCLP.js                                  18.00 kB │ gzip:   2.52 kB
+apps/web build: dist/assets/liquid-C0sCDyMI.js                                   18.09 kB │ gzip:   3.16 kB
+apps/web build: dist/assets/svelte-Cy7k_4gC.js                                   18.24 kB │ gzip:   3.14 kB
+apps/web build: dist/assets/material-theme-D5KoaKCx.js                           18.62 kB │ gzip:   3.11 kB
+apps/web build: dist/assets/material-theme-darker-BfHTSMKl.js                    18.63 kB │ gzip:   3.11 kB
+apps/web build: dist/assets/material-theme-ocean-CyktbL80.js                     18.63 kB │ gzip:   3.14 kB
+apps/web build: dist/assets/material-theme-lighter-B0m2ddpp.js                   18.63 kB │ gzip:   3.11 kB
+apps/web build: dist/assets/material-theme-palenight-Csfq5Kiy.js                 18.64 kB │ gzip:   3.13 kB
+apps/web build: dist/assets/gdscript-DqcFQ5yU.js                                 19.09 kB │ gzip:   3.77 kB
+apps/web build: dist/assets/groovy-gcz8RCvz.js                                   19.18 kB │ gzip:   3.60 kB
+apps/web build: dist/assets/glimmer-js-ByusRIyA.js                               20.07 kB │ gzip:   2.95 kB
+apps/web build: dist/assets/glimmer-ts-BfAWNZQY.js                               20.07 kB │ gzip:   2.94 kB
+apps/web build: dist/assets/ayu-dark-DYE7WIF3.js                                 20.08 kB │ gzip:   3.94 kB
+apps/web build: dist/assets/ayu-mirage-32ctXXKs.js                               20.09 kB │ gzip:   3.94 kB
+apps/web build: dist/assets/powershell-BmBUJMz7.js                               20.10 kB │ gzip:   4.07 kB
+apps/web build: dist/assets/ayu-light-BA47KaF1.js                                20.15 kB │ gzip:   3.93 kB
+apps/web build: dist/assets/mdc-D1_yUvq7.js                                      20.18 kB │ gzip:   6.81 kB
+apps/web build: dist/assets/viml-CJc9bBzg.js                                     20.37 kB │ gzip:   6.73 kB
+apps/web build: dist/assets/snazzy-light-Bw305WKR.js                             20.77 kB │ gzip:   3.83 kB
+apps/web build: dist/assets/nushell-D3jzshHO.js                                  20.88 kB │ gzip:   5.36 kB
+apps/web build: dist/assets/dracula-BzJJZx-M.js                                  21.07 kB │ gzip:   4.00 kB
+apps/web build: dist/assets/dracula-soft-BXkSAIEj.js                             21.08 kB │ gzip:   4.04 kB
+apps/web build: dist/assets/wit-5i3qLPDT.js                                      21.47 kB │ gzip:   2.89 kB
+apps/web build: dist/assets/rose-pine-5qJOZa0Y.js                                21.74 kB │ gzip:   3.88 kB
+apps/web build: dist/assets/rose-pine-moon-C9pEdX9L.js                           21.75 kB │ gzip:   3.90 kB
+apps/web build: dist/assets/rose-pine-dawn-zx0QlTCp.js                           21.75 kB │ gzip:   3.90 kB
+apps/web build: dist/assets/twig-27uCiNez.js                                     21.95 kB │ gzip:   3.98 kB
+apps/web build: dist/assets/nim-BIad80T-.js                                      22.46 kB │ gzip:   3.16 kB
+apps/web build: dist/assets/common-lisp-Cg-RD9OK.js                              22.58 kB │ gzip:   6.06 kB
+apps/web build: dist/assets/gruvbox-dark-hard-CFHQjOhq.js                        22.63 kB │ gzip:   4.18 kB
+apps/web build: dist/assets/gruvbox-dark-soft-CVdnzihN.js                        22.63 kB │ gzip:   4.17 kB
+apps/web build: dist/assets/gruvbox-light-hard-CH1njM8p.js                       22.64 kB │ gzip:   4.18 kB
+apps/web build: dist/assets/gruvbox-light-soft-hJgmCMqR.js                       22.64 kB │ gzip:   4.18 kB
+apps/web build: dist/assets/gruvbox-dark-medium-GsRaNv29.js                      22.64 kB │ gzip:   4.18 kB
+apps/web build: dist/assets/gruvbox-light-medium-DRw_LuNl.js                     22.64 kB │ gzip:   4.18 kB
+apps/web build: dist/assets/apl-CORt7UWP.js                                      22.71 kB │ gzip:   4.20 kB
+apps/web build: dist/assets/sql-CRqJ_cUM.js                                      23.43 kB │ gzip:   7.42 kB
+apps/web build: dist/assets/cadence-Bv_4Rxtq.js                                  23.67 kB │ gzip:   3.67 kB
+apps/web build: dist/assets/astro-HNnZUWAn.js                                    24.01 kB │ gzip:   7.55 kB
+apps/web build: dist/assets/templ-DhtptRzy.js                                    24.06 kB │ gzip:   5.40 kB
+apps/web build: dist/assets/vhdl-CeAyd5Ju.js                                     24.26 kB │ gzip:   3.87 kB
+apps/web build: dist/assets/angular-html-DA-rfuFy.js                             24.29 kB │ gzip:   4.01 kB
+apps/web build: dist/assets/purescript-CklMAg4u.js                               24.63 kB │ gzip:   3.25 kB
+apps/web build: dist/assets/bsl-DlhNcFeZ.js                                      24.71 kB │ gzip:   8.36 kB
+apps/web build: dist/assets/moonbit-CHtswR0a.js                                  24.87 kB │ gzip:   3.79 kB
+apps/web build: dist/assets/vue-BqiEGhQt.js                                      24.96 kB │ gzip:   3.04 kB
+apps/web build: dist/assets/typespec-CAFt9gP4.js                                 25.05 kB │ gzip:   2.63 kB
+apps/web build: dist/assets/one-light-C3Wv6jpd.js                                25.30 kB │ gzip:   3.67 kB
+apps/web build: dist/assets/fsharp-CXgrBDvD.js                                   25.31 kB │ gzip:   4.13 kB
+apps/web build: dist/assets/marko-DjSrsDqO.js                                    25.48 kB │ gzip:   3.59 kB
+apps/web build: dist/assets/night-owl-light-CMTm3GFP.js                          25.90 kB │ gzip:   4.26 kB
+apps/web build: dist/assets/julia-5Bft2YPA.js                                    26.01 kB │ gzip:   4.34 kB
+apps/web build: dist/assets/c3-Dp5svz6Z.js                                       26.39 kB │ gzip:   3.99 kB
+apps/web build: dist/assets/system-verilog-0hqHdDBg.js                           26.56 kB │ gzip:   4.88 kB
+apps/web build: dist/assets/nord-Ddv68eIx.js                                     26.72 kB │ gzip:   4.40 kB
+apps/web build: dist/assets/codeql-DsOJ9woJ.js                                   26.88 kB │ gzip:   3.79 kB
+apps/web build: dist/assets/scss-D5BDwBP9.js                                     27.20 kB │ gzip:   4.20 kB
+apps/web build: dist/assets/java-CylS5w8V.js                                     27.22 kB │ gzip:   4.26 kB
+apps/web build: dist/assets/coffee-Ch7k5sss.js                                   27.42 kB │ gzip:   6.35 kB
+apps/web build: dist/assets/razor-BjBPvh-w.js                                    27.51 kB │ gzip:   3.57 kB
+apps/web build: dist/assets/scala-CqE71os6.js                                    28.89 kB │ gzip:   3.94 kB
+apps/web build: dist/assets/night-owl-C39BiMTA.js                                28.91 kB │ gzip:   5.16 kB
+apps/web build: dist/assets/crystal-DGywbUpC.js                                  29.39 kB │ gzip:   4.45 kB
+apps/web build: dist/assets/applescript-Co6uUVPk.js                              29.54 kB │ gzip:   5.93 kB
+apps/web build: dist/assets/pierre-dark-CyvmCCZW.js                              30.55 kB │ gzip:   4.76 kB
+apps/web build: dist/assets/pierre-light-480U9XYS.js                             30.55 kB │ gzip:   4.75 kB
+apps/web build: dist/assets/pierre-dark-soft-BHGpRqa4.js                         30.56 kB │ gzip:   4.79 kB
+apps/web build: dist/assets/pierre-light-soft-CVdyfjmI.js                        30.56 kB │ gzip:   4.76 kB
+apps/web build: dist/assets/pierre-dark-tritanopia-Beq2gCRQ.js                   30.57 kB │ gzip:   4.70 kB
+apps/web build: dist/assets/pierre-light-tritanopia-B4_gpKOM.js                  30.57 kB │ gzip:   4.70 kB
+apps/web build: dist/assets/pierre-dark-protanopia-deuteranopia-Rgc0TwpF.js      30.60 kB │ gzip:   4.78 kB
+apps/web build: dist/assets/pierre-light-protanopia-deuteranopia-CaVOBURG.js     30.60 kB │ gzip:   4.73 kB
+apps/web build: dist/assets/stylus-BEDo0Tqx.js                                   31.07 kB │ gzip:   7.99 kB
+apps/web build: dist/assets/ahk-CsyLZFj1.js                                      31.44 kB │ gzip:   7.81 kB
+apps/web build: dist/assets/poimandres-CS3Unz2-.js                               33.49 kB │ gzip:   5.50 kB
+apps/web build: dist/assets/one-dark-pro-DVMEJ2y_.js                             33.79 kB │ gzip:   5.52 kB
+apps/web build: dist/assets/nginx-BpAMiNFr.js                                    35.37 kB │ gzip:   4.43 kB
+apps/web build: dist/assets/houston-DnULxvSX.js                                  35.42 kB │ gzip:   5.78 kB
+apps/web build: dist/assets/tokyo-night-hegEt444.js                              35.67 kB │ gzip:   6.24 kB
+apps/web build: dist/assets/haxe-CfZj7gIn.js                                     35.95 kB │ gzip:   6.01 kB
+apps/web build: dist/assets/org-DM6o9KBp.js                                      36.32 kB │ gzip:   3.70 kB
+apps/web build: dist/assets/erlang-DsQrWhSR.js                                   37.48 kB │ gzip:   4.40 kB
+apps/web build: dist/assets/bird2-Bx8U0n9b.js                                    38.68 kB │ gzip:   8.50 kB
+apps/web build: dist/assets/cobol-nBiQ_Alo.js                                    39.13 kB │ gzip:  10.86 kB
+apps/web build: dist/assets/asm-D_Q5rh1f.js                                      40.72 kB │ gzip:   8.21 kB
+apps/web build: dist/assets/haskell-Df6bDoY_.js                                  41.43 kB │ gzip:   6.44 kB
+apps/web build: dist/assets/shellscript-Yzrsuije.js                              41.48 kB │ gzip:   6.09 kB
+apps/web build: dist/assets/perl-B9cMNwum.js                                     43.16 kB │ gzip:   4.67 kB
+apps/web build: dist/assets/d-85-TOEBH.js                                        43.80 kB │ gzip:   8.47 kB
+apps/web build: dist/assets/pierre-dark-vibrant-BWBVywrn.js                      44.76 kB │ gzip:   5.33 kB
+apps/web build: dist/assets/pierre-light-vibrant-DdTDNdfJ.js                     44.76 kB │ gzip:   5.31 kB
+apps/web build: dist/assets/ahk2-8Zs4aa1G.js                                     45.07 kB │ gzip:   9.88 kB
+apps/web build: dist/assets/ruby-C0TQ7zu5.js                                     46.72 kB │ gzip:   5.83 kB
+apps/web build: dist/assets/go-C27-OAKa.js                                       46.82 kB │ gzip:   5.18 kB
+apps/web build: dist/assets/apex-DhZFqWV2.js                                     47.89 kB │ gzip:   6.90 kB
+apps/web build: dist/assets/ada-bCR0ucgS.js                                      48.08 kB │ gzip:   6.03 kB
+apps/web build: dist/assets/css-CLj8gQPS.js                                      49.04 kB │ gzip:  11.86 kB
+apps/web build: dist/assets/imba-DGztddWO.js                                     49.93 kB │ gzip:   9.46 kB
+apps/web build: dist/assets/catppuccin-mocha-Ct7hS0mc.js                         50.85 kB │ gzip:   8.49 kB
+apps/web build: dist/assets/catppuccin-latte-DH-8KZSZ.js                         50.85 kB │ gzip:   8.49 kB
+apps/web build: dist/assets/catppuccin-frappe-CZL1YF0i.js                        50.85 kB │ gzip:   8.51 kB
+apps/web build: dist/assets/catppuccin-macchiato-B7yYVSCf.js                     50.86 kB │ gzip:   8.50 kB
+apps/web build: dist/assets/everforest-dark-BgDCqdQA.js                          53.75 kB │ gzip:   8.42 kB
+apps/web build: dist/assets/everforest-light-C8M2exoo.js                         53.75 kB │ gzip:   8.42 kB
+apps/web build: dist/assets/mermaid-CQcHuHx7.js                                  54.81 kB │ gzip:   4.81 kB
+apps/web build: dist/assets/wikitext-BhOHFoWU.js                                 55.89 kB │ gzip:   4.76 kB
+apps/web build: dist/assets/stata-DI20mbqo.js                                    56.99 kB │ gzip:  12.36 kB
+apps/web build: dist/assets/html-pp8916En.js                                     57.03 kB │ gzip:  11.69 kB
+apps/web build: dist/assets/ballerina-BFfxhgS-.js                                58.69 kB │ gzip:   8.15 kB
+apps/web build: dist/assets/markdown-Cvjx9yec.js                                 59.34 kB │ gzip:   5.64 kB
+apps/web build: dist/assets/ocaml-C0hk2d4L.js                                    62.45 kB │ gzip:   5.02 kB
+apps/web build: dist/assets/mojo-DJz3ZmWd.js                                     69.52 kB │ gzip:   9.27 kB
+apps/web build: dist/assets/python-B6aJPvgy.js                                   69.95 kB │ gzip:   9.13 kB
+apps/web build: dist/assets/c-BIGW1oBm.js                                        72.11 kB │ gzip:  10.51 kB
+apps/web build: dist/assets/latex-D5pSuvFb.js                                    72.90 kB │ gzip:   6.78 kB
+apps/web build: dist/assets/vyper-CDx5xZoG.js                                    74.65 kB │ gzip:  10.74 kB
+apps/web build: dist/assets/hack-BWmVpMyf.js                                     81.10 kB │ gzip:  26.38 kB
+apps/web build: dist/assets/swift-C2oV4EkX.js                                    86.38 kB │ gzip:  14.84 kB
+apps/web build: dist/assets/fortran-free-form-BxgE0vQu.js                        88.97 kB │ gzip:  11.27 kB
+apps/web build: dist/assets/csharp-DSvCPggb.js                                   90.19 kB │ gzip:  10.75 kB
+apps/web build: dist/assets/racket-BqYA7rlc.js                                   92.38 kB │ gzip:  15.02 kB
+apps/web build: dist/assets/less-B1dDrJ26.js                                     97.07 kB │ gzip:  14.70 kB
+apps/web build: dist/assets/blade-2xfisSek.js                                   104.85 kB │ gzip:  28.20 kB
+apps/web build: dist/assets/objective-c-DXmwc3jG.js                             105.41 kB │ gzip:  23.33 kB
+apps/web build: dist/assets/php-Csjmro_R.js                                     113.09 kB │ gzip:  28.74 kB
+apps/web build: dist/assets/asciidoc-CSVQ5wI8.js                                136.05 kB │ gzip:   9.50 kB
+apps/web build: dist/assets/mdx-Cmh6b_Ma.js                                     136.11 kB │ gzip:  23.35 kB
+apps/web build: dist/assets/typst-BUadGCkm.js                                   163.34 kB │ gzip:  10.98 kB
+apps/web build: dist/assets/objective-cpp-CLxacb5B.js                           171.97 kB │ gzip:  30.62 kB
+apps/web build: dist/assets/javascript-wDzz0qaB.js                              174.83 kB │ gzip:  16.51 kB
+apps/web build: dist/assets/tsx-COt5Ahok.js                                     175.54 kB │ gzip:  16.51 kB
+apps/web build: dist/assets/jsx-g9-lgVsj.js                                     177.79 kB │ gzip:  16.61 kB
+apps/web build: dist/assets/typescript-BPQ3VLAy.js                              181.08 kB │ gzip:  16.04 kB
+apps/web build: dist/assets/angular-ts-BrjP3tb8.js                              183.82 kB │ gzip:  16.63 kB
+apps/web build: dist/assets/vue-vine-BoDAl6tE.js                                190.05 kB │ gzip:  17.99 kB
+apps/web build: dist/assets/wolfram-lXgVvXCa.js                                 262.39 kB │ gzip:  77.14 kB
+apps/web build: dist/assets/wasm-CG6Dc4jp.js                                    622.34 kB │ gzip: 230.29 kB
+apps/web build: dist/assets/cpp-BMRokrvK.js                                     785.49 kB │ gzip:  53.20 kB
+apps/web build: dist/assets/emacs-lisp-C_m_b--Z.js                              790.01 kB │ gzip: 198.83 kB
+apps/web build: dist/assets/index-DEgdgVjg.js                                 3,117.51 kB │ gzip: 938.72 kB
+apps/web build: ✓ built in 11.85s
+apps/web build: (!) Some chunks are larger than 500 kB after minification. Consider:
+apps/web build: - Using dynamic import() to code-split the application
+apps/web build: - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+apps/web build: - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+apps/web build: Done
+packages/host build$ tsup src/index.ts src/bin.ts --format esm --dts --loader .md=text
+packages/host build: CLI Building entry: src/bin.ts, src/index.ts
+packages/host build: CLI Using tsconfig: tsconfig.json
+packages/host build: CLI tsup v8.5.1
+packages/host build: CLI Target: es2022
+packages/host build: ESM Build start
+packages/host build: ESM dist/bin.js                   567.00 B
+packages/host build: ESM dist/local-daemon-QRY36QV4.js 1.79 KB
+packages/host build: ESM dist/index.js                 1.58 KB
+packages/host build: ESM dist/chunk-TXCTRJYU.js        490.29 KB
+packages/host build: ESM ⚡️ Build success in 53ms
+packages/host build: DTS Build start
+packages/host build: DTS ⚡️ Build success in 2507ms
+packages/host build: DTS dist/bin.d.ts   20.00 B
+packages/host build: DTS dist/index.d.ts 21.00 KB
+packages/host build: Done
+packages/wspx build$ tsup && node scripts/stage.mjs
+packages/wspx build: CLI Building entry: {"bin":"src/bin.ts"}
+packages/wspx build: CLI Using tsconfig: tsconfig.json
+packages/wspx build: CLI tsup v8.5.1
+packages/wspx build: CLI Using tsup config: /Users/zingzy/wsp/.claude/worktrees/fix-462/packages/wspx/tsup.config.ts
+packages/wspx build: CLI Target: node22
+packages/wspx build: CLI Cleaning output folder
+packages/wspx build: ESM Build start
+packages/wspx build: ESM dist/local-daemon-QRY36QV4-FWWRBJSX.js 113.75 KB
+packages/wspx build: ESM dist/chunk-ECHCAEDF.js                 935.94 KB
+packages/wspx build: ESM dist/bin.js                            1.35 MB
+packages/wspx build: ESM ⚡️ Build success in 84ms
+packages/wspx build: staged /Users/zingzy/wsp/.claude/worktrees/fix-462/packages/wspx/assets
+packages/wspx build: Done

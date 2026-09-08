@@ -1,0 +1,44 @@
+Scope: all 16 workspace projects
+✓ Lockfile passes supply-chain policies (verified 31m ago)
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +853
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 853, reused 853, downloaded 0, added 210
+Progress: resolved 853, reused 853, downloaded 0, added 477
+Progress: resolved 853, reused 853, downloaded 0, added 849
+Progress: resolved 853, reused 853, downloaded 0, added 853, done
+.../node-pty@1.1.0/node_modules/node-pty install$ node scripts/prebuild.js || node-gyp rebuild
+.../node-pty@1.1.0/node_modules/node-pty install: [32m> Checking prebuilds...[0m
+.../node-pty@1.1.0/node_modules/node-pty install: Done
+.../node-pty@1.1.0/node_modules/node-pty postinstall$ node scripts/post-install.js
+.../node-pty@1.1.0/node_modules/node-pty postinstall: [32m> Cleaning release folder...[0m
+.../node-pty@1.1.0/node_modules/node-pty postinstall: [32m> Moving conpty.dll...[0m
+.../node-pty@1.1.0/node_modules/node-pty postinstall:   SKIPPED (not Windows)
+.../node-pty@1.1.0/node_modules/node-pty postinstall: Done
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/apps/desktop/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/apps/desktop/node_modules/.bin/wsp. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/host/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/apps/web/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/apps/wspx/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/packages/host/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/packages/runtime/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/packages/wspx/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/packages/wspx/node_modules/.bin/wsp. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/host/dist/bin.js'
+
+devDependencies:
++ @types/node 22.20.1
++ tsup 8.5.1
++ typescript 5.9.3
++ vitest 2.1.9
+
+packages/daemon postinstall$ node scripts/fix-node-pty-perms.mjs
+packages/daemon postinstall: Done
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/packages/runtime/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/runtime/node_modules/@wsp/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/apps/web/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/apps/web/node_modules/@wsp/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/apps/wspx/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/apps/wspx/node_modules/@wsp/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/packages/host/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/host/node_modules/@wsp/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/apps/desktop/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/apps/desktop/node_modules/@wsp/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/apps/desktop/node_modules/.bin/wsp. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/apps/desktop/node_modules/@wsp/host/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/packages/wspx/node_modules/.bin/wsp-daemon. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/wspx/node_modules/@wsp/daemon/dist/bin.js'
+[WARN] Failed to create bin at /Users/zingzy/wsp/.claude/worktrees/fix-462/packages/wspx/node_modules/.bin/wsp. ENOENT: no such file or directory, open '/Users/zingzy/wsp/.claude/worktrees/fix-462/packages/wspx/node_modules/@wsp/host/dist/bin.js'
+Done in 6.3s using pnpm v11.9.0

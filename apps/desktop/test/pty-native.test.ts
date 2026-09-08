@@ -87,6 +87,13 @@ const built = packaged();
 const nativeIn = (tree: PackagedTree): string => join(resourcesIn(tree), "node_modules", "node-pty", "prebuilds", tree.target, "pty.node");
 
 describe("node-pty in the packaged app", () => {
+  it.skipIf(process.platform !== "darwin" || !built.some(tree => tree.target.startsWith("darwin")))("every mac bundle carries one signature that covers the staged native, so a download is not read as damaged", () => {
+    for (const tree of built.filter(tree => tree.target.startsWith("darwin"))) {
+      const app = dirname(dirname(resourcesIn(tree)));
+      expect(() => execFileSync("codesign", ["--verify", "--deep", "--strict", app], { stdio: "pipe" })).not.toThrow();
+    }
+  });
+
   it.skipIf(built.length === 0)("every packaged tree carries pty.node for the arch it runs on", () => {
     expect(Object.fromEntries(built.map(tree => [tree.target, existsSync(nativeIn(tree))]))).toEqual(Object.fromEntries(built.map(tree => [tree.target, true])));
   });
