@@ -35,7 +35,10 @@ describe("the release workflow", () => {
     for (const step of ["run build:mac", "run build:linux", "smoke"]) expect(workflow).toContain(`pnpm --filter @wsp/desktop ${step}`);
     expect(desktopScripts["build:mac"]).toContain("--mac --arm64 --x64");
     expect(desktopScripts["build:linux"]).toContain("--linux");
-    expect(desktopScripts["build"]).toBe("pnpm run build:mac && pnpm run build:linux");
+    // node-pty's native module only exists for the machine that installed it, so the plain build packages the machine
+    // it runs on and the workflow's two jobs are what make both platforms. A build that named the other platform
+    // would fail at the packaging step, which is the only alternative to shipping a package whose panes die.
+    expect(desktopScripts["build"]).toBe("pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --publish never");
   });
 
   it("uploads the bundles under the names the notes promise", () => {

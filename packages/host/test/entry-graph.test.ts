@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The desktop's tsup bundles everything @wsp/host's entry reaches into the Electron main script, and @wsp/daemon
-// loads node-pty at module scope. There is no node-pty built against Electron's ABI in the packaged app, so an
-// eager edge from this entry to the daemon throws before app.whenReady and the app never opens a window. The rule
-// is stated at doctor.ts's OPEN_SHIM_PATH; this holds it. The daemon is reached by a dynamic import, which the
-// bundle defers to the first caller.
+// dlopens node-pty's native module at import. An eager edge from this entry to the daemon would load that module in
+// every process that imports the host, before app.whenReady in the packaged app, whether or not anyone ever opens a
+// pane. The rule is stated at doctor.ts's OPEN_SHIM_PATH; this holds it. The daemon is reached by a dynamic import,
+// which the bundle defers to the first caller.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
