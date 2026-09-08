@@ -1,0 +1,64 @@
+import { Callout, Tabs, Tab } from 'scalar-mdx-components'
+
+# Install
+
+## Before you start
+
+- Node 22 or newer, on macOS or Linux.
+- A [Solari](https://console.getsolari.com) account and API key. Solari provides the machines. They cost money while they run, about $0.11 an hour for the 2 vCPU, 4 GB size, and nap on their own when idle.
+- A way for Claude Code to sign in: an Anthropic API key, or a Claude subscription you log in with on the machine during the first run. Codex signs in the same way.
+
+## The command line
+
+```bash
+npm i -g @zingzy/wsp
+```
+
+`wsp --version` prints the version. The same package holds the command line, the host and the app, so this is the whole install.
+
+## Two ways to set up
+
+<Tabs default="Let your agent do it">
+  <Tab title="Let your agent do it">
+    Give the agent you already use the wsp tools, then ask it:
+
+    ```bash
+    wsp mcp install --agent claude     # or codex, gemini, opencode
+    ```
+
+    Then, in that agent, say `set up wsp for me`. It reads what you use on this computer, writes the recipe, asks you about the heavy rows, builds the image, and hands you each sign-in link as the build reaches it. Sign-ins finish in your browser. The whole sequence it follows is on [Driving wsp from an agent](/agents/driving).
+  </Tab>
+  <Tab title="Do it yourself">
+    ```bash
+    wsp init
+    ```
+
+    Six screens: the agents on this computer, their tools, what else to bring from this Mac, sign-ins, wsp for your own agents, and the build. Everything is ticked from what you actually use, and Enter through every screen takes the defaults. Nothing leaves your disk before the confirm. Each screen is on [wsp init, screen by screen](/setup/init).
+  </Tab>
+</Tabs>
+
+Useful flags on `wsp init`: `--yes` takes every default and asks nothing, which also skips the sign-ins. `--recipe <path>` builds from a recipe an agent wrote. `--non-interactive --json` prints one JSON line per sign-in and build stage, for an agent driving the setup. `--state <path>` and `--port <n>` keep a second setup apart from the first.
+
+<Callout type="info">
+  The Solari key goes in `~/.wsp/.env` as `SOLARI_API_KEY=<key>`, one line. Put `ANTHROPIC_API_KEY=<key>` beside it only if you pay Anthropic by the token. With a Claude subscription you sign in on the machine during init instead.
+</Callout>
+
+## Every day
+
+```bash
+wsp up
+```
+
+serves the app at `http://127.0.0.1:4400` and the runtime behind it, until you stop it. `wsp up --service` hands the same line to your computer's service manager, a launchd agent on a Mac and a systemd user unit on Linux, so it serves now and again at every login; `wsp down` stops that and takes it away.
+
+The desktop app is the same host and app in one window. Bundles for macOS and Linux are on the [releases page](https://github.com/Zingzy/wsp/releases).
+
+## Building from source
+
+```bash
+git clone https://github.com/Zingzy/wsp.git && cd wsp
+pnpm install && pnpm build
+pnpm wsp init
+```
+
+`pnpm test` runs without any key. The rules the code follows are on [Contributing](/project/contributing).

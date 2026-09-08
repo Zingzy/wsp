@@ -1,0 +1,60 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Costs, naps and limits
+
+wsp itself is free software. The machines cost money while they run, on your own Solari account. This page is what you pay for, how wsp counts it, and the limits you will meet.
+
+## Machine time
+
+| machine | awake | napping |
+| --- | --- | --- |
+| 2 vCPU, 4 GB | $0.11 an hour | $0.00 |
+| 2 vCPU, 8 GB | $0.15 an hour | $0.00 |
+
+The rate is Solari's published Starter pricing, 3.5 cents per vCPU hour plus 1 cent per GB hour. wsp computes it locally from the size and the time the machine was proven awake; provider billing is not read. The meter stops at the last instant anything proved the machine awake, so nothing is billed while the host is down or not watching, and a size change an hour after a wake bills that hour at the size it woke at.
+
+The sidebar shows each workspace's cost today and its rate. The Machine tab charts the accrued total. The 8 GB size is offered by the provider's API and declared here; it had not been measured on the author's account at the time of writing.
+
+## Naps
+
+A workspace naps on its own after twenty minutes with no person, thread or command touching it. While it naps it bills nothing for machine time. Its disk and its terminals survive; the machine is frozen, not rebuilt. The next thread, send or exec wakes it.
+
+Pause a workspace nobody is using with `wsp pause`. It also gives back one of the two machines the account runs at once.
+
+<Callout type="info">
+  Whether a paused machine's disk counts toward snapshot storage is not modelled by wsp and is a question for the provider's pricing page.
+</Callout>
+
+## Snapshot storage
+
+Every golden version and every project golden is a snapshot at the provider. Solari's snapshot storage is free up to 10 GB per organization, then $0.05 per GB-month pro-rated daily, billed from 1 October 2026. The Machine tab shows the total and what it costs above the free tier: `4 snapshots · 12.3 GB · about $0.61/month above the free 10 GB from Solari`, in decimal GB because that is how the provider lists and bills them.
+
+wsp keeps the golden's head and its parent, so a rollback has one step back, and offers older versions for deletion oldest first. It never offers a version any workspace was forked from. A deletion entirely inside the free 10 GB saves nothing and says so.
+
+## The builder
+
+`wsp init` boots a builder for the build, about $0.11 an hour while it runs, and holds one of the two machine slots. After a seal on a run that goes on to serve, it stays up ten minutes for one more change, then dies. A builder left idle is killed after six hours; a forgotten one costs under a dollar over that window.
+
+## Limits
+
+| limit | value | why it is there |
+| --- | --- | --- |
+| machines awake at once | 2 per account | the provider's Starter plan; a third `new` or `fork` is refused, and the builder counts |
+| vCPU per machine | 2 | the Starter plan clamps every machine; resize is not offered |
+| memory | 4 or 8 GB | the sizes the create API takes |
+| root disk | 20 GB | the provider's cap; a 4 GB root filled during a build once |
+| free disk kept | 2 GB | tool installs that would go under it are skipped and recorded |
+| turn with no output | 10 minutes | a silent step that long is cut; long steps must print |
+| turn in all | 6 hours | the hard cap on one turn |
+| vault at nap | 200 MB | the agent state saved before a nap; over it, the nap keeps the previous vault and says so |
+| one command through the provider's exec | about 29 seconds | the provider cuts it; wsp routes anything longer through a detached run |
+| preview URL | 60 minutes | the provider's token life; wsp swaps tokens under about 50 minutes without changing the hostname |
+| forwarded ports | 1024 and up, 16 per workspace | binding under 1024 here needs root |
+
+## One machine, one heavy thing
+
+A 2 vCPU, 4 GB machine runs one build or one agent at a time. Two starve the helper, and the app reads the machine as not answering. Three test runs at once starved a machine and every turn in flight failed. Put a second builder on a second workspace, not a second heavy thread on the same one. The helper itself is placed last for the memory killer and first for the scheduler, so a build that outgrows the machine loses its own processes and not the link you reach the machine by.
+
+## Where a memory failure shows
+
+When the link drops with memory near full, the row reads `out of memory, 3.6 of 3.9 GB` and the Machine tab says the work on it took the memory, not a fault of the machine, and names the next size up. Ninety percent is the threshold, from a measured 3.59 of 3.94 GB when a build took the helper.

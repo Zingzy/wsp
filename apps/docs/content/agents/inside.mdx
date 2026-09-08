@@ -1,0 +1,56 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Agents inside a workspace
+
+Claude Code and Codex run headless on the machine, one process per turn, launched detached so a nap mid-turn stalls the reading and not the agent. This page is how each is run, what the machine tells them, and where they differ.
+
+## How a turn is launched
+
+The runtime writes a small script to the machine and starts it in its own session, `setsid bash <script> > <log> 2>&1 &`, then polls the log every second and a half. The process belongs to the machine, not to the host: a host restart re-opens every run the machines still hold and reads the rest of the output. Every command starts placed after the helper for the memory killer, so a build that outgrows the machine loses itself and not the link.
+
+**Claude Code** runs `claude -p` with stream-json in and out, `--verbose`, the access flag, `--model`, `--effort`, `--name <title>` when a title was given, and either `--session-id <uuid>` for a new session or `--resume <uuid>` for a send. The task is never an argument; it rides stdin as one JSON line, and stdin closes when the reply lands, which ends the process after its current turn. The session id is minted before launch so the thread is addressable before the CLI prints anything. Its config lives at `/root/.claude-cfg` through `CLAUDE_CONFIG_DIR`.
+
+**Codex** runs `codex exec` with `--json`, `--skip-git-repo-check`, `resume <thread id>` for a send, the sandbox and approval flags, `-m <model>` and `-c model_reasoning_effort=<effort>`. The task travels in a quoted heredoc on stdin, because a long task as an argument would hit the kernel's per-argument cap. Its home is `/root/.codex`.
+
+## What the machine tells every agent
+
+Every installed agent gets the machine's context through its own always-loaded hook, `/etc/claude-code/CLAUDE.md` for Claude Code, `/etc/codex/requirements.toml` for Codex, and the full document as a skill named `wsp-machine`. Both open with the line that wsp writes the file when a workspace is forked and edits are overwritten. The facts in it:
+
+- Containers do not run here; services install natively.
+- `wsp-daemon` listens on `0.0.0.0:7070` with its own token and must not be stopped or shadowed.
+- A background process started with a plain `&` inside a tool call dies when that call ends; a server that must outlive the turn starts with `setsid nohup ... &`.
+- A turn ends when the agent process exits, not at its reply, and a reply given with a command still running reads failed.
+- A loopback-only bind is unreachable through the preview edge; bind `0.0.0.0`. Ports below 1024 are not forwarded.
+- Secrets are exported by `/etc/profile.d/wsp-secrets.sh`, used by name, and that file is never read, printed, logged or committed.
+- `.env` files, `.netrc` and private keys were never copied from the person's computer.
+- Sign-ins go through wsp: `BROWSER` is the shim, the page opens on the person's computer, and the callback is tunnelled back.
+
+## Your MCP servers travel with them
+
+The MCP servers you configured for an agent go onto the image inside that agent's own config file, `~/.claude.json` for Claude Code and `~/.codex/config.toml` for Codex. Laptop paths are rewritten to the machine's, a command sitting under a known bin directory becomes its bare name, and a server that carries a secret travels only when you answered copy for it. Each is recorded as installed, fetched on first use for `npx` and `uv` commands, or skipped with the reason.
+
+## Titles and renames
+
+A few seconds after the first turn announces its session, wsp asks the agent's cheapest model for a name, three to six words, and reads what the agent already calls the session. A name a person gives is never replaced. A rename writes into the agent's own store: Claude Code's session file gets the same record its own `/rename` appends; Codex's SQLite state gets its `name` column set. So the agent's own session list and wsp show the same name.
+
+## Where they differ
+
+| | Claude Code | Codex |
+| --- | --- | --- |
+| message into a running turn | joins it | waits behind it |
+| cost reported | yes | no; duration only |
+| context window | `200k` or `1m` | none |
+| default access | `bypassPermissions` | `danger-full-access` |
+| sign in on the machine | `claude auth login` | `codex login --device-auth` |
+| install size | about 208 MB | about 455 MB |
+| session store | `projects/<folder>/<id>.jsonl` | `state_<n>.sqlite` |
+
+Codex needs `sqlite3` on the machine for titles and renames; it is on the floor of every golden. Neither agent can be named before it announces a session.
+
+<Callout type="info">
+  Gemini CLI, OpenCode, Pi and Hermes install on the image when ticked and get the machine context, but wsp cannot open threads on them yet. Pi and Gemini threads are next.
+</Callout>
+
+## Signing them in
+
+Claude Code takes an API key at create time, `ANTHROPIC_API_KEY` from your `.env`, or a subscription sign-in on the machine during `wsp init`. Codex signs in on the machine the same way, or reads `OPENAI_API_KEY` from the machine's environment. The OAuth credential for Claude Code is never copied from your computer; see [Sign-ins and the relay](/setup/sign-ins).

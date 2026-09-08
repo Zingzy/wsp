@@ -1,0 +1,53 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Keys and secrets
+
+wsp runs on your computer and talks to the machine provider with your key. There is no server of wsp's for a key to reach. This page says where each secret lives, what travels to a machine and how, and what never does.
+
+## Your keys
+
+| key | where it lives | who reads it |
+| --- | --- | --- |
+| `SOLARI_API_KEY` | the environment, then `./.env`, then `~/.wsp/.env` | the host process, for direct calls to the provider |
+| `ANTHROPIC_API_KEY` | beside it, only if you pay Anthropic by the token | set on the machine at create time, for Claude Code |
+
+`wsp up` asks for the Solari key only when none is found, offers the Anthropic key at the same time, and writes them to `~/.wsp/.env` at mode 600 in a directory created 700. Off a terminal a missing key is a refusal with exit code 2, never a prompt on a stream nobody reads.
+
+The service unit `wsp up --service` writes holds no key; it reads the same `.env` a terminal run reads. A key exported only in the shell that installs the service is refused before anything is written, since the service starts without that shell.
+
+<Callout type="warning">
+  Never paste a key into a conversation with an agent, and never print `~/.wsp/.env`. The agent path is built so an agent starts the host and the host reads the file itself; nothing about the key passes through the agent.
+</Callout>
+
+## What goes onto a machine
+
+- The files you ticked, minus every refusal below.
+- Logins answered **copy**: a Keychain item read with your consent through the system dialog, a credential file, or the output of a Claude Code `apiKeyHelper`, each placed as the tool's own file on the machine.
+- Logins answered **key**: the value typed hidden, carried in the environment and never on a command line, landing in `/etc/profile.d/wsp-secrets.sh` at mode 600, plus a fish variant when fish is on the machine. Agents are told that file exists, that its variables are used by name, and that it is never read, printed, logged or committed.
+- The helper and its token.
+
+Every archive is checksummed on your computer and verified on the machine before it is unpacked.
+
+## What never goes
+
+- **Private keys.** `~/.ssh` as a whole is never copied. Only `config`, `authorized_keys`, `allowed_signers`, `environment`, `rc` and `*.pub` travel; anything else there is treated as a private key, and `known_hosts` is rebuilt on first connect. A false positive costs a greyed row; a false negative would copy a key.
+- **GPG keys.** `~/.gnupg` and anything under it.
+- **`.env` and `.env.*` files, and `.netrc`.** Set the values on the machine instead. A directory called `.env` is a Python environment more often than a secret and is treated as one.
+- **Exported secrets in shell files.** Every exported variable whose name contains `KEY`, `APIKEY`, `TOKEN`, `SECRET` or `PASSWORD` as a whole word is cut from the copy, with any continuation or heredoc, and its name is listed so you can set it by hand. `KEYTIMEOUT` is not a key.
+- **The Claude Code OAuth credential.** The vendor's terms forbid a host to collect or intermediate it.
+- **A git credential.** Dotfile clones are anonymous https only; an ssh remote or a credentialed URL is refused. Import reads git config for inline credential helpers, userinfo in URLs and `extraheader` lines, and offers the config rewritten bare.
+- **Secret-shaped files in a project import** unless you name them with `--keep`.
+
+## What never leaves your computer
+
+- The provider key and the Anthropic key.
+- The contents of your agents' sessions. `wsp recipe scan` and `wsp init` read tool names and command words to count use, never a line's content.
+- Login values during detection. Presence is a `stat` or a Keychain lookup by service name without the password flag; no login file is read until you answer copy.
+
+## Tokens the host mints
+
+The app's WebSocket token is 24 random bytes, written to `host-token` beside the state file at mode 600, and sent in the first frame of a connection, never in a URL. The helper's token is minted once per host process, written on the machine at `/root/.wsp-daemon-token` through a rename so a half-written file is never read, and rotated at every host start so a token leaked from an earlier run dies with that run. Preview URL tokens from the provider expire after sixty minutes and are swapped without the hostname changing.
+
+## Logs
+
+The init run log redacts any `NAME=value` whose name contains KEY, TOKEN, SECRET or PASSWORD and blanks every Keychain-read value wherever it appears. Command output in the log is trimmed to twenty head and twenty tail lines, and five runs are kept. The relay's log names the workspace, the hostname and the port of a sign-in page, never the URL.
