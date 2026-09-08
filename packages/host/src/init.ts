@@ -721,9 +721,9 @@ function isCapRefusal(e: unknown): boolean {
   return e instanceof Error && "kind" in e && e.kind === "concurrency";
 }
 
-/** The shell's own code for a death by that signal. */
-function exitCodeOf(sig: "SIGINT" | "SIGTERM"): number {
-  return sig === "SIGINT" ? 130 : 143;
+/** The shell's own code for a death by that signal; the serving host's stop reads it for the same reason. */
+export function exitCodeOf(sig: "SIGINT" | "SIGTERM" | "SIGHUP"): number {
+  return sig === "SIGINT" ? 130 : sig === "SIGHUP" ? 129 : 143;
 }
 
 /** Resolves after ms, or at once when the signal aborts. */

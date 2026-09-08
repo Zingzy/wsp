@@ -1,0 +1,80 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Workspaces
+
+A workspace is a machine forked from your golden image, with your setup already on it, plus what wsp keeps about it on your computer. This page is every verb that makes, moves or removes one.
+
+## Make one
+
+```bash
+wsp new dev
+wsp new dev-2 --from app            # from a project golden, project in place
+wsp new gate --size 2x8             # a size the provider offers
+wsp fork dev --name dev-3           # a sibling from dev's golden version
+wsp fork dev --send "Run the gate." # and open its first thread
+```
+
+`wsp new` forks the golden's head. With `--from`, it forks a project golden by project name or snapshot id, so the machine starts with the project and its installed dependencies in place and nothing to upload. It returns when the machine is booted and reachable, in about twenty seconds.
+
+`wsp fork` makes a sibling from another workspace's golden version. It is a new machine, not a copy of the source's live disk: work on the source's disk is not on the fork. Fork from a project golden when the fork needs the project. With `--send` the fork opens its first thread, and `thread new`'s flags follow. When that first turn fails, the workspace still exists and the error names it; continue with `wsp thread new` on it rather than forking again.
+
+`--size` is `<cpu>x<memGb>`. The provider offers `2x4` and `2x8`; a size it does not offer is refused in one line that lists the ones it does with the rate of each. Absent, a workspace takes the golden's size.
+
+The account runs two machines at once. A third `new` or `fork` is refused; the builder stays up ten minutes after a seal and counts as one.
+
+## Keep a project on it
+
+```bash
+wsp import ~/code/app --to dev
+wsp snapshot dev
+```
+
+`wsp snapshot` takes a project golden: the golden plus the loaded project as it stands, so `wsp new --from` can start from it. It takes only a running machine that has never napped, with a project imported. The machine freezes for about three seconds and stays fresh. The rule exists because the provider cannot snapshot a machine that was ever resumed, so take the snapshot on a fresh workspace right after the import. See [Import and export](/work/import-export).
+
+## Naps and wakes
+
+```bash
+wsp pause dev
+wsp wake dev
+```
+
+A workspace naps on its own after twenty minutes with no person, thread or command touching it. Every message, inbox file, wake, import and export restarts the window. A napping machine costs nothing while it naps; its disk survives; the terminals on it survive too, since the machine is frozen rather than rebuilt.
+
+Before a nap, wsp saves a vault of the folders that matter, the agents' state, up to 200 MB, so a machine lost during the nap can be rebuilt with them. An export over that cap is refused at the nap, not discovered at the wake.
+
+`wsp pause` naps it now. `wsp wake` wakes it ahead of the next message; `thread new`, `send` and `exec` wake a napping workspace themselves, with one `waking <name>` line on stderr. A wake is done when the machine answers again, not when the provider says resumed, because the provider has handed back machines reporting running whose guest never served. Two attempts, six minutes each, then a fresh fork of the golden carrying the saved vault replaces the machine. A pause takes about seventy-five seconds; a wake usually a few seconds.
+
+<Callout type="info">
+  The idle window is fixed when a workspace is created. `wsp new` on the command line takes the default of twenty minutes; the runtime accepts a different window or none per workspace.
+</Callout>
+
+## Rename, forget, delete
+
+```bash
+wsp rename dev "auth work"
+wsp forget dev
+wsp delete dev --yes
+```
+
+`rename` names the workspace on this computer, the name every listing shows and the one `--in` takes. A name another workspace holds, or a blank one, is refused. Threads on the machine run on through it.
+
+`forget` drops a workspace whose machine the provider no longer has: its record and threads leave this computer, and the provider is asked nothing. It is refused while the machine still exists.
+
+`delete` deletes the machine at the provider, then drops the record and threads. Nothing left on that disk survives. It asks once unless `--yes`; off a terminal the line without `--yes` is refused, and the MCP tool deletes only on a second call with `confirm` true, so a machine is never killed by one tool call the caller made on its own.
+
+## When a machine goes wrong
+
+The app's Machine tab and the sidebar show the machine's state as the runtime reads it: running, pausing, paused, waking, unreachable, gone.
+
+- **Unreachable** for three minutes while the provider still says running earns one probe. If the machine does not answer, it is a **zombie**: the provider calls it running but its guest stopped serving. The only way out is a rebuild.
+- **Rebuild** forks a fresh machine from the golden, imports the nap-time vault, and kills the old machine whatever it reports. Anything running on it ends. Fork first, vault second, kill last, so the old machine dies only once its replacement holds the files.
+- **Gone** means the provider lost the machine. Forget it, or rebuild it.
+- A machine wsp created that nothing records anymore is not killed by the sweep; it is recorded again, because a machine nobody records bills unseen.
+
+## Lineage, update and roll back
+
+The Machine tab lists the golden's versions newest first, each with what is not on it, what was left on this computer, and what a later recipe retired but the image still carries. Two actions live there. **Update** moves this one workspace onto the golden's head, carrying its files across; it is refused on a project golden. **Roll back** moves the golden's head to an earlier version for every fork after it, and deletes nothing.
+
+## Costs
+
+A running workspace bills its size's rate per hour; a napping one bills nothing. The sidebar shows what each cost today and its rate. Machine time and snapshot storage are on [Costs, naps and limits](/work/costs).

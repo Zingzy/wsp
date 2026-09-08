@@ -14,14 +14,17 @@ export {
   currentHomePointer,
   goldenRecipe,
   loadKeys,
+  localWiring,
   makeRuntime,
   serve,
+  stopOnSignals,
   terminalIO,
   wspHome,
   HELP,
   type CliIO,
   type Keys,
   type KeySources,
+  type StopProcess,
 } from "./cli.js";
 export { SECTION_BEGIN, SECTION_END, sectionText } from "./agents-md.js";
 export { servingHost, type HostLock } from "./host-lock.js";

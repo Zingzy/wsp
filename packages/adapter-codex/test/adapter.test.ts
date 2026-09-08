@@ -309,3 +309,25 @@ describe("interrupt policy (teardown, then SIGKILL)", () => {
     expect(exec.order).toEqual(["teardown"]);
   });
 });
+
+describe("the process a finished turn leaves", () => {
+  it("a CLI that does not go after its own turn.completed is ended with its tree, and the turn still reads as its reply", async () => {
+    const exec = scriptedExec([started, '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"done"}}', '{"type":"turn.completed","usage":{"output_tokens":1}}'], { hang: true });
+    const { events, onEvent } = collect();
+    const adapter = createCodexAdapter({ exec: exec.factory, home: "/root/.codex", login: LOGIN, interruptGraceMs: 15, resultExitMs: 15 });
+
+    const result = await adapter.start({ prompt: "x", onEvent }).finished;
+
+    expect(exec.order).toEqual(["teardown", "kill"]);
+    expect(result).toMatchObject({ status: "completed", text: "done" });
+    expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+  });
+
+  it("a CLI that ends its own process is left alone", async () => {
+    const exec = scriptedExec(fixtureLines("exec-turn"));
+    const adapter = createCodexAdapter({ exec: exec.factory, home: "/root/.codex", login: LOGIN, interruptGraceMs: 15, resultExitMs: 15 });
+    expect((await adapter.start({ prompt: "x", onEvent: () => {} }).finished).status).toBe("completed");
+    await new Promise(r => setTimeout(r, 60));
+    expect(exec.order).toEqual([]);
+  });
+});

@@ -15,7 +15,7 @@ import { LINEAGE_MARKS, LOOK_PARTS, behindGoldenLine, biggerSizeLine, fmtRate, f
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
-import { useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
+import { useCapabilities, useCost, useLabs, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -70,12 +70,13 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
   const pendingSize = upgrade.phase.kind === "resizing" || upgrade.phase.kind === "settling" ? upgrade.phase.size : null;
   // A machine wsp neither forks nor pays for has no spend to chart and nothing to nap; its rows say what it is instead.
   const driven = kindWords(workspaceKind(workspace)).driven;
+  const labs = useLabs();
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
         <Facts workspace={workspace} status={status} awakeMs={last ? last.awakeMs : null} pendingSize={pendingSize} />
-        <Look workspace={workspace} />
+        {labs ? <Look workspace={workspace} /> : null}
         <Live workspace={workspace} />
         {driven && <Usage workspace={workspace} status={status} series={series} />}
         <Lineage workspace={workspace} />
@@ -88,7 +89,7 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
 function Header({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
   const machineId = status?.machineId ?? workspace.machineId;
   const verbs = useWorkspaceVerbs();
-  const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), verbs), "copy-id");
+  const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), verbs, false), "copy-id");
   return (
     <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
       <MachineLead workspace={workspace} status={status} />
@@ -269,7 +270,7 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
   const [note, setNote] = useState<string | null>(null);
   // The tab asks before it rebuilds, so its registry entry opens the dialog; the dialog's own button calls the api and
   // names a client without the verb.
-  const action = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), { ...verbs, rebuild: async () => setOpen(true) }), "rebuild");
+  const action = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), { ...verbs, rebuild: async () => setOpen(true) }, false), "rebuild");
 
   const rebuild = async (): Promise<void> => {
     setOpen(false);
@@ -798,7 +799,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   const [forgetting, setForgetting] = useState(false);
   const gone = workspace.phase === "gone";
   // The tab's forget opens its own dialog, in place of the request the sidebar answers; the dialog names a client without the verb.
-  const actions = resolveActions(workspaceActions, workspaceTarget(workspace, status), { ...verbs, forget: () => setForgetting(true) });
+  const actions = resolveActions(workspaceActions, workspaceTarget(workspace, status), { ...verbs, forget: () => setForgetting(true) }, false);
   const phase = actionById(actions, "phase");
   const forget = actionById(actions, "forget");
   // Backend fact, not a probe: a provider that cannot resize gets no picker at all.

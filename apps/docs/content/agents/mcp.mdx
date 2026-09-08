@@ -1,0 +1,81 @@
+import { Callout, Tabs, Tab } from 'scalar-mdx-components'
+
+# The MCP tools
+
+wsp serves its verbs as MCP tools over stdio to an agent on your computer. The tools and the command line call the same functions, so an agent that forks a workspace here forks the one you see in your sidebar, and a thread it opens is a thread you can answer.
+
+## Install
+
+`wsp mcp install --agent <id>` writes the server into that agent's own MCP config, puts the wsp skill into its skills folder, and adds wsp's own marked section to the instructions the current folder keeps: `AGENTS.md` for every agent and `CLAUDE.md` beside it for Claude Code.
+
+<Tabs default="Claude Code">
+  <Tab title="Claude Code">
+    ```bash
+    wsp mcp install --agent claude
+    ```
+  </Tab>
+  <Tab title="Codex">
+    ```bash
+    wsp mcp install --agent codex
+    ```
+  </Tab>
+  <Tab title="Gemini CLI">
+    ```bash
+    wsp mcp install --agent gemini
+    ```
+  </Tab>
+  <Tab title="OpenCode">
+    ```bash
+    wsp mcp install --agent opencode
+    ```
+  </Tab>
+</Tabs>
+
+A second run replaces the marked section where it stands, so there is only ever one and everything around it is untouched. A file whose end marker somebody deleted is repaired to one section rather than given a second begin marker. `--remove` takes the section back out, leaving the file's other lines byte for byte, and leaves the config and the skill where they are.
+
+`--agent` repeats to do several in one call, and one failing id costs the others nothing. Off a terminal, a run that names none takes every agent whose own command is on the PATH. `--json` answers with one line holding the `server` command every config now runs, what each agent took, its `docs` naming the files the section went into, and a `failures` array.
+
+Only agents the catalog knows an MCP config for get the server: claude, codex, gemini, opencode. Others get the skill and a by-hand line. The tools show up after the agent restarts; the `wsp` command line does the same job until then.
+
+## The tools
+
+Each tool's inputs are in parentheses. A flag on the command line is the input of the same name on the tool.
+
+| tool | inputs | what it does |
+| --- | --- | --- |
+| `workspaces` | | the workspace rows as the sidebar lists them |
+| `threads` | workspace | the sidebar's thread rows: agent, state, who opened it, the folder it works in, the title |
+| `threads_wait` | threads, timeout | blocks until one of the named threads leaves running; answers with its id, status, duration, cost and the reply's last line under `finished`; `timedOut` true when the timeout passed |
+| `new` | name, from, size | a workspace forked from the golden's head, or from a project golden by name or snapshot id; booted and reachable when it returns |
+| `fork` | workspace, name, size, task, agent, model, effort, access, cwd, notify | a sibling from the source's golden version; with a task, its first thread |
+| `snapshot` | workspace | a project golden: the golden plus the loaded project as it stands |
+| `pause` | workspace | naps the machine |
+| `wake` | workspace | wakes the machine and answers with its state |
+| `rename` | workspace, name | names the workspace on this computer |
+| `forget` | workspace | drops a workspace whose machine is gone; refused while it exists |
+| `delete` | workspace, confirm | deletes the machine at the provider and drops the record; deletes only with `confirm` true |
+| `thread_new` | workspace, task, agent, model, effort, access, cwd, notify, title, detach | opens a thread and follows its first turn to the reply, or with `detach` returns the id at once |
+| `thread_rename` | thread, title | names the thread in the agent's own store on the machine |
+| `send` | thread, message, model, effort, access, detach | a message into an existing thread |
+| `stop` | thread | ends the thread's running turn; the machine stays up |
+| `exec` | workspace, argv, cwd | runs a command on the machine, each word as given; output lines, the exit code and the folder |
+| `folders` | folder, hidden | the folders inside one folder on this computer, for naming one to import |
+| `import` | workspace, folder, yes, keep, cut, agents, replace | lands a folder on the machine at its path here; without `yes`, `keep` or `cut` it answers with the plan and moves nothing |
+| `export` | workspace, folder, from, replace, agents | brings a folder and the agent sessions keyed to it home |
+| `terminal_config` | scheme | the Ghostty config on this computer as the app's terminal pane applies it |
+| `recipe_scan` | project | reads this computer and answers with every option, writing nothing |
+| `recipe` | tick, set, signin, add, add_check, why, project, out | writes the recipe for a machine |
+
+`thread_new`, `send` and `exec` wake a paused workspace themselves before running, so a paused one needs no `wake` first.
+
+<Callout type="info">
+  A `thread_new` without `detach` blocks for the whole turn, which can be minutes or hours. An agent whose own conversation nothing can write into starts threads with `detach` true and reads their ends with `threads_wait`, one finished thread per call.
+</Callout>
+
+## Only on the command line
+
+`wsp up`, `wsp down`, `wsp status`, `wsp init`, `wsp doctor` and `wsp mcp` have no tool, since each starts, stops or installs something on the person's computer. An agent that needs one runs it from a shell. See [Driving wsp from an agent](/agents/driving) for the order.
+
+## Failures
+
+A tool answers a failure as a tool error whose structured content is the same object the command line prints under `--json`: `{"error": "<the line>", "class": "usage", "exit": 3}`. A call whose inputs do not fit the schema is refused by the server before the tool runs. The classes are on [The contract](/reference/contract).

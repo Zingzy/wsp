@@ -1,0 +1,70 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Recipes and the agent path
+
+A recipe is the file that says what goes on the golden: every catalog row with its tick and why, the sign-in answers, and any tool added by hand. `wsp init` writes one from its screens. An agent writes one with `wsp recipe` and builds from it with `wsp init --recipe`, which is how the agent path sets you up without a wizard.
+
+The file lives beside the state file, `~/.wsp/recipe.json` by default. It is never edited by hand.
+
+## Read everything first
+
+```bash
+wsp recipe scan
+wsp recipe scan --project ~/code/app
+wsp recipe scan --json
+```
+
+`wsp recipe scan` reads this computer and prints every option, writing nothing. Five tables:
+
+1. The agents, with what each one's history here says.
+2. The tools, each with why it is there, its download size, and what to do about it. The groups are, in order: always on the image, your project needs, you use these, installed here but never used, added by your agent, and also in the catalog. Heavy rows come first inside each group.
+3. What else a package manager on this computer has that the image could take, by manager, with the install line and size of each.
+4. The commands your agents ran that the catalog does not carry, most run first.
+5. The sign-ins, each with the choice that would be taken by default.
+
+Every why is one line: `used here, 3 sessions`, `installed here, never used`, `12 commands in 4 sessions`, `heavy, below the floor, 8 commands in 1 session`, `in the catalog, on request`. A ticked heavy row adds `1.2 GB on the machine, worth a question`. `--json` gives the same rows with a `recommended` value and the reason on every one, which is the form to read when deciding rather than showing. The last line is always `Nothing was written.`
+
+## Write the recipe
+
+```bash
+wsp recipe --tick used
+wsp recipe --set java=off --set gradle=off --signin gh=machine --signin claude=key
+wsp recipe --add just="brew install just" --add-check just="just --version"
+wsp recipe --project ~/code/app --out ./recipe.json
+```
+
+| flag | what it does |
+| --- | --- |
+| `--tick used\|installed\|default` | the rule that decides every tick: what your agents actually ran here, what is installed here, or what the catalog ships on |
+| `--set <id>=on\|off` | flip one row by its catalog id, or by the id the scan gives a package one of your managers has, which ticks that package as a row of its own |
+| `--signin <id>=copy\|machine\|key\|skip` | answer a sign-in; `key` brings the key files beside a login and still leaves the login to run on the machine |
+| `--add <id>=<command>` | carry a tool neither the catalog nor this computer has, installed by that command on the machine |
+| `--add-check <id>=<command>` | what proves the added tool landed; without one, `command -v <id>` |
+| `--project <folder>` | read the folder's manifests and weigh the histories by it |
+| `--out <path>` | where the file goes |
+
+All of them repeat. Naming `--tick` or `--project` decides every tick again and drops earlier flips; a call naming neither keeps the file's ticks and puts this call's flips on top. Sign-in answers survive every rule, since nothing but the person decides one.
+
+## The tick rules
+
+Without a rule, the blended one applies: a tool is on if it is installed here, else on if its use clears the floor, else the catalog default. A use below the floor is the row's answer and vetoes the catalog default under it, so a tool looked at once stays off however popular it is. An agent is ticked only by its own sessions here. `--tick installed` is the only rule that ticks an agent wsp cannot open a thread on.
+
+The floors: 2 sessions and 5 commands for a tool; 3 sessions and 20 commands for a heavy one, over 300 MB. A project's own needs weigh before anything a rule reads off this computer, since the repository will not build without them.
+
+## Adding what the catalog does not carry
+
+`--add` is for a tool this computer does not have. A package one of your own package managers already has is a row of its own: tick it with `--set`, and an `--add` for one is refused naming the `--set` word to use. Add only what a history or a repository file shows in use; never on a guess. Prefer a `brew install`, `npm install -g`, `uv tool install` or `apt-get install -y` line over a downloader; a line that pipes a download into a shell is refused in review. One tool per row, so a row that fails names the tool that failed. A failed added row does not fail the build; the version records it as missing. There is no sign-in for added rows.
+
+## The agent path, end to end
+
+An agent reads with `wsp recipe scan --json`, puts two questions to you, the heavy rows and the sign-ins, writes the recipe with one `wsp recipe` call, and runs the build detached:
+
+```bash
+nohup wsp init --recipe ~/.wsp/recipe.json --non-interactive --json > /tmp/wsp-init.jsonl 2> /tmp/wsp-init.log &
+```
+
+The build prints one JSON line per stage and, at each sign-in answered `machine`, one line with the page to open, the code when there is one, and the command that opens it. The agent hands you that line; you finish in your browser. The whole sequence with what to expect at each step is on [Driving wsp from an agent](/agents/driving).
+
+<Callout type="info">
+  An agent-written recipe and a hand-driven wizard build the same image. The rows are the same rows and the roads are the same roads.
+</Callout>

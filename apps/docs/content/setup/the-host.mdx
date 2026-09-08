@@ -1,0 +1,65 @@
+import { Callout } from 'scalar-mdx-components'
+
+# The host
+
+The host is the process that owns your machines and your keys. `wsp up` starts it, the desktop app is it in a window, and everything else, the command line, the MCP tools, a browser tab, is a client of it.
+
+## wsp up
+
+```bash
+wsp up
+wsp up --port 4401 --ws-port 4411
+wsp up --state ~/work/.wsp/state.json
+```
+
+Loads the keys, refuses in one line when there is no golden yet, takes the host lock and serves. The app is HTTP on `127.0.0.1:4400` and the runtime WebSocket on `127.0.0.1:4410`, both loopback only. Port `0` picks a free one. It serves until you stop it, so the terminal has to stay open; closing it takes the app down with it and cuts every turn running on every workspace. A plain `wsp` does the same as `wsp up`.
+
+One state file, one host. A second host that finds a live one refuses, naming the pid and both ports. A lock whose process is gone is a crash leftover and gives way.
+
+At start and every ten minutes the host sweeps the provider for machines it made that nothing records, and kills the ones past their grace. It never touches a machine another computer's host made, and it never kills a machine whose age it cannot prove.
+
+## As a service
+
+```bash
+wsp up --service
+wsp down
+wsp status
+```
+
+`--service` hands the same line to your computer's service manager, a launchd agent on macOS at `~/Library/LaunchAgents/com.wsp.host.<tag>.plist` or a systemd user unit on Linux at `~/.config/systemd/user/wsp-host-<tag>.service`, one per state file. It starts now and again at every login; on Linux, `loginctl enable-linger` keeps it up between logins.
+
+The unit holds no key. It carries `PATH` and `WSP_HOME` and nothing else, and reads the same `~/.wsp/.env` a terminal run reads, which is why a key exported only in the installing shell is refused before anything is written. The unit pins the node and the wsp it was run from by path, so an nvm switch or a brew upgrade stops the service at the next login rather than running a different binary.
+
+After loading, `wsp up --service` waits up to twenty seconds until the lock exists and the port answers a request. The lock alone is not proof, since a host that cannot bind takes the lock and dies under restart, over and over. On failure it prints the last twenty lines of the log.
+
+`wsp down` stops the service and takes the unit away. `wsp status` prints whether a host is serving this state file, its ports, its token file and what keeps it there, with a non-zero exit code when none does.
+
+## What it keeps
+
+Everything is beside the state file, `~/.wsp/` by default:
+
+| file | what it holds |
+| --- | --- |
+| `state.json` | workspaces, threads, the golden manifest, costs |
+| `.env` | your keys, mode 600 |
+| `host.lock` | the serving host's pid and ports |
+| `host-token` | the app's WebSocket token, mode 600 |
+| `host.log` | what a service run would have printed |
+| `recipe.json` | the recipe of catalog ids |
+| `golden-recipe.json` | the saved manifest with every tick |
+| `golden-import.json` | the import result: sign-in and secret outcomes, build times |
+| `init.log` | the last five init runs, secrets redacted |
+| `history-cache.json` | what each agent session file came to, so the next scan is fast |
+
+`WSP_HOME` moves the whole folder. `~/.wsp/current-home` always points at the home the running host serves, so the desktop app can find it.
+
+## What it does on its own
+
+- **Keeps the helper current.** Each machine's helper reports a version when the host connects. One that is behind gets the current bundle deployed, after any running turn ends, since replacing it ends the terminals under it. The row reads `updating the helper` while it happens.
+- **Naps idle workspaces.** Twenty minutes with no person, thread or command, then a nap. The provider's own idle timer is set behind it as a backstop, because every read of a machine's state resets that timer, so if the provider owned the policy any process that looked at a machine would keep it awake and billing.
+- **Recovers machines.** A machine the provider says is running but whose helper stopped answering for three minutes gets one probe; if that fails it is marked zombie and offered a rebuild. A paused machine that vanished while paused is rebuilt from the golden with the files it saved at nap time.
+- **Refuses a mismatched client.** The command line and the MCP server refuse a host of another version in one line. `wsp down` then `wsp up` fixes it.
+
+<Callout type="info">
+  Restarting the host cuts every turn running on every workspace. Finish or stop the running turns first. A turn's run belongs to the machine, so the host re-opens every run the machines still hold when it comes back and reads the rest of the output.
+</Callout>

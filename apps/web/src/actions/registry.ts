@@ -17,6 +17,8 @@ export interface ActionEntry<Target, Verbs> {
   readonly icon?: (target: Target) => LucideIcon;
   readonly shortcutCommand?: KeybindingCommand;
   readonly destructive?: boolean;
+  /** One of the surfaces held back until labs is on; a client with labs off is not offered it at all, in any menu. */
+  readonly labs?: boolean;
   /** What the palette matches beyond the title. */
   readonly searchTerms?: ReadonlyArray<string>;
   readonly title: (target: Target) => string;
@@ -49,23 +51,27 @@ export interface ResolvedAction {
 /** A row button's label: the entry's row label, or its title for an entry no row carries. */
 export const rowLabelOf = (action: ResolvedAction): string => action.rowLabel ?? action.title;
 
-export function resolveActions<Target, Verbs>(registry: ReadonlyArray<ActionEntry<Target, Verbs>>, target: Target, verbs: Verbs): ResolvedAction[] {
-  return registry.map(entry => ({
-    id: entry.id,
-    group: entry.group,
-    ...(entry.icon !== undefined ? { icon: entry.icon(target) } : {}),
-    ...(entry.shortcutCommand !== undefined ? { shortcutCommand: entry.shortcutCommand } : {}),
-    destructive: entry.destructive === true,
-    searchTerms: entry.searchTerms ?? [],
-    title: entry.title(target),
-    rowLabel: entry.rowLabel?.(target) ?? null,
-    buttonWord: entry.buttonWord?.(target) ?? null,
-    hint: entry.hint?.(target) ?? null,
-    refusal: entry.refusal(target, verbs),
-    run: async () => {
-      await entry.run(target, verbs);
-    },
-  }));
+/** The registry's actions bound to one object. labs says whether the registry's labs entries are among them; a
+ * surface passes the person's own preference, and a caller reading the whole registry leaves it as it is. */
+export function resolveActions<Target, Verbs>(registry: ReadonlyArray<ActionEntry<Target, Verbs>>, target: Target, verbs: Verbs, labs = true): ResolvedAction[] {
+  return registry
+    .filter(entry => labs || entry.labs !== true)
+    .map(entry => ({
+      id: entry.id,
+      group: entry.group,
+      ...(entry.icon !== undefined ? { icon: entry.icon(target) } : {}),
+      ...(entry.shortcutCommand !== undefined ? { shortcutCommand: entry.shortcutCommand } : {}),
+      destructive: entry.destructive === true,
+      searchTerms: entry.searchTerms ?? [],
+      title: entry.title(target),
+      rowLabel: entry.rowLabel?.(target) ?? null,
+      buttonWord: entry.buttonWord?.(target) ?? null,
+      hint: entry.hint?.(target) ?? null,
+      refusal: entry.refusal(target, verbs),
+      run: async () => {
+        await entry.run(target, verbs);
+      },
+    }));
 }
 
 /** The one action with this id; a registry without it is a programming error, not a state. */

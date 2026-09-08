@@ -7,3 +7,4 @@ artifacts/
 
 .claude/worktrees/
 .DS_Store
+*.log

@@ -1,0 +1,52 @@
+import { Callout } from 'scalar-mdx-components'
+
+# The loop for building
+
+This is how wsp gets built: tickets go out as threads on workspaces, opened by an agent on the person's computer, and reviews come back the same way. The loop below is the one that works on 2 vCPU and 4 GB machines.
+
+## The loop
+
+1. **One workspace with the repo imported.** `wsp import <folder> --to <workspace>` on a fresh workspace, the app's import dialog, or `wsp new <name> --from <project golden>` from a snapshot taken after an import. `wsp threads --in <workspace>` shows what is on it.
+
+2. **One thread per ticket, each in its own worktree.** The brief opens with `git worktree add -b ticket/<n>-<slug> <folder> origin/main`, and `--cwd` points at the repo. Two threads writing in one checkout collide.
+
+3. **A brief that can be built.** It names the ticket, the files to read whole, the laws the repo's review skill holds, the exact test commands, and the proof required. It says to run every command in the foreground and wait for it. A reply that lands with a command still running in the background reads failed, with the reason `ended with 1 background task running`, and the thread takes no send until that process exits. A brief that says "fix the bug" comes back with a guess.
+
+4. **Start detached, then wait.** `wsp thread new --in dev --detach --title "413 build" "<brief>"` prints each thread's id and returns. Then `wsp threads wait <id>...` blocks until one of them finishes and prints its finished line, one thread per call; drop each returned id from the list and call again. Never poll `wsp threads` for a state change. A thread on a machine that wants its builders' ends as messages starts them with `--notify <its thread>`; a person uses `--notify me`.
+
+5. **Review in its own thread.** On the same workspace, with the branch name and the review skill. The builder fixes in its own thread through `wsp send`. A review runs well on a cheaper model, `--model` on `thread new`.
+
+6. **Work leaves the machine** by `git push` from the thread, when the golden signed in to GitHub during `wsp init`, or by `wsp export` to your computer.
+
+7. **Gates run one at a time.** Full test runs, builds and packaging run on the person's machine or one at a time on the workspace. A 2 vCPU, 4 GB machine runs one build or one agent at a time; two starve the daemon and the app reads the machine as not answering.
+
+## Running work on a workspace well
+
+- **Snapshot after the install.** Once a project's dependencies are installed on a workspace, `wsp snapshot <workspace>` keeps that disk as a project golden, and `wsp new <name> --from <that golden>` starts every later workspace with the install already there. No thread installs the same dependencies twice.
+- **One heavy thread per machine.** One thread runs tests or a build at a time; a second thread is a light send. Three test runs at once starve the machine and every turn in flight fails.
+- **Make the worktree cheap, not skipped.** pnpm's side-effects cache compiles a native module once per machine, and the checkout's `node_modules` hardlinked into the new worktree before `pnpm install --offline` leaves only a verify. A worktree set up from scratch relinks thousands of files and rebuilds native modules, minutes on 2 vCPU.
+- **Send only into a thread that has replied.** A send into a running turn opens no second turn. Wait for the turn to end, or `wsp stop <thread>` first.
+- **Finish turns before restarting the host.** `wsp down` and `wsp up` cut every turn running on every workspace.
+- **Pause what nobody uses.** `wsp pause <workspace>` costs nothing beyond the disk and gives back one of the two machines the account runs at once. The next thread or command wakes it.
+- **Name threads.** The person's app and the command line read the same host, so every thread opened here shows in their sidebar. `--title` names it, and a short, complete reply reads well there.
+
+## Rules learned the hard way
+
+Each of these cost a day once. They are in the code now, and they are here so nobody pays twice.
+
+- A send into a running thread steers it or waits behind it, never a second concurrent turn.
+- A thread's end reaches its parent thread or the person only when its start said `--notify`; nothing polls.
+- An agent on the person's computer starts threads with `--detach` and reads their ends with `threads wait`, one per call. `thread_new` without it blocks for the whole turn.
+- A thread works in `--cwd` or the workspace's project folder; a relative `--cwd` is refused before anything starts.
+- A turn ends on 10 minutes of silence, not a 15 minute wall clock, and at 6 hours in all. Long steps must print.
+- A turn's process group dies with the turn. A server that must outlive it starts with `setsid nohup ... &`.
+- `thread new` and `send` return when the reply is complete, not when the process exits minutes later. A send that meets that gap is refused in words naming the thread.
+- Snapshot only a running first-life machine with a project loaded; a woken machine is refused.
+- Export refuses an existing folder; `--replace` overwrites it on purpose.
+- A resumed thread runs in the folder its session started in, whatever folder is followed in the app.
+- A send carries its own request id, so two clients sending the same text do not adopt each other's turn.
+- The MCP server and the command line refuse a host of another version in one line; restart it with `wsp up`.
+
+<Callout type="warning">
+  Not here yet: a GitHub credential on the machine outside a sign-in during init. If `gh auth status` fails on the machine, export instead of pushing.
+</Callout>

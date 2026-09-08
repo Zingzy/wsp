@@ -179,6 +179,7 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
   {
     id: "colour",
     group: "edit",
+    labs: true,
     icon: () => PaletteIcon,
     searchTerms: ["workspace colour", "workspace color", "tint", "hue", "space theme"],
     title: () => WORKSPACE_WORDS.colour,
@@ -189,6 +190,7 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
   {
     id: "icon",
     group: "edit",
+    labs: true,
     icon: () => ShapesIcon,
     searchTerms: ["workspace icon", "glyph", "symbol", "space icon"],
     title: () => WORKSPACE_WORDS.icon,

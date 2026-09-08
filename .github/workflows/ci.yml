@@ -1,0 +1,44 @@
+name: ci
+
+# Every pull request and every push to main runs what the merge gate runs on a
+# clean machine: install, build every package but the landing site and the
+# desktop bundle, the unit suite, and the type check per package. The Chromium
+# cases and the Electron smoke need a screen and stay behind their own flags.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.9.0"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Install, build, test, types
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
+      - name: Tests
+        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=2
+      - name: Types
+        run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' exec tsc --noEmit

@@ -266,7 +266,7 @@ describe("the switch chords per sidebar body", () => {
 
   it("reads as the list where a caller names no body, and reads no record of its own to find one", () => {
     const before = useStore.getState().preferences;
-    useStore.setState({ preferences: { ...before, sidebarMode: "spaces" } });
+    useStore.setState({ preferences: { ...before, sidebarMode: "spaces", labs: true } });
     try {
       expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
       expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.next", { platform: MAC, context: DESKTOP })).toBeNull();

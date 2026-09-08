@@ -8,25 +8,17 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type Browser, type Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startVite, stopRender, type ViteChild } from "./vite-child";
+import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS = join(WEB_DIR, "artifacts", "render");
-const browserPath = ((): string | undefined => {
-  try {
-    return chromium.executablePath();
-  } catch {
-    return undefined;
-  }
-})();
-const hasBrowser = browserPath !== undefined && existsSync(browserPath);
-const skipped = process.env["WSP_RENDER"] !== "1" ? "WSP_RENDER is not 1" : !hasBrowser ? "Playwright's Chromium is not installed" : undefined;
 
-if (skipped !== undefined) console.info(`lineage project goldens render test skipped: ${skipped}`);
+if (renderSkipped !== undefined) console.info(`lineage project goldens render test skipped: ${renderSkipped}`);
 
-describe.skipIf(skipped !== undefined)("the lineage's project goldens laid out in Chromium", () => {
+describe.skipIf(renderSkipped !== undefined)("the lineage's project goldens laid out in Chromium", () => {
   let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
@@ -35,7 +27,7 @@ describe.skipIf(skipped !== undefined)("the lineage's project goldens laid out i
   beforeAll(async () => {
     vite = await startVite(WEB_DIR, "/test/lineage-projects/index.html");
     base = `${vite.base}/test/lineage-projects/index.html`;
-    browser = await chromium.launch();
+    browser = await launchRender();
     page = await browser.newPage({ viewport: { width: 1200, height: 960 } });
     mkdirSync(SHOTS, { recursive: true });
   }, 60_000);

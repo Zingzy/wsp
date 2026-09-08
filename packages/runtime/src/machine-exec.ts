@@ -28,17 +28,21 @@
 // question travels the launch road's reach window, and only the machine's own
 // answer that the claim is gone may end a run: a probe nothing answered says
 // nothing about the run it was sent to find, and killing that process group
-// would end the very turn the attach exists to save.
+// would end the very turn the attach exists to save. The same fact cuts the
+// other way once a host has finished connecting: a run no row of that host
+// holds is a harness process nobody will ever read again, so the sweep ends
+// every claim on the machine that the caller did not name.
 
 import { randomBytes } from "node:crypto";
-import { INLINE_EXEC_MS, MachineUnreached, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
-import { EXEC_CHUNK_BYTES, TURN_IDLE_MS, TURN_WALL_MS, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
+import { INLINE_EXEC_MS, MachineUnreached, execFits, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
+import { EXEC_CHUNK_BYTES, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, TURN_WORK_TICKS_PER_S, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
 export interface MachineExecOptions {
   /** Delay between log polls. */
   pollMs?: number;
-  /** How long the log may stay quiet, write() included, before the stream ends with exit null and the idle line. */
+  /** How long the log may stay quiet, write() and the run group's own work included, before the stream ends with
+   * exit null and the idle line. */
   idleMs?: number;
   /** The cap on one stream however much it prints; the stream ends with exit null and the wall line past it. */
   deadlineMs?: number;
@@ -53,7 +57,8 @@ export interface MachineExecOptions {
 }
 
 /** The two limits a turn runs under on every kind of machine, and what ends one: the wall since it started, else the
- * idle stretch since its last byte or the person's last message. */
+ * idle stretch since it last did anything, which is its last byte, the person's last message, or work in the
+ * process tree it started. */
 export interface TurnLimits {
   idleMs: number;
   deadlineMs: number;
@@ -66,10 +71,71 @@ export function turnCut(limits: TurnLimits, elapsedMs: number, quietMs: number):
   return rule === undefined ? undefined : new Error(turnCutLine(rule, elapsedMs, rule === "wall" ? limits.deadlineMs : limits.idleMs));
 }
 
+/** One reading of the process tree a turn started: its work in ticks, whatever the road can count of them, and the
+ * clock the reading was taken on. Only the difference between two readings means anything. */
+interface WorkReading {
+  ticks: number;
+  at: number;
+}
+
+/** The clock the idle limit is read against, one shape for every road: the harness's bytes and the person's messages
+ * move it, and so does work in the process tree the turn started once that work clears TURN_WORK_TICKS_PER_S since
+ * the clock last moved. A harness sitting in a long tool call prints nothing while its children burn a core, and
+ * reading bytes alone ended two builds that were still working (43 and 38 minutes, 2026-09-08). */
+export interface TurnActivity {
+  /** How long the turn has done nothing: what the idle limit is compared with. */
+  quietMs(nowMs: number): number;
+  /** A byte from the harness, or a message the person sent into the turn. */
+  touch(atMs: number): void;
+  /** One reading of the turn's tree. The first, and any that undercuts the one before it, is only what the next is
+   * measured from: a group whose members exited carries less work than it did and is no baseline. */
+  read(ticks: number, atMs: number): void;
+}
+
+export function turnActivity(startedAt: number): TurnActivity {
+  let activeAt = startedAt;
+  let base: WorkReading | undefined;
+  return {
+    quietMs: nowMs => nowMs - activeAt,
+    touch: atMs => {
+      activeAt = atMs;
+    },
+    read: (ticks, atMs) => {
+      if (base === undefined || ticks < base.ticks) {
+        base = { ticks, at: atMs };
+        return;
+      }
+      if (ticks - base.ticks < Math.max(1, (TURN_WORK_TICKS_PER_S * (atMs - base.at)) / 1_000)) return;
+      activeAt = atMs;
+      base = { ticks, at: atMs };
+    },
+  };
+}
+
+/** Whether the turn's tree is worth reading at this moment: there is an idle limit for a reading to hold open, and
+ * the stream has been quiet long enough that the cut is in sight. A turn that is printing is already alive on its
+ * bytes, and a stream run with no idle limit (the exec verb hands both limits infinite on purpose) would pay for a
+ * reading every second for the life of a build and could not be cut by any answer it got. */
+export function readsWork(idleMs: number, quietMs: number): boolean {
+  return Number.isFinite(idleMs) && quietMs >= idleMs / 2;
+}
+
+/** What the guest counts a run's work by, given the run's process group id in `p`: for every process in that group,
+ * the CPU ticks it has burned and the megabytes it has read or written, summed into one number the next poll is
+ * compared with. /proc is the only road to it, since the guests have no pgrep, and the comm field is stripped by its
+ * last bracket because a process may be named `(sh (2))`. A guest that answers nothing here (no awk, no /proc)
+ * leaves the turn's idle clock on bytes alone. */
+export const GROUP_WORK_AWK =
+  'FNR==1{s=$0;sub(/^[0-9]+ \\(.*\\) /,"",s);split(s,f," ");if(f[3]==p){t+=f[12]+f[13];i=FILENAME;sub(/stat$/,"io",i);while((getline l<i)>0)if(l~/^[rw]char:/){split(l,g," ");t+=int(g[2]/1048576)}close(i)}}END{print t+0}';
+
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** What a launch mints a run's name from, so a handle read back off the sessions index is checked against the shape
  * this code writes before it reaches shell text: a value that has been to a file on disk is no longer this code's. */
 const RUN_ID = /^[0-9a-f]{12}$/;
+/** How often the reap looks at the group it asked to go, while it waits out the one stop grace both roads give. */
+const GRACE_POLL_MS = 200;
+/** That grace as the shell's own counter, since a guest has no seq to lean on. */
+const GRACE_CHECKS = Array.from({ length: Math.round(RUN_STOP_MS / GRACE_POLL_MS) }, (_, i) => String(i + 1)).join(" ");
 
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
@@ -83,6 +149,14 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
   /** The one path that says a run is on the machine: the launch makes it, the reap takes it with the rest of the
    * run's files, and every road that asks whether a run is still there asks about this one. */
   const claim = (base: string): string => `${base}.d`;
+  /** What ending one run comes to on the guest, in the shell both the reader's own reap and the connect sweep run:
+   * the recorded process group gets TERM, then KILL once the stop grace passes, and the run's files go. */
+  const reapScript = (b: string): string =>
+    `P=$(cat ${b}.pid 2>/dev/null); ` +
+    `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
+    `for i in ${GRACE_CHECKS}; do kill -0 -- -$P 2>/dev/null || break; sleep ${GRACE_POLL_MS / 1000}; done; ` +
+    `kill -KILL -- -$P 2>/dev/null; fi; ` +
+    `rm -rf ${b}.*`;
   /** A handle this factory could have minted: the run directory it launches into and a name of its own shape. */
   const minted = (run: string): boolean => run.startsWith(`${runDir}/`) && RUN_ID.test(run.slice(runDir.length + 1));
 
@@ -98,7 +172,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     // Both limits run from this reader's first second: nothing on the machine records when the run's last byte
     // landed, so an attach cannot inherit an idle clock and starts the turn's cap again.
     const startedAt = now();
-    let lastByteAt = startedAt;
+    const activity = turnActivity(startedAt);
     let finishCode: number | null | undefined;
     let resolveExit: (code: number | null) => void = () => {};
     const exited = new Promise<number | null>(resolve => {
@@ -124,24 +198,19 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
     // Runs after the last poll read the log, so the group's stragglers cannot cost the turn a line.
     const reap = (): Promise<void> =>
-      machine
-        .exec(
-          `P=$(cat ${base}.pid 2>/dev/null); ` +
-            `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
-            `for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 -- -$P 2>/dev/null || break; sleep 0.2; done; ` +
-            `kill -KILL -- -$P 2>/dev/null; fi; ` +
-            `rm -rf ${base}.*; true`,
-          { timeoutMs: execTimeoutMs },
-        )
-        .then(() => undefined, () => undefined);
+      machine.exec(`${reapScript(base)}; true`, { timeoutMs: execTimeoutMs }).then(() => undefined, () => undefined);
 
-    // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
-    const pollCmd = (offset: number): string =>
+    // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete. The
+    // group's work rides the same poll when it is worth reading, so a turn working in silence costs no exec of its
+    // own and a stream nothing could cut asks the guest for nothing; unasked, $W is empty and the reader sees no
+    // reading.
+    const pollCmd = (offset: number, work: boolean): string =>
       `E=$(cat ${base}.exit 2>/dev/null); ` +
       `tail -c +${offset + 1} ${base}.log 2>/dev/null | head -c ${EXEC_CHUNK_BYTES} | base64 -w0; ` +
       `P=$(cat ${base}.pid 2>/dev/null); ` +
-      `printf '\\n${sentinel} %s %s\\n' "$E" ` +
-      `"$([ -n "$P" ] && kill -0 "$P" 2>/dev/null && echo up || echo down)"`;
+      (work ? `W=$(awk -v p="$P" ${shellQuote(GROUP_WORK_AWK)} /proc/[0-9]*/stat 2>/dev/null); ` : "") +
+      `printf '\\n${sentinel} %s %s %s\\n' "$E" ` +
+      `"$([ -n "$P" ] && kill -0 "$P" 2>/dev/null && echo up || echo down)" "$W"`;
 
     async function* lines(): AsyncGenerator<string> {
       let offset = 0;
@@ -164,7 +233,9 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           finish(null);
           return;
         }
-        const cut = turnCut({ idleMs, deadlineMs }, now() - startedAt, now() - lastByteAt);
+        const at = now();
+        const quietMs = activity.quietMs(at);
+        const cut = turnCut({ idleMs, deadlineMs }, at - startedAt, quietMs);
         if (cut !== undefined) {
           await reap();
           finish(null);
@@ -173,7 +244,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
         let res: ExecResult;
         try {
-          res = await machine.exec(pollCmd(offset), { timeoutMs: execTimeoutMs });
+          res = await machine.exec(pollCmd(offset, readsWork(idleMs, quietMs)), { timeoutMs: execTimeoutMs });
         } catch {
           // Machine likely napping; polls recover after wake (P10 semantics).
           await sleep(pollMs);
@@ -186,12 +257,14 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           await sleep(pollMs);
           continue;
         }
-        const [, exitStr = "", live = "up"] = out[markIdx]!.split(" ");
+        const [, exitStr = "", live = "up", workStr = ""] = out[markIdx]!.split(" ");
+        const work = Number.parseInt(workStr, 10);
+        if (Number.isSafeInteger(work)) activity.read(work, now());
         const chunk = Buffer.from(out.slice(0, markIdx).join(""), "base64");
         offset += chunk.length;
 
         if (chunk.length > 0) {
-          lastByteAt = now();
+          activity.touch(now());
           pending = Buffer.concat([pending, chunk]);
           let nl: number;
           while ((nl = pending.indexOf(0x0a)) !== -1) {
@@ -242,7 +315,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         if (res.stdout.includes("WSP_GONE")) return "gone";
         if (res.exitCode !== 0 || !res.stdout.includes("WSP_OK")) throw new Error(`remote write failed on ${machine.id}: exit ${res.exitCode}: ${res.stderr}`);
         // The person just acted, so the turn gets its idle time over.
-        lastByteAt = now();
+        activity.touch(now());
         return "written";
       },
       closeInput: () => {
@@ -308,6 +381,34 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     if (res.stdout.includes("WSP_RUN")) return open(run, input, Promise.resolve());
     if (res.stdout.includes("WSP_GONE")) return "gone";
     throw new Error(`the machine did not answer whether it still holds ${run}: exit ${res.exitCode}: ${res.stderr}`);
+  };
+
+  factory.sweep = async keep => {
+    // The claims are what the machine holds, so the machine is asked what is there rather than told; the shape a
+    // handle must have to be one of this factory's is read here, by the same predicate the attach road reads, so
+    // nothing the guest wrote into the run directory reaches shell text on the strength of being there.
+    const listed = await machine.exec(`for d in ${runDir}/*.d; do [ -d "$d" ] && printf '%s\\n' "$d"; done`, { timeoutMs: execTimeoutMs });
+    const kept = new Set(keep);
+    const stale = listed.stdout
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.endsWith(".d"))
+      .map(line => line.slice(0, -".d".length))
+      .filter(base => minted(base) && !kept.has(base));
+    if (stale.length === 0) return [];
+    // Each run's group is ended beside the others, not after them: every reap waits out its own stop grace, and a
+    // machine holding a day of them would spend that grace once per run in a connect that has to end.
+    const page = (bases: readonly string[]): string => `${bases.map(base => `{ ${reapScript(base)}; } &`).join(" ")} wait; true`;
+    // The machine holding the most stale runs is the one this exists for, and it is the one whose command would pass
+    // the exec body cap and be refused whole, so the reaps go a page at a time under the same rule every upload reads.
+    const pages: string[][] = [[]];
+    for (const base of stale) {
+      const last = pages.at(-1)!;
+      if (last.length > 0 && !execFits(page([...last, base]))) pages.push([base]);
+      else last.push(base);
+    }
+    for (const bases of pages) await machine.exec(page(bases), { timeoutMs: execTimeoutMs });
+    return stale;
   };
 
   return factory;

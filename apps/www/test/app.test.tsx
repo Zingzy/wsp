@@ -24,6 +24,15 @@ describe("the landing page", () => {
     await waitFor(() => expect(screen.getAllByRole("button", { name: "Copied" }).length).toBe(1));
   });
 
+  it("describes every question to search engines from the same list the accordion shows", () => {
+    const { container } = render(<App />);
+    const script = container.querySelector('script[type="application/ld+json"]');
+    const data = JSON.parse(script?.textContent ?? "{}") as { "@type"?: string; mainEntity?: { name: string }[] };
+    expect(data["@type"]).toBe("FAQPage");
+    expect(data.mainEntity?.length).toBe(screen.getAllByRole("button", { name: /\?$/ }).length);
+    for (const entry of data.mainEntity ?? []) expect(screen.getByRole("button", { name: entry.name })).toBeTruthy();
+  });
+
   it("carries no em-dash anywhere a visitor reads", () => {
     const { container } = render(<App />);
     expect(container.textContent).not.toContain("—");

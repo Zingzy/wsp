@@ -1,0 +1,25 @@
+# Releases
+
+A release is a version tag, the command line package on npm, and the desktop bundles on the GitHub Release for that tag. Every step runs from a clean checkout of `main` on a computer with the Solari key in `.env`.
+
+## Where to get one
+
+- **The command line**: `npm i -g @zingzy/wsp`. `wsp --version` prints the number.
+- **The desktop app**: bundles for macOS on Apple silicon, macOS on Intel, and Linux as an AppImage, on the [releases page](https://github.com/Zingzy/wsp/releases). The bundles are unsigned; the release notes say how to open them.
+
+One tag, one `wsp --version` line, one package on npm. Every `package.json` under `packages/` and `apps/` that carries a version says the same number.
+
+## How one is cut
+
+1. **Gate.** `pnpm install --frozen-lockfile && pnpm build`, then `pnpm test`, `pnpm -r exec tsc --noEmit`, and `pnpm --filter @wsp/web build`. All green, with no key set.
+2. **Canary.** `pnpm canary` against the real provider. A red case means a create body has to change on purpose; nothing is released over it.
+3. **Doctor.** `pnpm wsp doctor` once, and its table goes into the release notes.
+4. **Publish the command line package.** `pnpm release <version>` renumbers every manifest, builds everything but the desktop bundle, packs the package and publishes it. A bump name works too: `pnpm release patch`. Between the build and the publish it runs a smoke test that installs the tarball into an empty folder on a clean environment and runs `wsp --version`, `wsp recipe --out` and `wsp mcp install --agent claude` under a throwaway `HOME`, so nothing reaches npm that has not been installed and run.
+5. **Commit the version.** The renumbered manifests are staged by the paths the release printed and committed as `chore: v<version>`.
+6. **Desktop bundles.** `pnpm --filter @wsp/desktop build` produces the two macOS apps and the AppImage, the packaged smoke runs, and each app is zipped.
+7. **Tag and release.** `git tag v<version> && git push origin v<version>`, then a GitHub Release on that tag with the two zips and the AppImage attached, notes on what changed, and the doctor table.
+8. **Check from outside.** A bundle is downloaded from the release page as a stranger would and opened on a computer that never built wsp. The README's install command, version and release link must match what was just published.
+
+## The canary
+
+The live tests create real machines and cost money, so they run only when `WSP_LIVE=1` is set and never in the ordinary `pnpm test`. They pin the provider facts the engine depends on: create bodies, snapshot behaviour, pause and wake timing, the request quirks the engine works around. A red canary is the provider having changed under wsp, and the fix is a deliberate change to the engine, not a retry.

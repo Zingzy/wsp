@@ -291,9 +291,10 @@ const toast = params.get("toast");
 const shown = params.get("ws");
 useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(shown !== null ? { selectedId: shown } : {}) });
 // ?sidebar=<px> is the width the host's record holds, and ?spaces=1 the body it holds; the fixture's api answers no
-// preferences op, so the record is put in place here as the host's answer would put it.
+// preferences op, so the record is put in place here as the host's answer would put it. The shell is where the
+// surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.
 const sidebarWidth = params.get("sidebar");
-useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}) } });
+useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}) } });
 const settings = params.get("settings") === "1";
 if (settings) useStore.setState({ settingsOpen: true });
 function ThemeRule() {

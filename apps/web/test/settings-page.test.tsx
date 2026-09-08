@@ -60,7 +60,7 @@ const group = (name: string): HTMLElement => screen.getByRole("radiogroup", { na
 beforeEach(() => {
   window.localStorage.clear();
   document.documentElement.classList.add("dark");
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 
@@ -71,7 +71,7 @@ afterEach(() => {
 
 describe("the settings page", () => {
   it("has Appearance and Terminal, a label over each pick, and the record's values checked", async () => {
-    const { api } = fakeApi({ ...DEFAULT_PREFERENCES, theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "file", terminalZoom: {} });
+    const { api } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true, theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "file", terminalZoom: {} });
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
@@ -96,14 +96,14 @@ describe("the settings page", () => {
   });
 
   it("the terminal size rows say the app's size and the file's, and a file naming no size says so beside the app's", async () => {
-    const { api } = fakeApi(DEFAULT_PREFERENCES);
+    const { api } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
     const labels = () => within(group("Text size")).getAllByRole("radio").map(r => r.closest("label")!.textContent);
     await waitFor(() => expect(labels()).toEqual([`From the app${appTerminalFontSize()} px`, "From the Ghostty file16 px"]));
     document.body.innerHTML = "";
-    const bare = fakeApi(DEFAULT_PREFERENCES, { ...FILE, fontSize: undefined });
+    const bare = fakeApi({ ...DEFAULT_PREFERENCES, labs: true }, { ...FILE, fontSize: undefined });
     useStore.getState().bind(bare.api);
     await flush();
     render(<SettingsPage />);
@@ -113,7 +113,7 @@ describe("the settings page", () => {
   it("each pick paints at once and goes to the host as one patch; the width reset is offered only off the default", async () => {
     // Base UI's radio re-dispatches a click as a PointerEvent, which jsdom does not have.
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
-    const { api, sets } = fakeApi({ ...DEFAULT_PREFERENCES, sidebarWidth: 300 });
+    const { api, sets } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true, sidebarWidth: 300 });
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
@@ -134,7 +134,7 @@ describe("the settings page", () => {
   });
 
   it("in the shell's centre, the page takes the thread's place and the breadcrumb its name until a workspace is picked", async () => {
-    const { api } = fakeApi(DEFAULT_PREFERENCES);
+    const { api } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     useStore.getState().bind(api);
     render(<Shell />);
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));

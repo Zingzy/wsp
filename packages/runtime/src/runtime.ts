@@ -157,7 +157,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENY, PERMISSION_DENIED_LINE, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENY, PERMISSION_DENIED_LINE, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -1095,6 +1095,9 @@ const RESTARTED_REASON = "host restarted while the agent was working";
 const GONE_REASON = "machine gone at the provider while the agent was working";
 /** The host log's one line for a workspace found gone, from the road and from the record load alike. */
 const goneLogLine = (workspaceId: string, words: string): string => `workspace ${workspaceId} is gone: ${words}`;
+/** The host log's one line for the runs a connecting host ended on a machine because no row of its own held them. */
+const sweptRunsLogLine = (workspaceId: string, runs: readonly string[]): string =>
+  `ended ${runs.length === 1 ? "1 harness run" : `${runs.length} harness runs`} on ${workspaceId} that no thread here holds: ${runs.join(", ")}`;
 /** The host log's one line for a harness store that would not give a title; the read window keeps it to one line
  * per session rather than one per refresh. */
 const noTitleLogLine = (sessionId: string, workspaceId: string, words: string): string =>
@@ -2515,6 +2518,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         else if (answer === "gone") settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
       }
       for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
+      // Every run left over from a host that never came back to read it, now that this host knows which ones it does
+      // hold: a harness whose reader is gone answers nobody and holds the machine's memory for its life.
+      await Promise.all([...live.values()].map(entry => sweepRuns(entry)));
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
     })();
     return hydrated;
@@ -3590,6 +3596,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (t.imagesDir !== undefined) dropImages(entry, t.imagesDir);
       });
     return handle;
+  };
+
+  /** Every harness run on one workspace's machine that this host does not hold, ended. Read after the rows are in
+   * and every one that could be re-opened has been, so what is left is a run no thread here will ever read: the host
+   * that launched it went down under it, or its own row could not be re-opened and was settled. The runs this host
+   * holds are named to the machine rather than found there, so a turn this host is reading is never ended by its own
+   * sweep. Best effort: a machine that will not answer keeps its runs, and the next connect asks again. */
+  const sweepRuns = async (entry: LiveWorkspace): Promise<void> => {
+    if (entry.record.phase !== "running") return;
+    const sweep = execFactoryFor(entry).sweep;
+    if (sweep === undefined) return;
+    const held: string[] = [];
+    for (const s of sessions.values()) {
+      if (s.view.workspaceId === entry.record.id && s.view.status === "running" && s.run !== undefined) held.push(s.run);
+    }
+    const swept = await sweep(held).catch((e: unknown) => {
+      console.warn(`the runs on ${entry.record.id} were left as they are: ${e instanceof Error ? e.message : String(e)}`);
+      return [];
+    });
+    if (swept.length > 0) console.warn(sweptRunsLogLine(entry.record.id, swept));
   };
 
   /** What re-opening a turn the store left running came to. `attached` is a reader on the run again and the thread
@@ -4786,8 +4812,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // Sets run one after another: two clients patching different fields at once would otherwise each read the record
   // before the other's write and the later write would drop the earlier field.
   let preferenceWrites: Promise<unknown> = Promise.resolve();
+  // Read once, here, and stamped on every read: a state file that holds an older labs cannot outvote the environment.
+  const labs = labsFromEnv(process.env);
   const preferences: Runtime["preferences"] = {
-    get: async () => preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)),
+    get: async () => ({ ...preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)), labs }),
     set: patch => {
       const write = preferenceWrites.then(async () => {
         const next = applyPreferencesPatch(await preferences.get(), patch);

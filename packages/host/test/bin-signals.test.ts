@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
-import { BIN, describeWithBin } from "./built-bin.js";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { BIN, DIST, describeWithBin } from "./built-bin.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 
 interface Ports {
@@ -57,7 +57,7 @@ describeWithBin("the wsp bin stops cleanly on a signal", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it.each(["SIGINT", "SIGTERM"] as const)("%s removes host.lock and frees both ports", async signal => {
+  it.each(["SIGINT", "SIGTERM", "SIGHUP"] as const)("%s removes host.lock and frees both ports", async signal => {
     const statePath = join(home, "state", "state.json");
     const lockPath = join(home, "state", "host.lock");
     mkdirSync(join(home, "state"));
@@ -78,5 +78,66 @@ describeWithBin("the wsp bin stops cleanly on a signal", () => {
     expect(existsSync(lockPath)).toBe(false);
     expect(await canListen(ports.port)).toBe(true);
     expect(await canListen(ports.wsPort)).toBe(true);
+  }, 30_000);
+});
+
+/** A host of this computer's own making: the wiring every `wsp up` wires, one turn running on it, and the signals
+ * that stop it. A turn leads a process group of its own, so nothing but this host knows where it is. */
+const hostScript = (home: string, pidFile: string): string => `
+import { localWiring, stopOnSignals } from ${JSON.stringify(DIST)};
+const wiring = localWiring(${JSON.stringify(home)});
+wiring.execStream()("sleep 300 & echo $! > ${pidFile}; sleep 300", { env: {} });
+stopOnSignals({ close: () => wiring.close() }, { error: line => console.error(line) });
+console.log("serving");
+setInterval(() => {}, 60_000);
+`;
+
+describeWithBin("a hangup on a host running a turn on this computer", () => {
+  let home: string;
+  let host: ChildProcess | undefined;
+  /** The harness this turn stands for, so a red run leaves nothing of it on this Mac. */
+  let harness: number | undefined;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "wsp-hangup-"));
+  });
+  afterEach(async () => {
+    if (host !== undefined && host.exitCode === null && host.signalCode === null) {
+      host.kill("SIGKILL");
+      await exited(host);
+    }
+    host = undefined;
+    if (harness !== undefined) {
+      try {
+        process.kill(harness, "SIGKILL");
+      } catch {
+        harness = undefined;
+      }
+      harness = undefined;
+    }
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("ends the turn and everything it started before the host goes, the way a closing terminal delivers it", async () => {
+    const pidFile = join(home, "harness.pid");
+    const script = join(home, "host.mjs");
+    writeFileSync(script, hostScript(home, pidFile));
+    const output: string[] = [];
+    // Its own process group, so the hangup this test delivers reaches the host and nothing else on this computer.
+    host = spawn(process.execPath, [script], { cwd: home, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    host.stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
+    host.stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
+    await vi.waitFor(() => expect(output.join("")).toContain("serving"), { timeout: 10_000 });
+    await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 10_000 });
+    harness = Number(readFileSync(pidFile, "utf8").trim());
+    expect(harness).toBeGreaterThan(0);
+    expect(() => process.kill(harness!, 0)).not.toThrow();
+
+    host.kill("SIGHUP");
+    const end = await exited(host);
+
+    // Read before the exit code, so a host that took node's default action names what it left behind.
+    expect(() => process.kill(harness!, 0), "the turn's harness outlived the hangup").toThrow();
+    expect(end, output.join("")).toEqual({ code: 0, signal: null });
   }, 30_000);
 });
