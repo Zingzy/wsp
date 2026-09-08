@@ -778,6 +778,60 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
+  it("the effort picker marks the default of the model picked, not of the agent, in both themes", async () => {
+    const read = async (): Promise<{ label: string; marked: string[]; checked: string[]; badge: { mono: boolean; bare: boolean; muted: boolean } }> => {
+      const label = await page!.locator("[data-composer-picker='effort']").evaluate(el => el.textContent ?? "");
+      return page!.locator("[data-slot=menu-popup] [data-composer-option]").evaluateAll(
+        (els, buttonLabel) => {
+          const badgeOf = (el: Element) => [...el.querySelectorAll("span")].find(s => s.textContent === "default");
+          const marked = els.filter(el => badgeOf(el) !== undefined).map(el => el.getAttribute("data-composer-option") ?? "");
+          const badge = badgeOf(els.find(el => badgeOf(el) !== undefined)!)!;
+          const s = getComputedStyle(badge);
+          const row = getComputedStyle(els[0]!);
+          return {
+            label: buttonLabel,
+            marked,
+            checked: els.filter(el => el.getAttribute("aria-checked") === "true").map(el => el.getAttribute("data-composer-option") ?? ""),
+            badge: { mono: s.fontFamily.toLowerCase().includes("mono"), bare: s.boxShadow === "none", muted: s.color !== row.color },
+          };
+        },
+        label,
+      );
+    };
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
+      await page!.waitForSelector("[data-composer-picker='model']");
+      await page!.locator("[data-composer-picker='model']").click();
+      await page!.waitForSelector("[data-composer-model-menu]");
+      await page!.locator("[data-composer-harness='codex']").click();
+      await page!.waitForSelector("[data-composer-picker='effort'][data-value='low']");
+      await page!.locator("[data-composer-picker='effort']").click();
+      await page!.waitForSelector("[data-slot=menu-popup] [data-composer-option='medium']");
+      const sol = await read();
+      await page!.keyboard.press("Escape");
+      await page!.locator("[data-composer-picker='model']").click();
+      await page!.locator("[data-composer-option='gpt-5.5']").click();
+      await page!.waitForSelector("[data-composer-picker='effort'][data-value='medium']");
+      await page!.locator("[data-composer-picker='effort']").click();
+      await page!.waitForSelector("[data-slot=menu-popup] [data-composer-option='medium']");
+      const picked = await read();
+      console.info(`effort default at ${theme}: ${JSON.stringify({ sol, picked })}`);
+      // The app-server reports low for GPT-5.6-Sol and medium for GPT-5.5, so the mark moves with the pick.
+      expect(sol.label).toBe("Low");
+      expect(sol.marked).toEqual(["low"]);
+      expect(sol.checked).toEqual(["low"]);
+      expect(picked.label).toBe("Medium");
+      expect(picked.marked).toEqual(["medium"]);
+      expect(picked.checked).toEqual(["medium"]);
+      // The word is muted mono on nothing, the same caption the model menu marks its default with.
+      expect(picked.badge).toEqual({ mono: true, bare: true, muted: true });
+      const path = join(SHOTS_DIR, `composer-effort-${theme}.png`);
+      await page!.screenshot({ path });
+      console.info(`composer effort screenshot: ${path}`);
+      await page!.keyboard.press("Escape");
+    }
+  }, 60_000);
+
   it("each tab's footer is one muted mono line naming that agent's own binary and pin, at the popup's width, in both themes", async () => {
     interface Footer {
       text: string;
