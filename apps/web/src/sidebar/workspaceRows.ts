@@ -114,7 +114,10 @@ export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "i
   return project.state === "running" ? "" : project.indicator.label;
 }
 
-const PLAIN = { colorClass: "text-muted-foreground/70", dotClass: "bg-muted-foreground/60" };
+// The base the sidebar's whispered tiers mix from, not the app's muted ink: the same colour on a
+// dark surface, and on a light one the step an alpha needs there. A row in the command palette
+// draws it from the root's copy of the token.
+const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whisper/60" };
 
 const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli", agent: "agent" };
 

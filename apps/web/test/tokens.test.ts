@@ -75,12 +75,24 @@ describe("index.css", () => {
         --header-frame-inset: calc(69px + var(--header-gap) - var(--workspace-titlebar-control-size) / 2);
       }
 
-      /* The counts in the top rows: the muted text at part opacity.
+      /* The counts in the top rows: the sidebar's quiet text at part opacity.
          Declared where the contrast tokens are, so the sidebar's own step-ups
-         reach it. */
+         reach it. Drawn from the sidebar's ink and not the app's, since every row
+         that carries it is a sidebar row. */
       :root,
       [data-app-sidebar] {
-        --top-row-meta: color-mix(in srgb, var(--contrast-muted-foreground) var(--top-row-meta-alpha), transparent);
+        --top-row-meta: color-mix(in srgb, var(--contrast-sidebar-whisper) var(--top-row-meta-alpha), transparent);
+        /* The word a sidebar row at rest carries, the search row's included. The dark sidebar holds it
+           at 80 percent of its quiet ink and still reads at 5.43:1; on a light surface that same 80
+           percent lands at 4.47:1, and at 4.14:1 over the search row's tint, so light takes the ink
+           whole. Zinc-600 whole still reads a step behind the zinc-800 a selected row's name takes. */
+        --sidebar-row-rest: var(--contrast-sidebar-muted-foreground);
+
+        @variant dark {
+          /* oklab, not srgb: this is the space the utility's own 80 percent mixed in, and the dark side
+             is meant to come out of this pass with the pixels it went in with. */
+          --sidebar-row-rest: color-mix(in oklab, var(--contrast-sidebar-muted-foreground) 80%, transparent);
+        }
       }
 
       /* Over the glass the sidebar's quiet text and glyphs have no solid card

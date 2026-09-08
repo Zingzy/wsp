@@ -281,11 +281,11 @@ export function WorkspaceSidebar() {
                   onClick={() => toggleSettled(project.id)}
                   className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-hidden ring-ring focus-visible:ring-2"
                 >
-                  <span className="text-xs font-medium text-muted-foreground/50">
+                  <span className="text-xs font-medium text-sidebar-whisper/50">
                     {settledOpen ? "Idle" : `Idle (${settled.length})`}
                   </span>
                   <span className="h-px flex-1 bg-sidebar-border/60" />
-                  <ChevronDownIcon aria-hidden className={cn("size-3 text-muted-foreground/50 transition-transform", settledOpen && "rotate-180")} />
+                  <ChevronDownIcon aria-hidden className={cn("size-3 text-sidebar-whisper/50 transition-transform", settledOpen && "rotate-180")} />
                 </button>
               </SidebarMenuSubItem>
             ) : null}

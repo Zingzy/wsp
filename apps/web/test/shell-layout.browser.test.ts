@@ -35,6 +35,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTER } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
+import { textContrast } from "./contrast";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -1231,6 +1232,37 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       await page!.waitForSelector("[data-row-name-input]", { state: "detached" });
       expect((await wsSlot()).text).toBe("the name he typed");
       expect((await wsSlot()).rowHeight).toBe(plain.rowHeight);
+    }
+  }, 60_000);
+
+  // The sidebar paints its quiet text in four tiers, three of them at part opacity. An alpha buys
+  // less contrast over a light surface than over a dark one, so the two themes have to be measured
+  // against each other and not only against a floor: with one light token behind them the tiers
+  // read 4.62, 4.47, 2.68 and 2.10 to 1 where the dark side's read 8.33, 5.43, 4.35 and 3.00.
+  it("the sidebar's ink reads the same in light as in dark: the two tiers that carry words at AA, the whispered ones on the dark side's ink", async () => {
+    const TIERS = {
+      "a thread's title once it is idle": "[data-app-sidebar] .text-sidebar-muted-foreground",
+      "the word on a row at rest": "[data-app-sidebar] [data-slot=sidebar-menu-button]:not([data-active=true])",
+      "the state word beside a thread": "[data-sidebar-row] .hidden.md\\:inline",
+      "the row's meta line": "[data-app-sidebar] .text-\\[var\\(--top-row-meta\\)\\]",
+    } as const;
+    // The first two carry words a person reads, so their bar is AA. The last two are the whisper the
+    // rows are designed around and sit under AA in both themes on purpose, so their bar is the ink
+    // their dark twin already ships: they are the tiers an alpha over a light surface loses.
+    const AT_AA = ["a thread's title once it is idle", "the word on a row at rest"];
+    const read: Record<"dark" | "light", Record<string, number>> = { dark: {}, light: {} };
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      for (const [tier, selector] of Object.entries(TIERS)) {
+        const ratios = await textContrast(page!, selector);
+        expect(ratios.length, `${tier} drew nothing to measure in ${theme}`).toBeGreaterThan(0);
+        read[theme][tier] = Math.min(...ratios);
+      }
+      console.info(`${theme}: ${Object.entries(read[theme]).map(([tier, ratio]) => `${tier} ${ratio.toFixed(2)}`).join(", ")} to 1`);
+    }
+    for (const tier of Object.keys(TIERS)) {
+      if (AT_AA.includes(tier)) expect(read.light[tier], `${tier} reads at ${read.light[tier]} in light`).toBeGreaterThanOrEqual(4.5);
+      else expect(read.light[tier], `${tier} reads at ${read.light[tier]} in light against ${read.dark[tier]} in dark`).toBeGreaterThanOrEqual(read.dark[tier]! - 0.2);
     }
   }, 60_000);
 });
