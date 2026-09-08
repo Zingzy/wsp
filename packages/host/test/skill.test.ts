@@ -80,6 +80,13 @@ describe("the wsp skill", () => {
     expect(section).toContain("There is no sign-in for these rows");
   });
 
+  it("the local thread example names the folder its turn works in, since a thread with no cwd opens in the person's home", () => {
+    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### thread new"), WSP_SKILL.indexOf("### send"));
+    expect(section).toContain("wsp thread new --in mac --agent codex --cwd /Users/zingzy/wsp-work");
+    expect(section).toContain("a thread with no `--cwd` opens in the person's home folder");
+    expect(section).toContain("the workspace's own work folder (`~/wsp-work`, where `wsp exec` on this computer runs)");
+  });
+
   it("carries no em dash", () => {
     expect(WSP_SKILL).not.toContain("\u2014");
   });

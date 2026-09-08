@@ -243,7 +243,7 @@ describe("the MCP server over the host", () => {
       ["mac", "local", false],
     ]);
     // The listing's own words say a workspace need not be a machine, so a caller holding only the tools reads it here.
-    const served = (await (client ?? (await connect())).listTools()).tools.find(t => t.name === "workspaces")!.description!;
+    const served = (await client!.listTools()).tools.find(t => t.name === "workspaces")!.description!;
     expect(served).toContain("or this computer itself, which forks from no golden and runs while the host does");
 
     const opened = await call("thread_new", { workspace: "mac", task: "say pong" });
