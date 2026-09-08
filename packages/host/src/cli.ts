@@ -17,14 +17,16 @@ import {
   goldenHead,
   hostIdentity,
   jsonFileStore,
+  localExecStream,
   type GoldenRecipe,
   type GoldenVersion,
+  type LocalWiring,
   type Machine,
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { EXIT_CODES, EXIT_WORDS, ExitClass, TURN_END_WORDS, authRefusal, fmtDuration, shellQuote, usageRefusal } from "@wsp/protocol";
-import { agentHomes } from "@wsp/engine";
+import { EXIT_CODES, EXIT_WORDS, ExitClass, NOTHING_TO_SERVE_LINE, TURN_END_WORDS, authRefusal, fmtDuration, shellQuote, usageRefusal } from "@wsp/protocol";
+import { agentHomes, LocalBackend } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
@@ -365,9 +367,22 @@ function statePathFrom(flag?: string): string {
   return resolve(flag ?? defaultStatePath());
 }
 
+/** This computer as a workspace: the local backend, a real child process per turn, each harness's own store under the
+ * person's home, and a turn's environment their own so a tool on their PATH runs and their sign-ins are read. */
+export function localWiring(root = homedir()): LocalWiring {
+  const homes = agentHomes(root);
+  return {
+    backend: new LocalBackend({ root }),
+    execStream: localExecStream({ root }),
+    home: id => homes[id] ?? join(root, `.${id}`),
+    env: { PATH: process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin", HOME: root },
+  };
+}
+
 export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys)): Runtime {
   return createRuntime({
     backend: new SolariBackend({ apiKey: keys.solari }),
+    local: localWiring(),
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
@@ -539,11 +554,17 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   return hostFor(rt, keys, opts, io);
 }
 
+/** Whether the state has anything for the app to show: a sealed golden to fork from, or any workspace record, this
+ * computer's included. An empty state is refused with the two ways in rather than served as a blank app. */
+async function servesNothing(rt: Runtime): Promise<boolean> {
+  return goldenHead(await rt.golden.get()) === undefined && (await rt.workspaces.list()).length === 0;
+}
+
 export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | undefined> {
   const keys = await loadKeys(io, undefined, { anthropic: false });
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
-  if (goldenHead(await rt.golden.get()) === undefined) {
-    io.error("no golden yet; run wsp init");
+  if (await servesNothing(rt)) {
+    io.error(NOTHING_TO_SERVE_LINE);
     return undefined;
   }
   return hostFor(rt, keys, opts, io);
@@ -683,8 +704,8 @@ export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: 
     io.error(shellOnly);
     return 1;
   }
-  if (goldenHead(await makeRuntime(keys, opts.statePath).golden.get()) === undefined) {
-    io.error("no golden yet; run wsp init");
+  if (await servesNothing(makeRuntime(keys, opts.statePath))) {
+    io.error(NOTHING_TO_SERVE_LINE);
     return 1;
   }
   const claudeOnly = claudeKeyOnlyInThisShell(deps.keys);
@@ -958,7 +979,8 @@ export const COMMAND_LINES: readonly CommandLine[] = [
 
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
-  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere });
+  // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
+  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, runtime: async statePath => makeRuntime(await loadKeys(io, undefined, { anthropic: false }), statePath) });
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom);
   let values: SharedFlags;
   let positionals: string[];

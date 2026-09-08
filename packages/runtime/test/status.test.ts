@@ -314,7 +314,6 @@ describe("the status ticks", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     let asked = 0;
     const tracker = createStatusTracker({
-      rateUsdPerHour: () => 0.11,
       records: async () => {
         asked++;
         throw new Error("the store is gone");

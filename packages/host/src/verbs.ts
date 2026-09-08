@@ -10,6 +10,7 @@
 // to the provider.
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -286,6 +287,16 @@ export interface VerbDeps {
   alsoHere?: ScanInput["alsoHere"];
   /** The socket to the host: a verb's own dial, closed when it returns; a tool server's one dial across calls. */
   client(): Promise<HostClient>;
+  /** The runtime over the state file in this process, for the one verb that runs with no host serving (new --local
+   * on an empty state, the way in); the caller closes it. Absent on the tool door, which always has a host. */
+  runtime?(statePath: string): Promise<LocalRuntime>;
+}
+
+/** What new --local asks of a runtime in this process, and nothing more: typed here so the verbs stay clear of the
+ * runtime package, which the tool door may not import. */
+export interface LocalRuntime {
+  workspaces: { createLocal(name: string): Promise<WorkspaceView> };
+  close(): Promise<void>;
 }
 
 interface VerbContext extends VerbDeps {
@@ -614,6 +625,29 @@ export async function create(client: HostClient, out: Out, golden: string, name:
   } finally {
     pushed.stop();
   }
+}
+
+/** The one local workspace: this computer. It forks nothing, so there is no image and no size to pick; the host
+ * refuses a second one and a name another workspace holds. The name defaults to this computer's own. */
+export async function createLocalWorkspace(client: HostClient, out: Out, name: string): Promise<WorkspaceCreateResult> {
+  const { workspace } = await client.request<{ workspace: WorkspaceView }>("workspaces.createLocal", { name });
+  return createdLocal(out, workspace);
+}
+
+/** The same with no host serving: the record goes into the state file through a runtime in this process, so an empty
+ * state gains the one thing wsp up needs to serve. The runtime is closed once the record is written. */
+export async function createLocalWorkspaceHere(rt: LocalRuntime, out: Out, name: string): Promise<WorkspaceCreateResult> {
+  try {
+    return createdLocal(out, await rt.workspaces.createLocal(name));
+  } finally {
+    await rt.close();
+  }
+}
+
+function createdLocal(out: Out, workspace: WorkspaceView): WorkspaceCreateResult {
+  const created: WorkspaceCreateResult = { workspace };
+  out.emit(created, `created ${workspace.name} ${workspace.id} (this computer)`);
+  return created;
 }
 
 const sessionEvent = (f: Frame): f is Frame & SessionEvent => typeof f.type === "string" && f.type.startsWith("session.");
@@ -1408,25 +1442,38 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "new",
-    usage: "wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>]",
-    about: "a workspace from the golden's head or, with --from, a project golden; --size picks a size",
-    options: { from: { type: "string" }, size: { type: "string" } },
+    usage: "wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new --local [name]",
+    about: "a workspace from the golden's head or, with --from, a project golden; --local is this computer",
+    options: { from: { type: "string" }, size: { type: "string" }, local: { type: "boolean" } },
     run: async ctx => {
       const [name] = ctx.args;
-      if (name === undefined || ctx.args.length !== 1) throw usageRefusal("wsp new takes one name");
-      const client = await ctx.client();
       const from = flag(ctx.flags, "from");
       const size = flag(ctx.flags, "size");
+      if (ctx.flags["local"] === true) {
+        if (ctx.args.length > 1) throw usageRefusal("wsp new --local takes at most a name");
+        if (from !== undefined || size !== undefined) throw usageRefusal("wsp new --local forks nothing, so it takes no --from or --size");
+        // With no host serving the record is written straight into the state file: the way into an empty state.
+        if (ctx.runtime !== undefined && servingHost(ctx.statePath) === undefined) await createLocalWorkspaceHere(await ctx.runtime(ctx.statePath), ctx.out, name ?? hostname());
+        else await createLocalWorkspace(await ctx.client(), ctx.out, name ?? hostname());
+        return 0;
+      }
+      const client = await ctx.client();
+      if (name === undefined || ctx.args.length !== 1) throw usageRefusal("wsp new takes one name");
       if (from === undefined) await createFromHead(client, ctx.out, name, size);
       else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size);
       return 0;
     },
     tool: tool({
-      description: "A new workspace forked from the golden image's head, or with from, from a project golden (the project already in place), booted and reachable when this returns.",
-      input: { name: z.string(), from: z.string().optional().describe("a project golden: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"), size: SizeIn },
+      description: "A new workspace forked from the golden image's head, or with from, from a project golden (the project already in place), booted and reachable when this returns. With local true it is this computer instead, which forks nothing: one local workspace per host, its name this computer's own when none is given, no from or size.",
+      input: { name: z.string().optional().describe("the workspace name; required unless local, where it defaults to this computer's name"), from: z.string().optional().describe("a project golden: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"), size: SizeIn, local: z.boolean().optional().describe("true makes the one local workspace, this computer, forking nothing") },
       output: Created.shape,
-      call: async ({ name, from, size: word }, deps) => {
+      call: async ({ name, from, size: word, local }, deps) => {
         const client = await deps.client();
+        if (local === true) {
+          if (from !== undefined || word !== undefined) throw usageRefusal("a local workspace forks nothing, so it takes no from or size");
+          return asJson(await createLocalWorkspace(client, QUIET, name ?? hostname()));
+        }
+        if (name === undefined) throw usageRefusal("a cloud workspace needs a name");
         if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word));
         return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word));
       },
@@ -2029,7 +2076,7 @@ export function jsonAsked(argv: ReadonlyArray<string>): boolean {
   return argv.slice(0, cut === -1 ? argv.length : cut).includes("--json");
 }
 
-export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere"> = {}): Promise<number> {
+export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "runtime"> = {}): Promise<number> {
   let flags: Flags;
   let args: string[];
   try {
@@ -2053,6 +2100,7 @@ export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: Cl
     out: formatter(io, flags["json"] === true),
     statePath,
     ...(deps.alsoHere !== undefined ? { alsoHere: deps.alsoHere } : {}),
+    ...(deps.runtime !== undefined ? { runtime: deps.runtime } : {}),
     client: async () => (client ??= await dialHost(statePath)),
   };
   try {

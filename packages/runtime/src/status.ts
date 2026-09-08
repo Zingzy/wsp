@@ -122,6 +122,9 @@ export interface StatusApi {
  * backend.get. daemonReach is absent on backends without preview URLs. */
 export interface StatusRecord extends WorkspaceView {
   size: WorkspaceSize;
+  /** The awake rate for this workspace's size on its own backend: a cloud fork's from the provider's pricing, a local
+   * workspace's zero. Computed per record because the rate varies by the machine's kind, not by size alone. */
+  rateUsdPerHour: number;
   /** Which write of the record this view is of; the poll drops a row built on a view the record has moved past. */
   generation: number;
   idleAt?: number;
@@ -133,7 +136,6 @@ export interface StatusRecord extends WorkspaceView {
 }
 
 export interface StatusTrackerOptions {
-  rateUsdPerHour(size: WorkspaceSize): number;
   records(): Promise<StatusRecord[]>;
   /** Holds each workspace's folded cost history so the series and the meter behind it outlive the process. */
   store: Store;
@@ -440,7 +442,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         void metrics;
         void exec;
         void generation;
-        const base = { ...view, size, rateUsdPerHour: o.rateUsdPerHour(size), ...(idleAt !== undefined ? { idleAt } : {}) };
+        const base = { ...view, size, rateUsdPerHour: r.rateUsdPerHour, ...(idleAt !== undefined ? { idleAt } : {}) };
         const gone = (reason: string | undefined): WorkspaceStatus => ({ ...base, machineState: "gone", reach: { state: "gone" }, ...(reason !== undefined ? { reason } : {}) });
         const done = (state: MachineState, reach: WorkspaceStatus["reach"]): WorkspaceStatus =>
           state === "gone" ? gone(goneReasons.get(r.id) ?? goneWords(r.machineId)) : { ...base, machineState: state, reach };
@@ -519,7 +521,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const costTick = async (only?: string): Promise<void> => {
     await loading;
     const now = clock.now();
-    for (const { size, ...view } of await o.records()) {
+    for (const view of await o.records()) {
       if (only !== undefined && view.id !== only) continue;
       const m = meter(view.id);
       if (view.phase === "running") m.mark ??= now;
@@ -527,7 +529,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       // machine): the mark goes without folding, so no tick after a rebuild bills the gap.
       else if (view.phase === "gone") m.mark = undefined;
       const running = view.phase === "running" && m.mark !== undefined;
-      const rate = o.rateUsdPerHour(size);
+      const rate = view.rateUsdPerHour;
       const awakeMs = m.awakeMs + (running ? now - m.mark! : 0);
       const before = histories.get(view.id) ?? [];
       const last = before.at(-1);

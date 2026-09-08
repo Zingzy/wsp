@@ -163,6 +163,19 @@ describe("wsp verbs over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["first", "t-cap"]);
   });
 
+  it("new --local with no host serving writes the local workspace into the state file, the way in for an empty state", async () => {
+    await handle?.close();
+    handle = undefined;
+    rmSync(lockPathFor(statePath), { force: true });
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
+    const { code, io } = await run("new", "--local", "mac");
+    expect(code).toBe(0);
+    expect(io.lines).toHaveLength(1);
+    expect(io.lines[0]).toMatch(/^created mac ws_[0-9a-f]{8} \(this computer\)$/);
+    const written = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces: Record<string, { name: string; kind: string; machineId: string }> };
+    expect(Object.values(written.workspaces).map(w => [w.name, w.kind, w.machineId])).toEqual([["mac", "local", "local"]]);
+  });
+
   it("new refuses in one line when there is no golden", async () => {
     await restartHost({}, memoryStore());
     const { code, io } = await run("new", "alpha");

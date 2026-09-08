@@ -9,15 +9,7 @@
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { createCodexAdapter } from "@wsp/adapter-codex";
 import { CATALOG_AGENTS, type ThreadAgent } from "@wsp/catalog";
-import { guestAgentHomes } from "@wsp/engine";
-import { machineExecStream } from "./machine-exec.js";
 import type { HarnessAdapterFactory } from "./runtime.js";
-
-const guestHome = (id: ThreadAgent): string => {
-  const home = guestAgentHomes()[id];
-  if (home === undefined) throw new Error(`the catalog has no home for ${id}`);
-  return home;
-};
 
 /** The sign-in command a person runs on a machine: the row's headless fallback when it has one, else its login. */
 const machineLogin = (id: ThreadAgent): string => {
@@ -27,6 +19,6 @@ const machineLogin = (id: ThreadAgent): string => {
 };
 
 export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactory>> = {
-  claude: ctx => createClaudeAdapter({ exec: machineExecStream(ctx.machine), configDir: guestHome("claude"), baseEnv: ctx.env }),
-  codex: ctx => createCodexAdapter({ exec: machineExecStream(ctx.machine), home: guestHome("codex"), login: machineLogin("codex"), baseEnv: ctx.env }),
+  claude: ctx => createClaudeAdapter({ exec: ctx.execStream, configDir: ctx.home("claude"), baseEnv: ctx.env }),
+  codex: ctx => createCodexAdapter({ exec: ctx.execStream, home: ctx.home("codex"), login: machineLogin("codex"), baseEnv: ctx.env }),
 };

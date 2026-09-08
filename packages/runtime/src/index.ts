@@ -4,6 +4,7 @@ export * from "./serve.js";
 export * from "./status.js";
 export * from "./store.js";
 export * from "./machine-exec.js";
+export * from "./local-exec.js";
 export * from "./reach.js";
 export * from "./daemon-token.js";
 export * from "./harness-catalog.js";
