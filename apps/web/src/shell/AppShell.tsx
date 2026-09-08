@@ -7,7 +7,7 @@ import { ContextMenuHost } from "../actions/ContextMenuHost.js";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
 import { WorkspaceSwitcher } from "../components/switcher/WorkspaceSwitcher.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
-import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "../components/ui/sidebar.js";
+import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, type SidebarWidthStore } from "../components/ui/sidebar.js";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
@@ -25,9 +25,19 @@ import { RightPanel } from "./RightPanel.js";
 import { SignInBanner } from "./SignInBanner.js";
 import { ThreadBreadcrumb } from "./ThreadBreadcrumb.js";
 
-const SIDEBAR_WIDTH_STORAGE_KEY = "wsp:sidebar-width";
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 480;
+/** The dragged width goes onto the host's preferences record, so a browser tab on the same host opens at it and
+ * the settings page's reset reaches this window. */
+const sidebarWidthStore: SidebarWidthStore = {
+  read: () => useStore.getState().preferences.sidebarWidth ?? null,
+  // A drag ends on a fractional width; the record keeps whole pixels.
+  write: width => void useStore.getState().setPreferences({ sidebarWidth: Math.round(width) }),
+  subscribe: onChange =>
+    useStore.subscribe((s, prev) => {
+      if (s.preferences.sidebarWidth !== prev.preferences.sidebarWidth) onChange();
+    }),
+};
 const RIGHT_PANEL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "rightPanel.toggle");
 const TERMINAL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "terminal.toggle");
 
@@ -71,7 +81,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         collapsible="offcanvas"
         data-app-sidebar=""
         className={cn(isDesktopMac() ? "sidebar-vibrancy" : "sidebar-glass", "border-r border-sidebar-border text-sidebar-foreground")}
-        resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: SIDEBAR_MAX_WIDTH, storageKey: SIDEBAR_WIDTH_STORAGE_KEY }}
+        resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: SIDEBAR_MAX_WIDTH, width: sidebarWidthStore }}
       >
         <WorkspaceSidebar />
         <SidebarRail />

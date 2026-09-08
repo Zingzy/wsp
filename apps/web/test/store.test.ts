@@ -585,6 +585,19 @@ describe("store workspaces", () => {
     expect(useStore.getState().workspaces[0]!).toMatchObject({ phase: "gone", gone: "machine m1 is gone at the provider: Not found" });
     emit({ type: "workspace.upgraded", workspaceId: "ws_a", machineId: "m2" });
     expect(useStore.getState().workspaces[0]!).toMatchObject({ phase: "running", machineId: "m2" });
+    expect(useStore.getState().workspaces[0]!.gone).toBeUndefined();
+  });
+
+  it("a record that leaves gone drops the words with it, on the view and on its status", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    emit({ type: "workspace.gone", workspaceId: "ws_a", machineId: "m1", reason: "machine m1 is gone at the provider: Not found" });
+    expect(useStore.getState().workspaces[0]!.gone).toBe("machine m1 is gone at the provider: Not found");
+    // The verdict did not hold: the machine was there all along, so nothing is left saying it was not.
+    emit({ type: "workspace.woken", workspaceId: "ws_a", machineId: "m1", resurrected: false });
+    expect(useStore.getState().workspaces[0]!).toMatchObject({ phase: "running", machineId: "m1" });
+    expect(useStore.getState().workspaces[0]!.gone).toBeUndefined();
   });
 
   it("session.start counts spending and workspace.deleted prunes it", async () => {

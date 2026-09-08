@@ -7,7 +7,7 @@
 // well, the workspace name and the open thread's title.
 import { act, cleanup, configure, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionView, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { deriveSidebarProjects } from "../src/adapt/index.js";
 import { buildSwitcherCards } from "../src/components/switcher/switcherCards.js";
 import type { Api } from "../src/protocol/client.js";
@@ -17,7 +17,6 @@ import { ROW_META_CLASS } from "../src/sidebar/rowGrammar.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onComposerFocusRequest } from "../src/shell/shellRequests.js";
 import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
-import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
 import { releasesSwitchHold, stepSwitcherAt, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../src/shell/workspaceSwitcher.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 
@@ -104,7 +103,7 @@ configure({ asyncUtilTimeout: 10_000 });
 beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
   useWorkspacePreviews.setState({ images: {} });
@@ -470,7 +469,7 @@ describe("the card the space arrows put up", () => {
   });
 
   it("stays the cross-workspace jump in Spaces, where the Tab pair is the space's own threads", async () => {
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
     await mountShell();
     const restore = asDesktopShell();
     try {

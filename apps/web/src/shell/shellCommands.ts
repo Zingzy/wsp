@@ -18,7 +18,7 @@ import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPane
 import { sidebarThreadOrder } from "../sidebar/Sidebar.logic.js";
 import { spaceWorkspaceId } from "../sidebar/sidebarMode.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
-import { resetTerminalFontSize, stepTerminalFontSize } from "../terminal/fontSetting.js";
+import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import { requestComposerFocus, requestNewThread } from "./shellRequests.js";
 import { highlightedWorkspaceId, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
@@ -195,6 +195,9 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
     case "commandPalette.toggle":
       toggleCommandPalette();
       return;
+    case "settings.toggle":
+      useStore.getState().toggleSettings();
+      return;
     case "rightPanel.toggle":
       if (workspaceId) useRightPanelStore.getState().toggleVisibility(workspaceId);
       return;
@@ -213,13 +216,13 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       void (getTerminalFocusOwner() === "right-panel" ? splitActivePanelTerminal(workspaceId) : splitDrawerTerminal(workspaceId));
       return;
     case "terminal.zoomIn":
-      if (workspaceId) stepTerminalFontSize(workspaceId, 1);
+      if (workspaceId) stepTerminalZoom(workspaceId, 1);
       return;
     case "terminal.zoomOut":
-      if (workspaceId) stepTerminalFontSize(workspaceId, -1);
+      if (workspaceId) stepTerminalZoom(workspaceId, -1);
       return;
     case "terminal.zoomReset":
-      if (workspaceId) resetTerminalFontSize(workspaceId);
+      if (workspaceId) resetTerminalZoom(workspaceId);
       return;
     case "chat.new":
       if (workspaceId) requestNewThread({ workspaceId });

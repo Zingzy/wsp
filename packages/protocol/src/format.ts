@@ -20,6 +20,11 @@ export function fmtBytes(n: number): string {
 /** Memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
 const memGb = (memMb: number): number => Number((memMb / 1024).toFixed(1));
 
+/** A size in css pixels, as the settings page states the text and sidebar sizes. */
+export function fmtPx(px: number): string {
+  return `${px} px`;
+}
+
 /** A machine size's memory with its unit. */
 export function fmtMemGb(memMb: number): string {
   return `${memGb(memMb)} GB`;
@@ -741,15 +746,13 @@ export function goneWords(machineId: string, seen?: GoneSighting): string {
   return `${base}: the ${seen.by} found it gone at ${at}${answer}`;
 }
 
-/** The answer a sighting quotes when the host's metrics read came back missing while the state read still said
- * running: the host lost the VM before the gateway's record followed, so a pause or snapshot would have failed next. */
-export function hostLostAnswer(said: string): string {
-  return `metrics ${said}; the state read still said running`;
-}
-
 /** The machine row's line when a record that said paused met a machine the provider was running all along (a nap
  * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
 export const ALREADY_RUNNING = "already running at the provider";
+
+/** The machine row's line when a record marked gone met a machine the provider still holds, running or paused: the
+ * state read by id decides, so the record is gone no more and no rebuild abandoned a healthy machine. */
+export const NOT_GONE = "not gone at the provider after all; the record follows the state read";
 
 /** The machine row's line on a workspace the sweep recorded from the provider's listing: a machine of this setup's
  * that no record claimed, kept rather than killed, since a machine nobody records bills unseen. */

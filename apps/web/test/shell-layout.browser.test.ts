@@ -231,29 +231,25 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
-  it("in the desktop window the terminal draws at the Ghostty file's font-size: a file saying 16 gives cells a 16 px monospace line fits, not the app's 11 px mono", async () => {
-    await page!.goto(`${base}?theme=dark&ws=ws_a&mac=1&panel=terminal`);
-    await page!.waitForSelector("[data-terminal-translucent] canvas");
-    await page!.waitForFunction(() => (window as unknown as { surfaces: unknown[] }).surfaces.length > 0);
-    const read = await page!.evaluate(() => {
-      const [surface] = (window as unknown as { surfaces: { textSize: number; cellHeight: number }[] }).surfaces;
-      // A monospace line at the file's size and at the app's mono size, as the page lays them out.
-      const lineOf = (px: number): number => {
-        const span = document.createElement("span");
-        span.style.cssText = `position:absolute;font:400 ${px}px monospace;line-height:normal;white-space:pre`;
-        span.textContent = "Mg";
-        document.body.append(span);
-        const height = span.getBoundingClientRect().height;
-        span.remove();
-        return height;
-      };
-      return { textSize: surface!.textSize, cellHeight: surface!.cellHeight, line16: lineOf(16), line11: lineOf(11) };
-    });
-    console.info(`terminal size from a font-size 16 file: ${JSON.stringify(read)}`);
-    expect(read.textSize).toBe(16);
-    expect(read.cellHeight).toBeGreaterThanOrEqual(read.line16);
-    expect(read.cellHeight).toBeLessThan(read.line16 + 5);
-    expect(read.cellHeight).toBeGreaterThan(read.line11 + 4);
+  it("in the desktop window the terminal draws at the app's own text size over a file saying 16, and at the file's 16 once the record says the size comes from the file", async () => {
+    const read = async (query: string) => {
+      await page!.goto(`${base}?theme=dark&ws=ws_a&mac=1&panel=terminal${query}`);
+      await page!.waitForSelector("[data-terminal-translucent] canvas");
+      await page!.waitForFunction(() => (window as unknown as { surfaces: unknown[] }).surfaces.length > 0);
+      return page!.evaluate(() => {
+        const [surface] = (window as unknown as { surfaces: { textSize: number; cellHeight: number }[] }).surfaces;
+        const app = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--font-size-terminal"));
+        return { textSize: surface!.textSize, cellHeight: surface!.cellHeight, app };
+      });
+    };
+    const fromApp = await read("");
+    console.info(`terminal size with the app as the source: ${JSON.stringify(fromApp)}`);
+    expect(fromApp.textSize).toBe(fromApp.app);
+    const fromFile = await read("&size=file");
+    console.info(`terminal size with the file as the source: ${JSON.stringify(fromFile)}`);
+    expect(fromFile.textSize).toBe(16);
+    // The cells grow with the text: the file's 16 over the app's 14 is two pixels of text and at least that of cell.
+    expect(fromFile.cellHeight - fromApp.cellHeight).toBeGreaterThanOrEqual(2);
   }, 60_000);
 
   it("holding the switch chord puts the switcher up over the shell, one card per workspace of three parts, and the highlight moves nothing", async () => {
