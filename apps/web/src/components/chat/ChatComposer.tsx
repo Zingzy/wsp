@@ -34,8 +34,9 @@
 // a resumed one is started where its harness last said it was. The model,
 // effort, context window and access picks in the box's footer ride every
 // start, so a change mid-thread applies at the next turn.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TURN_IN_FLIGHT, sendNowFailedLine, sendRefusal, stillWorkingRefusal, stopFailedLine, workspaceState, type MachineState, type ReachState, type SendRefusalKind, type WorkspacePhase } from "@wsp/protocol";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
+import { ImageIcon } from "lucide-react";
+import { IMAGES_AFTER_TURN, IMAGES_MAX, TURN_IN_FLIGHT, noImagesLine, readsImages, sendNowFailedLine, sendRefusal, stillWorkingRefusal, stopFailedLine, workspaceState, type MachineState, type ReachState, type SendRefusalKind, type WorkspacePhase } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
@@ -46,6 +47,8 @@ import { catalogFromHarness } from "./adapt";
 import { ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
+import { ChatImageThumb } from "./ChatImages";
+import { attachmentOf, useComposerImages, useComposerImagesStore } from "./composerImages";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
 import { ComposerOptionPickers, useComposerPicks } from "./ComposerOptionPickers";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -53,6 +56,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerQueue } from "./ComposerQueue";
 import { searchSlashCommandItems, slashCommandItemsForPromptPosition } from "./composerSlashCommandSearch";
 import { ComposerSurface } from "./ComposerSurface";
+import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
 
 const PLACEHOLDER = "Ask anything, or / for commands";
@@ -121,7 +125,14 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     if (named.key !== named.thread) rekeyQueue(named.key, named.thread);
     release(named.thread);
   }, [named, rekeyQueue, release]);
+  const images = useComposerImages(workspaceId);
+  const addImages = useComposerImagesStore(s => s.add);
+  const removeImage = useComposerImagesStore(s => s.remove);
+  const sendImagesAs = useComposerImagesStore(s => s.sendAs);
+  const restoreImages = useComposerImagesStore(s => s.restore);
+  const [imageRefusal, setImageRefusal] = useState<string | null>(null);
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
+  const pickerRef = useRef<HTMLInputElement | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
   const [highlightedSearchKey, setHighlightedSearchKey] = useState<string | null>(null);
@@ -138,6 +149,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const unavailable = blocked === null ? null : sendRefusal(blocked);
   const sendDisabledReason = unavailable ?? (thread.busy ? TURN_IN_FLIGHT : null);
   const hasText = draft.prompt.trim().length > 0;
+  // The catalog answers before the click; a row the runtime's table stood in for is no answer, so the picker is
+  // offered and the runtime refuses in the agent's name if that binary turns out to read none.
+  const canAttach = readsImages(harnessCatalog);
 
   const runningTurn = thread.view.running ? thread.view.latestTurn : null;
   // The runtime keys sessions.interrupt by its own session id; the events carry the harness id, which differs after a
@@ -155,7 +169,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // One line in the slot above the box: the newest failure, else what blocks a send, else the turn that replied but
   // still runs, in the runtime's own words, since no new turn can start until its process exits.
   const line =
-    stopAttempt !== null && stopAttempt.error !== null
+    imageRefusal !== null
+      ? imageRefusal
+      : stopAttempt !== null && stopAttempt.error !== null
       ? stopFailedLine(stopAttempt.error)
       : steerAttempt !== null && steerAttempt.error !== null
         ? sendNowFailedLine(steerAttempt.error)
@@ -192,6 +208,40 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
 
   const onChange = useCallback((value: string, cursor: number) => setDraft(workspaceId, { prompt: value, cursor }), [setDraft, workspaceId]);
 
+  /** The one road every image takes into the composer: the paste, the drop and the picker all end here, so the caps
+   * and the refusal words are said once. An agent that reads no image is turned away before a file is even read. */
+  const take = useCallback(
+    (files: readonly File[]) => {
+      if (files.length === 0) return;
+      if (!canAttach) {
+        setImageRefusal(noImagesLine(harnessId));
+        return;
+      }
+      void addImages(workspaceId, files).then(setImageRefusal);
+    },
+    [addImages, canAttach, harnessId, workspaceId],
+  );
+
+  const onPaste = useCallback(
+    (event: ClipboardEvent<HTMLDivElement>) => {
+      const files = [...(event.clipboardData?.files ?? [])];
+      if (files.length === 0) return;
+      event.preventDefault();
+      take(files);
+    },
+    [take],
+  );
+
+  const onDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      const files = [...(event.dataTransfer?.files ?? [])];
+      if (files.length === 0) return;
+      event.preventDefault();
+      take(files);
+    },
+    [take],
+  );
+
   const highlight = useCallback(
     (itemId: string | null) => {
       setHighlightedItemId(itemId);
@@ -205,18 +255,33 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     (prompt: string, onRefused: () => void) => {
       if (!api) return;
       const requestId = newId();
+      const attachments = images.map(attachmentOf);
       setSending(true);
       hold(threadKey);
       appendUserTurn(prompt, requestId);
+      // The images leave the composer with the send and are kept under its request id, which is what the person's
+      // row in the transcript is drawn from; a refused send hands them back rather than losing them.
+      sendImagesAs(workspaceId, requestId);
+      setImageRefusal(null);
       void api
-        .startSession({ workspaceId, prompt, requestId, ...(resume ? { resume } : {}), ...(into !== undefined ? { thread: into } : {}), ...(cwd !== null ? { cwd } : {}), ...startOptions })
+        .startSession({
+          workspaceId,
+          prompt,
+          requestId,
+          ...(resume ? { resume } : {}),
+          ...(into !== undefined ? { thread: into } : {}),
+          ...(cwd !== null ? { cwd } : {}),
+          ...(attachments.length > 0 ? { attachments } : {}),
+          ...startOptions,
+        })
         .catch((err: unknown) => {
           setSending(false);
           onRefused();
+          restoreImages(workspaceId, requestId);
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, cwd, hold, into, resume, setSending, startOptions, threadKey, workspaceId],
+    [api, appendLocalError, appendUserTurn, cwd, hold, images, into, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, workspaceId],
   );
 
   const send = useCallback(() => {
@@ -224,6 +289,11 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     const snapshot = editorRef.current?.readSnapshot() ?? { value: draft.prompt, cursor: draft.cursor };
     const prompt = snapshot.value.trim();
     if (prompt === "") return;
+    // A queued row keeps only its words, so a message with images waits for the turn rather than losing them.
+    if (busy && images.length > 0) {
+      setImageRefusal(IMAGES_AFTER_TURN);
+      return;
+    }
     setDraft(workspaceId, EMPTY_DRAFT);
     if (!busy) {
       start(prompt, () => {
@@ -239,7 +309,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     }
     enqueue(threadKey, prompt, held ? "head" : "tail");
     release(threadKey);
-  }, [busy, draft, enqueue, held, release, sending, setDraft, start, threadKey, unavailable, workspaceId]);
+  }, [busy, draft, enqueue, held, images, release, sending, setDraft, start, threadKey, unavailable, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];
@@ -378,7 +448,29 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
           >
             <div className="relative">
               <ComposerSurface.Main>
-                <div data-chat-composer-surface="true" className="rounded-[20px] transition-[background-color] duration-200">
+                <div
+                  data-chat-composer-surface="true"
+                  className="rounded-[20px] transition-[background-color] duration-200"
+                  onPaste={onPaste}
+                  onDrop={onDrop}
+                  onDragOver={event => event.preventDefault()}
+                >
+                  {images.length > 0 ? (
+                    <ul aria-label="Images to send" data-composer-images="true" className="flex flex-wrap gap-1.5 px-3 pt-3 sm:px-4">
+                      {images.map((image, at) => (
+                        <li key={image.id}>
+                          <ChatImageThumb
+                            image={image}
+                            at={at + 1}
+                            onRemove={() => {
+                              removeImage(workspaceId, image.id);
+                              setImageRefusal(null);
+                            }}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                   <div ref={setMenuAnchor} className="relative px-3 pt-3.5 pb-2 sm:px-4 sm:pt-4">
                     {menuOpen ? (
                       <ComposerCommandMenuLayer anchor={menuAnchor}>
@@ -406,6 +498,31 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                     className="flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3 pb-3 sm:gap-0 sm:px-4 sm:pb-4"
                   >
                     <div className="-m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="ghost-muted"
+                        aria-label="Add an image"
+                        title={`Add an image: paste, drop or pick one. PNG, JPEG, GIF or WebP, at most ${IMAGES_MAX}.`}
+                        disabled={unavailable !== null}
+                        onClick={() => pickerRef.current?.click()}
+                        data-composer-image-picker="true"
+                      >
+                        <ImageIcon />
+                      </Button>
+                      <input
+                        ref={pickerRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/gif,image/webp"
+                        multiple
+                        hidden
+                        aria-hidden="true"
+                        data-composer-image-input="true"
+                        onChange={event => {
+                          take([...(event.target.files ?? [])]);
+                          event.target.value = "";
+                        }}
+                      />
                       <ComposerOptionPickers workspaceId={workspaceId} thread={thread} />
                     </div>
                     <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">

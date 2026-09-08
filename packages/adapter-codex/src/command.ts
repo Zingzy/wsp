@@ -4,6 +4,9 @@
 // through a quoted heredoc, since a long task as an argument would hit the
 // kernel's per-argument cap, and `-` tells codex to read it there; the heredoc
 // also closes stdin, which codex otherwise waits on when it is not a terminal.
+// Images ride `-i`, one flag per image on both exec and resume: exec's flag
+// takes many values and resume's one, and one flag each parses on both, with
+// the `-` after it still read as the prompt (measured on 0.153.0, 2026-09-08).
 import { inFolder, shellQuote } from "@wsp/protocol";
 
 const PROMPT_END = "WSP_PROMPT_END";
@@ -36,6 +39,8 @@ export interface BuildCommandOptions {
   effort?: string;
   /** One of the catalog's sandbox modes; absent runs without a sandbox, as every turn in a throwaway machine does. */
   permissionMode?: string;
+  /** Absolute paths of images already on the machine; the CLI reads each off disk, so it takes no bytes of its own. */
+  images?: readonly string[];
 }
 
 /** A value that may ride a codex command line or a SQL literal unquoted; anything else is refused before it does. */
@@ -60,7 +65,7 @@ function accessFlags(mode: string | undefined): string[] {
  * carries no HOME, so the default folder is `~`, which bash reads from passwd.
  */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { prompt, resume, cwd, model, effort, permissionMode } = options;
+  const { prompt, resume, cwd, model, effort, permissionMode, images } = options;
   if (prompt.split("\n").includes(PROMPT_END)) throw new Error(`the prompt has a line that reads ${PROMPT_END}, which ends the prompt`);
   const codex = [
     "codex exec",
@@ -70,9 +75,17 @@ export function buildCommand(options: BuildCommandOptions): string {
     ...accessFlags(permissionMode),
     ...(model === undefined ? [] : [`-m ${slug("model", model)}`]),
     ...(effort === undefined ? [] : [config("model_reasoning_effort", slug("effort", effort))]),
+    ...(images ?? []).map(path => `-i ${shellQuote(imagePath(path))}`),
     "-",
   ].join(" ");
   return inFolder(cwd, `${codex} <<'${PROMPT_END}'\n${prompt}\n${PROMPT_END}`);
+}
+
+/** An image path is a plain absolute path on the machine, never a word the flag would read as another flag: `-i`
+ * takes many values on exec and one on resume, so a value starting with a dash would be read as the next flag. */
+function imagePath(path: string): string {
+  if (!path.startsWith("/") || path.includes("\n")) throw new Error(`an image path must be one absolute path on the machine, got "${path}"`);
+  return path;
 }
 
 /** Interrupt is a hard boundary, as it is for every harness: teardown (SIGTERM), then SIGKILL after this grace window. */

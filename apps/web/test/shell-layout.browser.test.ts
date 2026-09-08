@@ -9,7 +9,9 @@
 // uncut and without growing the row, collapsing the sidebar leaves the
 // page header's left padding alone, a send refusal above the composer is
 // one muted mono line in a slot the composer keeps at one height whether or
-// not a line is in it, a right-click on a workspace row opens the in-app menu
+// not a line is in it, images pasted into the composer are one row of square
+// thumbnails above the text inside the box, each with its own remove,
+// a right-click on a workspace row opens the in-app menu
 // at the pointer in the tooltip skin, inside the viewport, Rename turns a
 // thread row's title and a workspace row's name into one field in the same
 // slot at the same row height, and the switch
@@ -712,6 +714,51 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         expect(state.box).toEqual(idle.box);
         expect(state.shell).toEqual(idle.shell);
       }
+    }
+  }, 60_000);
+
+  it("the composer's images are a row of square thumbnails above the text, each with its own remove, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
+      await page!.waitForSelector("[data-composer-image-picker]");
+      const empty = await box("[data-chat-composer]");
+      // The picker sits in the footer's left group, first, before the model and access pickers.
+      const order = await page!.locator("[data-chat-composer-footer]").evaluate(el =>
+        [...el.querySelectorAll("button")].map(b => b.getAttribute("aria-label") ?? b.textContent?.trim() ?? ""),
+      );
+      expect(order[0]).toBe("Add an image");
+      expect(await page!.locator("[data-composer-images]").count()).toBe(0);
+
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a&images=3`);
+      await page!.waitForSelector("[data-composer-images] [data-chat-image]");
+      await page!.waitForFunction(() => document.querySelectorAll("[data-composer-images] [data-chat-image]").length === 3);
+      const thumbs = await page!.locator("[data-composer-images] [data-chat-image]").evaluateAll(els =>
+        els.map(el => {
+          const r = el.getBoundingClientRect();
+          const button = el.querySelector("button")!;
+          const s = getComputedStyle(button);
+          return { width: Math.round(r.width), height: Math.round(r.height), top: Math.round(r.top), radius: s.borderTopLeftRadius, removes: el.querySelectorAll("[aria-label^=Remove]").length };
+        }),
+      );
+      expect(thumbs).toHaveLength(3);
+      // One square per image, all on one line, each with its own remove: a uniform row, not three shapes.
+      expect(new Set(thumbs.map(t => `${t.width}x${t.height}`)).size).toBe(1);
+      expect(thumbs[0]!.width).toBe(thumbs[0]!.height);
+      expect(new Set(thumbs.map(t => t.top)).size).toBe(1);
+      expect(new Set(thumbs.map(t => t.radius)).size).toBe(1);
+      expect(thumbs.map(t => t.removes)).toEqual([1, 1, 1]);
+      // The row is above the text, inside the box, and the box grew by the row rather than the row escaping it.
+      const row = await box("[data-composer-images]");
+      const editor = await box("[data-chat-composer-form] [contenteditable]");
+      const shell = await box("[data-slot=composer-shell]");
+      expect(row.y + row.height).toBeLessThanOrEqual(editor.y);
+      expect(row.y).toBeGreaterThan(shell.y);
+      expect(row.x + row.width).toBeLessThanOrEqual(shell.x + shell.width);
+      const grown = await box("[data-chat-composer]");
+      expect(grown.height).toBeGreaterThan(empty.height);
+      const path = join(SHOTS_DIR, `composer-images-${theme}.png`);
+      await page!.locator("[data-chat-composer]").screenshot({ path });
+      console.info(`composer images screenshot: ${path}`);
     }
   }, 60_000);
 

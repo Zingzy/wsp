@@ -4,7 +4,7 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { backgroundTasksLine, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnResult, TurnStatus } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult, TurnStatus } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
@@ -22,6 +22,8 @@ export interface StartOptions {
   contextWindow?: string;
   /** The name the session is opened under; the CLI records it as the person's own, so nothing generated replaces it. */
   title?: string;
+  /** Images for this turn, read off their bytes: this CLI takes them inline, so none of them is on the machine. */
+  images?: readonly TurnImage[];
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -59,6 +61,8 @@ export interface ClaudeAdapter {
   readonly sessions: ReadonlyMap<string, ClaudeSession>;
   /** Sessions take a message mid-turn over the stdin channel. */
   readonly steers: true;
+  /** The CLI's stream-json user message carries image blocks, so an image never lands on the machine. */
+  readonly attachments: "inline";
   /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. The
    * handshake carries no reason of its own, so this probe has no refusal to hand the footer. */
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
@@ -404,7 +408,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       contextWindow: options.contextWindow,
       ...(options.title !== undefined ? { name: options.title } : {}),
     });
-    const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(options.prompt, localId)] });
+    const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(options.prompt, localId, options.images)] });
     return follow({ stream, localId, announced: false, command, onEvent: options.onEvent });
   };
 
@@ -422,6 +426,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       : {}),
     sessions,
     steers: true,
+    attachments: "inline",
     probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir, baseEnv: deps.baseEnv })).then(parseCatalogProbe),
     sessionTitle: (sessionId, exec) => exec(sessionTitleCommand({ configDir: deps.configDir, sessionId })).then(parseSessionTitle),
     renameSession: (sessionId, title, exec) => exec(renameCommand({ configDir: deps.configDir, sessionId, title })).then(parseRename),

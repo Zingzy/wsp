@@ -29,6 +29,7 @@ import {
   isMissing,
   isNetworkError,
   landBundle,
+  tarOf,
   parseMergeOutput,
   plural,
   agentsOnMachine,
@@ -92,6 +93,7 @@ import {
 import type {
   AdapterAttachOptions,
   AdapterEvent,
+  AttachmentRoad,
   DaemonEvent,
   DaemonReachView,
   EventUnion,
@@ -130,6 +132,9 @@ import type {
   SessionView,
   TitleSource,
   SnapshotStorage,
+  ImageAttachment,
+  ImageRecord,
+  TurnImage,
   TurnResult,
   TurnStatus,
   WorkspaceCreateStage,
@@ -138,7 +143,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, RECORD_RESTORED, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathOn, imageRecord, imagesBlocked, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, RECORD_RESTORED, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, threadImagesDir, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -176,6 +181,9 @@ export interface HarnessStartOptions {
   /** The name the thread is opened under, for a CLI that takes one at launch; every harness is told it again through
    * renameSession once its session is announced, so an adapter whose CLI cannot take it here need not. */
   title?: string;
+  /** The turn's images, each already on the road its adapter declared: bytes for an inline adapter, a path on the
+   * machine for a file one. Empty on a turn that carries none. */
+  images?: readonly TurnImage[];
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -201,6 +209,9 @@ export interface HarnessAdapter {
   attach?(options: AdapterAttachOptions): Promise<HarnessSession | "gone">;
   /** Whether this adapter's sessions carry steer; the catalog tells the composer before a turn runs. */
   readonly steers: boolean;
+  /** How this harness takes an image with a turn, and that it takes one at all: absent, a turn carrying an image is
+   * refused in this agent's name before the machine is asked for anything. */
+  readonly attachments?: AttachmentRoad;
   /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
    * when it does not answer at all; absent, the table alone answers and nothing runs. */
   probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
@@ -843,6 +854,9 @@ export interface Runtime {
         /** The name the thread takes as a person's: it stands from the first second, the harness is told it too, and
          * no generated title ever replaces it. Rejects on a blank one. */
         title?: string;
+        /** The images the message carries. Rejects over the caps, and rejects naming the agent when that agent's
+         * adapter reads no image, both before the machine is asked for anything. */
+        attachments?: readonly ImageAttachment[];
       },
     ): Promise<SessionHandle>;
     /** Every turn this state file knows, the ones before a restart as they were last written. One that was still
@@ -2660,7 +2674,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * not answer costs one exec, not one per composer mount. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
   const catalogOn = (table: HarnessCatalog, machine: Machine, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
-    const known: HarnessCatalog = { ...table, steers: adapter.steers, renames: adapter.renameSession !== undefined };
+    const known: HarnessCatalog = { ...table, steers: adapter.steers, renames: adapter.renameSession !== undefined, images: adapter.attachments !== undefined };
     if (adapter.probeCatalog === undefined) return Promise.resolve(known);
     const key = `${machine.id}:${table.harness}`;
     const hit = catalogs.get(key);
@@ -2825,6 +2839,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The mark goes on the way out, never into the cache: a start and a list share one cached table. */
   const markDefault = (c: HarnessCatalog): HarnessCatalog => ({ ...c, ...(c.harness === DEFAULT_AGENT.id ? { isDefault: true } : {}) });
 
+  /**
+   * The turn's images on the road its adapter declared, imagesBlocked having already turned away what cannot go. An
+   * inline adapter is handed the bytes and nothing lands anywhere. A file adapter is handed paths under the thread's
+   * own images folder, emptied first, so a thread holds the images of the turn it is running and not of every turn
+   * before it; the folder travels the same signed-URL road an import takes, since the exec body holds 16 KB.
+   */
+  const landImages = async (entry: LiveWorkspace, road: AttachmentRoad | undefined, threadId: string, images: readonly ImageAttachment[]): Promise<TurnImage[]> => {
+    if (images.length === 0 || road === undefined) return [];
+    if (road === "inline") return images.map(({ mediaType, bytes }) => ({ mediaType, bytes }));
+    const landed = images.map((image, index) => ({ ...image, path: imagePathOn(threadId, index, image.mediaType) }));
+    const dir = threadImagesDir(threadId);
+    await entry.machine.exec(`rm -rf ${shellQuote(dir)}`, { timeoutMs: INLINE_EXEC_MS });
+    await importInto(entry.machine, tarOf(landed.map(i => ({ path: i.path, mode: 0o600, content: Buffer.from(i.bytes, "base64") }))), "/", { overlay: true });
+    return landed.map(({ mediaType, bytes, path }) => ({ mediaType, bytes, path }));
+  };
+
   /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. */
   const adapterFor = (entry: LiveWorkspace, named?: string): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
@@ -2938,7 +2968,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     notify?: string;
     outcome: SessionStartOutcome;
     /** What this turn's own session.start row carries, for the road that still has to write it. */
-    opening: { prompt: string; requestId?: string; afterCut?: boolean; title?: string };
+    opening: { prompt: string; requestId?: string; afterCut?: boolean; title?: string; attachments?: readonly ImageRecord[] };
     /** The harness session this turn resumes, so the row it takes over keeps who opened the thread and with what. */
     resume?: string;
     /** What the row already knows of this turn's reply: a re-opened turn whose result landed before the restart is
@@ -3002,6 +3032,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             prompt: opening.prompt,
             ...(opening.requestId !== undefined ? { requestId: opening.requestId } : {}),
             ...(opening.afterCut === true ? { afterCut: true } : {}),
+            ...(opening.attachments !== undefined ? { attachments: [...opening.attachments] } : {}),
             ...(event.model !== undefined ? { model: event.model } : {}),
             ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
             ...(event.tools !== undefined ? { tools: event.tools } : {}),
@@ -3218,6 +3249,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const title = o.title === undefined ? undefined : titleLine(o.title);
       if (title === "") throw new Error(EMPTY_TITLE_LINE);
       const { harness, adapter } = adapterFor(entry, o.harness);
+      const records = (o.attachments ?? []).map(imageRecord);
+      const blocked = imagesBlocked(records, adapter.attachments, harness);
+      if (blocked !== null) throw new Error(blocked);
       const named = o.thread === undefined ? undefined : latestOn(o.thread);
       if (o.thread !== undefined && named?.workspaceId !== workspaceId) throw new Error(`no thread ${o.thread} on this workspace`);
       const resume = o.resume ?? named?.claudeSessionId;
@@ -3238,8 +3272,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Checked against the binary's own lists, the ones the composer shows for this workspace.
       const picks = startPicks(table === undefined ? undefined : await catalogOn(table, entry.machine, adapter), o, resume === undefined);
       let outcome: SessionStartOutcome = "started";
-      // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time.
-      for (let running = runningOn(threadId); running !== undefined; running = runningOn(threadId)) {
+      let images: TurnImage[] = [];
+      let landed = (o.attachments?.length ?? 0) === 0;
+      // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time. Nothing
+      // below this loop may await: the wait ends the moment no turn is running, and every line from there to
+      // runTurn, which registers this one, is one synchronous run. The images land inside it for that reason, and
+      // the wait is entered again after them, since landing them is a trip to the machine.
+      for (;;) {
+        const running = runningOn(threadId);
+        if (running === undefined) {
+          if (landed) break;
+          landed = true;
+          images = await landImages(entry, adapter.attachments, threadId, o.attachments ?? []);
+          continue;
+        }
         // The turn replied and its process has not exited: it takes no message and waiting on it would block the
         // caller for however long the harness lingers, so the send is refused in words naming the thread.
         if (running.turnLive?.reply !== undefined) throw new Error(stillWorkingRefusal(threadId));
@@ -3280,7 +3326,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         turnId,
         ...(notify !== undefined ? { notify } : {}),
         outcome,
-        opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}) },
+        opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
         ...(resume !== undefined ? { resume } : {}),
         open: onEvent =>
           adapter.start({
@@ -3290,6 +3336,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...picks,
             ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
             ...(title !== undefined ? { title } : {}),
+            ...(images.length > 0 ? { images } : {}),
             onEvent,
           }),
       });

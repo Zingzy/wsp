@@ -9,8 +9,8 @@
 // reads a key or imports the runtime: the host is the only process that talks
 // to the provider.
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
@@ -24,6 +24,7 @@ import {
   HOST_STOPPING_CLOSE,
   HOST_STOPPING_LINE,
   HostFolderListing,
+  IMAGES_MAX,
   LOGIN_CHOICES,
   NOTIFY_ME,
   NOTIFY_WORDS,
@@ -61,9 +62,13 @@ import {
   forgetNotice,
   goldenHead,
   goneRefusal,
+  imageLine,
+  imageTypeOf,
+  imagesRefusal,
   importConsented,
   importRequest,
   noAdapterLine,
+  notAnImageLine,
   notifyLine,
   notifyTail,
   offeredSize,
@@ -87,6 +92,7 @@ import {
   type ExecEvent,
   type GoldenManifest,
   type HarnessCatalog,
+  type ImageAttachment,
   type ProjectExportEvent,
   type ProjectImportEvent,
   type ProjectImportRequest,
@@ -660,6 +666,36 @@ export function picksOf(picks: Picks): Record<string, string> {
   return { ...(picks.model !== undefined ? { model: picks.model } : {}), ...(picks.effort !== undefined ? { effort: picks.effort } : {}), ...(picks.access !== undefined ? { permissionMode: picks.access } : {}) };
 }
 
+/** The head every image type is told apart by; the longest of the four is twelve bytes. */
+const IMAGE_HEAD_BYTES = 12;
+
+/**
+ * The images a `--image` flag or an MCP `images` list names, read off this computer's disk and carried as bytes, so
+ * nothing on the machine ever reaches back for the person's filesystem. Each file's type comes off its own first
+ * bytes, never off its name, and the caps are checked against what the files weigh before any of them is read whole,
+ * so naming a video does not pull it into memory to refuse it.
+ */
+export function imagesFrom(paths: readonly string[]): ImageAttachment[] {
+  const files = paths.map(given => {
+    const path = resolve(given);
+    const stat = statSync(path);
+    if (!stat.isFile()) throw usageRefusal(notAnImageLine(given));
+    const head = Buffer.alloc(IMAGE_HEAD_BYTES);
+    const fd = openSync(path, "r");
+    try {
+      readSync(fd, head, 0, IMAGE_HEAD_BYTES, 0);
+    } finally {
+      closeSync(fd);
+    }
+    const mediaType = imageTypeOf(head);
+    if (mediaType === null) throw usageRefusal(notAnImageLine(given));
+    return { path, mediaType, name: basename(path), bytes: stat.size };
+  });
+  const refusal = imagesRefusal(files);
+  if (refusal !== null) throw usageRefusal(refusal);
+  return files.map(f => ({ mediaType: f.mediaType, name: f.name, bytes: readFileSync(f.path).toString("base64") }));
+}
+
 /** The three pick flags as given on the command line. */
 export function pickFlags(flags: Flags): Picks {
   return Object.fromEntries(PICK_FLAGS.map(name => [name, flag(flags, name)]));
@@ -686,8 +722,9 @@ export async function checkedStart(client: HostClient, task: string, harness: st
 /** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the named
  * folder or the workspace's own; cwd is the field the app's composer sends. notify is the thread its every turn's end
  * is told to, or NOTIFY_ME. */
-export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: string; title?: string } = {}): Record<string, unknown> {
+export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: string; title?: string; images?: readonly string[] } = {}): Record<string, unknown> {
   const cwd = workFolder(workspace, opts.cwd);
+  const attachments = imagesFrom(opts.images ?? []);
   return {
     workspaceId: workspace.id,
     prompt,
@@ -695,6 +732,7 @@ export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks 
     ...(opts.harness !== undefined ? { harness: opts.harness } : {}),
     ...(opts.notify !== undefined ? { notify: opts.notify } : {}),
     ...(opts.title !== undefined ? { title: opts.title } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
     ...picksOf(opts),
   };
 }
@@ -710,10 +748,11 @@ export async function notifyOf(client: HostClient, ref: string | undefined): Pro
  * or, on a thread whose harness never announced a session, runs the message as its first turn; under the thread's own
  * agent, with any pick named for this turn. A row from before threads had ids resumes by its session, and one with
  * neither is refused: a start naming nothing would open a new thread in silence. */
-export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {}): Record<string, unknown> {
+export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {}, images: readonly string[] = []): Record<string, unknown> {
   if (thread.threadId === undefined && thread.claudeSessionId === undefined) throw new Error(`thread ${thread.id} has no session to resume yet`);
   const target = thread.threadId !== undefined ? { thread: thread.threadId } : { resume: thread.claudeSessionId };
-  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, ...target, ...picksOf(picks) };
+  const attachments = imagesFrom(images);
+  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, ...target, ...(attachments.length > 0 ? { attachments } : {}), ...picksOf(picks) };
 }
 
 /** A start reply the protocol schema refuses: the host process predates or postdates this command's build. */
@@ -911,6 +950,8 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
     event: e => {
       ctx.out.emit(e, e.type === "session.done" ? e.result.text : undefined);
       if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
+      // The person's turn as the transcript keeps it: one bracket per image, since a terminal draws no pixels.
+      if (e.type === "session.start") for (const image of e.attachments ?? []) stream.line(imageLine(image));
       if (e.type === "session.delta" && e.kind === "text") stream.text(e.text);
       if (e.type === "session.delta" && e.kind === "tool_use") stream.line(toolActivityLine(e.toolName, e.text));
       if (e.type === "session.delta" && e.kind === "tool_result") {
@@ -1192,6 +1233,7 @@ const NotifyIn = z.string().optional().describe("a thread (by id, or a prefix of
 const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute; absent means the workspace's project folder, else the home folder");
 const DetachIn = z.boolean().optional().describe("true answers with the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end; for a turn that runs for minutes or an hour, so this call does not block for it");
 const TitleIn = z.string().optional().describe("the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it");
+const ImagesIn = z.array(z.string()).optional().describe(`paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: PNG, JPEG, GIF or WebP, at most ${IMAGES_MAX} and 10 MB each. The host reads each file and sends its bytes, so the machine never reaches back for this computer\u2019s files; a message to an agent that reads no image is refused naming that agent.`);
 const ConfirmIn = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");
 /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
 const PICK_INPUTS = {
@@ -1630,9 +1672,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "thread new",
-    usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach] "<task>"',
+    usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <path>, --detach] "<task>"',
     about: "opens a thread with the agent, model, effort and access the app offers; follows its first turn, or with --detach prints the id and returns",
-    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" }, title: { type: "string" }, detach: { type: "boolean" } },
+    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" }, title: { type: "string" }, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       const [task] = ctx.args;
       const within = flag(ctx.flags, "in");
@@ -1644,21 +1686,21 @@ export const VERBS: readonly Verb[] = [
       const picks = pickFlags(ctx.flags);
       await checkedStart(client, task, harness, picks, found.id);
       const workspace = await awake(client, found, "send", line => ctx.io.error(line));
-      const opening = openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")), title: flag(ctx.flags, "title") });
+      const opening = openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
       if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening);
       else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true)));
       return 0;
     },
     tool: tool({
       description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll. ${NOTIFY_WORDS}.`,
-      input: { workspace: WorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, title: TitleIn, detach: DetachIn },
+      input: { workspace: WorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, title: TitleIn, images: ImagesIn, detach: DetachIn },
       output: TurnOut.shape,
-      call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, detach, ...input }, deps) => {
+      call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, images, detach, ...input }, deps) => {
         const client = await deps.client();
         const found = await workspaceOf(client, ref);
         await checkedStart(client, task, harness, input, found.id);
         const target = await awake(client, found, "send", QUIET_LINE);
-        const opening = openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell), title });
+        const opening = openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell), title, images });
         if (detach === true) return detachedOut(await startDetached(client, opening, "agent"));
         const out = turnOut(await follow(client, opening, "agent", QUIET_TURN));
         return asText(turnText(out), out);
@@ -1696,9 +1738,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "send",
-    usage: 'wsp send <thread> [--model, --effort, --access <value>] [--detach] "<message>"',
-    about: "a message to the thread, on a named model, effort or access; a running turn keeps its own; --detach prints the id and returns",
-    options: { ...PICK_OPTIONS, detach: { type: "boolean" } },
+    usage: 'wsp send <thread> [--model, --effort, --access <value>] [--image <path>] [--detach] "<message>"',
+    about: "a message to the thread, on a named model, effort or access, with images; a running turn keeps its own; --detach prints the id and returns",
+    options: { ...PICK_OPTIONS, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       const [ref, message] = ctx.args;
       if (ref === undefined || message === undefined || ctx.args.length !== 2) throw usageRefusal("wsp send takes a thread and one message");
@@ -1707,21 +1749,22 @@ export const VERBS: readonly Verb[] = [
       const thread = await threadOf(client, ref);
       await checkedStart(client, message, thread.harness, picks, thread.workspaceId);
       await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
-      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, messageTo(thread, message, picks), picks);
-      else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks), false, picks)));
+      const images = flagList(ctx.flags, "image");
+      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, messageTo(thread, message, picks, images), picks);
+      else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks, images), false, picks)));
       return 0;
     },
     tool: tool({
       description: `Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end. A model, effort or access named here is the turn's; a turn that joins a running one keeps that one's. ${SEND_MEETS}`,
-      input: { thread: z.string(), message: z.string(), ...PICK_INPUTS, detach: DetachIn },
+      input: { thread: z.string(), message: z.string(), ...PICK_INPUTS, images: ImagesIn, detach: DetachIn },
       output: TurnOut.shape,
-      call: async ({ thread: ref, message, detach, ...input }, deps) => {
+      call: async ({ thread: ref, message, images, detach, ...input }, deps) => {
         const client = await deps.client();
         const thread = await threadOf(client, ref);
         await checkedStart(client, message, thread.harness, input, thread.workspaceId);
         await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
-        if (detach === true) return detachedOut(await startDetached(client, messageTo(thread, message, input), "agent"));
-        const out = turnOut(await follow(client, messageTo(thread, message, input), "agent", QUIET_TURN));
+        if (detach === true) return detachedOut(await startDetached(client, messageTo(thread, message, input, images), "agent"));
+        const out = turnOut(await follow(client, messageTo(thread, message, input, images), "agent", QUIET_TURN));
         return asText(turnText(out), out);
       },
     }),

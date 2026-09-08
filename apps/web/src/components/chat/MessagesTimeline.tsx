@@ -55,6 +55,8 @@ import {
 import { Button } from "../ui/button";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
+import { ChatImageRow } from "./ChatImages";
+import { useSentImages } from "./composerImages";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
@@ -941,6 +943,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const ctx = use(TimelineRowCtx);
   const canRevertAgentWork =
     typeof ctx.revertTurnCountByUserMessageId.get(row.message.id) === "number";
+  // The pixels are this tab's, held under the request id its own send carried; a transcript from a reload or another
+  // client has the runtime's records and draws their words.
+  const images = useSentImages(row.message.requestId);
 
   return (
     <div className="group flex flex-col items-end gap-1">
@@ -948,6 +953,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         <span data-user-message-steered="true" className="pe-1 font-mono text-[11px] leading-4 text-muted-foreground">steered</span>
       ) : null}
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+        <ChatImageRow records={row.message.attachments ?? []} images={images} />
         <CollapsibleUserMessageBody
           text={row.message.text}
           skills={ctx.skills}

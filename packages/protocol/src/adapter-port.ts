@@ -6,7 +6,8 @@
 // reads out of the harness's own store when the runtime asks what that harness
 // calls a session (SessionTitleReader), what it writes back into that store
 // when a thread is named (SessionRenamer), and what it answers when the runtime
-// asks the harness itself to name a thread (SessionTitleMaker). It sits here, beside the wire types,
+// asks the harness itself to name a thread (SessionTitleMaker), and how it
+// takes an image with a turn (AttachmentRoad). It sits here, beside the wire types,
 // so no adapter owns the interface its siblings implement. The runtime folds
 // these into the SessionEvent shapes in index.ts that clients read, which is
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
@@ -46,6 +47,25 @@ export interface AdapterAttachOptions {
   model?: string;
   cwd?: string;
   onEvent: (event: AdapterEvent) => void;
+}
+
+/**
+ * How one harness takes an image with a turn, the single fact that varies between them: `inline` puts the bytes in
+ * the message the adapter writes, so nothing lands on the machine; `file` reads the image off the machine's disk, so
+ * the runtime lands each one under the thread's images folder first and the adapter passes the paths on its flag.
+ * An adapter that declares neither reads no image at all, and the runtime refuses such a turn in that agent's name
+ * before the machine is asked.
+ */
+export type AttachmentRoad = "inline" | "file";
+
+/** One image as the adapter for its road reads it: an inline road reads mediaType and bytes, a file road reads path,
+ * where the runtime landed this image before the start. */
+export interface TurnImage {
+  mediaType: string;
+  /** The image's bytes, base64, as the client sent them. */
+  bytes: string;
+  /** Where this image sits on the machine; set by the runtime on the file road only. */
+  path?: string;
 }
 
 export interface ExecStream {
