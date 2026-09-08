@@ -3,6 +3,7 @@
 
 import { randomUUID } from "node:crypto";
 import { inFolder, shellQuote } from "@wsp/protocol";
+import type { TurnImage } from "@wsp/protocol";
 
 // Inherited CLAUDE_CODE_*/CLAUDECODE mark the child as nested inside another
 // Claude Code run; FORCE_CODE_TERMINAL flips terminal detection (t3code unsets
@@ -142,11 +143,21 @@ export function buildCommand(options: BuildCommandOptions): string {
   return inFolder(cwd, claude);
 }
 
-/** One line of the stdin channel: a user message in the CLI's stream-json input shape. */
-export function userMessageLine(text: string, sessionId: string): string {
+/**
+ * One line of the stdin channel: a user message in the CLI's stream-json input shape. Images ride the same message as
+ * base64 content blocks ahead of the text, the shape the CLI took on 2.1.263 (measured 2026-09-08: a 64px block sent
+ * this way came back described), so nothing has to land on the machine for this harness.
+ */
+export function userMessageLine(text: string, sessionId: string, images: readonly TurnImage[] = []): string {
   return JSON.stringify({
     type: "user",
-    message: { role: "user", content: [{ type: "text", text }] },
+    message: {
+      role: "user",
+      content: [
+        ...images.map(image => ({ type: "image", source: { type: "base64", media_type: image.mediaType, data: image.bytes } })),
+        { type: "text", text },
+      ],
+    },
     parent_tool_use_id: null,
     session_id: sessionId,
   });
