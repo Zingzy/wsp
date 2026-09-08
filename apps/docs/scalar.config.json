@@ -11,7 +11,6 @@
       "darkMode": "assets/logo-dark.svg",
       "lightMode": "assets/logo-light.svg"
     },
-    "theme": "none",
     "head": {
       "title": "wsp docs",
       "meta": [
