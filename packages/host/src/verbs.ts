@@ -70,6 +70,7 @@ import {
   imagesRefusal,
   importConsented,
   importRequest,
+  kindWords,
   needsRebuild,
   noAdapterLine,
   notAFileLine,
@@ -91,6 +92,7 @@ import {
   usageRefusal,
   verbFailure,
   waitTimedOutLine,
+  workspaceKind,
   workspaceState,
   workspaceWord,
   type Capabilities,
@@ -591,6 +593,14 @@ export function shortenedEnd(text: string, width: number): string {
 
 function threadLine(t: ThreadRow): string[] {
   return [t.id, t.workspaceName, t.harness, t.status, t.startedBy, t.cwd !== undefined ? shortenedFront(t.cwd, FOLDER_WIDTH) : "", shortenedEnd(t.title, TITLE_WIDTH)];
+}
+
+/** A workspace row: what its machine is, and its state where the kind has one. The kind's own words for the machine
+ * stand in for the provider's id, and a kind wsp does not drive has no state of its own to name, so that cell stays
+ * empty; both facts come off the one kind table. */
+function workspaceLine(w: WorkspaceView): string[] {
+  const kind = kindWords(workspaceKind(w));
+  return [w.name, w.id, kind.machine ?? w.machineId, kind.driven ? workspaceWord(workspaceState({ phase: w.phase })) : "", w.project !== undefined ? shortenedFront(w.project.dest, FOLDER_WIDTH) : ""];
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
@@ -1351,9 +1361,18 @@ function folderLines(listing: HostFolderListing): string[] {
 export const VERBS: readonly Verb[] = [
   {
     name: "workspaces",
-    toolOnly: "the rows wsp threads folds its output from; the command line lists threads with their workspace on every row",
+    usage: "wsp workspaces",
+    about: "every workspace this host runs: what its machine is, its state where the kind has one, and its project folder",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length !== 0) throw usageRefusal("wsp workspaces takes no positional arguments");
+      const rows = await workspaces(await ctx.client());
+      ctx.out.emit({ workspaces: rows }, table([["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECT"], ...rows.map(workspaceLine)]).join("\n"));
+      return 0;
+    },
     tool: tool({
-      description: "Every workspace this host runs, as the app lists them: id, name, phase (running or napping) and the golden it forked from.",
+      description:
+        "Every workspace this host runs, as the app lists them: id, name, phase (running or napping), the golden it forked from and its project folder. A workspace is a machine wsp forked at the provider, or this computer itself, which forks from no golden and runs while the host does; kind says which, and the name is what thread_new and every other verb take.",
       input: {},
       output: { workspaces: z.array(WorkspaceView) },
       call: async (_args, deps) => asJson({ workspaces: await workspaces(await deps.client()) }),

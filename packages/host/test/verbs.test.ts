@@ -7,11 +7,11 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ThreadView, effortsFor, markedDefault, notifyLine, unknownAgentLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ThreadView, WorkspaceView, effortsFor, markedDefault, notifyLine, unknownAgentLine, workspaceKind, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
-import { HELP, cli, serve } from "../src/cli.js";
+import { HELP, cli, localWiring, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { PLAN_ONLY, dialHost, messageTo, threadRows } from "../src/verbs.js";
@@ -59,7 +59,7 @@ describe("wsp verbs over the host", () => {
     await store.put("goldens", "default", SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) } });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user")) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     // The host has its keys; the verbs never read any.
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -102,7 +102,7 @@ describe("wsp verbs over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend, store: over, adapters });
+    rt = createRuntime({ backend, store: over, adapters, local: localWiring(join(dir, "user")) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -178,6 +178,35 @@ describe("wsp verbs over the host", () => {
     expect(io.lines[0]).toMatch(/^created mac ws_[0-9a-f]{8} \(this computer\)$/);
     const written = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces: Record<string, { name: string; kind: string; machineId: string }> };
     expect(Object.values(written.workspaces).map(w => [w.name, w.kind, w.machineId])).toEqual([["mac", "local", "local"]]);
+  });
+
+  it("workspaces lists this computer beside a fork, its machine cell the kind's own words and its state cell empty, and thread new --in takes it by name like any workspace", async () => {
+    await run("new", "alpha");
+    await run("new", "--local", "mac");
+    const listed = await run("workspaces");
+    expect(listed.code).toBe(0);
+    const [heading, ...rows] = listed.io.lines[0]!.split("\n");
+    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECT"]);
+    // The fork names its machine and its state; this computer names neither, so both cells fall off the end of the row.
+    expect(rows.map(r => r.split(/ {2,}/))).toEqual([
+      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running"],
+      ["mac", expect.stringMatching(/^ws_/), "this computer"],
+    ]);
+    expect(listed.io.errors).toEqual([]);
+
+    const raw = await run("workspaces", "--json");
+    const rawRows = (json(raw.io)[0] as { workspaces: WorkspaceView[] }).workspaces;
+    expect(rawRows.map(w => [w.name, workspaceKind(w), w.golden])).toEqual([
+      ["alpha", "cloud", head(SEALED_GOLDEN).snapshotId],
+      ["mac", "local", ""],
+    ]);
+
+    const opened = await run("thread", "new", "--in", "mac", "say pong");
+    expect(opened.code).toBe(0);
+    expect(opened.io.errors).toEqual([]);
+    const threads = await threadRows(await dialHost(statePath));
+    expect(threads.map(t => [t.workspaceName, t.harness, t.startedBy])).toEqual([["mac", "claude", "cli"]]);
+    expect(opened.io.lines).toEqual([expect.stringMatching(/^thread /), "re: say pong"]);
   });
 
   it("new refuses in one line when there is no golden", async () => {

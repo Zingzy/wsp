@@ -59,8 +59,11 @@ export function skillRows(skill: string): SkillRow[] {
     .map(line => {
       const [command, tools] = line.split(/(?<!\\)\|/).slice(1);
       const words: string[] = [];
+      // A row whose command takes no argument closes its code span on the last word, so the backtick comes off before
+      // the word is read.
       for (const token of command!.trim().slice("`wsp ".length).split(" ")) {
-        if (/^[a-z]/.test(token)) words.push(token);
+        const word = token.replace(/`$/, "");
+        if (/^[a-z]+$/.test(word)) words.push(word);
         else break;
       }
       const named: Tool[] = [];
@@ -246,7 +249,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       expect(row!.tools.find(t => t.name === tool.name)!.inputs, `${tool.name}'s inputs in the skill`).toEqual(tool.inputs);
     }
     expect(COMMAND_LINES.filter(c => "cliOnly" in c).map(c => c.words).sort()).toEqual(["doctor", "down", "init", "mcp", "mcp install", "status", "up"]);
-    expect(VERBS.filter(v => "toolOnly" in v).map(v => v.name)).toEqual(["workspaces"]);
+    // Every tool has a command line of its own: the seam above still holds a tool that has none to a stated reason.
+    expect(VERBS.filter(v => "toolOnly" in v).map(v => v.name)).toEqual([]);
   });
 
   it("every command line is a verb table entry or a command carrying why it has no tool, so a new command sits in neither only by failing here", () => {

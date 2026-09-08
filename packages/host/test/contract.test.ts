@@ -99,6 +99,7 @@ describe("the agent contract on the command line and the tool door", () => {
 
     const created = (await last("new", "new", "alpha")) as { workspace: { id: string } };
     const alpha = created.workspace.id;
+    await last("workspaces", "workspaces");
     await last("threads", "threads");
     // One level of this computer's own folders: the home folder this test stubbed, with a folder inside it to list.
     mkdirSync(join(dir, "user", "code"), { recursive: true });
