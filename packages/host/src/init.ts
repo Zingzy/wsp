@@ -1378,7 +1378,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       if (first === undefined && local === undefined && handle !== undefined) log.step(DONE_LINE, out);
     }
   }
-  // The address opens on whatever this run made: the fork when there is one, else this computer.
   const opened = first?.workspace ?? local;
   if (handle === undefined) {
     io.json?.({

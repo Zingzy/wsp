@@ -618,9 +618,9 @@ async function init(
   const screen = terminalInitIO(flags.json);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
   const keys = await loadKeys(say, undefined, { anthropic: false, noSolari: "local" });
-  // No provider key: there is no machine to build an image on, so the run makes this computer the workspace and
-  // serves the app on it. Every flag about the golden is about a road this run does not take.
-  if (keys.solari === undefined) {
+  // A provider with no size to boot a builder on has no image to build, so the run makes this computer the workspace
+  // and serves the app on it. Every flag about the golden is about a road this run does not take.
+  if (providerBackend(keys).capabilities.sizes.length === 0) {
     if (flags.noLocal) throw usageRefusal(`wsp init: with no provider key ${THIS_COMPUTER} is all this run makes, so --no-local would leave it with nothing. Drop it, or set SOLARI_API_KEY first.`);
     // Every other flag is about a golden: what goes on the image, what forks from it and what lands on that fork.
     // This road builds no image, and the workspace it makes is this computer, whose files are already here.
@@ -1007,7 +1007,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   doctor: {
     json: false,
-    cliOnly: "forks a live machine and bills while it runs; a person decides that at a terminal",
+    cliOnly: "forks a live machine and bills while it runs, or with --local runs a thread on this computer; a person decides that at a terminal",
     run: async (io, opts, values) => {
       // The local road touches no provider, so it asks for no provider key: it is the whole of the doctor for a
       // person whose wsp init took the local road.

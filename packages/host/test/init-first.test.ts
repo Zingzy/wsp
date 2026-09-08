@@ -75,11 +75,11 @@ describe("the flags in the question's place", () => {
     expect(output.read()).toBeNull();
   });
 
-  it("--no-local turns the tick off on every road, and a host that already holds one is not asked either", async () => {
+  it("--no-local turns the tick off on every road", async () => {
     const { input, output } = streams();
     expect(await askFirst({ interactive: false, unattended: true, noLocal: true, input, output })).toEqual({ local: false });
     expect(await askFirst({ interactive: false, unattended: false, noLocal: true, input, output })).toEqual({ fork: { name: "first" }, local: false });
-    expect(await askFirst({ interactive: true, unattended: false, name: "proj", hasLocal: true, input, output })).toEqual({ fork: { name: "proj" }, local: false });
+    expect(await askFirst({ interactive: true, unattended: false, name: "proj", noLocal: true, input, output })).toEqual({ fork: { name: "proj" }, local: false });
     expect(output.read()).toBeNull();
   });
 
@@ -119,6 +119,15 @@ describe("the tick beside the fork", () => {
   it("No to the fork still asks the tick, so a person who wants no cloud workspace ends with one here", async () => {
     const { step } = await answer({ fork: "n", tick: ENTER });
     expect(step).toEqual({ local: true });
+  });
+
+  it("the fork's hint says what No leads to: this computer next, or none when --no-local turned the tick off", async () => {
+    const offered = await answer({ fork: ENTER, tick: ENTER, folder: ENTER });
+    expect(offered.drawn()).toContain("No forks nothing; the next question offers this computer instead.");
+    expect(offered.drawn()).not.toContain("No leaves the app with none");
+    const off = await answer({ fork: ENTER, folder: ENTER }, { noLocal: true });
+    expect(off.drawn()).toContain("No leaves the app with none; you can make one there.");
+    expect(off.drawn()).not.toContain(ALSO_LOCAL_QUESTION);
   });
 
   it("No to the tick leaves this computer alone", async () => {

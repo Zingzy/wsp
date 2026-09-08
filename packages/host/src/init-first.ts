@@ -26,7 +26,7 @@ export const FOLDER_QUESTION = "Which folder on this Mac?";
  * on by default and a No to the fork above still leaves a workspace to open the app on. */
 export const ALSO_LOCAL_QUESTION = `Also make ${THIS_COMPUTER} a workspace?`;
 export const ALSO_LOCAL_HINT = "Threads run here, on your own machine, under your own sign-ins and the tools already on your PATH. Nothing is forked and nothing bills.";
-/** What the No answer leaves behind, the wizard's last line. */
+/** What esc, or No to the fork with the tick off, leaves behind: the wizard's last line. */
 export const DONE_LINE = "Done. wsp up starts the app; opening it now.";
 
 /** What the last question settled: the workspace to fork and, when one was named, the folder whose project lands on it. */
@@ -55,8 +55,6 @@ export interface FirstAsk {
   folder?: string;
   /** --no-local: the tick off, the one way to end an init with no local workspace. */
   noLocal?: boolean;
-  /** This host already holds its one local workspace, so the tick has nothing to make and is not asked. */
-  hasLocal?: boolean;
   input: Readable;
   output: Writable;
 }
@@ -93,8 +91,7 @@ export async function askFirst(o: FirstAsk): Promise<WorkspaceStep | symbol> {
   const named = o.name !== undefined || o.folder !== undefined;
   const name = o.name ?? FIRST_WORKSPACE;
   const folder = folderOf(o.folder);
-  // The tick has nothing to make on a host that already holds its one local workspace, and --no-local turns it off.
-  const offered = o.noLocal !== true && o.hasLocal !== true;
+  const offered = o.noLocal !== true;
   const forked = { name, ...(folder !== undefined ? { folder } : {}) };
   // A flag is an answer already given; asking again would ask an agent's caller a question nobody is there to read.
   if (named) return { fork: forked, local: offered };
@@ -102,7 +99,7 @@ export async function askFirst(o: FirstAsk): Promise<WorkspaceStep | symbol> {
   if (!o.interactive) return { fork: { name }, local: offered };
   const go = await confirmPrompt({
     message: FIRST_QUESTION,
-    hint: "Enter forks a workspace from the golden just sealed and imports a folder onto it. No leaves the app with none; you can make one there.",
+    hint: `Enter forks a workspace from the golden just sealed and imports a folder onto it. ${offered ? `No forks nothing; the next question offers ${THIS_COMPUTER} instead.` : "No leaves the app with none; you can make one there."}`,
     initialValue: true,
     input: o.input,
     output: o.output,

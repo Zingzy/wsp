@@ -189,4 +189,21 @@ describe("wsp init with no provider key", () => {
     expect(f.text()).toContain("port 4400 is held");
     expect(f.text()).toContain("The app did not start; fix that and run wsp up, with --port when a port is taken.");
   });
+
+  it("a state holding machines this host has no key for refuses with the provider's sentence, before the tick or the app", async () => {
+    const f = fake({ tty: true });
+    const real = f.opts.runtime;
+    let closed = 0;
+    f.opts.runtime = () => {
+      const rt = real();
+      const list = async (): Promise<never> => { throw new Error(NO_PROVIDER_LINE); };
+      const close = async (): Promise<void> => void (closed += 1);
+      return { ...rt, workspaces: { ...rt.workspaces, list }, close };
+    };
+    await expect(runLocalInit(f.opts, f.io)).rejects.toThrow(NO_PROVIDER_LINE);
+    expect(f.text()).not.toContain(ALSO_LOCAL_QUESTION);
+    expect(f.text()).not.toContain("was not made a workspace");
+    expect(f.hosts).toBe(0);
+    expect(closed).toBe(1);
+  });
 });

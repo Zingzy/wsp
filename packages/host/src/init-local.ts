@@ -15,8 +15,6 @@ import type { PortProbes } from "./ports.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
 import type { InitIO, InitResult } from "./init.js";
 
-export const NO_KEY_TITLE = `wsp on ${THIS_COMPUTER} alone`;
-
 /** What this run does and does not do, said before it does any of it: no key, so no image and no machine, and the
  * one command that adds the cloud later. */
 export function noKeyLines(upCommand: string): string[] {
@@ -60,8 +58,15 @@ export async function runLocalInit(opts: LocalInitOptions, io: InitIO): Promise<
   const rt = opts.runtime();
   const closeRuntime = (): Promise<void> => rt.close().catch((e: unknown) => log.warn(`the runtime did not close cleanly: ${e instanceof Error ? e.message : String(e)}`, out));
   // The one this host already holds, if any: a second wsp init on the local road opens the app on it rather than
-  // asking the runtime for a workspace it would refuse.
-  let workspace: WorkspaceView | undefined = (await rt.workspaces.list().catch((): WorkspaceView[] => [])).find(isLocalWorkspace);
+  // asking the runtime for a workspace it would refuse. A state holding machines this host has no key for refuses
+  // here, with the provider's own sentence, rather than after the tick.
+  let workspace: WorkspaceView | undefined;
+  try {
+    workspace = (await rt.workspaces.list()).find(isLocalWorkspace);
+  } catch (e) {
+    await closeRuntime();
+    throw e;
+  }
   let handle: HostHandle | undefined;
   if (serves) {
     try {

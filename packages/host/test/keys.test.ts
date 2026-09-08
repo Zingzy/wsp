@@ -6,7 +6,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { exitClassOf } from "@wsp/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HELP, cli, forkCommandFor, jsonCliIO, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO } from "../src/cli.js";
 
 const SOLARI = "slr_live_fake_solari_key";
@@ -91,6 +91,8 @@ let dir: string;
 let cwd: string;
 let home: string;
 afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   rmSync(dir, { recursive: true, force: true });
 });
 function setup(): void {
@@ -244,6 +246,10 @@ describe("loadKeys", () => {
 
   it("the flags about a golden are refused on the local road rather than taken and ignored", async () => {
     setup();
+    // Pinned off this computer's key layers: a Solari key on the Mac running the suite would make this a real init that boots a machine.
+    vi.stubEnv("SOLARI_API_KEY", "");
+    vi.stubEnv("WSP_HOME", home);
+    vi.spyOn(process, "cwd").mockReturnValue(cwd);
     const io = fakeIO([]);
     for (const flag of [["--no-local"], ["--first-workspace", "proj"], ["--import", cwd], ["--recipe", "r.json"], ["--project", cwd]]) {
       const code = await cli(["init", "--state", join(home, "state.json"), ...flag], io);
