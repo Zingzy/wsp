@@ -1,0 +1,66 @@
+name: Bug report
+description: Something wsp did that it should not have, or did not do that it should have.
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Say what you ran, what you saw, and what you expected. Never paste a key, a token or a preview link.
+  - type: textarea
+    id: ran
+    attributes:
+      label: What you ran
+      description: The command, the app action, or the MCP call, and what the workspace was doing at the time.
+      placeholder: wsp thread new --in first "run the tests"
+    validations:
+      required: true
+  - type: textarea
+    id: saw
+    attributes:
+      label: What you saw
+      description: The output, the error, or the screen. Paste text rather than a screenshot where you can.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Output of wsp --version
+      placeholder: "0.1.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Where it happened
+      options:
+        - Command line
+        - App in the browser
+        - Desktop app
+        - MCP tools
+        - On the machine
+    validations:
+      required: false
+  - type: checkboxes
+    id: keys
+    attributes:
+      label: Keys
+      options:
+        - label: I did not paste a key, a token or a preview link.
+          required: true
