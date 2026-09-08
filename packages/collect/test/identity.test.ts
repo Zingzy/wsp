@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { detectIdentity } from "../src/index.js";
+import { SSH_IGNORE_UNKNOWN_DETAIL, detectIdentity } from "../src/index.js";
 import { fakeHost } from "./fake-host.js";
 
 const GIT = {
@@ -45,7 +45,7 @@ describe("identity", () => {
   });
 
   it.each([
-    ["config", "identity/ssh-config", { default: "bring", paths: ["~/.ssh/config"] }],
+    ["config", "identity/ssh-config", { default: "bring", paths: ["~/.ssh/config"], detail: SSH_IGNORE_UNKNOWN_DETAIL }],
     ["id_ed25519", "identity/ssh-key/id_ed25519", { default: "skip", reason: "private key, never copied; the machine gets its own key" }],
     ["work_rsa", "identity/ssh-key/work_rsa", { default: "skip" }],
     ["known_hosts", "identity/ssh-known-hosts", { default: "skip", reason: "host entries are rebuilt on first connect" }],
@@ -71,6 +71,16 @@ describe("identity", () => {
     expect(rows).toEqual([
       { rung: "identity", id: "identity/gpg", label: "GPG keyring", paths: ["~/.gnupg"], bytes: 5000, default: "skip", reason: "GPG keys are never copied" },
     ]);
+  });
+
+  it("the ssh config row says what the copy gains as a detail, leaving reason to mean locked off", async () => {
+    const [config] = await detectIdentity(fakeHost({ files: { "~/.ssh/config": 900 } }));
+    expect(config).toEqual({
+      rung: "identity", id: "identity/ssh-config", label: "~/.ssh/config", paths: ["~/.ssh/config"], bytes: 900, default: "bring",
+      detail: "copied with IgnoreUnknown at the top, since ssh on the machine does not know every option yours does, and one unknown option would stop it reading the file",
+    });
+    expect(config?.detail).toBe(SSH_IGNORE_UNKNOWN_DETAIL);
+    expect(config?.reason).toBeUndefined();
   });
 
   it("never reads a file under ~/.ssh", async () => {
