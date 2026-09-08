@@ -995,6 +995,26 @@ describe("localhost forwards over a fake daemon link", () => {
     expect(FORWARD_IDLE_MS).toBe(10 * 60_000);
   });
 
+  it("a renamed workspace's forwards read the name it carries now, on the rows and in the lines, and the app hears each row again", async () => {
+    const { rt, lines, events, link, ws, clock } = await setup();
+    const port = await freePort();
+    link.emit({ type: "localhost.url", port });
+    await until(() => relay!.forwards().length === 1);
+    expect(relay!.list()).toEqual([{ workspaceId: ws.id, port, startedAt: new Date(clock.t).toISOString(), name: "task-1", kind: "url" }]);
+
+    await rt.workspaces.rename(ws.id, "the name he typed");
+    await until(() => relay!.list()[0]?.name === "the name he typed");
+
+    // The row a client already holds is announced again under the new name, so nothing waits for the next open.
+    expect(events.at(-1)).toEqual({ type: "forward.open", forward: { workspaceId: ws.id, port, startedAt: new Date(clock.t).toISOString(), name: "the name he typed", kind: "url" } });
+    // Every line from here names the workspace as it is now.
+    const before = lines.length;
+    relay!.stop(ws.id, port);
+    await until(() => lines.length > before);
+    expect(lines.slice(before).join("\n")).toContain("the name he typed:");
+    expect(lines.slice(before).join("\n")).not.toContain("task-1:");
+  });
+
   it("localhost.url forwards its port, one per port per workspace, and the app hears each one open", async () => {
     const { lines, events, link, ws, clock } = await setup();
     const a = await freePort();

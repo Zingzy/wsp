@@ -102,7 +102,7 @@ export const NEW_THREAD_WAITS = "New threads wait for the rebuild";
 export const PROJECTS_WAIT = "Projects wait for the rebuild";
 export const CLIENT_CANNOT_IMPORT = "This client cannot import projects";
 export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
-export const NO_WORKSPACE_RENAME = "Renaming is not in the runtime yet";
+export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename workspaces";
 export const NO_WORKSPACE_FORK = "Forking a workspace is not in the runtime yet; take a project snapshot in the Machine tab and start a workspace from it";
 
 export function forgetRefusal(state: WorkspaceState): string | null {

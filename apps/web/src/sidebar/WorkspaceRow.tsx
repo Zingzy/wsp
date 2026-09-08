@@ -5,19 +5,23 @@
 // says running); on hover the word yields and the row's two glyphs, the
 // collapse chevron and new thread, take the slot, so nothing moves. Line
 // two: the one mono meta line over the row's whole width, cut from the right
-// and whole in its title. A dead row's glyphs are its recovery and always
-// show, so that row makes room for them beside the word: a gone row's forget
-// and rebuild, a zombie's rebuild alone. The words come from
-// workspaceRows.ts and the actions from the workspace registry.
+// and whole in its title. Renaming turns the name into the sidebar's one name
+// box in the same slot, opened from the menu or by a double-click on the
+// name, so the row keeps its height and its grammar. A dead row's glyphs are
+// its recovery and always show, so that row makes room for them beside the
+// word: a gone row's forget and rebuild, a zombie's rebuild alone. The words
+// come from workspaceRows.ts and the actions from the workspace registry.
 import { ChevronDownIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { needsRebuild, type MemoryReading } from "@wsp/protocol";
 import { runAction } from "../actions/contextMenu.js";
+import { WORKSPACE_WORDS } from "../actions/format.js";
 import { actionById, rowLabelOf, type ResolvedAction } from "../actions/registry.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS } from "./rowGrammar.js";
+import { RowNameInput } from "./RowNameInput.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, workspaceRowId } from "./rowGrammar.js";
 import { NEW_THREAD_TITLE, dotClassForTone, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
 
 /** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
@@ -38,8 +42,13 @@ export function WorkspaceRow({
   active,
   collapsed,
   rebuildAsked,
+  renaming,
+  saving,
   onSelect,
   onToggleCollapsed,
+  onRename,
+  onRenameCancel,
+  onRenameOpen,
 }: {
   project: SidebarProjectSnapshot;
   cost: { readonly rateUsdPerHour: number; readonly accruedUsd: number } | null;
@@ -49,8 +58,16 @@ export function WorkspaceRow({
   active: boolean;
   collapsed: boolean;
   rebuildAsked: boolean;
+  /** The name is being typed on this row: the name slot holds the box instead of the text. */
+  renaming: boolean;
+  /** That name is on its way to the runtime: the field stays exactly as it is and takes no second Enter. */
+  saving: boolean;
   onSelect: () => void;
   onToggleCollapsed: () => void;
+  onRename: (name: string) => void;
+  onRenameCancel: () => void;
+  /** Opens the box on this row, as the menu's Rename does; absent where the rename is refused, so the name is text alone. */
+  onRenameOpen?: (() => void) | undefined;
 }) {
   const dead = needsRebuild({ phase: project.phase, machineState: project.machineState, reach: project.reach });
   const gone = project.state === "gone";
@@ -60,15 +77,35 @@ export function WorkspaceRow({
   const newThreadAction = actionById(actions, "new-thread");
   return (
     <>
-      <SidebarMenuButton size="lg" isActive={active} data-sidebar-row data-row-id={`ws:${project.id}`} className={cn(TWO_LINE_ROW_CLASS, dead ? DEAD_ROW_CLASS : LIVE_ROW_CLASS)} onClick={onSelect}>
+      <SidebarMenuButton
+        size="lg"
+        // An input may not sit inside a button, so a row being renamed is a plain box with the same grammar.
+        render={renaming ? <div /> : <button type="button" />}
+        isActive={active}
+        data-sidebar-row
+        data-row-id={workspaceRowId(project.id)}
+        className={cn(TWO_LINE_ROW_CLASS, dead ? DEAD_ROW_CLASS : LIVE_ROW_CLASS)}
+        {...(renaming ? {} : { onClick: onSelect })}
+      >
         <span aria-hidden className={ROW_LEAD_CLASS}>
           <span className={cn("size-2 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
           <span className="flex items-center gap-2">
-            <span data-workspace-name className="min-w-0 flex-1 truncate text-sidebar-foreground">
-              {project.displayName}
-            </span>
+            {renaming ? (
+              <RowNameInput name={project.displayName} label={WORKSPACE_WORDS.rename} saving={saving} onRename={onRename} onCancel={onRenameCancel} />
+            ) : (
+              <span
+                data-workspace-name
+                className="min-w-0 flex-1 truncate text-sidebar-foreground"
+                onDoubleClick={onRenameOpen === undefined ? undefined : event => {
+                  event.stopPropagation();
+                  onRenameOpen();
+                }}
+              >
+                {project.displayName}
+              </span>
+            )}
             <span data-workspace-state className={cn(ROW_META_CLASS, STATE_SLOT_CLASS, !dead && YIELDING_SLOT_CLASS)}>
               {stateSlotWord(project)}
             </span>

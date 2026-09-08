@@ -8,11 +8,11 @@ import {
   CLIENT_CANNOT_FORGET,
   CLIENT_CANNOT_IMPORT,
   CLIENT_CANNOT_REBUILD,
+  CLIENT_CANNOT_RENAME_WORKSPACE,
   FORGET_HINT,
   NEW_THREAD_WAITS,
   NO_REBUILD_NEEDED,
   NO_WORKSPACE_FORK,
-  NO_WORKSPACE_RENAME,
   PROJECTS_WAIT,
   REBUILD_HINT,
   WORKSPACE_WORDS,
@@ -65,6 +65,8 @@ export interface WorkspaceVerbs {
   readonly rebuild?: ((workspaceId: string) => Promise<void>) | undefined;
   /** Opens the confirmation; the dialog itself asks the host. */
   readonly forget?: ((workspaceId: string) => void) | undefined;
+  /** Opens the name box on the workspace's own row; the row is the only editor, as it is for a thread. */
+  readonly rename?: ((workspaceId: string) => void) | undefined;
   /** Open the trip's dialog; absent on a client whose host cannot read or land folders here. */
   readonly importProject?: ((workspaceId: string) => void) | undefined;
   readonly exportProject?: ((workspaceId: string) => void) | undefined;
@@ -162,8 +164,9 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     icon: () => PencilIcon,
     searchTerms: ["rename workspace"],
     title: () => WORKSPACE_WORDS.rename,
-    refusal: () => NO_WORKSPACE_RENAME,
-    run: () => {},
+    rowLabel: target => rowVerb("Rename", target.displayName),
+    refusal: (_target, verbs) => (verbs.rename === undefined ? CLIENT_CANNOT_RENAME_WORKSPACE : null),
+    run: (target, verbs) => verbs.rename?.(target.id),
   },
   {
     id: "fork",

@@ -3,10 +3,11 @@
 // same leading slot, so the title starts where the name starts; the title
 // takes the line up to a fixed mono time column at the right edge; under it
 // the status pill, the agent's mark and who opened the thread. Renaming turns
-// that title into an input in the same slot, so the row keeps its height and
+// that title into the sidebar's one name box in the same slot, opened from
+// the menu or by a double-click on the title, so the row keeps its height and
 // its grammar while a name is typed.
 import { MessageSquareIcon } from "lucide-react";
-import { useEffect, useRef, type KeyboardEvent, type MouseEvent } from "react";
+import type { MouseEvent } from "react";
 import { agentName } from "@wsp/catalog";
 import { THREAD_WORDS } from "../actions/format.js";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
@@ -15,7 +16,8 @@ import { SidebarMenuSubButton, SidebarMenuSubItem } from "../components/ui/sideb
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
 import { ProjectFavicon } from "./ProjectFavicon.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS } from "./rowGrammar.js";
+import { RowNameInput } from "./RowNameInput.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, threadRowId } from "./rowGrammar.js";
 import { isThreadWorking } from "./Sidebar.logic.js";
 import { ThreadRowLeadingStatus } from "./ThreadStatusIndicators.js";
 import { openerWord, provenanceLabel, threadPill } from "./workspaceRows.js";
@@ -30,6 +32,7 @@ export function ThreadRow({
   onContextMenu,
   onRename,
   onRenameCancel,
+  onRenameOpen,
 }: {
   thread: SidebarThreadSnapshot;
   time: string;
@@ -42,6 +45,8 @@ export function ThreadRow({
   onContextMenu: (event: MouseEvent<HTMLElement>) => void;
   onRename: (title: string) => void;
   onRenameCancel: () => void;
+  /** Opens the box on this row, as the menu's Rename does; absent where the rename is refused, so the title is text alone. */
+  onRenameOpen?: (() => void) | undefined;
 }) {
   const pill = threadPill(thread);
   // The Idle header can be shut, so the row carries the difference itself, in the title's colour.
@@ -53,7 +58,7 @@ export function ThreadRow({
         render={renaming ? <div /> : <button type="button" />}
         isActive={active}
         data-sidebar-row
-        data-row-id={`thread:${thread.id}`}
+        data-row-id={threadRowId(thread.id)}
         {...(renaming ? {} : { onClick: onSelect, onContextMenu })}
         className={cn(TWO_LINE_ROW_CLASS, "w-full")}
       >
@@ -63,9 +68,16 @@ export function ThreadRow({
         <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
           <span className="flex items-center gap-2">
             {renaming ? (
-              <ThreadNameInput title={thread.title} saving={saving} onRename={onRename} onCancel={onRenameCancel} />
+              <RowNameInput name={thread.title} label={THREAD_WORDS.rename} saving={saving} onRename={onRename} onCancel={onRenameCancel} />
             ) : (
-              <span data-thread-title className={cn("min-w-0 flex-1 truncate", idle && "text-sidebar-muted-foreground")}>
+              <span
+                data-thread-title
+                className={cn("min-w-0 flex-1 truncate", idle && "text-sidebar-muted-foreground")}
+                onDoubleClick={onRenameOpen === undefined ? undefined : event => {
+                  event.stopPropagation();
+                  onRenameOpen();
+                }}
+              >
                 {thread.title}
               </span>
             )}
@@ -85,46 +97,5 @@ export function ThreadRow({
         </span>
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>
-  );
-}
-
-/** The title as a field, in the title's own font and size: the name it had, selected, so typing replaces it. Enter
- * names the thread, Escape and leaving it cancel, and a name that is blank or unchanged is a cancel too. Keys stop
- * here rather than reaching the sidebar's own traversal, which reads Home and End. While the name is on its way to
- * the machine the field stays as it is and neither Enter nor leaving it does anything, so a wake that takes seconds
- * cannot lose what was typed. */
-function ThreadNameInput({ title, saving, onRename, onCancel }: { title: string; saving: boolean; onRename: (title: string) => void; onCancel: () => void }) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    ref.current?.focus({ preventScroll: true });
-    ref.current?.select();
-  }, []);
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
-    event.stopPropagation();
-    if (saving) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onCancel();
-      return;
-    }
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    const typed = event.currentTarget.value.trim();
-    if (typed === "" || typed === title) onCancel();
-    else onRename(typed);
-  };
-  return (
-    <input
-      ref={ref}
-      data-thread-title-input
-      aria-label={THREAD_WORDS.rename}
-      defaultValue={title}
-      spellCheck={false}
-      className="min-w-0 flex-1 rounded-sm bg-transparent p-0 text-inherit outline-hidden ring-1 ring-ring/50 ring-offset-1 ring-offset-transparent"
-      onKeyDown={onKeyDown}
-      onBlur={() => {
-        if (!saving) onCancel();
-      }}
-    />
   );
 }

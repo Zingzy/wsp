@@ -102,6 +102,12 @@ const api: Api = {
     if (row !== undefined) row.harnessTitle = title;
     return { outcome: "renamed" };
   },
+  // The runtime holds the name on this computer, so the next listing carries it; the shell fixture does the same.
+  renameWorkspace: async (id, name) => {
+    const row = workspaces.find(w => w.id === id)!;
+    row.name = name;
+    return row;
+  },
   listHarnesses: async () => catalogs,
   subscribe: () => () => {},
   getGolden: async () => undefined,

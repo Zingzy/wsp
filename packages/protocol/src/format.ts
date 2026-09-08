@@ -768,6 +768,9 @@ export function nameDeletingRefusal(name: string): string {
   return `${name} is being deleted; wait for the delete to finish, then fork it again`;
 }
 
+/** The refusal a fork or a rename gets for a blank name: a person and an agent both address a workspace by its name. */
+export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
+
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how
  * long it was given in all, and what the provider reads about the machine after it, or that the provider could not
  * be read. The person's road is to try again; the runtime never leaves the row at Pausing or Waking. */

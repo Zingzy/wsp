@@ -262,6 +262,10 @@ export interface Api {
   /** Drops a workspace whose machine is gone from the host's store; the row leaves on workspace.deleted. The host refuses
    * while the machine exists. Optional so fixtures without a gone machine need not fake it. */
   forget?(id: string): Promise<void>;
+  /** Names the workspace on the host. The name is unique there, so a name another workspace holds and a blank one are
+   * refused with that reason and nothing is renamed. Optional so fixtures that never rename need not fake it; a client
+   * without it offers no rename. */
+  renameWorkspace?(id: string, name: string): Promise<WorkspaceView>;
   /** The guest ports the host forwards to this computer's loopback; forward.open and forward.close keep the list current. Optional so fixtures without forwards need not fake it. */
   listForwards?(): Promise<PortForward[]>;
   stopForward?(workspaceId: string, port: number): Promise<void>;
@@ -410,6 +414,7 @@ export function makeApi(c: ProtocolClient): Api {
     updateImage: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.updateImage", { workspaceId: id })).workspace,
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
     forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),
+    renameWorkspace: async (id, name) => (await c.request<{ workspace: WorkspaceView }>("workspaces.rename", { workspaceId: id, name })).workspace,
     // Parsed, not trusted: a reply without the list must not become the list.
     listForwards: async () => PortForward.array().parse((await c.request<{ forwards?: unknown }>("forwards.list")).forwards),
     stopForward: async (workspaceId, port) => void (await c.request("forwards.stop", { workspaceId, port })),
