@@ -23,6 +23,8 @@ import {
   type TerminalScheme,
   type PortProbeView,
   type PortReachView,
+  Preferences,
+  type PreferencesPatch,
   ProjectExportResult,
   ProjectGolden,
   ProjectImportResult,
@@ -313,6 +315,11 @@ export interface Api {
   /** The person's Ghostty config on the computer running the host, as the terminal pane applies it, read now for the
    * scheme the app shows. Optional so fixtures without a terminal need not fake it; without it the pane keeps its defaults. */
   hostTerminalConfig?(scheme: TerminalScheme): Promise<TerminalConfig>;
+  /** The person's view preferences as the host keeps them, one record every client on this host shares. Optional so
+   * fixtures without a settings page need not fake it; without it the defaults stand and nothing is kept. */
+  preferences?(): Promise<Preferences>;
+  /** The patch over the host's record; resolves with the record as it now stands, and every client hears preferences.changed. */
+  setPreferences?(patch: PreferencesPatch): Promise<Preferences>;
   /** What importing a folder on this computer would carry; nothing is read into memory or uploaded. Optional so
    * fixtures that never import need not fake it; the sidebar offers no import without it. */
   planProject?(source: string): Promise<ProjectPlan>;
@@ -450,6 +457,9 @@ export function makeApi(c: ProtocolClient): Api {
       HostFolderListing.parse((await c.request<{ listing?: unknown }>("host.folders", { ...(dir !== undefined ? { dir } : {}), ...(hidden !== undefined ? { hidden } : {}) })).listing),
     // Parsed, not trusted: the pane paints only values the wire type vouches for.
     hostTerminalConfig: async scheme => TerminalConfig.parse((await c.request<{ config?: unknown }>("host.terminalConfig", { scheme })).config),
+    // Parsed, not trusted: the page paints its theme and sizes only from values the wire type vouches for.
+    preferences: async () => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.get")).preferences),
+    setPreferences: async patch => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.set", { patch })).preferences),
     // Parsed, not trusted: the consent step renders only what the wire type vouches for.
     planProject: async source => ProjectPlan.parse((await c.request<{ plan?: unknown }>("project.plan", { source })).plan),
     importProject: async opts => ProjectImportResult.parse((await c.request<{ imported?: unknown }>("project.import", { ...opts })).imported),

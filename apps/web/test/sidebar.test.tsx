@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -14,7 +14,8 @@ import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
-import { SIDEBAR_MODE_KEY, useSpaceTint } from "../src/sidebar/sidebarMode.js";
+import { useSpaceTint } from "../src/sidebar/sidebarMode.js";
+import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
@@ -98,7 +99,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -119,6 +120,12 @@ const metaOf = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>
 const spaceHeader = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-space-header]");
 const headerLines = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-header] [data-space-meta]")).map(l => l.textContent ?? "");
 const dots = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-dot]"));
+const panes = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane]"));
+const paneNames = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane] [data-space-name]")).map(n => n.textContent ?? "");
+/** What React says when one body is drawn as both panes: the one console line the reversal case is about. */
+const DUPLICATE_KEY = "two children with the same key";
+/** The name in the header of the body that is staying: the pane not marked as the one on its way out. */
+const spaceName = (): string => document.querySelector<HTMLElement>("[data-space-pane]:not([data-space-leaving]) [data-space-name]")?.textContent ?? "";
 const workspaceRowIds = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='ws:']")).map(r => r.dataset["rowId"] ?? "");
 
 const API = view("ws_a", "api");
@@ -379,6 +386,27 @@ describe("rows from the fixture wire", () => {
     expect(meta.children).toHaveLength(0);
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
     await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · $0.110/hr · active"));
+  });
+
+  it("this computer's row: the laptop glyph where the state dot goes, no state word, and what the machine is on the meta line, beside cloud rows that keep all three", async () => {
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    await mount(fakeApi([API, WEB, MAC], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB), { ...status(MAC), kind: "local", rateUsdPerHour: 0 }]), "api");
+    await waitFor(() => expect(rowOf("zingzy-mac")).toBeDefined());
+    const lead = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-lead]")!;
+    expect(lead(rowOf("zingzy-mac")).dataset["workspaceLead"]).toBe("glyph");
+    expect(lead(rowOf("zingzy-mac")).querySelector("svg")).not.toBeNull();
+    expect(lead(rowOf("api")).dataset["workspaceLead"]).toBe("dot");
+    expect(lead(rowOf("api")).querySelector("svg")).toBeNull();
+    expect(metaOf(rowOf("zingzy-mac")).textContent).toBe("this computer");
+    expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
+    // The cloud rows beside it are untouched: the spend, the countdown and the paused word all still read.
+    expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · $0.110/hr · naps in 14m");
+    expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
+    // One row grammar for both kinds: the same lead slot and the same height.
+    const boxOf = (row: HTMLElement) => [...row.firstElementChild!.classList].filter(c => /^(size-|mt-)/.test(c)).sort();
+    expect(boxOf(rowOf("zingzy-mac"))).toEqual(boxOf(rowOf("api")));
+    const heightOf = (row: HTMLElement) => [...row.classList].filter(c => /^(h-|py-)/.test(c)).sort();
+    expect(heightOf(rowOf("zingzy-mac"))).toEqual(heightOf(rowOf("api")));
   });
 
   it("every two-line row is one height, the thread rows share the workspace rows' grammar, and the Idle row is the kit row", async () => {
@@ -937,7 +965,7 @@ describe("a workspace's own colour and glyph", () => {
   const tinted = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-tint]")).map(el => el.getAttribute("data-space-tint") ?? "");
 
   async function mountSpaces(api: FakeApi): Promise<FakeApi> {
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
     useStore.getState().bind(api);
     render(
       <SidebarProvider defaultOpen>
@@ -962,7 +990,7 @@ describe("a workspace's own colour and glyph", () => {
     expect(name.className).toContain("text-[var(--space-tint)]");
     // The glyph rides the current dot alone, since only that one has the room for it, and takes the row's own ink.
     expect(tint.querySelector("[data-space-glyph='flask']")).not.toBeNull();
-    expect(tint.querySelector("[data-space-glyph]")!.className.baseVal ?? "").not.toContain("--space-tint");
+    expect(tint.querySelector("[data-space-glyph]")!.getAttribute("class") ?? "").not.toContain("--space-tint");
     fireEvent.click(plain);
     await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
     expect(document.querySelector("[data-space-dots] [data-space-glyph]")).toBeNull();
@@ -995,7 +1023,7 @@ describe("a workspace's own colour and glyph", () => {
   // whose id sorts first parts the two orders. A creation in flight holds its own key as the selection, which is in
   // neither order, and both fall back to a first row: the shell's wash has to be the header's workspace even then.
   it("the wash the shell paints and the header the body draws are the same workspace when the two orders differ", async () => {
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
     const napping: WorkspaceView = { ...view("ws_aaa", "old", "napping"), tint: "azure" };
     const running: WorkspaceView = { ...view("ws_zzz", "api"), tint: "magenta" };
     const api = fakeApi([napping, running], [status(napping), status(running)]);
@@ -1035,7 +1063,7 @@ describe("Spaces mode", () => {
   // The current workspace's name reads twice on screen, in the header and on its own dot, so the shared mount's
   // one-name wait cannot be used here; the header arriving is what says the body is up.
   async function mountSpaces(api: FakeApi): Promise<FakeApi> {
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
     useStore.getState().bind(api);
     render(
       <SidebarProvider defaultOpen>
@@ -1060,11 +1088,11 @@ describe("Spaces mode", () => {
         session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) }),
       ]),
     );
-    // No workspace row at all: the header stands in for the one on screen, the dots for the rest.
-    expect(workspaceRowIds()).toEqual([]);
+    // No workspace row at all: the header stands in for the one on screen, wearing its id, the dots for the rest.
+    expect(workspaceRowIds()).toEqual(["ws:ws_a"]);
     expect(within(spaceHeader()!).getByText("api")).toBeDefined();
-    // Only that workspace's threads, in the list's own grammar.
-    expect(rowIds()).toEqual(["thread:s1"]);
+    // Only that workspace's threads, in the list's own grammar, under the header the walk starts on.
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1"]);
     expect(screen.queryByText("bump the lockfile")).toBeNull();
     expect(dots().map(d => d.getAttribute("aria-label"))).toEqual(["api", "web", "old"]);
     // The current dot is the only one carrying its name, so it is the wide one.
@@ -1110,6 +1138,92 @@ describe("Spaces mode", () => {
     expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
   });
 
+  it("this computer's header says what the machine is where a fork's size reads, through the one machine line", async () => {
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    useStore.setState({ selectedId: "ws_m" });
+    await mountSpaces(fakeApi([API, MAC], [status(API), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]));
+    await waitFor(() => expect(within(spaceHeader()!).getByText("zingzy-mac")).toBeDefined());
+    // The machine words alone: nothing wsp does not pay for, so no cost line and no rate under them.
+    expect(headerLines()).toEqual(["this computer"]);
+    expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
+    // A tick on this computer's meter changes nothing there either.
+    act(() =>
+      useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_m", phase: "running", rateUsdPerHour: 0, awakeMs: 120_000, accruedUsd: 0, at: new Date(NOW).toISOString() }),
+    );
+    await waitFor(() => expect(headerLines()).toEqual(["this computer"]));
+    // The fork beside it keeps every line it had: the size and the OS word, then the spend with its rate. Both
+    // bodies carry a header while one travels out, so the lines are read once the body asked for is there alone.
+    fireEvent.click(dots()[0]!);
+    await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr"]));
+  });
+
+  it("a space asked for while the body is still travelling turns it around and never draws one workspace twice", async () => {
+    const errors: string[] = [];
+    const console_ = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      const line = args.map(String).join(" ");
+      if (line.includes(DUPLICATE_KEY)) errors.push(line);
+    });
+    try {
+      await mountSpaces(fakeApi(THREE, statuses()));
+      fireEvent.click(dots()[1]!);
+      expect(paneNames()).toEqual(["api", "web"]);
+      // Straight back while that travel is still running: React says "two children with the same key" if the
+      // workspace now on screen is still the one the travel calls the leaver.
+      fireEvent.click(dots()[0]!);
+      expect(errors).toEqual([]);
+      expect(paneNames()).toEqual(["api", "web"]);
+      expect(document.querySelector<HTMLElement>("[data-space-leaving] [data-space-name]")!.textContent).toBe("web");
+      await waitFor(() => expect(panes()).toHaveLength(1));
+      expect(spaceName()).toBe("api");
+      expect(errors).toEqual([]);
+    } finally {
+      console_.mockRestore();
+    }
+  });
+
+  it("a two-finger swipe across the body moves a space, out one way and back the other", async () => {
+    await mountSpaces(fakeApi(THREE, statuses(), [session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) })]));
+    const body = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-slide]")!;
+    fireEvent.wheel(body(), { deltaX: 80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    // The workspace that left is still drawn while the body travels, out of the keyboard's reach and off the
+    // accessibility tree, and it is gone once the travel is over.
+    const leaving = document.querySelector<HTMLElement>("[data-space-leaving]")!;
+    expect(panes()).toHaveLength(2);
+    expect(within(leaving).getByText("api")).toBeDefined();
+    expect(leaving.getAttribute("aria-hidden")).toBe("true");
+    expect(leaving.hasAttribute("inert")).toBe(true);
+    expect(spaceName()).toBe("web");
+    await waitFor(() => expect(panes()).toHaveLength(1));
+    expect(screen.getByText("bump the lockfile")).toBeDefined();
+    expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
+    // The quiet after the fingers lift ends the gesture, so the next swipe is read as its own.
+    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
+    fireEvent.wheel(body(), { deltaX: -80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_a");
+    await waitFor(() => expect(panes()).toHaveLength(1));
+    expect(spaceName()).toBe("api");
+  });
+
+  it("one swipe moves one space however long the fingers keep going, and a scroll down the sidebar moves nothing", async () => {
+    await mountSpaces(fakeApi(THREE, statuses()));
+    const body = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-slide]")!;
+    for (const deltaX of [80, 80, 80]) fireEvent.wheel(body(), { deltaX, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    await waitFor(() => expect(panes()).toHaveLength(1));
+    expect(spaceName()).toBe("web");
+    // A gesture of its own, straight down the rows: nothing moves.
+    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
+    for (const deltaY of [120, 120]) fireEvent.wheel(body(), { deltaX: 0, deltaY });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    expect(panes()).toHaveLength(1);
+    // The workspaces carry the swipe, not the whole sidebar: over the search row the same push moves nothing.
+    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
+    fireEvent.wheel(document.querySelector<HTMLElement>("[data-sidebar-search]")!, { deltaX: 80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+  });
+
   it("before the first status the header carries no machine line: nothing draws a bare OS word", async () => {
     await mountSpaces(fakeApi([API], []));
     await waitFor(() => expect(headerLines()).toEqual(["$0.00 today"]));
@@ -1137,6 +1251,58 @@ describe("Spaces mode", () => {
     expect(headerLines()).toContain("2 vCPU · 4 GB · Linux");
     act(() => getLive("ws_a").feedStatus("live"));
     await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+  });
+
+  it("the header is a stop in the arrow walk, and the walk carries on into the space's threads", async () => {
+    await mountSpaces(
+      fakeApi(THREE, statuses(), [
+        session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
+        session("s4", "ws_a", { prompt: "read the log", startedAt: iso(-9 * 60_000) }),
+      ]),
+    );
+    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "thread:s4"]));
+    spaceHeader()!.focus();
+    expect(document.activeElement).toBe(spaceHeader());
+    fireEvent.keyDown(spaceHeader()!, { key: "ArrowDown" });
+    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("thread:s1");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(spaceHeader());
+    fireEvent.keyDown(spaceHeader()!, { key: "End" });
+    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("thread:s4");
+  });
+
+  it("is the rows' own button, so what activates a row activates it, and it opens the workspace as its row does in the list", async () => {
+    const asked: string[] = [];
+    const off = onNewThreadRequest(request => asked.push(request.workspaceId));
+    try {
+      await mountSpaces(fakeApi(THREE, statuses(), [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) })]));
+      // A real button is what makes Space and Enter both activate it, which jsdom cannot deliver for itself.
+      expect(spaceHeader()!.tagName).toBe("BUTTON");
+      expect(spaceHeader()!.getAttribute("type")).toBe("button");
+      expect(spaceHeader()!.tabIndex).toBe(0);
+      act(() => useStore.getState().select("ws_a", "s1"));
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("s1"));
+      expect(spaceHeader()!.getAttribute("data-active")).toBe("false");
+      fireEvent.click(spaceHeader()!);
+      // The list's own row does exactly this on a click, and the same key road reaches both.
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBeNull());
+      expect(useStore.getState().selectedId).toBe("ws_a");
+      // Selecting leaves it plain: the one workspace on screen has nothing to say by being tinted, and the wide
+      // dot is where the sidebar says which workspace this is. The list's rows keep their own tint.
+      expect(spaceHeader()!.getAttribute("data-active")).toBe("false");
+      // Opening a thread stays on its own roads: the menu, the palette and the new-thread chord.
+      expect(asked).toEqual([]);
+    } finally {
+      off();
+    }
+  });
+
+  it("hands the name box a plain box to sit in, since an input may not sit inside a button", async () => {
+    const api = { ...fakeApi(THREE, statuses()), renameWorkspace: vi.fn(async (id: string, name: string) => ({ ...view(id, name) })) };
+    await mountSpaces(api);
+    act(() => requestRenameWorkspace("ws_a"));
+    await screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename });
+    expect(spaceHeader()!.tagName).toBe("DIV");
   });
 
   it("the header grows the sidebar's one name box: the palette's ask and a double-click both open it in the name's slot", async () => {

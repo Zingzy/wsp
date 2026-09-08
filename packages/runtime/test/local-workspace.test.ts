@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import { relayedRefusal, type PortForward } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
@@ -43,8 +45,21 @@ describe("local workspace", () => {
   let localWiring: LocalWiring;
   /** Every options object the registry handed the local factory, in order. */
   let handed: (MachineExecOptions | undefined)[];
+  /** Stands in for the loopback daemon the host starts: a plain GET to a WebSocket server is answered 426, which is
+   * what the status probe reads as the daemon being up. */
+  let probe: { port: number; close: () => Promise<void> };
   const runtime = (): Runtime =>
     createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: localWiring });
+
+  beforeAll(async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(426);
+      res.end();
+    });
+    await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
+    probe = { port: (server.address() as AddressInfo).port, close: () => new Promise<void>(done => server.close(() => done())) };
+  });
+  afterAll(() => probe.close());
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "wsp-localws-"));
@@ -287,6 +302,64 @@ describe("local workspace", () => {
     const status = (await rt.status.list()).find(s => s.id === ws.id)!;
     expect(status.rateUsdPerHour).toBe(0);
     expect(status.kind).toBe("local");
+  });
+
+  it("the panes dial this computer's own daemon: workspaces.daemonReach hands out the road the host wired", async () => {
+    const road = { url: "http://127.0.0.1:54321", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t0ken" };
+    localWiring = { ...localWiring, daemonRoad: async () => road };
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    expect(await rt.workspaces.daemonReach(ws.id)).toEqual(road);
+  });
+
+  it("a host that wired no daemon for this computer says so rather than minting a preview route", async () => {
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    await expect(rt.workspaces.daemonReach(ws.id)).rejects.toThrow("wired no daemon for its local workspace");
+  });
+
+  it("the status probe reads the local road: reachable with one wired, unsupported without", async () => {
+    const withRoad = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: { ...localWiring, daemonRoad: async () => ({ url: `http://127.0.0.1:${probe.port}`, expiresAt: Number.MAX_SAFE_INTEGER }) } });
+    const dialled = await withRoad.workspaces.createLocal("mac");
+    expect((await withRoad.status.list()).find(s => s.id === dialled.id)!.reach.state).toBe("reachable");
+    await withRoad.close();
+    const bare = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: echoAdapter }, local: localWiring });
+    const alone = await bare.workspaces.createLocal("mac");
+    expect((await bare.status.list()).find(s => s.id === alone.id)!.reach.state).toBe("unsupported");
+    await bare.close();
+  });
+
+  it("closing the runtime frees what the local wiring holds open on this computer", async () => {
+    let closed = 0;
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: { ...localWiring, close: async () => void closed++ } });
+    await rt.workspaces.createLocal("mac");
+    await rt.close();
+    expect(closed).toBe(1);
+  });
+
+  it("this computer holds no machine slot: at the cap one cloud record still leaves a slot, and the refusal never names the local row", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store, adapters: { claude: echoAdapter }, local: localWiring });
+    await rt.workspaces.createLocal("zingzys-MacBook-Pro.local");
+    await rt.workspaces.create({ golden: "snap_g", name: "b2" });
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
+      return create(spec);
+    };
+    const refused = await rt.workspaces.create({ golden: "snap_g", name: "b3" }).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe("a machine slot is in use: b2. Pause it or wait for a nap.");
+  });
+
+  it("with no cloud record at all the refusal claims no holder, since this computer holds none", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store, adapters: { claude: echoAdapter }, local: localWiring });
+    await rt.workspaces.createLocal("zingzys-MacBook-Pro.local");
+    backend.create = async () => {
+      throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
+    };
+    const refused = await rt.workspaces.create({ golden: "snap_g", name: "b1" }).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe("the provider is at its machine cap and no machine of this computer holds a slot; free one at the provider and try again");
   });
 
   it("createLocal is refused when no local backend is wired", async () => {

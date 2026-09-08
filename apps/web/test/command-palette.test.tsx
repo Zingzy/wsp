@@ -5,7 +5,7 @@
 import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionView, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { SIDEBAR_MODE_WORDS } from "../src/actions/format.js";
 import { RECENT_THREAD_LIMIT } from "../src/components/palette/CommandPalette.logic.js";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
@@ -15,9 +15,8 @@ import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
-import { stepWorkspaceId } from "../src/shell/shellCommands.js";
+import { stepInOrder } from "../src/shell/shellCommands.js";
 import { onComposerFocusRequest, onNewThreadRequest } from "../src/shell/shellRequests.js";
-import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
 
@@ -41,13 +40,14 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   createdAt: `2026-09-01T00:0${id.length}:00Z`,
 });
 
-const session = (id: string, workspaceId: string, prompt: string): SessionView => ({
+const session = (id: string, workspaceId: string, prompt: string, over: Partial<SessionView> = {}): SessionView => ({
   id,
   workspaceId,
   harness: "claude",
   status: "completed",
   prompt,
   startedAt: Date.now() - 60_000,
+  ...over,
 });
 
 const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] };
@@ -88,6 +88,11 @@ const mod = (key: string, mods: { shiftKey?: boolean; altKey?: boolean } = {}, t
   fireEvent.keyDown(target, { key, code: `Key${key.toUpperCase()}`, metaKey: true, ...mods });
 
 const ctrlTab = (mods: { shiftKey?: boolean } = {}) => fireEvent.keyDown(window, { key: "Tab", code: "Tab", ctrlKey: true, ...mods });
+/** The switch between spaces, as macOS spells it here; the platform is mocked to MacIntel for the file. */
+const spaceArrow = (name: "ArrowLeft" | "ArrowRight", target: Element | Window = window) =>
+  fireEvent.keyDown(target, { key: name, code: name, metaKey: true, altKey: true });
+/** One of that chord's hold keys let go, which is what commits a walk the arrows opened. */
+const spaceArrowUp = () => fireEvent.keyUp(window, { key: "Alt" });
 /** The hold let go, which is what commits the switch; the walk itself only moves the overlay's highlight. */
 const ctrlUp = () => fireEvent.keyUp(window, { key: "Control" });
 const digit = (n: number) => fireEvent.keyDown(window, { key: String(n), code: `Digit${n}`, metaKey: true });
@@ -128,7 +133,7 @@ configure({ asyncUtilTimeout: 10_000 });
 beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
 });
@@ -194,16 +199,38 @@ describe("command palette", () => {
     fireEvent.click(screen.getByText(SIDEBAR_MODE_WORDS.spaces.title, { selector: "[data-slot=command-item] span" }));
     await waitFor(() => expect(palette()).toBeNull());
     await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
+    // No workspace row: the one id under ws: is the header's, which wears it so the arrow walk stops there.
+    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
     expect(document.querySelectorAll("[data-space-dot]")).toHaveLength(2);
-    expect(window.localStorage.getItem(SIDEBAR_MODE_KEY)).toBe("spaces");
+    expect(useStore.getState().preferences.sidebarMode).toBe("spaces");
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     expect(inPalette().queryByText(SIDEBAR_MODE_WORDS.spaces.title)).toBeNull();
     fireEvent.click(screen.getByText(SIDEBAR_MODE_WORDS.list.title, { selector: "[data-slot=command-item] span" }));
     await waitFor(() => expect(document.querySelector("[data-space-header]")).toBeNull());
     expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(2);
-    expect(window.localStorage.getItem(SIDEBAR_MODE_KEY)).toBe("list");
+    expect(useStore.getState().preferences.sidebarMode).toBe("list");
+  });
+
+  it("the Settings row and its chord open the settings page, whose row names the chord; a workspace row closes it again", async () => {
+    await mountShell();
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    const row = inPalette().getByText("Settings", { selector: "[data-slot=command-item] span" }).closest("[data-slot=command-item]")!;
+    expect(row.textContent).toContain("⌘,");
+    fireEvent.click(row);
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState().settingsOpen).toBe(true);
+    fireEvent.click(document.querySelector("[data-row-id='ws:ws_b']")!);
+    expect(useStore.getState().settingsOpen).toBe(false);
+    mod(",");
+    expect(useStore.getState().settingsOpen).toBe(true);
+    // The chord toggles and Escape closes, so a host with no workspace row to pick can still leave the page.
+    mod(",");
+    expect(useStore.getState().settingsOpen).toBe(false);
+    mod(",");
+    fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
+    expect(useStore.getState().settingsOpen).toBe(false);
   });
 
   it("opens the new-workspace dialog through the sidebar", async () => {
@@ -283,7 +310,7 @@ describe("command palette", () => {
     expect(useStore.getState().selectedThreadId).toBe("t_old");
   });
 
-  it("lists the switch with its chord and each workspace row with its slot chord, and shows no chord in a browser tab", async () => {
+  it("lists the switch with its chord and each workspace row with its slot chord, and in a browser tab only what one leaves the page", async () => {
     await mountShell();
     const restore = asDesktopShell();
     try {
@@ -300,7 +327,10 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).toBeNull());
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
+    // A browser tab on macOS keeps Tab, the digits and the mod arrows for its own tabs, so the switch has no
+    // chord to show there at all and the row is a click alone.
     expect(chordOn("Next workspace")).toBeNull();
+    expect(chordOn("Previous workspace")).toBeNull();
     expect(chordOn("api")).toBeNull();
   });
 
@@ -476,6 +506,124 @@ describe("default shortcuts", () => {
     expect(useStore.getState().selectedId).toBe("ws_a");
   });
 
+  it("the mod arrows walk the workspaces in either body, and a browser tab on macOS keeps them for its own tabs", async () => {
+    await mountShell();
+    const restore = asDesktopShell();
+    try {
+      expect(useStore.getState().selectedId).toBe("ws_a");
+      spaceArrow("ArrowRight");
+      spaceArrowUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      spaceArrow("ArrowLeft");
+      spaceArrowUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+      act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } }));
+      spaceArrow("ArrowRight");
+      spaceArrowUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+    } finally {
+      restore();
+    }
+    spaceArrow("ArrowLeft");
+    spaceArrowUp();
+    await settle();
+    expect(useStore.getState().selectedId).toBe("ws_b");
+  });
+
+  it("in Spaces the Tab pair walks the threads of the workspace on screen, wrapping, and lands the caret", async () => {
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } }));
+    await mountShell([
+      session("s1", "ws_a", "fix the port list", { threadId: "thr_1", status: "running" }),
+      session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" }),
+      session("s3", "ws_b", "somewhere else", { threadId: "thr_3" }),
+    ]);
+    const restore = asDesktopShell();
+    const { asks, off } = watchComposerFocus("ws_a");
+    try {
+      useStore.getState().select("ws_a");
+      ctrlTab();
+      // Nothing is selected until a hold is let go for a workspace walk; a thread walk lands on the press.
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_1"));
+      expect(useStore.getState().selectedId).toBe("ws_a");
+      expect(asks).toEqual(["ws_a"]);
+      ctrlTab();
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_2"));
+      ctrlTab();
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_1"));
+      ctrlTab({ shiftKey: true });
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_2"));
+      // The walk stays inside the workspace on screen: the other workspace's thread is never landed on.
+      expect(useStore.getState().selectedId).toBe("ws_a");
+    } finally {
+      off();
+      restore();
+    }
+  });
+
+  it("in the list the Tab pair is still the workspace switch, and it never moves a thread", async () => {
+    await mountShell([session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" })]);
+    const restore = asDesktopShell();
+    try {
+      useStore.getState().select("ws_a");
+      ctrlTab();
+      ctrlUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      expect(useStore.getState().selectedThreadId).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("a space with one thread the walk can land on has nowhere to go, and the palette's rows say so", async () => {
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } }));
+    await mountShell([session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "no id on this row")]);
+    const restore = asDesktopShell();
+    try {
+      useStore.getState().select("ws_a", "thr_1");
+      ctrlTab();
+      await settle();
+      expect(useStore.getState().selectedThreadId).toBe("thr_1");
+      mod("k");
+      await waitFor(() => expect(palette()).not.toBeNull());
+      // Both directions say it, since neither has anywhere to go.
+      expect(inPalette().getAllByText("Only one thread")).toHaveLength(2);
+    } finally {
+      restore();
+    }
+  });
+
+  it("lists the thread walk with the chord of the body it is in: the Tab pair in Spaces, no chord in the list", async () => {
+    const sessions = [session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" })];
+    await mountShell(sessions);
+    const restore = asDesktopShell();
+    try {
+      useStore.getState().select("ws_a");
+      mod("k");
+      await waitFor(() => expect(palette()).not.toBeNull());
+      expect(chordOn("Next thread")).toBeNull();
+      expect(chordOn("Next workspace")).toBe("⌃Tab");
+      mod("k");
+      await waitFor(() => expect(palette()).toBeNull());
+      act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } }));
+      mod("k");
+      await waitFor(() => expect(palette()).not.toBeNull());
+      expect(chordOn("Next thread")).toBe("⌃Tab");
+      expect(chordOn("Previous thread")).toBe("⌃⇧Tab");
+      expect(chordOn("Next workspace")).toBe("⌥⌘Right");
+    } finally {
+      restore();
+    }
+  });
+
+  it("the palette's Next thread row moves the same walk the chord does", async () => {
+    await mountShell([session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" })]);
+    useStore.getState().select("ws_a");
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    fireEvent.click(inPalette().getByText("Next thread"));
+    await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_1"));
+  });
+
   it("reports a missing terminal link instead of failing silently", async () => {
     await mountShell();
     const term = document.createElement("div");
@@ -490,23 +638,23 @@ describe("default shortcuts", () => {
   });
 });
 
-describe("stepWorkspaceId", () => {
+describe("stepInOrder", () => {
   const ids = ["ws_a", "ws_b", "ws_c"];
 
   it("wraps at both ends, and starts from the near end while the selected row is no workspace", () => {
-    expect(stepWorkspaceId(ids, "ws_a", 1)).toBe("ws_b");
-    expect(stepWorkspaceId(ids, "ws_c", 1)).toBe("ws_a");
-    expect(stepWorkspaceId(ids, "ws_a", -1)).toBe("ws_c");
-    expect(stepWorkspaceId(ids, null, 1)).toBe("ws_a");
-    expect(stepWorkspaceId(ids, null, -1)).toBe("ws_c");
-    expect(stepWorkspaceId(ids, "creating:1", 1)).toBe("ws_a");
-    expect(stepWorkspaceId([], null, 1)).toBeNull();
+    expect(stepInOrder(ids, "ws_a", 1)).toBe("ws_b");
+    expect(stepInOrder(ids, "ws_c", 1)).toBe("ws_a");
+    expect(stepInOrder(ids, "ws_a", -1)).toBe("ws_c");
+    expect(stepInOrder(ids, null, 1)).toBe("ws_a");
+    expect(stepInOrder(ids, null, -1)).toBe("ws_c");
+    expect(stepInOrder(ids, "creating:1", 1)).toBe("ws_a");
+    expect(stepInOrder([], null, 1)).toBeNull();
   });
 
   it("answers nowhere to go for the one workspace already selected, which is what the palette's rows say", () => {
-    expect(stepWorkspaceId(["ws_a"], "ws_a", 1)).toBeNull();
-    expect(stepWorkspaceId(["ws_a"], "ws_a", -1)).toBeNull();
-    expect(stepWorkspaceId(["ws_a"], "creating:1", 1)).toBe("ws_a");
+    expect(stepInOrder(["ws_a"], "ws_a", 1)).toBeNull();
+    expect(stepInOrder(["ws_a"], "ws_a", -1)).toBeNull();
+    expect(stepInOrder(["ws_a"], "creating:1", 1)).toBe("ws_a");
   });
 });
 
@@ -546,5 +694,29 @@ describe("typing contexts", () => {
     mountDispatcher();
     fireEvent.keyDown(window, { key: "b", code: "KeyB" });
     await waitFor(() => expect(sidebarOpen()).toBe("false"));
+  });
+
+  it("switches twice in a row from inside a text field, where a bare option arrow is still that field's word move", async () => {
+    await mountShell();
+    const restore = asDesktopShell();
+    const box = document.createElement("textarea");
+    document.body.appendChild(box);
+    box.focus();
+    try {
+      // The composer takes the caret after every switch, so the second press of the chord is the one that proves it.
+      spaceArrow("ArrowRight", box);
+      spaceArrowUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      spaceArrow("ArrowRight", box);
+      spaceArrowUp();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+      fireEvent.keyDown(box, { key: "ArrowLeft", code: "ArrowLeft", altKey: true });
+      fireEvent.keyUp(window, { key: "Alt" });
+      await settle();
+      expect(useStore.getState().selectedId).toBe("ws_a");
+    } finally {
+      box.remove();
+      restore();
+    }
   });
 });

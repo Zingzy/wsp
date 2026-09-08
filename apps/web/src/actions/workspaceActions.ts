@@ -2,7 +2,7 @@
 // The workspace's actions, one registry: what a workspace row, the palette,
 // the Machine tab and the row's context menu offer for one machine.
 import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PaletteIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, ShapesIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { isBilling, needsRebuild, workspaceState, type LookPart, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NO_REBUILD_NEEDED, isBilling, kindWords, localMachineRefusal, needsRebuild, workspaceKind, workspaceState, type LookPart, type MachineState, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
@@ -12,7 +12,6 @@ import {
   CLIENT_CANNOT_RENAME_WORKSPACE,
   FORGET_HINT,
   NEW_THREAD_WAITS,
-  NO_REBUILD_NEEDED,
   NO_WORKSPACE_FORK,
   PROJECTS_WAIT,
   REBUILD_HINT,
@@ -21,6 +20,7 @@ import {
   openBrowserRefusal,
   openTerminalRefusal,
   phaseButtonWord,
+  phaseCannot,
   phaseHint,
   phaseRefusal,
   phaseWord,
@@ -34,6 +34,8 @@ export interface WorkspaceTarget {
   readonly id: string;
   readonly displayName: string;
   readonly machineId: string;
+  /** What kind of machine it is; the verbs only wsp's own forks take read it. */
+  readonly kind: WorkspaceKind;
   readonly phase: WorkspacePhase;
   readonly machineState: MachineState | null;
   readonly reach: ReachState | null;
@@ -47,6 +49,7 @@ export function workspaceTarget(workspace: WorkspaceView, status: WorkspaceStatu
     id: workspace.id,
     displayName: workspace.name,
     machineId: status?.machineId ?? workspace.machineId,
+    kind: workspaceKind(workspace),
     phase: status?.phase ?? workspace.phase,
     machineState: status?.machineState ?? null,
     reach: status?.reach.state ?? null,
@@ -88,7 +91,9 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb(phaseWord(stateOf(target)).split(" ")[0]!, target.displayName),
     buttonWord: target => phaseButtonWord(stateOf(target)),
     hint: target => phaseHint(stateOf(target)),
-    refusal: target => phaseRefusal(stateOf(target)),
+    // A machine wsp neither forked nor pays for takes neither verb, in the runtime's own sentence and the verb this
+    // slot's own button offers, so what is offered and what would be thrown say the same thing.
+    refusal: target => (kindWords(target.kind).driven ? phaseRefusal(stateOf(target)) : localMachineRefusal(target.displayName, phaseCannot(stateOf(target)))),
     run: (target, verbs) => verbs.togglePhase(target.id),
   },
   {

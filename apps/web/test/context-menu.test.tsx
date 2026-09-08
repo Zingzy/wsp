@@ -10,7 +10,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ContextMenuItem, SessionView, WorkspaceLook, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type ContextMenuItem, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -37,7 +37,6 @@ import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { requestRenameWorkspace } from "../src/shell/shellRequests.js";
-import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
@@ -155,7 +154,7 @@ beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
   useDiffRevealStore.setState({ pendingByWorkspaceId: {} });
@@ -186,7 +185,7 @@ describe("the space header's menu", () => {
 
     // The name reads twice in Spaces, on the header and on its own dot, so the shared mount's one-name wait
     // cannot be used; the header arriving is what says the body is up.
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
     useStore.getState().bind(fakeApi([API], [statusOf(API)]));
     render(
       <SidebarProvider defaultOpen>
@@ -411,7 +410,8 @@ describe("the Workspaces section's menu", () => {
     fireEvent.click(item(SIDEBAR_MODE_WORDS.spaces.title));
     await waitFor(() => expect(menu()).toBeNull());
     await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
+    // No workspace row: the one id under ws: is the header's, which wears it so the arrow walk stops there.
+    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
     // The menu then names the way back, from the one registry entry: nothing spells the two words twice.
     rightClick(screen.getByRole("button", { name: "Workspaces" }));
     await screen.findByRole("menu");
@@ -617,7 +617,7 @@ describe("a workspace row's name box", () => {
   /** The Spaces body draws no workspace row, and the current name reads twice (header and dot), so the shared
    * mount's one-name wait cannot be used: the header arriving is what says the body is up. */
   const mountSpaces = async (api: FakeApi): Promise<void> => {
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
     useStore.getState().bind(api);
     render(
       <SidebarProvider defaultOpen>
@@ -655,9 +655,10 @@ describe("a workspace row's name box", () => {
   it("in Spaces the header grows the same box: the menu opens it in the name's own slot and Enter names the workspace", async () => {
     const api = fakeApi([{ ...API }], [statusOf(API)]);
     await mountSpaces(api);
-    // No workspace row on screen at all, so the header is the only editor there can be.
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
+    // The header is the only thing wearing the workspace's row id, so it is the only editor there can be.
+    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
     const header = document.querySelector<HTMLElement>("[data-space-header]")!;
+    expect(header.dataset["rowId"]).toBe("ws:ws_a");
     rightClick(header);
     await screen.findByRole("menu");
     expect(labels()).toContain(WORKSPACE_WORDS.rename);
@@ -665,12 +666,26 @@ describe("a workspace row's name box", () => {
     const input = await nameBox();
     expect(input.value).toBe("api");
     expect(document.activeElement).toBe(input);
-    expect(input.closest("[data-space-header]")).toBe(header);
+    // The block swaps a button for a plain box while it holds the field, since an input may not sit inside a button.
+    expect(input.closest("[data-space-header]")).toBe(document.querySelector("[data-space-header]"));
     fireEvent.change(input, { target: { value: "the name he typed" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "the name he typed"));
     await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
     expect(within(document.querySelector<HTMLElement>("[data-space-header]")!).getByText("the name he typed")).toBeDefined();
+  });
+
+  it("the menu key reaches the header's menu, which a browser sends as a menu with no pointer on what has focus", async () => {
+    await mountSpaces(fakeApi([{ ...API }], [statusOf(API)]));
+    const header = document.querySelector<HTMLElement>("[data-space-header]")!;
+    // A block a browser will never send that event to is a block whose actions are the mouse's alone.
+    expect(header.tabIndex).toBe(0);
+    header.focus();
+    expect(document.activeElement).toBe(header);
+    rightClick(header, { clientX: 0, clientY: 0 });
+    await screen.findByRole("menu");
+    expect(labels()).toContain(WORKSPACE_WORDS.rename);
+    expect(labels()).toContain(WORKSPACE_WORDS.newThread);
   });
 
   it("a double-click on the name opens the same box", async () => {

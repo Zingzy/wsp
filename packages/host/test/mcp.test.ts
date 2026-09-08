@@ -134,7 +134,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "recipe", "recipe_scan", "rename", "send", "snapshot", "stop", "terminal_config", "thread_new", "thread_rename", "threads", "threads_wait", "wake", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "rebuild", "recipe", "recipe_scan", "rename", "send", "snapshot", "stop", "terminal_config", "thread_new", "thread_rename", "threads", "threads_wait", "wake", "workspaces"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
@@ -344,6 +344,29 @@ describe("the MCP server over the host", () => {
     expect(sent.isError).toBe(false);
     expect(sent.text).toBe("re: again");
     expect((await rt.workspaces.list())[0]!.phase).toBe("running");
+  });
+
+  it("rebuild puts a new machine under a gone workspace and answers with it; one that still answers is a tool error in the row's own words", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    expect(await call("rebuild", { workspace: "alpha" })).toEqual(failedWith("Rebuild replaces a gone or zombie machine; this one answers"));
+    expect(backend.machines).toHaveLength(1);
+
+    await handle!.close();
+    handle = undefined;
+    await socket!.closed;
+    backend.machines[0]!.killed = true;
+    await restartHost({ claude: claude.adapter });
+    expect((await rt.workspaces.get(alpha!.id)).phase).toBe("gone");
+
+    const built = await call("rebuild", { workspace: "alpha" });
+    expect(built.isError).toBe(false);
+    const after = await rt.workspaces.get(alpha!.id);
+    expect(after).toMatchObject({ id: alpha!.id, name: "alpha", phase: "running", golden: alpha!.golden });
+    expect(after.machineId).not.toBe(alpha!.machineId);
+    expect(built.structured).toEqual({ workspace: expect.objectContaining({ id: alpha!.id, machineId: after.machineId, phase: "running" }) });
+    expect(built.text).toBe(`alpha running on ${after.machineId}`);
+    expect(await call("rebuild", { workspace: "nope" })).toEqual(failedWith("no workspace nope"));
   });
 
   it("forget drops a workspace whose machine is gone and says what went; one whose machine exists is a tool error with the reason", async () => {

@@ -11,7 +11,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { LINEAGE_MARKS, LOOK_PARTS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { LINEAGE_MARKS, LOOK_PARTS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceKind, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -42,6 +42,7 @@ import {
   reachLabel,
   type DiskTier,
 } from "./format.js";
+import { workspaceKindGlyph } from "../../workspaceKindGlyph.js";
 import { SnapshotStorageLine } from "./SnapshotStorageLine.js";
 import { UsageChart, UsageRangeToggle } from "./UsageChart.js";
 import type { UsageRange } from "./usage.js";
@@ -67,6 +68,8 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
   const upgrade = useUpgrade(workspace.id);
   const last = series[series.length - 1];
   const pendingSize = upgrade.phase.kind === "resizing" || upgrade.phase.kind === "settling" ? upgrade.phase.size : null;
+  // A machine wsp neither forks nor pays for has no spend to chart and nothing to nap; its rows say what it is instead.
+  const driven = kindWords(workspaceKind(workspace)).driven;
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header workspace={workspace} status={status} />
@@ -74,7 +77,7 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
         <Facts workspace={workspace} status={status} awakeMs={last ? last.awakeMs : null} pendingSize={pendingSize} />
         <Look workspace={workspace} />
         <Live workspace={workspace} />
-        <Usage workspace={workspace} status={status} series={series} />
+        {driven && <Usage workspace={workspace} status={status} series={series} />}
         <Lineage workspace={workspace} />
       </ScrollArea>
       <Actions workspace={workspace} status={status} upgrade={upgrade} />
@@ -88,7 +91,7 @@ function Header({ workspace, status }: { workspace: WorkspaceView; status: Works
   const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), verbs), "copy-id");
   return (
     <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-      <PhaseDot workspace={workspace} status={status} />
+      <MachineLead workspace={workspace} status={status} />
       <span className="min-w-0 truncate text-sm font-medium">{workspace.name}</span>
       <span className="ml-auto flex min-w-0 items-center gap-0.5 font-mono text-[.7rem] text-muted-foreground">
         <span className="max-w-28 truncate" title={machineId} data-k="machine-id">
@@ -102,7 +105,10 @@ function Header({ workspace, status }: { workspace: WorkspaceView; status: Works
   );
 }
 
-function PhaseDot({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
+/** The header's lead: the phase dot for a machine wsp drives, the kind's own glyph for one it does not. */
+function MachineLead({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
+  const KindGlyph = workspaceKindGlyph(workspaceKind(workspace));
+  if (KindGlyph !== null) return <KindGlyph aria-hidden className="size-3.5 shrink-0 text-muted-foreground/60" />;
   const dead = needsRebuild({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
   return (
     <span
@@ -161,6 +167,7 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
   const rebuild = needsRebuild({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
   const billing = isBilling(workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state }));
   const outOfMemory = useOutOfMemoryReading(workspace.id, workspace.phase);
+  const driven = kindWords(workspaceKind(workspace)).driven;
   return (
     <Section label="Machine">
       <div className="mt-1 divide-y divide-border/40">
@@ -189,12 +196,16 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
             "pending"
           )}
         </Row>
-        <Row label="Awake" k="awake">
-          {awakeMs === null ? "pending" : durationLabel(awakeMs)}
-        </Row>
-        <Row label="Auto-nap" k="idle">
-          {idleLabel(billing ? status?.idleAt : undefined, now)}
-        </Row>
+        {driven && (
+          <>
+            <Row label="Awake" k="awake">
+              {awakeMs === null ? "pending" : durationLabel(awakeMs)}
+            </Row>
+            <Row label="Auto-nap" k="idle">
+              {idleLabel(billing ? status?.idleAt : undefined, now)}
+            </Row>
+          </>
+        )}
       </div>
       {status?.reason && (
         <p className={cn("mt-1.5 text-[11px] leading-relaxed", zombie ? "text-destructive-foreground" : "text-muted-foreground")} data-k="reason">
@@ -212,7 +223,7 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
         </p>
       )}
       {rebuild && <Rebuild workspace={workspace} status={status} />}
-      <p className="mt-1.5 text-[11px] text-muted-foreground/70">The idle window is fixed when a workspace is created.</p>
+      {driven && <p className="mt-1.5 text-[11px] text-muted-foreground/70">The idle window is fixed when a workspace is created.</p>}
       {capabilities?.containers === false && (
         <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="containers">
           This provider's machines cannot run containers; install services natively.
@@ -438,7 +449,24 @@ function Usage({ workspace, status, series }: { workspace: WorkspaceView; status
   );
 }
 
+/** Where this workspace's disk came from: the golden lineage for a machine wsp forked, or one row naming the
+ * machine for one that already existed and forks from no image. */
 function Lineage({ workspace }: { workspace: WorkspaceView }) {
+  const machine = kindWords(workspaceKind(workspace)).machine;
+  return machine === null ? <GoldenLineage workspace={workspace} /> : <MachineLineage machine={machine} />;
+}
+
+function MachineLineage({ machine }: { machine: string }) {
+  return (
+    <Section label="Lineage">
+      <ul className={cn("mt-1 divide-y divide-border/40", LINEAGE_GRID)}>
+        <LineageRow dot="bg-foreground" title={<span className="font-medium" data-k="machine">{machine}</span>} detail="forks from no image" marks={["now"]} />
+      </ul>
+    </Section>
+  );
+}
+
+function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
   const api = useStore(s => s.api);
   const createWorkspace = useStore(s => s.createWorkspace);
   const applyWorkspace = useStore(s => s.applyWorkspace);
@@ -759,6 +787,8 @@ function LineageNote({ k, label, text }: { k: string; label: string; text: strin
   );
 }
 
+/** Pause, wake, upgrade and forget, for a machine wsp drives; a machine that already existed takes none of them, so
+ * the tab ends at its facts rather than at a row of buttons that would each refuse. */
 function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; status: WorkspaceStatus | null; upgrade: Upgrade }) {
   const verbs = useWorkspaceVerbs();
   const capabilities = useCapabilities();
@@ -776,6 +806,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   const options = status && canResize && capabilities ? upgradeOptions(status.size, capabilities.sizes) : [];
   const choice = picked ?? options[0] ?? null;
   const rate = status?.rateUsdPerHour ?? null;
+  const driven = kindWords(workspaceKind(workspace)).driven;
 
   const close = (): void => {
     setOpen(false);
@@ -787,6 +818,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
     upgrade.run({ cpu: choice.cpu, memMb: choice.memMb });
   };
 
+  if (!driven) return null;
   return (
     <footer className="flex flex-col gap-2 border-t border-border/60 p-3">
       <div className="flex gap-2">

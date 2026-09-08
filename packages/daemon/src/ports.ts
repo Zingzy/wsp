@@ -1,11 +1,16 @@
+import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { open, readdir, readFile, readlink } from "node:fs/promises";
+import { promisify } from "node:util";
 import type { DaemonEvent } from "@wsp/protocol";
+
+const run = promisify(execFile);
 
 export interface ListeningPort {
   port: number;
   pid: number | null;
-  inode: number;
+  /** The socket's inode on the /proc road, which is how a pid is found there; the lsof road names the pid itself and carries none. */
+  inode?: number;
   uid: number;
   /** /proc/<pid>/comm of the owner; unset when there is no pid or the read fails. */
   process?: string;
@@ -17,18 +22,66 @@ export interface ListeningPort {
 
 const TCP_LISTEN = "0A";
 
-/** /proc/net/tcp prints each 32-bit word of the address little-endian in hex:
- * 0100007F is 127.0.0.1, and tcp6 rows carry four such words. */
-export function isLoopbackHex(addr: string): boolean {
-  const hex = addr.toUpperCase();
-  const lastByte = (word: string): number => Number.parseInt(word.slice(6, 8), 16);
-  if (hex.length === 8) return lastByte(hex) === 127;
-  if (hex.length !== 32) return false;
-  const words = [hex.slice(0, 8), hex.slice(8, 16), hex.slice(16, 24), hex.slice(24, 32)];
-  if (words[0] !== "00000000" || words[1] !== "00000000") return false;
-  if (words[2] === "00000000") return words[3] === "01000000";
-  return words[2] === "FFFF0000" && lastByte(words[3]!) === 127;
+/** Whether a listening address reaches only this computer: 127.0.0.0/8 or ::1, the IPv4-mapped form of either
+ * included. The one rule, over the address bytes in network order; each road parses its own encoding down to them. */
+function isLoopbackBytes(bytes: readonly number[]): boolean {
+  if (bytes.length === 4) return bytes[0] === 127;
+  if (bytes.length !== 16) return false;
+  if (bytes.slice(0, 10).some(b => b !== 0)) return false;
+  if (bytes[10] === 0xff && bytes[11] === 0xff) return isLoopbackBytes(bytes.slice(12));
+  return bytes.slice(10).every((b, i) => b === (i === 5 ? 1 : 0));
 }
+
+/** The address bytes behind /proc/net/tcp's address column: each 32-bit word is printed little-endian in hex, so
+ * 0100007F is 127.0.0.1 and a tcp6 row carries four such words. Empty for a column of any other width. */
+function hexAddressBytes(addr: string): number[] {
+  if (addr.length !== 8 && addr.length !== 32) return [];
+  const bytes: number[] = [];
+  for (let word = 0; word < addr.length; word += 8) {
+    for (let byte = 6; byte >= 0; byte -= 2) bytes.push(Number.parseInt(addr.slice(word + byte, word + byte + 2), 16));
+  }
+  return bytes;
+}
+
+export function isLoopbackHex(addr: string): boolean {
+  return isLoopbackBytes(hexAddressBytes(addr));
+}
+
+/** The address bytes behind a numeric host as lsof prints it: a dotted quad, an IPv6 address with its brackets
+ * already off, or an IPv4-mapped one. Empty for a wildcard and for anything that does not parse. */
+function hostAddressBytes(host: string): number[] {
+  if (host === "" || host === "*") return [];
+  const quad = (text: string): number[] => {
+    const parts = text.split(".").map(Number);
+    return parts.length === 4 && parts.every(n => Number.isInteger(n) && n >= 0 && n <= 255) ? parts : [];
+  };
+  if (!host.includes(":")) return quad(host);
+  const [head = "", tail, extra] = host.split("::");
+  if (extra !== undefined) return [];
+  const groups = (text: string): number[] | null => {
+    const bytes: number[] = [];
+    for (const group of text.split(":").filter(g => g !== "")) {
+      if (group.includes(".")) {
+        const mapped = quad(group);
+        if (mapped.length === 0) return null;
+        bytes.push(...mapped);
+        continue;
+      }
+      if (!/^[0-9a-f]{1,4}$/i.test(group)) return null;
+      const value = Number.parseInt(group, 16);
+      bytes.push(value >> 8, value & 0xff);
+    }
+    return bytes;
+  };
+  const left = groups(head);
+  const right = tail === undefined ? [] : groups(tail);
+  if (left === null || right === null) return [];
+  const gap = 16 - left.length - right.length;
+  if (tail === undefined ? gap !== 0 : gap < 0) return [];
+  return [...left, ...Array<number>(gap).fill(0), ...right];
+}
+
+export const isLoopbackHost = (host: string): boolean => isLoopbackBytes(hostAddressBytes(host));
 
 /**
  * Parses /proc/net/tcp (or tcp6; same layout, wider address) into LISTEN rows.
@@ -70,6 +123,73 @@ export function procNetTcpSource(procRoot = "/proc"): PortSnapshotSource {
       return { ...row, ...(process !== undefined ? { process } : {}), ...(command !== undefined ? { command } : {}) };
     }));
   };
+}
+
+/** lsof's field output for the listening TCP sockets this user can see: numeric hosts and ports, untruncated
+ * command names, and one field per line. A process set opens with its pid and carries its command and uid; each
+ * socket under it opens with its fd and carries its address. */
+const LSOF_ARGS = ["-nP", "-w", "+c", "0", "-F", "pcfnu", "-iTCP", "-sTCP:LISTEN"];
+
+/** lsof field output into LISTEN rows. The fd lines only separate one socket from the next; a row is the process
+ * set's pid, command and uid with that socket's address. */
+export function parseLsofListeners(text: string): ListeningPort[] {
+  const rows: ListeningPort[] = [];
+  let held: { pid: number | null; uid: number; process?: string } = { pid: null, uid: 0 };
+  for (const line of text.split("\n")) {
+    const value = line.slice(1);
+    switch (line[0]) {
+      case "p":
+        held = { pid: Number.parseInt(value, 10), uid: 0 };
+        break;
+      case "c":
+        if (value !== "") held.process = value;
+        break;
+      case "u":
+        held.uid = Number.parseInt(value, 10) || 0;
+        break;
+      case "n": {
+        const cut = value.lastIndexOf(":");
+        const port = Number.parseInt(value.slice(cut + 1), 10);
+        if (cut < 0 || !Number.isFinite(port)) break;
+        const host = value.slice(0, cut).replace(/^\[|\]$/g, "");
+        rows.push({ port, pid: Number.isFinite(held.pid) ? held.pid : null, uid: held.uid, ...(held.process !== undefined ? { process: held.process } : {}), loopback: isLoopbackHost(host) });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return rows;
+}
+
+/** The darwin road: /proc does not exist there, so lsof names the listeners. It reports the holder's command name
+ * but not its argv, so a row from this road carries no command; lsof exits non-zero when nothing is listening, and
+ * whatever it printed before that is still read. */
+export function lsofSource(): PortSnapshotSource {
+  return async () => {
+    const printed = await run("lsof", LSOF_ARGS, { maxBuffer: 8 * 1024 * 1024 }).then(
+      r => r.stdout,
+      (e: { stdout?: string }) => e.stdout ?? "",
+    );
+    const byPort = new Map<number, ListeningPort>();
+    for (const row of parseLsofListeners(printed)) {
+      if (!byPort.has(row.port)) byPort.set(row.port, row);
+    }
+    return [...byPort.values()];
+  };
+}
+
+/** The road to this computer's listening ports, one module per platform: Linux reads /proc/net/tcp, macOS asks
+ * lsof. A platform with no road here reads empty rather than failing the daemon that asked, so a pane on it shows
+ * no ports instead of no daemon. Adding a platform is a row here and its source. */
+const PORT_SOURCES: Partial<Record<NodeJS.Platform, () => PortSnapshotSource>> = {
+  linux: () => procNetTcpSource(),
+  darwin: () => lsofSource(),
+};
+
+export function portSourceFor(platform: NodeJS.Platform): PortSnapshotSource {
+  const road = PORT_SOURCES[platform];
+  return road === undefined ? async () => [] : road();
 }
 
 async function readComm(procRoot: string, pid: number): Promise<string | undefined> {

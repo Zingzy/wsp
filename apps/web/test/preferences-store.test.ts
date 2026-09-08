@@ -1,0 +1,191 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The store's side of the preferences record: read from the host on bind and
+// on every reconnect, followed on preferences.changed, a set painted ahead of
+// the host's answer and settled by it, a refusal a toast that reads the host's
+// record again, the picks this browser kept in localStorage moved onto the
+// record once, and the settings page a state a workspace pick leaves.
+import { DEFAULT_PREFERENCES, applyPreferencesPatch, type Preferences, type PreferencesPatch, type WorkspaceView } from "@wsp/protocol";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
+import { useStore } from "../src/protocol/store.js";
+
+const view = (id: string): WorkspaceView => ({ id, name: id, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] };
+
+function fakeApi(record: Preferences, refuse?: () => Error) {
+  const listeners = new Set<(e: ProtocolEvent) => void>();
+  const sets: PreferencesPatch[] = [];
+  const reads = { count: 0 };
+  let held = record;
+  const api: Api = {
+    listWorkspaces: async () => [view("ws_a")],
+    getWorkspace: async () => view("ws_a"),
+    createWorkspace: async () => view("ws_a"),
+    createFromGoldenHead: async () => view("ws_a"),
+    watchStatuses: async () => [],
+    nap: async () => view("ws_a"),
+    wake: async () => view("ws_a"),
+    upgrade: async () => view("ws_a"),
+    capabilities: async () => CAPS,
+    startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
+    portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: 0 }),
+    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    sessionHistory: async () => [],
+    listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
+    snapshotStorage: async () => null,
+    rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
+    listSessions: async () => [],
+    getGolden: async () => undefined,
+    subscribe: fn => {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    preferences: async () => {
+      reads.count++;
+      return held;
+    },
+    setPreferences: async patch => {
+      sets.push(patch);
+      if (refuse !== undefined) throw refuse();
+      held = applyPreferencesPatch(held, patch);
+      return held;
+    },
+  };
+  const emit = (e: ProtocolEvent) => {
+    for (const fn of [...listeners]) fn(e);
+  };
+  return { api, emit, sets, reads };
+}
+
+const flush = () => new Promise(r => setTimeout(r, 0));
+
+beforeEach(() => {
+  window.localStorage.clear();
+  useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("the preferences record in the store", () => {
+  it("is the defaults until the host answers, then the host's record, read again when the socket comes back live, and follows preferences.changed", async () => {
+    const record: Preferences = { ...DEFAULT_PREFERENCES, theme: "light", sidebarWidth: 300 };
+    const { api, emit, reads } = fakeApi(record);
+    expect(useStore.getState().preferences).toEqual(DEFAULT_PREFERENCES);
+    useStore.getState().bind(api);
+    await flush();
+    expect(useStore.getState().preferences).toEqual(record);
+    expect(reads.count).toBe(1);
+    useStore.getState().setConn("live");
+    await flush();
+    expect(reads.count).toBe(2);
+    emit({ type: "preferences.changed", preferences: { ...record, sidebarMode: "spaces" } });
+    expect(useStore.getState().preferences.sidebarMode).toBe("spaces");
+  });
+
+  it("a set paints at once, goes to the host as the patch, and the host's answer settles the record", async () => {
+    const { api, sets } = fakeApi(DEFAULT_PREFERENCES);
+    useStore.getState().bind(api);
+    await flush();
+    const done = useStore.getState().setPreferences({ theme: "dark" });
+    expect(useStore.getState().preferences.theme).toBe("dark");
+    await done;
+    expect(sets).toEqual([{ theme: "dark" }]);
+    expect(useStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, theme: "dark" });
+    expect(useStore.getState().toast).toBeNull();
+  });
+
+  it("while a set is on its way, an earlier record from the host does not paint over the person's pick", async () => {
+    const { api, emit } = fakeApi(DEFAULT_PREFERENCES);
+    useStore.getState().bind(api);
+    await flush();
+    const done = useStore.getState().setPreferences({ terminalZoom: { ws_a: 2 } });
+    emit({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, terminalZoom: { ws_a: 1 } } });
+    expect(useStore.getState().preferences.terminalZoom).toEqual({ ws_a: 2 });
+    await done;
+    expect(useStore.getState().preferences.terminalZoom).toEqual({ ws_a: 2 });
+  });
+
+  it("a refusal is a toast and the host's record is read again; a dropped socket is neither", async () => {
+    const { api, reads } = fakeApi({ ...DEFAULT_PREFERENCES, theme: "light" }, () => new RequestError("state file unreadable"));
+    useStore.getState().bind(api);
+    await flush();
+    await useStore.getState().setPreferences({ theme: "dark" });
+    await flush();
+    expect(useStore.getState().toast).toBe("settings: state file unreadable");
+    expect(reads.count).toBe(2);
+    expect(useStore.getState().preferences.theme).toBe("light");
+
+    const dropped = fakeApi(DEFAULT_PREFERENCES, () => new DisconnectedError("lost"));
+    useStore.setState({ api: dropped.api, toast: null });
+    await useStore.getState().setPreferences({ theme: "dark" });
+    expect(useStore.getState().toast).toBeNull();
+  });
+
+  it("without the verb on the client the pick still paints and nothing is sent", async () => {
+    const { api } = fakeApi(DEFAULT_PREFERENCES);
+    const { preferences: _p, setPreferences: _s, ...bare } = api;
+    useStore.getState().bind(bare);
+    await flush();
+    await useStore.getState().setPreferences({ sidebarMode: "spaces" });
+    expect(useStore.getState().preferences.sidebarMode).toBe("spaces");
+  });
+
+  it("moves the three picks this browser kept in localStorage onto the record once, the old size as pixels over the app's, and drops the old keys", async () => {
+    window.localStorage.setItem("wsp:sidebar-width", "312.4");
+    window.localStorage.setItem("wsp:sidebar-mode", "spaces");
+    window.localStorage.setItem("wsp:terminal-font-size:ws_a", "16");
+    window.localStorage.setItem("wsp:terminal-font-size:ws_b", "12");
+    window.localStorage.setItem("wsp:terminal-font", "Hack");
+    const { api, sets, reads } = fakeApi(DEFAULT_PREFERENCES);
+    useStore.getState().bind(api);
+    await flush();
+    await flush();
+    expect(sets).toEqual([{ sidebarWidth: 312, sidebarMode: "spaces", terminalZoom: { ws_a: 2, ws_b: -2 } }]);
+    expect(useStore.getState().preferences).toMatchObject({ sidebarWidth: 312, sidebarMode: "spaces", terminalZoom: { ws_a: 2, ws_b: -2 } });
+    expect(window.localStorage.getItem("wsp:sidebar-width")).toBeNull();
+    expect(window.localStorage.getItem("wsp:sidebar-mode")).toBeNull();
+    expect(window.localStorage.getItem("wsp:terminal-font-size:ws_a")).toBeNull();
+    expect(window.localStorage.getItem("wsp:terminal-font")).toBe("Hack");
+    // The next read finds nothing to move.
+    useStore.getState().setConn("live");
+    await flush();
+    await flush();
+    expect(reads.count).toBe(2);
+    expect(sets).toHaveLength(1);
+  });
+
+  it("a browser with none of the old keys, or one holding nonsense under them, sends nothing; nonsense under one key does not stop the rest", async () => {
+    window.localStorage.setItem("wsp:sidebar-width", "wide");
+    window.localStorage.setItem("wsp:sidebar-mode", "grid");
+    const { api, sets } = fakeApi(DEFAULT_PREFERENCES);
+    useStore.getState().bind(api);
+    await flush();
+    await flush();
+    expect(sets).toEqual([]);
+    window.localStorage.setItem("wsp:sidebar-mode", "spaces");
+    useStore.getState().setConn("live");
+    await flush();
+    await flush();
+    expect(sets).toEqual([{ sidebarMode: "spaces" }]);
+  });
+
+  it("the settings page opens on its own state, toggles shut, closes on its own, and closes when a workspace or a thread is picked", () => {
+    expect(useStore.getState().settingsOpen).toBe(false);
+    useStore.getState().openSettings();
+    expect(useStore.getState().settingsOpen).toBe(true);
+    useStore.getState().select("ws_a");
+    expect(useStore.getState().settingsOpen).toBe(false);
+    useStore.getState().openSettings();
+    useStore.getState().select("ws_a", "thr_1");
+    expect(useStore.getState().settingsOpen).toBe(false);
+    useStore.getState().toggleSettings();
+    expect(useStore.getState().settingsOpen).toBe(true);
+    useStore.getState().toggleSettings();
+    expect(useStore.getState().settingsOpen).toBe(false);
+    useStore.getState().openSettings();
+    useStore.getState().closeSettings();
+    expect(useStore.getState().settingsOpen).toBe(false);
+  });
+});

@@ -60,6 +60,19 @@ describe("makeApi wrappers", () => {
     await expect(read("dark")).rejects.toThrow();
   });
 
+  it("preferences and setPreferences send the two preferences ops and unwrap the record the wire type vouches for", async () => {
+    const { api, lastSent } = await connect();
+    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 } };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
+    expect(await api.preferences!()).toEqual(record);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.get" });
+    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual(record);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.set", patch: { theme: "light", sidebarWidth: null } });
+    // A record the wire type does not vouch for is not applied: the page would paint a theme it never checked.
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: { ...record, theme: "sepia" } });
+    await expect(api.preferences!()).rejects.toThrow();
+  });
+
   it("hostFolders sends host.folders with only the fields it was given and unwraps the level the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
     const browse = api.hostFolders!;

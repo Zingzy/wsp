@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, computerOffline, goneRefusal, isBilling, needsRebuild, reachShown, sendRefusal, stillWorkingRefusal, workspaceState, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, computerOffline, goneRefusal, isBilling, kindWords, localMachineRefusal, needsRebuild, reachShown, relayedRefusal, sendRefusal, stillWorkingRefusal, THIS_COMPUTER, workspaceKind, workspaceState, workspaceWord, WORKSPACE_KIND_WORDS, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -121,5 +121,28 @@ describe("computerOffline", () => {
     expect(computerOffline([{ reach: { state: "reachable" } }, { reach: { state: "unreachable" } }])).toBe(false);
     expect(computerOffline([{ reach: { state: "reachable" } }, { reach: { state: "unreachable", offline: true } }])).toBe(true);
     expect(computerOffline([])).toBe(false);
+  });
+});
+
+describe("what a workspace's kind changes about its words", () => {
+  it("a record from before local workspaces existed carries no kind and reads as a provider fork", () => {
+    expect(workspaceKind({ kind: undefined })).toBe("cloud");
+    expect(workspaceKind({ kind: "cloud" })).toBe("cloud");
+    expect(workspaceKind({ kind: "local" })).toBe("local");
+  });
+
+  it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and says what it is", () => {
+    expect(kindWords("cloud")).toEqual({ machine: null, driven: true });
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, driven: false });
+  });
+
+  it("every kind has a row in the table, so adding one is a row here and nothing else", () => {
+    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local"]);
+  });
+
+  it("the phrase for this computer has one home: the refusals read it too", () => {
+    expect(THIS_COMPUTER).toBe("this computer");
+    expect(relayedRefusal("mac")).toContain(THIS_COMPUTER);
+    expect(localMachineRefusal("mac", "be paused")).toBe(`mac is ${THIS_COMPUTER}, not a machine wsp runs; it cannot be paused`);
   });
 });

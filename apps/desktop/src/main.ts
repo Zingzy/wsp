@@ -2,7 +2,7 @@
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { currentHome, type CliIO } from "@wsp/host";
-import { DEFAULT_PORT, DEFAULT_WS_PORT } from "@wsp/protocol";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, ThemePreference } from "@wsp/protocol";
 import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell } from "electron";
 import { chooseFrom, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
@@ -74,6 +74,14 @@ ipcMain.on("terminal:focus", (event, focused: unknown) => {
   if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) return;
   if (focused === true) terminalFocus.add(event.sender.id);
   else terminalFocus.delete(event.sender.id);
+});
+
+// The window's chrome, the frosted sidebar and the traffic-light bar follow the theme the page draws, which the page
+// reads off the host's preferences; only the host's own page may move it.
+ipcMain.on("theme:set", (event, theme: unknown) => {
+  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) return;
+  const parsed = ThemePreference.safeParse(theme);
+  if (parsed.success) nativeTheme.themeSource = parsed.data;
 });
 
 function locate(): Promise<Located> {
@@ -169,7 +177,7 @@ app.on("window-all-closed", () => app.quit());
 app
   .whenReady()
   .then(async () => {
-    // The window's chrome and the frosted sidebar follow the page's one theme, dark, not the system; a light theme moves this pin with it.
+    // Dark until the page says otherwise: the page opens on its dark side too, and tells the shell the preference once it has read it.
     nativeTheme.themeSource = "dark";
     const located = await locate();
     if (!(await showApp(located))) await showSetup(located);
