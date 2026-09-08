@@ -122,7 +122,7 @@ describe("app shell", () => {
   });
 
   it("a load paints the kept width and the Spaces body from this browser's first-paint cache before the host answers, and the record wins when it lands", async () => {
-    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "dark", sidebarWidth: 312, sidebarMode: "spaces" }));
+    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "dark", sidebarWidth: 312, sidebarMode: "spaces", labs: true }));
     vi.resetModules();
     const { useStore: bootStore } = await import("../src/protocol/store.js");
     const { AppShell: BootShell } = await import("../src/shell/AppShell.js");
@@ -140,23 +140,23 @@ describe("app shell", () => {
     await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
     // Spaces: the one workspace row is the space's header.
     expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
-    await act(async () => answer!({ ...DEFAULT_PREFERENCES, sidebarMode: "list" }));
+    await act(async () => answer!({ ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "list" }));
     await waitFor(() => expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(2));
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("16rem");
-    expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "system", sidebarMode: "list" });
+    expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "system", sidebarMode: "list", labs: true });
   });
 
   it("the sidebar opens at the width the host's record holds, follows a change to it, and a cleared width puts the default back", async () => {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarWidth: 312 } });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarWidth: 312 } });
     await mountShell();
     const wrapper = document.querySelector<HTMLElement>("[data-slot='sidebar-wrapper']")!;
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("312px");
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarWidth: 400 } }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarWidth: 400 } }));
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("400px");
     // Past the sidebar's own bounds the kept width is held to them.
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarWidth: 900 } }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarWidth: 900 } }));
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("480px");
-    act(() => useStore.setState({ preferences: DEFAULT_PREFERENCES }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } }));
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("16rem");
   });
 

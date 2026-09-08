@@ -45,6 +45,8 @@ export interface PaletteItemsInput {
   /** What the person typed; the thread search runs over it, the at-rest list ignores it. */
   readonly query: string;
   readonly canCreate: boolean;
+  /** Whether this host offers the surfaces still being worked on; the registries' labs rows and the Settings row read it. */
+  readonly labs: boolean;
   readonly sidebarMode: SidebarMode;
   readonly handlers: PaletteHandlers;
   readonly verbs: WorkspaceVerbs;
@@ -94,7 +96,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     },
   ];
   if (selected !== null) {
-    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status), input.verbs).map(action => actionItem(action, selected.displayName)));
+    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status), input.verbs, input.labs).map(action => actionItem(action, selected.displayName)));
   }
 
   items.push(
@@ -102,6 +104,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       sidebarActions,
       { mode: input.sidebarMode, hasLocal: input.hasLocal, connected: input.canCreate },
       { setMode: handlers.setSidebarMode, newLocal: handlers.newLocalWorkspace },
+      input.labs,
     ).map(action => actionItem(action, action.hint ?? "")),
   );
 
@@ -159,16 +162,20 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       shortcutCommand: "sidebar.toggle",
       run: sync(handlers.toggleSidebar),
     },
-    {
-      kind: "action",
-      value: "action:settings",
-      searchTerms: ["settings", "preferences", "theme", "appearance", "light mode", "dark mode", "terminal size"],
-      icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
-      title: SETTINGS_WORDS.title,
-      description: SETTINGS_WORDS.hint,
-      shortcutCommand: "settings.toggle",
-      run: sync(handlers.openSettings),
-    },
+    ...(input.labs
+      ? [
+          {
+            kind: "action" as const,
+            value: "action:settings",
+            searchTerms: ["settings", "preferences", "theme", "appearance", "light mode", "dark mode", "terminal size"],
+            icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+            title: SETTINGS_WORDS.title,
+            description: SETTINGS_WORDS.hint,
+            shortcutCommand: "settings.toggle" as const,
+            run: sync(handlers.openSettings),
+          },
+        ]
+      : []),
     {
       kind: "action",
       value: "action:toggle-right-panel",

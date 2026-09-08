@@ -20,7 +20,8 @@ export type MenuShape = ReadonlyArray<string>;
  * has just created is running, which is what its record already says. */
 export function workspaceMenuShape(workspace: WorkspaceView): MenuShape {
   const target = workspaceTarget(workspace, null);
-  const items = workspaceActions.map(entry => ({ id: entry.id, label: entry.title(target), group: entry.group, enabled: true }));
+  // The smoke's host runs with labs off, the public build's setting, so the registry's labs rows are not among the menu's.
+  const items = workspaceActions.filter(entry => entry.labs !== true).map(entry => ({ id: entry.id, label: entry.title(target), group: entry.group, enabled: true }));
   return contextMenuTemplate(items, () => {}).map(row => (row.type === "separator" ? SEPARATOR : String(row.label)));
 }
 

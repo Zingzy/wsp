@@ -31,7 +31,9 @@ export function applyTheme(theme: ThemePreference, systemDark: boolean): void {
  * and under system the computer's own scheme as it changes; the desktop shell hears it so the window's frame, glass
  * and traffic-light bar follow. */
 export function useThemeEffect(): void {
-  const theme = useStore(s => s.preferences.theme);
+  // The settings page is the only place a side is picked, so with labs off the record's side is not drawn: the page
+  // that would change it is not offered, and a side left in the record from before would be one nothing could undo.
+  const theme = useStore(s => (s.preferences.labs ? s.preferences.theme : "system"));
   const systemDark = useMediaQuery(SYSTEM_DARK_QUERY);
   useLayoutEffect(() => {
     applyTheme(theme, systemDark);

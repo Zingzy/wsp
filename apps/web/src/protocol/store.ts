@@ -307,9 +307,10 @@ export const useStore = create<State>((set, get) => {
       if (conn === "live" && api) pull(api);
     },
     select(id, threadId = null) { set({ selectedId: id, selectedThreadId: threadId, settingsOpen: false }); },
-    openSettings() { set({ settingsOpen: true }); },
+    // The page is a labs surface, so every road to it (the chord, the palette row) is shut in one place.
+    openSettings() { if (get().preferences.labs) set({ settingsOpen: true }); },
     closeSettings() { set({ settingsOpen: false }); },
-    toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen })); },
+    toggleSettings() { set(s => ({ settingsOpen: s.preferences.labs && !s.settingsOpen })); },
     async setPreferences(patch) {
       const api = get().api;
       set(s => ({ preferences: applyPreferencesPatch(s.preferences, patch) }));
@@ -622,6 +623,8 @@ export function useSpending(id: string | null): boolean {
 }
 export function useReady(): boolean { return useStore(s => s.ready); }
 export function usePreferences(): Preferences { return useStore(s => s.preferences); }
+/** Whether this host offers the surfaces still being worked on; the record's one field, read by every surface that hides. */
+export function useLabs(): boolean { return useStore(s => s.preferences.labs); }
 export function useSettingsOpen(): boolean { return useStore(s => s.settingsOpen); }
 export function useForwards(): PortForward[] { return useStore(s => s.forwards); }
 /** Whether localhost:port on this computer is a page of that workspace to open: a printed link, not a sign-in callback. */
