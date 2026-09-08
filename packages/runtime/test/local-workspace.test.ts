@@ -336,6 +336,31 @@ describe("local workspace", () => {
     expect(closed).toBe(1);
   });
 
+  it("this computer holds no machine slot: at the cap one cloud record still leaves a slot, and the refusal never names the local row", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store, adapters: { claude: echoAdapter }, local: localWiring });
+    await rt.workspaces.createLocal("zingzys-MacBook-Pro.local");
+    await rt.workspaces.create({ golden: "snap_g", name: "b2" });
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
+      return create(spec);
+    };
+    const refused = await rt.workspaces.create({ golden: "snap_g", name: "b3" }).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe("a machine slot is in use: b2. Pause it or wait for a nap.");
+  });
+
+  it("with no cloud record at all the refusal claims no holder, since this computer holds none", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store, adapters: { claude: echoAdapter }, local: localWiring });
+    await rt.workspaces.createLocal("zingzys-MacBook-Pro.local");
+    backend.create = async () => {
+      throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
+    };
+    const refused = await rt.workspaces.create({ golden: "snap_g", name: "b1" }).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe("the provider is at its machine cap and no machine of this computer holds a slot; free one at the provider and try again");
+  });
+
   it("createLocal is refused when no local backend is wired", async () => {
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter } });
     await expect(rt.workspaces.createLocal("mac")).rejects.toThrow("no local backend wired");
