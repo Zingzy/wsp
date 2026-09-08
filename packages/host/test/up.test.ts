@@ -28,6 +28,8 @@ describe("wsp up", () => {
   let webDir: string;
   let statePath: string;
   const handles: HostHandle[] = [];
+  /** Runtimes a case built by hand, closed after it whether it got that far or not. */
+  const runtimes: Runtime[] = [];
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "wsp-up-home-"));
@@ -44,6 +46,7 @@ describe("wsp up", () => {
   });
   afterEach(async () => {
     for (const h of handles.splice(0)) await h.close();
+    for (const rt of runtimes.splice(0)) await rt.close();
     vi.unstubAllEnvs();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -105,6 +108,29 @@ describe("wsp up", () => {
     handles.push(handle);
     expect((await fetch(`http://127.0.0.1:${handle.port}/`)).status).toBe(200);
     expect((await rt.workspaces.list()).map(w => [w.name, w.kind])).toEqual([["mac", "local"]]);
+  });
+
+  it("the panes of a local workspace dial a daemon this host starts on the first ask and closes with the runtime", async () => {
+    stateFile({
+      workspaces: {
+        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), spec: {}, firstLife: false, idleWindowMs: null },
+      },
+    });
+    const wiring = localWiring(home);
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath), adapters: {}, local: wiring });
+    runtimes.push(rt);
+    // Nothing is bound before a pane asks: the road is what starts the daemon.
+    expect(existsSync(join(home, ".wsp-inbox"))).toBe(false);
+    const road = await rt.workspaces.daemonReach("ws_l");
+    expect(road.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(road.daemonToken).toMatch(/^[0-9a-f]{48}$/);
+    expect((await fetch(road.url)).status).toBe(426);
+    // The same daemon answers the next ask; the host binds one port for this computer, not one per pane.
+    expect((await rt.workspaces.daemonReach("ws_l")).url).toBe(road.url);
+    await rt.close();
+    await expect(fetch(road.url)).rejects.toThrow();
+    // The teardown closes every runtime a case built, so a second close must be quiet rather than a second wss.close.
+    await expect(rt.close()).resolves.toBeUndefined();
   });
 
   it.each([

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { resolve } from "node:path";
 import { DAEMON_ROOTS_PATH, DAEMON_VERSION, DaemonAuthRequest, type DaemonEvent } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -12,7 +12,7 @@ import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
 import { InboxWatcher } from "./inbox.js";
 import { ProcessManifest, type ManifestOptions } from "./manifest.js";
 import { linuxModeProbe, ModeWatcher, type ModeProbe } from "./mode.js";
-import { PortWatcher, procNetTcpSource, type PortOpenEvent, type PortSnapshotSource } from "./ports.js";
+import { PortWatcher, portSourceFor, type PortOpenEvent, type PortSnapshotSource } from "./ports.js";
 import { killProcess, ProcSampler } from "./proc.js";
 import { PtyManager } from "./pty-manager.js";
 import { procSysSource, SysSampler, type SysSource } from "./sys.js";
@@ -140,7 +140,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
 
   const getPortWatcher = () => {
     if (!portWatcher) {
-      portWatcher = new PortWatcher(opts.portsSource ?? procNetTcpSource(), {
+      portWatcher = new PortWatcher(opts.portsSource ?? portSourceFor(platform()), {
         intervalMs: opts.portsIntervalMs ?? 1000,
       });
       portWatcher.on("port.open", (e: PortOpenEvent) => spotter.noteOpen(e.port, e.loopback === true));

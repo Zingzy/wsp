@@ -368,6 +368,27 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · $0.110/hr · active"));
   });
 
+  it("this computer's row: the laptop glyph where the state dot goes, no state word, and what the machine is on the meta line, beside cloud rows that keep all three", async () => {
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    await mount(fakeApi([API, WEB, MAC], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB), { ...status(MAC), kind: "local", rateUsdPerHour: 0 }]), "api");
+    await waitFor(() => expect(rowOf("zingzy-mac")).toBeDefined());
+    const lead = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-lead]")!;
+    expect(lead(rowOf("zingzy-mac")).dataset["workspaceLead"]).toBe("glyph");
+    expect(lead(rowOf("zingzy-mac")).querySelector("svg")).not.toBeNull();
+    expect(lead(rowOf("api")).dataset["workspaceLead"]).toBe("dot");
+    expect(lead(rowOf("api")).querySelector("svg")).toBeNull();
+    expect(metaOf(rowOf("zingzy-mac")).textContent).toBe("this computer");
+    expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
+    // The cloud rows beside it are untouched: the spend, the countdown and the paused word all still read.
+    expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · $0.110/hr · naps in 14m");
+    expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
+    // One row grammar for both kinds: the same lead slot and the same height.
+    const boxOf = (row: HTMLElement) => [...row.firstElementChild!.classList].filter(c => /^(size-|mt-)/.test(c)).sort();
+    expect(boxOf(rowOf("zingzy-mac"))).toEqual(boxOf(rowOf("api")));
+    const heightOf = (row: HTMLElement) => [...row.classList].filter(c => /^(h-|py-)/.test(c)).sort();
+    expect(heightOf(rowOf("zingzy-mac"))).toEqual(heightOf(rowOf("api")));
+  });
+
   it("every two-line row is one height, the thread rows share the workspace rows' grammar, and the Idle row is the kit row", async () => {
     await mount(
       fakeApi(
@@ -990,6 +1011,25 @@ describe("Spaces mode", () => {
     expect(useStore.getState().selectedId).toBe("ws_b");
     expect(screen.getByText("bump the lockfile")).toBeDefined();
     expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
+  });
+
+  it("this computer's header says what the machine is where a fork's size reads, through the one machine line", async () => {
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    useStore.setState({ selectedId: "ws_m" });
+    await mountSpaces(fakeApi([API, MAC], [status(API), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]));
+    await waitFor(() => expect(within(spaceHeader()!).getByText("zingzy-mac")).toBeDefined());
+    // The machine words alone: nothing wsp does not pay for, so no cost line and no rate under them.
+    expect(headerLines()).toEqual(["this computer"]);
+    expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
+    // A tick on this computer's meter changes nothing there either.
+    act(() =>
+      useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_m", phase: "running", rateUsdPerHour: 0, awakeMs: 120_000, accruedUsd: 0, at: new Date(NOW).toISOString() }),
+    );
+    await waitFor(() => expect(headerLines()).toEqual(["this computer"]));
+    // The fork beside it keeps every line it had: the size and the OS word, then the spend with its rate.
+    fireEvent.click(dots()[0]!);
+    await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
+    expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr"]);
   });
 
   it("before the first status the header carries no machine line: nothing draws a bare OS word", async () => {
