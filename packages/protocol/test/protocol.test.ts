@@ -421,6 +421,19 @@ describe("runtime wire types", () => {
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
   });
 
+  it("every request carries where it reached the host from, on the envelope and not per op", () => {
+    const relayed = [
+      { id: 1, op: "workspaces.list", origin: "relayed" },
+      { id: 2, op: "workspaces.nap", workspaceId: "ws_1", origin: "relayed" },
+      { id: 3, op: "sessions.start", workspaceId: "ws_1", prompt: "go", origin: "relayed" },
+      { id: 4, op: "workspaces.exec", workspaceId: "ws_1", argv: ["ls"], origin: "here" },
+    ];
+    for (const r of relayed) expect(RuntimeRequest.parse(r)).toEqual(r);
+    // A client on this computer names none, and nothing is added to what it sent.
+    expect(RuntimeRequest.parse({ id: 5, op: "workspaces.list" })).toEqual({ id: 5, op: "workspaces.list" });
+    expect(() => RuntimeRequest.parse({ id: 6, op: "workspaces.list", origin: "machine" })).toThrow();
+  });
+
   it("sessions.start carries the composer's model, effort and permission mode as the harness's own slugs", () => {
     const picked = { id: 22, op: "sessions.start", workspaceId: "ws_1", prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits", contextWindow: "1m" };
     expect(RuntimeRequest.parse(picked)).toEqual(picked);
@@ -443,10 +456,11 @@ describe("runtime wire types", () => {
       permissionModes: [{ value: "plan", label: "Plan", description: "Read and plan only" }],
       steers: true,
       renames: true,
+      images: true,
     };
     expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
     expect(HarnessCatalog.parse({ ...catalog, isDefault: true })).toEqual({ ...catalog, isDefault: true });
-    const bare = { harness: "pi", label: "Pi", source: "table", version: null, models: [], efforts: [], contextWindows: [], permissionModes: [], steers: false, renames: false };
+    const bare = { harness: "pi", label: "Pi", source: "table", version: null, models: [], efforts: [], contextWindows: [], permissionModes: [], steers: false, renames: false, images: false };
     expect(HarnessCatalog.parse(bare)).toEqual(bare);
     // steers says whether a running turn of this harness takes a message; the composer decides send-now from it before the click
     expect(() => HarnessCatalog.parse({ ...catalog, steers: undefined })).toThrow();
@@ -454,6 +468,9 @@ describe("runtime wire types", () => {
     // renames says whether a name of a person's survives in the harness's own store; a client offers the rename from it
     expect(() => HarnessCatalog.parse({ ...catalog, renames: undefined })).toThrow();
     expect(() => HarnessCatalog.parse({ ...catalog, renames: "yes" })).toThrow();
+    // images says whether a message to this harness may carry one; the composer offers its picker from it
+    expect(() => HarnessCatalog.parse({ ...catalog, images: undefined })).toThrow();
+    expect(() => HarnessCatalog.parse({ ...catalog, images: "yes" })).toThrow();
     expect(() => HarnessCatalog.parse({ ...catalog, models: [{ value: "x" }] })).toThrow();
     expect(() => HarnessCatalog.parse({ ...catalog, efforts: undefined })).toThrow();
     expect(() => HarnessCatalog.parse({ ...catalog, source: "guess" })).toThrow();
@@ -473,6 +490,7 @@ describe("runtime wire types", () => {
       permissionModes: [],
       steers: true,
       renames: true,
+      images: true,
       ...over,
     });
     expect(keepsRename(row({}))).toBe(true);
@@ -501,6 +519,7 @@ describe("runtime wire types", () => {
       permissionModes: [{ value: "plan", label: "Plan" }],
       steers: true,
       renames: true,
+      images: true,
     };
     expect(effortsFor(catalog, catalog.models[0]!).map(o => o.value)).toEqual(["low", "high"]);
     expect(effortsFor(catalog, catalog.models[3]!).map(o => o.value)).toEqual(["high"]);

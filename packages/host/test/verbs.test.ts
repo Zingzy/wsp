@@ -7,7 +7,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, HOST_STOPPING_LINE, ThreadView, effortsFor, markedDefault, notifyLine, unknownAgentLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ThreadView, effortsFor, markedDefault, notifyLine, unknownAgentLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -765,7 +765,7 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const relative = await run("thread", "new", "--in", "alpha", "--cwd", "packages/host", "look here");
     expect(relative.code).toBe(3);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach] "<task>"']);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <path>, --detach] "<task>"']);
     const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
     expect(forked.code).toBe(3);
     expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute: got "packages\/host"\n\nusage: wsp fork /);
@@ -1659,7 +1659,7 @@ describe("wsp verbs over the host", () => {
     // A flag another verb reads is refused naming that verb, so the caller is told where it lives: thread new's --agent on send, threads' --in on stop.
     const foreign = await run("send", "row_1", "--agent", "claude", "hello");
     expect(foreign.code).toBe(3);
-    expect(foreign.io.errors).toEqual(['--agent belongs to wsp fork and wsp thread new; wsp send does not read it\n\nusage: wsp send <thread> [--model, --effort, --access <value>] [--detach] "<message>"']);
+    expect(foreign.io.errors).toEqual(['--agent belongs to wsp fork and wsp thread new; wsp send does not read it\n\nusage: wsp send <thread> [--model, --effort, --access <value>] [--image <path>] [--detach] "<message>"']);
     const within = await run("stop", "row_1", "--in", "alpha");
     expect(within.io.errors[0]).toContain("--in belongs to wsp threads and wsp thread new; wsp stop does not read it");
     // A flag spelled like a prototype member is nobody's: the tables are read as own keys, so it gets the parser's line.
@@ -1669,7 +1669,7 @@ describe("wsp verbs over the host", () => {
     expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(3);
-    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach] "<task>"\nusage: wsp thread rename <thread> "<title>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread rename <thread> "<title>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {
@@ -1685,6 +1685,99 @@ describe("wsp verbs over the host", () => {
     const { code, io } = await run("threads");
     expect(code).toBe(2);
     expect(io.errors).toEqual(["wsp threads: unauthorized"]);
+  });
+
+  describe("an image on a message from the command line", () => {
+    /** A real PNG head, so the type is read off the bytes as the verbs read it; the rest is filler of a known weight. */
+    const pngFile = (dirPath: string, name: string, bytes: number): string => {
+      const path = join(dirPath, name);
+      writeFileSync(path, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(bytes - 8, 7)]));
+      return path;
+    };
+
+    it("wsp send --image reads the file here and sends its bytes, so the machine never reaches back for this computer's files", async () => {
+      await run("new", "alpha");
+      await run("thread", "new", "--in", "alpha", "hello");
+      const [row] = await rt.sessions.list();
+      const path = pngFile(dir, "shot.png", 2048);
+      const sent = await run("send", row!.threadId!, "--image", path, "what does this show?");
+      expect(sent.code).toBe(0);
+      const start = claude.starts.at(-1)!;
+      expect(start.images).toEqual([{ mediaType: "image/png", bytes: readFileSync(path).toString("base64") }]);
+      // The path itself never travels: the agent is handed the bytes, not somewhere on this computer to look.
+      expect(JSON.stringify(start)).not.toContain(path);
+    });
+
+    it("the flag repeats, and the images reach the agent in the order they were named", async () => {
+      await run("new", "alpha");
+      await run("thread", "new", "--in", "alpha", "hello");
+      const [row] = await rt.sessions.list();
+      const one = pngFile(dir, "one.png", 512);
+      const two = pngFile(dir, "two.png", 1024);
+      const sent = await run("send", row!.threadId!, "--image", one, "--image", two, "these two");
+      expect(sent.code).toBe(0);
+      expect(claude.starts.at(-1)!.images?.map(i => i.bytes)).toEqual([readFileSync(one).toString("base64"), readFileSync(two).toString("base64")]);
+    });
+
+    it("thread new --image opens the thread with the image on its first turn", async () => {
+      await run("new", "alpha");
+      const path = pngFile(dir, "opening.png", 256);
+      const opened = await run("thread", "new", "--in", "alpha", "--image", path, "what is this?");
+      expect(opened.code).toBe(0);
+      expect(claude.starts.at(-1)!.images).toEqual([{ mediaType: "image/png", bytes: readFileSync(path).toString("base64") }]);
+    });
+
+    it("the person's turn prints one bracket per image on stderr, since a terminal draws no pixels", async () => {
+      await run("new", "alpha");
+      const path = pngFile(dir, "big.png", 1_258_291);
+      const opened = await run("thread", "new", "--in", "alpha", "--image", path, "what is this?");
+      expect(opened.io.streamed).toContain("[image 1.2 MB png]");
+    });
+
+    it("a path this computer has no file at answers in a sentence, not in the reader's own error", async () => {
+      await run("new", "alpha");
+      const missing = join(dir, "not-here.png");
+      const refused = await run("send", "--image", missing, "x", "y");
+      expect(refused.io.errors[0]).not.toContain("ENOENT");
+      const opening = await run("thread", "new", "--in", "alpha", "--image", missing, "look");
+      expect(opening.code).toBe(EXIT_CODES.usage);
+      expect(opening.io.errors).toEqual([`wsp thread new: there is no file at ${missing} on this computer`]);
+      expect(claude.starts).toHaveLength(0);
+    });
+
+    it("a folder named where an image should be is refused the same way, rather than failing on the read", async () => {
+      await run("new", "alpha");
+      const refused = await run("thread", "new", "--in", "alpha", "--image", dir, "look");
+      expect(refused.code).toBe(EXIT_CODES.usage);
+      expect(refused.io.errors).toEqual([`wsp thread new: there is no file at ${dir} on this computer`]);
+    });
+
+    it("a file that is not one of the four types is refused by name, before anything travels", async () => {
+      await run("new", "alpha");
+      const path = join(dir, "notes.pdf");
+      writeFileSync(path, "%PDF-1.7 not an image at all");
+      const refused = await run("thread", "new", "--in", "alpha", "--image", path, "look");
+      expect(refused.code).toBe(EXIT_CODES.usage);
+      expect(refused.io.errors).toEqual([`wsp thread new: ${path} is not PNG, JPEG, GIF or WebP; a message carries those four`]);
+      expect(claude.starts).toHaveLength(0);
+    });
+
+    it("a 12 MB image is refused with the cap in the sentence, and the file is never read whole", async () => {
+      await run("new", "alpha");
+      const path = pngFile(dir, "huge.png", 12 * 1024 * 1024);
+      const refused = await run("thread", "new", "--in", "alpha", "--image", path, "look");
+      expect(refused.code).toBe(EXIT_CODES.usage);
+      expect(refused.io.errors).toEqual(["wsp thread new: huge.png is 12.0 MB, over the 10.0 MB an image may be"]);
+      expect(claude.starts).toHaveLength(0);
+    });
+
+    it("six images are refused with both counts", async () => {
+      await run("new", "alpha");
+      const paths = Array.from({ length: 6 }, (_, i) => pngFile(dir, `n${i}.png`, 64));
+      const refused = await run("thread", "new", "--in", "alpha", ...paths.flatMap(p => ["--image", p]), "look");
+      expect(refused.code).toBe(EXIT_CODES.usage);
+      expect(refused.io.errors).toEqual(["wsp thread new: only 5 images fit one message; this one carries 6"]);
+    });
   });
 });
 

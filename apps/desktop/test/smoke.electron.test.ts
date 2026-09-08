@@ -179,16 +179,13 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await win.waitForSelector("[data-workspace-switcher]", { state: "detached" });
     // The capture is an ipc round trip the tap only started, and the overlay reads the pictures once, when it
     // opens. Which workspace the tap left is the sidebar's order to decide, so the picture names it.
-    const photographed = await win.waitForFunction(
-      async ids => {
-        const bridge = (window as unknown as DesktopWindow).wsp;
-        for (const id of ids) if ((await bridge.workspacePreview(id)) !== undefined) return id;
-        return null;
+    const left = await vi.waitFor(
+      async () => {
+        for (const id of [api.id, web.id]) if ((await readPreview(win, id)) !== undefined) return id;
+        throw new Error("no picture yet");
       },
-      [api.id, web.id],
+      { timeout: 30_000, interval: 100 },
     );
-    const left = await photographed.jsonValue();
-    expect([api.id, web.id]).toContain(left);
 
     await win.keyboard.down("Control");
     await win.keyboard.press("Tab");
@@ -196,7 +193,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const shot = win.locator(`[data-workspace-card='${left}'] [data-card-preview] img`);
     await shot.waitFor();
     expect(await shot.getAttribute("src")).toMatch(/^data:image\/png;base64,\w/);
-    expect(await shot.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+    // The picture decodes off the main thread; its size is a fact only once it has.
+    expect(await shot.evaluate((img: HTMLImageElement) => img.decode().then(() => img.naturalWidth))).toBeGreaterThan(0);
     await win.keyboard.up("Control");
   });
 
@@ -430,7 +428,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         const [hi, lo] = [lum(painted), lum(glass)].sort((x, y) => y - x) as [number, number];
         return (hi + 0.05) / (lo + 0.05);
       };
-      const staged = await app.evaluate(async ({ BrowserWindow, app: electronApp, screen }, id) => {
+      const backdropId = await app.evaluate(({ BrowserWindow, app: electronApp, screen }, id) => {
         const w = BrowserWindow.fromId(id)!;
         const backdrop = new BrowserWindow({ ...screen.getPrimaryDisplay().bounds, frame: false, show: false, focusable: false, backgroundColor: "#ffffff" });
         backdrop.showInactive();
@@ -443,13 +441,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
         backdrop.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
         w.focus();
-        await new Promise(r => setTimeout(r, 800));
-        return { b: w.getBounds(), backdropId: backdrop.id };
+        return backdrop.id;
       }, frame.id);
-      const { b } = staged;
-      const capture = (file: string) => expect(spawnSync("screencapture", ["-R", `${b.x},${b.y},${b.width},${b.height}`, "-x", file]).status).toBe(0);
       const lights = async (file: string) => {
-        capture(file);
+        const b = await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.getBounds(), frame.id);
+        expect(spawnSync("screencapture", ["-R", `${b.x},${b.y},${b.width},${b.height}`, "-x", file]).status).toBe(0);
         return app.evaluate(({ nativeImage }, args) => {
           const image = nativeImage.createFromPath(args.file);
           const { width, height } = image.getSize();
@@ -487,15 +483,26 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
           };
         }, { file, width: b.width, probeX: page.lockupLeft + 2, searchRow: page.searchRow });
       };
-      const mainColour = (px: number[]) => px.every((v, i) => Math.abs(v - page.mainRgb[i]!) <= 6);
-      // The window is in the frame when the main column shows its own opaque background and the lights are coloured (key);
-      // the header pixel at the wordmark's x tells the two states apart, so a frame saved mid-slide is retaken.
+      const near = (px: number[], to: number[], within: number) => px.every((v, i) => Math.abs(v - to[i]!) <= within);
+      const mainColour = (px: number[]) => near(px, page.mainRgb, 6);
+      // The screen is shared: a shot counts once it shows this window, key, where its frame puts it, over a backdrop unlike
+      // every one measured before (a backdrop that has not repainted yet leaves the glass as the last one did).
       type Shot = Awaited<ReturnType<typeof lights>>;
-      const inFrame = (shot: Shot, state: "open" | "collapsed") =>
-        mainColour(shot.main) && shot.reds > 20 && shot.greens > 20 && (state === "collapsed" ? mainColour(shot.probe) : !mainColour(shot.probe));
-      const retake = async (file: string, state: "open" | "collapsed"): Promise<Shot> => {
+      const inFrame = (shot: Shot, state: "open" | "collapsed", unlike: number[][]) =>
+        mainColour(shot.main) &&
+        shot.reds > 20 &&
+        shot.greens > 20 &&
+        shot.red.x > 18 &&
+        shot.red.x < 26 &&
+        shot.red.y > 20 &&
+        shot.red.y < 32 &&
+        (state === "collapsed" ? mainColour(shot.probe) : near(shot.probe, shot.glass, 4)) &&
+        unlike.every(glass => !near(shot.glass, glass, 2));
+      // Bounded by time, not tries: the last shot comes back either way, so the assertions after it name what was seen.
+      const retake = async (file: string, state: "open" | "collapsed", unlike: number[][] = []): Promise<Shot> => {
+        const deadline = Date.now() + 20_000;
         let shot = await lights(file);
-        for (let attempt = 0; !inFrame(shot, state) && attempt < 12; attempt++) {
+        while (!inFrame(shot, state, unlike) && Date.now() < deadline) {
           // A click elsewhere on this Mac takes the key status back; the window asks for it again before each retake.
           await app.evaluate(({ BrowserWindow, app: electronApp }, id) => {
             electronApp.focus({ steal: true });
@@ -506,23 +513,16 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         }
         return shot;
       };
-      // The sidebar slides for 200 ms; its container's left edge holding still across two frames, at rest for the state, is the end.
+      // The sidebar slides for 200 ms; its container's left edge holding still across two frames, at rest for the state, is
+      // the end. The poll runs once a frame, so the edge it saw last time is the frame before.
       const slid = (state: "open" | "collapsed") =>
-        win.waitForFunction(
-          (want: string) =>
-            new Promise<boolean>(resolve => {
-              const el = document.querySelector("[data-slot=sidebar-container]")!;
-              const before = el.getBoundingClientRect().left;
-              requestAnimationFrame(() =>
-                requestAnimationFrame(() => {
-                  const { left, width } = el.getBoundingClientRect();
-                  resolve(left === before && (want === "open" ? left === 0 : left <= 1 - width));
-                }),
-              );
-            }),
-          state,
-          { timeout: 5_000 },
-        );
+        win.waitForFunction((want: string) => {
+          const { left, width } = document.querySelector("[data-slot=sidebar-container]")!.getBoundingClientRect();
+          const seen = window as unknown as { __sidebarLeft?: number };
+          const before = seen.__sidebarLeft;
+          seen.__sidebarLeft = left;
+          return before === left && (want === "open" ? left === 0 : left <= 1 - width);
+        }, state);
       // One gap: the third light's centre to the toggle's centre, and the toggle's centre to the first glyph after it. One
       // vertical centre, measured on ink: the lights' hue extent, the toggle glyph's icon box, the wordmark's optical centre.
       const gaps = (shot: Shot, toggleCentre: { x: number; y: number }, contentLeft: number, glyphCentreY: number) => ({
@@ -539,11 +539,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       const glass: Record<string, number[]> = {};
       for (const [desktop, color] of [["light", "#ffffff"], ["dark", "#101010"]] as const) {
         const file = join(shots, `desktop-mac-${desktop}.png`);
-        await app.evaluate(async ({ BrowserWindow }, args) => {
-          BrowserWindow.fromId(args.backdropId)!.setBackgroundColor(args.color);
-          await new Promise(r => setTimeout(r, 600));
-        }, { backdropId: staged.backdropId, color });
-        const shot = await retake(file, "open");
+        await app.evaluate(({ BrowserWindow }, args) => BrowserWindow.fromId(args.backdropId)!.setBackgroundColor(args.color), { backdropId, color });
+        const shot = await retake(file, "open", Object.values(glass));
         console.info(`desktop-mac over a ${desktop} desktop: ${file} ${JSON.stringify(shot)}`);
         expect(shot.reds).toBeGreaterThan(20);
         expect(shot.red.y).toBeGreaterThan(20);
@@ -573,7 +570,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         // Collapsed, the page header is the frame row: the toggle lands where the sidebar's was, the breadcrumb after it, the row still drags.
         await win.click("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
         await win.waitForSelector("[data-sidebar-state=collapsed]");
-        await win.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().left - x) < 0.01, page.toggleLeft, { timeout: 5_000 });
+        await win.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().left - x) < 0.01, page.toggleLeft);
         await slid("collapsed");
         const collapsed = await win.evaluate(() => {
           const row = document.querySelector("header [data-header-row]")!;
@@ -605,7 +602,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         expectOneGap(collapsedGaps);
         await win.click("header [data-slot=sidebar-trigger]");
         await win.waitForSelector("[data-sidebar-state=expanded]");
-        await win.waitForFunction(x => Math.abs(document.querySelector("[data-slot=sidebar-header] [data-slot=sidebar-trigger]")!.getBoundingClientRect().left - x) < 0.01, page.toggleLeft, { timeout: 5_000 });
+        await win.waitForFunction(x => Math.abs(document.querySelector("[data-slot=sidebar-header] [data-slot=sidebar-trigger]")!.getBoundingClientRect().left - x) < 0.01, page.toggleLeft);
         await slid("open");
       }
       // The glass shows what is behind it: the two desktops leave two different tints.
@@ -613,7 +610,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       await app.evaluate(({ BrowserWindow }, args) => {
         BrowserWindow.fromId(args.backdropId)!.close();
         BrowserWindow.fromId(args.id)!.setAlwaysOnTop(false);
-      }, { id: frame.id, backdropId: staged.backdropId });
+      }, { id: frame.id, backdropId });
     },
     90_000,
   );

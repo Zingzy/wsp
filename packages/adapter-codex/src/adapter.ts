@@ -5,7 +5,7 @@
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
 import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnResult } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
@@ -19,6 +19,9 @@ export interface CodexStartOptions {
   effort?: string;
   permissionMode?: string;
   contextWindow?: string;
+  /** Images for this turn, read off their paths: this CLI reads each off the machine's disk, where the runtime
+   * landed it under the thread's images folder before the start. */
+  images?: readonly TurnImage[];
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -56,6 +59,8 @@ export interface CodexAdapter {
   readonly sessions: ReadonlyMap<string, CodexSession>;
   /** `codex exec` reads its prompt and closes stdin; nothing reaches a running turn. */
   readonly steers: false;
+  /** The CLI takes images as files on `-i`, so each one lands on the machine before the turn starts. */
+  readonly attachments: "file";
   /** Makes the binary describe itself under the same home as a session, without running a turn. */
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
@@ -308,6 +313,13 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     return session;
   };
 
+  /** An image reaches this CLI as a file, so one that arrived with no path never travelled the runtime's file road
+   * and the turn is refused rather than started without it. */
+  const imagePathOf = (image: TurnImage): string => {
+    if (image.path === undefined) throw new Error("codex reads images off the machine's disk; this one has no path on it");
+    return image.path;
+  };
+
   const start = (options: CodexStartOptions): CodexSession => {
     if (options.contextWindow !== undefined) throw new Error("codex takes no context window");
     const localId = options.resume ?? randomUUID();
@@ -318,6 +330,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       model: options.model,
       effort: options.effort,
       permissionMode: options.permissionMode,
+      ...(options.images !== undefined ? { images: options.images.map(image => imagePathOf(image)) } : {}),
     });
     return follow({
       stream: deps.exec(command, { env: { ...env } }),
@@ -337,6 +350,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
 
   return {
     start,
+    attachments: "file",
     ...(attach !== undefined
       ? {
           attach: async (options: AdapterAttachOptions) => {

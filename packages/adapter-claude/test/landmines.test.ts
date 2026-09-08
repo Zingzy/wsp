@@ -156,4 +156,38 @@ describe("userMessageLine", () => {
       session_id: sessionId,
     });
   });
+
+  it("carries an image as a base64 content block ahead of the text, with the type the person's file was", () => {
+    const bytes = Buffer.from("not really a png").toString("base64");
+    const line = userMessageLine("what does this show?", sessionId, [{ mediaType: "image/png", bytes }]);
+    expect(line).not.toContain("\n");
+    expect(JSON.parse(line)).toEqual({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/png", data: bytes } },
+          { type: "text", text: "what does this show?" },
+        ],
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+    });
+  });
+
+  it("carries every image of the message, in the order the person added them, each with its own type", () => {
+    const line = userMessageLine("these three", sessionId, [
+      { mediaType: "image/png", bytes: "AAA=" },
+      { mediaType: "image/jpeg", bytes: "BBB=" },
+      { mediaType: "image/webp", bytes: "CCC=" },
+    ]);
+    const content = (JSON.parse(line) as { message: { content: { type: string; source?: { media_type: string; data: string } }[] } }).message.content;
+    expect(content.map(block => block.type)).toEqual(["image", "image", "image", "text"]);
+    expect(content.slice(0, 3).map(block => block.source?.media_type)).toEqual(["image/png", "image/jpeg", "image/webp"]);
+    expect(content.slice(0, 3).map(block => block.source?.data)).toEqual(["AAA=", "BBB=", "CCC="]);
+  });
+
+  it("a message with no image is the one-block line it always was: nothing rides for free", () => {
+    expect(JSON.parse(userMessageLine("plain", sessionId, []))).toEqual(JSON.parse(userMessageLine("plain", sessionId)));
+  });
 });
