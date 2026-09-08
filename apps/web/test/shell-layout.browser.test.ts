@@ -20,8 +20,11 @@
 // workspace and thread rows keep one grammar: one height per row kind, the
 // state word in its slot at the right edge only off running, the meta line
 // in one order cut from the right, no import or export glyph, the thread
-// title up to a fixed time column, and the Spaces body draws one workspace
-// under its header with a dot per workspace at the sidebar's bottom. Vite
+// title up to a fixed time column, the Spaces body draws one workspace
+// under its header with a dot per workspace at the sidebar's bottom, and the
+// move to another space travels that body out the way it was pushed and the
+// next one in from the other side while the header and the dots row hold
+// still, or swaps it with no travel for a reader who asked for less motion. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -33,6 +36,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
+import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -642,10 +646,11 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today"]);
         await page!.locator("[data-space-dot][aria-label=api]").click();
         await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "api");
-        // The pointer leaves the row and its hover fades out before the shot, so what is saved is the rest state:
-        // no dot carries a fill of its own.
+        // The pointer leaves the row and every hover fades out before the shot, so what is saved is the rest state:
+        // no dot carries a fill of its own. A dot the pointer left while the body was still travelling only loses
+        // its hover on the layout that ends the travel, so all three are waited for, not the first.
         await page!.mouse.move(600, 700);
-        await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-space-dot]")!).backgroundColor === "rgba(0, 0, 0, 0)");
+        await page!.waitForFunction(() => Array.from(document.querySelectorAll("[data-space-dot]")).every(dot => getComputedStyle(dot).backgroundColor === "rgba(0, 0, 0, 0)"));
         const atRest = await page!.locator("[data-space-dot]").evaluateAll(els => els.map(el => getComputedStyle(el).backgroundColor));
         expect(atRest).toEqual(["rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)"]);
         const path = join(SHOTS_DIR, `sidebar-spaces-${width}-${theme}.png`);
@@ -654,6 +659,122 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       }
     }
   }, 120_000);
+
+  it("moving to another space travels the body out the way it was pushed and the next one in, over a still header and dots row, and reduced motion swaps it at once, in both themes", async () => {
+    // The travel is read off the animation itself, seeked rather than raced: a frame sampled on a loaded machine
+    // says nothing about where the body was at the halfway mark.
+    const travel = (label: string) =>
+      page!.evaluate(async ({ name, ms }) => {
+        const track = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-space-track]");
+        const still = (): { dots: DOMRect; section: DOMRect } => ({
+          dots: document.querySelector<HTMLElement>("[data-space-dots]")!.getBoundingClientRect(),
+          section: document.querySelector<HTMLElement>("button[aria-label='Workspaces']")!.getBoundingClientRect(),
+        });
+        const before = still();
+        document.querySelector<HTMLElement>(`[data-space-dot][aria-label=${name}]`)!.click();
+        // React runs the travel's effect a task after the click, so the animation is waited for rather than assumed;
+        // it is seeked below, so the few milliseconds spent here do not reach the readings.
+        for (let i = 0; i < 100 && (track()?.getAnimations().length ?? 0) === 0; i++) await new Promise(resolve => setTimeout(resolve, 1));
+        const el = track();
+        const [animation] = el?.getAnimations() ?? [];
+        if (el === null || animation === undefined) return null;
+        const x = (): number => {
+          const shape = getComputedStyle(el).transform;
+          return shape === "none" ? 0 : new DOMMatrixReadOnly(shape).m41;
+        };
+        const at = (time: number): number => {
+          animation.currentTime = time;
+          return x();
+        };
+        animation.pause();
+        const style = getComputedStyle(el);
+        const read = {
+          width: el.getBoundingClientRect().width,
+          start: at(0),
+          mid: at(ms / 2),
+          end: at(ms),
+          duration: style.animationDuration,
+          easing: style.animationTimingFunction,
+          panes: document.querySelectorAll("[data-space-pane]").length,
+          leaving: document.querySelector<HTMLElement>("[data-space-leaving] [data-space-name]")?.textContent ?? "",
+          staying: document.querySelector<HTMLElement>("[data-space-pane]:not([data-space-leaving]) [data-space-name]")?.textContent ?? "",
+          moved: (() => {
+            const now = still();
+            return { dots: Math.abs(now.dots.x - before.dots.x) + Math.abs(now.dots.y - before.dots.y), section: Math.abs(now.section.x - before.section.x) + Math.abs(now.section.y - before.section.y) };
+          })(),
+        };
+        animation.play();
+        return read;
+      }, { name: label, ms: SPACE_SLIDE_MS });
+    const settled = () =>
+      page!.evaluate(() => ({
+        panes: document.querySelectorAll("[data-space-pane]").length,
+        transform: getComputedStyle(document.querySelector<HTMLElement>("[data-space-track]")!).transform,
+        name: document.querySelector<HTMLElement>("[data-space-name]")?.textContent ?? "",
+      }));
+
+    for (const theme of ["dark", "light"] as const) {
+      // Headless Chromium asks for less motion unless it is told otherwise, and that is the other half of this case.
+      await page!.emulateMedia({ reducedMotion: "no-preference" });
+      await page!.goto(`${base}?theme=${theme}&spaces=1`);
+      await page!.waitForSelector("[data-space-header]");
+      // Pushed forward: the body that was on screen travels left and the next one follows it in from the right.
+      const forward = await travel("web");
+      console.info(`space travel forward ${theme}: ${JSON.stringify(forward)}`);
+      expect(forward).not.toBeNull();
+      expect(forward!.duration).toBe(`${SPACE_SLIDE_MS / 1000}s`);
+      expect(forward!.easing).toBe("ease-out");
+      expect(forward!.panes).toBe(2);
+      expect(forward!.leaving).toBe("api");
+      expect(forward!.staying).toBe("web");
+      // The track holds both bodies, so it is twice the sidebar's body and the travel is half of it.
+      expect(Math.abs(forward!.start)).toBeLessThan(1);
+      expect(Math.abs(forward!.end + forward!.width / 2)).toBeLessThan(1);
+      // Halfway through the clock it is between the two, and never past the body it is going to: no bounce.
+      expect(forward!.mid).toBeLessThan(-1);
+      expect(forward!.mid).toBeGreaterThan(forward!.end + 1);
+      // The sidebar's own header row and the dots row do not move under it.
+      expect(forward!.moved.dots).toBeLessThan(1);
+      expect(forward!.moved.section).toBeLessThan(1);
+      await page!.waitForFunction(() => document.querySelectorAll("[data-space-pane]").length === 1);
+      const rested = await settled();
+      expect(rested).toEqual({ panes: 1, transform: "none", name: "web" });
+
+      // Pushed the other way: the travel runs in reverse, ending on the body that has come back.
+      const back = await travel("api");
+      console.info(`space travel back ${theme}: ${JSON.stringify(back)}`);
+      expect(back).not.toBeNull();
+      expect(back!.leaving).toBe("web");
+      expect(back!.staying).toBe("api");
+      expect(Math.abs(back!.start + back!.width / 2)).toBeLessThan(1);
+      expect(Math.abs(back!.end)).toBeLessThan(1);
+      expect(back!.mid).toBeGreaterThan(back!.start + 1);
+      expect(back!.mid).toBeLessThan(-1);
+      await page!.waitForFunction(() => document.querySelectorAll("[data-space-pane]").length === 1);
+      expect(await settled()).toEqual({ panes: 1, transform: "none", name: "api" });
+
+      // Asked for less motion, the body swaps with nothing moving: one pane, no animation, no transform.
+      await page!.emulateMedia({ reducedMotion: "reduce" });
+      await page!.goto(`${base}?theme=${theme}&spaces=1`);
+      await page!.waitForSelector("[data-space-header]");
+      const swap = await page!.evaluate(async () => {
+        const track = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-track]")!;
+        document.querySelector<HTMLElement>("[data-space-dot][aria-label=web]")!.click();
+        // Watched over the window a travel would have opened in: no second body ever comes up, and nothing animates.
+        let mostPanes = 0;
+        let animations = 0;
+        for (let i = 0; i < 60; i++) {
+          await new Promise(resolve => setTimeout(resolve, 1));
+          mostPanes = Math.max(mostPanes, document.querySelectorAll("[data-space-pane]").length);
+          animations = Math.max(animations, track().getAnimations().length);
+        }
+        return { mostPanes, animations, transform: getComputedStyle(track()).transform, name: document.querySelector<HTMLElement>("[data-space-name]")?.textContent ?? "" };
+      });
+      console.info(`space swap with reduced motion ${theme}: ${JSON.stringify(swap)}`);
+      expect(swap).toEqual({ mostPanes: 1, animations: 0, transform: "none", name: "web" });
+      await page!.emulateMedia({ reducedMotion: null });
+    }
+  }, 60_000);
 
   it("a status toast with a 200-character token stays inside the sidebar's width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);

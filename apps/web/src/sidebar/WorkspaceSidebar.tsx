@@ -3,7 +3,8 @@
 // under each, over the adapter's SidebarProjectSnapshot. The search row, the
 // Workspaces section row that shuts them all and opens the new-workspace
 // dialog, the settled shelf, the Spaces body with one workspace's rows under
-// its header and a dot per workspace at the bottom, keyboard traversal, the
+// its header and a dot per workspace at the bottom, the slide and the
+// two-finger swipe that move between them, keyboard traversal, the
 // rebuild of a zombie or gone machine, the forget of a gone one and the
 // project trips' dialogs live here; the rows are WorkspaceRow and ThreadRow
 // beside this file, and the logic comes from the copied t3code files. Every
@@ -11,7 +12,7 @@
 // the workspace and thread registries. The surface itself is the shell's
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
 import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -43,6 +44,8 @@ import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { useSidebarMode } from "./sidebarMode.js";
 import { SpaceDots } from "./SpaceDots.js";
 import { SpaceHeader } from "./SpaceHeader.js";
+import { SPACE_LEAVING_SELECTOR, SpaceSlide } from "./SpaceSlide.js";
+import { NO_SWIPE, readSwipe } from "./spaceSwipe.js";
 import { ThreadRow } from "./ThreadRow.js";
 import { WorkspaceRow } from "./WorkspaceRow.js";
 import { NEW_THREAD_SHORTCUT, NEW_THREAD_TITLE, compactTimeLabel, defaultWorkspaceName } from "./workspaceRows.js";
@@ -356,7 +359,14 @@ export function WorkspaceSidebar() {
     );
   };
 
-  const rows = (): HTMLElement[] => Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []);
+  /** One space's whole body, drawn for the workspace on screen and, while a slide runs, for the one leaving too. */
+  const spacePane = (workspaceId: string) => {
+    const pane = visible.find(v => v.project.id === workspaceId);
+    return pane === undefined ? null : <SidebarMenu>{spaceItem(pane)}</SidebarMenu>;
+  };
+
+  // The body on its way out of a slide is still drawn: its rows are not the ones the keyboard walks.
+  const rows = (): HTMLElement[] => Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []).filter(row => row.closest(SPACE_LEAVING_SELECTOR) === null);
   const focusRow = (id: string | null): void => {
     if (id === null) return;
     rows().find(r => r.dataset["rowId"] === id)?.focus();
@@ -384,6 +394,21 @@ export function WorkspaceSidebar() {
         return;
     }
     e.preventDefault();
+  };
+
+  /** A two-finger swipe over the body moves a space, the way the arrows and the dots do; the gesture it belongs to
+   * lives across the wheel events that make it up, so a swipe that keeps going moves one space and no more. */
+  const swipe = useRef(NO_SWIPE);
+  const onWheel = (e: WheelEvent<HTMLElement>): void => {
+    const read = readSwipe(swipe.current, { deltaX: e.deltaX, deltaY: e.deltaY, at: e.timeStamp });
+    swipe.current = read.gesture;
+    if (read.step === 0) return;
+    const next = resolveAdjacentThreadId({
+      threadIds: visible.map(v => v.project.id),
+      currentThreadId: currentSpace?.project.id ?? null,
+      direction: read.step === 1 ? "next" : "previous",
+    });
+    if (next !== null) select(next);
   };
 
   const offline = useMemo(() => computerOffline(Object.values(statuses)), [statuses]);
@@ -422,7 +447,7 @@ export function WorkspaceSidebar() {
   return (
     <>
       <SidebarChromeHeader />
-      <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
+      <div ref={rootRef} onKeyDown={onKeyDown} onWheel={mode === "spaces" ? onWheel : undefined} className="flex min-h-0 flex-1 flex-col">
         <SidebarContent fixedHeader={search}>
           <SidebarGroup className="pt-0">
             <SectionRow
@@ -455,9 +480,13 @@ export function WorkspaceSidebar() {
                   {creations.map(creation => (
                     <CreationRow key={creation.key} creation={creation} active={selectedId === creation.key} onSelect={() => select(creation.key)} />
                   ))}
-                  {currentSpace === null ? null : spaceItem(currentSpace)}
                   {mode === "spaces" ? null : visible.map(listItem)}
                 </SidebarMenu>
+                {currentSpace === null ? null : (
+                  <SpaceSlide currentId={currentSpace.project.id} order={visible.map(v => v.project.id)}>
+                    {spacePane}
+                  </SpaceSlide>
+                )}
                 {visible.length === 0 && creations.length === 0 ? (
                   <Empty className="py-8">
                     <EmptyHeader>

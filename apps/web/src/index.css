@@ -154,6 +154,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --animate-ghost-pulse: ghost-pulse 2.4s infinite;
   --animate-status-ping: status-ping 2s infinite;
   --animate-squiggle: squiggle 0.9s linear infinite;
+  /* The sidebar's move between two spaces, over the length the track sets on itself so the clock that ends the
+     travel and the animation that draws it stay one number. Held at the end, since the body that left is dropped a
+     frame or two after the travel is over. */
+  --animate-space-slide-forward: space-slide-forward var(--space-slide-ms) ease-out both;
+  --animate-space-slide-back: space-slide-back var(--space-slide-ms) ease-out both;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-warning-surface: var(--warning-surface);
@@ -254,6 +259,16 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     }
     100% {
       opacity: 1;
+    }
+  }
+  @keyframes space-slide-forward {
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @keyframes space-slide-back {
+    from {
+      transform: translateX(-50%);
     }
   }
   @keyframes squiggle {

@@ -15,6 +15,7 @@ import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
+import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
@@ -106,6 +107,9 @@ const metaOf = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>
 const spaceHeader = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-space-header]");
 const headerLines = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-header] [data-space-meta]")).map(l => l.textContent ?? "");
 const dots = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-dot]"));
+const panes = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane]"));
+/** The name in the header of the body that is staying: the pane not marked as the one on its way out. */
+const spaceName = (): string => document.querySelector<HTMLElement>("[data-space-pane]:not([data-space-leaving]) [data-space-name]")?.textContent ?? "";
 const workspaceRowIds = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='ws:']")).map(r => r.dataset["rowId"] ?? "");
 
 const API = view("ws_a", "api");
@@ -990,6 +994,44 @@ describe("Spaces mode", () => {
     expect(useStore.getState().selectedId).toBe("ws_b");
     expect(screen.getByText("bump the lockfile")).toBeDefined();
     expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
+  });
+
+  it("a two-finger swipe across the body moves a space, out one way and back the other", async () => {
+    await mountSpaces(fakeApi(THREE, statuses(), [session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) })]));
+    const body = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-slide]")!;
+    fireEvent.wheel(body(), { deltaX: 80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    // The workspace that left is still drawn while the body travels, out of the keyboard's reach and off the
+    // accessibility tree, and it is gone once the travel is over.
+    const leaving = document.querySelector<HTMLElement>("[data-space-leaving]")!;
+    expect(panes()).toHaveLength(2);
+    expect(within(leaving).getByText("api")).toBeDefined();
+    expect(leaving.getAttribute("aria-hidden")).toBe("true");
+    expect(leaving.hasAttribute("inert")).toBe(true);
+    expect(spaceName()).toBe("web");
+    await waitFor(() => expect(panes()).toHaveLength(1));
+    expect(screen.getByText("bump the lockfile")).toBeDefined();
+    expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
+    // The quiet after the fingers lift ends the gesture, so the next swipe is read as its own.
+    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
+    fireEvent.wheel(body(), { deltaX: -80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_a");
+    await waitFor(() => expect(panes()).toHaveLength(1));
+    expect(spaceName()).toBe("api");
+  });
+
+  it("one swipe moves one space however long the fingers keep going, and a scroll down the sidebar moves nothing", async () => {
+    await mountSpaces(fakeApi(THREE, statuses()));
+    const body = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-slide]")!;
+    for (const deltaX of [80, 80, 80]) fireEvent.wheel(body(), { deltaX, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    await waitFor(() => expect(panes()).toHaveLength(1));
+    expect(spaceName()).toBe("web");
+    // A gesture of its own, straight down the rows: nothing moves.
+    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
+    for (const deltaY of [120, 120]) fireEvent.wheel(body(), { deltaX: 0, deltaY });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    expect(panes()).toHaveLength(1);
   });
 
   it("before the first status the header carries no machine line: nothing draws a bare OS word", async () => {
