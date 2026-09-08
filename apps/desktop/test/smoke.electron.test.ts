@@ -45,13 +45,18 @@ interface Launched {
 
 const APP_URL = /^http:\/\/127\.0\.0\.1:\d+\/$/;
 const SETUP_URL = /setup\.html/;
+const DEVTOOLS_URL = /^devtools:\/\//;
 
-/** The window showing a page: a devtools window is enumerated alongside the app's own and can come first, so a window
- * here is picked by its URL and never by the order the windows were made in. */
+/** The windows the app opened: a devtools window is Chromium's own, enumerated alongside them and able to come first. */
+function appWindows(app: ElectronApplication): Page[] {
+  return app.windows().filter(w => !DEVTOOLS_URL.test(w.url()));
+}
+
+/** The window showing a page, picked by its URL and never by the order the windows were made in. */
 function windowAt(app: ElectronApplication, url: RegExp): Promise<Page> {
   return vi.waitFor(
     () => {
-      const page = app.windows().find(w => url.test(w.url()));
+      const page = appWindows(app).find(w => url.test(w.url()));
       if (page === undefined) throw new Error(`no window at ${url}, saw ${JSON.stringify(app.windows().map(w => w.url()))}`);
       return page;
     },
@@ -152,7 +157,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await win.title()).toBe("wsp");
     expect(boot.token).toMatch(TOKEN);
     expect(boot.wsPort).toBeGreaterThan(0);
-    expect(launched.app.windows()).toHaveLength(1);
+    expect(appWindows(launched.app)).toHaveLength(1);
     await launched.app.close();
     expect(await refused(url)).toBe(true);
   });
@@ -233,7 +238,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const app = launched.app;
     const setup = await windowAt(app, SETUP_URL);
     await setup.waitForLoadState("domcontentloaded");
-    expect(setup.url()).toMatch(/setup\.html\?/);
+    expect(setup.url()).toContain("?");
     expect(await setup.title()).toBe("wsp");
     expect(await setup.innerText("main")).toContain("run wsp init in a terminal");
     expect(await setup.innerText("main")).toContain(`Looked for keys and a golden in ${launched.home}.`);
@@ -242,20 +247,19 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await setup.click("#retry");
     await setup.waitForFunction(() => document.getElementById("status")?.textContent === "not set up yet");
     // The window count is a fact that settles, not one that holds the moment the page's status line changed.
-    await vi.waitFor(() => expect(app.windows()).toHaveLength(1), { timeout: 10_000, interval: 50 });
+    await vi.waitFor(() => expect(appWindows(app)).toHaveLength(1), { timeout: 10_000, interval: 50 });
     expect(existsSync(join(launched.home, ".env"))).toBe(false);
 
     writeFileSync(join(launched.home, ".env"), `SOLARI_API_KEY=${FAKE_SOLARI}\n`, { mode: 0o600 });
     seedGolden(launched.home);
-    // The retry opens the app window and closes this one, both while the click is in flight, and an event asked for
-    // after it has fired never arrives: the close is listened for before the click and the app window found by its URL.
+    // An event asked for after it has fired never arrives, and the retry closes this window while the click is in flight.
     const closed = setup.waitForEvent("close");
     await setup.click("#retry");
     const win = await windowAt(app, APP_URL);
     const boot = await bootOf(win);
     expect(boot.token).toMatch(TOKEN);
     await closed;
-    await vi.waitFor(() => expect(app.windows()).toHaveLength(1), { timeout: 10_000, interval: 50 });
+    await vi.waitFor(() => expect(appWindows(app)).toHaveLength(1), { timeout: 10_000, interval: 50 });
   });
 
   it("attaches to a host already on the port with an empty ~/.wsp and no key, skipping the gate, and leaves it running after quit", async () => {
@@ -557,8 +561,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         }, state);
       // One gap: the third light's centre to the toggle's centre, and the toggle's centre to the first glyph after it. One
       // vertical centre, measured on ink: the lights' hue extent, the toggle glyph's icon box, the wordmark's optical centre.
-      // The display's tone mapping moves the edge rows of that hue extent, carrying the light's centre by up to 1 px at
-      // 1x, so a drop of 1 px is that drift and not a layout change.
+      // The display's tone mapping moves the edge pixels of that hue extent, carrying the light's centre by up to 1 px
+      // at 1x on either axis, so 1 px of drift is that and not a layout change.
       const CENTRED = 1;
       const gaps = (shot: Shot, toggleCentre: { x: number; y: number }, contentLeft: number, glyphCentreY: number) => ({
         lightsToToggle: toggleCentre.x - shot.green.x,

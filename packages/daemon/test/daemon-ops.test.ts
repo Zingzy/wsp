@@ -134,8 +134,8 @@ describe("daemon ops: ports, manifest, inbox", () => {
     await vi.waitFor(() => expect(sysReads).toBeGreaterThan(readsWithOneLeft), { timeout: 10_000, interval: 10 });
 
     b.close();
-    // The last close stops the sampler, and a loaded box is slow to notice: the count holding still over four
-    // intervals is the stop, and it has to keep holding after that.
+    // The last close stops the sampler, and a loaded box is slow to notice: the count holding still over four of the
+    // sampler's own 20 ms ticks is the stop, and it has to keep holding after that.
     const readsAfterLast = await vi.waitFor(
       async () => {
         const before = sysReads;
