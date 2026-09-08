@@ -1018,13 +1018,18 @@ describe("Spaces mode", () => {
     useStore.setState({ selectedId: "ws_m" });
     await mountSpaces(fakeApi([API, MAC], [status(API), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]));
     await waitFor(() => expect(within(spaceHeader()!).getByText("zingzy-mac")).toBeDefined());
-    expect(headerLines()[0]).toBe("this computer");
-    expect(headerLines()[0]).not.toContain("vCPU");
+    // The machine words alone: nothing wsp does not pay for, so no cost line and no rate under them.
+    expect(headerLines()).toEqual(["this computer"]);
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
-    // The fork beside it keeps the size and the OS word on the same line.
+    // A tick on this computer's meter changes nothing there either.
+    act(() =>
+      useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_m", phase: "running", rateUsdPerHour: 0, awakeMs: 120_000, accruedUsd: 0, at: new Date(NOW).toISOString() }),
+    );
+    await waitFor(() => expect(headerLines()).toEqual(["this computer"]));
+    // The fork beside it keeps every line it had: the size and the OS word, then the spend with its rate.
     fireEvent.click(dots()[0]!);
     await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
-    expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux");
+    expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr"]);
   });
 
   it("before the first status the header carries no machine line: nothing draws a bare OS word", async () => {

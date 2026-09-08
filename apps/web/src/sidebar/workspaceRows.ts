@@ -90,18 +90,21 @@ export const rateLabel = (rateUsdPerHour: number | null): string | null => (rate
  * memory near full. Then what the machine is, what it costs, and when it naps. A line nothing is known for is left
  * out rather than drawn half: no size yet means no machine line, as no nap scheduled means no nap line. The cost
  * line leads with the same honest zero the row's does and carries the rate only while the machine bills. A kind
- * with its own words for what the machine is says them where a fork's size reads, through the one machine line. */
+ * with its own words for what the machine is says them where a fork's size reads, through the one machine line, and
+ * a machine wsp does not drive stops there: it spends nothing and naps never, so a rate under the words for what
+ * the machine is would name an hour nobody is charged for. */
 export function spaceHeaderLines({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
-  const nap = idleCountdownLabel(project.status, nowMs);
-  return [
-    daemonNote(project) ?? null,
-    outOfMemory === undefined ? null : outOfMemoryRowLine(outOfMemory),
-    machineLine(project),
-    [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]
-      .filter((part): part is string => part !== null)
-      .join(" · "),
-    nap === NO_NAP_SCHEDULED ? null : nap,
-  ].filter((line): line is string => line !== null);
+  const lines: (string | null)[] = [daemonNote(project) ?? null, outOfMemory === undefined ? null : outOfMemoryRowLine(outOfMemory), machineLine(project)];
+  if (kindWords(workspaceKind(project.workspace)).driven) {
+    const nap = idleCountdownLabel(project.status, nowMs);
+    lines.push(
+      [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]
+        .filter((part): part is string => part !== null)
+        .join(" · "),
+      nap === NO_NAP_SCHEDULED ? null : nap,
+    );
+  }
+  return lines.filter((line): line is string => line !== null);
 }
 
 /** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. A

@@ -17,6 +17,7 @@ import {
   compactTimeLabel,
   defaultWorkspaceName,
   machineLine,
+  spaceHeaderLines,
   idleCountdownLabel,
   dotClassForTone,
   stateSlotWord,
@@ -151,6 +152,19 @@ describe("workspace row labels", () => {
     expect(machineLine({ status: null, workspace: project({}).workspace })).toBeNull();
     // A kind with its own words says them before any status has arrived, since no size is behind them.
     expect(machineLine({ status: null, workspace: { ...project({}).workspace, kind: "local" } })).toBe("this computer");
+  });
+
+  it("the Spaces header of a machine wsp does not drive is its machine words alone: no cost line, no rate, no nap line", () => {
+    const header = (over: Partial<WorkspaceStatus>, view: Partial<WorkspaceView> = {}, meter: ReturnType<typeof tick> | null = null) =>
+      spaceHeaderLines({ project: project(over, view), cost: meter, outOfMemory: undefined, nowMs: now });
+    expect(header({ idleAt: now + 14.5 * 60_000 }, { kind: "local" }, tick(0.29))).toEqual(["this computer"]);
+    // Nothing the machine bills for reaches it, whatever the meter has ticked or the runtime has scheduled.
+    expect(header({}, { kind: "local" })).toEqual(["this computer"]);
+    // A fork's header is untouched: the size and the OS word, the spend with its rate, the countdown when one is set.
+    expect(header({ idleAt: now + 14.5 * 60_000 }, {}, tick(0.29))).toEqual([`2 vCPU · 4 GB · ${MACHINE_OS_WORD}`, "$0.29 today · $0.110/hr", "naps in 14m"]);
+    expect(header({})).toEqual([`2 vCPU · 4 GB · ${MACHINE_OS_WORD}`, "$0.00 today · $0.110/hr"]);
+    // What the runtime is doing to the daemon still leads on both kinds: it is the one thing there a person waits on.
+    expect(header({ daemonNote: "updating the helper" }, { kind: "local" })).toEqual(["updating the helper", "this computer"]);
   });
 
   it("this computer's row says what it is and nothing about spend, naps or state: it runs while the host does", () => {
