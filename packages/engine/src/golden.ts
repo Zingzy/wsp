@@ -22,6 +22,7 @@ import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./ma
 import type { Machine, MachineBackend, MachineKind, MachineState, TemplateRow } from "./machine.js";
 import { isMissing } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
+import { goldenName } from "./snapshot-names.js";
 import { importInto } from "./vault.js";
 
 export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
@@ -130,11 +131,6 @@ export interface Templates {
   list(): Promise<TemplateRow[]>;
   delete(id: string): Promise<void>;
 }
-
-/** The name a version's template is promoted under: one rule. The host is in it because the provider lets two
- * templates share a name, so two hosts on one account with the same golden name would otherwise read as one; the
- * caller hands the host's id in lowercase letters and digits, the class the provider has taken. */
-export const templateName = (host: string, golden: string, version: number): string => `wsp-${host}-${golden}-v${version}`;
 
 /** How long a promoted template may read building before the seal gives up (a promotion reads ready at once per the
  * provider's reference; the wait covers a slower day), and how often it is read. Tests shrink both. */
@@ -801,6 +797,9 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
 
   const prior = opts.manifest?.versions ?? [];
   const versionNum = (prior[prior.length - 1]?.version ?? 0) + 1;
+  // One name for the version: the snapshot is taken under it and the template is promoted under it, and the host in
+  // it is the only mark a snapshot can carry (the provider takes no metadata on one).
+  const name = goldenName(opts.hostId, opts.name ?? "default", versionNum);
   let snapshotId: string | undefined;
   let templateId: string | undefined;
   let builderAlive = true;
@@ -820,7 +819,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
   const takeSnapshot = async (): Promise<string> => {
     for (let attempt = 1; ; attempt++) {
       try {
-        return await builder.machine.snapshot(`golden-v${versionNum}`);
+        return await builder.machine.snapshot(name);
       } catch (e) {
         if (!isSnapshotRefusal(e)) throw e;
         const answer = answerOf(e);
@@ -832,7 +831,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     }
   };
   try {
-    stage("snapshotting", `golden-v${versionNum}`);
+    stage("snapshotting", name);
     snapshotId = await takeSnapshot();
     if (opts.keepBuilder !== true) {
       await kill(builder.machine);
@@ -840,7 +839,6 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     }
     // The template is what forks boot from, so the smoke proves it and not the snapshot behind it.
     if (templates !== undefined) {
-      const name = templateName(opts.hostId, opts.name ?? "default", versionNum);
       stage("promoting", name);
       templateId = (await promoteVersion(templates, snapshotId, name, { ...opts.templateWait, onStatus: line => stage("promoting", line) })).templateId;
     }

@@ -1866,9 +1866,14 @@ export const ProjectGolden = z.object({
 });
 export type ProjectGolden = z.infer<typeof ProjectGolden>;
 
+/** One part of the listing: how many snapshots and what they hold. */
+export const SnapshotGroup = z.object({ count: z.number(), bytes: z.number() });
+export type SnapshotGroup = z.infer<typeof SnapshotGroup>;
+
 /** Every snapshot on the account as the provider bills it: a snapshot is a full disk image, the free GB are shared
  * by all of them, and the rest costs usdPerGbMonth from billedFrom. Sizes come from the provider's snapshot
- * listing, never from a machine's requested disk. */
+ * listing, never from a machine's requested disk. The three groups split that sum by who made each snapshot, since
+ * the account is shared and the bill is not. */
 export const SnapshotStorage = z.object({
   count: z.number(),
   totalBytes: z.number(),
@@ -1876,6 +1881,13 @@ export const SnapshotStorage = z.object({
   usdPerGbMonth: z.number(),
   billedFrom: z.string(),
   monthlyUsd: z.number(),
+  /** This host's and in use: a golden version, a project golden or a live workspace names it, or this host took it
+   * inside the grace a seal needs before the manifest records it. */
+  kept: SnapshotGroup,
+  /** This host's mark on the name and nothing names the id: what wsp doctor offers to delete. */
+  orphans: SnapshotGroup,
+  /** No mark of this host: another host's or a person's own, never touched. */
+  others: SnapshotGroup,
 });
 export type SnapshotStorage = z.infer<typeof SnapshotStorage>;
 

@@ -953,6 +953,9 @@ export const SNAPSHOT_GONE_REASON = "its snapshot is gone at the provider";
 /** The doctor's line on a backend whose capabilities lack templates: nothing to promote, nothing wrong. */
 export const NO_TEMPLATES_LINE = "this backend has no templates; goldens stay as snapshots";
 
+/** The doctor's line on a backend that cannot list snapshots: nothing to split, nothing to clean. */
+export const NO_SNAPSHOT_LISTING = "this backend lists no snapshots; nothing to split by owner";
+
 /** The one sentence every road that leaves a builder running says: its id, what it costs, how to attach to it
  * again, and that the sweep ends it. */
 export function builderStaysLine(builderId: string, rateUsdPerHour: number, attachCommand: string): string {

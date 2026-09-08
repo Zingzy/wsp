@@ -27,6 +27,8 @@ import {
   OPEN_SHIM_SCRIPT,
   START_MJS,
   packBundle,
+  cleanOrphans,
+  doctor,
   promoteGoldens,
   stageDaemonBundle,
   tarPackCommand,
@@ -34,6 +36,8 @@ import {
 } from "../src/doctor.js";
 import { redact } from "../src/init-log.js";
 import { stubBackend } from "./stub-backend.js";
+
+const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -119,6 +123,131 @@ describe("promoteGoldens", () => {
     expect(await promoteGoldens(rt, cli)).toBe("this backend has no templates; goldens stay as snapshots");
     expect(lines).toEqual([]);
     expect(backend.promoted).toEqual([]);
+  });
+});
+
+describe("cleanOrphans", () => {
+  const GB = 1e9;
+  /** Long past OWN_GRACE_MS whenever the suite runs, so only the mark and the record decide these rows. */
+  const OLD = "2026-09-01T00:00:00.000Z";
+  const version = (n: number, templateId?: string) => ({ version: n, snapshotId: `snap_wsp-h1-default-v${n}`, ...(templateId !== undefined ? { templateId } : {}), baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } });
+  const io = () => {
+    const lines: string[] = [];
+    return { lines, io: { log: (l: string) => void lines.push(l) } };
+  };
+
+  /** One version this host records, one snapshot and one template it left behind, one snapshot named before the
+   * mark existed and one another host sealed. */
+  async function account() {
+    const backend = stubBackend();
+    backend.capabilities.templates = true;
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [version(1, "tpl_wsp-h1-default-v1")] });
+    backend.snapshots.push(
+      { id: "snap_wsp-h1-default-v1", name: "wsp-h1-default-v1", sizeBytes: 12 * GB, createdAt: OLD },
+      { id: "snap_orphan", name: "wsp-h1-default-v9", sizeBytes: 20 * GB, createdAt: OLD },
+      { id: "snap_before", name: "golden-v1", sizeBytes: 21 * GB, createdAt: OLD },
+      { id: "snap_other", name: "wsp-zz9-default-v1", sizeBytes: 7 * GB, createdAt: OLD },
+    );
+    for (const t of [
+      { id: "tpl_wsp-h1-default-v1", name: "wsp-h1-default-v1", snapshotId: "snap_wsp-h1-default-v1" },
+      // Standing on the orphan snapshot, so the provider refuses that snapshot until this template goes first.
+      { id: "tpl_wsp-h1-old-v1", name: "wsp-h1-old-v1", snapshotId: "snap_orphan" },
+      // The provider's own image: no mark of this host, so it is named and left, and the line for it is printed.
+      { id: "base", name: "base", snapshotId: "" },
+    ]) backend.templates.set(t.id, { ...t, status: "ready", createdAt: OLD });
+    return { backend, rt: createRuntime({ backend, store, adapters: {}, hostId: "box:h1" }) };
+  }
+
+  it("without --yes it splits the listing, names every orphan and every row left alone, and deletes nothing", async () => {
+    const { backend, rt } = await account();
+    const { lines, io: cli } = io();
+    expect(await cleanOrphans(rt, cli, false)).toBe("1 orphan snapshot and 1 orphan template, 20.0 GB, saving about $1.00/month; wsp doctor --yes deletes them");
+    expect(lines).toEqual([
+      "storage: 4 snapshots, 60.0 GB; about $2.50/month above the free 10 GB from 2026-10-01. 1 kept here, 12.0 GB; 1 this host's with nothing recording them, 20.0 GB; 2 not this host's, 28.0 GB",
+      "  orphan template wsp-h1-old-v1 (tpl_wsp-h1-old-v1)",
+      "  orphan snapshot wsp-h1-default-v9 (snap_orphan), 20.0 GB",
+      "  left alone, no mark of this host: template base (base)",
+      "  left alone, no mark of this host: snapshot golden-v1 (snap_before), 21.0 GB",
+      "  left alone, no mark of this host: snapshot wsp-zz9-default-v1 (snap_other), 7.0 GB",
+    ]);
+    expect(backend.snapshots).toHaveLength(4);
+    expect([...backend.templates.keys()]).toHaveLength(3);
+  });
+
+  it("on --yes it deletes this host's orphans and nothing else: the row from before the mark and another host's both stay", async () => {
+    const { backend, rt } = await account();
+    const { lines, io: cli } = io();
+    expect(await cleanOrphans(rt, cli, true)).toBe("deleted 1 snapshot and 1 template");
+    expect(lines).toContain("deleting 1 orphan snapshot and 1 orphan template, 20.0 GB, saving about $1.00/month");
+    // No state path given, so the offer names none rather than inventing one.
+    expect(lines.some(l => l.includes("records them"))).toBe(false);
+    expect(backend.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v1", "snap_before", "snap_other"]);
+    expect([...backend.templates.keys()]).toEqual(["tpl_wsp-h1-default-v1", "base"]);
+  });
+
+  it("the offer names the state file that decided, since a run under another --state reads the usual file's goldens as recorded by nothing", async () => {
+    const { backend, rt } = await account();
+    const { io: cli } = io();
+    expect(await cleanOrphans(rt, cli, false, "/tmp/scratch.json")).toBe("1 orphan snapshot and 1 orphan template, 20.0 GB, saving about $1.00/month; nothing in /tmp/scratch.json records them; wsp doctor --yes deletes them");
+    expect(await cleanOrphans(rt, cli, true, "/tmp/scratch.json")).toBe("deleted 1 snapshot and 1 template");
+    expect(backend.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v1", "snap_before", "snap_other"]);
+  });
+
+  it("a delete the provider refuses names the row that stayed and never fails the step", async () => {
+    const { backend, rt } = await account();
+    await backend.create({ kind: "sandbox", fromSnapshot: "snap_orphan" });
+    const { io: cli } = io();
+    expect(await cleanOrphans(rt, cli, true)).toBe("deleted 1 template; wsp-h1-default-v9 (snap_orphan) stayed (SnapshotHasChildren)");
+    expect(backend.snapshots.map(r => r.id)).toContain("snap_orphan");
+  });
+
+  it("with nothing of this host's left behind the step says so and still prints the line", async () => {
+    const backend = stubBackend();
+    backend.capabilities.templates = true;
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [version(1)] });
+    backend.snapshots.push({ id: "snap_wsp-h1-default-v1", name: "wsp-h1-default-v1", sizeBytes: 8 * GB });
+    const rt = createRuntime({ backend, store, adapters: {}, hostId: "box:h1" });
+    const { lines, io: cli } = io();
+    expect(await cleanOrphans(rt, cli, true)).toBe("no orphan of this host");
+    expect(lines).toEqual(["storage: 1 snapshot, 8.0 GB; inside the free 10 GB, nothing to pay from 2026-10-01"]);
+  });
+
+  it("the doctor runs the step before it forks anything, so --yes clears this host's orphans even on a run that cannot build a golden", async () => {
+    const { backend, rt } = await account();
+    const lines: string[] = [];
+    const cli = { log: (l: string) => void lines.push(l), error: (l: string) => void lines.push(l), ask: noPrompt, askSecret: noPrompt };
+    // No golden and no key, so the run fails at the golden step; the storage step ran first either way.
+    expect(await doctor(rt, cli, { yes: true, statePath: "/tmp/state.json" })).toBe(1);
+    expect(lines.some(l => l.includes("nothing in /tmp/state.json records them"))).toBe(true);
+    expect(lines).toContain("  orphan snapshot wsp-h1-default-v9 (snap_orphan), 20.0 GB");
+    expect(backend.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v1", "snap_before", "snap_other"]);
+    expect(lines.some(l => l.includes("snapshot storage") && l.includes("deleted 1 snapshot and 1 template"))).toBe(true);
+  });
+
+  it("without --yes the same run names them and deletes nothing", async () => {
+    const { backend, rt } = await account();
+    const lines: string[] = [];
+    const cli = { log: (l: string) => void lines.push(l), error: (l: string) => void lines.push(l), ask: noPrompt, askSecret: noPrompt };
+    expect(await doctor(rt, cli, {})).toBe(1);
+    expect(backend.snapshots).toHaveLength(4);
+    expect(lines.some(l => l.includes("wsp doctor --yes deletes them"))).toBe(true);
+  });
+
+  it("says so on a backend that lists no snapshots, and a listing the provider refuses is one line, never a failure", async () => {
+    const bare = stubBackend();
+    const { listSnapshots: _l, ...rest } = bare;
+    const rt = createRuntime({ backend: { ...rest, capabilities: { ...bare.capabilities, snapshotListing: false } }, store: memoryStore(), adapters: {}, hostId: "box:h1" });
+    const { lines, io: cli } = io();
+    expect(await cleanOrphans(rt, cli, true)).toBe("this backend lists no snapshots; nothing to split by owner");
+    expect(lines).toEqual([]);
+
+    const { backend, rt: live } = await account();
+    backend.listSnapshots = async () => {
+      throw new Error("502 Bad Gateway");
+    };
+    expect(await cleanOrphans(live, cli, true)).toBe("listing not read: 502 Bad Gateway");
   });
 });
 

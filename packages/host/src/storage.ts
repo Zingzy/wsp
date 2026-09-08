@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Snapshot storage in words: the line wsp prints at start, and wsp init's
-// offer to delete the golden versions retention no longer needs.
+// Snapshot storage in words: the line wsp prints at start, wsp init's offer to
+// delete the golden versions retention no longer needs, and the doctor's split
+// of the account listing into this host's, this host's orphans and the rest.
 import type { Readable, Writable } from "node:stream";
 import { plural } from "@wsp/engine";
 import type { GoldenVersion, SnapshotStorage } from "@wsp/protocol";
-import type { RetentionPlan, Runtime } from "@wsp/runtime";
+import type { AccountOrphans, OrphansDeleted, RetentionPlan, Runtime } from "@wsp/runtime";
 import { isCancel, log } from "@clack/prompts";
 import { confirmPrompt } from "./init-layout.js";
 
@@ -18,9 +19,66 @@ function versionList(versions: readonly GoldenVersion[]): string {
   return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
+/** The account listing split by who made each snapshot: what this host keeps, what this host left with nothing
+ * recording it, and what carries no mark of this host. Left out when this host keeps every snapshot, where it
+ * would only repeat the count. */
+export function describeOwners(s: SnapshotStorage): string {
+  if (s.kept.count === s.count) return "";
+  const parts = [
+    [s.kept, "kept here"],
+    [s.orphans, "this host's with nothing recording them"],
+    [s.others, "not this host's"],
+  ] as const;
+  return parts.filter(([g]) => g.count > 0).map(([g, words]) => `${g.count} ${words}, ${gb(g.bytes)}`).join("; ");
+}
+
 export function describeStorage(s: SnapshotStorage): string {
   const cost = s.monthlyUsd > 0 ? `${perMonth(s.monthlyUsd)} above the free ${s.freeGb} GB from ${s.billedFrom}` : `inside the free ${s.freeGb} GB, nothing to pay from ${s.billedFrom}`;
-  return `storage: ${plural(s.count, "snapshot")}, ${gb(s.totalBytes)}; ${cost}`;
+  const owners = describeOwners(s);
+  return `storage: ${plural(s.count, "snapshot")}, ${gb(s.totalBytes)}; ${cost}${owners === "" ? "" : `. ${owners}`}`;
+}
+
+/** A row as a person reads it: the name it carries and the provider id under it, since the id is what a delete takes. */
+const rowLine = (r: { id: string; name?: string }): string => (r.name === undefined ? r.id : `${r.name} (${r.id})`);
+
+/** Every orphan named, then every row left alone. A snapshot carries no provider metadata, so this host owns a row
+ * only by the mark in its name: anything without that mark is named here and never deleted, whoever made it. */
+export function describeOrphans(plan: AccountOrphans): string[] {
+  const lines: string[] = [];
+  for (const t of plan.templates) lines.push(`  orphan template ${rowLine(t)}`);
+  for (const r of plan.snapshots) lines.push(`  orphan snapshot ${rowLine(r)}, ${gb(r.sizeBytes)}`);
+  for (const t of plan.others.templates) lines.push(`  left alone, no mark of this host: template ${rowLine(t)}`);
+  for (const r of plan.others.snapshots) lines.push(`  left alone, no mark of this host: snapshot ${rowLine(r)}, ${gb(r.sizeBytes)}`);
+  return lines;
+}
+
+/** What the orphans cost to keep, and how they go. A template is a pointer at a snapshot and holds no billed bytes
+ * of its own, so an offer with no snapshot in it says that rather than blaming the free GB for saving nothing. The
+ * state file is named because it is what decided: a run under a different --state reads the usual file's goldens as
+ * recorded by nothing, and this delete cannot be undone. */
+export function describeOrphanOffer(plan: AccountOrphans, yes: boolean, statePath?: string): string {
+  const what = [
+    plan.snapshots.length > 0 ? plural(plan.snapshots.length, "orphan snapshot") : "",
+    plan.templates.length > 0 ? plural(plan.templates.length, "orphan template") : "",
+  ].filter(w => w !== "").join(" and ");
+  const cost = plan.freedBytes === 0
+    ? ", holding no snapshot bytes"
+    : plan.savesUsdPerMonth > 0
+      ? `, ${gb(plan.freedBytes)}, saving ${perMonth(plan.savesUsdPerMonth)}`
+      : `, ${gb(plan.freedBytes)}, inside the free GB, so nothing saved yet`;
+  const decided = statePath === undefined ? "" : `; nothing in ${statePath} records them`;
+  return yes ? `deleting ${what}${cost}${decided}` : `${what}${cost}${decided}; wsp doctor --yes deletes them`;
+}
+
+/** What the delete did, by row, so a refusal names the row that stayed. */
+export function describeDeleted(done: OrphansDeleted): string {
+  const gone = [
+    done.snapshots.length > 0 ? plural(done.snapshots.length, "snapshot") : "",
+    done.templates.length > 0 ? plural(done.templates.length, "template") : "",
+  ].filter(w => w !== "").join(" and ");
+  const kept = done.failed.map(f => `${rowLine(f)} stayed (${f.message})`);
+  const deleted = gone === "" ? "nothing deleted" : `deleted ${gone}`;
+  return kept.length === 0 ? deleted : `${deleted}; ${kept.join("; ")}`;
 }
 
 /** The one line the offer asks with: what goes, what it holds, what it saves, what stays. */
