@@ -7,7 +7,7 @@ import { useMemo } from "react";
 import { useStore } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { showTerminal } from "../shell/shellCommands.js";
-import { requestForgetWorkspace, requestNewThread, requestProjectTrip, requestRenameWorkspace } from "../shell/shellRequests.js";
+import { requestForgetWorkspace, requestNewThread, requestProjectTrip, requestRenameWorkspace, requestWorkspaceLook } from "../shell/shellRequests.js";
 import { copyText } from "./clipboard.js";
 import type { ThreadVerbs } from "./threadActions.js";
 import type { WorkspaceVerbs } from "./workspaceActions.js";
@@ -20,6 +20,7 @@ export function useWorkspaceVerbs(): WorkspaceVerbs {
   const rebuild = api?.rebuild;
   const forget = api?.forget;
   const canRename = api?.renameWorkspace !== undefined;
+  const canLook = api?.setWorkspaceLook !== undefined;
   const canImport = api?.planProject !== undefined && api.importProject !== undefined;
   const canExport = api?.exportProject !== undefined;
   return useMemo<WorkspaceVerbs>(
@@ -41,10 +42,11 @@ export function useWorkspaceVerbs(): WorkspaceVerbs {
             },
       forget: forget === undefined ? undefined : requestForgetWorkspace,
       rename: canRename ? requestRenameWorkspace : undefined,
+      pickLook: canLook ? requestWorkspaceLook : undefined,
       importProject: canImport ? workspaceId => requestProjectTrip({ workspaceId, trip: "import" }) : undefined,
       exportProject: canExport ? workspaceId => requestProjectTrip({ workspaceId, trip: "export" }) : undefined,
     }),
-    [canExport, canImport, canRename, forget, openSurface, rebuild, select, togglePhase],
+    [canExport, canImport, canLook, canRename, forget, openSurface, rebuild, select, togglePhase],
   );
 }
 

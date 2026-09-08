@@ -37,10 +37,17 @@ export const terminalBaseSize = (source: TerminalSizeSource, file: TerminalConfi
 /** The scheme the app is showing, which picks the side of a light:...,dark:... theme. */
 export const appScheme = (): TerminalScheme => (document.documentElement.classList.contains("dark") ? "dark" : "light");
 
+/** Each slot the file names over the app's own for that slot; a slot neither names keeps libghostty's. */
+function paletteOver(file: TerminalConfig["palette"], app: GhosttyTheme["palette"]): GhosttyTheme["palette"] {
+  const slots = Math.max(file.length, app?.length ?? 0);
+  const merged = Array.from({ length: slots }, (_, index) => file[index] ?? app?.[index] ?? null);
+  return merged.some(slot => slot !== null) ? merged : undefined;
+}
+
 /** The file's colors over the app's theme; a palette with nothing set is left out so libghostty keeps its own. */
 export function terminalThemeWith(file: TerminalConfig | null, app: GhosttyTheme): GhosttyTheme {
   if (file === null) return app;
-  const palette = file.palette.some(slot => slot !== null) ? file.palette : undefined;
+  const palette = paletteOver(file.palette, app.palette);
   return {
     background: file.background ?? app.background,
     foreground: file.foreground ?? app.foreground,

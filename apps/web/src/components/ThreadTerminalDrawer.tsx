@@ -121,6 +121,16 @@ function readThemeColor(styles: CSSStyleDeclaration, variable: string, fallback:
   return normalizeComputedColor(styles.getPropertyValue(variable), fallback);
 }
 
+/** The sixteen ANSI slots the stylesheet names for this theme; a slot it does not name keeps libghostty's own,
+ * and a page carrying no stylesheet at all sends none, so libghostty keeps the lot. */
+function readThemePalette(styles: CSSStyleDeclaration): (GhosttyColor | null)[] | undefined {
+  const slots = Array.from({ length: 16 }, (_, slot) => {
+    const value = styles.getPropertyValue(`--terminal-ansi-${slot}`).trim();
+    return value === "" ? null : parseTerminalColor(value, { r: 0, g: 0, b: 0 });
+  });
+  return slots.some(slot => slot !== null) ? slots : undefined;
+}
+
 export function terminalThemeFromApp(mountElement?: HTMLElement | null): GhosttyTheme {
   const isDark = document.documentElement.classList.contains("dark");
   const fallbackBackground = isDark ? "rgb(14, 18, 24)" : "rgb(255, 255, 255)";
@@ -152,6 +162,7 @@ export function terminalThemeFromApp(mountElement?: HTMLElement | null): Ghostty
     "--terminal-selection-background",
     isDark ? "rgba(180, 203, 255, 0.25)" : "rgba(37, 63, 99, 0.2)",
   );
+  const palette = readThemePalette(themeStyles);
   return {
     background: parseTerminalColor(
       terminalBackground,
@@ -166,6 +177,7 @@ export function terminalThemeFromApp(mountElement?: HTMLElement | null): Ghostty
       isDark ? { r: 180, g: 203, b: 255 } : { r: 38, g: 56, b: 78 },
     ),
     selectionBackground: terminalSelection,
+    ...(palette !== undefined ? { palette } : {}),
   };
 }
 

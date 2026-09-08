@@ -6,13 +6,16 @@
 // sidebar's one name box in the same slot, as it does on a row, so the mode
 // keeps one editor and one grammar. The words come from workspaceRows.ts; the
 // block carries the workspace's menu, since in this mode no row of its own is
-// on screen to right-click. It is a row in every other way too: the same
+// on screen to right-click. A workspace with a glyph picked puts it in the
+// lead in its own hue, and the state dot moves to the state slot at the other
+// end of that line, so the running dot is never lost to a glyph. It is a row
+// in every other way too: the same
 // button the rows are drawn with, wearing the id the walk stops on, so Space
 // and Enter both open the workspace here as they do on its row in the list,
 // and the menu key reaches the actions, since a browser sends that key as a
-// context menu on whatever has focus. It rests plain: it is the one workspace
-// on screen, so a tint saying that one is open would say nothing, and which
-// workspace this is lives in the dots row instead.
+// context menu on whatever has focus. The block takes no colour of its own:
+// the hue it declares is there for the glyph to draw in, and the wash that
+// says which workspace is open is painted on the sidebar, not here.
 import type { MouseEvent } from "react";
 import type { MemoryReading } from "@wsp/protocol";
 import { openContextMenu } from "../actions/contextMenu.js";
@@ -20,10 +23,11 @@ import { WORKSPACE_WORDS } from "../actions/format.js";
 import type { ResolvedAction } from "../actions/registry.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
+import { TINTED_INK, WorkspaceGlyphMark, tintAttr } from "../components/workspaceLook.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, workspaceRowId } from "./rowGrammar.js";
-import { dotClassForTone, spaceHeaderLines, stateSlotWord } from "./workspaceRows.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, workspaceRowId } from "./rowGrammar.js";
+import { dotClassForTone, metaSentences, spaceHeaderLines, stateSlotWord } from "./workspaceRows.js";
 
 export function SpaceHeader({
   project,
@@ -54,12 +58,15 @@ export function SpaceHeader({
   /** Opens the box here, as the menu's Rename does; absent where the rename is refused, so the name is text alone. */
   onRenameOpen?: (() => void) | undefined;
 }) {
+  // Which of the header's lines are sentences rather than figures; they take the ink that reads at AA.
+  const prose = metaSentences({ project, outOfMemory });
   return (
     <SidebarMenuButton
       size="lg"
       // An input may not sit inside a button, so a header being renamed is a plain box with the same grammar.
       render={renaming ? <div /> : <button type="button" />}
       data-space-header
+      {...tintAttr(project.workspace.tint)}
       data-sidebar-row
       data-row-id={workspaceRowId(project.id)}
       // The bottom two corners stay square so the hairline under the block runs the sidebar's width; the top two
@@ -69,7 +76,7 @@ export function SpaceHeader({
       {...(renaming ? {} : { onClick: onSelect, onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions) })}
     >
       <span aria-hidden className={ROW_LEAD_CLASS}>
-        <span className={cn("size-2 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />
+        {project.workspace.glyph === undefined ? <StateDot project={project} /> : <WorkspaceGlyphMark glyph={project.workspace.glyph} className={cn("size-3.5", TINTED_INK)} />}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
         <span className="flex items-center gap-2">
@@ -87,16 +94,22 @@ export function SpaceHeader({
               {project.displayName}
             </span>
           )}
-          <span data-space-state className={cn(ROW_META_CLASS, "shrink-0 text-right")}>
+          <span data-space-state className={cn(ROW_META_CLASS, "flex shrink-0 items-center gap-1.5 text-right")}>
+            {project.workspace.glyph === undefined ? null : <StateDot project={project} />}
             {stateSlotWord(project)}
           </span>
         </span>
         {spaceHeaderLines({ project, cost, outOfMemory, nowMs }).map(line => (
-          <span key={line} data-space-meta className={cn(ROW_META_CLASS, "truncate")} title={line}>
+          <span key={line} data-space-meta className={cn(prose.includes(line) ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={line}>
             {line}
           </span>
         ))}
       </span>
     </SidebarMenuButton>
   );
+}
+
+/** The workspace's state as a dot, wherever the header puts it: the lead, or the state slot when a glyph has the lead. */
+function StateDot({ project }: { project: SidebarProjectSnapshot }) {
+  return <span className={cn("size-2 shrink-0 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />;
 }

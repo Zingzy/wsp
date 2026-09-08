@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, workspaceState, type WorkspaceSize, type WorkspaceState, type WorkspaceTint } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { sidebarActions } from "../actions/sidebarActions.js";
@@ -24,6 +24,7 @@ import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.j
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { useOutOfMemoryReadings } from "../machine/live.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
+import { WorkspaceLookDialog, tintAttr } from "../components/workspaceLook.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { SidebarContent, SidebarGroup, SidebarGroupAction, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubItem } from "../components/ui/sidebar.js";
 import { Spinner } from "../components/ui/spinner.js";
@@ -33,17 +34,17 @@ import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
 import { catalogIn, useCapabilities, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
-import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, type ProjectTripRequest } from "../shell/shellRequests.js";
+import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, onWorkspaceLookRequest, type ProjectTripRequest, type WorkspaceLookRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, TWO_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
-import { spaceWorkspaceId, useSidebarMode } from "./sidebarMode.js";
+import { useSidebarMode, useSpaceWorkspaceId } from "./sidebarMode.js";
 import { SpaceDots } from "./SpaceDots.js";
 import { SpaceHeader } from "./SpaceHeader.js";
 import { SPACE_LEAVING_SELECTOR, SpaceSlide } from "./SpaceSlide.js";
@@ -136,6 +137,8 @@ export function WorkspaceSidebar() {
   /** Workspace id to the machine id a rebuild was asked for; the action stays disabled while that machine is still the one reported. */
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
   const [forgetting, setForgetting] = useState<string | null>(null);
+  /** The look picker open for one workspace, on the fact the menu named; keyed per opening so it reopens fresh. */
+  const [looking, setLooking] = useState<(WorkspaceLookRequest & { key: number }) | null>(null);
   /** The row whose name is being typed, by the row id every row already carries, and whether that name is on its way;
    * one row at a time whatever its kind, the row is the only editor, and the field stays until the store has the name. */
   const [renaming, setRenaming] = useState<{ rowId: string; saving: boolean } | null>(null);
@@ -158,10 +161,11 @@ export function WorkspaceSidebar() {
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const sectionActions = useMemo(() => resolveActions(sidebarActions, { mode }, { setMode }), [mode, setMode]);
-  const spaceId = spaceWorkspaceId(projects.map(project => project.id), selectedId);
+  const spaceId = useSpaceWorkspaceId();
   const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === spaceId) ?? null);
   const tripTarget = trip === null ? undefined : workspaces.find(w => w.id === trip.workspaceId);
   const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting);
+  const lookTarget = looking === null ? undefined : workspaces.find(w => w.id === looking.workspaceId);
 
   const openDialog = (): void => {
     const key = Date.now();
@@ -184,6 +188,7 @@ export function WorkspaceSidebar() {
       }),
     [],
   );
+  useEffect(() => onWorkspaceLookRequest(request => setLooking({ ...request, key: Date.now() })), []);
   useEffect(() => onProjectTripRequest(request => setTrip({ ...request, key: Date.now() })), []);
 
   const create = async (name: string, start: WorkspaceStart, size?: WorkspaceSize): Promise<void> => {
@@ -265,8 +270,9 @@ export function WorkspaceSidebar() {
 
   /** The rows under one workspace, whichever body draws them: the line that opens its first thread while it has
    * none, the working rows, then the idle shelf under its own header with the archive nested inside it. The list
-   * and Spaces both read this, so the row grammar has one home. */
-  const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, machine: RowMachine, shut: boolean) => {
+   * and Spaces both read this, so the row grammar has one home. The rail takes the workspace's hue in the list,
+   * where it is the one place the hue draws; Spaces passes none, since there the whole surface carries it. */
+  const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, machine: RowMachine, shut: boolean, rail?: WorkspaceTint | undefined) => {
     const settledOpen = !settledCollapsed.includes(project.id);
     const archivedOpen = archivedOpenIds.includes(project.id);
     /** Everything the shelf holds, the archived rows included, since shutting it hides the archive with them: the
@@ -291,7 +297,7 @@ export function WorkspaceSidebar() {
           </SidebarMenuSub>
         ) : null}
         {!shut && active.length + shelved > 0 ? (
-          <SidebarMenuSub>
+          <SidebarMenuSub {...tintAttr(rail)}>
             {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), machine))}
             {shelved > 0 ? (
               <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} onToggle={() => toggleSettled(project.id)} />
@@ -337,7 +343,7 @@ export function WorkspaceSidebar() {
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actions, "rename"))}
         />
-        {threadsOf(visibleProject, newThreadAction, machine, isCollapsed)}
+        {threadsOf(visibleProject, newThreadAction, machine, isCollapsed, project.workspace.tint)}
       </SidebarMenuItem>
     );
   };
@@ -442,7 +448,7 @@ export function WorkspaceSidebar() {
         />
       </div>
       {offline ? (
-        <p data-sidebar-offline className={cn(ROW_META_CLASS, "px-2 pt-1 leading-4")}>
+        <p data-sidebar-offline className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
           {PROVIDER_UNREACHED_LINE}
         </p>
       ) : null}
@@ -536,6 +542,9 @@ export function WorkspaceSidebar() {
           <ExportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} />
         )
       ) : null}
+      {looking !== null && lookTarget !== undefined ? (
+        <WorkspaceLookDialog key={looking.key} workspace={lookTarget} part={looking.part} onClose={() => setLooking(null)} />
+      ) : null}
       {forgetTarget !== undefined ? (
         <ForgetWorkspaceDialog
           workspace={forgetTarget.workspace}
@@ -564,9 +573,9 @@ function ThreadGroupRow({ rowId, label, count, open, onToggle }: { rowId: string
         onClick={onToggle}
         className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-hidden ring-ring focus-visible:ring-2"
       >
-        <span className="text-xs font-medium text-muted-foreground/50">{open ? label : `${label} (${count})`}</span>
+        <span className="text-xs font-medium text-sidebar-whisper/50">{open ? label : `${label} (${count})`}</span>
         <span className="h-px flex-1 bg-sidebar-border/60" />
-        <ChevronDownIcon aria-hidden className={cn("size-3 text-muted-foreground/50 transition-transform", open && "rotate-180")} />
+        <ChevronDownIcon aria-hidden className={cn("size-3 text-sidebar-whisper/50 transition-transform", open && "rotate-180")} />
       </button>
     </SidebarMenuSubItem>
   );
