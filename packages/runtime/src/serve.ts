@@ -191,6 +191,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id, ok: true, workspace, ...(notice !== undefined ? { notice } : {}) });
               return;
             }
+            case "workspaces.createLocal":
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.createLocal(msg.name) });
+              return;
             case "workspaces.list":
               send({ id: msg.id, ok: true, workspaces: await rt.workspaces.list() });
               return;
@@ -250,6 +253,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
                 ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
                 ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
+                ...(msg.origin !== undefined ? { origin: msg.origin } : {}),
                 ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
                 ...(msg.notify !== undefined ? { notify: msg.notify } : {}),
                 ...(msg.title !== undefined ? { title: msg.title } : {}),

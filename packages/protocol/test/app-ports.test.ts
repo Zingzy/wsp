@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  DEFAULT_PORT,
+  DEFAULT_WS_PORT,
+  PORT_TAKEN_REFUSAL,
+  WS_PORT_OFFSET,
+  portHolderWords,
+  portTakenLine,
+  portsAsked,
+  portsPickedLine,
+  stateFileLine,
+} from "../src/index.js";
+import { ROOT, sourceFiles } from "./source-files.js";
+
+describe("the pair of ports the app is served on", () => {
+  it("names 4400 and 4410, one offset apart, as the pair nobody named", () => {
+    expect([DEFAULT_PORT, WS_PORT_OFFSET, DEFAULT_WS_PORT]).toEqual([4400, 10, 4410]);
+    expect(portsAsked({})).toEqual({ port: 4400, wsPort: 4410, named: false });
+  });
+
+  it("--port alone derives the WebSocket port at the defaults' own offset, and says a person named it", () => {
+    expect(portsAsked({ port: "4401" })).toEqual({ port: 4401, wsPort: 4411, named: true });
+    expect(portsAsked({ port: "5000" })).toEqual({ port: 5000, wsPort: 5010, named: true });
+  });
+
+  it("--ws-port names that port on its own, whether or not --port came with it", () => {
+    expect(portsAsked({ port: "4401", wsPort: "9000" })).toEqual({ port: 4401, wsPort: 9000, named: true });
+    expect(portsAsked({ wsPort: "9000" })).toEqual({ port: 4400, wsPort: 9000, named: true });
+  });
+
+  it("keeps both ports at 0, since 0 asks for any free port and the offset above it would be privileged", () => {
+    expect(portsAsked({ port: "0" })).toEqual({ port: 0, wsPort: 0, named: true });
+  });
+});
+
+describe("who holds a port, and the lines about it", () => {
+  it("names a wsp host by the state file it serves, a process by its command and pid, and nothing else as another process", () => {
+    expect(portHolderWords({ statePath: "/Users/z/.wsp/state.json" })).toBe("the host serving /Users/z/.wsp/state.json");
+    expect(portHolderWords({ command: "node", pid: 62569 })).toBe("node (pid 62569)");
+    expect(portHolderWords(undefined)).toBe("another process");
+  });
+
+  it("the taken line names the port and its holder", () => {
+    expect(portTakenLine(4410, { command: "node", pid: 62569 })).toBe("Port 4410 is in use on this computer by node (pid 62569).");
+    expect(portTakenLine(4400, undefined)).toBe("Port 4400 is in use on this computer by another process.");
+  });
+
+  it("the picked line names the pair it serves on and the port it stepped over with its holder", () => {
+    expect(portsPickedLine({ port: 4401, wsPort: 4411 }, 4400, { statePath: "/Users/z/.wsp/state.json" })).toBe(
+      "Serving on 4401 and 4411; 4400 is held by the host serving /Users/z/.wsp/state.json.",
+    );
+  });
+
+  it("the refusal offers --port alone and says where its WebSocket port lands", () => {
+    expect(PORT_TAKEN_REFUSAL).toBe(
+      "Nothing was booted. Stop that process, or name a free app port with --port; the WebSocket port follows 10 above it unless --ws-port names another.",
+    );
+    expect(PORT_TAKEN_REFUSAL).not.toContain("—");
+  });
+
+  it("the state file line names the file and the flag that starts a fresh setup", () => {
+    expect(stateFileLine("/Users/z/.wsp/state.json")).toBe("Setting up /Users/z/.wsp/state.json; --state <path> starts a fresh setup instead.");
+  });
+});
+
+describe("one copy of the pair", () => {
+  const HOME = join("packages", "protocol", "src", "app-ports.ts");
+
+  it("no other source file spells out a default port: the app and the desktop read them from here", () => {
+    const copies = sourceFiles().filter(rel => rel !== HOME && /\b(4400|4410)\b/.test(readFileSync(join(ROOT, rel), "utf8")));
+    expect(copies).toEqual([]);
+  });
+});

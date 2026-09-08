@@ -74,9 +74,12 @@ export async function moveProjectState(move: ProjectStateMove, agents: readonly 
   return report;
 }
 
-/** Every catalog agent's home under a home directory, by id: the entry's stateHome joined onto it. */
-export function agentHomes(homeDir: string): Record<string, string> {
-  return Object.fromEntries(CATALOG_AGENTS.map(a => [a.id, join(homeDir, a.stateHome)]));
+/** Every catalog agent's home under a home directory, by id: the entry's stateHome joined onto it, or, given the
+ * person's environment, the folder their own store variable names (CLAUDE_CONFIG_DIR) when it is set, so a turn on
+ * this computer reads the store their terminal reads. */
+export function agentHomes(homeDir: string, env?: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const own = (a: (typeof CATALOG_AGENTS)[number]): string | undefined => (a.stateHomeEnv === undefined ? undefined : env?.[a.stateHomeEnv]);
+  return Object.fromEntries(CATALOG_AGENTS.map(a => [a.id, own(a) || join(homeDir, a.stateHome)]));
 }
 
 /** Every catalog agent's home on the guest, by id: the entry's own guest home where it names one, else stateHome under the guest's home. */

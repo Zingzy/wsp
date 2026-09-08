@@ -5,6 +5,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { NOTHING_TO_SERVE_LINE } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { claudeKeyOnlyInThisShell, downCommand, keyOnlyInThisShell, statusCommand, upServiceCommand, type CliIO, type ServiceDeps } from "../src/cli.js";
 import {
@@ -404,7 +405,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     const bare: string[] = [];
     const empty = svc();
     expect(await upServiceCommand(quietIO([], bare), opts, empty.deps)).toBe(1);
-    expect(bare).toEqual(["no golden yet; run wsp init"]);
+    expect(bare).toEqual([NOTHING_TO_SERVE_LINE]);
     expect(empty.ran).toEqual([]);
   });
 

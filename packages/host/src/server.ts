@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
-import { recordRestoredLine, type BootPayload, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, recordRestoredLine, type BootPayload, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import { hostFolders } from "./host-folders.js";
@@ -22,9 +22,9 @@ export interface HostOptions {
   runtime: Runtime;
   /** The built web app: index.html plus its assets. */
   webDir: string;
-  /** HTTP port for the app (0 picks a free one). Default 4400. */
+  /** HTTP port for the app (0 picks a free one). Default DEFAULT_PORT. */
   port?: number;
-  /** Port for serveRuntime's WS (0 picks a free one). Default 4410. */
+  /** Port for serveRuntime's WS (0 picks a free one). Default DEFAULT_WS_PORT. */
   wsPort?: number;
   /** Auth token for the runtime WS; generated when omitted. */
   authToken?: string;
@@ -251,7 +251,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   });
   let rtServer: RuntimeServer;
   try {
-    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? 4410, host: LOOPBACK, authToken, forwards: relay, projects: bundlerFor, landing: projectLander(homes), folders: hostFolders(() => rt.workspaces.list()), terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) } });
+    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? DEFAULT_WS_PORT, host: LOOPBACK, authToken, forwards: relay, projects: bundlerFor, landing: projectLander(homes), folders: hostFolders(() => rt.workspaces.list()), terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) } });
   } catch (e) {
     await relay.close();
     throw e;
@@ -311,7 +311,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   try {
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
-      server.listen(opts.port ?? 4400, LOOPBACK, resolve);
+      server.listen(opts.port ?? DEFAULT_PORT, LOOPBACK, resolve);
     });
   } catch (e) {
     await relay.close();
@@ -319,7 +319,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     throw e;
   }
   const addr = server.address();
-  const port = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? 4400);
+  const port = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? DEFAULT_PORT);
 
   // A sweep that outlives its period (a slow provider listing) must not be
   // joined by the next one: two sweeps would race to kill the same machines.

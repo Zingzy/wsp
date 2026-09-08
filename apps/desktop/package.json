@@ -7,7 +7,9 @@
   "scripts": {
     "build:deps": "pnpm --filter \"@wsp/desktop^...\" build",
     "build:app": "tsup && node scripts/stage.mjs",
-    "build": "pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --mac --arm64 --x64 --linux",
+    "build:mac": "pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --mac --arm64 --x64 --publish never",
+    "build:linux": "pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --linux --publish never",
+    "build": "pnpm run build:mac && pnpm run build:linux",
     "start": "pnpm run build:app && electron build/app",
     "smoke": "cd ../.. && WSP_DESKTOP_SMOKE=1 vitest run --project node apps/desktop/test/smoke.electron.test.ts"
   },

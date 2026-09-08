@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cli, up, type CliIO } from "../src/cli.js";
+import { NOTHING_TO_SERVE_LINE } from "@wsp/protocol";
+import { cli, localWiring, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
@@ -86,9 +87,24 @@ describe("wsp up", () => {
     const errors: string[] = [];
     const handle = await up(quietIO(lines, errors), { port: 0, wsPort: 0, statePath, webDir, runtime: fileRuntime() });
     expect(handle).toBeUndefined();
-    expect(errors).toEqual(["no golden yet; run wsp init"]);
+    expect(errors).toEqual([NOTHING_TO_SERVE_LINE]);
     expect(lines).toEqual([]);
     expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
+  });
+
+  it("serves a state that holds only a local workspace and no golden: this computer is something to show", async () => {
+    stateFile({
+      workspaces: {
+        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), spec: {}, firstLife: false, idleWindowMs: null },
+      },
+    });
+    const lines: string[] = [];
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath), adapters: {}, local: localWiring(home) });
+    const handle = await up(quietIO(lines), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    if (handle === undefined) throw new Error("up refused a state with a local workspace");
+    handles.push(handle);
+    expect((await fetch(`http://127.0.0.1:${handle.port}/`)).status).toBe(200);
+    expect((await rt.workspaces.list()).map(w => [w.name, w.kind])).toEqual([["mac", "local"]]);
   });
 
   it.each([
@@ -98,7 +114,7 @@ describe("wsp up", () => {
     const errors: string[] = [];
     const code = await cli([...cmd, "--port", "0", "--ws-port", "0", "--state", statePath], quietIO([], errors));
     expect(code).toBe(1);
-    expect(errors).toEqual(["no golden yet; run wsp init"]);
+    expect(errors).toEqual([NOTHING_TO_SERVE_LINE]);
     expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
   });
 
@@ -107,5 +123,22 @@ describe("wsp up", () => {
     const initSource = readFileSync(new URL("../src/init.ts", import.meta.url), "utf8");
     expect(cliSource.match(/startHost\(/g)).toHaveLength(1);
     expect(initSource).not.toMatch(/startHost\(/);
+  });
+
+  it("--port alone derives the websocket port, and every command of the shared parse works on that one pair", () => {
+    expect(optsFor({ port: "4401", state: statePath })).toMatchObject({ port: 4401, wsPort: 4411, named: true });
+    expect(optsFor({ state: statePath })).toMatchObject({ port: 4400, wsPort: 4410, named: false });
+    expect(optsFor({ port: "4401", "ws-port": "9000", state: statePath })).toMatchObject({ port: 4401, wsPort: 9000, named: true });
+    // wsp up, wsp init and the rest read their pair from this one call, so neither can derive it its own way: the
+    // parse calls optsFor once (the second hit is its own declaration) and optsFor is the only reader of the rule.
+    const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
+    expect(cliSource.match(/optsFor\(/g)).toHaveLength(2);
+    expect(cliSource.match(/portsAsked\(/g)).toHaveLength(1);
+    expect(cliSource).not.toMatch(/\b(4400|4410)\b/);
+  });
+
+  it("the state files a taken port is asked about are this run's and this computer's default, each once", () => {
+    expect(statesHere(statePath)).toEqual([statePath, join(home, "state.json")]);
+    expect(statesHere(join(home, "state.json"))).toEqual([join(home, "state.json")]);
   });
 });

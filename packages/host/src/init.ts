@@ -19,7 +19,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, BUILDER_DISK_GB, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, notHereLine, packageOf, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote } from "@wsp/protocol";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, notHereLine, packageOf, PORT_TAKEN_REFUSAL, portTakenLine, portsPickedLine, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, stateFileLine, type AppPorts, type PortsAsked } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -69,7 +69,7 @@ import type { Tone } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
 import { builderLink, flowHooks, keyAsks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import { handoffStage } from "./init-handoff.js";
-import { portClash } from "./ports.js";
+import { choosePorts, type PortProbes } from "./ports.js";
 import type { CallbackRelay } from "./relay.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
 
@@ -134,9 +134,12 @@ export interface InitOptions {
   scan?: (recipe: readonly RecipeCustomRow[]) => Promise<readonly ScanRow[]>;
   /** Builds the runtime around the recipe the ticks produced. */
   runtime(recipe: GoldenRecipe): Runtime;
-  /** The ports the app binds. A run on a terminal without --non-interactive ends by serving the app, so it probes them
-   * before anything is read and a clash is found before a machine bills. */
-  ports: { port: number; wsPort: number };
+  /** The ports the app binds, whether a person named them, and how a busy one is found and named: the state files a
+   * host here could be serving, and the probe and the lsof reader themselves, which a test hands over so no port
+   * outside the ones it holds decides where the pair lands. A run on a terminal without --non-interactive ends by
+   * serving the app, so it probes the pair before anything is read: a pair nobody named steps over a busy port, one
+   * a person named is refused, both before a machine bills. */
+  ports: PortsAsked & PortProbes;
   /** The command that starts the app once the golden is recorded, with the flags this run was given. */
   upCommand: string;
   /** The command that forks the first workspace from it, for a run with nobody at a terminal that asked for none. */
@@ -149,8 +152,9 @@ export interface InitOptions {
    * serving. */
   roads(rt: Runtime): WorkspaceRoads;
   /** Starts the app server over the runtime once the golden is sealed and recorded, on a run at a terminal without
-   * --non-interactive: a person is there to use it. */
-  host(rt: Runtime): Promise<HostHandle>;
+   * --non-interactive: a person is there to use it. The pair is the one the run settled on, which is not the pair
+   * asked for when a busy default was stepped over. */
+  host(rt: Runtime, ports: AppPorts): Promise<HostHandle>;
   /** A pty link to the builder's daemon for the sign-in and secrets steps, dialled before each command; the real one dials its reach. */
   daemon?(rt: Runtime, builder: GoldenBuilderView): Promise<BuilderLink>;
   /** How long to wait when the account is at its machine cap, and how often. */
@@ -753,13 +757,17 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // A person at a terminal gets the app served at the end, --yes or not; --non-interactive says an agent is driving,
   // and off a terminal nobody is here, so neither serves anything. Only a run that serves needs the ports.
   const serves = io.isTTY && opts.nonInteractive !== true;
+  let ports: AppPorts = { port: opts.ports.port, wsPort: opts.ports.wsPort };
   if (serves) {
-    const clash = await portClash([opts.ports.port, opts.ports.wsPort]);
-    if (clash !== undefined) {
-      log.error(clash, out);
-      cancel("Nothing was booted. Stop that process, or run wsp init and wsp up with --port and --ws-port naming free ports.", out);
+    const chosen = await choosePorts(opts.ports, opts.ports);
+    if ("taken" in chosen) {
+      log.error(portTakenLine(chosen.taken.port, chosen.taken.holder), out);
+      log.step(stateFileLine(opts.statePath), out);
+      cancel(PORT_TAKEN_REFUSAL, out);
       return { code: 1 };
     }
+    ports = chosen.ports;
+    if (chosen.moved !== undefined) log.step(portsPickedLine(ports, chosen.moved.port, chosen.moved.holder), out);
   }
 
   let manifest: Manifest;
@@ -1342,11 +1350,11 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   let handle: HostHandle | undefined;
   if (serves) {
     try {
-      handle = await opts.host(rt);
+      handle = await opts.host(rt, ports);
     } catch (e) {
       log.error(e instanceof Error ? e.message : String(e), out);
       log.step(logLine(), out);
-      outro(`Golden v${version} is sealed and recorded. The app did not start; fix that and run ${opts.upCommand}, with --port and --ws-port when a port is taken.`, out);
+      outro(`Golden v${version} is sealed and recorded. The app did not start; fix that and run ${opts.upCommand}, with --port when a port is taken.`, out);
       await closeRuntime();
       return { ...result, code: 1 };
     }

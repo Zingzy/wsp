@@ -84,6 +84,8 @@ interface Fake {
   /** How many hosts the run started once the golden was sealed, and how many it closed. */
   hosts: number;
   hostsClosed: number;
+  /** The pair each host was started on, which is the pair the run settled on rather than the pair asked for. */
+  served: { port: number; wsPort: number }[];
   /** Keychain services the fake reader was asked for. */
   reads: string[];
   /** The one store every runtime of this fake reads and writes. */
@@ -166,6 +168,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   const hooks: HostHooks[] = [];
   const link = scriptedLink({ signedIn: over.signedIn ?? true, hold: over.hold ?? false, missing: over.missing ?? false });
   const counters = { hosts: 0, closed: 0, relays: 0, relaysClosed: 0 };
+  const served: { port: number; wsPort: number }[] = [];
   const signals = new EventEmitter();
   const exits: number[] = [];
   const records: Record<string, unknown>[] = [];
@@ -228,7 +231,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       runtimes.push(rt);
       return rt;
     },
-    ports: { port: 0, wsPort: 0 },
+    ports: { port: 0, wsPort: 0, named: true },
     upCommand: "wsp up",
     forkCommand: "wsp new first",
     relay: async (rt: Runtime, builder, h) => {
@@ -238,8 +241,9 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       return { close: async () => void (counters.relaysClosed += 1) };
     },
     roads: rt => roadsOf(rt, trail, imports),
-    host: async (rt: Runtime) => {
+    host: async (rt: Runtime, ports: { port: number; wsPort: number }) => {
       counters.hosts += 1;
+      served.push(ports);
       // The host starts only once the golden is on the account and in the store: a host that fails cannot lose it.
       expect(goldenHead(await rt.golden.get())).toBeDefined();
       const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", ...roadsOf(rt, trail, imports), close: async () => void (counters.closed += 1) };
@@ -290,6 +294,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     get hostsClosed() {
       return counters.closed;
     },
+    served,
     reads,
     store,
     signals,
@@ -1702,7 +1707,7 @@ describe("wsp init, flags and no terminal", () => {
   it("under --non-interactive --json on a terminal with the app's ports taken: no screens, each sign-in's page and outcome as one object, no host, the golden recorded, and one last object naming it and the wsp up to run", async () => {
     // Another host holds the app's port, as the coordinator's did: a run nobody is at never binds it, so it never notices.
     const port = await heldPort();
-    const f = fake({ nonInteractive: true, json: true, ports: { port, wsPort: port }, upCommand: "wsp up --state /tmp/wsp-test/state.json", forkCommand: "wsp new first --state /tmp/wsp-test/state.json" });
+    const f = fake({ nonInteractive: true, json: true, ports: { port, wsPort: port, named: true }, upCommand: "wsp up --state /tmp/wsp-test/state.json", forkCommand: "wsp new first --state /tmp/wsp-test/state.json" });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
     expect(result.handle).toBeUndefined();
@@ -1745,19 +1750,49 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.hosts).toBe(0);
   });
 
-  it("on a terminal with the app's ports taken the run says who holds them and offers --port before anything is read or booted", async () => {
+  it("a port a person named and something holds refuses with the holder, the state file and --port, before anything is read or booted", async () => {
+    // The one port this test speaks about is one it holds for the whole run, so the real probe finds it taken
+    // whatever else the machine is doing; a named pair never steps, so no other port's state can decide the run.
     const port = await heldPort();
-    const f = fake({ ports: { port: 0, wsPort: port } });
+    const f = fake({ ports: { port: 0, wsPort: port, named: true, listener: async () => ({ command: "node", pid: 62569 }) } });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     const out = f.text();
-    // lsof names this very process when it is on the box; without it the holder is another process.
-    expect(out).toMatch(new RegExp(`Port ${port} is in use on this computer by (\\S+ \\(pid ${process.pid}\\)|another process)\\.`));
-    expect(out).toContain("Nothing was booted. Stop that process, or run wsp init and wsp up with --port and --ws-port naming free ports.");
+    expect(out).toContain(`Port ${port} is in use on this computer by node (pid 62569).`);
+    // Which state file the run was about to set up, and the flag that starts a fresh one, so a second init is not a surprise upgrade.
+    expect(out).toContain(`Setting up ${f.opts.statePath}; --state <path> starts a fresh setup instead.`);
+    expect(out).toContain("Nothing was booted. Stop that process, or name a free app port with --port; the WebSocket port follows 10 above it unless --ws-port names another.");
     expect(out).not.toContain("Found on this computer");
     expect(f.backends).toEqual([]);
     expect(f.relays).toBe(0);
     expect(f.hosts).toBe(0);
+  });
+
+  it("a pair nobody named that is taken is stepped over: the run says which pair it serves on and who holds the one it left, and serves there", async () => {
+    // Every port this run treats as taken is one this test holds for its duration, and the probe answers off that
+    // list alone: a port another process takes while the run works cannot move the pair the assertions name.
+    const taken = await heldPort();
+    const held = new Set([taken]);
+    // The state file of the host holding it: a path this test names, not one it reads off this computer.
+    const other = "/Users/z/.wsp/state.json";
+    const f = fake({
+      yes: true,
+      ports: {
+        port: taken,
+        wsPort: taken + 10,
+        named: false,
+        probe: async p => held.has(p),
+        states: [other],
+        serving: () => ({ pid: 62569, port: taken, wsPort: taken + 10, startedAt: "2026-09-07T23:08:00.000Z" }),
+      },
+    });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain(`Serving on ${taken + 1} and ${taken + 11}; ${taken} is held by the host serving ${other}.`);
+    expect(out).not.toContain("Nothing was booted");
+    // The host is started on the pair the run settled on, not the one it was asked for.
+    expect(f.served).toEqual([{ port: taken + 1, wsPort: taken + 11 }]);
+    expect(f.hosts).toBe(1);
   });
 
   it("a host that fails after the seal loses nothing: the golden is recorded, the builder is kept as saved with its hold freed, and the line names the wsp up to run", async () => {
@@ -1776,7 +1811,7 @@ describe("wsp init, flags and no terminal", () => {
     const out = f.text();
     expect(out).toContain("Golden v1 sealed.");
     expect(out).toContain("listen EADDRINUSE: address already in use 127.0.0.1:4410");
-    expect(out).toContain("Golden v1 is sealed and recorded. The app did not start; fix that and run wsp up, with --port and --ws-port when a port is taken.");
+    expect(out).toContain("Golden v1 is sealed and recorded. The app did not start; fix that and run wsp up, with --port when a port is taken.");
     expect(out).not.toContain(FIRST_QUESTION);
     expect(goldenHead(await f.runtimes.at(-1)!.golden.get())?.snapshotId).toBe("snap_wsp-h1-default-v1");
     // The builder is kept ten minutes for one more change and recorded as saved; the smoke fork is gone; no workspace was forked.

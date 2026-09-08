@@ -14,6 +14,7 @@ import type { Machine } from "@wsp/engine";
 import { EMPTY_TITLE_LINE, foldThreads, keepsRename, type AdapterEvent, type TitleTurn, type TurnResult } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
+import { machineExecStream } from "../src/machine-exec.js";
 import { SESSION_TITLE_REFRESH_MAX, SESSION_TITLE_TTL_MS, createRuntime, type HarnessAdapter, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -626,7 +627,7 @@ describe("the agents whose store keeps a name", () => {
     expect(rows.map(c => c.harness).sort()).toEqual([...THREAD_AGENTS].sort());
     const machine = { id: "m_1" } as unknown as Machine;
     for (const row of rows) {
-      const adapter = HARNESS_ADAPTERS[row.harness as ThreadAgent]({ machine, workspaceId: ws.id, env: {} });
+      const adapter = HARNESS_ADAPTERS[row.harness as ThreadAgent]({ machine, workspaceId: ws.id, execStream: machineExecStream(machine), home: () => "/root/.state", env: {} });
       expect(row.renames, row.harness).toBe(adapter.renameSession !== undefined);
       expect(keepsRename(row), row.harness).toBe(true);
     }
