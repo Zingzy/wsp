@@ -11,7 +11,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
 import { useSelectedWorkspaceId, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
-import { goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
+import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { requestNewWorkspace } from "../../shell/shellRequests.js";
 import { useSidebarMode } from "../../sidebar/sidebarMode.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
@@ -40,6 +40,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
   const select = useStore(s => s.select);
+  const openSettings = useStore(s => s.openSettings);
   const selectedId = useSelectedWorkspaceId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
   const [sidebarMode, setSidebarMode] = useSidebarMode();
@@ -69,9 +70,12 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       toggleRightPanel,
       nextWorkspace: () => goToAdjacentWorkspace(1),
       previousWorkspace: () => goToAdjacentWorkspace(-1),
+      nextThread: () => cycleThreadInSpace(1),
+      previousThread: () => cycleThreadInSpace(-1),
       setSidebarMode,
+      openSettings,
     }),
-    [select, setSidebarMode, toggleRightPanel, toggleSidebar],
+    [openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
     () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, sidebarMode, handlers, verbs }),
@@ -140,6 +144,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
             highlightedItemValue={highlightedItemValue}
             isActionsOnly={query.startsWith(">")}
             keybindings={keybindings}
+            shortcuts={{ context: { spacesMode: sidebarMode === "spaces" } }}
             onExecuteItem={executeItem}
           />
         </CommandPaletteContent>

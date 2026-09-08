@@ -2,9 +2,10 @@
 // The left region: workspaces (machines) first, their sessions as threads
 // under each, over the adapter's SidebarProjectSnapshot. The search row, the
 // Workspaces section row that shuts them all and opens the new-workspace
-// dialog, the settled shelf and the archive under it, the Spaces body with
-// one workspace's rows under its header and a dot per workspace at the
-// bottom, keyboard traversal, the
+// dialog, the settled shelf with the archive nested in it, the Spaces body
+// with one workspace's rows under its header and a dot per workspace at the
+// bottom, the slide and the two-finger swipe that move between them,
+// keyboard traversal, the
 // rebuild of a zombie or gone machine, the forget of a gone one and the
 // project trips' dialogs live here; the rows are WorkspaceRow and ThreadRow
 // beside this file, and the logic comes from the copied t3code files. Every
@@ -12,7 +13,7 @@
 // the workspace and thread registries. The surface itself is the shell's
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
 import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -31,6 +32,7 @@ import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
 import { catalogIn, useCapabilities, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, type ProjectTripRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
@@ -41,9 +43,11 @@ import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
-import { useSidebarMode } from "./sidebarMode.js";
+import { spaceWorkspaceId, useSidebarMode } from "./sidebarMode.js";
 import { SpaceDots } from "./SpaceDots.js";
 import { SpaceHeader } from "./SpaceHeader.js";
+import { SPACE_LEAVING_SELECTOR, SpaceSlide } from "./SpaceSlide.js";
+import { NO_SWIPE, readSwipe } from "./spaceSwipe.js";
 import { ThreadRow } from "./ThreadRow.js";
 import { WorkspaceRow } from "./WorkspaceRow.js";
 import { NEW_THREAD_SHORTCUT, NEW_THREAD_TITLE, compactTimeLabel, defaultWorkspaceName } from "./workspaceRows.js";
@@ -154,8 +158,8 @@ export function WorkspaceSidebar() {
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const sectionActions = useMemo(() => resolveActions(sidebarActions, { mode }, { setMode }), [mode, setMode]);
-  // Spaces draws the selected workspace, and the first one in the sidebar's order until something is selected.
-  const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === selectedId) ?? visible[0] ?? null);
+  const spaceId = spaceWorkspaceId(projects.map(project => project.id), selectedId);
+  const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === spaceId) ?? null);
   const tripTarget = trip === null ? undefined : workspaces.find(w => w.id === trip.workspaceId);
   const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting);
 
@@ -354,6 +358,7 @@ export function WorkspaceSidebar() {
           actions={actions}
           renaming={naming}
           saving={naming && renaming?.saving === true}
+          onSelect={() => select(project.id)}
           onRename={name => void sendName(workspaceRowId(project.id), () => renameWorkspace({ workspaceId: project.id, name }))}
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actions, "rename"))}
@@ -363,7 +368,14 @@ export function WorkspaceSidebar() {
     );
   };
 
-  const rows = (): HTMLElement[] => Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []);
+  /** One space's whole body, drawn for the workspace on screen and, while a slide runs, for the one leaving too. */
+  const spacePane = (workspaceId: string) => {
+    const pane = visible.find(v => v.project.id === workspaceId);
+    return pane === undefined ? null : <SidebarMenu>{spaceItem(pane)}</SidebarMenu>;
+  };
+
+  // The body on its way out of a slide is still drawn: its rows are not the ones the keyboard walks.
+  const rows = (): HTMLElement[] => Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []).filter(row => row.closest(SPACE_LEAVING_SELECTOR) === null);
   const focusRow = (id: string | null): void => {
     if (id === null) return;
     rows().find(r => r.dataset["rowId"] === id)?.focus();
@@ -391,6 +403,17 @@ export function WorkspaceSidebar() {
         return;
     }
     e.preventDefault();
+  };
+
+  /** A two-finger swipe over the workspaces moves a space, and it lands where the arrows land, through the one verb
+   * they run: the swipe is another way to ask, not another rule. It rides that group alone, so the search row above
+   * it and the forwards under it still scroll as they are, and the gesture it belongs to lives across the wheel
+   * events that make it up, so a swipe that keeps going moves one space and no more. */
+  const swipe = useRef(NO_SWIPE);
+  const onWheel = (e: WheelEvent<HTMLElement>): void => {
+    const read = readSwipe(swipe.current, { deltaX: e.deltaX, deltaY: e.deltaY, at: e.timeStamp });
+    swipe.current = read.gesture;
+    if (read.step !== 0) goToAdjacentWorkspace(read.step);
   };
 
   const offline = useMemo(() => computerOffline(Object.values(statuses)), [statuses]);
@@ -431,7 +454,7 @@ export function WorkspaceSidebar() {
       <SidebarChromeHeader />
       <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
         <SidebarContent fixedHeader={search}>
-          <SidebarGroup className="pt-0">
+          <SidebarGroup className="pt-0" onWheel={mode === "spaces" ? onWheel : undefined}>
             <SectionRow
               label="Workspaces"
               count={projects.length + creations.length}
@@ -462,9 +485,13 @@ export function WorkspaceSidebar() {
                   {creations.map(creation => (
                     <CreationRow key={creation.key} creation={creation} active={selectedId === creation.key} onSelect={() => select(creation.key)} />
                   ))}
-                  {currentSpace === null ? null : spaceItem(currentSpace)}
                   {mode === "spaces" ? null : visible.map(listItem)}
                 </SidebarMenu>
+                {currentSpace === null ? null : (
+                  <SpaceSlide currentId={currentSpace.project.id} order={visible.map(v => v.project.id)}>
+                    {spacePane}
+                  </SpaceSlide>
+                )}
                 {visible.length === 0 && creations.length === 0 ? (
                   <Empty className="py-8">
                     <EmptyHeader>

@@ -10,7 +10,8 @@ export function sourceFiles(): string[] {
   const out: string[] = [];
   for (const top of ["packages", "apps"]) {
     for (const pkg of readdirSync(join(ROOT, top), { withFileTypes: true })) {
-      if (!pkg.isDirectory()) continue;
+      // The landing site under apps/www is marketing copy, not the product: it names sizes and words the grep rules guard.
+      if (!pkg.isDirectory() || (top === "apps" && pkg.name === "www")) continue;
       const src = join(ROOT, top, pkg.name, "src");
       let files: string[];
       try {

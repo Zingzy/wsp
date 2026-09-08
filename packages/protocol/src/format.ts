@@ -20,6 +20,11 @@ export function fmtBytes(n: number): string {
 /** Memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
 const memGb = (memMb: number): number => Number((memMb / 1024).toFixed(1));
 
+/** A size in css pixels, as the settings page states the text and sidebar sizes. */
+export function fmtPx(px: number): string {
+  return `${px} px`;
+}
+
 /** A machine size's memory with its unit. */
 export function fmtMemGb(memMb: number): string {
   return `${memGb(memMb)} GB`;
@@ -741,15 +746,13 @@ export function goneWords(machineId: string, seen?: GoneSighting): string {
   return `${base}: the ${seen.by} found it gone at ${at}${answer}`;
 }
 
-/** The answer a sighting quotes when the host's metrics read came back missing while the state read still said
- * running: the host lost the VM before the gateway's record followed, so a pause or snapshot would have failed next. */
-export function hostLostAnswer(said: string): string {
-  return `metrics ${said}; the state read still said running`;
-}
-
 /** The machine row's line when a record that said paused met a machine the provider was running all along (a nap
  * whose pause never took, a resume nobody wrote): the record followed the fact and nothing was resumed. */
 export const ALREADY_RUNNING = "already running at the provider";
+
+/** The machine row's line when a record marked gone met a machine the provider still holds, running or paused: the
+ * state read by id decides, so the record is gone no more and no rebuild abandoned a healthy machine. */
+export const NOT_GONE = "not gone at the provider after all; the record follows the state read";
 
 /** The machine row's line on a workspace the sweep recorded from the provider's listing: a machine of this setup's
  * that no record claimed, kept rather than killed, since a machine nobody records bills unseen. */
@@ -778,18 +781,22 @@ export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
  * or any workspace record, this computer's included, serves; an empty one has nothing for the app to show. */
 export const NOTHING_TO_SERVE_LINE = "nothing to serve yet; wsp new --local makes this computer a workspace, or wsp init seals a golden";
 
+/** What a local workspace's machine is, in every sentence and every row that names it: the refusals below, the
+ * sidebar row's second line and the Machine tab's lineage all read this one phrase. */
+export const THIS_COMPUTER = "this computer";
+
 /** The one sentence a local workspace refuses a request relayed from a machine with. A local workspace is this
  * computer; it answers only its own person, so a request that reached the host from a machine wsp runs cannot drive
  * it. Today no machine has a road into the host, so nothing relays yet; the rule and its test land now. */
 export function relayedRefusal(name: string): string {
-  return `${name} is this computer; it answers only requests from this computer, never one relayed from a machine`;
+  return `${name} is ${THIS_COMPUTER}; it answers only requests from ${THIS_COMPUTER}, never one relayed from a machine`;
 }
 
 /** The one sentence a local workspace refuses a verb its machine cannot take with. This computer is not a machine
  * wsp forks, pauses or snapshots, so the verbs that move a provider fork have no meaning on it; `action` is the verb
  * as the person typed it. The capability behind each is false, so the road that reads the capability says this. */
 export function localMachineRefusal(name: string, action: string): string {
-  return `${name} is this computer, not a machine wsp runs; it cannot ${action}`;
+  return `${name} is ${THIS_COMPUTER}, not a machine wsp runs; it cannot ${action}`;
 }
 
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how

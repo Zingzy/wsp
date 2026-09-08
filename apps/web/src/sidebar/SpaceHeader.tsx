@@ -6,16 +6,23 @@
 // sidebar's one name box in the same slot, as it does on a row, so the mode
 // keeps one editor and one grammar. The words come from workspaceRows.ts; the
 // block carries the workspace's menu, since in this mode no row of its own is
-// on screen to right-click.
+// on screen to right-click. It is a row in every other way too: the same
+// button the rows are drawn with, wearing the id the walk stops on, so Space
+// and Enter both open the workspace here as they do on its row in the list,
+// and the menu key reaches the actions, since a browser sends that key as a
+// context menu on whatever has focus. It rests plain: it is the one workspace
+// on screen, so a tint saying that one is open would say nothing, and which
+// workspace this is lives in the dots row instead.
 import type { MouseEvent } from "react";
 import type { MemoryReading } from "@wsp/protocol";
 import { openContextMenu } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
 import type { ResolvedAction } from "../actions/registry.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
+import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, workspaceRowId } from "./rowGrammar.js";
 import { dotClassForTone, spaceHeaderLines, stateSlotWord } from "./workspaceRows.js";
 
 export function SpaceHeader({
@@ -26,6 +33,7 @@ export function SpaceHeader({
   actions,
   renaming,
   saving,
+  onSelect,
   onRename,
   onRenameCancel,
   onRenameOpen,
@@ -40,17 +48,25 @@ export function SpaceHeader({
   renaming: boolean;
   /** That name is on its way to the runtime: the field stays exactly as it is and takes no second Enter. */
   saving: boolean;
+  onSelect: () => void;
   onRename: (name: string) => void;
   onRenameCancel: () => void;
   /** Opens the box here, as the menu's Rename does; absent where the rename is refused, so the name is text alone. */
   onRenameOpen?: (() => void) | undefined;
 }) {
   return (
-    <div
+    <SidebarMenuButton
+      size="lg"
+      // An input may not sit inside a button, so a header being renamed is a plain box with the same grammar.
+      render={renaming ? <div /> : <button type="button" />}
       data-space-header
-      className="mb-1 flex items-start gap-[var(--sidebar-control-gap)] border-b border-sidebar-border/60 px-2 pt-1.5 pb-2 text-sm"
+      data-sidebar-row
+      data-row-id={workspaceRowId(project.id)}
+      // The bottom two corners stay square so the hairline under the block runs the sidebar's width; the top two
+      // carry the row's radius, which is the shape the focus ring takes.
+      className="mb-1 h-auto items-start gap-[var(--sidebar-control-gap)] rounded-t-lg rounded-b-none border-b border-sidebar-border/60 px-2 pt-1.5 pb-2 text-sm"
       // A header holding the box takes no menu over it, as a row being named does not.
-      {...(renaming ? {} : { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions) })}
+      {...(renaming ? {} : { onClick: onSelect, onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions) })}
     >
       <span aria-hidden className={ROW_LEAD_CLASS}>
         <span className={cn("size-2 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />
@@ -81,6 +97,6 @@ export function SpaceHeader({
           </span>
         ))}
       </span>
-    </div>
+    </SidebarMenuButton>
   );
 }

@@ -40,7 +40,8 @@ import { isTerminalAppShortcut } from "../keybindings";
 import { cn, errorText } from "../lib/utils";
 import { getTerminalLabel } from "../lib/terminalLabels";
 import { GhosttyTerminalSurface, type GhosttyTerminalFont, type GhosttyTerminalSurfaceOptions } from "../terminal/ghostty/surface";
-import { appScheme, terminalFontWith, terminalSurfaceSettings, terminalThemeWith } from "../terminal/ghosttyConfig";
+import { DEFAULT_TERMINAL_SIZING, appScheme, terminalFontWith, terminalSurfaceSettings, terminalThemeWith, type TerminalSizing } from "../terminal/ghosttyConfig";
+import { rememberTerminalFile } from "../terminal/terminalFile";
 import type { Api } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { type GhosttyColor, type GhosttyTheme } from "../terminal/ghostty/core";
@@ -172,6 +173,8 @@ export interface TerminalViewportConfig {
   font?: GhosttyTerminalFont;
   /** Whether the viewer typed the family, which beats the one their terminal config names. */
   chosenFont?: boolean;
+  /** Where the text size starts and how far this workspace's zoom moved it; absent, the app's own size unmoved. */
+  sizing?: TerminalSizing;
   /** A modifier-click on a link in the output; by default URLs open in a new tab and paths do nothing. */
   onLinkActivate?: (text: string) => void;
 }
@@ -227,6 +230,8 @@ export function TerminalViewport({
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
   const fontRef = useRef(config.font);
+  const sizing = config.sizing ?? DEFAULT_TERMINAL_SIZING;
+  const sizingRef = useRef(sizing);
   const chosenRef = useRef(config.chosenFont === true);
   chosenRef.current = config.chosenFont === true;
   // The person's Ghostty config, as the host read it when this viewport opened; null until then and when no host answers.
@@ -250,10 +255,11 @@ export function TerminalViewport({
   });
 
   useEffect(() => {
-    if (fontRef.current === config.font) return;
+    if (fontRef.current === config.font && sizingRef.current === sizing) return;
     fontRef.current = config.font;
-    void terminalRef.current?.setFont(terminalFontWith(fileRef.current, config.font, chosenRef.current));
-  }, [config.font]);
+    sizingRef.current = sizing;
+    void terminalRef.current?.setFont(terminalFontWith(fileRef.current, config.font, chosenRef.current, sizing));
+  }, [config.font, sizing]);
 
   // A read that failed while the socket was down, or a file saved since, lands on the next live socket: a pane already
   // drawn takes the file's colours, font, padding and opacity. The cursor style is the core's construction option and
@@ -265,7 +271,8 @@ export function TerminalViewport({
     void readTerminalFile(readHostConfig, appScheme()).then(file => {
       if (stale || file === null || terminalRef.current !== terminal) return;
       fileRef.current = file;
-      const settings = terminalSurfaceSettings(file, terminalThemeFromApp(containerRef.current), fontRef.current, chosenRef.current);
+      rememberTerminalFile(file);
+      const settings = terminalSurfaceSettings(file, terminalThemeFromApp(containerRef.current), fontRef.current, chosenRef.current, sizingRef.current);
       terminal.setTheme(settings.theme);
       void terminal.setFont(settings.font);
       terminal.setPadding(settings.padding);
@@ -288,12 +295,14 @@ export function TerminalViewport({
 
     const setup = async (): Promise<(() => void) | null> => {
       const setupFont = fontRef.current;
+      const setupSizing = sizingRef.current;
       // Read again on every open, so a saved change to the file reaches the next terminal without a reload.
       let scheme: TerminalScheme = appScheme();
       const file = readHostConfig === undefined ? null : await readTerminalFile(readHostConfig, scheme);
       if (cancelled) return null;
       fileRef.current = file;
-      const settings = terminalSurfaceSettings(file, terminalThemeFromApp(mount), setupFont, chosenRef.current);
+      rememberTerminalFile(file);
+      const settings = terminalSurfaceSettings(file, terminalThemeFromApp(mount), setupFont, chosenRef.current, setupSizing);
       const terminalOptions: GhosttyTerminalSurfaceOptions = {
         theme: settings.theme,
         font: settings.font,
@@ -325,7 +334,7 @@ export function TerminalViewport({
       terminalRef.current = terminal;
       setTranslucent(terminal.translucent);
       // A font change that landed while the surface was loading found terminalRef null.
-      if (fontRef.current !== setupFont) void terminal.setFont(terminalFontWith(file, fontRef.current, chosenRef.current));
+      if (fontRef.current !== setupFont || sizingRef.current !== setupSizing) void terminal.setFont(terminalFontWith(file, fontRef.current, chosenRef.current, sizingRef.current));
 
       setupCleanups.push(
         io.attach({

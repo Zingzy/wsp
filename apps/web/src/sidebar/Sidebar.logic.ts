@@ -261,10 +261,16 @@ export function splitSidebarThreads<T extends SidebarThreadRow>(
   };
 }
 
+/** One workspace's threads in the order the sidebar draws them: the working rows, then the idle shelf. The rows,
+ * the top thread and the chord that walks a space's threads all read this one order. */
+export function sidebarThreadOrder<T extends SidebarThreadRow>(threads: readonly T[]): T[] {
+  const { active, settled } = splitSidebarThreads(threads);
+  return [...active, ...settled];
+}
+
 /** The thread the sidebar draws at the top of a workspace, which is the one its centre opens; null with no threads. */
 export function topSidebarThread<T extends SidebarThreadRow>(threads: readonly T[]): T | null {
-  const { active, settled } = splitSidebarThreads(threads);
-  return active[0] ?? settled[0] ?? null;
+  return sidebarThreadOrder(threads)[0] ?? null;
 }
 
 export function formatWorkingDurationLabel(elapsedMs: number): string {

@@ -31,6 +31,7 @@ import {
   LOGIN_CHOICES,
   NOTIFY_ME,
   NOTIFY_WORDS,
+  NO_REBUILD_NEEDED,
   ProjectExportResult,
   ProjectGolden,
   ProjectImportResult,
@@ -70,6 +71,7 @@ import {
   imagesRefusal,
   importConsented,
   importRequest,
+  needsRebuild,
   noAdapterLine,
   notAFileLine,
   notAnImageLine,
@@ -437,6 +439,21 @@ export function stateLine(workspace: WorkspaceView): string {
 export async function nap(client: HostClient, ref: string): Promise<WorkspaceView> {
   const source = await workspaceOf(client, ref);
   return (await client.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: source.id })).workspace;
+}
+
+/** Replaces the machine under a workspace the provider no longer has, the road out of gone that the app's row
+ * action takes. The record is read here so a machine that still answers is refused in the row's own words; the
+ * runtime alone knows the machine is replaced, and the view it returns carries the new one. */
+export async function rebuild(client: HostClient, ref: string): Promise<WorkspaceView> {
+  const source = await workspaceOf(client, ref);
+  if (!needsRebuild(source)) throw new Error(NO_REBUILD_NEEDED);
+  return (await client.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: source.id })).workspace;
+}
+
+/** The state line every director prints after a rebuild, with the machine now under the workspace: the id changed,
+ * so a caller that held the old one is told. */
+export function rebuiltLine(workspace: WorkspaceView): string {
+  return `${stateLine(workspace)} on ${workspace.machineId}`;
 }
 
 /** What a workspace rename came to, as every director prints it: the name it went in under and the record after. */
@@ -1657,6 +1674,29 @@ export const VERBS: readonly Verb[] = [
       call: async ({ workspace: ref }, deps) => {
         const client = await deps.client();
         return asJson({ workspace: await awake(client, await workspaceOf(client, ref), "wake", QUIET_LINE) });
+      },
+    }),
+  },
+  {
+    name: "rebuild",
+    usage: "wsp rebuild <workspace>",
+    about: "replaces a gone workspace's machine from its image and prints the state of the new one",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp rebuild takes one workspace");
+      const workspace = await rebuild(await ctx.client(), ref);
+      ctx.out.emit({ workspace }, rebuiltLine(workspace));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Replaces the machine of a workspace the provider no longer has, forking it afresh from the image the workspace was made on and importing the vault its last nap left; the workspace keeps its id, its name and its threads, and the new machine's id and state come back once the runtime has them. Anything written on the old machine's disk since that nap is not there. This is the road out of the refusal every other verb gives a gone workspace, and it is refused in one line on a machine that still answers.",
+      input: { workspace: WorkspaceIn },
+      output: { workspace: WorkspaceView },
+      call: async ({ workspace: ref }, deps) => {
+        const workspace = await rebuild(await deps.client(), ref);
+        return asText(rebuiltLine(workspace), { workspace });
       },
     }),
   },

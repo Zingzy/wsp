@@ -3,11 +3,13 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, foldThreads, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, applyPreferencesPatch, foldThreads, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
+import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
+import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
 export interface CostTick {
@@ -85,11 +87,22 @@ interface State {
   ready: boolean;
   /** How many reconnects the runtime could not replay events for; anything built from sessions.history reloads when it moves. */
   gaps: number;
+  /** The person's view preferences, the host's one record; until the host answers, the defaults with what this browser
+   * kept of the last record, so the first paint is the side, the width and the body the person picked. */
+  preferences: Preferences;
+  /** Whether the centre shows the settings page in place of the selected workspace's thread. */
+  settingsOpen: boolean;
   bind(api: Api): void;
   noteGap(): void;
   /** Mirrors the client's status; live with an api bound pulls list and statuses again so a reconnect converges. */
   setConn(conn: ConnStatus): void;
+  /** Also leaves the settings page: every road to a workspace lands on its thread. */
   select(id: string | null, threadId?: string | null): void;
+  openSettings(): void;
+  closeSettings(): void;
+  toggleSettings(): void;
+  /** Paints the patch at once and sends it; the host's answer settles the record, a refusal is a toast and the host's record is read again. */
+  setPreferences(patch: PreferencesPatch): Promise<void>;
   /** Starts a create from the golden head, or from `golden` (a project golden's snapshot) when given, selects its row,
    * and follows it through the stage events; resolves with the runtime's id for the new workspace, or null when the
    * create was refused. */
@@ -162,6 +175,9 @@ function firstRow(s: Pick<State, "workspaces" | "statuses" | "sessions">): strin
 }
 
 let creationSeq = 0;
+/** Sets on their way to the host. While one is, a reply or a preferences.changed for an earlier set would paint an
+ * older record over the one the person sees; the last reply, or the record read after a refusal, settles it. */
+let preferenceSetsInFlight = 0;
 
 export const useStore = create<State>((set, get) => {
   const patchCreation = (key: string, patch: (c: Creation) => Creation): void => {
@@ -195,9 +211,11 @@ export const useStore = create<State>((set, get) => {
     }
   };
 
-  // wake-via-resurrect and upgrade replace the machine, so those events carry a new machineId; gone carries the words
+  // wake-via-resurrect and upgrade replace the machine, so those events carry a new machineId; gone carries the
+  // words, and any other phase drops the ones the view was holding, since a record that left gone has none to show
   const setPhase = (id: string, phase: WorkspacePhase, machineId?: string, gone?: string): void => {
-    const patch = { phase, ...(machineId !== undefined ? { machineId } : {}), ...(gone !== undefined ? { gone } : {}) };
+    const words = phase !== "gone" ? { gone: undefined } : gone !== undefined ? { gone } : {};
+    const patch = { phase, ...(machineId !== undefined ? { machineId } : {}), ...words };
     set(s => ({
       workspaces: s.workspaces.map(w => (w.id === id ? { ...w, ...patch } : w)),
       statuses: s.statuses[id] ? { ...s.statuses, [id]: { ...s.statuses[id]!, ...patch } } : s.statuses,
@@ -230,6 +248,15 @@ export const useStore = create<State>((set, get) => {
       .listForwards?.()
       .then(forwards => set({ forwards }))
       .catch((e: unknown) => set({ forwards: [], toast: `forward list unavailable: ${e instanceof Error ? e.message : String(e)}` }));
+    void api
+      .preferences?.()
+      .then(preferences => {
+        if (preferenceSetsInFlight === 0) set({ preferences });
+        // What this browser kept before the record existed goes onto the record once, then the old keys go.
+        const legacy = legacyPreferences(window.localStorage);
+        if (legacy !== null) void get().setPreferences(legacy).then(() => clearLegacyPreferences(window.localStorage));
+      })
+      .catch(() => {});
   };
 
   return {
@@ -250,6 +277,8 @@ export const useStore = create<State>((set, get) => {
     sessions: {},
     ready: false,
     gaps: 0,
+    preferences: bootPreferences(),
+    settingsOpen: false,
     noteGap() { set(s => ({ gaps: s.gaps + 1 })); },
     bind(api) {
       set({ api });
@@ -269,7 +298,25 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       if (conn === "live" && api) pull(api);
     },
-    select(id, threadId = null) { set({ selectedId: id, selectedThreadId: threadId }); },
+    select(id, threadId = null) { set({ selectedId: id, selectedThreadId: threadId, settingsOpen: false }); },
+    openSettings() { set({ settingsOpen: true }); },
+    closeSettings() { set({ settingsOpen: false }); },
+    toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen })); },
+    async setPreferences(patch) {
+      const api = get().api;
+      set(s => ({ preferences: applyPreferencesPatch(s.preferences, patch) }));
+      if (!api?.setPreferences) return;
+      preferenceSetsInFlight++;
+      try {
+        const preferences = await api.setPreferences(patch);
+        if (--preferenceSetsInFlight === 0) set({ preferences });
+      } catch (e) {
+        preferenceSetsInFlight--;
+        if (e instanceof DisconnectedError) return;
+        set({ toast: `settings: ${e instanceof Error ? e.message : String(e)}` });
+        if (preferenceSetsInFlight === 0) void api.preferences?.().then(preferences => set({ preferences })).catch(() => {});
+      }
+    },
     async createWorkspace(name, golden, size) {
       if (!get().api) return null;
       const key = `creating:${++creationSeq}`;
@@ -478,6 +525,9 @@ export const useStore = create<State>((set, get) => {
         case "session.notify":
           if (e.notify === NOTIFY_ME) set({ toast: e.text });
           return;
+        case "preferences.changed":
+          if (preferenceSetsInFlight === 0) set({ preferences: e.preferences });
+          return;
         default:
           return;
       }
@@ -488,6 +538,10 @@ export const useStore = create<State>((set, get) => {
 // Every road to a workspace (a click, a chord, a finished creation, the boot fallback) lands here; a creation row is not a workspace yet.
 useStore.subscribe((s, prev) => {
   if (s.selectedId !== prev.selectedId && s.selectedId !== null && s.workspaces.some(w => w.id === s.selectedId)) rememberWorkspace(s.selectedId);
+});
+// Every change to the record, the host's or a pick painted ahead of it, is what the next load paints first.
+useStore.subscribe((s, prev) => {
+  if (s.preferences !== prev.preferences) rememberFirstPaint(s.preferences);
 });
 
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
@@ -512,6 +566,8 @@ export function useSpending(id: string | null): boolean {
   return useStore(s => (id ? (s.spending[id] ?? 0) > 0 : false));
 }
 export function useReady(): boolean { return useStore(s => s.ready); }
+export function usePreferences(): Preferences { return useStore(s => s.preferences); }
+export function useSettingsOpen(): boolean { return useStore(s => s.settingsOpen); }
 export function useForwards(): PortForward[] { return useStore(s => s.forwards); }
 /** Whether localhost:port on this computer is a page of that workspace to open: a printed link, not a sign-in callback. */
 export function useForwarded(workspaceId: string | null, port: number | null): boolean {
