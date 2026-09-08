@@ -5,8 +5,9 @@
 // The workspace that left is still drawn until the travel ends, so while it
 // is on screen it is held off the accessibility tree and out of the
 // keyboard's reach; the traversal skips it by the same mark. A space asked
-// for while a travel is still running turns that travel around from where the
-// track has got to. Someone who asked for less motion gets the swap with
+// for while a travel is still running starts a travel of its own from where
+// the track has got to, whether it turns the last one around or carries on
+// to a third space. Someone who asked for less motion gets the swap with
 // nothing moving.
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
@@ -22,11 +23,15 @@ export const SPACE_LEAVING_SELECTOR = "[data-space-leaving]";
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
 interface Travel {
+  /** One travel from the next: a travel taking over from a running one counts up from it, and one from rest follows
+   * a render with no travel at all, so the track keyed by it is a new element for each and the animation drawing it
+   * starts over. A browser leaves an animation whose name it has already seen running on the clock it has. */
+  readonly id: number;
   readonly leavingId: string;
   /** The space asked for sits after the one leaving in the sidebar's order, so the body travels left. */
   readonly forward: boolean;
-  /** Where the track already is, when this travel turned a running one around; null starts it at the far side,
-   * which is where a track at rest is drawn anyway. */
+  /** Where the track starts, for a travel taking over from a running one; null starts it at the far side, which is
+   * where a track at rest is drawn anyway. */
   readonly from: string | null;
 }
 
@@ -59,6 +64,7 @@ export function SpaceSlide({ currentId, order, children }: { currentId: string; 
   return (
     <div data-space-slide className="overflow-x-clip">
       <div
+        key={travel === null ? "rest" : travel.id}
         ref={track}
         data-space-track
         style={style}
@@ -78,22 +84,31 @@ export function SpaceSlide({ currentId, order, children }: { currentId: string; 
 }
 
 /** The travel from the workspace that was on screen to the one asked for: which way it goes in the sidebar's order,
- * and where it starts. Null when the order has lost either of them, since neither pane would have a place to be. */
+ * and where its track starts. Null when the order has lost either of them, since neither pane would have a place to be. */
 function travelBetween(leavingId: string, currentId: string, order: ReadonlyArray<string>, running: Travel | null, track: HTMLElement | null): Travel | null {
   const from = order.indexOf(leavingId);
   const to = order.indexOf(currentId);
   if (from === -1 || to === -1) return null;
-  // Turning a running travel around leaves the two bodies in the places they already hold, so the new one starts
-  // where the track has got to; a travel to a third space has no such place to pick up from.
-  const turning = running !== null && running.leavingId === currentId;
-  const at = turning ? trackOffset(track) : null;
-  return { leavingId, forward: to > from, from: at === null ? null : `${at}px` };
+  const forward = to > from;
+  return { id: (running?.id ?? 0) + 1, leavingId, forward, from: handover(running, forward, track) };
+}
+
+/** Where a travel taking over from a running one starts its track. The body the two of them share, the one now
+ * leaving, sits in the second pane of a forward pair and the first of one going back, so a travel that changes which
+ * pane holds it moves the track a pane's width to leave that body where it is on screen. Null from rest, where the
+ * keyframes name the side to start at themselves. */
+function handover(running: Travel | null, forward: boolean, track: HTMLElement | null): string | null {
+  if (running === null || track === null) return null;
+  const at = trackOffset(track);
+  if (at === null) return null;
+  const was = running.forward ? 1 : 0;
+  const now = forward ? 0 : 1;
+  return `${at + (was - now) * (track.getBoundingClientRect().width / 2)}px`;
 }
 
 /** How far the running animation has drawn the track from its own origin; null where nothing has moved it, or where
  * the browser reports a shape this cannot read, and the travel starts at the far side instead. */
-function trackOffset(track: HTMLElement | null): number | null {
-  if (track === null) return null;
+function trackOffset(track: HTMLElement): number | null {
   const matrix = /^matrix\(([^)]*)\)$/.exec(getComputedStyle(track).transform);
   const x = matrix === null ? Number.NaN : Number(matrix[1]?.split(",")[4]);
   return Number.isFinite(x) ? x : null;

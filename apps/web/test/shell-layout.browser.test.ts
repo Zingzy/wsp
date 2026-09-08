@@ -50,6 +50,9 @@ const browserPath = ((): string | undefined => {
 })();
 const hasBrowser = browserPath !== undefined && existsSync(browserPath);
 const skipped = process.env["WSP_RENDER"] !== "1" ? "WSP_RENDER is not 1" : !hasBrowser ? "Playwright's Chromium is not installed" : undefined;
+/** What React says when one body is drawn as both panes. The case that watches for it wants this line and not
+ * whatever else a browser puts on the console. */
+const DUPLICATE_KEY = "two children with the same key";
 
 interface Box {
   x: number;
@@ -787,7 +790,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       await page!.waitForSelector("[data-space-header]");
       const errors: string[] = [];
       const listen = (message: ConsoleMessage): void => {
-        if (message.type() === "error") errors.push(message.text());
+        if (message.type() === "error" && message.text().includes(DUPLICATE_KEY)) errors.push(message.text());
       };
       page!.on("console", listen);
       // Every frame of a travel turned around after 80 ms: where the track is, and which bodies are on screen.
@@ -845,6 +848,67 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(run.leftOver).toBe("");
       // The track clips sideways only, so the wrapper is no scroll container of its own.
       expect(run.clip).toEqual({ x: "clip", y: "visible", scrolls: false });
+    }
+  }, 60_000);
+
+  it("a third space asked for mid-travel runs its own full travel from where the body is, in both themes", async () => {
+    const TURN_AFTER_MS = 80;
+    for (const theme of ["dark", "light"] as const) {
+      await page!.emulateMedia({ reducedMotion: "no-preference" });
+      await page!.goto(`${base}?theme=${theme}&spaces=1`);
+      await page!.waitForSelector("[data-space-header]");
+      // Every frame of a travel to web that is asked for old 80 ms in: where each body sits across the sidebar's
+      // body, and the clock of the animation drawing the track. A body's own edge is the reading that counts, since
+      // the track moves a pane's width under a travel that changes which pane holds a body, and the track's
+      // transform alone cannot tell that apart from the body jumping.
+      const run = await page!.evaluate(async turnAfter => {
+        const track = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-track]")!;
+        const frame = () => {
+          const across = document.querySelector<HTMLElement>("[data-space-slide]")!.getBoundingClientRect().left;
+          return {
+            at: performance.now(),
+            bodies: Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane]")).map(pane => ({ name: pane.querySelector<HTMLElement>("[data-space-name]")?.textContent ?? "", x: pane.getBoundingClientRect().left - across })),
+            clocks: track()
+              .getAnimations()
+              .map(animation => Number(animation.currentTime ?? 0)),
+          };
+        };
+        const click = (name: string): void => document.querySelector<HTMLElement>(`[data-space-dot][aria-label=${name}]`)!.click();
+        const paint = (): Promise<unknown> => new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
+        const frames: ReturnType<typeof frame>[] = [];
+        click("web");
+        // The travel comes up in the click's own render, but a browser under load can hold that render back, and two
+        // clicks landing in one render would be one travel rather than a travel taken over.
+        for (let i = 0; i < 200 && document.querySelectorAll("[data-space-pane]").length < 2; i++) await new Promise(resolve => setTimeout(resolve, 1));
+        const started = performance.now();
+        while (performance.now() - started < turnAfter) {
+          await paint();
+          frames.push(frame());
+        }
+        click("old");
+        while (performance.now() - started < turnAfter + 500) {
+          await paint();
+          frames.push(frame());
+        }
+        return { frames, width: track().getBoundingClientRect().width };
+      }, TURN_AFTER_MS);
+
+      const pane = run.width / 2;
+      const took = run.frames.findIndex(read => read.bodies.some(body => body.name === "old"));
+      const swap = run.frames[took]!;
+      const arrived = run.frames.findIndex((read, i) => i >= took && read.bodies.some(body => body.name === "old" && Math.abs(body.x) < 1));
+      const tookMs = arrived < 0 ? null : run.frames[arrived]!.at - swap.at;
+      console.info(`space third ${theme}: ${JSON.stringify({ pane, clockAtSwap: swap.clocks, enteredAt: swap.bodies.find(body => body.name === "old")?.x, tookMs, frames: run.frames.length, last: run.frames.at(-1) })}`);
+      // The travel taken over is drawn by an animation of its own, on its own clock, not by the one already running.
+      expect(swap.clocks).toHaveLength(1);
+      expect(swap.clocks[0]).toBeLessThan(40);
+      // The space asked for comes in from off the sidebar's edge, not from part of the way across it.
+      expect(swap.bodies.find(body => body.name === "old")!.x).toBeGreaterThan(0.75 * pane);
+      // And it takes a whole travel to arrive, rather than finishing early on a clock it inherited.
+      expect(tookMs).toBeGreaterThan(0.85 * SPACE_SLIDE_MS);
+      expect(tookMs).toBeLessThan(1.4 * SPACE_SLIDE_MS);
+      // It settles on that space alone, at rest at the sidebar's edge.
+      expect(run.frames.at(-1)!.bodies).toEqual([{ name: "old", x: 0 }]);
     }
   }, 60_000);
 

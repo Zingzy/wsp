@@ -109,6 +109,8 @@ const headerLines = (): string[] => Array.from(document.querySelectorAll<HTMLEle
 const dots = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-dot]"));
 const panes = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane]"));
 const paneNames = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane] [data-space-name]")).map(n => n.textContent ?? "");
+/** What React says when one body is drawn as both panes: the one console line the reversal case is about. */
+const DUPLICATE_KEY = "two children with the same key";
 /** The name in the header of the body that is staying: the pane not marked as the one on its way out. */
 const spaceName = (): string => document.querySelector<HTMLElement>("[data-space-pane]:not([data-space-leaving]) [data-space-name]")?.textContent ?? "";
 const workspaceRowIds = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='ws:']")).map(r => r.dataset["rowId"] ?? "");
@@ -999,7 +1001,10 @@ describe("Spaces mode", () => {
 
   it("a space asked for while the body is still travelling turns it around and never draws one workspace twice", async () => {
     const errors: string[] = [];
-    const console_ = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void errors.push(args.map(String).join(" ")));
+    const console_ = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      const line = args.map(String).join(" ");
+      if (line.includes(DUPLICATE_KEY)) errors.push(line);
+    });
     try {
       await mountSpaces(fakeApi(THREE, statuses()));
       fireEvent.click(dots()[1]!);
