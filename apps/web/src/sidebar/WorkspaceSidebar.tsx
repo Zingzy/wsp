@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, workspaceState, type WorkspaceSize, type WorkspaceState, type WorkspaceTint } from "@wsp/protocol";
+import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState, type WorkspaceTint } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { sidebarActions } from "../actions/sidebarActions.js";
@@ -119,6 +119,9 @@ export function WorkspaceSidebar() {
   const select = useStore(s => s.select);
   const creations = useStore(s => s.creations);
   const createWorkspace = useStore(s => s.createWorkspace);
+  const createLocal = useStore(s => s.createLocalWorkspace);
+  // One local workspace per host: the section's road to this computer says whether a pick makes it or goes to it.
+  const hasLocal = useStore(s => s.workspaces.some(w => workspaceKind(w) === "local"));
   const capabilities = useCapabilities();
   const selectedId = useSelectedId();
   const selectedThreadId = useSelectedThreadId();
@@ -160,7 +163,10 @@ export function WorkspaceSidebar() {
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   const outOfMemory = useOutOfMemoryReadings(projects);
-  const sectionActions = useMemo(() => resolveActions(sidebarActions, { mode }, { setMode }), [mode, setMode]);
+  const sectionActions = useMemo(
+    () => resolveActions(sidebarActions, { mode, hasLocal, connected: api !== null }, { setMode, newLocal: () => void createLocal() }),
+    [api, createLocal, hasLocal, mode, setMode],
+  );
   const spaceId = useSpaceWorkspaceId();
   const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === spaceId) ?? null);
   const tripTarget = trip === null ? undefined : workspaces.find(w => w.id === trip.workspaceId);

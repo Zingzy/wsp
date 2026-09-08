@@ -8,7 +8,8 @@ import { PauseIcon, PlayIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { goneRefusal, localMachineRefusal, type HarnessCatalog, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
-import { FILE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THIS_COMPUTER_HINTS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { NEW_LOCAL_ACTION, SIDEBAR_MODE_ACTION, sidebarActions, type SidebarTarget, type SidebarVerbs } from "../src/actions/sidebarActions.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
@@ -387,5 +388,48 @@ describe("placing the in-app menu", () => {
   it("flips left of the pointer and up from it when the edge is near, and never leaves the margin", () => {
     expect(placeMenu({ x: 900, y: 500 }, { width: 180, height: 240 }, viewport)).toEqual({ left: 720, top: 260 });
     expect(placeMenu({ x: 990, y: 590 }, { width: 2000, height: 2000 }, viewport)).toEqual({ left: 8, top: 8 });
+  });
+});
+
+describe("the Workspaces section registry", () => {
+  const target = (over: Partial<SidebarTarget> = {}): SidebarTarget => ({ mode: "list", hasLocal: false, connected: true, ...over });
+  const verbs = (): SidebarVerbs & { calls: string[] } => {
+    const calls: string[] = [];
+    return { calls, setMode: mode => calls.push(`mode:${mode}`), newLocal: () => calls.push("newLocal") };
+  };
+
+  it("offers one road to this computer, saying whether the pick makes it or goes to the one there is", () => {
+    const row = (over?: Partial<SidebarTarget>) => actionById(resolveActions(sidebarActions, target(over), verbs()), NEW_LOCAL_ACTION)!;
+    expect(row().title).toBe("This computer");
+    expect(row().hint).toBe(THIS_COMPUTER_HINTS.fresh);
+    expect(row().refusal).toBeNull();
+    // One per host: the second pick is a selection, and the row says so rather than offering a second create.
+    expect(row({ hasLocal: true }).hint).toBe(THIS_COMPUTER_HINTS.existing);
+    expect(row({ hasLocal: true }).refusal).toBeNull();
+    // Nothing to ask while there is no host to ask.
+    expect(row({ connected: false }).refusal).toBe(THIS_COMPUTER_HINTS.offline);
+  });
+
+  it("running it asks the store, and the mode row still runs the toggle: one registry, two rows", () => {
+    const v = verbs();
+    const rows = resolveActions(sidebarActions, target(), v);
+    actionById(rows, NEW_LOCAL_ACTION)!.run();
+    actionById(rows, SIDEBAR_MODE_ACTION)!.run();
+    expect(v.calls).toEqual(["newLocal", "mode:spaces"]);
+  });
+
+  it("both rows reach the palette and the section menu from the same list, so neither can say two things", () => {
+    const ids = resolveActions(sidebarActions, target(), verbs()).map(a => a.id);
+    expect(ids).toEqual([SIDEBAR_MODE_ACTION, NEW_LOCAL_ACTION]);
+    const menu = toMenuItems(resolveActions(sidebarActions, target(), verbs()), DEFAULT_RESOLVED_KEYBINDINGS);
+    expect(menu.map(item => [item.label, item.group, item.enabled])).toEqual([
+      [SIDEBAR_MODE_WORDS.spaces.title, "view", true],
+      ["This computer", "create", true],
+    ]);
+    // A row the host cannot answer carries its refusal into the menu rather than reading as available.
+    expect(toMenuItems(resolveActions(sidebarActions, target({ connected: false }), verbs()), DEFAULT_RESOLVED_KEYBINDINGS).at(-1)).toMatchObject({
+      enabled: false,
+      refusal: THIS_COMPUTER_HINTS.offline,
+    });
   });
 });

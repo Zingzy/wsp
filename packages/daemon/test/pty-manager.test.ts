@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir, tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { workScoreLine } from "@wsp/protocol";
 import { PtyManager, ptyEnv, ptyLaunch } from "../src/pty-manager.js";
@@ -154,4 +155,17 @@ describe("PtySession cwd", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "wsp-pty-")));
     expect(await pwdOf({ cwd: dir }, `CWD=${dir}\r`)).toContain(`CWD=${dir}\r`);
   }, PTY_CASE_TIMEOUT_MS);
+});
+
+// The desktop package carries both mac arches, so the postinstall's chmod covers every prebuild node-pty ships and
+// not only this machine's: an unrunnable helper in the other arch's build kills its panes with posix_spawnp.
+describe("node-pty's spawn-helper after install", () => {
+  it("is executable in every prebuild node-pty ships", () => {
+    const prebuilds = join(dirname(createRequire(import.meta.url).resolve("node-pty/package.json")), "prebuilds");
+    const helpers = (existsSync(prebuilds) ? readdirSync(prebuilds) : [])
+      .map(target => join(prebuilds, target, "spawn-helper"))
+      .filter(helper => existsSync(helper));
+    expect(helpers.length).toBeGreaterThan(0);
+    expect(helpers.filter(helper => (statSync(helper).mode & 0o111) !== 0o111)).toEqual([]);
+  });
 });

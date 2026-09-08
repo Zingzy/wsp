@@ -89,4 +89,23 @@ describe("a drop with memory near full", () => {
     expect(terminalPaneHints({ kind: "not-answering", outOfMemory: oom }, null, sizes)).toEqual([REBUILD]);
     expect(terminalPaneHints({ kind: "reconnecting", outOfMemory: oom }, size, null)).toEqual([OOM_LINE]);
   });
+
+  it("a machine with no daemon road says so in one sentence, with nothing to wait for and nothing to rebuild", () => {
+    // The runtime's own word for a machine it has no daemon road to; nothing is reconnecting.
+    const pane = terminalPaneState({ state: "running", reach: "unsupported", socket: "connecting" });
+    expect(pane).toEqual({ kind: "no-daemon" });
+    expect(terminalPaneTitle(pane)).toBe("There is no daemon on this machine");
+    expect(terminalEmptyLine(pane)).toBe("There is no daemon on this machine, so no terminal opens here");
+    expect(terminalInputRefusal(pane)).toBe("Typing is refused: there is no daemon on this machine");
+    expect(terminalPaneHints(pane, size, sizes)).toEqual([]);
+    // Nothing about it promises a return, which is what the reconnecting copy did for a kind that had no daemon.
+    for (const line of [terminalPaneTitle(pane), terminalEmptyLine(pane)]) {
+      expect(line).not.toMatch(/reconnect|when it is back|when it does/i);
+    }
+  });
+
+  it("a daemon that is dropping out still reads as reconnecting, since that one does come back", () => {
+    expect(terminalPaneState({ state: "running", reach: "reachable", socket: "connecting" })).toEqual({ kind: "reconnecting" });
+    expect(terminalPaneState({ state: "unreachable", reach: "no-daemon", socket: "dead" })).toEqual({ kind: "reconnecting" });
+  });
 });

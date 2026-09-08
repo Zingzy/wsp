@@ -30,12 +30,27 @@ export function reachNote(reach: ReachState | null): string | null {
   return reach === "slow" ? "edge slow" : null;
 }
 
+/** The row's line for a daemon that is not there, on a kind whose row shows no state word: nothing on the row would
+ * otherwise say it, and it was readable only on the Machine tab's Reach. no-daemon is a machine that answers with
+ * nothing on the daemon's port, unsupported one with no daemon road at all; the two are different facts and the
+ * line says which. Nothing for every other reach. */
+export function daemonGoneLine(reach: ReachState | null): string | undefined {
+  if (reach === "no-daemon") return "no daemon answering";
+  return reach === "unsupported" ? "no daemon on this machine" : undefined;
+}
+
 /** The sentences a meta line can carry in place of its counts, in the order a surface draws them: what the
- * runtime is doing to the machine's daemon, then a drop with memory near full. Written once because two
- * surfaces draw them and both have to tell them from a figure: prose takes the ink that reads at AA, the
- * counts beside it keep the whisper. */
+ * runtime is doing to the machine's daemon, then a drop with memory near full, then a daemon that is not there at
+ * all. Written once because two surfaces draw them and both have to tell them from a figure: prose takes the ink
+ * that reads at AA, the counts beside it keep the whisper. */
 export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "outOfMemory">): string[] {
-  return [daemonNote(project), outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory)].filter((line): line is string => line !== undefined);
+  return [
+    daemonNote(project),
+    outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
+    // A row with no state word has nowhere else to say its daemon is gone, and it is the thing a person waiting on
+    // a terminal is waiting on; a driven kind's state word already reads Unreachable for it.
+    kindWords(workspaceKind(project.workspace)).driven ? undefined : daemonGoneLine(project.reach),
+  ].filter((line): line is string => line !== undefined);
 }
 
 export interface WorkspaceMetaInput {
@@ -50,9 +65,9 @@ export interface WorkspaceMetaInput {
 /** The machine row's second line, one string in one order: what it cost today, the rate while it bills, the edge
  * note, the nap countdown last. The cost always leads, an honest zero before the meter's first tick, so no row draws
  * a blank line. The width cuts it from the right; nothing here decides what to leave out. What the runtime is doing
- * to the machine's daemon, or a drop with memory near full, takes the whole line while it lasts: it is the one thing
- * on the row a person may be waiting on. A machine wsp does not drive spends nothing and naps never, so its line
- * says what the machine is instead. */
+ * to the machine's daemon, a drop with memory near full, or a daemon that is not there at all takes the whole line
+ * while it lasts: it is the one thing on the row a person may be waiting on, and it reads in the ink prose gets. A
+ * machine wsp does not drive spends nothing and naps never, so its line says what the machine is instead. */
 export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
   const [sentence] = metaSentences({ project, outOfMemory });
   if (sentence !== undefined) return sentence;
@@ -93,8 +108,8 @@ export function accruedTodayLabel(accruedUsd: number | null): string | null {
 export const rateLabel = (rateUsdPerHour: number | null): string | null => (rateUsdPerHour === null ? null : `$${rateUsdPerHour.toFixed(3)}/hr`);
 
 /** The Spaces header's lines under the name. The two the row's meta line gives a whole line to lead, since the one
- * workspace on screen is where a person waits on them: what the runtime is doing to the daemon, then a drop with
- * memory near full. Then what the machine is, what it costs, and when it naps. A line nothing is known for is left
+ * workspace on screen is where a person waits on them: what the runtime is doing to the daemon, a drop with memory
+ * near full, then a daemon that is not there at all. Then what the machine is, what it costs, and when it naps. A line nothing is known for is left
  * out rather than drawn half: no size yet means no machine line, as no nap scheduled means no nap line. The cost
  * line leads with the same honest zero the row's does and carries the rate only while the machine bills. A kind
  * with its own words for what the machine is says them where a fork's size reads, through the one machine line, and

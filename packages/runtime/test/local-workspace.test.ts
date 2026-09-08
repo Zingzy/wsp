@@ -368,6 +368,62 @@ describe("local workspace", () => {
   });
 });
 
+describe("a local turn and a host restart", () => {
+  let root: string;
+  let store: Store;
+  let localWiring: LocalWiring;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "wsp-localcut-"));
+    store = memoryStore();
+    localWiring = {
+      backend: new LocalBackend({ root }),
+      execStream: o => localExecStream({ root, ...o }),
+      home: () => join(root, ".claude"),
+      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+    };
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  /** A turn that starts and never replies, the way a real one looks while the agent is still working. */
+  const hangingAdapter: HarnessAdapterFactory = () => ({
+    steers: false,
+    start: ({ onEvent }) => {
+      const sessionId = "33333333-3333-4333-8333-333333333333";
+      onEvent({ type: "session.start", sessionId, cwd: "/root" });
+      return { localId: sessionId, finished: new Promise(() => {}), interrupt: async () => {} };
+    },
+  });
+
+  it("a local turn dies with the host that started it, so a restart settles it as cut with one honest line and the next send resumes past it", async () => {
+    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: hangingAdapter }, local: localWiring });
+    const ws = await rt1.workspaces.createLocal("mac");
+    const handle = await rt1.sessions.start(ws.id, { prompt: "build it" });
+    expect((await rt1.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    // A local turn's harness is a child of this host: nothing on a machine outlives it, so the local exec factory
+    // offers no attach and the next host has no run to re-open.
+    expect(localExecStream({ root }).attach).toBeUndefined();
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: hangingAdapter }, local: localWiring });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["failed"]);
+    const history = await rt2.sessions.history(ws.id);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, reason: "host restarted while the agent was working" });
+    expect((await rt2.sessions.list(ws.id))[0]!.endedAt).toBeDefined();
+    await rt2.close();
+
+    // The thread is not lost: the next send resumes it and says the transcript may be missing what the cut turn did.
+    const rt3 = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: localWiring });
+    const resumed = await rt3.sessions.start(ws.id, { prompt: "carry on", thread: handle.view().threadId });
+    await resumed.finished;
+    const starts = (await rt3.sessions.history(ws.id)).filter(e => e.type === "session.start");
+    expect(starts.at(-1)).toMatchObject({ prompt: "carry on", afterCut: true });
+    await rt3.close();
+  });
+});
+
 describe("one registry for what a workspace's kind means", () => {
   const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
   /** A comparison on the kind, or a switch arm for it, anywhere in source: every road reads a capability or asks the

@@ -62,6 +62,7 @@ const CAPS: Capabilities = {
   callbackRelay: true,
   snapshotListing: true,
   templates: false,
+  kept: false,
   sizes: [
     { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
     { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 },

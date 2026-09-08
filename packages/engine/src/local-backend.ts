@@ -150,6 +150,9 @@ export class LocalBackend implements MachineBackend {
     snapshotListing: false,
     templates: false,
     sizes: [],
+    // This computer is the person's own: nothing here was made by wsp and nothing here is thrown away, so a turn's
+    // access starts at what its harness asks for rather than at skip-everything.
+    kept: true,
   };
 
   readonly pricing: BackendPricing = {

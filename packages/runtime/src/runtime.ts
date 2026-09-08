@@ -124,8 +124,12 @@ import type {
   ProjectImportResult,
   ProjectImportStage,
   ProjectPlan,
+  PermissionAsk,
+  PermissionOption,
+  PermissionOutcome,
   ReachState,
   SessionEvent,
+  SessionAnswerResult,
   SessionInterruptResult,
   SessionRenameResult,
   SessionRenamer,
@@ -153,7 +157,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, preferencesFrom, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENY, PERMISSION_DENIED_LINE, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -214,6 +218,10 @@ export interface HarnessSession {
   /** Present on a harness that takes a message mid-turn; absent means it cannot. not-running when the turn had not
    * started or had ended when the message was offered. */
   steer?(prompt: string): Promise<"accepted" | "not-running">;
+  /** Answers a permission prompt this turn raised; absent on a harness that raises none this host can answer. The
+   * caller names the outcome, since only it knows whether the answer is the person's or its own for a prompt nobody
+   * came to, and the adapter emits the permission.close that carries it. `gone` when no such prompt is open. */
+  answer?(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<"answered" | "gone">;
 }
 
 export interface HarnessAdapter {
@@ -516,7 +524,15 @@ export interface SessionHandle {
   view(): SessionView;
   interrupt(): Promise<void>;
   steer?(prompt: string): Promise<"accepted" | "not-running">;
+  /** Answers a permission prompt this turn raised, by the prompt's id, one of its options and who is answering: a
+   * person picking in the chat, or the runtime's own wait running out on a thread nobody came to. Absent on a
+   * harness that raises none. */
+  answer?(askId: string, opts: { optionId: string; by: PermissionAnswerer }): Promise<SessionAnswerResult["outcome"]>;
 }
+
+/** Who answered a permission prompt, the one fact the outcome and the line the agent reads both come from. */
+export type PermissionAnswerer = "person" | "wait";
+
 
 /** What every golden built by this runtime gets; the host wires it (the daemon
  * bundle and the harness install script live there, not in the runtime). */
@@ -589,6 +605,9 @@ export interface RuntimeOptions {
   idle?: { defaultWindowMs?: number };
   /** Drives the idle window and the transcript debounce; tests inject one they advance by hand. */
   clock?: Clock;
+  /** How long a permission prompt relayed into the chat waits for an answer before the runtime denies it in the
+   * person's place; PERMISSION_WAIT_MS when unset (tests shrink it). */
+  permissionWaitMs?: number;
   /** How long a seal waits for a killed machine to read gone (tests shrink it). */
   killConfirm?: KillConfirm;
   /** How long a seal waits between snapshot attempts the provider refused (tests shrink it). */
@@ -826,7 +845,7 @@ export interface Runtime {
     create(opts: CreateWorkspaceOptions, origin?: WorkspaceOrigin): Promise<CreatedWorkspace>;
     /** The one local workspace: this computer. Refused when this host wired no local backend, when one already
      * exists (one per host), and for a name another workspace holds. It forks nothing; the machine already exists. */
-    createLocal(name: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    createLocal(name?: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
     get(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
     /** Every workspace this host holds, less the ones the caller's origin may not drive. */
     list(origin?: WorkspaceOrigin): Promise<WorkspaceView[]>;
@@ -943,6 +962,11 @@ export interface Runtime {
      * harness took it; a turn already over, a harness without steer or an unknown id answers. Refuses like start
      * while the workspace is pausing or paused. */
     steer(sessionId: string, opts: { prompt: string; requestId?: string }, origin?: WorkspaceOrigin): Promise<SessionSteerResult>;
+    /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's own id and one
+     * of the options it carried; the tool call it blocks then runs or is refused, and a session.permission.closed
+     * event records which option did it. A prompt already answered, one the harness withdrew and an unknown id
+     * answer rather than throw, since two clients may reach one prompt. */
+    answer(sessionId: string, opts: { askId: string; optionId: string }, origin?: WorkspaceOrigin): Promise<SessionAnswerResult>;
     /** Names the session's harness session in the harness's own store, in the field the harness itself writes, and
      * keeps the name on every row of the thread; a harness that keeps no name of a person's, a store without that
      * session and an unknown id answer. Refuses while the workspace cannot be reached, as a listing's read needs it. */
@@ -1371,6 +1395,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const goneConfirmMs = opts.goneConfirmMs ?? GONE_CONFIRM_MS;
   const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
   const clock = opts.clock ?? realClock;
+  const permissionWaitMs = opts.permissionWaitMs ?? PERMISSION_WAIT_MS;
   /** Each provider move the guest has to cooperate with: the state it leaves the machine in, and the state a
    * machine the move never touched still reads. */
   const moves: Record<ProviderMove, { leaves: MachineState; from: MachineState }> = {
@@ -1561,19 +1586,34 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return false;
   };
 
-  /** The folder a resumed session's harness ran in, from its row or, past the index cap, its start event. The CLI
-   * keys a session to that folder, so a resume anywhere else opens nothing. */
-  const folderOf = (workspaceId: string, resume: string): string | undefined => {
-    for (const s of sessions.values()) {
-      if (s.view.workspaceId === workspaceId && s.view.claudeSessionId === resume && s.view.cwd !== undefined) return s.view.cwd;
+  /** What a resumed session's turns carry, read the one way for every such fact: its own rows newest first, then,
+   * past the session index cap, the newest start event of that session. The index keeps SESSION_INDEX_CAP rows per
+   * workspace and drops the oldest finished ones while the transcript keeps the thread, so the events are where a
+   * long-lived thread's own facts survive. Nothing from before a fact was recorded, and the start then fills what
+   * its catalog marks. */
+  const resumedFact = (workspaceId: string, resume: string, fact: "cwd" | "permissionMode"): string | undefined => {
+    const rows = [...sessions.values()];
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const view = rows[i]!.view;
+      if (view.workspaceId === workspaceId && view.claudeSessionId === resume && view[fact] !== undefined) return view[fact];
     }
     const events = transcripts.get(workspaceId) ?? [];
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i]!;
-      if (e.type === "session.start" && e.sessionId === resume && e.cwd !== undefined) return e.cwd;
+      if (e.type === "session.start" && e.sessionId === resume && e[fact] !== undefined) return e[fact];
     }
     return undefined;
   };
+
+  /** The folder a resumed session's harness ran in. The CLI keys a session to that folder, so a resume anywhere
+   * else opens nothing. */
+  const folderOf = (workspaceId: string, resume: string): string | undefined => resumedFact(workspaceId, resume, "cwd");
+
+  /** The access a resumed thread's turns run at: what its latest turn recorded. A send that names none keeps the
+   * thread's own rather than falling back to the adapter's unnamed default, which is bypass on every harness here;
+   * without this a second turn on a thread the person opened at its harness's prompts would quietly skip them. */
+  const accessOf = (workspaceId: string, resume: string | undefined): string | undefined =>
+    resume === undefined ? undefined : resumedFact(workspaceId, resume, "permissionMode");
 
   /** What the runtime is doing to a machine's daemon, by workspace: the line its row shows while an update runs and
    * the sentence left there when one failed. Held here rather than on the record because it says what this process
@@ -2651,7 +2691,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async createLocal(name, origin) {
       await ready();
       const { backend: mine } = moduleOf("local");
-      const n = nameGiven(name);
+      // The one place a local workspace's default name lives: this computer's own, so the command line, the app and
+      // the MCP tool all land on the same one rather than each defaulting it.
+      const n = nameGiven(name ?? hostname());
       refuseRelayed({ kind: "local", name: n }, origin);
       const refusal = nameRefusal(n);
       if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
@@ -2961,19 +3003,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** One probe per harness per machine per TTL, a failed one included and one in flight shared: a binary that does
    * not answer costs one exec, not one per composer mount. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
-  const catalogOn = (table: HarnessCatalog, machine: Machine, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
+  const catalogOn = (table: HarnessCatalog, entry: LiveWorkspace, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
+    const machine = entry.machine;
+    // A machine the person keeps runs a thread at the access its harness asks for, bypass one pick away and named
+    // after the machine it would touch; a throwaway fork runs bypass. The one place either list is decided, so the
+    // composer's picker and the start's own check cannot show different defaults.
+    const forMachine = (c: HarnessCatalog): HarnessCatalog => (backendFor(entry.record.kind).capabilities.kept ? keptAccess(c, THIS_COMPUTER) : c);
     const known: HarnessCatalog = { ...table, steers: adapter.steers, renames: adapter.renameSession !== undefined, images: adapter.attachments !== undefined };
-    if (adapter.probeCatalog === undefined) return Promise.resolve(known);
+    if (adapter.probeCatalog === undefined) return Promise.resolve(forMachine(known));
     const key = `${machine.id}:${table.harness}`;
     const hit = catalogs.get(key);
     const now = clock.now();
-    if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog;
+    if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog.then(forMachine);
     const catalog = adapter
       .probeCatalog(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout))
       // A binary that named why it described nothing keeps the table's lists and lends the footer its words.
       .then(answer => (answer === null ? known : catalogRefused(answer) ? { ...known, refusal: answer.refused } : catalogFromProbe(known, answer)), () => known);
     catalogs.set(key, { at: now, catalog });
-    return catalog;
+    return catalog.then(forMachine);
   };
 
   /** One title read per harness session per machine per TTL, a failed one included and one in flight shared: the
@@ -3095,7 +3142,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (adapter.titleFor === undefined) return;
     titlesAsked.add(threadId);
     const table = harnessCatalog(harness);
-    const model = smallestModel(table === undefined ? undefined : await catalogOn(table, entry.machine, adapter));
+    const model = smallestModel(table === undefined ? undefined : await catalogOn(table, entry, adapter));
     const title = await adapter.titleFor(
       { opening: view.prompt, ...(model !== undefined ? { model } : {}) },
       command => entry.machine.exec(command, { timeoutMs: TITLE_MAKE_TIMEOUT_MS }).then(res => res.stdout),
@@ -3312,6 +3359,60 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
     // exists) or later from its stream.
     const turnLive: TurnLive = t.turnLive ?? {};
+    /** The permission prompts of this turn nobody has answered, each with the timer that denies it when nobody
+     * does. The harness is blocked on every one of them, so this map is what the thread is waiting on. */
+    const open = new Map<string, { ask: PermissionAsk; timer: ReturnType<typeof setTimeout> }>();
+    /** The harness's own answer road, once the turn is open; a prompt raised inside start() is answered through it
+     * too, since its wait outlasts the synchronous run that raised it by minutes. */
+    let answerAsk: HarnessSession["answer"];
+
+    /** The ask as clients read it: the harness's slug for a mode option carries no words of its own, and the words
+     * for one live in the harness table beside the picker's, so they are lent here rather than in the adapter. */
+    const named = (ask: PermissionAsk): PermissionOption[] => {
+      const modes = harnessCatalog(view.harness)?.permissionModes ?? [];
+      return ask.options.map(o =>
+        o.effect === "mode" && o.mode !== undefined ? { ...o, label: permissionModeOptionLabel(modes.find(m => m.value === o.mode)?.label ?? o.mode) } : { ...o },
+      );
+    };
+
+    /** The row that says a prompt is closed, and the end of its wait. Both the harness's own close and the runtime
+     * ending the turn under it come through here: a turn cut from this side never reaches the adapter's close, and a
+     * row left open would keep offering options that answer nothing. */
+    const closeAsk = (askId: string, outcome: PermissionOutcome, optionId?: string): void => {
+      const held = open.get(askId);
+      if (held === undefined) return;
+      clearTimeout(held.timer);
+      open.delete(askId);
+      record({
+        type: "session.permission.closed",
+        workspaceId,
+        sessionId: view.claudeSessionId ?? view.id,
+        turnId,
+        threadId,
+        askId,
+        outcome,
+        ...(optionId !== undefined ? { optionId } : {}),
+      });
+    };
+
+    /** Every prompt still waiting, closed as going with its turn; the caller is ending the turn. */
+    const closeOpenAsks = (): void => {
+      for (const askId of [...open.keys()]) closeAsk(askId, "cancelled");
+    };
+
+    /** The one place a pick becomes an outcome and the line the agent reads as the call's result: a person's deny
+     * says the person denied it, and the wait's says nobody answered, which is a different thing to an agent. */
+    const answer = async (askId: string, o: { optionId: string; by: PermissionAnswerer }): Promise<SessionAnswerResult["outcome"]> => {
+      const held = open.get(askId);
+      if (held === undefined) return "gone";
+      const option = held.ask.options.find(candidate => candidate.id === o.optionId);
+      if (option === undefined) return "no-option";
+      // A turn that raised a prompt has the road that raised it; with none there is nothing left to answer it.
+      if (answerAsk === undefined) return "gone";
+      const outcome: PermissionOutcome = o.by === "wait" ? "unanswered" : option.effect === "deny" ? "denied" : "allowed";
+      const denyMessage = o.by === "wait" ? permissionUnansweredLine(permissionWaitMs) : PERMISSION_DENIED_LINE;
+      return (await answerAsk(askId, { optionId: o.optionId, outcome, denyMessage })) === "answered" ? "answered" : "gone";
+    };
 
     const forward = (event: AdapterEvent): void => {
       if (ended) return;
@@ -3342,6 +3443,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(opening.attachments !== undefined ? { attachments: [...opening.attachments] } : {}),
             ...(event.model !== undefined ? { model: event.model } : {}),
             ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
+            ...(view.permissionMode !== undefined ? { permissionMode: view.permissionMode } : {}),
             ...(event.tools !== undefined ? { tools: event.tools } : {}),
             ...(event.harness !== undefined ? { harness: event.harness } : {}),
           });
@@ -3394,6 +3496,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if (notify !== undefined) notifyEnd({ view, turnId }, notify, event.result);
           record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
           return;
+        case "permission.ask": {
+          const ask = { ...event.ask, options: named(event.ask) };
+          // The turn stops here until an option comes back, and nobody may be reading: the wait is the policy for
+          // an unattended thread, and it denies rather than let the wait reach the turn's idle cut.
+          const timer = setTimeout(() => {
+            void answer(ask.askId, { optionId: PERMISSION_DENY, by: "wait" });
+          }, permissionWaitMs);
+          timer.unref?.();
+          open.set(ask.askId, { ask, timer });
+          record({ type: "session.permission", workspaceId, sessionId, turnId, threadId, ...ask, options: [...ask.options], waitMs: permissionWaitMs });
+          return;
+        }
+        case "permission.close":
+          closeAsk(event.askId, event.outcome, event.optionId);
+          return;
         case "session.end":
           // The process exited: the turn is over now, so the row takes the reply's status here (synchronously,
           // before the event is recorded, so a waiter woken by it reads the settled row, not the running one).
@@ -3424,6 +3541,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       () => idle.release(workspaceId),
       () => idle.release(workspaceId),
     );
+    answerAsk = started.answer?.bind(started);
     const handleId = started.localId;
     // A row that already has an id keeps it: a re-opened turn is named by the harness's own session, which is not
     // always the id the row was keyed by, and a client holding the row must not see it change under a restart.
@@ -3446,9 +3564,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       view: () => ({ ...view }),
       interrupt: () => started.interrupt(),
       ...(started.steer !== undefined ? { steer: (prompt: string) => started.steer!(prompt) } : {}),
+      ...(started.answer !== undefined ? { answer } : {}),
     };
     const end = (reason: string): void => {
       if (ended || view.status !== "running") return;
+      // Before `ended` shuts the forward road: the interrupt below reaches the harness, whose own close would then
+      // be dropped, so the rows and the waits are ended here.
+      closeOpenAsks();
       ended = true;
       settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), turnLive }, reason, () => reason);
       void persistSessions(workspaceId);
@@ -3599,7 +3721,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const notify = o.notify ?? notifyOf(threadId);
       const table = harnessCatalog(harness);
       // Checked against the binary's own lists, the ones the composer shows for this workspace.
-      const picks = startPicks(table === undefined ? undefined : await catalogOn(table, entry.machine, adapter), o, resume === undefined);
+      const picks = startPicks(table === undefined ? undefined : await catalogOn(table, entry, adapter), { ...o, permissionMode: o.permissionMode ?? accessOf(workspaceId, resume) }, resume === undefined);
       let outcome: SessionStartOutcome = "started";
       let images: TurnImage[] = [];
       let imagesDir: string | undefined;
@@ -3734,6 +3856,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (outcome !== "accepted") return { outcome };
       recordSteer(s, sessionId, o);
       return { outcome: "accepted" };
+    },
+
+    async answer(sessionId, o, origin) {
+      await ready();
+      const s = sessions.get(sessionId);
+      if (!s) return { outcome: "not-found" };
+      const entry = await entryOf(s.view.workspaceId, origin);
+      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
+      if (refusal !== null) throw new Error(refusal);
+      if (s.handle?.answer === undefined) return { outcome: s.handle === undefined ? "gone" : "unsupported" };
+      return { outcome: await s.handle.answer(o.askId, { optionId: o.optionId, by: "person" }) };
     },
 
     async rename(sessionId, title, origin) {
@@ -4717,7 +4850,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (workspaceId === undefined) return table.map(markDefault);
         const entry = await entryOf(workspaceId, origin);
         if (entry.record.phase !== "running") return table.map(markDefault);
-        return Promise.all(table.map(c => catalogOn(c, entry.machine, adapterFor(entry, c.harness).adapter).then(markDefault)));
+        return Promise.all(table.map(c => catalogOn(c, entry, adapterFor(entry, c.harness).adapter).then(markDefault)));
       },
     },
     golden,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { THREAD_AGENTS } from "@wsp/catalog";
-import { HarnessCatalog, catalogSourceLine, effortsFor, markedDefault, noModelsLine, startPicks, type HarnessCatalogProbe } from "@wsp/protocol";
+import { HarnessCatalog, catalogSourceLine, effortsFor, keptAccess, markedDefault, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog } from "../src/harness-catalog.js";
 
 describe("harness catalogs", () => {
@@ -116,20 +116,65 @@ describe("the default effort of a pick", () => {
   });
 });
 
+describe("the access a kept machine's threads start at", () => {
+  it("every harness with an access mode names the one a kept machine runs, and it is not the throwaway default", () => {
+    for (const catalog of HARNESS_CATALOGS) {
+      if (catalog.permissionModes.length === 0) {
+        expect(catalog.keptMode).toBeUndefined();
+        continue;
+      }
+      expect(catalog.keptMode).toBeDefined();
+      expect(catalog.permissionModes.map(o => o.value)).toContain(catalog.keptMode);
+      expect(catalog.keptMode).not.toBe(markedDefault(catalog.permissionModes)?.value);
+      // Each row names its own skip-everything mode, so nothing outside the table keeps a list of them.
+      expect(catalog.bypassMode).toBeDefined();
+      expect(catalog.permissionModes.map(o => o.value)).toContain(catalog.bypassMode);
+      expect(catalog.bypassMode).not.toBe(catalog.keptMode);
+    }
+  });
+
+  it("claude asks the person in its default mode; codex exec cannot ask, so its narrowest working sandbox stands", () => {
+    expect(harnessCatalog("claude")!.keptMode).toBe("default");
+    expect(harnessCatalog("codex")!.keptMode).toBe("workspace-write");
+  });
+
+  it("moves the default mark to the asking mode and names the machine on every mode that skips the asking", () => {
+    const kept = keptAccess(harnessCatalog("claude")!, THIS_COMPUTER);
+    expect(markedDefault(kept.permissionModes)?.value).toBe("default");
+    expect(kept.permissionModes.filter(o => o.isDefault)).toHaveLength(1);
+    expect(kept.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe("Bypass on this computer");
+    // Same modes, same order, same descriptions: bypass is one pick away, where it was.
+    expect(kept.permissionModes.map(o => o.value)).toEqual(harnessCatalog("claude")!.permissionModes.map(o => o.value));
+    expect(kept.permissionModes.map(o => o.description)).toEqual(harnessCatalog("claude")!.permissionModes.map(o => o.description));
+    expect(HarnessCatalog.parse(kept)).toEqual(kept);
+    const codex = keptAccess(harnessCatalog("codex")!, THIS_COMPUTER);
+    expect(markedDefault(codex.permissionModes)?.value).toBe("workspace-write");
+    expect(codex.permissionModes.find(o => o.value === "danger-full-access")?.label).toBe("Full access on this computer");
+  });
+
+  it("a catalog with no access mode of its own comes back untouched, so nothing invents one for it", () => {
+    const pi = harnessCatalog("pi")!;
+    expect(keptAccess(pi, THIS_COMPUTER)).toBe(pi);
+  });
+});
+
 describe("startPicks", () => {
   const claude = harnessCatalog("claude")!;
   const MODELS = "Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)";
   /** A catalog whose default model takes two of the five efforts and whose other model takes none. */
   const narrowed = { ...claude, models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, efforts: ["high", "max"] }, { value: "claude-haiku-4-5", label: "Haiku", efforts: [] }] };
 
-  it("a start that opens a thread without a model or effort runs the defaults the composer shows; a resume keeps the thread's own", () => {
-    // Claude names no default effort per model, so the catalog's own mark is what the pick runs at.
-    expect(startPicks(claude, {}, true)).toEqual({ model: "claude-opus-5", effort: "high" });
+  it("a start that opens a thread without a pick runs every default the composer shows, the access included; a resume keeps the thread's own", () => {
+    // Claude names no default effort per model, so the catalog's own mark is what the pick runs at. The access is
+    // filled in like the other two: an unnamed one used to reach the adapter as nothing, which it reads as bypass.
+    expect(startPicks(claude, {}, true)).toEqual({ model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" });
     expect(startPicks(claude, {}, false)).toEqual({});
     expect(startPicks(claude, { model: "claude-sonnet-5", effort: "low", permissionMode: "plan" }, true)).toEqual({ model: "claude-sonnet-5", effort: "low", permissionMode: "plan" });
     expect(startPicks(claude, { effort: "max" }, false)).toEqual({ effort: "max" });
     const noDefault = { ...claude, models: claude.models.map(({ isDefault: _d, ...m }) => m) };
-    expect(startPicks(noDefault, {}, true)).toEqual({ effort: "high" });
+    expect(startPicks(noDefault, {}, true)).toEqual({ effort: "high", permissionMode: "bypassPermissions" });
+    // On a machine the person keeps the same start runs the mode its harness asks in, and nothing else changes.
+    expect(startPicks(keptAccess(claude, THIS_COMPUTER), {}, true)).toEqual({ model: "claude-opus-5", effort: "high", permissionMode: "default" });
   });
 
   it("refuses a value the catalog does not list, naming the list in the composer's words", () => {
@@ -141,15 +186,15 @@ describe("startPicks", () => {
   });
 
   it("a model that takes no effort at all is given none, and one that takes some runs the default its own list carries", () => {
-    expect(startPicks(narrowed, { model: "claude-haiku-4-5" }, true)).toEqual({ model: "claude-haiku-4-5" });
-    expect(startPicks(narrowed, {}, true)).toEqual({ model: "claude-opus-5", effort: "high" });
+    expect(startPicks(narrowed, { model: "claude-haiku-4-5" }, true)).toEqual({ model: "claude-haiku-4-5", permissionMode: "bypassPermissions" });
+    expect(startPicks(narrowed, {}, true)).toEqual({ model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" });
     // A model whose own list drops the catalog's marked effort is left to the CLI, since nothing in its list is marked.
     const off = { ...claude, models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, efforts: ["low", "max"] }] };
-    expect(startPicks(off, {}, true)).toEqual({ model: "claude-opus-5" });
+    expect(startPicks(off, {}, true)).toEqual({ model: "claude-opus-5", permissionMode: "bypassPermissions" });
   });
 
   it("an effort is checked against the model's own list where the model has one, the chosen or the default model", () => {
-    expect(startPicks(narrowed, { effort: "max" }, true)).toEqual({ model: "claude-opus-5", effort: "max" });
+    expect(startPicks(narrowed, { effort: "max" }, true)).toEqual({ model: "claude-opus-5", effort: "max", permissionMode: "bypassPermissions" });
     expect(() => startPicks(narrowed, { effort: "low" }, true)).toThrow('effort "low" is not one Opus 5 takes; one of: High (high), Max (max)');
     expect(() => startPicks(narrowed, { model: "claude-haiku-4-5", effort: "low" }, true)).toThrow("Haiku takes no effort");
     expect(startPicks(narrowed, { effort: "low" }, false)).toEqual({ effort: "low" });
@@ -165,11 +210,11 @@ describe("startPicks", () => {
 
   it("a start on the Codex table runs its default model and refuses a model or effort that table does not carry", () => {
     const codex = harnessCatalog("codex")!;
-    expect(startPicks(codex, {}, true)).toEqual({ model: "gpt-5.6-sol", effort: "low" });
+    expect(startPicks(codex, {}, true)).toEqual({ model: "gpt-5.6-sol", effort: "low", permissionMode: "danger-full-access" });
     expect(markedDefault(effortsFor(codex, markedDefault(codex.models) ?? null))?.value).toBe("low");
     expect(startPicks(codex, { model: "gpt-5.5", effort: "high", permissionMode: "read-only" }, true)).toEqual({ model: "gpt-5.5", effort: "high", permissionMode: "read-only" });
     // The model's own default, not the catalog's low, which is the effort the binary reports for gpt-5.6-sol.
-    expect(startPicks(codex, { model: "gpt-5.5" }, true)).toEqual({ model: "gpt-5.5", effort: "medium" });
+    expect(startPicks(codex, { model: "gpt-5.5" }, true)).toEqual({ model: "gpt-5.5", effort: "medium", permissionMode: "danger-full-access" });
     expect(startPicks(codex, { model: "gpt-5.5" }, false)).toEqual({ model: "gpt-5.5" });
     expect(() => startPicks(codex, { model: "gpt-4" }, true)).toThrow('model "gpt-4" is not one codex takes');
     expect(() => startPicks(codex, { model: "gpt-5.5", effort: "ultra" }, true)).toThrow('effort "ultra" is not one GPT-5.5 takes');

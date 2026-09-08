@@ -28,6 +28,10 @@ export const EXEC_CHUNK_BYTES = 262_144;
  * a tool event or a log line well inside this, so it is the one rule that ends a turn the harness left hanging: a
  * fixed wall clock cut a build that was still working at 15 minutes on 2026-09-06. */
 export const TURN_IDLE_MS = 10 * 60_000;
+/** How long a permission prompt relayed into the chat waits for an answer before the runtime denies it in the
+ * person's place. Well inside TURN_IDLE_MS: a waiting prompt writes no byte, so a wait past the idle cut would take
+ * the turn with it and the thread would read as hung rather than as unanswered. */
+export const PERMISSION_WAIT_MS = 5 * 60_000;
 /** How long a thread sits idle before the sidebar folds it out of that workspace's shelf into its Archived group.
  * The fold reads the thread's own last activity, so a thread that takes a new turn leaves the archive by itself and
  * there is no archived flag anywhere to set or clear. */
@@ -106,6 +110,10 @@ export const Capabilities = z.object({
   /** Every size a create may ask for; a create that names another is refused with this list. A create that names
    * none takes the golden's size, which need not be on it. */
   sizes: z.array(MachineSizeOffer),
+  /** The machine is the person's own, kept: its files, its sign-ins and its git checkouts outlive every turn, and
+   * wsp neither made it nor throws it away. False on a fork wsp made, where a turn that wrecks the disk costs a
+   * rebuild and nothing else. What a turn's access starts at reads this, not the workspace's kind. */
+  kept: z.boolean(),
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 
@@ -391,8 +399,34 @@ export const HarnessCatalog = z.object({
    * harness added to the table names its own. Absent where the harness offers no model of its own, and the title
    * question runs on whatever the CLI would run without one. */
   smallModel: z.string().optional(),
+  /** The access a thread on a kept machine starts at: the mode whose tools reach the person as a prompt where this
+   * CLI can ask one (Claude Code's default over its control stream), else the narrowest mode that still lets a turn
+   * work, for a CLI with no road to ask (codex exec runs non-interactively, so its sandbox is the whole answer).
+   * The mode marked isDefault is what a throwaway machine runs instead, which is bypass on every row here. Absent
+   * on a harness whose CLI takes no access mode at all. */
+  keptMode: z.string().optional(),
+  /** This CLI's mode that runs every tool without asking anyone, as it spells it. A kept machine's picker names the
+   * machine on this one, since picking it hands that computer over for the turn. Absent on a harness whose CLI has
+   * no such mode. */
+  bypassMode: z.string().optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
+
+/** The catalog a kept machine's composer shows and its starts are checked against: the same lists, with the default
+ * mark moved from what a throwaway machine runs to keptMode, and the row's own bypassMode named after the machine it
+ * is about to touch, so the pick that skips the prompts says whose computer it skips them on. One pick away, in the
+ * same list, in the same order. A catalog with no keptMode (a CLI that takes no access mode) comes back as it went
+ * in. `machine` is the machine in words, the one phrase every local surface uses.
+ */
+export function keptAccess(catalog: HarnessCatalog, machine: string): HarnessCatalog {
+  if (catalog.keptMode === undefined) return catalog;
+  const permissionModes = catalog.permissionModes.map(({ isDefault: _throwaway, ...mode }) => ({
+    ...mode,
+    ...(mode.value === catalog.keptMode ? { isDefault: true } : {}),
+    ...(mode.value === catalog.bypassMode ? { label: `${mode.label} on ${machine}` } : {}),
+  }));
+  return { ...catalog, permissionModes };
+}
 
 /** Whether a rename of one of this harness's sessions is kept in its own store, as far as this catalog knows. The
  * answer is the adapter's on the machine, so a row the runtime's table stood in for is not a no: a client offers the
@@ -471,10 +505,14 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
   const model = picks.model ?? (opensThread && catalog !== undefined ? markedDefault(catalog.models)?.value : undefined);
   if (catalog !== undefined) checkedAgainst(catalog, picks, model);
   const effort = picks.effort ?? (opensThread && catalog !== undefined ? markedDefault(effortsFor(catalog, modelOf(catalog, model)))?.value : undefined);
+  // The access is filled in like the other two, so what the picker shows is what the CLI is told: an unnamed access
+  // used to reach the adapter as nothing, which every adapter here reads as its own skip-everything flag. On a kept
+  // machine that turned the picker's Default into bypass behind the person's back.
+  const permissionMode = picks.permissionMode ?? (opensThread && catalog !== undefined ? markedDefault(catalog.permissionModes)?.value : undefined);
   return {
     ...(model !== undefined ? { model } : {}),
     ...(effort !== undefined ? { effort } : {}),
-    ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}),
+    ...(permissionMode !== undefined ? { permissionMode } : {}),
   };
 }
 
@@ -533,6 +571,10 @@ export const SessionStartEvent = z.object({
   afterCut: z.literal(true).optional(),
   model: z.string().optional(),
   cwd: z.string().optional(),
+  /** The access this turn ran at, as the harness's own slug; the runtime's pick, not the CLI's echo. It rides the
+   * row so a resume past the session index cap still reads what the thread was opened at rather than falling back
+   * to the adapter's unnamed default. Absent on a turn from before it was recorded. */
+  permissionMode: z.string().optional(),
   tools: z.array(z.string()).optional(),
   harness: SessionHarness.optional(),
 });
@@ -609,9 +651,78 @@ export const SessionNotifyEvent = z.object({
 });
 export type SessionNotifyEvent = z.infer<typeof SessionNotifyEvent>;
 
+/** What picking one option on a permission prompt does to the tool call in front of it: run it, refuse it, or run it
+ * and leave the rest of the turn in another access mode, which is how a harness offers "and stop asking about
+ * edits". The runtime hands the option's id back to the adapter, which turns it into whatever its CLI takes. */
+export const PermissionEffect = z.enum(["allow", "deny", "mode"]);
+export type PermissionEffect = z.infer<typeof PermissionEffect>;
+
+export const PermissionOption = z.object({
+  id: z.string(),
+  label: z.string(),
+  effect: PermissionEffect,
+  /** The access mode the rest of the turn runs in when this option is picked; set on the mode effect only. */
+  mode: z.string().optional(),
+});
+export type PermissionOption = z.infer<typeof PermissionOption>;
+
+/** How a permission prompt ended. allowed and denied are a person's pick. unanswered is the runtime's own deny after
+ * PERMISSION_WAIT_MS, the policy for a thread nobody is watching. cancelled is the prompt going with its turn: a
+ * stop, or a harness that withdrew the question. */
+export const PermissionOutcome = z.enum(["allowed", "denied", "unanswered", "cancelled"]);
+export type PermissionOutcome = z.infer<typeof PermissionOutcome>;
+
+/** One permission prompt the harness raised, relayed into the chat as its own row: the tool it wants to run, what it
+ * wants to run it on, and the options the person may pick. The prompt blocks the turn until sessions.answer names an
+ * option or the runtime's wait runs out, so the row is what the thread is waiting on. */
+export const SessionPermissionEvent = z.object({
+  type: z.literal("session.permission"),
+  ...sessionScope,
+  /** What sessions.answer names this prompt by; unique inside its turn. */
+  askId: z.string(),
+  toolName: z.string(),
+  /** The tool_use this prompt is about, so the row sits with the call it belongs to; absent where the harness
+   * named none. */
+  toolUseId: z.string().optional(),
+  /** The tool's input as the harness sent it, JSON, the same text a tool_use delta carries. */
+  input: z.string(),
+  /** The harness's own one phrase for the call (a file name, a command); absent where it named none. */
+  detail: z.string().optional(),
+  options: z.array(PermissionOption),
+  /** How long this prompt waits before the runtime denies it, from `at`; absent on a prompt the runtime does not
+   * time out. */
+  waitMs: z.number().optional(),
+});
+export type SessionPermissionEvent = z.infer<typeof SessionPermissionEvent>;
+
+/** The prompt above is closed and the turn moved on. One of these lands for every session.permission, so a
+ * transcript never leaves a row waiting on an answer that was given while nobody was reading. */
+export const SessionPermissionClosedEvent = z.object({
+  type: z.literal("session.permission.closed"),
+  ...sessionScope,
+  askId: z.string(),
+  outcome: PermissionOutcome,
+  /** The option that closed it, on a person's pick; absent on the runtime's own deny and on a cancel. */
+  optionId: z.string().optional(),
+});
+export type SessionPermissionClosedEvent = z.infer<typeof SessionPermissionClosedEvent>;
+
 /** The events sessions.history replays: what a chat transcript folds. */
-export const SessionEvent = z.discriminatedUnion("type", [SessionStartEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionSteerEvent, SessionNotifyEvent]);
+export const SessionEvent = z.discriminatedUnion("type", [
+  SessionStartEvent,
+  SessionDeltaEvent,
+  SessionDoneEvent,
+  SessionEndEvent,
+  SessionSteerEvent,
+  SessionNotifyEvent,
+  SessionPermissionEvent,
+  SessionPermissionClosedEvent,
+]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
+
+/** Every type a session event carries, read off the union itself: a client telling a session event from the rest of
+ * the bus asks this rather than keeping a list of its own, which one added event leaves quietly short. */
+export const SESSION_EVENT_TYPES: ReadonlySet<SessionEvent["type"]> = new Set(SessionEvent.options.map(o => o.shape.type.value));
 
 // --- workspace / port / inbox events ----------------------------------------
 
@@ -1354,6 +1465,8 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionEndEvent.extend(sequenced),
   SessionSteerEvent.extend(sequenced),
   SessionNotifyEvent.extend(sequenced),
+  SessionPermissionEvent.extend(sequenced),
+  SessionPermissionClosedEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
   PortCloseEvent.extend(sequenced),
@@ -1741,7 +1854,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   }),
   /** The one local workspace: this computer. Forks nothing (the machine already exists); refused when this host wired
    * no local backend, when one already exists, or for a name another workspace holds. Replies with { workspace }. */
-  z.object({ id: reqId, op: z.literal("workspaces.createLocal"), name: z.string() }),
+  /** Makes this computer the host's one local workspace; the name defaults to this computer's own. */
+  z.object({ id: reqId, op: z.literal("workspaces.createLocal"), name: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
   z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.nap"), workspaceId: z.string() }),
@@ -1828,6 +1942,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Sends a message into the session's running turn; replies with a SessionSteerResult. Takes the runtime's session
    * id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
+  /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
+   * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. */
+  z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string() }),
   /** Names the session's harness session in the harness's own store and keeps the name on the thread's rows; replies
    * with a SessionRenameResult. Takes the runtime's session id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.rename"), sessionId: z.string(), title: z.string() }),
@@ -1988,6 +2105,18 @@ export type SessionSteerOutcome = z.infer<typeof SessionSteerOutcome>;
 export const SessionSteerResult = z.object({ outcome: SessionSteerOutcome });
 export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
 
+// --- session answer (what picking an option on a relayed permission prompt gets back) --
+
+/** answered: the harness took the answer and the tool call it blocks ran or was refused as the option says, and a
+ * session.permission.closed event carries it. gone: no such prompt is open on that session, so it was answered
+ * already, withdrawn by the harness, or its turn is over; the row closes on that event, not on this reply.
+ * unsupported: the session's harness raises no prompt this host can answer. not-found: this runtime holds no such
+ * session. no-option: the prompt is open and carries no option by that id. None is an error reply. */
+export const SessionAnswerOutcome = z.enum(["answered", "gone", "unsupported", "not-found", "no-option"]);
+export type SessionAnswerOutcome = z.infer<typeof SessionAnswerOutcome>;
+export const SessionAnswerResult = z.object({ outcome: SessionAnswerOutcome });
+export type SessionAnswerResult = z.infer<typeof SessionAnswerResult>;
+
 // --- session rename (what a name a person typed came to in the harness's store) -
 
 /** renamed: the harness's store took the name, in the field the harness itself writes, and the thread's rows carry
@@ -2088,5 +2217,5 @@ export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
-export { catalogRefused, endAfterResult, endRun } from "./adapter-port.js";
-export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";
+export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

@@ -738,13 +738,17 @@ describe("wsp verbs over the host", () => {
     expect(shown).toBe("claude-opus-5");
     const level = markedDefault(effortsFor(harnessCatalog("claude")!, markedDefault(harnessCatalog("claude")!.models) ?? null))!.value;
     expect(claude.starts.at(-1)).toMatchObject({ model: shown, effort: level });
-    // The access mode is the one pick no catalog reads off a binary, so the CLI's own default stands.
-    expect(claude.starts.at(-1)!.permissionMode).toBeUndefined();
+    // The access is named too, and named explicitly: an unnamed one reached the adapter as nothing, which every
+    // adapter here reads as its own skip-everything flag, so the picker's word and the CLI's flag could differ.
+    const access = markedDefault(harnessCatalog("claude")!.permissionModes)!.value;
+    expect(access).toBe("bypassPermissions");
+    expect(claude.starts.at(-1)!.permissionMode).toBe(access);
     const [, thread] = await rt.sessions.list();
 
     const same = await run("send", thread!.threadId!, "go on");
     expect(same.code).toBe(0);
-    expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId });
+    // A send that names nothing keeps the thread's own access rather than dropping back to the adapter's default.
+    expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, permissionMode: access });
     expect(claude.starts.at(-1)!.model).toBeUndefined();
     const changed = await run("send", thread!.threadId!, "--model", "claude-fable-5-1", "--effort", "max", "--access", "acceptEdits", "now think");
     expect(changed.code).toBe(0);

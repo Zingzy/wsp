@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Claude Code's side of the permission prompt: the control channel that rides
+// the same stream-json pair a turn already uses. The CLI raises a prompt as a
+// control_request with subtype can_use_tool on stdout and blocks the tool call
+// until a control_response with the same request_id comes back on stdin
+// (measured on 2.1.263, 2026-09-08: --permission-mode default alone denies
+// every such call by itself and prints system/permission_denied; the prompts
+// reach this process only with --permission-prompt-tool stdio, which is what
+// the CLI's own --permission-prompts host means by "the SDK host"). Either
+// side may withdraw one of its own in-flight requests with a
+// control_cancel_request, which the CLI sends for a prompt whose turn was
+// interrupted. A control_request this file does not know is answered with an
+// error rather than left unanswered, since the CLI waits on every one it sends.
+
+import { PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
+import type { PermissionAsk, PermissionOption } from "@wsp/protocol";
+
+/** The one flag that routes the CLI's permission prompts to this process instead of having it deny them itself. */
+export const PERMISSION_PROMPT_TOOL = "stdio";
+
+/** A setMode suggestion's option id, so the runtime and the adapter name the same pick. */
+const modeOptionId = (mode: string): string => `mode:${mode}`;
+
+function rec(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+/** What one line of the CLI's stream is, as far as the control channel cares. */
+export type ControlLine =
+  | { kind: "ask"; ask: PermissionAsk }
+  | { kind: "cancel"; requestId: string }
+  /** A control_request of a subtype this adapter does not answer; the CLI is told so it stops waiting. */
+  | { kind: "unknown"; requestId: string; subtype: string }
+  | undefined;
+
+/**
+ * Reads a parsed stream line as a control-channel line, or nothing when it is an ordinary event. The options are
+ * allow and deny always, in that order, then one per setMode suggestion the CLI made for this call, each labelled by
+ * its own mode slug: the words for a mode live in the runtime's harness table, which an adapter does not read, so
+ * the runtime relabels these on the way to the wire.
+ */
+export function controlLine(event: Record<string, unknown>): ControlLine {
+  const type = str(event.type);
+  if (type === "control_cancel_request") {
+    const requestId = str(event.request_id);
+    return requestId === undefined ? undefined : { kind: "cancel", requestId };
+  }
+  if (type !== "control_request") return undefined;
+  const requestId = str(event.request_id);
+  const request = rec(event.request);
+  if (requestId === undefined || request === undefined) return undefined;
+  const subtype = str(request.subtype) ?? "";
+  if (subtype !== "can_use_tool") return { kind: "unknown", requestId, subtype };
+  const toolName = str(request.tool_name);
+  if (toolName === undefined) return { kind: "unknown", requestId, subtype };
+  const suggestions = Array.isArray(request.permission_suggestions) ? request.permission_suggestions : [];
+  const modes: PermissionOption[] = [];
+  for (const raw of suggestions) {
+    const suggestion = rec(raw);
+    const mode = str(suggestion?.mode);
+    if (suggestion === undefined || str(suggestion.type) !== "setMode" || mode === undefined) continue;
+    if (modes.some((o: PermissionOption) => o.mode === mode)) continue;
+    modes.push({ id: modeOptionId(mode), label: mode, effect: "mode", mode });
+  }
+  const detail = str(request.description);
+  const toolUseId = str(request.tool_use_id);
+  return {
+    kind: "ask",
+    ask: {
+      askId: requestId,
+      toolName,
+      ...(toolUseId !== undefined ? { toolUseId } : {}),
+      input: JSON.stringify(request.input ?? null),
+      ...(detail !== undefined && detail !== "" ? { detail } : {}),
+      options: [
+        { id: PERMISSION_ALLOW, label: "Allow", effect: "allow" },
+        { id: PERMISSION_DENY, label: "Deny", effect: "deny" },
+        ...modes,
+      ],
+    },
+  };
+}
+
+/** One line of the stdin channel: the answer to a prompt, in the shape the CLI's control channel takes. A mode pick
+ * is an allow that also carries the permission update the CLI suggested, which is how it stops asking for the rest
+ * of the session. `input` is the tool's input as the ask carried it, handed back unchanged: the channel lets a host
+ * rewrite it and this one never does. */
+export function controlAnswerLine(ask: PermissionAsk, optionId: string, denyMessage: string): string {
+  const option = ask.options.find(o => o.id === optionId);
+  if (option === undefined) throw new Error(`${optionId} is not an option on this permission prompt`);
+  const updatedInput = JSON.parse(ask.input) ?? {};
+  const response =
+    option.effect === "deny"
+      ? { behavior: "deny", message: denyMessage }
+      : option.effect === "allow"
+        ? { behavior: "allow", updatedInput }
+        : { behavior: "allow", updatedInput, updatedPermissions: [{ type: "setMode", mode: option.mode, destination: "session" }] };
+  return JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: ask.askId, response } });
+}
+
+/** The answer to a control_request this adapter cannot serve: the CLI stops waiting on it and says why in its log. */
+export function controlErrorLine(requestId: string, subtype: string): string {
+  return JSON.stringify({
+    type: "control_response",
+    response: { subtype: "error", request_id: requestId, error: `wsp answers no ${subtype} control request` },
+  });
+}

@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { inFolder, shellQuote } from "@wsp/protocol";
 import type { TurnImage } from "@wsp/protocol";
+import { PERMISSION_PROMPT_TOOL } from "./permissions.js";
 
 // Inherited CLAUDE_CODE_*/CLAUDECODE mark the child as nested inside another
 // Claude Code run; FORCE_CODE_TERMINAL flips terminal detection (t3code unsets
@@ -80,7 +81,7 @@ export interface BuildCommandOptions {
   /** The CLI's own slugs, from the harness catalog; absent leaves the CLI's default in place. */
   model?: string;
   effort?: string;
-  /** "default" sends no permission flag; absent keeps skipping permissions, what every session did before there was a picker. */
+  /** The CLI's own mode slug; absent keeps skipping permissions, what every session did before there was a picker. */
   permissionMode?: string;
   /** "1m" or "200k" from the catalog; the CLI takes 1M as a "[1m]" suffix on the model, so it needs one. */
   contextWindow?: string;
@@ -106,10 +107,16 @@ function modelWithContext(model: string | undefined, contextWindow: string | und
   throw new Error(`contextWindow must be "200k" or "1m", got "${contextWindow}"`);
 }
 
+/**
+ * The access flags for one mode. Bypass, and no mode at all, skip permissions outright. Every other mode names
+ * itself, "default" included: sending no flag for it left the person's own settings deciding the turn's access, and
+ * on 2.1.263 a turn launched that way came back in the auto mode their store had (measured 2026-09-08), which is
+ * not what the picker said. A mode that is not bypass may raise a prompt, and --permission-prompt-tool routes it to
+ * this process over the control channel; without the flag the CLI denies every such call by itself.
+ */
 function permissionFlags(mode: string | undefined): string[] {
   if (mode === undefined || mode === "bypassPermissions") return ["--dangerously-skip-permissions"];
-  if (mode === "default") return [];
-  return slugFlag("--permission-mode", "permissionMode", mode);
+  return [...slugFlag("--permission-mode", "permissionMode", mode), `--permission-prompt-tool ${PERMISSION_PROMPT_TOOL}`];
 }
 
 /**
