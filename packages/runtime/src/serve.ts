@@ -257,6 +257,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
                 ...(msg.notify !== undefined ? { notify: msg.notify } : {}),
                 ...(msg.title !== undefined ? { title: msg.title } : {}),
+                ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
               });
               send({ id: msg.id, ok: true, session: handle.view(), outcome: handle.outcome, turnId: handle.turnId });
               return;

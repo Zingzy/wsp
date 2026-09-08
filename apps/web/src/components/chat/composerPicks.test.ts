@@ -19,6 +19,7 @@ const CLAUDE: HarnessCatalog = {
   permissionModes: [{ value: "plan", label: "Plan" }, { value: "bypassPermissions", label: "Bypass", isDefault: true }],
   steers: true,
   renames: true,
+  images: true,
 };
 
 describe("resolveModel", () => {
