@@ -157,6 +157,12 @@ export const ReachStatus = z.object({
 });
 export type ReachStatus = z.infer<typeof ReachStatus>;
 
+/** The reach as every door outside the app's own socket shows it: the state, and whether the probe even left this
+ * computer. Picked rather than omitted, so a field added to the reach is not handed over by having been forgotten:
+ * the route the status carries is the provider's minted bearer with an hour on it, and only the app dials it. */
+export const ReachView = ReachStatus.pick({ state: true, offline: true });
+export type ReachView = z.infer<typeof ReachView>;
+
 /** What a browser needs to dial a workspace's daemon: the minted preview route
  * (edge token embedded, hourly expiry) and the daemon token the host minted at
  * start and wrote to the guest, sent as the socket's first frame, never in the
@@ -239,6 +245,12 @@ export const WorkspaceStatus = WorkspaceView.extend({
   idleAt: z.number().optional(),
 });
 export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
+
+/** A workspace as the command line and the MCP tool list it: the status without the route the reach carries, since a
+ * table needs the state word and nothing that opens a machine. A relayed caller drives every cloud record, so this
+ * door reaches a transcript that leaves the computer. Parsing a status through it is what drops the route. */
+export const WorkspaceListing = WorkspaceStatus.extend({ reach: ReachView });
+export type WorkspaceListing = z.infer<typeof WorkspaceListing>;
 
 export const SessionStatus = z.enum(["running", "completed", "interrupted", "failed"]);
 export type SessionStatus = z.infer<typeof SessionStatus>;
@@ -1895,6 +1907,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * poller + cost ticker running while this socket lives; the events ride the
    * events.subscribe channel. */
   z.object({ id: reqId, op: z.literal("status.subscribe") }),
+  /** Replies with a WorkspaceListing[] snapshot and keeps nothing running: the one shot a command line or a tool
+   * takes to read a state, since a WorkspaceView carries neither the provider's word for the machine nor the daemon
+   * reach and the state word turns on both. The listing is the status without the minted route, which only the app's
+   * own socket needs, and the snapshot costs one reach probe per machine and no exec probe. */
+  z.object({ id: reqId, op: z.literal("status.list") }),
   z.object({
     id: reqId,
     op: z.literal("workspaces.create"),
@@ -2281,7 +2298,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, computerOffline, goneRefusal, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, computerOffline, goneRefusal, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";

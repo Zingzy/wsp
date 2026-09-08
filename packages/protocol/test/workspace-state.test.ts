@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, computerOffline, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, OVER_SSH, reachShown, type ReachState, relayedRefusal, type SendBlock, sendRefusal, stillWorkingRefusal, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, type WorkspaceState, workspaceWord } from "../src/index.js";
+import { actionRefusal, computerOffline, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, OVER_SSH, reachShown, type ReachState, relayedRefusal, type SendBlock, sendRefusal, stillWorkingRefusal, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, type WorkspaceState, workspaceStateOf, workspaceWord } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -31,6 +31,15 @@ describe("workspaceState", () => {
     expect(workspaceState({ phase: "running", machineState: "running", reach: "slow" })).toBe("running");
     expect(workspaceState({ phase: "running", machineState: "running", reach: "unsupported" })).toBe("running");
     expect(workspaceState({ phase: "running", machineState: null, reach: null })).toBe("running");
+  });
+
+  it("a status carries all three facts, so every surface holding one reads the state off it; without one the phase stands alone", () => {
+    const paused = { machineState: "paused" as const, reach: { state: "napping" as const } };
+    expect(workspaceStateOf({ phase: "running" }, paused)).toBe("paused");
+    expect(workspaceStateOf({ phase: "running" }, { machineState: "running", reach: { state: "no-daemon" } })).toBe("unreachable");
+    expect(workspaceStateOf({ phase: "running" }, { machineState: "running", reach: { state: "reachable" } })).toBe("running");
+    expect(workspaceStateOf({ phase: "running" }, null)).toBe("running");
+    expect(workspaceStateOf({ phase: "napping" }, null)).toBe("paused");
   });
 
   it("every state has a capitalised word", () => {

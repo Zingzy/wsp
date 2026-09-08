@@ -8,7 +8,7 @@ import { randomBytes } from "node:crypto";
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { HOST_STOPPING_CLOSE, RELAY_TICKET_REFUSAL, RuntimeRequest, TICKET_ORIGIN, type ExecEvent, type ForwardEvent, type PortForward, type WorkspaceOrigin } from "@wsp/protocol";
+import { HOST_STOPPING_CLOSE, RELAY_TICKET_REFUSAL, RuntimeRequest, TICKET_ORIGIN, WorkspaceListing, type ExecEvent, type ForwardEvent, type PortForward, type WorkspaceOrigin } from "@wsp/protocol";
 import type { HostFolders, HostTerminalConfig, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -196,6 +196,16 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               detaches.push(rt.status.watch());
               send({ id: msg.id, ok: true, statuses: await rt.status.list(undefined, origin) });
               return;
+            case "status.list": {
+              // The provider is asked only where a reach failed: a bare list asks it for every machine, and every
+              // such ask resets the provider's idle timer, so a caller listing in a loop would keep them all awake.
+              // No exec probe either, so the wait is one reach probe; the poller keeps the zombie verdict.
+              const statuses = await rt.status.list({ reconcile: "on-failure", zombieProbe: false }, origin);
+              // Through the schema, so the route the reach carries is dropped rather than remembered about: it is
+              // the provider's minted bearer, and this door answers a person's terminal and an agent's transcript.
+              send({ id: msg.id, ok: true, statuses: statuses.map(s => WorkspaceListing.parse(s)) });
+              return;
+            }
             case "workspaces.create": {
               const { id, op, origin: _sent, ...rest } = msg;
               void op;

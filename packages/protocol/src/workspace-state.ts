@@ -83,6 +83,14 @@ export function workspaceState(input: WorkspaceStateInput): WorkspaceState {
   }
 }
 
+/** The one state word's key for a workspace as every client knows it: its phase, and the machine state and reach of
+ * its status when one has arrived. A caller holding only the record passes null and reads the phase alone, which is
+ * why a surface that shows a state asks for the status: the phase alone calls a paused or unreachable machine
+ * running. */
+export function workspaceStateOf(workspace: Pick<WorkspaceView, "phase">, status: Pick<WorkspaceStatus, "machineState" | "reach"> | null): WorkspaceState {
+  return workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
+}
+
 const WORDS: Record<WorkspaceState, string> = {
   running: "Running",
   pausing: "Pausing",

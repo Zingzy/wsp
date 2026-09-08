@@ -48,6 +48,7 @@ import {
   TerminalScheme,
   ThreadView,
   TurnStatus,
+  WorkspaceListing,
   WorkspaceView,
   actionRefusal,
   authRefusal,
@@ -96,6 +97,7 @@ import {
   waitTimedOutLine,
   workspaceKind,
   workspaceState,
+  workspaceStateOf,
   workspaceWord,
   type Capabilities,
   type ExecEvent,
@@ -397,6 +399,13 @@ export async function workspaces(client: HostClient): Promise<WorkspaceView[]> {
   return (await client.request<{ workspaces: WorkspaceView[] }>("workspaces.list")).workspaces;
 }
 
+/** Every workspace with what the app's rail reads live beside it: the provider's word for the machine and the daemon
+ * reach, without the route the reach carries, which the runtime keeps off this door. The listing above is what every
+ * verb that only needs to name a workspace takes, since this one probes. */
+export async function workspaceStatuses(client: HostClient): Promise<WorkspaceListing[]> {
+  return (await client.request<{ statuses: WorkspaceListing[] }>("status.list")).statuses;
+}
+
 async function threads(client: HostClient, workspaceId?: string): Promise<ThreadView[]> {
   const { sessions } = await client.request<{ sessions: SessionView[] }>("sessions.list", workspaceId !== undefined ? { workspaceId } : {});
   return foldThreads(sessions);
@@ -615,10 +624,11 @@ function threadLine(t: ThreadRow): string[] {
 
 /** A workspace row: what its machine is, and its state where the kind has one. The kind's own words for the machine
  * stand in for the provider's id, and a kind wsp does not drive has no state of its own to name, so that cell stays
- * empty; both facts come off the one kind table. */
-function workspaceLine(w: WorkspaceView): string[] {
+ * empty; both facts come off the one kind table. The state cell reads the status the sidebar reads, through the one
+ * predicate, so a machine the provider has paused or one whose daemon is dark says here what it says there. */
+function workspaceLine(w: WorkspaceListing): string[] {
   const kind = kindWords(workspaceKind(w));
-  return [w.name, w.id, kind.machine ?? w.machineId, kind.driven ? workspaceWord(workspaceState({ phase: w.phase })) : "", w.project !== undefined ? shortenedFront(w.project.dest, FOLDER_WIDTH) : ""];
+  return [w.name, w.id, kind.machine ?? w.machineId, kind.driven ? workspaceWord(workspaceStateOf(w, w)) : "", w.project !== undefined ? shortenedFront(w.project.dest, FOLDER_WIDTH) : ""];
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
@@ -1419,20 +1429,20 @@ export const VERBS: readonly Verb[] = [
   {
     name: "workspaces",
     usage: "wsp workspaces",
-    about: "every workspace this host runs: what its machine is, its state where the kind has one, and its project folder",
+    about: "every workspace this host runs: what its machine is, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one, and its project folder",
     options: {},
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp workspaces takes no positional arguments");
-      const rows = await workspaces(await ctx.client());
+      const rows = await workspaceStatuses(await ctx.client());
       ctx.out.emit({ workspaces: rows }, table([["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECT"], ...rows.map(workspaceLine)]).join("\n"));
       return 0;
     },
     tool: tool({
       description:
-        "Every workspace this host runs, as the app lists them: id, name, phase (running or napping), the golden it forked from and its project folder. A workspace is a machine wsp forked at the provider, or this computer itself, which forks from no golden and runs while the host does; kind says which, and the name is what thread_new and every other verb take.",
+        "Every workspace this host runs, as the app lists them: id, name, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one, the golden it forked from and its project folder. A workspace is a machine wsp forked at the provider, or this computer itself, which forks from no golden and runs while the host does; kind says which, and the name is what thread_new and every other verb take.",
       input: {},
-      output: { workspaces: z.array(WorkspaceView) },
-      call: async (_args, deps) => asJson({ workspaces: await workspaces(await deps.client()) }),
+      output: { workspaces: z.array(WorkspaceListing) },
+      call: async (_args, deps) => asJson({ workspaces: await workspaceStatuses(await deps.client()) }),
     }),
   },
   {

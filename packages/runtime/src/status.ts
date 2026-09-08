@@ -100,6 +100,10 @@ export interface StatusListOptions {
    * bare list() does). "on-failure" asks only after a failed reach and reuses
    * that answer for the reconcile window; the poller runs this way. */
   reconcile?: "always" | "on-failure";
+  /** Whether a machine dark past the zombie window may be settled here with an exec probe into the guest, which
+   * costs up to zombieProbeTimeoutMs on top of the reach probe. The poller pays it, since the verdict is its to
+   * keep; false bounds a caller's wait to one reach probe and shows the word the poller last settled on. */
+  zombieProbe?: boolean;
 }
 
 export interface StatusWatchOptions {
@@ -423,12 +427,15 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
    * is weather. Past it, and only while the provider still says running, one
    * exec probe decides: an answer restarts the window (a long slow spell with
    * a live guest never flags), a failure marks the machine zombie until reach
-   * reads healthy again or the machine is replaced. */
+   * reads healthy again or the machine is replaced. A caller that will not
+   * wait out that probe leaves the verdict to the poller and reads the word it
+   * last settled on. */
   const judge = async (
     r: StatusRecord,
     reach: ReachStatus,
-    reconcile: StatusListOptions["reconcile"],
+    opts: StatusListOptions | undefined,
   ): Promise<{ state: MachineState; reach: ReachStatus; reason?: string }> => {
+    const reconcile = opts?.reconcile ?? "always";
     const s = suspectOf(r);
     const elapsed = clock.now() - s.badSince;
     if (s.zombie === undefined && elapsed < zombieWindowMs) {
@@ -440,6 +447,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       return { state: provider, reach };
     }
     if (s.zombie !== undefined) return { state: provider, reach: { ...reach, state: "zombie" }, reason: s.zombie };
+    if (opts?.zombieProbe === false) return { state: provider, reach };
     s.probe ??= probeExec(r).finally(() => {
       s.probe = undefined;
     });
@@ -511,7 +519,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
           return done(await machineState(r, reconcile, !probed.fromDaemon), { ...status, state: shown });
         }
         // The window and the exec probe run on the raw silence; only the word on the row waits for a second one.
-        const judged = await judge(r, status, reconcile);
+        const judged = await judge(r, status, opts);
         const reach = judged.reach.state === "zombie" ? judged.reach : { ...judged.reach, state: shown };
         memory.shown = reach.state;
         return { ...done(judged.state, reach), ...(judged.reason !== undefined ? { reason: judged.reason } : {}) };
