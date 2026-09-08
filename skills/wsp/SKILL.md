@@ -169,7 +169,7 @@ wsp exec dev -- git status --short
 wsp exec dev --cwd /root -- sh -c 'ls | wc -l'
 ```
 
-Each word after `--` reaches the machine as one argument; a shell line goes through `sh -c`. The command runs in the folder `--cwd` names (absolute, on the machine), else in the workspace's imported project folder when it has one, else in the home folder, so `git status` on a workspace with a project needs no `cd`. The command's exit code is the verb's, and a non-zero exit is followed by one stderr line naming the folder it ran in. A non-zero exit is a result; the machine going away is an error. The machine runs as root with home /root and no login shell, so `bash -c`, never `bash -lc`.
+Each word after `--` reaches the machine as one argument; a shell line goes through `sh -c`. The command runs in the folder `--cwd` names (absolute, on the machine), else in the workspace's imported project folder when it has one, else in the workspace's own folder, which on a fork is the machine's home folder, so `git status` on a workspace with a project needs no `cd`. The command's exit code is the verb's, and a non-zero exit is followed by one stderr line naming the folder it ran in, which the host answers with rather than the caller assuming it; the tool carries that folder as `cwd`. A non-zero exit is a result; the machine going away is an error. The machine runs as root with home /root and no login shell, so `bash -c`, never `bash -lc`.
 
 ### new, fork, snapshot
 

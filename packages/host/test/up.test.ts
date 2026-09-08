@@ -17,13 +17,13 @@ const PAGE = `<!doctype html>
 </body></html>
 `;
 
-/** Everything a command printed, read the way a client reads it: over execStream, the road serve.ts answers the exec
- * verb with, which wraps the argv in a cd of its own where the in-process exec method never sees that wrapper. */
-async function printed(stream: ExecStream): Promise<string> {
+/** What a command printed and how it ended, read the way a client reads it: over execStream, the road serve.ts
+ * answers the exec verb with, which wraps the argv in a cd of its own where the in-process exec method never sees
+ * that wrapper. */
+async function printed(stream: ExecStream): Promise<{ out: string; exitCode: number | null }> {
   let out = "";
   for await (const line of stream.lines) out += line;
-  await stream.exited;
-  return out;
+  return { out, exitCode: await stream.exited };
 }
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
@@ -138,12 +138,16 @@ describe("wsp up", () => {
     // in a cd of its own, so it is the road asked here; the in-process method never sees that wrapper. Both sides
     // read through realpath: macOS reaches its temp dir through a symlink, so a shell's pwd and the path built here
     // are two spellings of one folder.
-    expect(realpathSync((await printed(await rt.workspaces.execStream("ws_l", ["pwd"]))).trim())).toBe(realpathSync(work));
-    await printed(await rt.workspaces.execStream("ws_l", ["sh", "-c", "printf mine > seen.txt"]));
+    const where = await printed(await rt.workspaces.execStream("ws_l", ["pwd"]));
+    expect(where.exitCode).toBe(0);
+    expect(realpathSync(where.out.trim())).toBe(realpathSync(work));
+    expect((await printed(await rt.workspaces.execStream("ws_l", ["sh", "-c", "printf mine > seen.txt"]))).exitCode).toBe(0);
     expect(existsSync(join(work, "seen.txt"))).toBe(true);
     expect(existsSync(join(home, "seen.txt"))).toBe(false);
-    // And the folder the turn road resolves is that same one, read off the wiring the host built.
-    expect(wiring.folder).toBe(work);
+    // And the folder the turn road resolves is that same one, read off the backend the wiring published it on, which
+    // is also the folder that backend's own machine runs in: one fact, so the two roads cannot split.
+    expect(wiring.backend.folder).toBe(work);
+    expect((await rt.workspaces.execStream("ws_l", ["pwd"])).ranIn).toBe(work);
     // The harness's own store stays the person's, wherever their store variable puts it: a sign-in they made is the
     // one a turn uses, so nothing of it moved under the work folder.
     expect(wiring.home("claude").startsWith(work)).toBe(false);

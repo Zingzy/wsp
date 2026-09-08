@@ -93,7 +93,6 @@ describe("local workspace", () => {
         handed.push(o);
         return localExecStream({ root, ...o });
       },
-      folder: root,
       home: () => join(root, ".claude"),
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
     };
@@ -155,6 +154,8 @@ describe("local workspace", () => {
     const rt = runtime();
     const ws = await rt.workspaces.createLocal("mac");
     const stream = await rt.workspaces.execStream(ws.id, ["pwd"]);
+    // The stream says which folder it resolved, so the client that prints it never restates the rule.
+    expect(stream.ranIn).toBe(root);
     let out = "";
     for await (const line of stream.lines) out += line;
     expect(await stream.exited).toBe(0);
@@ -423,7 +424,6 @@ describe("a local turn and a host restart", () => {
     localWiring = {
       backend: new LocalBackend({ root }),
       execStream: o => localExecStream({ root, ...o }),
-      folder: root,
       home: () => join(root, ".claude"),
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
     };

@@ -569,14 +569,22 @@ export interface GoldenExec {
  * how a turn's process is launched on it (a real child, not the guest's polled road), where each harness keeps its
  * own sessions here, and the environment a turn runs under. Absent, the runtime serves cloud workspaces alone and
  * `createLocal` is refused. The one place the local variant is registered beside the cloud default. */
+/** A command launched on a machine, with the folder the runtime resolved for it: what the caller named, else the
+ * folder that workspace's kind names. Absent on a kind that names none, where the machine's own home is what its
+ * shell lands in, which is the one case a caller has left to word for itself. */
+export interface RunningExec extends ExecStream {
+  readonly ranIn?: string;
+}
+
 export interface LocalWiring {
-  backend: MachineBackend;
+  /** This computer's backend, which publishes the folder its commands run in: the folder a turn and a command start
+   * in when the caller names none is that one and not the person's home, which is one `cd` away and holds the
+   * checkouts they work in themselves. One fact, so the roads that go through the runtime and the ones that reach
+   * the machine directly cannot land in two different folders. */
+  backend: MachineBackend & { readonly folder: string };
   /** The launch factory for a turn on this computer, under the limits the registry hands every turn (the turn's own
    * by default, none for the exec verb), so a local turn is cut the way a cloud turn is. */
   execStream: (opts?: MachineExecOptions) => ExecStreamFactory;
-  /** The folder a turn and a command on this computer start in when the caller names none: the workspace's own, not
-   * the person's home, which is one `cd` away and holds the checkouts they work in themselves. */
-  folder: string;
   home: (agentId: string) => string;
   env: Readonly<Record<string, string>>;
   /** Where this computer's daemon listens and the token that opens it, in the shape a cloud fork's preview route
@@ -894,9 +902,10 @@ export interface Runtime {
     exec(id: string, cmd: string, opts?: { timeoutMs?: number }, origin?: WorkspaceOrigin): Promise<ExecResult>;
     /** The command, word by word, launched the way a harness turn is: detached on the machine, each word quoted for
      * its shell, exported with what the default harness's turns get, its output streamed by line, its exit code at
-     * the end; in cwd when given, else the home folder, as a harness turn does. Rejects when the workspace or that
-     * harness's adapter is unknown; a launch that fails ends the stream. */
-    execStream(id: string, argv: ReadonlyArray<string>, cwd?: string, origin?: WorkspaceOrigin): Promise<ExecStream>;
+     * the end; in cwd when given, else the folder the workspace's kind names, as a harness turn does. The stream
+     * carries that folder back as `ranIn`, so a client says where the command ran rather than restating the rule.
+     * Rejects when the workspace or that harness's adapter is unknown; a launch that fails ends the stream. */
+    execStream(id: string, argv: ReadonlyArray<string>, cwd?: string, origin?: WorkspaceOrigin): Promise<RunningExec>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string, origin?: WorkspaceOrigin): Promise<DaemonReachView>;
     /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
@@ -1355,7 +1364,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     local:
       local === undefined
         ? undefined
-        : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), folder: local.folder, home: local.home, env: local.env, relayed: false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
+        : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), folder: local.backend.folder, home: local.home, env: local.env, relayed: false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
     const found = modules[kind];
@@ -1364,8 +1373,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const backendFor = (kind: WorkspaceKind): MachineBackend => moduleOf(kind).backend;
   const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry.machine, o);
-  /** The folder a turn or a command runs in: the one the caller named, else the kind's own. Every road that starts a
-   * process on a machine reads it here, so the folder a turn opens in and the one a command runs in cannot differ. */
+  /** The folder a turn or a command runs in: the one the caller named, else the kind's own. Both roads that launch a
+   * process through this runtime read it here, the turn and the exec verb, so the folder a turn opens in and the one
+   * a command runs in cannot differ; the roads that reach `entry.machine` directly land in the folder that machine
+   * was built with, which for this computer is the same one, since the kind reads it off the backend. */
   const folderFor = (entry: LiveWorkspace, cwd: string | undefined): string | undefined => cwd ?? moduleOf(entry.record.kind).folder;
   /** The capability a verb reads before it runs: a machine whose capability is false refuses the verb with the one
    * sentence, which reads for the local computer, the only machine short of these capabilities today. */
@@ -2952,7 +2963,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id, origin);
       const { adapter } = adapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
-      const inner = execFactoryFor(entry, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(folderFor(entry, cwd), argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
+      const ranIn = folderFor(entry, cwd);
+      const inner = execFactoryFor(entry, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(ranIn, argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
       let endWith: (reason: string) => void = () => {};
       const ended = new Promise<{ reason: string }>(resolve => {
         endWith = reason => resolve({ reason });
@@ -2979,7 +2991,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           execs.delete(running);
         }
       };
-      return { ...inner, lines: lines(), exited: Promise.race([inner.exited, ended.then(() => null)]) };
+      return { ...inner, lines: lines(), exited: Promise.race([inner.exited, ended.then(() => null)]), ...(ranIn !== undefined ? { ranIn } : {}) };
     },
 
     async daemonReach(id, origin) {

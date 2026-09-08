@@ -2023,7 +2023,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * ExecEvent frames to this socket only: exec.output per line, exec.exit last. The socket closing ends the
    * command, and so does the machine going away under it (deleted, paused, or unanswering: exec.exit then carries
    * the reason as its error); nothing else does, there is no deadline. cwd is the folder the command runs in, absolute;
-   * absent, the home folder, as a harness turn's is. */
+   * absent, the folder the workspace's kind names, as a harness turn's is. The reply carries that folder back as its
+   * own cwd, absent only where the kind names none and the machine's own home is where the shell landed. */
   z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1), cwd: z.string().optional() }),
   /** Replies with { listing: HostFolderListing }: one level of this computer's own folders, for the picker a browser
    * tab has instead of the desktop shell's dialog. `dir` absent lists the first root and a folder inside the roots

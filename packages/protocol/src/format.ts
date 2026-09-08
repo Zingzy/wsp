@@ -547,7 +547,9 @@ export function folderRefusalLine(reason: string): string {
 }
 
 /** The one stderr line the command line shows under a command that exited non-zero, naming the folder it ran in:
- * the host chose it when none was named, so the person did not see it go by; absent, the runtime ran it in ~. */
+ * the host chose it when none was named, so the person did not see it go by. The caller passes the folder the host
+ * answered with rather than the one it asked for; absent, the workspace's kind named none and the machine's own home
+ * is where the command ran. */
 export function execFolderLine(cwd: string | undefined): string {
   return `ran in ${cwd ?? "the home folder"}`;
 }

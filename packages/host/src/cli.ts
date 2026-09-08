@@ -399,7 +399,6 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   return {
     backend: new LocalBackend({ root, env }),
     execStream: o => localExecStream({ root, ...o }),
-    folder: root,
     home: id => homes[id] ?? join(home, `.${id}`),
     env: login,
     daemonRoad: async () => {

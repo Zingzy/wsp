@@ -714,8 +714,9 @@ export function absoluteFolder(cwd: string | undefined): string | undefined {
 }
 
 /** The folder a new thread works in and a command runs in: the one named, else the workspace's imported project
- * folder, else none, and the harness or the shell starts in its own home. A thread's folder decides which project
- * state its agent loads; a command's decides what its git or its tests see, so both read the one rule. */
+ * folder, else none, which leaves the host to fill in the folder that workspace's kind names. A thread's folder
+ * decides which project state its agent loads; a command's decides what its git or its tests see, so both read the
+ * one rule, and neither says which folder it came to: the host answers that. */
 export function workFolder(workspace: WorkspaceView, cwd?: string): string | undefined {
   return absoluteFolder(cwd) ?? workspace.project?.dest;
 }
@@ -1044,9 +1045,17 @@ export type ExecExit = Extract<ExecEvent, { type: "exec.exit" }>;
 
 /** Runs argv on the workspace's machine, in cwd when given, and follows it to its exit; `on` sees each output line
  * and the exit. Fails when the host goes away first. */
-export async function execOn(client: HostClient, workspaceId: string, argv: readonly string[], cwd: string | undefined, on: (e: ExecEvent) => void): Promise<ExecExit> {
+/** What a command came to: its exit, and the folder the runtime ran it in as the runtime resolved it. `ranIn` is
+ * absent only where the workspace's kind names no folder, which leaves the machine's own home; every caller prints
+ * this rather than restating the rule the runtime holds. */
+export interface ExecRun {
+  exit: ExecExit;
+  ranIn?: string;
+}
+
+export async function execOn(client: HostClient, workspaceId: string, argv: readonly string[], cwd: string | undefined, on: (e: ExecEvent) => void): Promise<ExecRun> {
   const pushed = pushedFrames(client);
-  const { execId } = await client.request<{ execId: string }>("workspaces.exec", { workspaceId, argv, ...(cwd !== undefined ? { cwd } : {}) });
+  const { execId, cwd: ranIn } = await client.request<{ execId: string; cwd?: string }>("workspaces.exec", { workspaceId, argv, ...(cwd !== undefined ? { cwd } : {}) });
   const exited = new Promise<ExecExit>(done => {
     pushed.follow(
       f => (f.type === "exec.output" || f.type === "exec.exit") && f["execId"] === execId,
@@ -1058,7 +1067,7 @@ export async function execOn(client: HostClient, workspaceId: string, argv: read
     );
   });
   try {
-    return await untilSettled(client, exited);
+    return { exit: await untilSettled(client, exited), ...(ranIn !== undefined ? { ranIn } : {}) };
   } finally {
     pushed.stop();
   }
@@ -1295,7 +1304,7 @@ const PLAN_ONLY_TOOL = "nothing imported; call import again with yes true to tak
 const WorkspaceIn = z.string().describe("the workspace's name, or its id when two share a name");
 const AgentIn = z.string().optional().describe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
 const NotifyIn = z.string().optional().describe("a thread (by id, or a prefix of it) told in one line each time a turn of the new thread ends, as a message into it; or me, for the person's app");
-const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute; absent means the workspace's project folder, else the home folder");
+const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute; absent means the workspace's project folder, else the workspace's own folder, which on a fork is the machine's home folder");
 const DetachIn = z.boolean().optional().describe("true answers with the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end; for a turn that runs for minutes or an hour, so this call does not block for it");
 const TitleIn = z.string().optional().describe("the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it");
 const ImagesIn = z.array(z.string()).optional().describe(`paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each. The host reads each file and sends its bytes, so the machine never reaches back for this computer\u2019s files; a message to an agent that reads no image is refused naming that agent.`);
@@ -1912,26 +1921,26 @@ export const VERBS: readonly Verb[] = [
       const client = await ctx.client();
       const workspace = await awake(client, await workspaceOf(client, ref), "exec", line => ctx.io.error(line));
       const folder = workFolder(workspace, flag(ctx.flags, "cwd"));
-      const exit = await execOn(client, workspace.id, words, folder, e => {
+      const { exit, ranIn } = await execOn(client, workspace.id, words, folder, e => {
         if (e.type === "exec.output") ctx.out.emit(e, e.text);
       });
       if (exit.error !== undefined) throw new Error(exit.error);
-      ctx.out.emit({ exitCode: exit.exitCode, ...(folder !== undefined ? { cwd: folder } : {}) });
-      if (exit.exitCode !== null && exit.exitCode !== 0) ctx.io.error(execFolderLine(folder));
+      ctx.out.emit({ exitCode: exit.exitCode, ...(ranIn !== undefined ? { cwd: ranIn } : {}) });
+      if (exit.exitCode !== null && exit.exitCode !== 0) ctx.io.error(execFolderLine(ranIn));
       return exit.exitCode ?? EXIT_CODES.provider;
     },
     tool: tool({
       description: "Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the workspace's project folder, and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the machine going away is an error.",
       input: { workspace: WorkspaceIn, argv: Argv, cwd: CwdIn },
-      output: { exitCode: z.number().int().nullable(), output: z.array(z.string()), cwd: z.string().optional().describe("the folder the command ran in; absent, the home folder") },
+      output: { exitCode: z.number().int().nullable(), output: z.array(z.string()), cwd: z.string().optional().describe("the folder the command ran in, as the host resolved it; absent only on a machine whose kind names no folder, where its own home is where the command ran") },
       stream: ["output"],
       call: async ({ workspace: ref, argv, cwd: folder }, deps) => {
         absoluteFolder(folder);
         const client = await deps.client();
         const target = await awake(client, await workspaceOf(client, ref), "exec", QUIET_LINE);
-        const ranIn = workFolder(target, folder);
+        const asked = workFolder(target, folder);
         const output: string[] = [];
-        const exit = await execOn(client, target.id, argv, ranIn, e => {
+        const { exit, ranIn } = await execOn(client, target.id, argv, asked, e => {
           if (e.type === "exec.output") output.push(e.text);
         });
         if (exit.error !== undefined) throw new Error(exit.error);

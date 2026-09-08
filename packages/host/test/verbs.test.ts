@@ -11,7 +11,7 @@ import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ThreadView, WorkspaceV
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
-import { HELP, cli, localWiring, serve } from "../src/cli.js";
+import { HELP, cli, localWiring, localWorkFolder, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { PLAN_ONLY, dialHost, messageTo, threadRows } from "../src/verbs.js";
@@ -1312,12 +1312,22 @@ describe("wsp verbs over the host", () => {
     expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp exec <workspace> [--cwd <dir>] -- <command...>']);
   });
 
-  it("a failing exec with no folder of its own says it ran in the home folder", async () => {
+  it("a failing exec says the folder the host ran it in, the machine's home on a fork and the workspace's own on this computer", async () => {
     await run("new", "alpha");
     execGuest(backend, "", 2);
-    const { code, io } = await run("exec", "alpha", "--", "false");
-    expect(code).toBe(2);
-    expect(io.errors).toEqual(["ran in the home folder"]);
+    const fork = await run("exec", "alpha", "--", "false");
+    expect(fork.code).toBe(2);
+    // A fork's kind names no folder, so its shell lands in the machine's own home and the line says so.
+    expect(fork.io.errors).toEqual(["ran in the home folder"]);
+
+    // On this computer the host resolved a folder, so the line names it rather than the home the rule used to assume.
+    await run("new", "--local", "mac");
+    const work = localWorkFolder(join(dir, "user"));
+    const local = await run("exec", "mac", "--", "false");
+    expect(local.code).toBe(1);
+    expect(local.io.errors).toEqual([`ran in ${work}`]);
+    const raw = await run("exec", "mac", "--json", "--", "false");
+    expect(json(raw.io).at(-1)).toEqual({ exitCode: 1, cwd: work });
   });
 
   it("a host that stops under a turn says so and that the turn goes on, in one line with exit 1 instead of hanging", async () => {
