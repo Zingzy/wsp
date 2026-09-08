@@ -33,6 +33,13 @@ export function machineStateOf(phase: WorkspacePhase): MachineState {
   }
 }
 
+/** What a state read makes of a record marked gone: a machine the provider still holds unmakes the verdict, running
+ * as running and paused as napping, and any other answer leaves the record gone. Every road out of gone (a wake, a
+ * rebuild, the sweep, the record load) reads it here, so none of them keeps a rule of its own. */
+export function phaseLeavingGone(read: MachineState): "running" | "napping" | undefined {
+  return read === "running" ? "running" : read === "paused" ? "napping" : undefined;
+}
+
 /** The provider's answer as a row or a log line quotes it: its status and message when the call answered with both. */
 export function providerSaid(e: unknown): string {
   const message = e instanceof Error ? e.message : String(e);
@@ -228,6 +235,10 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const probes = new Map<string, Probes>();
   /** Per workspace, the machine whose metrics 404 was logged while its guest still answered, so the line lands once per spell. */
   const doubted = new Map<string, string>();
+  /** The awake stretch a gone verdict closed, per workspace, until a record leaves gone and reopens it or a rebuild
+   * or a nap makes it stale. A verdict the state read later unmakes was never true, and the machine under it went
+   * on billing, so those hours belong to the stretch rather than to nothing. */
+  const closedByGone = new Map<string, { mark: number; awakeMs: number }>();
 
   // Exact awake accounting comes from lifecycle events, not poll edges. A
   // workspace hydrated already-running starts its meter lazily at first tick.
@@ -252,7 +263,20 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     if (e.type === "workspace.created") beganAwake(e.workspace.id);
   });
   o.on("workspace.woken", e => {
-    if (e.type === "workspace.woken") beganAwake(e.workspaceId);
+    if (e.type !== "workspace.woken") return;
+    const reopened = closedByGone.get(e.workspaceId);
+    if (reopened === undefined) return beganAwake(e.workspaceId);
+    // A record that leaves gone was never paused: the machine went on running and billing through the gap, so the
+    // stretch the verdict closed reopens where it began rather than a fresh one starting now.
+    closedByGone.delete(e.workspaceId);
+    const m = meter(e.workspaceId);
+    m.mark = reopened.mark;
+    m.awakeMs = reopened.awakeMs;
+    sawAwake(e.workspaceId);
+  });
+  // A rebuild put another machine under the record: the stretch the verdict closed was the old one's.
+  o.on("workspace.upgraded", e => {
+    if (e.type === "workspace.upgraded") closedByGone.delete(e.workspaceId);
   });
   // Awake time ends where the machine did: a pause this host made ends it now; a pause the provider made and this
   // host only found, and the moment the provider was found not to know the machine at all, end it at the last
@@ -263,6 +287,10 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       const m = meter(e.workspaceId);
       const found = e.type === "workspace.gone" || e.found === true;
       const ended = found ? (m.awakeUntil ?? clock.now()) : clock.now();
+      // A machine found paused stopped billing somewhere in the gap and nothing says when, so that stretch stays
+      // closed at the last proof; only a gone verdict is one a later read can unmake.
+      if (e.type === "workspace.napped") closedByGone.delete(e.workspaceId);
+      else if (m.mark !== undefined) closedByGone.set(e.workspaceId, { mark: m.mark, awakeMs: m.awakeMs });
       if (m.mark !== undefined) m.awakeMs += Math.max(0, ended - m.mark);
       m.mark = undefined;
     });
@@ -270,6 +298,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   o.on("workspace.deleted", e => {
     if (e.type !== "workspace.deleted") return;
     meters.delete(e.workspaceId);
+    closedByGone.delete(e.workspaceId);
     forget(e.workspaceId);
     lastEmitted.delete(e.workspaceId);
     reconciled.delete(e.workspaceId);

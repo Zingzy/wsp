@@ -704,8 +704,11 @@ describe("goneWords", () => {
     expect(goneWords("sb_1", { by: "sweep", at, answer: "" })).toBe("machine sb_1 is gone at the provider: the sweep found it gone at 2026-09-07T01:21:10Z");
   });
 
-  it("says the record follows the state read when a verdict did not hold", () => {
-    expect(NOT_GONE).toBe("running at the provider after all; the record follows the state read");
+});
+
+describe("NOT_GONE", () => {
+  it("says the record follows the state read, whichever state it holds the machine in", () => {
+    expect(NOT_GONE).toBe("not gone at the provider after all; the record follows the state read");
   });
 });
 

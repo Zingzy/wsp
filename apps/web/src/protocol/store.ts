@@ -195,9 +195,11 @@ export const useStore = create<State>((set, get) => {
     }
   };
 
-  // wake-via-resurrect and upgrade replace the machine, so those events carry a new machineId; gone carries the words
+  // wake-via-resurrect and upgrade replace the machine, so those events carry a new machineId; gone carries the
+  // words, and any other phase drops the ones the view was holding, since a record that left gone has none to show
   const setPhase = (id: string, phase: WorkspacePhase, machineId?: string, gone?: string): void => {
-    const patch = { phase, ...(machineId !== undefined ? { machineId } : {}), ...(gone !== undefined ? { gone } : {}) };
+    const words = phase !== "gone" ? { gone: undefined } : gone !== undefined ? { gone } : {};
+    const patch = { phase, ...(machineId !== undefined ? { machineId } : {}), ...words };
     set(s => ({
       workspaces: s.workspaces.map(w => (w.id === id ? { ...w, ...patch } : w)),
       statuses: s.statuses[id] ? { ...s.statuses, [id]: { ...s.statuses[id]!, ...patch } } : s.statuses,

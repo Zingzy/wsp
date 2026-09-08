@@ -699,6 +699,50 @@ describe("a record marked gone recovers on a state read that says running", () =
     }
   });
 
+  it("the sweep, over a machine the provider holds paused: the record leaves gone as napping, on the same predicate", async () => {
+    const t = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { ws, m } = await wronglyGone(t);
+      m.paused = true;
+      await t.rt.reap();
+      const record = await t.rt.workspaces.get(ws.id);
+      expect(record).toMatchObject({ phase: "napping", machineId: "m1" });
+      expect(record.gone).toBeUndefined();
+      expect(t.backend.machines).toHaveLength(1);
+      expect(t.statuses.at(-1)).toMatchObject({ id: ws.id, phase: "napping", reason: NOT_GONE });
+      // The wake road takes it from there the way it takes any napping record: one resume, the same machine.
+      expect(await t.rt.workspaces.wake(ws.id)).toMatchObject({ phase: "running", machineId: "m1" });
+      expect(m.resumes).toBe(1);
+      expect(t.backend.machines).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the record load, over a machine the provider holds paused: the record leaves gone as napping, on the same predicate", async () => {
+    const t = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { ws, m } = await wronglyGone(t);
+      m.paused = true;
+      await t.rt.close();
+      expect(await t.store.get("workspaces", ws.id)).toMatchObject({ phase: "gone" });
+
+      const second = testRuntime({}, { store: t.store, backend: t.backend });
+      try {
+        expect(await second.rt.workspaces.get(ws.id)).toMatchObject({ phase: "napping", machineId: "m1" });
+        expect((await second.rt.workspaces.get(ws.id)).gone).toBeUndefined();
+        expect(await t.store.get("workspaces", ws.id)).toMatchObject({ phase: "napping" });
+        expect(((await t.store.get("workspaces", ws.id)) as { gone?: string }).gone).toBeUndefined();
+      } finally {
+        await second.rt.close();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("a stored gone record whose machine the provider still runs hydrates running, and the words go with it", async () => {
     const t = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -716,6 +760,58 @@ describe("a record marked gone recovers on a state read that says running", () =
       } finally {
         await second.rt.close();
       }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("the awake meter across a verdict that did not hold", () => {
+  const GAP = 3 * 60_000;
+
+  it("a recovery reopens the stretch the gone verdict closed, so the hours the machine went on billing are metered", async () => {
+    const t = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await t.rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = t.backend.machines[0]!;
+      await until(() => t.costs.some(c => c.phase === "running"));
+      expect(t.costs.at(-1)).toMatchObject({ phase: "running", awakeMs: 0 });
+
+      m.killed = true;
+      await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal("wake", (await t.rt.workspaces.get(ws.id)).gone));
+      await until(() => t.costs.some(c => c.phase === "gone"));
+      expect(t.costs.at(-1)).toMatchObject({ phase: "gone", rateUsdPerHour: 0, awakeMs: 0 });
+
+      // The machine was never gone: it ran and billed through the whole gap, and the read that unmakes the verdict
+      // has to hand those hours back to the stretch rather than start a new one here.
+      m.killed = false;
+      t.fc.advance(GAP);
+      expect(await t.rt.workspaces.wake(ws.id)).toMatchObject({ phase: "running", machineId: "m1" });
+      await until(() => t.costs.at(-1)!.phase === "running");
+      expect(t.costs.at(-1)).toMatchObject({ phase: "running", awakeMs: GAP });
+      expect(t.costs.at(-1)!.rateUsdPerHour).toBeCloseTo(0.11);
+
+      // The reopened stretch is the stored one, so a host that reads the series back meters those hours too.
+      expect((await t.rt.status.history(ws.id)).at(-1)).toMatchObject({ phase: "running", awakeMs: GAP });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a rebuild out of gone leaves the closed stretch closed: the new machine's first tick counts none of the gap", async () => {
+    const t = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await t.rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = t.backend.machines[0]!;
+      m.killed = true;
+      await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal("wake", (await t.rt.workspaces.get(ws.id)).gone));
+      await until(() => t.costs.some(c => c.phase === "gone"));
+      t.fc.advance(GAP);
+      expect(await t.rt.workspaces.rebuild(ws.id)).toMatchObject({ phase: "running", machineId: "m2" });
+      await until(() => t.costs.at(-1)!.phase === "running");
+      expect(t.costs.at(-1)).toMatchObject({ phase: "running", awakeMs: 0 });
     } finally {
       warn.mockRestore();
     }
