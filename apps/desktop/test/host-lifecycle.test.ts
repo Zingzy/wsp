@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeRuntime, startHost, type CliIO, type HostHandle } from "@wsp/host";
+import { localWorkFolder, makeRuntime, startHost, type CliIO, type HostHandle } from "@wsp/host";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
@@ -224,6 +224,8 @@ describe("openHost", () => {
     session = await openHost({ port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), io: quietIO(), ...(state.ready ? { runtime: state.runtime } : {}) });
     expect(session.owned).toBe(true);
     expect((await bootOf(session.url))?.token).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    // The workspace is this computer, so the folder its turns start in is here.
+    expect(existsSync(localWorkFolder(home))).toBe(true);
   });
 
   it("shows the setup screen rather than failing when there is no key, no golden and no workspace", async () => {
@@ -231,6 +233,8 @@ describe("openHost", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "");
     // Nothing recorded: the gate answers before any host is started, so the window has a screen to show.
     expect(await checkSetup({ statePath: join(home, "state.json") })).toEqual({ ready: false, missing: "key" });
+    // And a first launch that ends there leaves the person's home as it was: no workspace was recorded here.
+    expect(existsSync(localWorkFolder(home))).toBe(false);
   });
 
   it("ignores a host.lock whose pid is gone and starts its own host", async () => {

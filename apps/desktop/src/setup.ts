@@ -29,8 +29,10 @@ export async function checkSetup(opts: SetupOptions): Promise<Setup> {
   const keys = await findKeys(opts.sources);
   const runtime = (opts.runtimeFor ?? makeRuntime)(keys, opts.statePath);
   if (!(await servesNothing(runtime))) return { ready: true, runtime };
-  await runtime.close();
   // Which onboarding is wanted is read off the provider module the runtime wired, never off a key: a computer that
-  // forks nothing needs wsp init's local road, and one that forks needs a golden sealed.
-  return { ready: false, missing: forksNoMachines(runtime.backend.capabilities) ? "key" : "golden" };
+  // forks nothing needs wsp init's local road, and one that forks needs a golden sealed. Read while the runtime is
+  // open, since a field read off a closed one stops being true without saying so.
+  const missing = forksNoMachines(runtime.backend.capabilities) ? "key" : "golden";
+  await runtime.close();
+  return { ready: false, missing };
 }

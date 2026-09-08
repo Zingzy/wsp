@@ -15,6 +15,7 @@ export {
   goldenRecipe,
   loadKeys,
   localWiring,
+  localWorkFolder,
   makeRuntime,
   serve,
   servesNothing,

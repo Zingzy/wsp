@@ -126,13 +126,18 @@ describe("wsp up", () => {
       },
     });
     const work = localWorkFolder(home);
-    // Made when the wiring is built, so the first turn has somewhere to be rather than failing on a missing folder.
+    // Not made by building the wiring: a host that only asks whether it has anything to serve builds one too, and a
+    // computer that was never set up is left as it was.
     const wiring = localWiring(home);
-    expect(existsSync(work)).toBe(true);
+    expect(existsSync(work)).toBe(false);
     // The exec road asks for the default agent's adapter, for the environment a command runs under; nothing here
     // starts a turn through it.
     const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath), adapters: { claude: () => ({ steers: false, start: () => { throw new Error("no turn in this case"); } }) }, local: wiring });
     runtimes.push(rt);
+    // Made by taking this computer as a machine, which loading the record above does, so the first turn has
+    // somewhere to be rather than failing on a missing folder.
+    await rt.workspaces.get("ws_l");
+    expect(existsSync(work)).toBe(true);
     // The one thing that decides where an agent's shell begins: a turn that started in the home folder is one cd
     // from the checkouts the person works in themselves. The road a client takes is execStream, which wraps the argv
     // in a cd of its own, so it is the road asked here; the in-process method never sees that wrapper. Both sides
@@ -157,6 +162,9 @@ describe("wsp up", () => {
 
   it("closing the wiring ends the turns running on this computer and what those turns started", async () => {
     const wiring = localWiring(home);
+    // A turn runs on a workspace, and recording one takes this computer as a machine, which is what makes the
+    // folder its commands start in.
+    await wiring.backend.get("local");
     const pidFile = join(home, "child.pid");
     const stream = wiring.execStream()(`sleep 300 & echo $! > ${pidFile}; sleep 300`, { env: {} });
     await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 5_000 });

@@ -9,6 +9,7 @@
 // meaning on a computer and throw, since the runtime refuses them by capability
 // before it ever reaches here.
 
+import { mkdirSync } from "node:fs";
 import { cpus, totalmem } from "node:os";
 import { runChild } from "./child-exec.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
@@ -136,6 +137,10 @@ export class LocalBackend implements MachineBackend {
   }
 
   async get(): Promise<Machine> {
+    // Made here and not at construction: a host builds this backend to answer whether it has anything to serve, and
+    // a computer that has never been set up must be left as it was. Taking this computer as a machine is what a
+    // recorded local workspace does, and its commands start in this folder.
+    mkdirSync(this.folder, { recursive: true });
     return this.machine;
   }
 
