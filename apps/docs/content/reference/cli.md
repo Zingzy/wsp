@@ -1,6 +1,6 @@
 # Command line
 
-Every verb, as `wsp --help` prints it. This page is generated from the binary at wsp 0.1.3; do not edit it by hand, run `pnpm --filter @wsp/docs cli` after the host changes.
+Every verb, as `wsp --help` prints it. This page is generated from the binary at wsp 0.1.4; do not edit it by hand, run `pnpm --filter @wsp/docs cli` after the host changes.
 
 Every verb takes `--json` for one JSON object per line, frames first and the result last, and `--state <path>` to name the state file the host serves. A refusal is one line on stderr and an exit code of its class: 0 ok, 1 provider, 2 auth, 3 usage. `wsp exec` exits with the command's own code.
 
@@ -22,6 +22,7 @@ usage:
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
                      on this Mac, and Build, then the browser
   wsp doctor         run the reach loop end to end against one live machine
+                     (--yes also deletes the snapshots this host left behind)
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (claude, codex, gemini, opencode),
@@ -36,6 +37,9 @@ usage:
 verbs; every one takes --json for its raw values. The recipe verbs read this
 computer and write beside the state file; the rest speak to the host wsp up
 started:
+  wsp workspaces
+      every workspace this host runs: what its machine is, its state where the
+      kind has one, and its project folder
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -70,9 +74,10 @@ started:
       the file says stands and the flags flip rows on top of it. A sign-in
       answer stands either way: no rule decides one. All of them repeat. Review
       it, then wsp init --recipe
-  wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>]
+  wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
+    --local [name]
       a workspace from the golden's head or, with --from, a project golden;
-      --size picks a size
+      --local is this computer
   wsp rename <workspace> "<name>"
       names the workspace on this computer; the name is unique here, so one
       another workspace holds is refused
@@ -88,6 +93,9 @@ started:
   wsp wake <workspace>
       wakes the workspace's machine and prints its state once the runtime has
       answered
+  wsp rebuild <workspace>
+      replaces a gone workspace's machine from its image and prints the state of
+      the new one
   wsp forget <workspace> [--yes]
       drops a gone workspace and its threads from this computer; refused while
       its machine exists
@@ -95,16 +103,17 @@ started:
       deletes the machine at the provider, then drops the record and threads
       from this computer
   wsp thread new --in <workspace>
-    [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach]
+    [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <p…
     "<task>"
       opens a thread with the agent, model, effort and access the app offers;
       follows its first turn, or with --detach prints the id and returns
   wsp thread rename <thread> "<title>"
       names the thread inside the agent's own store, so the agent shows the same
       name
-  wsp send <thread> [--model, --effort, --access <value>] [--detach] "<message>"
-      a message to the thread, on a named model, effort or access; a running
-      turn keeps its own; --detach prints the id and returns
+  wsp send <thread> [--model, --effort, --access <value>] [--image <path>]
+    [--detach] "<message>"
+      a message to the thread, on a named model, effort or access, with images;
+      a running turn keeps its own; --detach prints the id and returns
   wsp stop <thread>
       stops the thread's running turn, as the app's stop does; the machine stays
       up
@@ -145,15 +154,19 @@ exit codes; every failure is one line on stderr, the failure object with --json:
               unknown flag or a value nothing takes
 
 options:
-  --port N           app port (default 4400)
-  --ws-port N        runtime websocket port (default 4410)
+  --port N           app port (default 4400); the runtime websocket
+                     port follows 10 above it
+  --ws-port N        runtime websocket port on its own (default
+                     4410); --port alone moves both
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
                      unless a saved recipe answered copy, so macOS has nothing
-                     to ask either and the sign-ins wait for the app's terminal
+                     to ask either and the sign-ins wait for the app's terminal.
+                     doctor: also delete the snapshots and templates this host
+                     left behind, which is not reversible
   --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
@@ -225,6 +238,7 @@ usage:
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
                      on this Mac, and Build, then the browser
   wsp doctor         run the reach loop end to end against one live machine
+                     (--yes also deletes the snapshots this host left behind)
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (claude, codex, gemini, opencode),
@@ -239,6 +253,9 @@ usage:
 verbs; every one takes --json for its raw values. The recipe verbs read this
 computer and write beside the state file; the rest speak to the host wsp up
 started:
+  wsp workspaces
+      every workspace this host runs: what its machine is, its state where the
+      kind has one, and its project folder
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -273,9 +290,10 @@ started:
       the file says stands and the flags flip rows on top of it. A sign-in
       answer stands either way: no rule decides one. All of them repeat. Review
       it, then wsp init --recipe
-  wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>]
+  wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
+    --local [name]
       a workspace from the golden's head or, with --from, a project golden;
-      --size picks a size
+      --local is this computer
   wsp rename <workspace> "<name>"
       names the workspace on this computer; the name is unique here, so one
       another workspace holds is refused
@@ -291,6 +309,9 @@ started:
   wsp wake <workspace>
       wakes the workspace's machine and prints its state once the runtime has
       answered
+  wsp rebuild <workspace>
+      replaces a gone workspace's machine from its image and prints the state of
+      the new one
   wsp forget <workspace> [--yes]
       drops a gone workspace and its threads from this computer; refused while
       its machine exists
@@ -298,16 +319,17 @@ started:
       deletes the machine at the provider, then drops the record and threads
       from this computer
   wsp thread new --in <workspace>
-    [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach]
+    [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <p…
     "<task>"
       opens a thread with the agent, model, effort and access the app offers;
       follows its first turn, or with --detach prints the id and returns
   wsp thread rename <thread> "<title>"
       names the thread inside the agent's own store, so the agent shows the same
       name
-  wsp send <thread> [--model, --effort, --access <value>] [--detach] "<message>"
-      a message to the thread, on a named model, effort or access; a running
-      turn keeps its own; --detach prints the id and returns
+  wsp send <thread> [--model, --effort, --access <value>] [--image <path>]
+    [--detach] "<message>"
+      a message to the thread, on a named model, effort or access, with images;
+      a running turn keeps its own; --detach prints the id and returns
   wsp stop <thread>
       stops the thread's running turn, as the app's stop does; the machine stays
       up
@@ -348,15 +370,19 @@ exit codes; every failure is one line on stderr, the failure object with --json:
               unknown flag or a value nothing takes
 
 options:
-  --port N           app port (default 4400)
-  --ws-port N        runtime websocket port (default 4410)
+  --port N           app port (default 4400); the runtime websocket
+                     port follows 10 above it
+  --ws-port N        runtime websocket port on its own (default
+                     4410); --port alone moves both
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
                      unless a saved recipe answered copy, so macOS has nothing
-                     to ask either and the sign-ins wait for the app's terminal
+                     to ask either and the sign-ins wait for the app's terminal.
+                     doctor: also delete the snapshots and templates this host
+                     left behind, which is not reversible
   --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
@@ -428,6 +454,7 @@ usage:
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
                      on this Mac, and Build, then the browser
   wsp doctor         run the reach loop end to end against one live machine
+                     (--yes also deletes the snapshots this host left behind)
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (claude, codex, gemini, opencode),
@@ -442,6 +469,9 @@ usage:
 verbs; every one takes --json for its raw values. The recipe verbs read this
 computer and write beside the state file; the rest speak to the host wsp up
 started:
+  wsp workspaces
+      every workspace this host runs: what its machine is, its state where the
+      kind has one, and its project folder
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -476,9 +506,10 @@ started:
       the file says stands and the flags flip rows on top of it. A sign-in
       answer stands either way: no rule decides one. All of them repeat. Review
       it, then wsp init --recipe
-  wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>]
+  wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
+    --local [name]
       a workspace from the golden's head or, with --from, a project golden;
-      --size picks a size
+      --local is this computer
   wsp rename <workspace> "<name>"
       names the workspace on this computer; the name is unique here, so one
       another workspace holds is refused
@@ -494,6 +525,9 @@ started:
   wsp wake <workspace>
       wakes the workspace's machine and prints its state once the runtime has
       answered
+  wsp rebuild <workspace>
+      replaces a gone workspace's machine from its image and prints the state of
+      the new one
   wsp forget <workspace> [--yes]
       drops a gone workspace and its threads from this computer; refused while
       its machine exists
@@ -501,16 +535,17 @@ started:
       deletes the machine at the provider, then drops the record and threads
       from this computer
   wsp thread new --in <workspace>
-    [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach]
+    [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <p…
     "<task>"
       opens a thread with the agent, model, effort and access the app offers;
       follows its first turn, or with --detach prints the id and returns
   wsp thread rename <thread> "<title>"
       names the thread inside the agent's own store, so the agent shows the same
       name
-  wsp send <thread> [--model, --effort, --access <value>] [--detach] "<message>"
-      a message to the thread, on a named model, effort or access; a running
-      turn keeps its own; --detach prints the id and returns
+  wsp send <thread> [--model, --effort, --access <value>] [--image <path>]
+    [--detach] "<message>"
+      a message to the thread, on a named model, effort or access, with images;
+      a running turn keeps its own; --detach prints the id and returns
   wsp stop <thread>
       stops the thread's running turn, as the app's stop does; the machine stays
       up
@@ -551,15 +586,19 @@ exit codes; every failure is one line on stderr, the failure object with --json:
               unknown flag or a value nothing takes
 
 options:
-  --port N           app port (default 4400)
-  --ws-port N        runtime websocket port (default 4410)
+  --port N           app port (default 4400); the runtime websocket
+                     port follows 10 above it
+  --ws-port N        runtime websocket port on its own (default
+                     4410); --port alone moves both
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
                      unless a saved recipe answered copy, so macOS has nothing
-                     to ask either and the sign-ins wait for the app's terminal
+                     to ask either and the sign-ins wait for the app's terminal.
+                     doctor: also delete the snapshots and templates this host
+                     left behind, which is not reversible
   --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
@@ -637,6 +676,17 @@ usage: wsp recipe [--tick used|installed|default] [--set <id>=on|off] [--signin 
   --state PATH   the state file the host serves
 ```
 
+## wsp workspaces
+
+```text
+usage: wsp workspaces
+  every workspace this host runs: what its machine is, its state where the kind
+  has one, and its project folder
+
+  --json         print the raw protocol values, one JSON line each
+  --state PATH   the state file the host serves
+```
+
 ## wsp threads
 
 ```text
@@ -651,9 +701,9 @@ usage: wsp threads [--in <workspace>]
 ## wsp new
 
 ```text
-usage: wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>]
-  a workspace from the golden's head or, with --from, a project golden; --size
-  picks a size
+usage: wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new --local [name]
+  a workspace from the golden's head or, with --from, a project golden; --local
+  is this computer
 
   --json         print the raw protocol values, one JSON line each
   --state PATH   the state file the host serves
@@ -755,6 +805,7 @@ usage:
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
                      on this Mac, and Build, then the browser
   wsp doctor         run the reach loop end to end against one live machine
+                     (--yes also deletes the snapshots this host left behind)
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (claude, codex, gemini, opencode),
@@ -769,6 +820,9 @@ usage:
 verbs; every one takes --json for its raw values. The recipe verbs read this
 computer and write beside the state file; the rest speak to the host wsp up
 started:
+  wsp workspaces
+      every workspace this host runs: what its machine is, its state where the
+      kind has one, and its project folder
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -803,9 +857,10 @@ started:
       the file says stands and the flags flip rows on top of it. A sign-in
       answer stands either way: no rule decides one. All of them repeat. Review
       it, then wsp init --recipe
-  wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>]
+  wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
+    --local [name]
       a workspace from the golden's head or, with --from, a project golden;
-      --size picks a size
+      --local is this computer
   wsp rename <workspace> "<name>"
       names the workspace on this computer; the name is unique here, so one
       another workspace holds is refused
@@ -821,6 +876,9 @@ started:
   wsp wake <workspace>
       wakes the workspace's machine and prints its state once the runtime has
       answered
+  wsp rebuild <workspace>
+      replaces a gone workspace's machine from its image and prints the state of
+      the new one
   wsp forget <workspace> [--yes]
       drops a gone workspace and its threads from this computer; refused while
       its machine exists
@@ -828,16 +886,17 @@ started:
       deletes the machine at the provider, then drops the record and threads
       from this computer
   wsp thread new --in <workspace>
-    [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach]
+    [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <p…
     "<task>"
       opens a thread with the agent, model, effort and access the app offers;
       follows its first turn, or with --detach prints the id and returns
   wsp thread rename <thread> "<title>"
       names the thread inside the agent's own store, so the agent shows the same
       name
-  wsp send <thread> [--model, --effort, --access <value>] [--detach] "<message>"
-      a message to the thread, on a named model, effort or access; a running
-      turn keeps its own; --detach prints the id and returns
+  wsp send <thread> [--model, --effort, --access <value>] [--image <path>]
+    [--detach] "<message>"
+      a message to the thread, on a named model, effort or access, with images;
+      a running turn keeps its own; --detach prints the id and returns
   wsp stop <thread>
       stops the thread's running turn, as the app's stop does; the machine stays
       up
@@ -878,15 +937,19 @@ exit codes; every failure is one line on stderr, the failure object with --json:
               unknown flag or a value nothing takes
 
 options:
-  --port N           app port (default 4400)
-  --ws-port N        runtime websocket port (default 4410)
+  --port N           app port (default 4400); the runtime websocket
+                     port follows 10 above it
+  --ws-port N        runtime websocket port on its own (default
+                     4410); --port alone moves both
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
                      unless a saved recipe answered copy, so macOS has nothing
-                     to ask either and the sign-ins wait for the app's terminal
+                     to ask either and the sign-ins wait for the app's terminal.
+                     doctor: also delete the snapshots and templates this host
+                     left behind, which is not reversible
   --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
@@ -941,9 +1004,9 @@ With a Solari key present, a missing Anthropic key is only noted at start.
 ## wsp send
 
 ```text
-usage: wsp send <thread> [--model, --effort, --access <value>] [--detach] "<message>"
-  a message to the thread, on a named model, effort or access; a running turn
-  keeps its own; --detach prints the id and returns
+usage: wsp send <thread> [--model, --effort, --access <value>] [--image <path>] [--detach] "<message>"
+  a message to the thread, on a named model, effort or access, with images; a
+  running turn keeps its own; --detach prints the id and returns
 
   --json         print the raw protocol values, one JSON line each
   --state PATH   the state file the host serves
@@ -1024,6 +1087,7 @@ usage:
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
                      on this Mac, and Build, then the browser
   wsp doctor         run the reach loop end to end against one live machine
+                     (--yes also deletes the snapshots this host left behind)
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (claude, codex, gemini, opencode),
@@ -1038,6 +1102,9 @@ usage:
 verbs; every one takes --json for its raw values. The recipe verbs read this
 computer and write beside the state file; the rest speak to the host wsp up
 started:
+  wsp workspaces
+      every workspace this host runs: what its machine is, its state where the
+      kind has one, and its project folder
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -1072,9 +1139,10 @@ started:
       the file says stands and the flags flip rows on top of it. A sign-in
       answer stands either way: no rule decides one. All of them repeat. Review
       it, then wsp init --recipe
-  wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>]
+  wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
+    --local [name]
       a workspace from the golden's head or, with --from, a project golden;
-      --size picks a size
+      --local is this computer
   wsp rename <workspace> "<name>"
       names the workspace on this computer; the name is unique here, so one
       another workspace holds is refused
@@ -1090,6 +1158,9 @@ started:
   wsp wake <workspace>
       wakes the workspace's machine and prints its state once the runtime has
       answered
+  wsp rebuild <workspace>
+      replaces a gone workspace's machine from its image and prints the state of
+      the new one
   wsp forget <workspace> [--yes]
       drops a gone workspace and its threads from this computer; refused while
       its machine exists
@@ -1097,16 +1168,17 @@ started:
       deletes the machine at the provider, then drops the record and threads
       from this computer
   wsp thread new --in <workspace>
-    [--agent, --model, --effort, --access, --cwd, --notify, --title, --detach]
+    [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <p…
     "<task>"
       opens a thread with the agent, model, effort and access the app offers;
       follows its first turn, or with --detach prints the id and returns
   wsp thread rename <thread> "<title>"
       names the thread inside the agent's own store, so the agent shows the same
       name
-  wsp send <thread> [--model, --effort, --access <value>] [--detach] "<message>"
-      a message to the thread, on a named model, effort or access; a running
-      turn keeps its own; --detach prints the id and returns
+  wsp send <thread> [--model, --effort, --access <value>] [--image <path>]
+    [--detach] "<message>"
+      a message to the thread, on a named model, effort or access, with images;
+      a running turn keeps its own; --detach prints the id and returns
   wsp stop <thread>
       stops the thread's running turn, as the app's stop does; the machine stays
       up
@@ -1147,15 +1219,19 @@ exit codes; every failure is one line on stderr, the failure object with --json:
               unknown flag or a value nothing takes
 
 options:
-  --port N           app port (default 4400)
-  --ws-port N        runtime websocket port (default 4410)
+  --port N           app port (default 4400); the runtime websocket
+                     port follows 10 above it
+  --ws-port N        runtime websocket port on its own (default
+                     4410); --port alone moves both
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
                      unless a saved recipe answered copy, so macOS has nothing
-                     to ask either and the sign-ins wait for the app's terminal
+                     to ask either and the sign-ins wait for the app's terminal.
+                     doctor: also delete the snapshots and templates this host
+                     left behind, which is not reversible
   --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for

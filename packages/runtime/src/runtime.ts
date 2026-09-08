@@ -572,17 +572,15 @@ export interface GoldenExec {
   error?: string;
 }
 
-/** What a host wires for the one local workspace this computer can be: the backend that answers with this computer,
- * how a turn's process is launched on it (a real child, not the guest's polled road), where each harness keeps its
- * own sessions here, and the environment a turn runs under. Absent, the runtime serves cloud workspaces alone and
- * `createLocal` is refused. The one place the local variant is registered beside the cloud default. */
-/** A command launched on a machine, with the folder the runtime resolved for it: what the caller named, else the
- * folder that workspace's kind names. Absent on a kind that names none, where the machine's own home is what its
- * shell lands in, which is the one case a caller has left to word for itself. */
+/** `ranIn` absent means the workspace's kind named no folder, so the machine's own home is where its shell landed. */
 export interface RunningExec extends ExecStream {
   readonly ranIn?: string;
 }
 
+/** What a host wires for the one local workspace this computer can be: the backend that answers with this computer,
+ * how a turn's process is launched on it (a real child, not the guest's polled road), where each harness keeps its
+ * own sessions here, and the environment a turn runs under. Absent, the runtime serves cloud workspaces alone and
+ * `createLocal` is refused. The one place the local variant is registered beside the cloud default. */
 export interface LocalWiring {
   /** This computer's backend, which publishes the folder its commands run in: the folder a turn and a command start
    * in when the caller names none is that one and not the person's home, which is one `cd` away and holds the

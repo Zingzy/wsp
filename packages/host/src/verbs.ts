@@ -1043,16 +1043,15 @@ async function detachVerb(ctx: VerbContext, client: HostClient, start: Record<st
 
 export type ExecExit = Extract<ExecEvent, { type: "exec.exit" }>;
 
-/** Runs argv on the workspace's machine, in cwd when given, and follows it to its exit; `on` sees each output line
- * and the exit. Fails when the host goes away first. */
-/** What a command came to: its exit, and the folder the runtime ran it in as the runtime resolved it. `ranIn` is
- * absent only where the workspace's kind names no folder, which leaves the machine's own home; every caller prints
- * this rather than restating the rule the runtime holds. */
+/** `ranIn` is the folder the host answered with, which every caller prints rather than the one it asked for; absent
+ * only where the workspace's kind names no folder, which leaves the machine's own home. */
 export interface ExecRun {
   exit: ExecExit;
   ranIn?: string;
 }
 
+/** Runs argv on the workspace's machine, in cwd when given, and follows it to its exit; `on` sees each output line
+ * and the exit. Fails when the host goes away first. */
 export async function execOn(client: HostClient, workspaceId: string, argv: readonly string[], cwd: string | undefined, on: (e: ExecEvent) => void): Promise<ExecRun> {
   const pushed = pushedFrames(client);
   const { execId, cwd: ranIn } = await client.request<{ execId: string; cwd?: string }>("workspaces.exec", { workspaceId, argv, ...(cwd !== undefined ? { cwd } : {}) });
