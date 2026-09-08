@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { relayedRefusal } from "@wsp/protocol";
+import { relayedRefusal, type PortForward } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
-import { serveRuntime } from "../src/serve.js";
+import { serveRuntime, type ForwardsSource } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
 import { WsClient } from "./ws-client.js";
@@ -208,6 +208,50 @@ describe("local workspace", () => {
       // A client on this computer names no origin, and the workspace answers it.
       expect((await c.request("workspaces.list"))["workspaces"]).toHaveLength(1);
       expect((await c.request("workspaces.rename", { workspaceId: ws.id, name: "mini", origin: "relayed" }))["error"]).toBe(relayedRefusal("mac"));
+      c.close();
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("the port forwards the host holds read the same rule: a relayed request neither lists nor stops one on this computer", async () => {
+    const rt = runtime();
+    const local = await rt.workspaces.createLocal("mac");
+    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const row = (workspaceId: string, port: number, name: string): PortForward => ({ workspaceId, port, startedAt: "2026-09-08T00:00:00.000Z", name, kind: "url" });
+    // The host forwards a builder's ports too, and no workspace record names a builder.
+    const rows = [row(local.id, 8123, "mac"), row(cloud.id, 8124, "b1"), row("m_builder", 8125, "setup (builder)")];
+    const stops: string[] = [];
+    const forwards: ForwardsSource = {
+      list: () => rows,
+      stop: (workspaceId, port) => {
+        stops.push(`${workspaceId}:${port}`);
+        return true;
+      },
+      on: () => () => {},
+    };
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", forwards });
+    try {
+      const c = await WsClient.connect(srv.port, { token: "secret" });
+      const ports = async (params?: Record<string, unknown>): Promise<number[]> => ((await c.request("forwards.list", params))["forwards"] as PortForward[]).map(f => f.port);
+      const stopped = async (workspaceId: string, port: number): Promise<string> => (await c.request("forwards.stop", { workspaceId, port, origin: "relayed" }))["error"] as string ?? "stopped it";
+      // Both halves are read before anything is asserted, so a half that stops holding is named rather than hidden.
+      const seen = {
+        listedHere: await ports(),
+        listedRelayed: await ports({ origin: "relayed" }),
+        localStop: await stopped(local.id, 8123),
+        cloudStop: await stopped(cloud.id, 8124),
+        builderStop: await stopped("m_builder", 8125),
+        asked: stops,
+      };
+      expect(seen).toEqual({
+        listedHere: [8123, 8124, 8125],
+        listedRelayed: [8124, 8125],
+        localStop: relayedRefusal("mac"),
+        cloudStop: "stopped it",
+        builderStop: "stopped it",
+        asked: [`${cloud.id}:8124`, "m_builder:8125"],
+      });
       c.close();
     } finally {
       await srv.close();

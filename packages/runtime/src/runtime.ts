@@ -861,6 +861,11 @@ export interface Runtime {
      * all. A 401 is the edge refusing the token, so the port's route is reminted before the reply and the next portReach
      * carries the fresh one. */
     portProbe(id: string, port: number, origin?: WorkspaceOrigin): Promise<PortProbeView>;
+    /** The same rule every verb above reads, as a sentence, for the rows and the roads the runtime does not own
+     * itself: the host's port forwards, which it lists and stops by the id of their target. Answers the sentence to
+     * refuse this request with, or nothing when it may drive that workspace; a target no record here names, as a
+     * builder whose ports the host forwards is, is nobody's to hide or refuse for. */
+    originRefusal(id: string, origin?: WorkspaceOrigin): Promise<string | undefined>;
   };
   readonly projects: {
     /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
@@ -1291,14 +1296,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * workspace answers nothing relayed. Today no machine has a road into the host, so nothing relays yet; the rule
    * holds when one appears. */
   const drives = (kind: WorkspaceKind, origin: WorkspaceOrigin | undefined): boolean => origin !== "relayed" || moduleOf(kind).relayed;
+  /** The rule as a sentence: what this request is refused with for that record, or nothing when it may drive it.
+   * A record this host does not hold, which a port forward's target may be since the host forwards a builder's
+   * ports too, is nobody's to refuse for. */
+  const refusalFor = (record: Pick<WorkspaceRecord, "kind" | "name"> | undefined, origin: WorkspaceOrigin | undefined): string | undefined =>
+    record !== undefined && !drives(record.kind, origin) ? relayedRefusal(record.name) : undefined;
   const refuseRelayed = (record: Pick<WorkspaceRecord, "kind" | "name"> | undefined, origin: WorkspaceOrigin | undefined): void => {
-    if (record !== undefined && !drives(record.kind, origin)) throw new Error(relayedRefusal(record.name));
+    const line = refusalFor(record, origin);
+    if (line !== undefined) throw new Error(line);
   };
-  /** The same rule for a workspace named by id: one this host does not hold is nobody's to hide. */
-  const drivesId = (workspaceId: string, origin: WorkspaceOrigin | undefined): boolean => {
-    const entry = live.get(workspaceId);
-    return entry === undefined || drives(entry.record.kind, origin);
-  };
+  const drivesId = (workspaceId: string, origin: WorkspaceOrigin | undefined): boolean => refusalFor(live.get(workspaceId)?.record, origin) === undefined;
   const bus = eventBus();
   const pingTimeoutMs = opts.wake?.pingTimeoutMs ?? WAKE_PING_TIMEOUT_MS;
   const pauseDeadlineMs = opts.nap?.pauseDeadlineMs ?? PAUSE_DEADLINE_MS;
@@ -2817,6 +2824,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const body = await readBodyUpTo(res, PORT_PROBE_BODY_CAP);
       if (res.status === 401) await entry.ws.remintPortReach(port);
       return { status: res.status, body };
+    },
+
+    async originRefusal(id, origin) {
+      await ready();
+      return refusalFor(live.get(id)?.record, origin);
     },
   };
 

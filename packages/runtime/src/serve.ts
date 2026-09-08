@@ -157,8 +157,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           return;
         }
 
-        // Where this request reached the host from rides the envelope, so every verb below hands the runtime the
-        // same fact and the runtime reads the rule once.
         const origin = msg.origin;
         try {
           switch (msg.op) {
@@ -188,9 +186,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, statuses: await rt.status.list(undefined, origin) });
               return;
             case "workspaces.create": {
-              const { id, op, origin: from, ...rest } = msg;
+              const { id, op, origin: _sent, ...rest } = msg;
               void op;
-              const { notice, ...workspace } = await rt.workspaces.create(rest, from);
+              const { notice, ...workspace } = await rt.workspaces.create(rest, origin);
               send({ id, ok: true, workspace, ...(notice !== undefined ? { notice } : {}) });
               return;
             }
@@ -333,13 +331,19 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.rebuild":
               send({ id: msg.id, ok: true, workspace: await rt.workspaces.rebuild(msg.workspaceId, origin) });
               return;
-            case "forwards.list":
-              send({ id: msg.id, ok: true, forwards: opts.forwards?.list() ?? [] });
+            case "forwards.list": {
+              const shown: PortForward[] = [];
+              for (const f of opts.forwards?.list() ?? []) if ((await rt.workspaces.originRefusal(f.workspaceId, origin)) === undefined) shown.push(f);
+              send({ id: msg.id, ok: true, forwards: shown });
               return;
-            case "forwards.stop":
+            }
+            case "forwards.stop": {
+              const refusal = await rt.workspaces.originRefusal(msg.workspaceId, origin);
+              if (refusal !== undefined) throw new Error(refusal);
               if (!opts.forwards?.stop(msg.workspaceId, msg.port)) throw new Error(`nothing is forwarding localhost:${msg.port} for that workspace`);
               send({ id: msg.id, ok: true });
               return;
+            }
             case "workspaces.exec": {
               const stream = await rt.workspaces.execStream(msg.workspaceId, msg.argv, msg.cwd, origin);
               const execId = randomBytes(6).toString("hex");
