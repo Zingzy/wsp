@@ -6,7 +6,7 @@ Set Width 1120
 Set Height 760
 Set Padding 28
 Set Theme "Catppuccin Mocha"
-Type "wsp init --state /tmp/wsp-demo/state.json --port 4401 --ws-port 4411"
+Type "wsp init --state /tmp/wsp-demo/state.json --port 4401"
 Enter
 Sleep 36s
 Enter
