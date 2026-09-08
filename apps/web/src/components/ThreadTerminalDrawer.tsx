@@ -41,6 +41,7 @@ import { cn, errorText } from "../lib/utils";
 import { getTerminalLabel } from "../lib/terminalLabels";
 import { GhosttyTerminalSurface, type GhosttyTerminalFont, type GhosttyTerminalSurfaceOptions } from "../terminal/ghostty/surface";
 import { DEFAULT_TERMINAL_SIZING, appScheme, terminalFontWith, terminalSurfaceSettings, terminalThemeWith, type TerminalSizing } from "../terminal/ghosttyConfig";
+import { rememberTerminalFile } from "../terminal/terminalFile";
 import type { Api } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { type GhosttyColor, type GhosttyTheme } from "../terminal/ghostty/core";
@@ -270,6 +271,7 @@ export function TerminalViewport({
     void readTerminalFile(readHostConfig, appScheme()).then(file => {
       if (stale || file === null || terminalRef.current !== terminal) return;
       fileRef.current = file;
+      rememberTerminalFile(file);
       const settings = terminalSurfaceSettings(file, terminalThemeFromApp(containerRef.current), fontRef.current, chosenRef.current, sizingRef.current);
       terminal.setTheme(settings.theme);
       void terminal.setFont(settings.font);
@@ -299,6 +301,7 @@ export function TerminalViewport({
       const file = readHostConfig === undefined ? null : await readTerminalFile(readHostConfig, scheme);
       if (cancelled) return null;
       fileRef.current = file;
+      rememberTerminalFile(file);
       const settings = terminalSurfaceSettings(file, terminalThemeFromApp(mount), setupFont, chosenRef.current, setupSizing);
       const terminalOptions: GhosttyTerminalSurfaceOptions = {
         theme: settings.theme,

@@ -34,11 +34,12 @@ describe("preferences over the wire", () => {
     expect(watcher.events.find(e => e.type === "preferences.changed")).toMatchObject({ type: "preferences.changed", preferences: expected, seq: expect.any(Number) });
     watcher.close();
 
-    // A second patch lands on the first, and a null width clears the width alone.
-    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { sidebarMode: "spaces", sidebarWidth: null } })).toMatchObject({
+    // A second patch lands on the first, a null width clears the width alone, and a zoom entry lands beside the others.
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { sidebarMode: "spaces", sidebarWidth: null, terminalZoom: { ws_b: -1 } } })).toMatchObject({
       ok: true,
-      preferences: { theme: "light", sidebarMode: "spaces", terminalSize: "app", terminalZoom: { ws_a: 2 } },
+      preferences: { theme: "light", sidebarMode: "spaces", terminalSize: "app", terminalZoom: { ws_a: 2, ws_b: -1 } },
     });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { terminalZoom: { ws_b: null } } })).toMatchObject({ ok: true, preferences: { terminalZoom: { ws_a: 2 } } });
     expect((await wsRequest(srv.port, "t", { op: "preferences.get" }))["preferences"]).not.toHaveProperty("sidebarWidth");
 
     await srv.close();

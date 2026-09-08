@@ -888,8 +888,12 @@ export const Preferences = z.object({
 });
 export type Preferences = z.infer<typeof Preferences>;
 
-/** What preferences.set takes: any of the record's fields; a null sidebarWidth clears it back to the default. */
-export const PreferencesPatch = Preferences.partial().extend({ sidebarWidth: z.number().int().positive().nullable().optional() });
+/** What preferences.set takes: any of the record's fields; a null sidebarWidth clears it back to the default, and
+ * terminalZoom names only the workspaces it moves, a null entry dropping that workspace's zoom. */
+export const PreferencesPatch = Preferences.partial().extend({
+  sidebarWidth: z.number().int().positive().nullable().optional(),
+  terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
+});
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
 export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {} };
@@ -904,11 +908,16 @@ export function preferencesFrom(stored: unknown): Preferences {
  * that paints ahead of the host's answer, so both land on the same record. */
 export function applyPreferencesPatch(current: Preferences, patch: PreferencesPatch): Preferences {
   const sidebarWidth = patch.sidebarWidth === undefined ? current.sidebarWidth : patch.sidebarWidth;
+  const terminalZoom = { ...current.terminalZoom };
+  for (const [workspaceId, zoom] of Object.entries(patch.terminalZoom ?? {})) {
+    if (zoom === null) delete terminalZoom[workspaceId];
+    else terminalZoom[workspaceId] = zoom;
+  }
   return {
     theme: patch.theme ?? current.theme,
     sidebarMode: patch.sidebarMode ?? current.sidebarMode,
     terminalSize: patch.terminalSize ?? current.terminalSize,
-    terminalZoom: patch.terminalZoom ?? current.terminalZoom,
+    terminalZoom,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
   };
 }

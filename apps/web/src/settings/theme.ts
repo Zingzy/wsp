@@ -8,7 +8,6 @@ import { useLayoutEffect } from "react";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { useStore } from "../protocol/store.js";
-import { rememberTheme } from "../protocol/themeCache.js";
 
 /** Whether each value draws the dark side, given whether the computer does. */
 const DRAWS_DARK: Record<ThemePreference, (systemDark: boolean) => boolean> = {
@@ -29,14 +28,13 @@ export function applyTheme(theme: ThemePreference, systemDark: boolean): void {
 }
 
 /** Mounted once under the store: the html element follows the preference before the first paint and at once after,
- * and under system the computer's own scheme as it changes; the value is kept for the next load's first paint; the
- * desktop shell hears it so the window's frame, glass and traffic-light bar follow. */
+ * and under system the computer's own scheme as it changes; the desktop shell hears it so the window's frame, glass
+ * and traffic-light bar follow. */
 export function useThemeEffect(): void {
   const theme = useStore(s => s.preferences.theme);
   const systemDark = useMediaQuery(SYSTEM_DARK_QUERY);
   useLayoutEffect(() => {
     applyTheme(theme, systemDark);
-    rememberTheme(theme);
     desktopBridge()?.setTheme?.(theme);
   }, [theme, systemDark]);
 }

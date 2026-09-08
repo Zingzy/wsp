@@ -567,8 +567,9 @@ function SidebarRail({
     if (!rail) return;
     const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
     if (!wrapper) return;
-    // Before the browser paints, so a kept width never flashes at the default first; a width cleared elsewhere
-    // puts the default back, since the provider's own inline value is gone once this has set the variable.
+    // Before the browser paints, from the record the store booted on, so a kept width never flashes at the default
+    // first; a width cleared elsewhere puts the default back, since the provider's own inline value is gone once this
+    // has set the variable.
     const apply = (): void => {
       const stored = store.read();
       if (stored === null) {

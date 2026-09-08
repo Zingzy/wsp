@@ -121,6 +121,30 @@ describe("app shell", () => {
     expect(window.localStorage.getItem(RIGHT_PANEL_WIDTH_STORAGE_KEY)).toBe("640");
   });
 
+  it("a load paints the kept width and the Spaces body from this browser's first-paint cache before the host answers, and the record wins when it lands", async () => {
+    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "dark", sidebarWidth: 312, sidebarMode: "spaces" }));
+    vi.resetModules();
+    const { useStore: bootStore } = await import("../src/protocol/store.js");
+    const { AppShell: BootShell } = await import("../src/shell/AppShell.js");
+    // A host that has not answered yet: the record is pending for the whole first frame.
+    let answer: ((p: import("@wsp/protocol").Preferences) => void) | undefined;
+    const api = { ...fakeApi([view("ws_a", "api"), view("ws_b", "web")]), preferences: () => new Promise<import("@wsp/protocol").Preferences>(r => (answer = r)) };
+    bootStore.getState().bind(api);
+    render(
+      <BootShell>
+        <div>center content</div>
+      </BootShell>,
+    );
+    const wrapper = document.querySelector<HTMLElement>("[data-slot='sidebar-wrapper']")!;
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("312px");
+    await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
+    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
+    await act(async () => answer!({ ...DEFAULT_PREFERENCES, sidebarMode: "list" }));
+    await waitFor(() => expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(2));
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("16rem");
+    expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "system", sidebarMode: "list" });
+  });
+
   it("the sidebar opens at the width the host's record holds, follows a change to it, and a cleared width puts the default back", async () => {
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarWidth: 312 } });
     await mountShell();

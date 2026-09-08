@@ -9,7 +9,7 @@ import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
-import { bootPreferences } from "./themeCache.js";
+import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
 export interface CostTick {
@@ -87,8 +87,8 @@ interface State {
   ready: boolean;
   /** How many reconnects the runtime could not replay events for; anything built from sessions.history reloads when it moves. */
   gaps: number;
-  /** The person's view preferences, the host's one record; until the host answers, the defaults with the theme this
-   * browser last applied, so the first paint is the side the person picked. */
+  /** The person's view preferences, the host's one record; until the host answers, the defaults with what this browser
+   * kept of the last record, so the first paint is the side, the width and the body the person picked. */
   preferences: Preferences;
   /** Whether the centre shows the settings page in place of the selected workspace's thread. */
   settingsOpen: boolean;
@@ -99,6 +99,8 @@ interface State {
   /** Also leaves the settings page: every road to a workspace lands on its thread. */
   select(id: string | null, threadId?: string | null): void;
   openSettings(): void;
+  closeSettings(): void;
+  toggleSettings(): void;
   /** Paints the patch at once and sends it; the host's answer settles the record, a refusal is a toast and the host's record is read again. */
   setPreferences(patch: PreferencesPatch): Promise<void>;
   /** Starts a create from the golden head, or from `golden` (a project golden's snapshot) when given, selects its row,
@@ -296,6 +298,8 @@ export const useStore = create<State>((set, get) => {
     },
     select(id, threadId = null) { set({ selectedId: id, selectedThreadId: threadId, settingsOpen: false }); },
     openSettings() { set({ settingsOpen: true }); },
+    closeSettings() { set({ settingsOpen: false }); },
+    toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen })); },
     async setPreferences(patch) {
       const api = get().api;
       set(s => ({ preferences: applyPreferencesPatch(s.preferences, patch) }));
@@ -532,6 +536,10 @@ export const useStore = create<State>((set, get) => {
 // Every road to a workspace (a click, a chord, a finished creation, the boot fallback) lands here; a creation row is not a workspace yet.
 useStore.subscribe((s, prev) => {
   if (s.selectedId !== prev.selectedId && s.selectedId !== null && s.workspaces.some(w => w.id === s.selectedId)) rememberWorkspace(s.selectedId);
+});
+// Every change to the record, the host's or a pick painted ahead of it, is what the next load paints first.
+useStore.subscribe((s, prev) => {
+  if (s.preferences !== prev.preferences) rememberFirstPaint(s.preferences);
 });
 
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }

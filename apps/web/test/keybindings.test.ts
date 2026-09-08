@@ -56,9 +56,9 @@ describe("default shortcuts", () => {
     expect(resolve(cmd("j", { shiftKey: true }), MAC)).toBe("preview.toggle");
     expect(resolve(cmd("k"), MAC)).toBe("commandPalette.toggle");
     expect(resolve(ctrl("k"), LINUX)).toBe("commandPalette.toggle");
-    expect(resolve(cmd(","), MAC)).toBe("settings.open");
-    expect(resolve(ctrl(","), LINUX)).toBe("settings.open");
-    expect(resolve(cmd(","), MAC, { terminalFocus: true })).toBe("settings.open");
+    expect(resolve(cmd(","), MAC)).toBe("settings.toggle");
+    expect(resolve(ctrl(","), LINUX)).toBe("settings.toggle");
+    expect(resolve(cmd(","), MAC, { terminalFocus: true })).toBe("settings.toggle");
   });
 
   it("gates the terminal chords on terminalFocus and hands mod+n to chat otherwise", () => {

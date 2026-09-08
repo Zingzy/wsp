@@ -140,16 +140,23 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await refused(url)).toBe(true);
   });
 
-  it("opens dark and moves the window's theme source with the theme the page says", async () => {
+  it("the window's theme source follows the page: the record's system once the page has read it, light after a Light pick on the settings page, and light again on a reload from a dark pin", async () => {
     launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
     const win = await launched.app.firstWindow();
     await bootOf(win);
     const source = () => launched!.app.evaluate(({ nativeTheme }) => nativeTheme.themeSource);
-    expect(await source()).toBe("dark");
-    await win.evaluate(() => (window as unknown as DesktopWindow).wsp.setTheme("light"));
-    await vi.waitFor(async () => expect(await source()).toBe("light"));
-    await win.evaluate(() => (window as unknown as DesktopWindow).wsp.setTheme("system"));
+    // The page's first word is the record's default; the pin before it is not a fact the page can be asked about.
     await vi.waitFor(async () => expect(await source()).toBe("system"));
+    await win.keyboard.press("Meta+,");
+    await win.getByRole("radio", { name: "Light" }).click();
+    await vi.waitFor(async () => expect(await source()).toBe("light"));
+    expect(await win.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(false);
+    // Pinned dark again by hand, a reload has to say light on its own: the record on the host, and the page's cache before it.
+    await launched.app.evaluate(({ nativeTheme }) => {
+      nativeTheme.themeSource = "dark";
+    });
+    await win.reload();
+    await vi.waitFor(async () => expect(await source()).toBe("light"));
   });
 
   it("photographs its own page for a workspace and hands the picture back to the page", async () => {

@@ -161,8 +161,8 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
     case "commandPalette.toggle":
       toggleCommandPalette();
       return;
-    case "settings.open":
-      useStore.getState().openSettings();
+    case "settings.toggle":
+      useStore.getState().toggleSettings();
       return;
     case "rightPanel.toggle":
       if (workspaceId) useRightPanelStore.getState().toggleVisibility(workspaceId);

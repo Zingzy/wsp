@@ -4,7 +4,7 @@
 // the host's answer and settled by it, a refusal a toast that reads the host's
 // record again, the picks this browser kept in localStorage moved onto the
 // record once, and the settings page a state a workspace pick leaves.
-import { DEFAULT_PREFERENCES, type Preferences, type PreferencesPatch, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, applyPreferencesPatch, type Preferences, type PreferencesPatch, type WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -47,7 +47,7 @@ function fakeApi(record: Preferences, refuse?: () => Error) {
     setPreferences: async patch => {
       sets.push(patch);
       if (refuse !== undefined) throw refuse();
-      held = { ...held, ...(patch as Partial<Preferences>) };
+      held = applyPreferencesPatch(held, patch);
       return held;
     },
   };
@@ -171,7 +171,7 @@ describe("the preferences record in the store", () => {
     expect(sets).toEqual([{ sidebarMode: "spaces" }]);
   });
 
-  it("the settings page opens on its own state and closes when a workspace or a thread is picked", () => {
+  it("the settings page opens on its own state, toggles shut, closes on its own, and closes when a workspace or a thread is picked", () => {
     expect(useStore.getState().settingsOpen).toBe(false);
     useStore.getState().openSettings();
     expect(useStore.getState().settingsOpen).toBe(true);
@@ -179,6 +179,13 @@ describe("the preferences record in the store", () => {
     expect(useStore.getState().settingsOpen).toBe(false);
     useStore.getState().openSettings();
     useStore.getState().select("ws_a", "thr_1");
+    expect(useStore.getState().settingsOpen).toBe(false);
+    useStore.getState().toggleSettings();
+    expect(useStore.getState().settingsOpen).toBe(true);
+    useStore.getState().toggleSettings();
+    expect(useStore.getState().settingsOpen).toBe(false);
+    useStore.getState().openSettings();
+    useStore.getState().closeSettings();
     expect(useStore.getState().settingsOpen).toBe(false);
   });
 });

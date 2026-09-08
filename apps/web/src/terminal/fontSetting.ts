@@ -9,7 +9,9 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { bootPayload } from "../boot.js";
 import type { TerminalViewportConfig } from "../components/ThreadTerminalDrawer.js";
 import { useStore } from "../protocol/store.js";
-import { appTerminalFontSize, terminalFontSize } from "./ghostty/surface.js";
+import { terminalFontSize } from "./ghostty/surface.js";
+import { terminalBaseSize } from "./ghosttyConfig.js";
+import { terminalFile } from "./terminalFile.js";
 
 export const TERMINAL_FONT_KEY = "wsp:terminal-font";
 const CHANGE_EVENT = "wsp:terminal-font-change";
@@ -53,20 +55,20 @@ export function effectiveTerminalFont(): string | undefined {
 /** The pixels this workspace's panes add to the base size; none until a zoom chord moves it. */
 export const terminalZoomOf = (zoom: Readonly<Record<string, number>>, workspaceId: string): number => zoom[workspaceId] ?? 0;
 
-/** One step of the terminal's own zoom, held so the size stays inside what the surface draws over the app's base. */
+/** One step of the terminal's own zoom, held so the size stays inside what the surface draws over the base the panes
+ * draw from; the patch names this workspace alone, so another client's zoom on another workspace is kept. */
 export function stepTerminalZoom(workspaceId: string, steps: number): void {
   const { preferences, setPreferences } = useStore.getState();
-  const base = appTerminalFontSize();
+  const base = terminalBaseSize(preferences.terminalSize, terminalFile());
   const zoom = terminalFontSize(base + terminalZoomOf(preferences.terminalZoom, workspaceId) + steps * FONT_SIZE_STEP) - base;
-  void setPreferences({ terminalZoom: { ...preferences.terminalZoom, [workspaceId]: zoom } });
+  void setPreferences({ terminalZoom: { [workspaceId]: zoom } });
 }
 
 /** The panes back on the base size, with nothing of this workspace's own left on the record. */
 export function resetTerminalZoom(workspaceId: string): void {
   const { preferences, setPreferences } = useStore.getState();
   if (!(workspaceId in preferences.terminalZoom)) return;
-  const { [workspaceId]: _gone, ...rest } = preferences.terminalZoom;
-  void setPreferences({ terminalZoom: rest });
+  void setPreferences({ terminalZoom: { [workspaceId]: null } });
 }
 
 function subscribe(onChange: () => void): () => void {

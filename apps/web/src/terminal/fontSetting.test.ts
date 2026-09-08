@@ -5,6 +5,7 @@ import { DEFAULT_PREFERENCES } from "@wsp/protocol";
 import { useStore } from "../protocol/store";
 import { TERMINAL_FONT_KEY, effectiveTerminalFont, readTerminalFont, resetTerminalZoom, stepTerminalZoom, useTerminalFont, useTerminalViewportConfig, writeTerminalFont } from "./fontSetting";
 import { appTerminalFontSize } from "./ghostty/surface";
+import { rememberTerminalFile } from "./terminalFile";
 
 const zoomOf = (workspaceId: string): number | undefined => useStore.getState().preferences.terminalZoom[workspaceId];
 
@@ -17,6 +18,7 @@ describe("terminal font setting", () => {
     window.localStorage.clear();
     delete (window as unknown as { __WSP__?: unknown }).__WSP__;
     useStore.setState({ api: null, preferences: DEFAULT_PREFERENCES });
+    rememberTerminalFile(null);
     vi.restoreAllMocks();
   });
 
@@ -86,10 +88,28 @@ describe("terminal font setting", () => {
     expect(useStore.getState().preferences.terminalZoom).toEqual({ ws_a: 32 - appTerminalFontSize(), ws_b: -1 });
     resetTerminalZoom("ws_a");
     expect(useStore.getState().preferences.terminalZoom).toEqual({ ws_b: -1 });
-    // A reset of a workspace with no zoom sends nothing.
+    // Each patch names its own workspace alone, so two clients zooming different workspaces at once both keep theirs; a
+    // reset of a workspace with no zoom sends nothing.
     const sets: unknown[] = [];
     useStore.setState({ api: { setPreferences: async (patch: unknown) => { sets.push(patch); return useStore.getState().preferences; } } as never });
+    stepTerminalZoom("ws_a", 1);
     resetTerminalZoom("ws_a");
-    expect(sets).toEqual([]);
+    resetTerminalZoom("ws_a");
+    expect(sets).toEqual([{ terminalZoom: { ws_a: 1 } }, { terminalZoom: { ws_a: null } }]);
+  });
+
+  it("the zoom stops where the surface's sizes end over the base the pane draws from: the file's size once the record says the size comes from the file", () => {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, terminalSize: "file" } });
+    rememberTerminalFile({ files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], fontSize: 16, palette: Array<null>(16).fill(null) });
+    stepTerminalZoom("ws_a", 100);
+    expect(zoomOf("ws_a")).toBe(32 - 16);
+    stepTerminalZoom("ws_a", -1);
+    expect(zoomOf("ws_a")).toBe(32 - 16 - 1);
+    stepTerminalZoom("ws_a", -100);
+    expect(zoomOf("ws_a")).toBe(6 - 16);
+    // A file naming no size, or none read yet, leaves the app's base.
+    rememberTerminalFile(null);
+    stepTerminalZoom("ws_b", 100);
+    expect(zoomOf("ws_b")).toBe(32 - appTerminalFontSize());
   });
 });

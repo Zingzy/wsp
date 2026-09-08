@@ -63,7 +63,7 @@ export function SettingsPage() {
             </RadioGroup>
           </Field>
           <Field id="settings-sidebar-width" label={SETTINGS_WORDS.sidebarWidth}>
-            <div className="flex h-9 items-center gap-2.5 text-sm" data-settings-row>
+            <div className="flex min-h-9 items-center gap-2.5 text-sm" data-settings-row>
               <span className={FACT} data-k="sidebar-width">
                 {preferences.sidebarWidth === undefined ? SETTINGS_WORDS.sidebarWidthDefault : fmtPx(preferences.sidebarWidth)}
               </span>
@@ -107,14 +107,15 @@ function Field({ id, label, children }: { id: string; label: string; children: R
   );
 }
 
-/** One choice row: the radio, the word, the sentence under it where the word does not say it all, and a fact at the right edge where the choice has one. */
+/** One choice row: the radio, the word, the sentence under it where the word does not say it all, whole even when it
+ * wraps, and a fact at the right edge where the choice has one. The row's height is the label's; a wrapped sentence grows it. */
 function Choice({ value, title, detail, fact }: { value: string; title: string; detail?: string; fact?: string }) {
   return (
-    <label className="flex h-9 cursor-pointer items-center gap-2.5 text-sm" data-settings-row>
+    <label className="flex min-h-9 cursor-pointer items-center gap-2.5 text-sm" data-settings-row>
       <Radio value={value} />
       <span className="flex min-w-0 flex-1 flex-col leading-tight">
         <span className="text-foreground">{title}</span>
-        {detail !== undefined ? <span className="truncate text-[11px] text-muted-foreground">{detail}</span> : null}
+        {detail !== undefined ? <span className="text-[11px] text-muted-foreground">{detail}</span> : null}
       </span>
       {fact !== undefined ? <span className={FACT}>{fact}</span> : null}
     </label>

@@ -17,12 +17,15 @@ describe("the preferences record", () => {
     expect(preferencesFrom({ theme: "light", sidebarWidth: 312 })).toEqual({ ...DEFAULT_PREFERENCES, theme: "light", sidebarWidth: 312 });
   });
 
-  it("a patch lands field by field, a null width clears the width, and the zoom map is replaced whole", () => {
+  it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
     expect(one).toEqual({ theme: "dark", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 } });
-    const two = applyPreferencesPatch(one, { sidebarWidth: null, terminalZoom: {} });
-    expect(two).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: {} });
+    const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
+    expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
+    const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
+    expect(three).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 } });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
+    expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
 
   it("the patch shape refuses a value outside the record's own", () => {

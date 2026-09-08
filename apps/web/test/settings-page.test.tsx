@@ -89,7 +89,9 @@ describe("the settings page", () => {
     // Every choice row is one height, and the facts and the width read in the mono voice.
     const rows = Array.from(document.querySelectorAll("[data-settings-row]"));
     expect(rows).toHaveLength(8);
-    for (const row of rows) expect(row.className).toContain("h-9");
+    for (const row of rows) expect(row.className).toContain("min-h-9");
+    // A detail sentence is whole, never cut: nothing truncates it.
+    expect(rows.some(row => row.querySelector(".truncate") !== null)).toBe(false);
     expect(document.querySelector("[data-k=sidebar-width]")!.className).toContain("font-mono");
   });
 

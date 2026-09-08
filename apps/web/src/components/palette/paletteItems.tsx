@@ -5,11 +5,11 @@
 // whose title holds the typed query. Pure apart from the callbacks it is
 // handed, so the list is testable without the dialog.
 import { ArrowDownIcon, ArrowUpIcon, MessageSquareIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import type { SidebarMode } from "@wsp/protocol";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { sidebarActions } from "../../actions/sidebarActions.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
-import type { SidebarMode } from "@wsp/protocol";
 import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
 import { cn } from "../../lib/utils.js";
 import { SETTINGS_WORDS } from "../../settings/format.js";
@@ -129,7 +129,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
       title: SETTINGS_WORDS.title,
       description: SETTINGS_WORDS.hint,
-      shortcutCommand: "settings.open",
+      shortcutCommand: "settings.toggle",
       run: sync(handlers.openSettings),
     },
     {

@@ -218,6 +218,12 @@ describe("command palette", () => {
     expect(useStore.getState().settingsOpen).toBe(false);
     mod(",");
     expect(useStore.getState().settingsOpen).toBe(true);
+    // The chord toggles and Escape closes, so a host with no workspace row to pick can still leave the page.
+    mod(",");
+    expect(useStore.getState().settingsOpen).toBe(false);
+    mod(",");
+    fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
+    expect(useStore.getState().settingsOpen).toBe(false);
   });
 
   it("opens the new-workspace dialog through the sidebar", async () => {

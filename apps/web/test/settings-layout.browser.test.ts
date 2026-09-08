@@ -56,7 +56,10 @@ describe.skipIf(skipped !== undefined)("the settings page laid out in Chromium",
       els.map(el => {
         const s = getComputedStyle(el);
         const box = el.getBoundingClientRect();
-        return { x: Math.round(box.x), width: Math.round(box.width), height: Math.round(box.height), border: s.borderTopWidth, background: s.backgroundColor, font: s.fontFamily, transform: s.textTransform, color: s.color };
+        const detail = el.querySelector<HTMLElement>("span > span:nth-child(2)");
+        // A detail that wraps takes more than one line of its own height.
+        const detailLines = detail === null ? 0 : Math.round(detail.getBoundingClientRect().height / parseFloat(getComputedStyle(detail).lineHeight));
+        return { x: Math.round(box.x), width: Math.round(box.width), height: Math.round(box.height), border: s.borderTopWidth, background: s.backgroundColor, font: s.fontFamily, transform: s.textTransform, color: s.color, detailLines, detailClipped: detail !== null && detail.scrollWidth > detail.clientWidth };
       }),
     );
   const shot = async (name: string): Promise<void> => {
@@ -75,7 +78,12 @@ describe.skipIf(skipped !== undefined)("the settings page laid out in Chromium",
     expect(await page!.locator("[data-settings-page] [data-slot=label]").allTextContents()).toEqual(["Theme", "Sidebar", "Sidebar width", "Text size"]);
     const rows = await paint(ROWS);
     expect(rows).toHaveLength(8);
-    expect(new Set(rows.map(r => r.height)).size).toBe(1);
+    // One height by the label; only a detail sentence that wraps grows its row, and none is cut.
+    const single = rows.filter(r => r.detailLines <= 1);
+    expect(single.length).toBeGreaterThanOrEqual(7);
+    expect(new Set(single.map(r => r.height))).toEqual(new Set([36]));
+    for (const r of rows) expect(r.height).toBeGreaterThanOrEqual(36);
+    for (const r of rows) expect(r.detailClipped).toBe(false);
     expect(new Set(rows.map(r => r.x)).size).toBe(1);
     expect(new Set(rows.map(r => r.width)).size).toBe(1);
     expect(rows[0]!.width).toBeLessThanOrEqual(576);

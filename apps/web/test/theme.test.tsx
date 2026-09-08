@@ -57,7 +57,7 @@ describe("the theme", () => {
 
   it("a load paints the theme this browser last applied before the host answers, and the record wins the moment it arrives", async () => {
     // A fresh boot: the store and the theme rule read again with the cache in place, the html on the stylesheet's dark default.
-    window.localStorage.setItem("wsp:theme", "light");
+    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "light" }));
     vi.resetModules();
     const { useStore: bootStore } = await import("../src/protocol/store.js");
     const { useThemeEffect: bootEffect } = await import("../src/settings/theme.js");
@@ -68,8 +68,8 @@ describe("the theme", () => {
     // The host's record says dark: it paints and the cache follows it, never the other way round.
     act(() => bootStore.getState().applyEvent({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, theme: "dark" } }));
     expect(isDark()).toBe(true);
-    expect(window.localStorage.getItem("wsp:theme")).toBe("dark");
-    window.localStorage.setItem("wsp:theme", "sepia");
+    expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "dark", sidebarMode: "list" });
+    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "sepia" }));
     vi.resetModules();
     const { useStore: cleanStore } = await import("../src/protocol/store.js");
     expect(cleanStore.getState().preferences).toEqual(DEFAULT_PREFERENCES);
