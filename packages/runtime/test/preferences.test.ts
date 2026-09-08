@@ -47,6 +47,28 @@ describe("preferences over the wire", () => {
     expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: { theme: "light", sidebarMode: "spaces", terminalZoom: { ws_a: 2 } } });
   });
 
+  it("the access picked in a workspace lands on the record and the next thread there reads it", async () => {
+    const store = memoryStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    srv = await serveRuntime(rt, { port: 0, authToken: "t" });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { access: { ws_a: "bypassPermissions" } } })).toMatchObject({
+      ok: true,
+      preferences: { access: { ws_a: "bypassPermissions" } },
+    });
+    // Per workspace: a pick in one leaves the others alone, and a null drops that workspace's alone.
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { access: { ws_b: "plan" } } })).toMatchObject({
+      ok: true,
+      preferences: { access: { ws_a: "bypassPermissions", ws_b: "plan" } },
+    });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { access: { ws_a: null } } })).toMatchObject({ ok: true, preferences: { access: { ws_b: "plan" } } });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { access: { ws_b: 3 } } })).toMatchObject({ ok: false });
+
+    // It is the host's record, not one browser's: a runtime started later on the same store still has the pick.
+    await srv.close();
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {} }), { port: 0, authToken: "t" });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: { access: { ws_b: "plan" } } });
+  });
+
   it("two patches landing at once keep both fields", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     const [a, b] = await Promise.all([rt.preferences.set({ theme: "light" }), rt.preferences.set({ sidebarMode: "spaces" })]);

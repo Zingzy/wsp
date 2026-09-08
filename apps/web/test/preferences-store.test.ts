@@ -156,7 +156,28 @@ describe("the preferences record in the store", () => {
     expect(sets).toHaveLength(1);
   });
 
+  it("carries the access pick this browser kept in the composer's own key onto the record, and clears that field alone", async () => {
+    const composer = (options: Record<string, Record<string, string>>) => JSON.stringify({ state: { byWorkspaceId: options }, version: 1 });
+    window.localStorage.setItem("wsp:composer-options:v1", composer({ ws_a: { permissionMode: "bypassPermissions", model: "claude-opus-5" }, ws_b: { effort: "high" } }));
+    const { api, sets } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
+    useStore.getState().bind(api);
+    await flush();
+    await flush();
+    // The pick the person had standing is on the record, so the first thread after this lands still runs at it.
+    expect(sets).toEqual([{ access: { ws_a: "bypassPermissions" } }]);
+    expect(useStore.getState().preferences.access).toEqual({ ws_a: "bypassPermissions" });
+    // The other picks under that key are this browser's and stay; only the moved field goes.
+    const left = JSON.parse(window.localStorage.getItem("wsp:composer-options:v1")!) as { state: { byWorkspaceId: Record<string, Record<string, string>> } };
+    expect(left.state.byWorkspaceId).toEqual({ ws_a: { model: "claude-opus-5" }, ws_b: { effort: "high" } });
+    // The next read finds nothing to move.
+    useStore.getState().setConn("live");
+    await flush();
+    await flush();
+    expect(sets).toHaveLength(1);
+  });
+
   it("a browser with none of the old keys, or one holding nonsense under them, sends nothing; nonsense under one key does not stop the rest", async () => {
+    window.localStorage.setItem("wsp:composer-options:v1", "not json");
     window.localStorage.setItem("wsp:sidebar-width", "wide");
     window.localStorage.setItem("wsp:sidebar-mode", "grid");
     const { api, sets } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
