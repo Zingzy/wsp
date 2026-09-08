@@ -1,0 +1,31 @@
+name: Feature request
+description: Something you want wsp to do.
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The task in your own words, and where wsp gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you want instead
+      description: The command, screen or behaviour you would expect. A sketch of the command line is enough.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How you work around it now
+    validations:
+      required: false
+  - type: checkboxes
+    id: keys
+    attributes:
+      label: Keys
+      options:
+        - label: I did not paste a key, a token or a preview link.
+          required: true
