@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { MACHINE_OS_WORD, OVER_SSH, THREAD_ARCHIVE_MS, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { MACHINE_OS_WORD, OVER_SSH, THREAD_ARCHIVE_MS, kindWords, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -217,7 +217,7 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
   });
 
-  it("a row with no state word says its daemon is gone on the meta line, since nothing else on it would", () => {
+  it("a row says its daemon is gone on the meta line, whatever kind of machine it is", () => {
     const local = (reach: ReachState) => project({ reach: { state: reach } }, { kind: "local" });
     const line = (reach: ReachState) => workspaceMetaLine({ project: local(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
     // The two are different facts: nothing answering on the port, and no daemon road at all.
@@ -230,10 +230,30 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     // The Spaces header says it above what the machine is, in the same place the row gives it.
     expect(spaceHeaderLines({ project: local("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual(["no daemon answering", "this computer"]);
-    // A driven kind's own state word already reads Unreachable for it, so its line keeps the spend.
-    expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" } }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("$0.29 today · $0.110/hr · active");
-    expect(daemonGoneLine("slow")).toBeUndefined();
-    expect(daemonGoneLine(null)).toBeUndefined();
+    expect(daemonGoneLine("slow", kindWords("local"))).toBeUndefined();
+    expect(daemonGoneLine(null, kindWords("local"))).toBeUndefined();
+  });
+
+  it("a fork whose daemon died says so too: Unreachable alone reads as a lost machine, and this one is fine", () => {
+    const driven = (reach: ReachState) => project({ reach: { state: reach } });
+    const line = (reach: ReachState) => workspaceMetaLine({ project: driven(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
+    expect(line("no-daemon")).toBe("no daemon answering");
+    // Nothing else changed: a reach that says nothing about the daemon leaves the spend and the countdown alone.
+    expect(line("reachable")).toBe("$0.29 today · $0.110/hr · active");
+    expect(line("slow")).toBe("$0.29 today · $0.110/hr · edge slow · active");
+    // While the runtime is putting the daemon back, that is what the row says instead.
+    expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "restarting the helper" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("restarting the helper");
+    // The Spaces header leads with it above the size, where the row's line sits.
+    expect(spaceHeaderLines({ project: driven("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })[0]).toBe("no daemon answering");
+    // Only the daemon that died crosses to a driven kind. A machine wsp forks is built with the road to a daemon,
+    // so a fork's row saying there is none would be saying something that cannot be true of it.
+    expect(line("unsupported")).toBe("$0.29 today · $0.110/hr · active");
+    expect(spaceHeaderLines({ project: driven("unsupported"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).not.toContain("no daemon on this machine");
+    expect(daemonGoneLine("unsupported", kindWords("cloud"))).toBeUndefined();
+    expect(daemonGoneLine("unsupported", kindWords("local"))).toBe("no daemon on this machine");
+    // A kind whose machines serve no daemon has none to miss, so neither line reaches its row.
+    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBeUndefined();
+    expect(daemonGoneLine("no-daemon", kindWords("ssh"))).toBeUndefined();
   });
 
   it("a machine over ssh serves no daemon at all, so its row says what the machine is rather than that one is missing", () => {

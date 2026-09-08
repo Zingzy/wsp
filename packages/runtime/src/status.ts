@@ -151,6 +151,10 @@ export interface StatusTrackerOptions {
   emit(event: EventUnion): void;
   on(type: EventUnion["type"] | "*", listener: (e: EventUnion) => void): () => void;
   defaults?: StatusWatchOptions;
+  /** Every status the poll built, on every tick, ahead of the bus dropping the ones that did not change. What a
+   * client needs is the changes; what the runtime needs about its own machines is the measurement, and a machine
+   * parked in one state changes nothing for hours while staying just as dark. */
+  onPolled?(statuses: WorkspaceStatus[]): void;
   /** Time source for the meters, the reconcile and zombie windows and the probe's elapsed read, and the timer the cost
    * and poll ticks run on; tests inject one they can advance. */
   clock?: Clock;
@@ -502,8 +506,9 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         if (probed.state !== "slow" && probed.state !== "unreachable") {
           suspects.delete(r.id);
           // An answer the guest did not send is a reason to ask the provider, never a verdict on the guest: the
-          // state on show stays as it was, and a machine the provider has paused is caught by its own word.
-          return done(await machineState(r, reconcile, !probed.fromDaemon), status);
+          // state on show stays as it was, and a machine the provider has paused is caught by its own word. The
+          // ask runs on the raw answer; only the word the row carries waits out a window, as the silence does.
+          return done(await machineState(r, reconcile, !probed.fromDaemon), { ...status, state: shown });
         }
         // The window and the exec probe run on the raw silence; only the word on the row waits for a second one.
         const judged = await judge(r, status, reconcile);
@@ -535,6 +540,13 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   let stopCost: (() => void) | undefined;
   let stopPoll: (() => void) | undefined;
   const lastEmitted = new Map<string, string>();
+  // A status the runtime pushed between polls is a row a client has already been given, so it belongs in the
+  // baseline the next poll is held against. Without this a push moves the row and the poll's own word for the same
+  // machine reads as a repeat and is dropped: a line the runtime meant to flash once then sat on the row until
+  // some other fact about the machine happened to change.
+  o.on("workspace.status", e => {
+    if (e.type === "workspace.status") lastEmitted.set(e.status.id, JSON.stringify(e.status));
+  });
 
   /** The timer's tick samples every workspace and always rides the bus. An event's tick is one workspace's: it pins
    * a boundary in the meter and rides the bus only when it changed the rate, so a create, a wake and a size change
@@ -591,6 +603,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     // A record written while its poll was in flight pushed its own row since; the poll's older row would put a phase the record has left back on the screen.
     const built = new Map(records.map(r => [r.id, r.generation]));
     const now = new Map((await o.records()).map(r => [r.id, r.generation]));
+    o.onPolled?.(statuses.filter(status => now.get(status.id) === built.get(status.id)));
     for (const status of statuses) {
       if (now.get(status.id) !== built.get(status.id)) continue;
       const key = JSON.stringify(status);

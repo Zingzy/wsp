@@ -1008,6 +1008,34 @@ describe("the reach word a row shows", () => {
     expect(daemon.hits()).toBe(6);
   });
 
+  it("a dead daemon port waits out the same window: one 502 keeps Running, the second reads Unreachable", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle });
+    await rt.workspaces.create({ golden: "snap_g", name: "steady" });
+    const mode = { answer: true };
+    const server = createServer((_req, res) => res.writeHead(mode.answer ? 426 : 502).end());
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    openServers.push(server);
+    const port = (server.address() as { port: number }).port;
+    backend.machines[0]!.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    const poll = async (): Promise<WorkspaceStatus> => {
+      fc.advance(POLL_INTERVAL_MS);
+      return (await rt.status.list({ ...opts, reconcile: "on-failure" }))[0]!;
+    };
+
+    expect((await poll()).reach.state).toBe("reachable");
+    mode.answer = false;
+    const first = await poll();
+    expect(first.reach.state).toBe("reachable");
+    expect(wordOf(first)).toBe("Running");
+    const second = await poll();
+    expect(second.reach.state).toBe("no-daemon");
+    expect(wordOf(second)).toBe("Unreachable");
+    mode.answer = true;
+    expect((await poll()).reach.state).toBe("reachable");
+  });
+
   it("over the poll, a single silence pushes no status at all and two push Unreachable once", async () => {
     const backend = stubBackend();
     const fc = fakeClock();

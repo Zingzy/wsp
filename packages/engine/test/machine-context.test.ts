@@ -39,7 +39,7 @@ import {
 } from "../src/machine-context.js";
 import type { ImportResult } from "../src/golden.js";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { EXEC_ENV } from "../src/solari-backend.js";
+import { EXEC_ENV } from "../src/golden-import.js";
 
 const bash = promisify(execFile);
 

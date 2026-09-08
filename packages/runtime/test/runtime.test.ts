@@ -7,12 +7,13 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, RUN_GONE_LINE, SessionEvent, foldThreads, stillWorkingRefusal, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, RUN_GONE_LINE, SessionEvent, foldThreads, stillWorkingRefusal, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
-import { CATALOG_TTL_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
+import { CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
+import { POLL_INTERVAL_MS } from "../src/status.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -1902,6 +1903,199 @@ describe("runtime daemon reach", () => {
     } finally {
       await daemon.close();
     }
+  });
+
+  const openServers: Server[] = [];
+  afterEach(async () => {
+    await Promise.all(openServers.map(s => { s.closeAllConnections(); return new Promise<void>(r => s.close(() => r())); }));
+    openServers.length = 0;
+  });
+
+  /** A preview edge in front of a machine whose daemon port answers nothing: the shape a dead daemon has on the
+   * wire (a prompt 502), and 426 once `up` is set, which is the daemon answering again. */
+  async function daemonPort(up: () => boolean): Promise<{ server: Server; port: number; hits: () => number }> {
+    let hits = 0;
+    const server = createServer((_req, res) => {
+      hits++;
+      res.writeHead(up() ? 426 : 502).end();
+    });
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    openServers.push(server);
+    return { server, port: (server.address() as AddressInfo).port, hits: () => hits };
+  }
+
+  it("puts the daemon back on a running machine whose port answers nothing, with nothing asking it to", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    // Answers once, then dies: the first silence is a window, and only the second is a daemon that is gone.
+    let probes = 0;
+    let back = false;
+    const edge = await daemonPort(() => ++probes === 1 || back);
+    const deployed: string[] = [];
+    const recipe = {
+      setup: "true",
+      smoke: "true",
+      deployDaemon: async (machine: { id: string }) => {
+        deployed.push(machine.id);
+        back = true;
+      },
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    const pushed: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => pushed.push((e as { status: WorkspaceStatus }).status));
+
+    const stop = rt.status.watch();
+    try {
+      await until(() => deployed.length === 1);
+      // One silence is a window a restart sits inside; the deploy waits for the second.
+      expect(edge.hits()).toBeGreaterThanOrEqual(3);
+      await until(() => pushed.at(-1)?.reach.state === "reachable");
+    } finally {
+      stop();
+    }
+    expect(deployed).toEqual(["m1"]);
+    // The row said what was being done while it was being done, and says nothing once the daemon answers again.
+    expect(pushed.filter(st => st.daemonNote === DAEMON_RESTARTING).length).toBeGreaterThanOrEqual(1);
+    expect((await rt.workspaces.get(ws.id)).daemonNote).toBeUndefined();
+    // The redeploy went through the same road the verb takes, so the runtime's own token opens the new daemon.
+    expect(backend.machines[0]!.execLog).toContain(rotateDaemonTokenScript(TOKEN));
+  });
+
+  it("leaves a machine alone whose daemon answers again on the next poll: one silence is not a dead daemon", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    let probes = 0;
+    // Every other probe answers; the run of silences never reaches two.
+    const edge = await daemonPort(() => ++probes % 2 === 1);
+    const deployed: string[] = [];
+    const recipe = { setup: "true", smoke: "true", deployDaemon: async (machine: { id: string }) => void deployed.push(machine.id) };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
+    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    const stop = rt.status.watch();
+    try {
+      await until(() => edge.hits() >= 10);
+    } finally {
+      stop();
+    }
+    expect(deployed).toEqual([]);
+  });
+
+  it("a redeploy that fails says so on the row once, logs the reason, holds the row at no-daemon, and is tried again a cooldown later", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const fc = fakeClock();
+    const edge = await daemonPort(() => false);
+    const deployed: number[] = [];
+    const recipe = {
+      setup: "true",
+      smoke: "true",
+      deployDaemon: async () => {
+        deployed.push(fc.clock.now());
+        throw new Error("daemon deploy failed: NPM_FAIL");
+      },
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, clock: fc.clock, goldenRecipe: recipe, status: { costIntervalMs: 24 * 3_600_000, reconcileMinMs: 60_000 } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: fc.clock.now() + 3_600_000 });
+    const pushed: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => pushed.push((e as { status: WorkspaceStatus }).status));
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+    /** One poll tick, waited out: the timer runs on the fake clock, the probe and the deploy on real promises. */
+    const poll = async (): Promise<void> => {
+      const before = edge.hits();
+      fc.advance(POLL_INTERVAL_MS);
+      await until(() => edge.hits() > before);
+      await new Promise(r => setTimeout(r, 30));
+    };
+    const stop = rt.status.watch();
+    try {
+      await poll();
+      await poll();
+      await until(() => deployed.length === 1);
+      await until(() => pushed.some(st => st.daemonNote === DAEMON_RESTART_FAILED));
+      // Ten more polls, three minutes of them, all inside the cooldown: the machine is left alone.
+      for (let i = 0; i < 10; i++) await poll();
+      expect(deployed).toHaveLength(1);
+      // The row a client is left looking at says the machine's daemon is dead, not that the machine answers: a
+      // push made while the deploy ran must not paint over what the poll measured, or the poll's own word after it
+      // reads as a repeat and never reaches the bus.
+      expect(pushed.at(-1)!.reach.state).toBe("no-daemon");
+      expect(pushed.at(-1)!.daemonNote).toBeUndefined();
+      // Past the cooldown, it tries again on its own.
+      fc.advance(DAEMON_REVIVE_AGAIN_MS);
+      await poll();
+      await until(() => deployed.length === 2);
+    } finally {
+      stop();
+      warn.mockRestore();
+    }
+    expect(deployed[1]! - deployed[0]!).toBeGreaterThanOrEqual(DAEMON_REVIVE_AGAIN_MS);
+    // Neither line about the daemon claims the machine answers. The runtime has no probe of its own between
+    // polls, so a push carries what the poll measured rather than what a running machine's kind would claim.
+    const aboutTheDaemon = pushed.filter(st => st.daemonNote === DAEMON_RESTARTING || st.daemonNote === DAEMON_RESTART_FAILED);
+    expect(aboutTheDaemon.length).toBeGreaterThanOrEqual(3);
+    expect(aboutTheDaemon.every(st => st.reach.state === "no-daemon")).toBe(true);
+    // The row said it and stopped saying it; the npm log is in this host's log and nowhere a person reads.
+    expect((await rt.workspaces.get(ws.id)).daemonNote).toBeUndefined();
+    expect(warned.some(l => l.includes("not restarted") && l.includes("NPM_FAIL") && l.includes("m1"))).toBe(true);
+    expect(pushed.every(st => st.daemonNote === undefined || !st.daemonNote.includes("NPM_FAIL"))).toBe(true);
+  });
+
+  it("a machine replaced under the record starts its own attempt instead of inheriting the old machine's cooldown", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const edge = await daemonPort(() => false);
+    const deployed: string[] = [];
+    const recipe = {
+      setup: "true",
+      smoke: "true",
+      deployDaemon: async (machine: { id: string }) => {
+        deployed.push(machine.id);
+        throw new Error("daemon deploy failed: NPM_FAIL");
+      },
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const edgeOn = (m: StubMachine): void => {
+      m.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    };
+    edgeOn(backend.machines[0]!);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stop = rt.status.watch();
+    try {
+      await until(() => deployed.length === 1);
+      await rt.workspaces.rebuild(ws.id);
+      edgeOn(backend.machines[1]!);
+      // Well inside the cooldown the first machine earned: the entry is that machine's, and this is another one.
+      await until(() => deployed.length === 2, 5_000);
+    } finally {
+      stop();
+      warn.mockRestore();
+    }
+    expect(deployed).toEqual(["m1", "m2"]);
+  });
+
+  it("leaves a dead daemon alone on a backend that mints no upload URL, since the deploy has no road to the machine", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    backend.capabilities.signedUrls = false;
+    const edge = await daemonPort(() => false);
+    const deployed: string[] = [];
+    const recipe = { setup: "true", smoke: "true", deployDaemon: async (machine: { id: string }) => void deployed.push(machine.id) };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
+    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    const stop = rt.status.watch();
+    try {
+      await until(() => edge.hits() >= 10);
+    } finally {
+      stop();
+    }
+    expect(deployed).toEqual([]);
   });
 
   it("updateDaemon refuses on a runtime whose recipe carries no deploy", async () => {

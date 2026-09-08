@@ -105,14 +105,25 @@ describe("reachShown", () => {
     expect(reachShown("unreachable", "slow")).toBe("slow");
   });
 
+  it("a dead daemon port waits out the same window: a restart under the unit takes about a second, less than a poll", () => {
+    expect(reachShown("reachable", "no-daemon")).toBe("reachable");
+    expect(reachShown("slow", "no-daemon")).toBe("slow");
+    expect(reachShown("no-daemon", "no-daemon")).toBe("no-daemon");
+    // The two unanswered words do not cover for each other: either one after the other is the second silence.
+    expect(reachShown("unreachable", "no-daemon")).toBe("no-daemon");
+    expect(reachShown("no-daemon", "unreachable")).toBe("unreachable");
+  });
+
   it("a machine never heard from, or one already failing, reads its silence at once", () => {
     expect(reachShown(undefined, "unreachable")).toBe("unreachable");
+    expect(reachShown(undefined, "no-daemon")).toBe("no-daemon");
     for (const previous of ["no-daemon", "zombie", "napping", "gone", "unsupported"] as const) expect(reachShown(previous, "unreachable")).toBe("unreachable");
+    for (const previous of ["unreachable", "zombie", "napping", "gone", "unsupported"] as const) expect(reachShown(previous, "no-daemon")).toBe("no-daemon");
   });
 
   it("every answer is shown as it came, whatever went before", () => {
-    const answers: ReachState[] = ["reachable", "slow", "no-daemon", "napping", "unsupported", "gone", "zombie"];
-    for (const probed of answers) for (const previous of [undefined, ...answers, "unreachable" as const]) expect(reachShown(previous, probed)).toBe(probed);
+    const answers: ReachState[] = ["reachable", "slow", "napping", "unsupported", "gone", "zombie"];
+    for (const probed of answers) for (const previous of [undefined, ...answers, "unreachable" as const, "no-daemon" as const]) expect(reachShown(previous, probed)).toBe(probed);
   });
 });
 

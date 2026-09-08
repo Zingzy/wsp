@@ -3,7 +3,7 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import { MACHINE_OS_WORD, fmtSize, isBilling, kindWords, outOfMemoryRowLine, workspaceKind, workspaceState, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { MACHINE_OS_WORD, fmtSize, isBilling, kindWords, outOfMemoryRowLine, workspaceKind, workspaceState, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -30,13 +30,17 @@ export function reachNote(reach: ReachState | null): string | null {
   return reach === "slow" ? "edge slow" : null;
 }
 
-/** The row's line for a daemon that is not there, on a kind whose row shows no state word: nothing on the row would
- * otherwise say it, and it was readable only on the Machine tab's Reach. no-daemon is a machine that answers with
- * nothing on the daemon's port, unsupported one with no daemon road at all; the two are different facts and the
- * line says which. Nothing for every other reach. */
-export function daemonGoneLine(reach: ReachState | null): string | undefined {
+/** The row's line for a daemon that is not there, and which of the two facts it is: no-daemon is a machine that
+ * answers with nothing on the daemon's port, unsupported one with no daemon road at all. Nothing for every other
+ * reach, and nothing at all on a kind whose machines serve no daemon, which has none to miss. A daemon that died
+ * is said on every kind that has one, since a driven kind's state word reads Unreachable for it, which is also
+ * what a machine gone dark reads, and only one of the two is a helper wsp puts back by itself while the machine is
+ * fine. A machine with no road to a daemon is said only where the row has no state word to spend on it: nothing
+ * wsp drives is built without the road, so a driven row saying it would be saying something that cannot be true. */
+export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWords): string | undefined {
+  if (!kind.daemon) return undefined;
   if (reach === "no-daemon") return "no daemon answering";
-  return reach === "unsupported" ? "no daemon on this machine" : undefined;
+  return reach === "unsupported" && !kind.driven ? "no daemon on this machine" : undefined;
 }
 
 /** The sentences a meta line can carry in place of its counts, in the order a surface draws them: what the
@@ -47,18 +51,8 @@ export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput,
   return [
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
-    // A row with no state word has nowhere else to say its daemon is gone, and it is the thing a person waiting on
-    // a terminal is waiting on; a driven kind's state word already reads Unreachable for it, and a kind that serves
-    // no daemon at all is not missing one, so its row says what the machine is instead.
-    daemonMissing(project) ? daemonGoneLine(project.reach) : undefined,
+    daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace))),
   ].filter((line): line is string => line !== undefined);
-}
-
-/** Whether this row is one a missing daemon is worth a line on: a kind wsp drives says it in its state word, and a
- * kind whose machines serve none has nothing missing. */
-function daemonMissing(project: Pick<SidebarProjectSnapshot, "workspace">): boolean {
-  const kind = kindWords(workspaceKind(project.workspace));
-  return !kind.driven && kind.daemon;
 }
 
 export interface WorkspaceMetaInput {
