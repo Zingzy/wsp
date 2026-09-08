@@ -5,7 +5,7 @@
 
 import { PERMISSION_DENY, RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, PermissionAsk, PermissionOutcome, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult, TurnStatus } from "@wsp/protocol";
-import { controlAnswerLine, controlErrorLine, controlLine } from "./permissions.js";
+import { controlAnswerLine, controlErrorLine, controlLine, setModeLine } from "./permissions.js";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
@@ -34,6 +34,10 @@ export type SteerOutcome = "accepted" | "not-running";
  * already, withdrawn by the CLI, or its turn is over). */
 export type AnswerOutcome = "answered" | "gone";
 
+/** What moving a running turn's access came to: the CLI took it and its next tool call runs at the new mode, it
+ * refused the mode in its own words, or the turn is over and its channel takes nothing. */
+export type AccessOutcome = "set" | "refused" | "gone";
+
 export interface ClaudeSession {
   /** Registry key, fixed before spawn (self-generated UUID, or the resume id). */
   readonly localId: string;
@@ -52,6 +56,9 @@ export interface ClaudeSession {
    * this is the person's pick or its own answer for a prompt nobody came to, and denyMessage is what the agent
    * reads as the call's result when the option refuses it. */
   answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<AnswerOutcome>;
+  /** Puts this running turn into another access mode, from its next tool call on; settles on the CLI's own answer to
+   * the request, so a mode it will not take comes back refused rather than as a silent no-op. */
+  setAccess(mode: string): Promise<AccessOutcome>;
 }
 
 export interface AdapterDeps {
@@ -310,6 +317,19 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     /** The prompts this turn raised and nobody has answered yet, by the CLI's own request id. The CLI runs nothing
      * while one is open, so an entry here is what the turn is waiting on. */
     const pending = new Map<string, PermissionAsk>();
+    /** The control requests this adapter sent that the CLI has not answered yet, by the id it was sent under. It
+     * answers every one, and one still open when the channel shuts is settled rather than left waiting. */
+    const asked = new Map<string, (outcome: AccessOutcome) => void>();
+    let askedSeq = 0;
+
+    /** Every request still waiting, answered as the caller's outcome; nothing can reach the CLI after this. */
+    const settleAsked = (outcome: AccessOutcome): void => {
+      for (const settle of [...asked.values()]) settle(outcome);
+      asked.clear();
+    };
+
+    /** The turn is open to a line on the channel: its CLI has announced itself and has neither replied nor gone. */
+    const running = (): boolean => sawInit && !sawResult && !exited && !interruptRequested;
 
     const closeAsk = (askId: string, outcome: PermissionOutcome, optionId?: string): void => {
       pending.delete(askId);
@@ -342,6 +362,12 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
                 // rather than left open.
                 void stream.write(controlErrorLine(control.requestId, control.subtype));
                 break;
+              case "answer": {
+                const settle = asked.get(control.requestId);
+                asked.delete(control.requestId);
+                settle?.(control.error === undefined ? "set" : "refused");
+                break;
+              }
             }
             continue;
           }
@@ -369,6 +395,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               // The CLI waits for more input after its result; EOF is what lets it exit, and a CLI that does not go
               // on its own is ended with its tree once the wait passes rather than left for the idle cut.
               stream.closeInput();
+              // The channel is shut, so a request still unanswered will never be: the caller is told now rather
+              // than waiting on the process to go, which is minutes on a harness that lingers.
+              settleAsked("gone");
               void endAfterResult(stream, deps.resultExitMs ?? RUN_EXIT_MS, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
               normalized.result = endedEarly(normalized.result, backgroundTasks);
               // Held until the process exits, since the CLI writes its reason to stderr after the result.
@@ -390,6 +419,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       // The process is gone, so nothing can answer these; the rows say so rather than waiting for an answer that
       // has nowhere to land.
       for (const askId of [...pending.keys()]) closeAsk(askId, "cancelled");
+      settleAsked("gone");
       if (turnResult === undefined) {
         turnResult =
           emptyResult !== undefined
@@ -415,7 +445,6 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ...(stream.run !== undefined ? { run: stream.run } : {}),
       finished,
       steer: async (prompt) => {
-        const running = (): boolean => sawInit && !sawResult && !exited && !interruptRequested;
         if (!running()) return "not-running";
         const wrote = await stream.write(userMessageLine(prompt, claudeSessionId));
         // The turn may have ended while the write travelled; the line then sits unread and the caller starts a turn.
@@ -431,6 +460,17 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         if (wrote !== "written") return "gone";
         onEvent({ type: "permission.close", sessionId: claudeSessionId, askId, outcome, optionId });
         return "answered";
+      },
+      setAccess: async (mode) => {
+        if (!running()) return "gone";
+        const requestId = `wsp-set-mode-${++askedSeq}`;
+        const answered = new Promise<AccessOutcome>((resolve) => asked.set(requestId, resolve));
+        const wrote = await stream.write(setModeLine(requestId, mode));
+        if (wrote !== "written") {
+          asked.delete(requestId);
+          return "gone";
+        }
+        return answered;
       },
       interrupt: async () => {
         interruptRequested = true;

@@ -76,8 +76,22 @@ describe("effectivePicks and startOptionsFrom", () => {
     expect(startOptionsFrom(CLAUDE, { harness: "claude", model: "claude-old-3", effort: "low" })).toEqual({ harness: "claude", model: "claude-old-3", effort: "low" });
   });
 
-  it("a remembered access mode the catalog no longer lists is shown as nothing and not sent", () => {
-    expect(effectivePicks(CLAUDE, { picked: { permissionMode: "auto" }, running: {} }).permissionMode).toBeNull();
-    expect(startOptionsFrom(CLAUDE, { permissionMode: "auto", effort: "high" })).toEqual({ effort: "high" });
+  it("a remembered access mode this harness does not list shows the mode that will run, and is not sent as a pick", () => {
+    // A pick is remembered per workspace and the harnesses' mode lists are disjoint, so this is what a claude thread
+    // shows after an access was picked on codex: the list's own default, which is what the start will run, rather
+    // than nothing at all, which said neither what was picked nor what would run.
+    expect(effectivePicks(CLAUDE, { picked: { permissionMode: "read-only" }, running: {} }).permissionMode).toBe("bypassPermissions");
+    expect(startOptionsFrom(CLAUDE, { permissionMode: "read-only", effort: "high" })).toEqual({ effort: "high" });
+    // The running turn's own value is read the same way: a mode off this list is not shown for it either.
+    expect(effectivePicks(CLAUDE, { picked: {}, running: { permissionMode: "read-only" } }).permissionMode).toBe("bypassPermissions");
+    // A list with no default of its own has nothing to fall back to, so the picker shows nothing and sends nothing.
+    const unmarked = { ...CLAUDE, permissionModes: CLAUDE.permissionModes.map(({ isDefault: _d, ...m }) => m) };
+    expect(effectivePicks(unmarked, { picked: { permissionMode: "read-only" }, running: {} }).permissionMode).toBeNull();
+  });
+
+  it("an effort or a window picked on another harness falls back the same way, one rule for the three", () => {
+    expect(effectivePicks(CLAUDE, { picked: { effort: "ultra" }, running: {} }).effort).toBe("high");
+    expect(effectivePicks(CLAUDE, { picked: { contextWindow: "2m" }, running: {} }).contextWindow).toBe("1m");
+    expect(startOptionsFrom(CLAUDE, { effort: "ultra", contextWindow: "2m" })).toEqual({});
   });
 });

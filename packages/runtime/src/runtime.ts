@@ -129,6 +129,7 @@ import type {
   PermissionOutcome,
   ReachState,
   SessionEvent,
+  SessionAccessResult,
   SessionAnswerResult,
   SessionInterruptResult,
   SessionRenameResult,
@@ -157,7 +158,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENY, PERMISSION_DENIED_LINE, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENY, PERMISSION_DENIED_LINE, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -222,6 +223,10 @@ export interface HarnessSession {
    * caller names the outcome, since only it knows whether the answer is the person's or its own for a prompt nobody
    * came to, and the adapter emits the permission.close that carries it. `gone` when no such prompt is open. */
   answer?(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<"answered" | "gone">;
+  /** Puts this running turn into another access mode from its next tool call on; absent on a harness whose CLI takes
+   * no such change once a turn is under way, and the person's pick then waits for their next message. `refused` is
+   * the CLI's own no to that mode, `gone` a turn whose channel takes nothing any more. */
+  setAccess?(mode: string): Promise<"set" | "refused" | "gone">;
 }
 
 export interface HarnessAdapter {
@@ -528,6 +533,8 @@ export interface SessionHandle {
    * person picking in the chat, or the runtime's own wait running out on a thread nobody came to. Absent on a
    * harness that raises none. */
   answer?(askId: string, opts: { optionId: string; by: PermissionAnswerer }): Promise<SessionAnswerResult["outcome"]>;
+  /** Moves this running turn to another access mode; absent on a harness that takes none mid-turn. */
+  setAccess?(mode: string): Promise<"set" | "refused" | "gone">;
 }
 
 /** Who answered a permission prompt, the one fact the outcome and the line the agent reads both come from. */
@@ -967,6 +974,11 @@ export interface Runtime {
      * event records which option did it. A prompt already answered, one the harness withdrew and an unknown id
      * answer rather than throw, since two clients may reach one prompt. */
     answer(sessionId: string, opts: { askId: string; optionId: string }, origin?: WorkspaceOrigin): Promise<SessionAnswerResult>;
+    /** Puts the session's running turn into another access mode, from its next tool call on: the person picked while
+     * a turn was under way, and where the harness takes such a change the turn in front of them follows it. The row
+     * then carries the new mode, so the thread's next turn resumes at it. unsupported is a harness that takes none
+     * mid-turn, and the pick reaches the agent with the person's next message instead. */
+    access(sessionId: string, permissionMode: string, origin?: WorkspaceOrigin): Promise<SessionAccessResult>;
     /** Names the session's harness session in the harness's own store, in the field the harness itself writes, and
      * keeps the name on every row of the thread; a harness that keeps no name of a person's, a store without that
      * session and an unknown id answer. Refuses while the workspace cannot be reached, as a listing's read needs it. */
@@ -1614,6 +1626,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * without this a second turn on a thread the person opened at its harness's prompts would quietly skip them. */
   const accessOf = (workspaceId: string, resume: string | undefined): string | undefined =>
     resume === undefined ? undefined : resumedFact(workspaceId, resume, "permissionMode");
+
+  /** The access a thread a send opens runs at when nothing named one: the last access picked in that workspace,
+   * kept on the preferences record rather than in one browser, so the next thread starts where the person left the
+   * last one and a send from the CLI or a second client reads the same pick. Nothing until a pick is made, and the
+   * catalog's own default then stands. */
+  const pickedAccess = async (workspaceId: string): Promise<string | undefined> => (await preferences.get()).access[workspaceId];
 
   /** What the runtime is doing to a machine's daemon, by workspace: the line its row shows while an update runs and
    * the sentence left there when one failed. Held here rather than on the record because it says what this process
@@ -3555,6 +3573,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (resumed.prompt !== undefined) view.prompt = resumed.prompt;
     }
 
+    /** A pick made while this turn runs, taken by the harness: the row carries the mode the turn is now at, so the
+     * thread's next turn resumes at it rather than at the one the start named. */
+    const setAccess = async (mode: string): Promise<"set" | "refused" | "gone"> => {
+      const outcome = await started.setAccess!(mode);
+      if (outcome !== "set") return outcome;
+      view.permissionMode = mode;
+      void persistSessions(workspaceId);
+      return outcome;
+    };
+
     const handle: SessionHandle = {
       id: rowId,
       workspaceId,
@@ -3565,6 +3593,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       interrupt: () => started.interrupt(),
       ...(started.steer !== undefined ? { steer: (prompt: string) => started.steer!(prompt) } : {}),
       ...(started.answer !== undefined ? { answer } : {}),
+      ...(started.setAccess !== undefined ? { setAccess } : {}),
     };
     const end = (reason: string): void => {
       if (ended || view.status !== "running") return;
@@ -3721,7 +3750,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const notify = o.notify ?? notifyOf(threadId);
       const table = harnessCatalog(harness);
       // Checked against the binary's own lists, the ones the composer shows for this workspace.
-      const picks = startPicks(table === undefined ? undefined : await catalogOn(table, entry, adapter), { ...o, permissionMode: o.permissionMode ?? accessOf(workspaceId, resume) }, resume === undefined);
+      const catalog = table === undefined ? undefined : await catalogOn(table, entry, adapter);
+      // A remembered access, the thread's own then the workspace's, read against the list in front of us: this send
+      // may be on a harness whose modes are not the ones that pick belongs to, and a mode this one does not take is
+      // a pick that does not apply here, not a send to refuse. An access this send NAMED is still refused, by
+      // startPicks, in the same words.
+      const access =
+        o.permissionMode ??
+        (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, resume) ?? (await pickedAccess(workspaceId))));
+      const picks = startPicks(catalog, { ...o, permissionMode: access }, resume === undefined);
       let outcome: SessionStartOutcome = "started";
       let images: TurnImage[] = [];
       let imagesDir: string | undefined;
@@ -3867,6 +3904,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (refusal !== null) throw new Error(refusal);
       if (s.handle?.answer === undefined) return { outcome: s.handle === undefined ? "gone" : "unsupported" };
       return { outcome: await s.handle.answer(o.askId, { optionId: o.optionId, by: "person" }) };
+    },
+
+    async access(sessionId, permissionMode, origin) {
+      await ready();
+      const s = sessions.get(sessionId);
+      if (!s) return { outcome: "not-found" };
+      const entry = await entryOf(s.view.workspaceId, origin);
+      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
+      if (refusal !== null) throw new Error(refusal);
+      if (s.view.status !== "running" || s.handle?.setAccess === undefined) {
+        return { outcome: s.view.status === "running" && s.handle !== undefined ? "unsupported" : "not-running" };
+      }
+      const { harness, adapter } = adapterFor(entry, s.view.harness);
+      const table = harnessCatalog(harness);
+      // Checked against the list the picker showed, so a mode this CLI does not take is refused in the same words a
+      // start refuses it with rather than travelling to the machine as a request it will not answer.
+      if (table !== undefined) startPicks(await catalogOn(table, entry, adapter), { permissionMode }, false);
+      const outcome = await s.handle.setAccess(permissionMode);
+      // A CLI that refused a mode its own list carries is one that will not take it on a turn already under way
+      // (Claude Code's bypass, which is a launch flag): the pick stands and the person's next message carries it,
+      // which is what unsupported tells the composer to say.
+      return { outcome: outcome === "set" ? "set" : outcome === "refused" ? "unsupported" : "not-running" };
     },
 
     async rename(sessionId, title, origin) {

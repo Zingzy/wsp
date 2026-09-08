@@ -1,18 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The last harness, model, effort, context window and permission mode picked
-// per workspace, kept in local storage so the next thread in that workspace
-// starts the same way. A key absent means nothing was picked and the CLI's
-// own default runs. Values are the harness's slugs; the runtime passes them
-// through unchanged.
+// The last harness, model, effort and context window picked per workspace,
+// kept in local storage so the next thread in that workspace starts the same
+// way. A key absent means nothing was picked and the CLI's own default runs.
+// Values are the harness's slugs; the runtime passes them through unchanged.
+// The access pick is the one that is not here: the host reads it too, to open
+// a thread nobody named an access for, so it lives on the preferences record
+// and useComposerOptions folds it in beside these.
+import { useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { useStore } from "../../protocol/store";
 
-export type ComposerOptionKey = "harness" | "model" | "effort" | "contextWindow" | "permissionMode";
+/** The picks this browser keeps. */
+export type ComposerOptionKey = "harness" | "model" | "effort" | "contextWindow";
 
-export type ComposerOptions = Partial<Record<ComposerOptionKey, string>>;
+/** Every pick the composer's pickers read: the four above and the access, which is the host's record's. */
+export type ComposerOptions = Partial<Record<ComposerOptionKey | "permissionMode", string>>;
 
 const STORAGE_KEY = "wsp:composer-options:v1";
-const KEYS: readonly ComposerOptionKey[] = ["harness", "model", "effort", "contextWindow", "permissionMode"];
+const KEYS: readonly ComposerOptionKey[] = ["harness", "model", "effort", "contextWindow"];
 const NONE: ComposerOptions = {};
 
 interface ComposerOptionsState {
@@ -59,6 +65,10 @@ export const useComposerOptionsStore = create<ComposerOptionsState>()(
   ),
 );
 
+/** Everything the composer's pickers show as picked for a workspace: what this browser kept, and the access the
+ * host's record holds for it. */
 export function useComposerOptions(workspaceId: string): ComposerOptions {
-  return useComposerOptionsStore(s => s.byWorkspaceId[workspaceId] ?? NONE);
+  const picked = useComposerOptionsStore(s => s.byWorkspaceId[workspaceId] ?? NONE);
+  const permissionMode = useStore(s => s.preferences.access[workspaceId]);
+  return useMemo(() => (permissionMode === undefined ? picked : { ...picked, permissionMode }), [picked, permissionMode]);
 }

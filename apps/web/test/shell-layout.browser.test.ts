@@ -40,7 +40,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type ConsoleMessage, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTER } from "@wsp/protocol";
+import { accessFromNextMessage, PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTER } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
 import { textContrast } from "./contrast";
@@ -1405,6 +1405,62 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         expect(state.box).toEqual(idle.box);
         expect(state.shell).toEqual(idle.shell);
       }
+    }
+  }, 60_000);
+
+  it("an access picked while a turn runs reads back on the picker, and the line saying when it lands is one uncut muted mono line, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      // A turn running on this computer, which is where a pick made mid-turn has somewhere to go.
+      await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&perm=1`);
+      await page!.waitForSelector("[data-composer-picker='permissionMode']");
+      await page!.waitForSelector("text=loading transcript", { state: "detached" });
+      const trigger = "[data-composer-picker='permissionMode']";
+      // The picker opens on the mode the harness asks in, which is what a thread on this computer starts at.
+      expect(await page!.locator(trigger).getAttribute("data-value")).toBe("default");
+      const before = await box("[data-slot=composer-shell]");
+      await page!.locator(trigger).click();
+      await page!.waitForSelector("[data-composer-option='bypassPermissions']");
+      const menu = join(SHOTS_DIR, `composer-access-menu-${theme}.png`);
+      await page!.locator("[role=menu]").first().screenshot({ path: menu });
+      console.info(`composer access menu screenshot: ${menu}`);
+      await page!.locator("[data-composer-option='bypassPermissions']").click();
+
+      // The pick reads back on the trigger whatever the running turn did with it, and the line says when it lands.
+      await page!.waitForSelector(`${trigger}[data-value='bypassPermissions']`);
+      // A radio pick leaves the menu up, as it does for the model and the effort; it is dismissed so the line is
+      // photographed with nothing over it.
+      await page!.keyboard.press("Escape");
+      await page!.waitForSelector("[role=menu]", { state: "detached" });
+      await page!.waitForSelector("[data-composer-refusal] [role=status]");
+      const read = await page!.locator("[data-chat-composer]").evaluate(el => {
+        const line = el.querySelector<HTMLElement>("[data-composer-refusal] [role=status]")!;
+        const s = getComputedStyle(line);
+        const label = el.querySelector<HTMLElement>("[data-composer-picker='permissionMode']")!;
+        return {
+          text: line.textContent ?? "",
+          skin: { mono: /mono/i.test(s.fontFamily), background: s.backgroundColor, border: `${s.borderTopWidth} ${s.borderLeftWidth}`, icons: line.getElementsByTagName("svg").length },
+          // The slot truncates from the right; a line wider than its box loses its own tail.
+          cut: line.scrollWidth > line.clientWidth,
+          width: line.scrollWidth,
+          slot: (line.parentElement as HTMLElement).clientWidth,
+          trigger: label.textContent ?? "",
+          panels: el.querySelectorAll("[data-composer-banner-surface]").length,
+        };
+      });
+      const shot = join(SHOTS_DIR, `composer-access-${theme}.png`);
+      await page!.locator("[data-chat-composer]").screenshot({ path: shot });
+      console.info(`composer access line screenshot: ${shot} (${read.width} px of line in ${read.slot} px of slot)`);
+
+      expect(read.text).toBe(accessFromNextMessage(`Bypass on ${THIS_COMPUTER}`));
+      expect(read.trigger).toContain(`Bypass on ${THIS_COMPUTER}`);
+      // Whole at the width this app is smallest in: the clause that says when the pick lands is the point of it.
+      expect(read.cut).toBe(false);
+      expect(read.width).toBeLessThan(read.slot);
+      // Drawn like every other line in that slot: mono words on nothing, no fill, no border, no icon, no panel.
+      expect(read.skin).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0 });
+      expect(read.panels).toBe(0);
+      // The line moves nothing: the slot is there whether or not a line is in it.
+      expect(await box("[data-slot=composer-shell]")).toEqual(before);
     }
   }, 60_000);
 

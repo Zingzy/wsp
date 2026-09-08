@@ -9,7 +9,7 @@
 // the same ones the pickers show, and an untouched access leaves the CLI's own
 // default in place; a context window rides as a suffix on the model, so it
 // brings the model along.
-import { contextWindowsFor, effortsFor, markedDefault, modelOf, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
+import { contextWindowsFor, effortsFor, listedPick, markedDefault, modelOf, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
 import type { ComposerOptions } from "./composerOptionsStore";
 
 export interface ResolvedPicks {
@@ -42,9 +42,11 @@ export function runningPicks(session: SessionView | null, running: boolean): Com
   };
 }
 
+/** What a picker shows: the pick where this list carries it, else the running turn's value, else the list's own
+ * default. Each is read against the list rather than the first of them being taken and then checked, so a pick made
+ * on another harness leaves the picker showing what the next start will actually run instead of showing nothing. */
 function current(options: ReadonlyArray<HarnessOption>, picked: string | undefined, running: string | undefined): string | null {
-  const value = picked ?? running ?? markedDefault(options)?.value ?? null;
-  return value !== null && options.some(o => o.value === value) ? value : null;
+  return listedPick(options, picked) ?? listedPick(options, running) ?? markedDefault(options)?.value ?? null;
 }
 
 export function effectivePicks(catalog: HarnessCatalog, input: { picked: ComposerOptions; running: ComposerOptions }): ResolvedPicks {
@@ -59,10 +61,9 @@ export function effectivePicks(catalog: HarnessCatalog, input: { picked: Compose
 
 export function startOptionsFrom(catalog: HarnessCatalog, picked: ComposerOptions): ComposerStart {
   const model = resolveModel(catalog, { picked: picked.model, running: undefined });
-  const effort = picked.effort !== undefined && effortsFor(catalog, model).some(o => o.value === picked.effort) ? picked.effort : undefined;
-  const contextWindow =
-    picked.contextWindow !== undefined && contextWindowsFor(catalog, model).some(o => o.value === picked.contextWindow) ? picked.contextWindow : undefined;
-  const permissionMode = picked.permissionMode !== undefined && catalog.permissionModes.some(o => o.value === picked.permissionMode) ? picked.permissionMode : undefined;
+  const effort = listedPick(effortsFor(catalog, model), picked.effort);
+  const contextWindow = listedPick(contextWindowsFor(catalog, model), picked.contextWindow);
+  const permissionMode = listedPick(catalog.permissionModes, picked.permissionMode);
   const modelValue = picked.model ?? (contextWindow !== undefined ? model?.value : undefined);
   return {
     ...(picked.harness !== undefined ? { harness: picked.harness } : {}),

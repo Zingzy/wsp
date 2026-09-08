@@ -7,11 +7,14 @@
 // and a Context Window section, each default marked and checked until a pick;
 // the access button carries the mode's icon and each mode its one line. A
 // pick rides the next sessions.start and is remembered per workspace; a turn
-// already running keeps its flags and shows them meanwhile.
+// already running keeps its flags and shows them meanwhile. The access pick is
+// the exception: it is remembered on the host's own record, so the next thread
+// here starts at it whichever client or CLI opens it, and where the harness
+// takes a mode change mid-turn it reaches the turn in front of the person too.
 import { BrainIcon, ChevronDownIcon, CircleSlashIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { contextWindowsFor, effortsFor, type HarnessCatalog, type HarnessModel, type HarnessOption } from "@wsp/protocol";
+import { accessFromNextMessage, contextWindowsFor, effortsFor, type HarnessCatalog, type HarnessModel, type HarnessOption } from "@wsp/protocol";
 import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useStore, useWorkspace } from "../../protocol/store";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -148,8 +151,41 @@ function EffortPicker({ workspaceId, efforts, contextWindows, picks }: { workspa
   );
 }
 
-function AccessPicker({ workspaceId, modes, value }: { workspaceId: string; modes: ReadonlyArray<HarnessOption>; value: string | null }) {
-  const pick = useComposerOptionsStore(s => s.pick);
+/** One turn of this workspace's, as a pick made while it runs needs it: the runtime's id for the session, which is
+ * what sessions.access takes, and the turn the note belongs to. */
+export interface RunningTurn {
+  readonly sessionId: string;
+  readonly turnId: string;
+}
+
+/** The one road an access pick takes. It goes onto the host's record, where the next thread in this workspace reads
+ * it whoever opens it, and into the turn in front of the person when one runs: Claude Code moves a running turn to
+ * another mode over its control channel, and a harness that takes no such change answers unsupported. `line` is what
+ * the composer says then, and it stands only while the turn the pick missed is still the running one. */
+export function useAccessPick(workspaceId: string, running: RunningTurn | null): { pick: (mode: string, label: string) => void; line: string | null } {
+  const api = useStore(s => s.api);
+  const setPreferences = useStore(s => s.setPreferences);
+  const [note, setNote] = useState<{ turnId: string; line: string } | null>(null);
+  const pick = useCallback(
+    (mode: string, label: string) => {
+      setNote(null);
+      void setPreferences({ access: { [workspaceId]: mode } });
+      if (running === null) return;
+      const missed = (): void => setNote({ turnId: running.turnId, line: accessFromNextMessage(label) });
+      if (api?.setSessionAccess === undefined) {
+        missed();
+        return;
+      }
+      void api.setSessionAccess(running.sessionId, mode).then(outcome => {
+        if (outcome !== "set") missed();
+      }, missed);
+    },
+    [api, running, setPreferences, workspaceId],
+  );
+  return { pick, line: note !== null && note.turnId === running?.turnId ? note.line : null };
+}
+
+function AccessPicker({ modes, value, onPick }: { modes: ReadonlyArray<HarnessOption>; value: string | null; onPick: (mode: string, label: string) => void }) {
   const current = modes.find(o => o.value === value);
   const Icon = (value !== null ? ACCESS_ICONS[value] : undefined) ?? ShieldIcon;
   const label = current?.label ?? "Access";
@@ -170,7 +206,8 @@ function AccessPicker({ workspaceId, modes, value }: { workspaceId: string; mode
         <MenuRadioGroup
           value={value}
           onValueChange={next => {
-            if (typeof next === "string") pick(workspaceId, "permissionMode", next);
+            const mode = modes.find(o => o.value === next);
+            if (mode !== undefined) onPick(mode.value, mode.label);
           }}
         >
           <OptionRows options={modes} />
@@ -180,7 +217,7 @@ function AccessPicker({ workspaceId, modes, value }: { workspaceId: string; mode
   );
 }
 
-export function ComposerOptionPickers({ workspaceId, thread }: { workspaceId: string; thread: ChatThreadHandle }) {
+export function ComposerOptionPickers({ workspaceId, thread, onPickAccess }: { workspaceId: string; thread: ChatThreadHandle; onPickAccess: (mode: string, label: string) => void }) {
   useMachineCatalogs(workspaceId);
   const pick = useComposerOptionsStore(s => s.pick);
   const catalogs = useHarnessCatalogs(workspaceId);
@@ -202,7 +239,7 @@ export function ComposerOptionPickers({ workspaceId, thread }: { workspaceId: st
         }}
       />
       {efforts.length > 0 || contextWindows.length > 0 ? <EffortPicker workspaceId={workspaceId} efforts={efforts} contextWindows={contextWindows} picks={picks} /> : null}
-      {catalog.permissionModes.length > 0 ? <AccessPicker workspaceId={workspaceId} modes={catalog.permissionModes} value={picks.permissionMode} /> : null}
+      {catalog.permissionModes.length > 0 ? <AccessPicker modes={catalog.permissionModes} value={picks.permissionMode} onPick={onPickAccess} /> : null}
     </>
   );
 }
