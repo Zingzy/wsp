@@ -1721,11 +1721,22 @@ describe("wsp verbs over the host", () => {
       expect(opened.io.streamed).toContain("[image 1.2 MB png]");
     });
 
+    it("a path this computer has no file at answers in a sentence, not in the reader's own error", async () => {
+      await run("new", "alpha");
+      const missing = join(dir, "not-here.png");
+      const refused = await run("send", "--image", missing, "x", "y");
+      expect(refused.io.errors[0]).not.toContain("ENOENT");
+      const opening = await run("thread", "new", "--in", "alpha", "--image", missing, "look");
+      expect(opening.code).toBe(EXIT_CODES.usage);
+      expect(opening.io.errors).toEqual([`wsp thread new: there is no file at ${missing} on this computer`]);
+      expect(claude.starts).toHaveLength(0);
+    });
+
     it("a folder named where an image should be is refused the same way, rather than failing on the read", async () => {
       await run("new", "alpha");
       const refused = await run("thread", "new", "--in", "alpha", "--image", dir, "look");
       expect(refused.code).toBe(EXIT_CODES.usage);
-      expect(refused.io.errors).toEqual([`wsp thread new: ${dir} is not PNG, JPEG, GIF or WebP; a message carries those four`]);
+      expect(refused.io.errors).toEqual([`wsp thread new: there is no file at ${dir} on this computer`]);
     });
 
     it("a file that is not one of the four types is refused by name, before anything travels", async () => {

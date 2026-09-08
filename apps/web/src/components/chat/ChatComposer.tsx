@@ -36,7 +36,7 @@
 // start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
-import { IMAGES_AFTER_TURN, IMAGES_MAX, TURN_IN_FLIGHT, noImagesLine, readsImages, sendNowFailedLine, sendRefusal, stillWorkingRefusal, stopFailedLine, workspaceState, type MachineState, type ReachState, type SendRefusalKind, type WorkspacePhase } from "@wsp/protocol";
+import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, sendNowFailedLine, sendRefusal, stillWorkingRefusal, stopFailedLine, workspaceState, type MachineState, type ReachState, type SendRefusalKind, type WorkspacePhase } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { useStatus, useStore, useWorkspace } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
@@ -48,7 +48,7 @@ import { ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatImageThumb } from "./ChatImages";
-import { attachmentOf, useComposerImages, useComposerImagesStore } from "./composerImages";
+import { attachmentOf, recordOf, useComposerImages, useComposerImagesStore } from "./composerImages";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
 import { ComposerOptionPickers, useComposerPicks } from "./ComposerOptionPickers";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -212,14 +212,16 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
    * and the refusal words are said once. An agent that reads no image is turned away before a file is even read. */
   const take = useCallback(
     (files: readonly File[]) => {
-      if (files.length === 0) return;
+      // Paste and drop answer to the same state the picker button does: one door open and two shut would take an
+      // image the send could not carry.
+      if (files.length === 0 || unavailable !== null) return;
       if (!canAttach) {
         setImageRefusal(noImagesLine(harnessId));
         return;
       }
       void addImages(workspaceId, files).then(setImageRefusal);
     },
-    [addImages, canAttach, harnessId, workspaceId],
+    [addImages, canAttach, harnessId, unavailable, workspaceId],
   );
 
   const onPaste = useCallback(
@@ -258,7 +260,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       const attachments = images.map(attachmentOf);
       setSending(true);
       hold(threadKey);
-      appendUserTurn(prompt, requestId);
+      appendUserTurn(prompt, requestId, images.map(recordOf));
       // The images leave the composer with the send and are kept under its request id, which is what the person's
       // row in the transcript is drawn from; a refused send hands them back rather than losing them.
       sendImagesAs(workspaceId, requestId);
@@ -503,7 +505,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                         size="icon-xs"
                         variant="ghost-muted"
                         aria-label="Add an image"
-                        title={`Add an image: paste, drop or pick one. PNG, JPEG, GIF or WebP, at most ${IMAGES_MAX}.`}
+                        title={`Add an image: paste, drop or pick one. ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each.`}
                         disabled={unavailable !== null}
                         onClick={() => pickerRef.current?.click()}
                         data-composer-image-picker="true"
@@ -513,7 +515,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                       <input
                         ref={pickerRef}
                         type="file"
-                        accept="image/png,image/jpeg,image/gif,image/webp"
+                        accept={IMAGE_ACCEPT}
                         multiple
                         hidden
                         aria-hidden="true"

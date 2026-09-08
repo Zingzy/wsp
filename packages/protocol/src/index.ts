@@ -1954,7 +1954,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 export { actionRefusal, computerOffline, goneRefusal, imageMoveRefusal, isBilling, needsRebuild, reachShown, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
-export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_MAX_BYTES, IMAGE_TYPES, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathOn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAnImageLine, threadImagesDir } from "./attachments.js";
+export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";
 export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";

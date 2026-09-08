@@ -26,7 +26,7 @@ export interface ComposerImage {
 const NONE: ReadonlyArray<ComposerImage> = [];
 
 /** How many sends of one tab keep their images in memory. Beyond this the oldest let go and their rows read as any
- * other client's do; a message of five images at the cap is 50 MB, so this is what a tab may hold. */
+ * other client's do. A message at both caps is fifty megabytes, so this bounds what one tab holds. */
 const SENT_KEPT = 10;
 
 /** Base64 in chunks: one spread of ten million bytes into fromCharCode overflows the argument stack. */

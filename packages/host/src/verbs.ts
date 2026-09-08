@@ -25,6 +25,8 @@ import {
   HOST_STOPPING_LINE,
   HostFolderListing,
   IMAGES_MAX,
+  IMAGE_MAX_WORDS,
+  IMAGE_TYPE_WORDS,
   LOGIN_CHOICES,
   NOTIFY_ME,
   NOTIFY_WORDS,
@@ -68,6 +70,7 @@ import {
   importConsented,
   importRequest,
   noAdapterLine,
+  notAFileLine,
   notAnImageLine,
   notifyLine,
   notifyTail,
@@ -678,8 +681,10 @@ const IMAGE_HEAD_BYTES = 12;
 export function imagesFrom(paths: readonly string[]): ImageAttachment[] {
   const files = paths.map(given => {
     const path = resolve(given);
-    const stat = statSync(path);
-    if (!stat.isFile()) throw usageRefusal(notAnImageLine(given));
+    // A path this computer has nothing at, or has something other than a file at, answers in a sentence; the reader's
+    // own ENOENT is what a person fat-fingering a screenshot path would otherwise get.
+    const stat = statSync(path, { throwIfNoEntry: false });
+    if (stat === undefined || !stat.isFile()) throw usageRefusal(notAFileLine(given));
     const head = Buffer.alloc(IMAGE_HEAD_BYTES);
     const fd = openSync(path, "r");
     try {
@@ -1233,7 +1238,7 @@ const NotifyIn = z.string().optional().describe("a thread (by id, or a prefix of
 const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute; absent means the workspace's project folder, else the home folder");
 const DetachIn = z.boolean().optional().describe("true answers with the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end; for a turn that runs for minutes or an hour, so this call does not block for it");
 const TitleIn = z.string().optional().describe("the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it");
-const ImagesIn = z.array(z.string()).optional().describe(`paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: PNG, JPEG, GIF or WebP, at most ${IMAGES_MAX} and 10 MB each. The host reads each file and sends its bytes, so the machine never reaches back for this computer\u2019s files; a message to an agent that reads no image is refused naming that agent.`);
+const ImagesIn = z.array(z.string()).optional().describe(`paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each. The host reads each file and sends its bytes, so the machine never reaches back for this computer\u2019s files; a message to an agent that reads no image is refused naming that agent.`);
 const ConfirmIn = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");
 /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
 const PICK_INPUTS = {

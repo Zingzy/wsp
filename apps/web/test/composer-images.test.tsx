@@ -5,7 +5,7 @@
 // fixture shape as chat-composer.test.tsx; no live daemon and no host.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { IMAGES_AFTER_TURN, noImagesLine, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { IMAGES_AFTER_TURN, noImagesLine, sendRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -167,6 +167,21 @@ describe("an image into the composer", () => {
   });
 });
 
+describe("what the composer will not take at all", () => {
+  it("paste and drop answer to the same state the picker does: nothing is taken while a send is blocked", async () => {
+    const { api } = fixtureApi();
+    await setup(api);
+    act(() => useStore.getState().setConn("closed"));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Add an image" }) as HTMLButtonElement).disabled).toBe(true));
+    act(() => void paste([pngFile("shot.png")]));
+    act(() => void drop([pngFile("dropped.png")]));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(thumbs()).toHaveLength(0);
+    // The line stays the one that says why a send is blocked; nothing about the image is added to it.
+    expect(refusalLine()).toBe(sendRefusal("closed"));
+  });
+});
+
 describe("what the composer refuses, in words, before anything leaves", () => {
   it("a file that is not one of the four types is named in the one line the composer keeps", async () => {
     const { api, started } = fixtureApi();
@@ -253,6 +268,24 @@ describe("the images on the send", () => {
     expect(started[0]!.attachments).toEqual([{ mediaType: "image/png", bytes: base64Of(2048, 3), name: "shot.png" }]);
     expect(started[0]!.prompt).toBe("what does this show?");
     await waitFor(() => expect(thumbs()).toHaveLength(0));
+  });
+
+  it("the person's own row carries its thumbnails at the click, not a roundtrip later", async () => {
+    const { api, started } = fixtureApi();
+    await setup(api);
+    await typeInto(composerEditor(), "what does this show?");
+    act(() => void paste([pngFile("shot.png", 2048, 3)]));
+    await waitFor(() => expect(thumbs()).toHaveLength(1));
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    // Nothing came back from the runtime; the row is drawn from the records the send already held.
+    const row = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-chat-image-row=true]");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(row.querySelectorAll("[data-chat-image='shot.png'] img")).toHaveLength(1);
+    expect(row.textContent).not.toContain("[image");
   });
 
   it("a message with no image sends no attachments field at all", async () => {

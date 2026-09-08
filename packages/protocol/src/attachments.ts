@@ -58,7 +58,16 @@ export function imageRecord(image: ImageAttachment): ImageRecord {
   return { mediaType: image.mediaType, bytes: imageBytes(image), ...(image.name !== undefined ? { name: image.name } : {}) };
 }
 
-const TYPE_WORDS = "PNG, JPEG, GIF or WebP";
+/** The four types as a person reads them, in one string. Every sentence that names what a message carries reads this
+ * rather than spelling the list again: a fifth type is then one row in IMAGE_TYPES and this line. */
+export const IMAGE_TYPE_WORDS = "PNG, JPEG, GIF or WebP";
+
+/** The four types as a file picker's accept attribute takes them, off the same table. */
+export const IMAGE_ACCEPT = Object.keys(IMAGE_TYPES).join(",");
+
+/** The size cap as a person reads it. Every sentence that names the cap reads this rather than spelling a number
+ * beside it, so the words a person is told and the rule the code enforces cannot drift apart. */
+export const IMAGE_MAX_WORDS = fmtBytes(IMAGE_MAX_BYTES);
 
 /** The first bytes each of the four types starts with; WebP's is a RIFF header whose length comes before the word
  * that names the format, so its check is the head and a second run eight bytes in. */
@@ -79,7 +88,13 @@ export function imageTypeOf(bytes: Uint8Array): string | null {
 
 /** The refusal of a file the person named that is not one of the four types, said before it travels. */
 export function notAnImageLine(path: string): string {
-  return `${path} is not ${TYPE_WORDS}; a message carries those four`;
+  return `${path} is not ${IMAGE_TYPE_WORDS}; a message carries those four`;
+}
+
+/** The refusal of a path the person named that this computer has no file at, or has something other than a file at:
+ * the road answers in a sentence, as every other refusal on it does, rather than in the reader's own error. */
+export function notAFileLine(path: string): string {
+  return `there is no file at ${path} on this computer`;
 }
 
 /** What a transcript prints in place of an image: its weight and its type, in one bracket. The command line prints
@@ -96,9 +111,9 @@ export function imagesRefusal(images: readonly ImageRecord[]): string | null {
   if (images.length > IMAGES_MAX) return `only ${IMAGES_MAX} images fit one message; this one carries ${images.length}`;
   for (const [index, image] of images.entries()) {
     const at = image.name ?? `image ${index + 1}`;
-    if (IMAGE_TYPES[image.mediaType] === undefined) return `${at} is ${image.mediaType || "of no stated type"}; a message carries ${TYPE_WORDS}`;
+    if (IMAGE_TYPES[image.mediaType] === undefined) return `${at} is ${image.mediaType || "of no stated type"}; a message carries ${IMAGE_TYPE_WORDS}`;
     if (image.bytes === 0) return `${at} is empty`;
-    if (image.bytes > IMAGE_MAX_BYTES) return `${at} is ${fmtBytes(image.bytes)}, over the ${fmtBytes(IMAGE_MAX_BYTES)} an image may be`;
+    if (image.bytes > IMAGE_MAX_BYTES) return `${at} is ${fmtBytes(image.bytes)}, over the ${IMAGE_MAX_WORDS} an image may be`;
   }
   return null;
 }
@@ -121,17 +136,30 @@ export function imagesBlocked(images: readonly ImageRecord[], road: AttachmentRo
   return imagesRefusal(images) ?? (road === undefined ? noImagesLine(harness) : null);
 }
 
-/** Where one thread's image copies live on a machine, the folder a harness that reads images off disk is pointed at.
- * One folder per thread, so a thread's copies go together and nothing another thread sent is in it. */
+/** Where one thread's image copies live on a machine: every send of that thread has a folder under this one, so a
+ * thread's copies go together and removing the thread removes all of them at once. */
 export function threadImagesDir(threadId: string): string {
   return `/root/.wsp/threads/${threadId}/images`;
 }
 
-/** Where one image of a message lands on a machine: under its thread's folder, named by its place in the message and
- * its own type, so the folder read in order is the message read in order. A type outside the table has no name here;
- * imagesRefusal is what turns that away, and this throws for a caller that never asked it. */
-export function imagePathOn(threadId: string, index: number, mediaType: string): string {
+/** A folder name that is one path segment and nothing else. A request id is a string a client chose, and it travels
+ * into a path on a machine, so one shaped like anything else is not used. */
+const PLAIN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** Where one send's images live on a machine: its own folder under its thread's, named by the request id the client
+ * minted for it, so two sends on one thread never write to the same path and the first turn cannot be handed the
+ * second's picture. `minted` stands in when the send carried no request id, and when the one it carried is not a
+ * plain id, since that string would otherwise be a path of the client's choosing. */
+export function turnImagesDir(threadId: string, requestId: string | undefined, minted: string): string {
+  const name = requestId !== undefined && PLAIN_ID.test(requestId) ? requestId : minted;
+  return `${threadImagesDir(threadId)}/${name}`;
+}
+
+/** Where one image of a message lands inside its send's folder: named by its place in the message and its own type,
+ * so the folder read in order is the message read in order. A type outside the table has no name here; imagesRefusal
+ * is what turns that away, and this throws for a caller that never asked it. */
+export function imagePathIn(dir: string, index: number, mediaType: string): string {
   const type = IMAGE_TYPES[mediaType];
   if (type === undefined) throw new Error(`${mediaType} is not an image type a message carries`);
-  return `${threadImagesDir(threadId)}/${index + 1}.${type.ext}`;
+  return `${dir}/${index + 1}.${type.ext}`;
 }

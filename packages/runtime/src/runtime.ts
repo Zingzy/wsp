@@ -143,7 +143,7 @@ import type {
   WorkspaceSize,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathOn, imageRecord, imagesBlocked, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, RECORD_RESTORED, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, threadImagesDir, titleLine, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOTIFY_ME, notifyLine, offeredSize, RECORD_RESTORED, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -2841,18 +2841,33 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /**
    * The turn's images on the road its adapter declared, imagesBlocked having already turned away what cannot go. An
-   * inline adapter is handed the bytes and nothing lands anywhere. A file adapter is handed paths under the thread's
-   * own images folder, emptied first, so a thread holds the images of the turn it is running and not of every turn
-   * before it; the folder travels the same signed-URL road an import takes, since the exec body holds 16 KB.
+   * inline adapter is handed the bytes and nothing lands anywhere, so there is no folder to answer with. A file
+   * adapter is handed paths inside this send's own folder under the thread's images dir: two sends on one thread
+   * would otherwise write the same paths and the first turn would be handed the second's picture, since the landing
+   * happens before either turn is registered. The folder travels the same signed-URL road an import takes, since the
+   * exec body holds 16 KB, and the caller removes it when the turn it was sent for ends.
    */
-  const landImages = async (entry: LiveWorkspace, road: AttachmentRoad | undefined, threadId: string, images: readonly ImageAttachment[]): Promise<TurnImage[]> => {
-    if (images.length === 0 || road === undefined) return [];
-    if (road === "inline") return images.map(({ mediaType, bytes }) => ({ mediaType, bytes }));
-    const landed = images.map((image, index) => ({ ...image, path: imagePathOn(threadId, index, image.mediaType) }));
-    const dir = threadImagesDir(threadId);
-    await entry.machine.exec(`rm -rf ${shellQuote(dir)}`, { timeoutMs: INLINE_EXEC_MS });
+  const landImages = async (
+    entry: LiveWorkspace,
+    road: AttachmentRoad | undefined,
+    dir: string,
+    images: readonly ImageAttachment[],
+  ): Promise<{ images: TurnImage[]; dir?: string }> => {
+    if (images.length === 0 || road === undefined) return { images: [] };
+    if (road === "inline") return { images: images.map(({ mediaType, bytes }) => ({ mediaType, bytes })) };
+    const landed = images.map((image, index) => ({ ...image, path: imagePathIn(dir, index, image.mediaType) }));
     await importInto(entry.machine, tarOf(landed.map(i => ({ path: i.path, mode: 0o600, content: Buffer.from(i.bytes, "base64") }))), "/", { overlay: true });
-    return landed.map(({ mediaType, bytes, path }) => ({ mediaType, bytes, path }));
+    return { images: landed.map(({ mediaType, bytes, path }) => ({ mediaType, bytes, path })), dir };
+  };
+
+  /** Takes one send's images off the machine once the turn they were sent for is over, whatever it came to: the
+   * harness read them at its start and nothing reads them again, so a thread that sends a screenshot and then runs
+   * twenty text turns is not still holding it. A machine that is gone or asleep keeps the folder, and the thread's
+   * own dir goes with the thread. */
+  const dropImages = (entry: LiveWorkspace, dir: string): void => {
+    void entry.machine.exec(`rm -rf ${shellQuote(dir)}`, { timeoutMs: INLINE_EXEC_MS }).catch((e: unknown) => {
+      console.warn(`images for a finished turn not removed from ${entry.record.id}: ${e instanceof Error ? e.message : String(e)}`);
+    });
   };
 
   /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. */
@@ -2974,6 +2989,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** What the row already knows of this turn's reply: a re-opened turn whose result landed before the restart is
      * still working, and reads as such until the run's own result line comes round again. */
     turnLive?: TurnLive;
+    /** The folder this turn's images landed in on the machine, removed when the turn ends however it ends; absent on
+     * a turn that landed none, whose harness read them inline or which carried none at all. */
+    imagesDir?: string;
     open: (onEvent: (event: AdapterEvent) => void) => HarnessSession;
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify } = t;
@@ -3157,12 +3175,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         view.endedAt ??= Date.now();
         void persistSessions(workspaceId);
         void refreshTitle(view, true);
+        if (t.imagesDir !== undefined) dropImages(entry, t.imagesDir);
       })
       .catch(() => {
         if (!ended) view.status = "failed";
         view.endedAt ??= Date.now();
         void persistSessions(workspaceId);
         void refreshTitle(view, true);
+        if (t.imagesDir !== undefined) dropImages(entry, t.imagesDir);
       });
     return handle;
   };
@@ -3273,7 +3293,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const picks = startPicks(table === undefined ? undefined : await catalogOn(table, entry.machine, adapter), o, resume === undefined);
       let outcome: SessionStartOutcome = "started";
       let images: TurnImage[] = [];
+      let imagesDir: string | undefined;
       let landed = (o.attachments?.length ?? 0) === 0;
+      // This send's own folder on the machine, named by the request id it minted: the landing runs before any turn is
+      // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
+      // turn holding the second's picture.
+      const sendDir = turnImagesDir(threadId, o.requestId, randomUUID());
       // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time. Nothing
       // below this loop may await: the wait ends the moment no turn is running, and every line from there to
       // runTurn, which registers this one, is one synchronous run. The images land inside it for that reason, and
@@ -3283,7 +3308,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (running === undefined) {
           if (landed) break;
           landed = true;
-          images = await landImages(entry, adapter.attachments, threadId, o.attachments ?? []);
+          ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, o.attachments ?? []));
           continue;
         }
         // The turn replied and its process has not exited: it takes no message and waiting on it would block the
@@ -3327,6 +3352,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(notify !== undefined ? { notify } : {}),
         outcome,
         opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
+        ...(imagesDir !== undefined ? { imagesDir } : {}),
         ...(resume !== undefined ? { resume } : {}),
         open: onEvent =>
           adapter.start({

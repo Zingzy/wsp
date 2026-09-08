@@ -5,14 +5,20 @@ import {
   IMAGE_MAX_BYTES,
   imageBytes,
   imageLine,
-  imagePathOn,
+  IMAGE_ACCEPT,
+  IMAGE_TYPES,
+  IMAGE_MAX_WORDS,
+  IMAGE_TYPE_WORDS,
+  imagePathIn,
   imageRecord,
   imageTypeOf,
   imagesBlocked,
   imagesRefusal,
   noImagesLine,
+  notAFileLine,
   notAnImageLine,
   threadImagesDir,
+  turnImagesDir,
 } from "../src/index.js";
 
 const b64 = (bytes: number): string => Buffer.alloc(bytes).toString("base64");
@@ -125,15 +131,51 @@ describe("the type read off the bytes, never off the name", () => {
 });
 
 describe("where a thread's copies live on a machine", () => {
-  it("one folder per thread, and one name per image by its place and its type", () => {
+  it("one folder per send under the thread's own, and one name per image by its place and its type", () => {
     expect(threadImagesDir("thr_1")).toBe("/root/.wsp/threads/thr_1/images");
-    expect(imagePathOn("thr_1", 0, "image/png")).toBe("/root/.wsp/threads/thr_1/images/1.png");
-    expect(imagePathOn("thr_1", 1, "image/jpeg")).toBe("/root/.wsp/threads/thr_1/images/2.jpg");
-    expect(imagePathOn("thr_2", 0, "image/webp")).toBe("/root/.wsp/threads/thr_2/images/1.webp");
+    const dir = turnImagesDir("thr_1", "req_a", "minted");
+    expect(dir).toBe("/root/.wsp/threads/thr_1/images/req_a");
+    expect(imagePathIn(dir, 0, "image/png")).toBe("/root/.wsp/threads/thr_1/images/req_a/1.png");
+    expect(imagePathIn(dir, 1, "image/jpeg")).toBe("/root/.wsp/threads/thr_1/images/req_a/2.jpg");
+    expect(imagePathIn(turnImagesDir("thr_2", "req_b", "minted"), 0, "image/webp")).toBe("/root/.wsp/threads/thr_2/images/req_b/1.webp");
+  });
+
+  it("two sends of one thread never share a folder, and every send's folder is under the thread's", () => {
+    expect(turnImagesDir("thr_1", "req_a", "m")).not.toBe(turnImagesDir("thr_1", "req_b", "m"));
+    for (const requestId of ["req_a", undefined]) {
+      expect(turnImagesDir("thr_1", requestId, "minted").startsWith(`${threadImagesDir("thr_1")}/`)).toBe(true);
+    }
+  });
+
+  it("a send with no request id takes the minted name, since a shared folder would lose one send's picture", () => {
+    expect(turnImagesDir("thr_1", undefined, "minted")).toBe("/root/.wsp/threads/thr_1/images/minted");
+  });
+
+  it("a request id shaped like a path is not used as one: it is a client's string and this is a path on a machine", () => {
+    for (const nasty of ["../../../etc", "a/b", "..", "", ".ssh/../..", "-rf"]) {
+      expect(turnImagesDir("thr_1", nasty, "minted")).toBe("/root/.wsp/threads/thr_1/images/minted");
+    }
+    // A plain id, whatever its shape otherwise, is the folder's name.
+    expect(turnImagesDir("thr_1", "a.b-c_1", "minted")).toBe("/root/.wsp/threads/thr_1/images/a.b-c_1");
   });
 
   it("a type outside the table has no name here; the caps refusal is what turns it away", () => {
-    expect(() => imagePathOn("thr_1", 0, "application/pdf")).toThrow(/not an image type/);
+    expect(() => imagePathIn("/tmp/x", 0, "application/pdf")).toThrow(/not an image type/);
+  });
+});
+
+describe("the words every road reads rather than spelling again", () => {
+  it("the four types, the accept list and the cap are each one export, and the refusals are built from them", () => {
+    expect(IMAGE_TYPE_WORDS).toBe("PNG, JPEG, GIF or WebP");
+    expect(IMAGE_ACCEPT).toBe("image/png,image/jpeg,image/gif,image/webp");
+    expect(IMAGE_ACCEPT.split(",")).toEqual(Object.keys(IMAGE_TYPES));
+    expect(IMAGE_MAX_WORDS).toBe("10.0 MB");
+    expect(notAnImageLine("a.pdf")).toContain(IMAGE_TYPE_WORDS);
+    expect(imagesRefusal([imageRecord({ mediaType: "image/png", bytes: b64(12 * 1024 * 1024) })])).toContain(IMAGE_MAX_WORDS);
+  });
+
+  it("a path this computer has no file at answers in a sentence, not in the reader's own error", () => {
+    expect(notAFileLine("/tmp/nope.png")).toBe("there is no file at /tmp/nope.png on this computer");
   });
 });
 
