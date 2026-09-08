@@ -3,16 +3,19 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { MACHINE_OS_WORD, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { MACHINE_OS_WORD, THREAD_ARCHIVE_MS, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
+  foldArchivedThreads,
+  isThreadArchived,
   isThreadWorking,
   resolveAdjacentThreadId,
   searchSidebarThreadsByTitle,
   sidebarThreadOrder,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
+  splitSidebarThreads,
   topSidebarThread,
 } from "../src/sidebar/Sidebar.logic.js";
 import { spaceWorkspaceId } from "../src/sidebar/sidebarMode.js";
@@ -57,6 +60,40 @@ describe("copied sort and search", () => {
     const threads = [{ title: "Fix the port list" }, { title: "upgrade node" }, { title: "port forwarding" }];
     expect(searchSidebarThreadsByTitle(threads, "PORT").map(t => t.title)).toEqual(["Fix the port list", "port forwarding"]);
     expect(searchSidebarThreadsByTitle(threads, "  ")).toEqual([]);
+  });
+});
+
+describe("the archive fold", () => {
+  const NOW = Date.parse("2026-09-08T12:00:00Z");
+  const idleFor = (id: string, ms: number) => thread(id, new Date(NOW - ms - 60_000).toISOString(), new Date(NOW - ms).toISOString());
+
+  it("the threshold is the protocol's one word: a thread idle just under it stays on the shelf, one idle at it or past it archives", () => {
+    expect(isThreadArchived(idleFor("just-under", THREAD_ARCHIVE_MS - 60_000), NOW)).toBe(false);
+    expect(isThreadArchived(idleFor("exactly", THREAD_ARCHIVE_MS), NOW)).toBe(true);
+    expect(isThreadArchived(idleFor("well-past", 3 * THREAD_ARCHIVE_MS), NOW)).toBe(true);
+  });
+
+  it("a thread with no readable timestamp has no idleness to measure, so it stays on the shelf", () => {
+    expect(isThreadArchived(thread("blank", null, null), NOW)).toBe(false);
+    expect(isThreadArchived(thread("malformed", "not a date", "also not a date"), NOW)).toBe(false);
+  });
+
+  it("the fold counts each side and keeps the order the shelf sorted them into", () => {
+    const shelf = [idleFor("a", 60_000), idleFor("b", 2 * THREAD_ARCHIVE_MS), idleFor("c", 3 * 60_000), idleFor("d", 5 * THREAD_ARCHIVE_MS)];
+    const { settled, archived } = foldArchivedThreads(shelf, NOW);
+    expect(settled.map(t => t.id)).toEqual(["a", "c"]);
+    expect(archived.map(t => t.id)).toEqual(["b", "d"]);
+  });
+
+  it("a thread that takes a new turn leaves the archive on its own: it is working, so the split never offers it to the fold", () => {
+    const woken = { ...idleFor("woken", 5 * THREAD_ARCHIVE_MS), status: "running" as const };
+    const stale = { ...idleFor("stale", 5 * THREAD_ARCHIVE_MS), status: "completed" as const };
+    const { active, settled } = splitSidebarThreads([woken, stale]);
+    expect(active.map(t => t.id)).toEqual(["woken"]);
+    expect(foldArchivedThreads(settled, NOW).archived.map(t => t.id)).toEqual(["stale"]);
+    // And once that turn settles, its fresh end stamp keeps it out of the archive with no flag to clear.
+    const replied = { ...woken, status: "completed" as const, endedAt: new Date(NOW - 1_000).toISOString() };
+    expect(isThreadArchived(replied, NOW)).toBe(false);
   });
 });
 
@@ -195,13 +232,13 @@ describe("workspace row labels", () => {
     expect(spaceHeaderLines({ project: local("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual(["no daemon answering", "this computer"]);
     // A driven kind's own state word already reads Unreachable for it, so its line keeps the spend.
     expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" } }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("$0.29 today · $0.110/hr · active");
-    expect(daemonGoneLine("slow")).toBeNull();
-    expect(daemonGoneLine(null)).toBeNull();
+    expect(daemonGoneLine("slow")).toBeUndefined();
+    expect(daemonGoneLine(null)).toBeUndefined();
   });
 
   it("thread pills key on the session status, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {
-    expect(threadPill({ status: "running", indicator: { label: "Working", tone: "neutral", pulse: true } })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("muted-foreground") });
-    expect(threadPill({ status: "failed", indicator: { label: "Ended", tone: "neutral", pulse: false } })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("muted-foreground") });
+    expect(threadPill({ status: "running", indicator: { label: "Working", tone: "neutral", pulse: true } })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("sidebar-whisper") });
+    expect(threadPill({ status: "failed", indicator: { label: "Ended", tone: "neutral", pulse: false } })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("sidebar-whisper") });
     expect(threadPill({ status: "failed", indicator: { label: "Stopped short", tone: "neutral", pulse: false } })).toMatchObject({ label: "Stopped short" });
     expect(threadPill({ status: "completed", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
     expect(threadPill({ status: "interrupted", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();

@@ -5,7 +5,7 @@
 // which model state wsp's wire does not carry. Contract types are hand-written
 // against the wsp thread snapshot (startedAt and endedAt instead of createdAt,
 // updatedAt and the turn projection).
-import type { SessionStatus } from "@wsp/protocol";
+import { THREAD_ARCHIVE_MS, type SessionStatus } from "@wsp/protocol";
 import { cn } from "../lib/utils";
 import { activeThreadAnchorTimestampMs, toSortableTimestamp } from "./threadSort";
 
@@ -89,7 +89,7 @@ export function resolveThreadRowClassName(input: {
 
   return cn(
     baseClassName,
-    "text-sidebar-muted-foreground/80 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+    "text-[var(--sidebar-row-rest)] hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
   );
 }
 
@@ -222,6 +222,28 @@ export function sortSettledThreadsForSidebar<T extends ThreadTimestamps & { read
   return [...threads].sort(
     (left, right) => timestampMs(right) - timestampMs(left) || left.id.localeCompare(right.id),
   );
+}
+
+/** Whether an idle thread has gone quiet long enough to belong in the archive, against the protocol's one threshold.
+    A thread whose timestamps are all missing or malformed has no idleness to read, so it stays on the shelf rather
+    than falling into a group the shelf keeps shut. */
+export function isThreadArchived(thread: ThreadTimestamps, nowMs: number): boolean {
+  const lastActivityMs = toSortableTimestamp(resolveSettledTimestamp(thread) ?? undefined);
+  return lastActivityMs !== null && nowMs - lastActivityMs >= THREAD_ARCHIVE_MS;
+}
+
+/** The idle shelf split into the rows it still shows and the ones that fold into Archived, each side keeping the
+    order the shelf sorted them into. */
+export function foldArchivedThreads<T extends ThreadTimestamps>(
+  settled: readonly T[],
+  nowMs: number,
+): { settled: T[]; archived: T[] } {
+  const shelf: T[] = [];
+  const archived: T[] = [];
+  for (const thread of settled) {
+    (isThreadArchived(thread, nowMs) ? archived : shelf).push(thread);
+  }
+  return { settled: shelf, archived };
 }
 
 /** A thread as both sidebar sorts read it. */

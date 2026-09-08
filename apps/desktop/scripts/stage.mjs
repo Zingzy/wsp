@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Lays out build/app, the directory electron-builder packages: the bundled
-// main and preload, the built web app, and a copy of @wsp/daemon's package
+// main and preload, the built web app, a copy of @wsp/daemon's package
 // (package.json plus dist) that the host's require.resolve finds when it
-// stages the guest bundle. Unpackaged runs find it under build/app/
-// node_modules; the packaged app carries it as an extra resource one
-// directory above the app, on the same parent walk.
+// stages the guest bundle, and node-pty, the one package the bundle leaves
+// external. An unpackaged run finds both under build/app/node_modules; a
+// packaged app carries the daemon as an extra resource one directory above the
+// app, on the same parent walk, and node-pty from scripts/after-pack.mjs,
+// which alone knows which target each packaged tree runs.
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ptyPackage, stagePty } from "./pty.mjs";
 
 // The table of shipped assets lives in @wsp/host's build output, and build:app
 // runs on its own from `start`, so a tree that has not built it is named here
@@ -41,6 +44,10 @@ rmSync(join(app, "node_modules"), { recursive: true, force: true });
 mkdirSync(daemonOut, { recursive: true });
 cpSync(join(daemonDir, "package.json"), join(daemonOut, "package.json"));
 cpSync(join(daemonDir, "dist"), join(daemonOut, "dist"), { recursive: true });
+
+// This machine's own build, for an unpackaged run: a packaged tree gets the build for the target it runs, from the
+// afterPack hook, since one build stages once and packages several targets.
+stagePty(ptyPackage(), app);
 
 writeFileSync(
   join(app, "package.json"),

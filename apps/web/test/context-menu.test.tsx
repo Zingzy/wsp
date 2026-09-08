@@ -10,7 +10,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type ContextMenuItem, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type ContextMenuItem, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -59,6 +59,7 @@ type FakeApi = Api & {
   forget: ReturnType<typeof vi.fn>;
   renameSession: ReturnType<typeof vi.fn>;
   renameWorkspace: ReturnType<typeof vi.fn>;
+  setWorkspaceLook: ReturnType<typeof vi.fn>;
   wake: ReturnType<typeof vi.fn>;
 };
 
@@ -84,6 +85,19 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     renameWorkspace: vi.fn(async (id: string, name: string) => {
       const row = workspaces.find(w => w.id === id)!;
       row.name = name;
+      return row;
+    }),
+    // The look sits on the record beside the name, so the fixture writes it there and answers with the row.
+    setWorkspaceLook: vi.fn(async (id: string, look: WorkspaceLook) => {
+      const row = workspaces.find(w => w.id === id)!;
+      if (look.tint !== undefined) {
+        if (look.tint === null) delete row.tint;
+        else row.tint = look.tint;
+      }
+      if (look.glyph !== undefined) {
+        if (look.glyph === null) delete row.glyph;
+        else row.glyph = look.glyph;
+      }
       return row;
     }),
     upgrade: async id => view(id, "?", "running"),
@@ -155,6 +169,43 @@ afterEach(() => {
   provideDaemonWire(WS, null);
 });
 
+describe("the space header's menu", () => {
+  // In Spaces mode no row of the workspace is on screen, so the header carries its menu. The chords are what a
+  // person learns the keys from, and the header is the only place they would see them for these actions.
+  it("carries the same chords the workspace row's menu shows for the same actions", async () => {
+    const chordsOfMenu = (): Array<[string | null | undefined, string | null]> =>
+      items().map(el => [el.querySelector("[data-menu-label]")?.textContent, el.querySelector("kbd")?.textContent ?? null]);
+
+    await mountSidebar(fakeApi([API], [statusOf(API)]), "api");
+    rightClick(rowOf("api"));
+    await screen.findByRole("menu");
+    const fromRow = chordsOfMenu();
+    useContextMenuStore.getState().choose(null);
+    cleanup();
+
+    // The name reads twice in Spaces, on the header and on its own dot, so the shared mount's one-name wait
+    // cannot be used; the header arriving is what says the body is up.
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
+    useStore.getState().bind(fakeApi([API], [statusOf(API)]));
+    render(
+      <SidebarProvider defaultOpen>
+        <WorkspaceSidebar />
+        <ContextMenuHost />
+      </SidebarProvider>,
+    );
+    const header = await waitFor(() => document.querySelector("[data-space-header]")!);
+    rightClick(header);
+    await screen.findByRole("menu");
+    expect(chordsOfMenu()).toEqual(fromRow);
+    // Not a vacuous match: these three actions do carry a chord, so an empty column would fail here.
+    expect(chordsOfMenu().filter(([, chord]) => chord !== null).map(([label]) => label)).toEqual([
+      WORKSPACE_WORDS.newThread,
+      WORKSPACE_WORDS.openTerminal,
+      WORKSPACE_WORDS.openBrowser,
+    ]);
+  });
+});
+
 describe("a workspace row's menu", () => {
   it("opens at the pointer with every registry action in order; disabled rows are dimmed with their refusal; arrows walk it and Escape hands focus back", async () => {
     await mountSidebar(fakeApi([API], [statusOf(API)]), "api");
@@ -174,6 +225,8 @@ describe("a workspace row's menu", () => {
       WORKSPACE_WORDS.importProject,
       WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
+      WORKSPACE_WORDS.colour,
+      WORKSPACE_WORDS.icon,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
       WORKSPACE_WORDS.forget,
@@ -271,6 +324,8 @@ describe("a workspace row's menu", () => {
       ["import-project", WORKSPACE_WORDS.importProject, false],
       ["export-project", WORKSPACE_WORDS.exportProject, false],
       ["rename", WORKSPACE_WORDS.rename, true],
+      ["colour", WORKSPACE_WORDS.colour, true],
+      ["icon", WORKSPACE_WORDS.icon, true],
       ["fork", WORKSPACE_WORDS.fork, false],
       ["copy-id", WORKSPACE_WORDS.copyId, true],
       ["forget", WORKSPACE_WORDS.forget, false],
@@ -279,6 +334,69 @@ describe("a workspace row's menu", () => {
     expect(sent.find(i => i.id === "open-terminal")?.accelerator).toBe("CommandOrControl+J");
     expect(menu()).toBeNull();
     await waitFor(() => expect(api.nap).toHaveBeenCalledWith("ws_a"));
+  });
+});
+
+describe("a workspace's colour and icon", () => {
+  const swatch = (dialog: HTMLElement, label: string): HTMLElement => within(dialog).getByRole("button", { name: label });
+
+  async function openPicker(api: FakeApi, word: string): Promise<HTMLElement> {
+    await mountSidebar(api, "api");
+    rightClick(rowOf("api"));
+    await screen.findByRole("menu");
+    fireEvent.click(item(word));
+    return await screen.findByRole("dialog");
+  }
+
+  it("the menu's Colour opens the six hues alone, a pick reaches the runtime and the row follows without asking again", async () => {
+    const api = fakeApi([API], [statusOf(API)]);
+    const dialog = await openPicker(api, WORKSPACE_WORDS.colour);
+    expect(within(dialog).getByText(API.name)).toBeDefined();
+    // The hues the palette offers, none of them near the green that means running or the red that means danger.
+    expect(within(dialog).getAllByRole("button").map(b => b.getAttribute("aria-label")).filter(label => label?.startsWith("Colour:"))).toEqual([
+      "Colour: None",
+      "Colour: Cyan",
+      "Colour: Azure",
+      "Colour: Blue",
+      "Colour: Violet",
+      "Colour: Purple",
+      "Colour: Magenta",
+    ]);
+    expect(swatch(dialog, "Colour: None").getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(swatch(dialog, "Colour: Cyan"));
+    await waitFor(() => expect(api.setWorkspaceLook).toHaveBeenCalledWith("ws_a", { tint: "cyan" }));
+    await waitFor(() => expect(useStore.getState().workspaces[0]!.tint).toBe("cyan"));
+    await waitFor(() => expect(swatch(dialog, "Colour: Cyan").getAttribute("aria-pressed")).toBe("true"));
+    // None is the way back, and it clears the hue rather than sending another one.
+    fireEvent.click(swatch(dialog, "Colour: None"));
+    await waitFor(() => expect(api.setWorkspaceLook).toHaveBeenCalledWith("ws_a", { tint: null }));
+    await waitFor(() => expect(useStore.getState().workspaces[0]!.tint).toBeUndefined());
+  });
+
+  it("the menu's Icon opens the glyphs alone, and a pick sends the glyph without touching the hue", async () => {
+    const api = fakeApi([{ ...API, tint: "violet" }], [statusOf(API)]);
+    const dialog = await openPicker(api, WORKSPACE_WORDS.icon);
+    const labels = within(dialog).getAllByRole("button").map(b => b.getAttribute("aria-label") ?? "").filter(label => label.startsWith("Icon:"));
+    expect(labels[0]).toBe("Icon: None");
+    expect(labels).toContain("Icon: Flask");
+    expect(labels.filter(l => l.startsWith("Colour:"))).toEqual([]);
+    fireEvent.click(swatch(dialog, "Icon: Flask"));
+    await waitFor(() => expect(api.setWorkspaceLook).toHaveBeenCalledWith("ws_a", { glyph: "flask" }));
+    await waitFor(() => expect(useStore.getState().workspaces[0]).toMatchObject({ tint: "violet", glyph: "flask" }));
+  });
+
+  it("a client that cannot hold a look says so on both rows rather than opening a picker nothing would take", async () => {
+    const api = fakeApi([API], [statusOf(API)]);
+    delete (api as { setWorkspaceLook?: unknown }).setWorkspaceLook;
+    await mountSidebar(api, "api");
+    rightClick(rowOf("api"));
+    await screen.findByRole("menu");
+    for (const word of [WORKSPACE_WORDS.colour, WORKSPACE_WORDS.icon]) {
+      expect(item(word).getAttribute("aria-disabled")).toBe("true");
+      expect(refusalOf(word)).toBe("This client cannot set a workspace's colour or icon");
+      fireEvent.click(item(word));
+    }
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

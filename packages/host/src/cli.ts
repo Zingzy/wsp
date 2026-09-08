@@ -390,9 +390,9 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   mkdirSync(root, { recursive: true });
   const homes = agentHomes(home, env);
   const login = Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined));
-  // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer. The
-  // module is loaded on that dial too, since it reaches @wsp/daemon and node-pty; the desktop's Electron bundle
-  // carries no build of that native module, so an eager edge would throw before the app opened its window.
+  // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
+  // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
+  // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
   let daemon: Promise<LocalDaemon> | undefined;
   let shutting = false;
   return {

@@ -620,6 +620,44 @@ describe("store workspaces", () => {
     expect(useStore.getState().statuses["ws_gone"]).toBeUndefined();
   });
 
+  it("the look lands on the row and its status, and a cleared fact leaves rather than lingering under the merge", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    emit({ type: "workspace.look", workspaceId: "ws_a", tint: "cyan", glyph: "flask" });
+    expect(useStore.getState().workspaces[0]!).toMatchObject({ tint: "cyan", glyph: "flask" });
+    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ tint: "cyan", glyph: "flask" });
+    // Clearing one is a null, not a missing key, so the row loses it instead of keeping the old hue.
+    emit({ type: "workspace.look", workspaceId: "ws_a", tint: null, glyph: "flask" });
+    expect(useStore.getState().workspaces[0]!).not.toHaveProperty("tint");
+    expect(useStore.getState().statuses["ws_a"]).not.toHaveProperty("tint");
+    expect(useStore.getState().workspaces[0]!.glyph).toBe("flask");
+    // A workspace no row holds is not invented by a look.
+    emit({ type: "workspace.look", workspaceId: "ws_gone", tint: "magenta", glyph: null });
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a"]);
+    expect(useStore.getState().statuses["ws_gone"]).toBeUndefined();
+  });
+
+  it("setWorkspaceLook sends the one fact a picker changed and puts what the runtime answers with on the row", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    const looked = { ...view("ws_a"), tint: "violet" as const };
+    const calls: unknown[][] = [];
+    api.setWorkspaceLook = async (...args) => { calls.push(args); return looked; };
+    useStore.getState().bind(api);
+    await flush();
+    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: "violet" } })).toBe(true);
+    expect(calls).toEqual([["ws_a", { tint: "violet" }]]);
+    expect(useStore.getState().workspaces[0]!.tint).toBe("violet");
+    // A refusal is a toast and a false, and the row keeps what it had.
+    api.setWorkspaceLook = async () => { throw new Error("the host said no"); };
+    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: null } })).toBe(false);
+    expect(useStore.getState().toast).toBe("the host said no");
+    expect(useStore.getState().workspaces[0]!.tint).toBe("violet");
+    // A client without the verb takes no pick at all.
+    delete api.setWorkspaceLook;
+    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: "cyan" } })).toBe(false);
+  });
+
   it("gone carries the phase and the provider's words onto the view and its status", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
     useStore.getState().bind(api);

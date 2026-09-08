@@ -158,8 +158,8 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
     expect(existsSync(join(SHOTS, `import-done-${theme}.png`))).toBe(true);
   }, 60_000);
 
-  it("the cache list opens under its count and wraps whole", async () => {
-    await read("theme=dark");
+  it.each(["dark", "light"] as const)("in the %s theme the cache list opens under its count and wraps whole", async theme => {
+    await read(`theme=${theme}`);
     expect(await page!.locator("[data-k=cache-list]").count()).toBe(0);
     const dest = await box("[data-k=dest]");
     await page!.locator("[data-k=caches] button").click();
@@ -167,17 +167,23 @@ describe.skipIf(skipped !== undefined)("the import dialog laid out in Chromium",
     expect(await page!.locator("[data-k=cache-list]").textContent()).toBe("node_modules, dist, .venv, coverage");
     await page!.waitForFunction(y => (document.querySelector("[data-k=dest]")?.getBoundingClientRect().y ?? 0) > y, dest.y);
     expect(await uncut("[data-k=cache-list]")).toBe(true);
-    await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, "import-caches-open-dark.png") });
+    const ratios = await textContrast(page!, "[data-k=cache-list]");
+    console.info(`${theme}: the cache list reads at ${ratios.map(r => r.toFixed(2)).join(", ")} to 1`);
+    for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `import-caches-open-${theme}.png`) });
   }, 30_000);
 
-  it("with nothing secret-shaped and no agent sessions both sections are absent and the progress line sits right under the summary", async () => {
-    await read("theme=dark&secrets=0&agents=0");
+  it.each(["dark", "light"] as const)("in the %s theme with nothing secret-shaped and no agent sessions both sections are absent and the progress line sits right under the summary", async theme => {
+    await read(`theme=${theme}&secrets=0&agents=0`);
     expect(await page!.locator("[data-k=secrets]").count()).toBe(0);
     expect(await page!.locator("[data-k=agents]").count()).toBe(0);
     const dest = await box("[data-k=dest]");
     const progress = await box("[data-k=progress]");
     expect(progress.y - (dest.y + dest.height)).toBeLessThan(40);
-    await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, "import-plain-dark.png") });
+    const ratios = await textContrast(page!, "[role=dialog] .text-muted-foreground");
+    console.info(`${theme}: the empty dialog's muted lines read at ${ratios.map(r => r.toFixed(2)).join(", ")} to 1`);
+    for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `import-plain-${theme}.png`) });
   }, 30_000);
 
   it.each(["dark", "light"] as const)("in the %s theme the browser a tab gets is one quiet list on the consent rows' height, keeps that height across a level, and reads at AA", async theme => {

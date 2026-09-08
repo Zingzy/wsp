@@ -33,10 +33,24 @@ export function reachNote(reach: ReachState | null): string | null {
 /** The row's line for a daemon that is not there, on a kind whose row shows no state word: nothing on the row would
  * otherwise say it, and it was readable only on the Machine tab's Reach. no-daemon is a machine that answers with
  * nothing on the daemon's port, unsupported one with no daemon road at all; the two are different facts and the
- * line says which. Null for every other reach, and for a kind whose state word already carries this. */
-export function daemonGoneLine(reach: ReachState | null): string | null {
+ * line says which. Nothing for every other reach. */
+export function daemonGoneLine(reach: ReachState | null): string | undefined {
   if (reach === "no-daemon") return "no daemon answering";
-  return reach === "unsupported" ? "no daemon on this machine" : null;
+  return reach === "unsupported" ? "no daemon on this machine" : undefined;
+}
+
+/** The sentences a meta line can carry in place of its counts, in the order a surface draws them: what the
+ * runtime is doing to the machine's daemon, then a drop with memory near full, then a daemon that is not there at
+ * all. Written once because two surfaces draw them and both have to tell them from a figure: prose takes the ink
+ * that reads at AA, the counts beside it keep the whisper. */
+export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "outOfMemory">): string[] {
+  return [
+    daemonNote(project),
+    outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
+    // A row with no state word has nowhere else to say its daemon is gone, and it is the thing a person waiting on
+    // a terminal is waiting on; a driven kind's state word already reads Unreachable for it.
+    kindWords(workspaceKind(project.workspace)).driven ? undefined : daemonGoneLine(project.reach),
+  ].filter((line): line is string => line !== undefined);
 }
 
 export interface WorkspaceMetaInput {
@@ -51,20 +65,14 @@ export interface WorkspaceMetaInput {
 /** The machine row's second line, one string in one order: what it cost today, the rate while it bills, the edge
  * note, the nap countdown last. The cost always leads, an honest zero before the meter's first tick, so no row draws
  * a blank line. The width cuts it from the right; nothing here decides what to leave out. What the runtime is doing
- * to the machine's daemon, or a drop with memory near full, takes the whole line while it lasts: it is the one thing
- * on the row a person may be waiting on. A machine wsp does not drive spends nothing and naps never, so its line
- * says what the machine is instead. */
+ * to the machine's daemon, a drop with memory near full, or a daemon that is not there at all takes the whole line
+ * while it lasts: it is the one thing on the row a person may be waiting on, and it reads in the ink prose gets. A
+ * machine wsp does not drive spends nothing and naps never, so its line says what the machine is instead. */
 export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
-  const note = daemonNote(project);
-  if (note !== undefined) return note;
-  if (outOfMemory !== undefined) return outOfMemoryRowLine(outOfMemory);
-  const undriven = !kindWords(workspaceKind(project.workspace)).driven;
-  // A row with no state word has nowhere else to say its daemon is gone, and it is the thing a person waiting on a
-  // terminal is waiting on; a driven kind's state word already reads Unreachable for it.
-  const noDaemon = undriven ? daemonGoneLine(project.reach) : null;
-  if (noDaemon !== null) return noDaemon;
+  const [sentence] = metaSentences({ project, outOfMemory });
+  if (sentence !== undefined) return sentence;
   const machine = machineLine(project);
-  if (undriven && machine !== null) return machine;
+  if (!kindWords(workspaceKind(project.workspace)).driven && machine !== null) return machine;
   return [
     accruedTodayLabel(cost?.accruedUsd ?? 0),
     isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null,
@@ -100,22 +108,16 @@ export function accruedTodayLabel(accruedUsd: number | null): string | null {
 export const rateLabel = (rateUsdPerHour: number | null): string | null => (rateUsdPerHour === null ? null : `$${rateUsdPerHour.toFixed(3)}/hr`);
 
 /** The Spaces header's lines under the name. The two the row's meta line gives a whole line to lead, since the one
- * workspace on screen is where a person waits on them: what the runtime is doing to the daemon, then a drop with
- * memory near full. Then what the machine is, what it costs, and when it naps. A line nothing is known for is left
+ * workspace on screen is where a person waits on them: what the runtime is doing to the daemon, a drop with memory
+ * near full, then a daemon that is not there at all. Then what the machine is, what it costs, and when it naps. A line nothing is known for is left
  * out rather than drawn half: no size yet means no machine line, as no nap scheduled means no nap line. The cost
  * line leads with the same honest zero the row's does and carries the rate only while the machine bills. A kind
  * with its own words for what the machine is says them where a fork's size reads, through the one machine line, and
  * a machine wsp does not drive stops there: it spends nothing and naps never, so a rate under the words for what
  * the machine is would name an hour nobody is charged for. */
 export function spaceHeaderLines({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
-  const driven = kindWords(workspaceKind(project.workspace)).driven;
-  const lines: (string | null)[] = [
-    daemonNote(project) ?? null,
-    outOfMemory === undefined ? null : outOfMemoryRowLine(outOfMemory),
-    driven ? null : daemonGoneLine(project.reach),
-    machineLine(project),
-  ];
-  if (driven) {
+  const lines: (string | null)[] = [...metaSentences({ project, outOfMemory }), machineLine(project)];
+  if (kindWords(workspaceKind(project.workspace)).driven) {
     const nap = idleCountdownLabel(project.status, nowMs);
     lines.push(
       [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]
@@ -134,7 +136,10 @@ export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "i
   return project.state === "running" ? "" : project.indicator.label;
 }
 
-const PLAIN = { colorClass: "text-muted-foreground/70", dotClass: "bg-muted-foreground/60" };
+// The base the sidebar's whispered tiers mix from, not the app's muted ink: the same colour on a
+// dark surface, and on a light one the step an alpha needs there. A row in the command palette
+// draws it from the root's copy of the token.
+const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whisper/60" };
 
 const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli", agent: "agent" };
 

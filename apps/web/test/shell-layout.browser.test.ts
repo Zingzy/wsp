@@ -21,12 +21,16 @@
 // state word in its slot at the right edge only off running, the meta line
 // in one order cut from the right, no import or export glyph, the thread
 // title up to a fixed time column, the Spaces body draws one workspace
-// under its header with a dot per workspace at the sidebar's bottom, the
+// under its header with a dot per workspace at the sidebar's bottom, a
+// workspace's own hue paints the sidebar's surface and its glyph in Spaces
+// and its threads' rail alone in the list, the
 // move to another space travels that body out the way it was pushed and the
 // next one in from the other side while the header and the dots row hold
 // still, or swaps it with no travel for a reader who asked for less motion,
-// and a mixed list of a local machine and two cloud ones keeps that one
-// grammar with the kind's glyph in the local lead. Vite
+// a mixed list of a local machine and two cloud ones keeps that one
+// grammar with the kind's glyph in the local lead, and the threads quiet for
+// over a day sit in an Archived group shut inside that workspace's idle
+// shelf, in the shelf header's own row grammar. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -39,6 +43,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTER } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
+import { textContrast } from "./contrast";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -288,6 +293,20 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       // No cost, no state word and no open word on any card: the state is read off the preview and the sidebar.
       for (const text of await cards.evaluateAll(els => els.map(el => el.textContent ?? ""))) expect(text).not.toMatch(/\$|Running|Paused|Gone|open/);
       expect(await page!.locator("[data-workspace-card][aria-selected=true]").getAttribute("data-workspace-card")).toBe("ws_b");
+      // No card here has a picture yet, so every well is the empty one. Its fill cannot hold an edge on a
+      // light card (1.02 against the white under it), so the hairline is what says where the box is, and
+      // it has to be there on both surfaces.
+      const wells = await page!.locator("[data-card-preview]").evaluateAll(els =>
+        els.map(el => {
+          const shadows = getComputedStyle(el).boxShadow.match(/(rgba?\([^)]*\)|color\([^)]*\))/g) ?? [];
+          return { empty: el.hasAttribute("data-card-preview-empty"), rings: shadows.filter(c => !/[,/]\s*0\)$/.test(c)).length };
+        }),
+      );
+      expect(wells).toHaveLength(3);
+      for (const well of wells) {
+        expect(well.empty, `a card's well is not the empty one in ${theme}`).toBe(true);
+        expect(well.rings, `the empty well carries no hairline in ${theme}`).toBeGreaterThan(0);
+      }
       await page!.screenshot({ path: join(SHOTS_DIR, `workspace-switcher-${theme}.png`) });
       console.info(`workspace switcher screenshot: ${join(SHOTS_DIR, `workspace-switcher-${theme}.png`)}`);
       await page!.keyboard.press("Tab");
@@ -664,6 +683,205 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 120_000);
 
+  // The hue is ink: it draws the header's glyph, the current dot's name and a thread rail. The floor it has to clear
+  // is the one the sidebar's own meta text clears, on the surface the hue itself has just washed, in both themes.
+  it("every workspace hue clears the sidebar's own readable floor on the surface it washes, in both themes", async () => {
+    const AA = 4.5;
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&spaces=1&tint=1`);
+      await page!.waitForSelector("[data-space-header][data-space-tint]");
+      const measured = await page!.evaluate(() => {
+        // Every colour goes through a canvas so it is read as the sRGB bytes the screen paints, gamut clamping and
+        // all; getComputedStyle hands back the oklch it was written in, which no contrast formula can take.
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+        const bytes = (css: string): [number, number, number] => {
+          ctx.fillStyle = "#000";
+          ctx.fillStyle = css;
+          ctx.fillRect(0, 0, 1, 1);
+          const d = ctx.getImageData(0, 0, 1, 1).data;
+          return [d[0]!, d[1]!, d[2]!];
+        };
+        const luminance = (c: [number, number, number]): number => {
+          const [r, g, b] = c.map(v => { const u = v / 255; return u <= 0.04045 ? u / 12.92 : ((u + 0.055) / 1.055) ** 2.4; }) as [number, number, number];
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        const ratio = (a: string, b: string): number => {
+          const [la, lb] = [luminance(bytes(a)), luminance(bytes(b))];
+          return Math.round(((Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)) * 100) / 100;
+        };
+        const read = (el: Element, prop: string): string => getComputedStyle(el).getPropertyValue(prop).trim();
+        const washed = getComputedStyle(document.querySelector<HTMLElement>("[data-app-sidebar] > [data-slot='sidebar-inner']")!).backgroundColor;
+        const plain = read(document.documentElement, "--sidebar");
+        const ids = Array.from(document.styleSheets)
+          .flatMap(sheet => Array.from(sheet.cssRules ?? []))
+          .flatMap(rule => Array.from(rule.cssText.matchAll(/--space-tint-([a-z]+):/g)).map(m => m[1]!));
+        const hues: Record<string, { onWashed: number; onPlain: number }> = {};
+        for (const id of [...new Set(ids)]) {
+          const el = document.createElement("div");
+          el.setAttribute("data-space-tint", id);
+          document.body.appendChild(el);
+          const colour = read(el, "--space-tint");
+          hues[id] = { onWashed: ratio(colour, washed), onPlain: ratio(colour, plain) };
+          el.remove();
+        }
+        return { washed, meta: ratio(read(document.documentElement, "--sidebar-muted-foreground"), washed), hues };
+      });
+      console.info(`hue contrast ${theme}: ${JSON.stringify(measured)}`);
+      // Six hues, not five: a hue dropped from the stylesheet and left in the protocol would show up here.
+      expect(Object.keys(measured.hues)).toHaveLength(6);
+      for (const [id, { onWashed, onPlain }] of Object.entries(measured.hues)) {
+        expect({ theme, id, onWashed: onWashed >= AA, onPlain: onPlain >= AA }).toEqual({ theme, id, onWashed: true, onPlain: true });
+      }
+      // The wash itself stays inside sRGB, so the screen paints it rather than clamping it. Mixing in sRGB left the
+      // dark theme's surface at a negative red channel; the oklab mix is what keeps it in range.
+      const [L, a, b] = (/oklab\((-?[\d.]+) (-?[\d.]+) (-?[\d.]+)\)/.exec(measured.washed) ?? []).slice(1).map(Number) as [number, number, number];
+      const [l, m, o] = [
+        (L + 0.3963377774 * a + 0.2158037573 * b) ** 3,
+        (L - 0.1055613458 * a - 0.0638541728 * b) ** 3,
+        (L - 0.0894841775 * a - 1.291485548 * b) ** 3,
+      ];
+      const linear = [
+        4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * o,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * o,
+        -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * o,
+      ];
+      console.info(`wash ${theme} in linear sRGB: ${JSON.stringify(linear.map(v => Math.round(v * 10000) / 10000))}`);
+      for (const channel of linear) expect({ theme, inGamut: channel >= -0.001 && channel <= 1.001 }).toEqual({ theme, inGamut: true });
+    }
+  }, 120_000);
+
+  it("two tinted spaces: the hue paints the sidebar's surface, the dot and the glyph, and in the list body the rail alone, in both themes", async () => {
+    const settled = async (): Promise<void> => {
+      // The body travels between spaces with both mounted, so until it settles the first header in the page is
+      // still the space being left.
+      await page!.waitForFunction(selector => document.querySelector(selector) === null, "[data-space-leaving]");
+    };
+    const readLook = () =>
+      page!.evaluate(() => {
+        const glyphColour = (el: Element | null | undefined): string | null => {
+          const glyph = el?.querySelector("[data-space-glyph]");
+          return glyph === null || glyph === undefined ? null : getComputedStyle(glyph).color;
+        };
+        const header = document.querySelector<HTMLElement>("[data-space-header]");
+        return {
+          surface: getComputedStyle(document.querySelector<HTMLElement>("[data-app-sidebar] > [data-slot='sidebar-inner']")!).backgroundColor,
+          sidebarTint: document.querySelector<HTMLElement>("[data-app-sidebar]")!.getAttribute("data-space-tint"),
+          headerTint: header?.getAttribute("data-space-tint") ?? null,
+          headerGlyph: glyphColour(header?.querySelector("span[aria-hidden]")),
+          dots: Array.from(document.querySelectorAll<HTMLElement>("[data-space-dot]")).map(dot => {
+            const name = dot.querySelector<HTMLElement>("[data-space-tint]");
+            return {
+              label: dot.getAttribute("aria-label") ?? "",
+              fill: getComputedStyle(dot.querySelector<HTMLElement>("span[aria-hidden]")!).backgroundColor,
+              // A napping dot is a ring, so its state colour is the border; the hue must be off both.
+              ring: getComputedStyle(dot.querySelector<HTMLElement>("span[aria-hidden]")!).borderColor,
+              glyph: glyphColour(dot),
+              nameTint: name?.getAttribute("data-space-tint") ?? null,
+              nameColour: name === null ? null : getComputedStyle(name).color,
+            };
+          }),
+        };
+      });
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&spaces=1`);
+      await page!.waitForSelector("[data-space-header]");
+      const plain = await readLook();
+      expect(plain.sidebarTint).toBeNull();
+
+      await page!.goto(`${base}?theme=${theme}&spaces=1&tint=1`);
+      await page!.waitForSelector("[data-space-header][data-space-tint]");
+      const tinted = await readLook();
+      console.info(`tinted spaces ${theme}: ${JSON.stringify(tinted)}`);
+      // The hue reaches the sidebar's own surface, so the whole column reads as this space and not only its rows.
+      expect(tinted.sidebarTint).toBe("cyan");
+      expect(tinted.headerTint).toBe("cyan");
+      expect(tinted.surface).not.toBe(plain.surface);
+      // Giving the workspaces hues moves no dot's fill at all: the running one is still the green that means running,
+      // the napping one still hollow, the gone one still muted. This row is the only place the state of the
+      // workspaces that are not on screen shows, so it stays a state row.
+      const [first, second, third] = tinted.dots as [(typeof tinted.dots)[number], (typeof tinted.dots)[number], (typeof tinted.dots)[number]];
+      expect(tinted.dots.map(dot => [dot.fill, dot.ring])).toEqual(plain.dots.map(dot => [dot.fill, dot.ring]));
+      expect(new Set([first.fill, second.fill, third.fill]).size).toBe(3);
+      expect([first.fill, second.fill, third.fill, first.ring, second.ring, third.ring]).not.toContain(tinted.headerGlyph);
+      // The hue reaches the current dot's name and stops there; the other dots carry no hue at all.
+      expect([first.nameTint, second.nameTint, third.nameTint]).toEqual(["cyan", null, null]);
+      expect(first.nameColour).toBe(tinted.headerGlyph);
+      // Only the current dot carries a glyph, and it takes the row's own ink, not the hue the sidebar is washed in.
+      expect([second.glyph, third.glyph]).toEqual([null, null]);
+      expect(first.glyph).not.toBe(tinted.headerGlyph);
+
+      await page!.locator("[data-space-dot][aria-label=web]").click();
+      await page!.waitForFunction(() => document.querySelector("[data-app-sidebar]")?.getAttribute("data-space-tint") === "violet");
+      await settled();
+      const violet = await readLook();
+      expect(violet.surface).not.toBe(tinted.surface);
+      expect(violet.dots[1]!.nameColour).toBe(violet.headerGlyph);
+      expect(violet.headerGlyph).not.toBe(tinted.headerGlyph);
+      // The workspace with no hue takes the sidebar back to its plain surface.
+      await page!.locator("[data-space-dot][aria-label=old]").click();
+      await page!.waitForFunction(() => document.querySelector("[data-app-sidebar]")?.getAttribute("data-space-tint") === null);
+      await settled();
+      expect((await readLook()).surface).toBe(plain.surface);
+
+      await page!.locator("[data-space-dot][aria-label=api]").click();
+      await page!.waitForFunction(() => document.querySelector("[data-app-sidebar]")?.getAttribute("data-space-tint") === "cyan");
+      await settled();
+      await page!.mouse.move(600, 700);
+      const spacesShot = join(SHOTS_DIR, `sidebar-tinted-spaces-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path: spacesShot });
+      console.info(`tinted spaces screenshot: ${spacesShot}`);
+
+      // In the list body the hue draws in one place: the rail the tinted workspace's threads hang from.
+      await page!.goto(`${base}?theme=${theme}&tint=1`);
+      await page!.waitForSelector("[data-row-id='ws:ws_a']");
+      const rails = await page!.evaluate(() =>
+        Array.from(document.querySelectorAll<HTMLElement>("[data-slot='sidebar-menu-sub']")).map(sub => ({
+          tint: sub.getAttribute("data-space-tint"),
+          border: getComputedStyle(sub).borderLeftColor,
+          threads: Array.from(sub.querySelectorAll("[data-row-id^='thread:']")).map(row => row.getAttribute("data-row-id")),
+        })),
+      );
+      console.info(`tinted rails ${theme}: ${JSON.stringify(rails)}`);
+      expect(rails.map(rail => rail.tint)).toEqual(["cyan", "violet"]);
+      expect(rails[0]!.threads).toEqual(["thread:s1", "thread:s2"]);
+      expect(rails[0]!.border).not.toBe(rails[1]!.border);
+      // Nothing else in the list body wears the hue, and the surface stays the plain one.
+      expect(await page!.locator("[data-space-tint]").count()).toBe(2);
+      expect((await readLook()).surface).toBe(plain.surface);
+      // On macOS the window's own material is the surface, so the hue goes over it and never seals it behind a token.
+      await page!.goto(`${base}?theme=${theme}&spaces=1&tint=1&mac=1`);
+      await page!.waitForSelector("[data-space-header][data-space-tint]");
+      const mac = await readLook();
+      expect(mac.sidebarTint).toBe("cyan");
+      expect(mac.surface).toMatch(/\/ 0\.\d+\)$|, 0\.\d+\)$/);
+
+      await page!.goto(`${base}?theme=${theme}&tint=1`);
+      await page!.waitForSelector("[data-row-id='ws:ws_a']");
+      const listShot = join(SHOTS_DIR, `sidebar-tinted-list-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path: listShot });
+      console.info(`tinted list screenshot: ${listShot}`);
+
+      // The picker the row's menu opens: one row of swatches, the picked one ringed, and the way back to none first.
+      await page!.locator("[data-row-id='ws:ws_a']").click({ button: "right" });
+      await page!.locator("[data-context-menu] [role=menuitem]", { hasText: "Colour" }).click();
+      const picker = page!.locator("[data-workspace-look]");
+      await picker.waitFor();
+      const swatches = await picker.locator("button").evaluateAll(els =>
+        els.map(el => ({ label: el.getAttribute("aria-label") ?? "", pressed: el.getAttribute("aria-pressed"), box: el.getBoundingClientRect().height })),
+      );
+      console.info(`colour picker ${theme}: ${JSON.stringify(swatches)}`);
+      expect(swatches).toHaveLength(7);
+      expect(swatches.filter(s => s.pressed === "true").map(s => s.label)).toEqual(["Colour: Cyan"]);
+      // One height for every cell, so the row reads as one control and not a ladder.
+      expect(new Set(swatches.map(s => Math.round(s.box))).size).toBe(1);
+      const pickerShot = join(SHOTS_DIR, `workspace-colour-picker-${theme}.png`);
+      await page!.locator("[data-slot=dialog-popup]").first().screenshot({ path: pickerShot });
+      console.info(`colour picker screenshot: ${pickerShot}`);
+    }
+  }, 120_000);
+
   it("a mixed list keeps one row grammar: this computer's row leads with the kind's glyph, says what it is and shows no state word, while the cloud rows beside it keep their dot, spend and word, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&local=1`);
@@ -954,6 +1172,91 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
+  it("the Archived group sits shut under the idle shelf, one row grammar with the Idle header and no colour of its own, and opens to rows of the same height, in both themes", async () => {
+    const readGroups = () =>
+      page!.evaluate(() => {
+        const read = (rowId: string) => {
+          const row = document.querySelector<HTMLElement>(`[data-row-id='${rowId}']`)!;
+          const word = row.querySelector<HTMLElement>("span")!;
+          const box = row.getBoundingClientRect();
+          const style = getComputedStyle(word);
+          const rowStyle = getComputedStyle(row);
+          return {
+            text: (row.textContent ?? "").trim(),
+            expanded: row.getAttribute("aria-expanded"),
+            y: box.y,
+            height: box.height,
+            x: box.x,
+            right: box.right,
+            color: style.color,
+            size: style.fontSize,
+            weight: style.fontWeight,
+            background: rowStyle.backgroundColor,
+            border: rowStyle.borderBottomWidth,
+            radius: rowStyle.borderBottomRightRadius,
+          };
+        };
+        // Only the first workspace's own block: the other two draw their own thread rows further down the list.
+        const block = document.querySelector<HTMLElement>("[data-row-id='ws:ws_a']")!.closest<HTMLElement>("[data-sidebar='menu-item']")!;
+        return {
+          idle: read("settled:ws_a"),
+          archived: read("archived:ws_a"),
+          threads: Array.from(block.querySelectorAll<HTMLElement>("[data-row-id^='thread:']")).map(row => ({
+            id: row.getAttribute("data-row-id"),
+            y: row.getBoundingClientRect().y,
+            height: row.getBoundingClientRect().height,
+          })),
+          sidebar: document.querySelector<HTMLElement>("[data-slot=sidebar]")!.getBoundingClientRect().right,
+        };
+      });
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&archived=1&sidebar=300`);
+      await page!.waitForSelector("[data-row-id='archived:ws_a']");
+      const shut = await readGroups();
+      console.info(`archived group ${theme} shut: ${JSON.stringify(shut)}`);
+      // Shut, carrying its count, and under the idle shelf it belongs to rather than above it.
+      expect(shut.archived.expanded).toBe("false");
+      expect(shut.archived.text).toBe("Archived (2)");
+      expect(shut.idle.text).toBe("Idle");
+      expect(shut.archived.y).toBeGreaterThan(shut.idle.y);
+      // The two threads it holds are not drawn; the working row and the one idle row are.
+      expect(shut.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2"]);
+      for (const thread of shut.threads) expect(thread.y).toBeLessThan(shut.archived.y);
+      // One row grammar with the header above it: same height, same left edge, same muted word, same rounding, and
+      // the group header is a plain row, not a chip or a badge, so it carries no fill and no border of its own.
+      expect(shut.archived.height).toBe(32);
+      expect(shut.archived.height).toBe(shut.idle.height);
+      expect(shut.archived.x).toBe(shut.idle.x);
+      expect(shut.archived.color).toBe(shut.idle.color);
+      expect(shut.archived.size).toBe(shut.idle.size);
+      expect(shut.archived.weight).toBe(shut.idle.weight);
+      expect(shut.archived.radius).toBe(shut.idle.radius);
+      expect(shut.archived.background).toBe("rgba(0, 0, 0, 0)");
+      expect(shut.archived.border).toBe("0px");
+      expect(shut.archived.right).toBeLessThanOrEqual(shut.sidebar);
+      const path = join(SHOTS_DIR, `sidebar-archived-shut-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar archived shut screenshot: ${path}`);
+      // One click opens it, and what it holds are ordinary thread rows at the ordinary thread-row height.
+      await page!.locator("[data-row-id='archived:ws_a']").click();
+      await page!.waitForFunction(
+        () => document.querySelector("[data-row-id='ws:ws_a']")!.closest("[data-sidebar='menu-item']")!.querySelectorAll("[data-row-id^='thread:']").length === 4,
+      );
+      const open = await readGroups();
+      console.info(`archived group ${theme} open: ${JSON.stringify(open)}`);
+      expect(open.archived.expanded).toBe("true");
+      expect(open.archived.text).toBe("Archived");
+      expect(open.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2", "thread:s5", "thread:s6"]);
+      expect(new Set(open.threads.map(t => Math.round(t.height))).size).toBe(1);
+      for (const id of ["thread:s5", "thread:s6"]) {
+        expect(open.threads.find(t => t.id === id)!.y).toBeGreaterThan(open.archived.y);
+      }
+      const openPath = join(SHOTS_DIR, `sidebar-archived-open-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path: openPath });
+      console.info(`sidebar archived open screenshot: ${openPath}`);
+    }
+  }, 60_000);
+
   it("a status toast with a 200-character token stays inside the sidebar's width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);
     const toast = encodeURIComponent(`Stopped the builder ${token} to make room at the machine cap.`);
@@ -994,12 +1297,16 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(style.border).toBe("0px");
       expect(style.shadow).toBe("none");
       expect(style.font.toLowerCase()).toMatch(/mono/);
-      // The line's ink is the muted foreground beside it, not a colour of its own.
+      // The line's ink is the muted foreground beside it, not a colour of its own: the same grey the
+      // counts on the rows are mixed from, and only the part of it differs, since a sentence is read
+      // through where a count is glanced at and the whisper the counts take sits under AA on purpose.
       const [lineColor, metaColor] = await Promise.all([
         line.evaluate(el => getComputedStyle(el).color),
         page!.locator("[data-row-id='ws:ws_a'] [data-workspace-meta]").first().evaluate(el => getComputedStyle(el).color),
       ]);
-      expect(lineColor).toBe(metaColor);
+      const hueOf = (color: string): string => color.replace(/\s*\/\s*[\d.]+\s*\)$/, ")");
+      expect(hueOf(lineColor)).toBe(hueOf(metaColor));
+      expect(lineColor).not.toBe(metaColor);
       expect((await page!.locator("[data-row-id='ws:ws_a'] [data-workspace-state]").textContent())?.trim()).toBe("");
       expect((await page!.locator("[data-row-id='ws:ws_b'] [data-workspace-state]").textContent())?.trim()).toBe("Paused");
       const path = join(SHOTS_DIR, `sidebar-offline-${theme}.png`);
@@ -1322,24 +1629,28 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 60_000);
 
-  it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it", async () => {
-    await open("dark");
-    const before = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
-    expect(await page!.locator("header [data-slot=sidebar-trigger]").count()).toBe(0);
-    await page!.locator("[data-slot=sidebar-header] [data-slot=sidebar-trigger]").click();
-    await page!.waitForSelector("[data-sidebar-state=collapsed]");
-    // The row animates padding-left over 200 ms; the read waits for the toggle to land.
-    await page!.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().x - x) < 1, before.x);
-    const after = await box("header [data-slot=sidebar-trigger]");
-    expect(Math.abs(after.x - before.x)).toBeLessThan(1);
-    expect(Math.abs(after.y - before.y)).toBeLessThan(1);
-    const crumb = await box("header [data-thread-breadcrumb]");
-    expect(Math.abs(crumb.x - (after.x + after.width + (await rowGap("header [data-header-row]"))))).toBeLessThan(1);
-    expect(await page!.locator("header [data-thread-breadcrumb]").evaluate(el => el.textContent)).toBe("api/Reply with exactly the word hi.");
-    const path = join(SHOTS_DIR, "header-collapsed-dark.png");
-    await page!.screenshot({ path, clip: { x: 0, y: 0, width: 600, height: 120 } });
-    console.info(`collapsed header screenshot: ${path}`);
-  }, 30_000);
+  it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      const before = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
+      expect(await page!.locator("header [data-slot=sidebar-trigger]").count()).toBe(0);
+      await page!.locator("[data-slot=sidebar-header] [data-slot=sidebar-trigger]").click();
+      await page!.waitForSelector("[data-sidebar-state=collapsed]");
+      // The row animates padding-left over 200 ms; the read waits for the toggle to land.
+      await page!.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().x - x) < 1, before.x);
+      const after = await box("header [data-slot=sidebar-trigger]");
+      expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+      expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+      const crumb = await box("header [data-thread-breadcrumb]");
+      expect(Math.abs(crumb.x - (after.x + after.width + (await rowGap("header [data-header-row]"))))).toBeLessThan(1);
+      expect(await page!.locator("header [data-thread-breadcrumb]").evaluate(el => el.textContent)).toBe("api/Reply with exactly the word hi.");
+      const ratios = await textContrast(page!, "header [data-thread-breadcrumb] .text-muted-foreground");
+      for (const ratio of ratios) expect(ratio, `the collapsed header's quiet crumb reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
+      const path = join(SHOTS_DIR, `header-collapsed-${theme}.png`);
+      await page!.screenshot({ path, clip: { x: 0, y: 0, width: 600, height: 120 } });
+      console.info(`collapsed header screenshot: ${path}`);
+    }
+  }, 60_000);
   /** One row's name slot: the row's height, where the name starts, where the slot at the right edge ends, and the
    * name's own font, read the same way whether the slot holds the text or the one name box. `selector` picks the row
    * and `nameSelector` the text it wears, so a workspace row and a thread row are read by the same rule. */
@@ -1387,7 +1698,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       expect(skin.background).not.toBe("rgba(0, 0, 0, 0)");
       expect(skin.z).toBe("130");
       expect(skin.arrows).toBe(0);
-      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(12);
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(14);
       // Rebuild, the two project trips (this fake host has no folder ops), fork and forget.
       expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(5);
       // The first row that can run holds focus, so the keyboard is already in the menu.
@@ -1484,6 +1795,55 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       await page!.waitForSelector("[data-row-name-input]", { state: "detached" });
       expect((await wsSlot()).text).toBe("the name he typed");
       expect((await wsSlot()).rowHeight).toBe(plain.rowHeight);
+    }
+  }, 60_000);
+
+  // The sidebar paints its quiet text in four tiers, three of them at part opacity. An alpha buys
+  // less contrast over a light surface than over a dark one, so the two themes have to be measured
+  // against each other and not only against a floor: with one light token behind them the tiers
+  // read 4.62, 4.47, 2.68 and 2.10 to 1 where the dark side's read 8.33, 5.43, 4.35 and 3.00.
+  // A sentence drawn in the whisper tier is not a count: the offline line is one, and so are the line
+  // for what the runtime is doing to a daemon and the one for a drop with memory near full. They take
+  // the prose ink, which clears AA on both surfaces, while the counts beside them keep the whisper.
+  it("a sentence in a row's meta line takes the prose ink and reads at AA in both themes, and the counts beside it keep the whisper", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&offline=1`);
+      await page!.waitForSelector("[data-sidebar-offline]");
+      const prose = await textContrast(page!, "[data-sidebar-offline]");
+      const counts = await textContrast(page!, "[data-app-sidebar] [data-workspace-meta]");
+      console.info(`${theme}: the offline sentence reads at ${prose.map(r => r.toFixed(2)).join(", ")}, the counts beside it at ${counts.map(r => r.toFixed(2)).join(", ")} to 1`);
+      expect(prose.length).toBeGreaterThan(0);
+      for (const ratio of prose) expect(ratio, `the offline sentence reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
+      // The counts stay the whisper they were: this raises the sentences, not the tier.
+      expect(counts.length).toBeGreaterThan(0);
+      for (const ratio of counts) expect(ratio, `a count reads at ${ratio} in ${theme}`).toBeLessThan(4.5);
+    }
+  }, 60_000);
+
+  it("the sidebar's ink reads the same in light as in dark: the two tiers that carry words at AA, the whispered ones on the dark side's ink", async () => {
+    const TIERS = {
+      "a thread's title once it is idle": "[data-app-sidebar] .text-sidebar-muted-foreground",
+      "the word on a row at rest": "[data-app-sidebar] [data-slot=sidebar-menu-button]:not([data-active=true])",
+      "the state word beside a thread": "[data-sidebar-row] .hidden.md\\:inline",
+      "the row's meta line": "[data-app-sidebar] .text-\\[var\\(--top-row-meta\\)\\]",
+    } as const;
+    // The first two carry words a person reads, so their bar is AA. The last two are the whisper the
+    // rows are designed around and sit under AA in both themes on purpose, so their bar is the ink
+    // their dark twin already ships: they are the tiers an alpha over a light surface loses.
+    const AT_AA = ["a thread's title once it is idle", "the word on a row at rest"];
+    const read: Record<"dark" | "light", Record<string, number>> = { dark: {}, light: {} };
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme);
+      for (const [tier, selector] of Object.entries(TIERS)) {
+        const ratios = await textContrast(page!, selector);
+        expect(ratios.length, `${tier} drew nothing to measure in ${theme}`).toBeGreaterThan(0);
+        read[theme][tier] = Math.min(...ratios);
+      }
+      console.info(`${theme}: ${Object.entries(read[theme]).map(([tier, ratio]) => `${tier} ${ratio.toFixed(2)}`).join(", ")} to 1`);
+    }
+    for (const tier of Object.keys(TIERS)) {
+      if (AT_AA.includes(tier)) expect(read.light[tier], `${tier} reads at ${read.light[tier]} in light`).toBeGreaterThanOrEqual(4.5);
+      else expect(read.light[tier], `${tier} reads at ${read.light[tier]} in light against ${read.dark[tier]} in dark`).toBeGreaterThanOrEqual(read.dark[tier]! - 0.2);
     }
   }, 60_000);
 });
