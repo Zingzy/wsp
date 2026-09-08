@@ -51,7 +51,9 @@ describe("the agent contract on the command line and the tool door", () => {
     store = memoryStore();
     await store.put("goldens", "default", SEALED_GOLDEN);
     const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`), () => ({ kind: "written" }));
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter } });
+    // The confirming read a gone verdict waits for runs on the same tick: this backend's 404 is the whole truth, so
+    // the wait only buys the contract a five second pause on the road to a rebuild.
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, goneConfirmMs: 0 });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
