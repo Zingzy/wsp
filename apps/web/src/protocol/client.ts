@@ -8,6 +8,7 @@
 import {
   HarnessCatalog,
   PortForward,
+  SessionAnswerOutcome,
   SessionInterruptOutcome,
   SessionRenameResult,
   SessionSteerOutcome,
@@ -35,6 +36,7 @@ import {
   type SnapshotRollbackResult,
   type SnapshotStorage,
   type WorkspaceCreateResult,
+  type WorkspaceLook,
   type WorkspaceSize,
   WorkspaceCostEvent,
   type WorkspaceStatus,
@@ -247,6 +249,11 @@ export interface Api {
   getWorkspace(id: string): Promise<WorkspaceView>;
   /** `size` is one of capabilities().sizes; absent, the workspace takes the golden's size. */
   createWorkspace(golden: string, name?: string, size?: WorkspaceSize): Promise<CreatedWorkspace>;
+  /** Makes this computer the host's one local workspace, named after this computer, which the host is the one to
+   * know. It forks nothing, so there is no image, no size and no boot to wait on: the record is written and the
+   * reply is the workspace. Rejects with the host's own sentence when this computer already is one. Optional so
+   * fixtures without the road need not fake it; a client without it offers no road to this computer. */
+  createLocalWorkspace?(): Promise<WorkspaceView>;
   /** Resolves the default golden manifest's head so the UI never handles snapshot ids. */
   createFromGoldenHead(name: string, size?: WorkspaceSize): Promise<CreatedWorkspace>;
   /** Snapshot of enriched statuses; keeps the runtime's poller + cost ticker running for this socket. */
@@ -269,6 +276,9 @@ export interface Api {
    * refused with that reason and nothing is renamed. Optional so fixtures that never rename need not fake it; a client
    * without it offers no rename. */
   renameWorkspace?(id: string, name: string): Promise<WorkspaceView>;
+  /** Sets the workspace's hue, its glyph, or both on the host. A key left out keeps that fact as it is and null clears
+   * it. Optional so fixtures that never pick a look need not fake it; a client without it offers no picker. */
+  setWorkspaceLook?(id: string, look: WorkspaceLook): Promise<WorkspaceView>;
   /** The guest ports the host forwards to this computer's loopback; forward.open and forward.close keep the list current. Optional so fixtures without forwards need not fake it. */
   listForwards?(): Promise<PortForward[]>;
   stopForward?(workspaceId: string, port: number): Promise<void>;
@@ -294,6 +304,11 @@ export interface Api {
    * means a session.steer event is on the wire; not-running means the turn beat it and the caller starts a turn instead.
    * Optional so fixtures without a steering harness need not fake it; the composer keeps the stop road without it. */
   steerSession?(sessionId: string, prompt: string, requestId: string): Promise<SessionSteerOutcome>;
+  /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
+   * options; takes the runtime's session id, as interruptSession does. answered means the tool call it blocks ran or
+   * was refused and the closing event is on the wire; every other outcome closed nothing here. Optional so fixtures
+   * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. */
+  answerPermission?(sessionId: string, askId: string, optionId: string): Promise<SessionAnswerOutcome>;
   /** Names the session in its harness's own store on the machine; takes the runtime's session id, as interruptSession
    * does. renamed means the store took it and the next listing carries it; every other outcome named nothing, and
    * failed carries the machine's own line for the write it refused. Optional so fixtures that never rename need not
@@ -410,6 +425,7 @@ export function makeApi(c: ProtocolClient): Api {
     listWorkspaces: async () => (await c.request<{ workspaces: WorkspaceView[] }>("workspaces.list")).workspaces,
     getWorkspace: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.get", { workspaceId: id })).workspace,
     createWorkspace: create,
+    createLocalWorkspace: async () => (await c.request<{ workspace: WorkspaceView }>("workspaces.createLocal", {})).workspace,
     createFromGoldenHead: async (name, size) => {
       const { manifest } = await c.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
       const head = goldenHead(manifest);
@@ -426,6 +442,7 @@ export function makeApi(c: ProtocolClient): Api {
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
     forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),
     renameWorkspace: async (id, name) => (await c.request<{ workspace: WorkspaceView }>("workspaces.rename", { workspaceId: id, name })).workspace,
+    setWorkspaceLook: async (id, look) => (await c.request<{ workspace: WorkspaceView }>("workspaces.look", { workspaceId: id, ...look })).workspace,
     // Parsed, not trusted: a reply without the list must not become the list.
     listForwards: async () => PortForward.array().parse((await c.request<{ forwards?: unknown }>("forwards.list")).forwards),
     stopForward: async (workspaceId, port) => void (await c.request("forwards.stop", { workspaceId, port })),
@@ -442,6 +459,8 @@ export function makeApi(c: ProtocolClient): Api {
       SessionInterruptOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.interrupt", { sessionId })).outcome),
     steerSession: async (sessionId, prompt, requestId) =>
       SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId })).outcome),
+    answerPermission: async (sessionId, askId, optionId) =>
+      SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId })).outcome),
     // Parsed, not trusted: an outcome outside the enum must not read as renamed.
     renameSession: async (sessionId, title) => SessionRenameResult.parse(await c.request<Record<string, unknown>>("sessions.rename", { sessionId, title })),
     // Parsed, not trusted: a picker renders only values the wire type vouches for.

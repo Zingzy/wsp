@@ -14,7 +14,7 @@ import {
   HARNESS_ADAPTERS,
   SolariBackend,
   createRuntime,
-  endLocalTurnGroups,
+  endLocalRuns,
   goldenHead,
   hostIdentity,
   jsonFileStore,
@@ -374,25 +374,37 @@ function statePathFrom(flag?: string): string {
   return resolve(flag ?? defaultStatePath());
 }
 
+/** The folder every turn and every exec on this computer starts in, made when it is first used. Not the person's
+ * home: a turn that starts there is one `cd` from the checkouts they work in themselves, and the first build thread
+ * run on a local workspace committed inside the person's own repo from there (measured 2026-09-08). Their own
+ * folders stay reachable, as they are to any shell they open, but nothing starts a turn in one. */
+export const localWorkFolder = (home: string): string => join(home, "wsp-work");
+
 /** This computer as a workspace: the local backend, a real child process per turn under the turn's limits, each
- * harness's own store (the one their store variable names, else the default under their home), and the person's own
- * login environment for every turn, the same one wsp exec runs under, so the keys and tools a terminal gives an agent
- * reach it here too. The adapters strip their own agent-session variables from it, as they do on a fork. */
-export function localWiring(root = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
-  const homes = agentHomes(root, env);
+ * harness's own store (the one their store variable names, else the default under the person's home), and the
+ * person's own login environment for every turn, the same one wsp exec runs under, so the keys and tools a terminal
+ * gives an agent reach it here too. The adapters strip their own agent-session variables from it, as they do on a
+ * fork. The person's home and the folder work starts in are two facts: the stores are theirs, so a sign-in they
+ * made is the one a turn uses, and the work folder is the workspace's own. */
+export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
+  const root = localWorkFolder(home);
+  mkdirSync(root, { recursive: true });
+  const homes = agentHomes(home, env);
   const login = Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined));
-  // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer. The
-  // module is loaded on that dial too, since it reaches @wsp/daemon and node-pty; the desktop's Electron bundle
-  // carries no build of that native module, so an eager edge would throw before the app opened its window.
+  // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
+  // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
+  // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
   let daemon: Promise<LocalDaemon> | undefined;
   let shutting = false;
   return {
     backend: new LocalBackend({ root, env }),
     execStream: o => localExecStream({ root, ...o }),
-    home: id => homes[id] ?? join(root, `.${id}`),
+    home: id => homes[id] ?? join(home, `.${id}`),
     env: login,
     daemonRoad: async () => {
-      const started = await (daemon ??= import("./local-daemon.js").then(m => m.LocalDaemon.start({ root })));
+      // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
+      // turn's own folder is the workspace's.
+      const started = await (daemon ??= import("./local-daemon.js").then(m => m.LocalDaemon.start({ root: home })));
       // A dial that lands while the host is closing must leave no socket behind: a listening one keeps this process up.
       if (shutting) {
         await started.close().catch(() => {});
@@ -404,6 +416,9 @@ export function localWiring(root = homedir(), env: Readonly<Record<string, strin
       shutting = true;
       const started = daemon;
       daemon = undefined;
+      // A turn here leads a process group of its own, so it no longer goes with the terminal's Ctrl-C: this host is
+      // the only thing that knows where its turns are, and nothing can re-open one once it is gone.
+      await endLocalRuns();
       await started?.then(d => d.close(), () => {});
     },
   };
@@ -469,23 +484,25 @@ export interface StopProcess {
   exit(code: number): void;
 }
 
-/** Ctrl-C and a service stop both end with the lock removed. A turn's process group is the turn's own and no signal
- * here reaches it, so the groups go first, then the close, then the exit. A second signal while that close runs
- * takes whatever group is left and exits at once, so a close that hangs can neither trap the terminal nor leave a
- * harness running on the computer. */
+/** Every way a host is told to go ends the same: the lock removed and this computer's turns ended. A turn leads a
+ * process group of its own, so no signal arriving here reaches it and the close is what ends it, through the one
+ * ender the wiring's own close calls. A hangup is one of these signals for that reason, and none of them is left to
+ * node's default exit, which runs no close at all: a second signal, with a close still in flight, ends the turns
+ * itself without their stop grace and exits at once, so a close that hangs can neither trap the terminal nor leave
+ * a harness running on this computer. */
 export function stopOnSignals(handle: HostHandle, io: CliIO, self: StopProcess = process): void {
   let stopping: Promise<void> | undefined;
   const stop = (sig: (typeof STOP_SIGNALS)[number]): void => {
-    endLocalTurnGroups();
     if (stopping !== undefined) {
-      self.exit(exitCodeOf(sig));
+      void endLocalRuns(0).then(() => self.exit(exitCodeOf(sig)));
       return;
     }
     stopping = handle.close().then(
       () => self.exit(0),
       (e: unknown) => {
         io.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`);
-        self.exit(1);
+        // A close that failed may not have reached the turns; where it did, the set is empty and this ends nothing.
+        void endLocalRuns(0).then(() => self.exit(1));
       },
     );
   };

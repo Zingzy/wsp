@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -14,6 +14,7 @@ import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
+import { useSpaceTint } from "../src/sidebar/sidebarMode.js";
 import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
@@ -69,7 +70,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     rebuild: vi.fn(async (id: string) => ({ ...view(id, "?", "running"), machineId: "m_rebuilt" })),
     forget: vi.fn(async (_id: string) => {}),
     upgrade: vi.fn(async (id: string) => view(id, "?", "running")),
-    capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] })),
+    capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] })),
     startSession: vi.fn(async (o: { workspaceId: string }) => session("s_x", o.workspaceId)),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: NOW + 3_600_000 })),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
@@ -80,6 +81,19 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     listSessions: vi.fn(async () => sessions),
     subscribe: vi.fn(() => () => {}),
     getGolden: async () => undefined,
+    // The look sits on the record beside the name, so the fixture writes it there and answers with the row.
+    setWorkspaceLook: vi.fn(async (id: string, look: WorkspaceLook) => {
+      const row = workspaces.find(w => w.id === id)!;
+      if (look.tint !== undefined) {
+        if (look.tint === null) delete row.tint;
+        else row.tint = look.tint;
+      }
+      if (look.glyph !== undefined) {
+        if (look.glyph === null) delete row.glyph;
+        else row.glyph = look.glyph;
+      }
+      return row;
+    }),
   };
 }
 
@@ -801,7 +815,7 @@ describe("new workspace dialog", () => {
   it("offers the provider's sizes with the golden's checked, and a picked size reaches the create; left alone, none does", async () => {
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
     const api = fakeApi([API], [status(API)]);
-    api.capabilities = vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }] }));
+    api.capabilities = vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }] }));
     api.getGolden = async () => ({ head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "t", setupSha: "s", createdAt: "c", smoke: { cmd: "true", exitCode: 0 }, size: { cpu: 2, memMb: 4096 } }] });
     api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_new", name));
     await mount(api, "api");
@@ -1035,6 +1049,111 @@ describe("Solari out of reach from this computer", () => {
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "unreachable", offline: true } }) }));
     await screen.findByText(PROVIDER_UNREACHED_LINE);
     expect(stateSlot(rowOf("api")).textContent).toBe("Unreachable");
+  });
+});
+
+/** What the shell reads to wash its own surface, mounted beside the body so one render answers for both. */
+function TintProbe() {
+  return <span data-tint-probe>{useSpaceTint() ?? "none"}</span>;
+}
+
+describe("a workspace's own colour and glyph", () => {
+  const TINTED: WorkspaceView = { ...view("ws_a", "api"), tint: "cyan", glyph: "flask" };
+  const PLAIN = view("ws_b", "web");
+  const both = () => [{ ...TINTED }, { ...PLAIN }];
+  const threads = () => [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }), session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-4 * 60_000) })];
+  const leadOf = (el: HTMLElement): HTMLElement => el.querySelector<HTMLElement>("span[aria-hidden]")!;
+  const tinted = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-tint]")).map(el => el.getAttribute("data-space-tint") ?? "");
+
+  async function mountSpaces(api: FakeApi): Promise<FakeApi> {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
+    useStore.getState().bind(api);
+    render(
+      <SidebarProvider defaultOpen>
+        <WorkspaceSidebar />
+      </SidebarProvider>,
+    );
+    await waitFor(() => expect(spaceHeader()).not.toBeNull());
+    return api;
+  }
+
+  it("in the dots row every dot keeps its state colour, and the hue reaches the current one's name alone", async () => {
+    await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
+    const [tint, plain] = dots() as [HTMLElement, HTMLElement];
+    // Both workspaces are running, so both dots are the green that says so, hue or no hue.
+    expect(leadOf(tint).className).toContain("bg-success");
+    expect(leadOf(plain).className).toContain("bg-success");
+    expect(tint.getAttribute("data-space-tint")).toBeNull();
+    // The name of the one on screen is where the hue shows, and only there.
+    const name = tint.querySelector<HTMLElement>("[data-space-tint]")!;
+    expect(name.getAttribute("data-space-tint")).toBe("cyan");
+    expect(name.textContent).toBe("api");
+    expect(name.className).toContain("text-[var(--space-tint)]");
+    // The glyph rides the current dot alone, since only that one has the room for it, and takes the row's own ink.
+    expect(tint.querySelector("[data-space-glyph='flask']")).not.toBeNull();
+    expect(tint.querySelector("[data-space-glyph]")!.getAttribute("class") ?? "").not.toContain("--space-tint");
+    fireEvent.click(plain);
+    await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
+    expect(document.querySelector("[data-space-dots] [data-space-glyph]")).toBeNull();
+    // The workspace with no hue puts no hue on its name either.
+    expect(document.querySelector("[data-space-dots] [data-space-tint]")).toBeNull();
+  });
+
+  it("the header's lead is the glyph in the hue, and the state dot moves to the state slot so running is still said", async () => {
+    await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
+    const header = spaceHeader()!;
+    expect(header.getAttribute("data-space-tint")).toBe("cyan");
+    expect(leadOf(header).querySelector("[data-space-glyph='flask']")).not.toBeNull();
+    const state = header.querySelector<HTMLElement>("[data-space-state]")!;
+    expect(state.querySelector(".bg-success")).not.toBeNull();
+    expect(state.textContent).toBe("");
+  });
+
+  it("a workspace with no glyph keeps the state dot in the lead and nothing in the state slot but its word", async () => {
+    useStore.setState({ selectedId: "ws_b" });
+    await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
+    await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
+    const header = spaceHeader()!;
+    expect(header.getAttribute("data-space-tint")).toBeNull();
+    expect(leadOf(header).querySelector("[data-space-glyph]")).toBeNull();
+    expect(leadOf(header).querySelector(".bg-success")).not.toBeNull();
+    expect(header.querySelector("[data-space-state]")!.querySelector("span[aria-hidden]")).toBeNull();
+  });
+
+  // The store keeps its workspaces sorted by id; the sidebar draws the running ones first, so a napping workspace
+  // whose id sorts first parts the two orders. A creation in flight holds its own key as the selection, which is in
+  // neither order, and both fall back to a first row: the shell's wash has to be the header's workspace even then.
+  it("the wash the shell paints and the header the body draws are the same workspace when the two orders differ", async () => {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
+    const napping: WorkspaceView = { ...view("ws_aaa", "old", "napping"), tint: "azure" };
+    const running: WorkspaceView = { ...view("ws_zzz", "api"), tint: "magenta" };
+    const api = fakeApi([napping, running], [status(napping), status(running)]);
+    api.createFromGoldenHead.mockImplementation(() => new Promise(() => {}));
+    useStore.getState().bind(api);
+    render(
+      <SidebarProvider defaultOpen>
+        <TintProbe />
+        <WorkspaceSidebar />
+      </SidebarProvider>,
+    );
+    await waitFor(() => expect(spaceHeader()).not.toBeNull());
+    await act(async () => void useStore.getState().createWorkspace("fresh"));
+    await waitFor(() => expect(useStore.getState().selectedId).toBe(useStore.getState().creations[0]!.key));
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_aaa", "ws_zzz"]);
+    expect(within(spaceHeader()!).getByText("api")).toBeDefined();
+    expect(document.querySelector("[data-tint-probe]")!.textContent).toBe("magenta");
+  });
+
+  it("in the list body the hue draws on the tinted workspace's branch rail and nowhere else", async () => {
+    await mount(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()), "api");
+    await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_b"]));
+    // One element in the whole body wears the hue, and it is the rail the tinted workspace's threads hang from.
+    expect(tinted()).toEqual(["cyan"]);
+    const rail = document.querySelector<HTMLElement>("[data-space-tint]")!;
+    expect(rail.getAttribute("data-slot")).toBe("sidebar-menu-sub");
+    expect(rail.querySelector("[data-row-id='thread:s1']")).not.toBeNull();
+    // The row itself is untouched: no glyph, no hue on the lead, the state dot as it always was.
+    expect(rowOf("api").querySelector("[data-space-glyph]")).toBeNull();
   });
 });
 

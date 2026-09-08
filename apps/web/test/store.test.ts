@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The store's session folding: rows come from the sessions.list op, the
 // session.* events decide when to refetch and what to patch in between.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView, WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
@@ -16,7 +16,7 @@ const view = (id: string): WorkspaceView => ({
   createdAt: "2026-09-01T00:00:00Z",
 });
 
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] };
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] };
 
 function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
@@ -183,6 +183,49 @@ describe("store creations", () => {
     message: "Fork of the golden image requested.",
     elapsedMs: 0,
     ...over,
+  });
+
+  it("this computer is created once and selected, and a second call selects the row it already is", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    const local: WorkspaceView = { ...view("ws_mac"), kind: "local", golden: "" };
+    api.createLocalWorkspace = vi.fn(async () => local);
+    useStore.getState().bind(api);
+    await flush();
+
+    expect(await useStore.getState().createLocalWorkspace()).toBe("ws_mac");
+    expect(useStore.getState().selectedId).toBe("ws_mac");
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_mac"]);
+    // This computer forks nothing and boots nothing: there is no creation row to watch and no stage to log.
+    expect(useStore.getState().creations).toEqual([]);
+    // The name is this computer's own, which the host is the one to know.
+    expect(api.createLocalWorkspace).toHaveBeenCalledWith();
+
+    useStore.getState().select("ws_a");
+    expect(await useStore.getState().createLocalWorkspace()).toBe("ws_mac");
+    expect(useStore.getState().selectedId).toBe("ws_mac");
+    // One local workspace per host, so the second call asked the host nothing.
+    expect(api.createLocalWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("a host that refuses this computer says so in its own sentence, with no creation row to carry it", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    api.createLocalWorkspace = async () => {
+      throw new Error("this computer is already the workspace mac; there is one local workspace per host");
+    };
+    useStore.getState().bind(api);
+    await flush();
+    expect(await useStore.getState().createLocalWorkspace()).toBeNull();
+    expect(useStore.getState().toast).toBe("this computer is already the workspace mac; there is one local workspace per host");
+    expect(useStore.getState().creations).toEqual([]);
+  });
+
+  it("a client with no road to this computer offers none: nothing is asked and nothing is selected", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    delete api.createLocalWorkspace;
+    useStore.getState().bind(api);
+    await flush();
+    expect(await useStore.getState().createLocalWorkspace()).toBeNull();
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a"]);
   });
 
   it("createWorkspace adds a selected row, adopts the runtime's id from the first stage by name, logs each stage, and swaps to the workspace when created", async () => {
@@ -575,6 +618,44 @@ describe("store workspaces", () => {
     emit({ type: "workspace.renamed", workspaceId: "ws_gone", name: "nobody" });
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a"]);
     expect(useStore.getState().statuses["ws_gone"]).toBeUndefined();
+  });
+
+  it("the look lands on the row and its status, and a cleared fact leaves rather than lingering under the merge", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    emit({ type: "workspace.look", workspaceId: "ws_a", tint: "cyan", glyph: "flask" });
+    expect(useStore.getState().workspaces[0]!).toMatchObject({ tint: "cyan", glyph: "flask" });
+    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ tint: "cyan", glyph: "flask" });
+    // Clearing one is a null, not a missing key, so the row loses it instead of keeping the old hue.
+    emit({ type: "workspace.look", workspaceId: "ws_a", tint: null, glyph: "flask" });
+    expect(useStore.getState().workspaces[0]!).not.toHaveProperty("tint");
+    expect(useStore.getState().statuses["ws_a"]).not.toHaveProperty("tint");
+    expect(useStore.getState().workspaces[0]!.glyph).toBe("flask");
+    // A workspace no row holds is not invented by a look.
+    emit({ type: "workspace.look", workspaceId: "ws_gone", tint: "magenta", glyph: null });
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a"]);
+    expect(useStore.getState().statuses["ws_gone"]).toBeUndefined();
+  });
+
+  it("setWorkspaceLook sends the one fact a picker changed and puts what the runtime answers with on the row", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    const looked = { ...view("ws_a"), tint: "violet" as const };
+    const calls: unknown[][] = [];
+    api.setWorkspaceLook = async (...args) => { calls.push(args); return looked; };
+    useStore.getState().bind(api);
+    await flush();
+    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: "violet" } })).toBe(true);
+    expect(calls).toEqual([["ws_a", { tint: "violet" }]]);
+    expect(useStore.getState().workspaces[0]!.tint).toBe("violet");
+    // A refusal is a toast and a false, and the row keeps what it had.
+    api.setWorkspaceLook = async () => { throw new Error("the host said no"); };
+    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: null } })).toBe(false);
+    expect(useStore.getState().toast).toBe("the host said no");
+    expect(useStore.getState().workspaces[0]!.tint).toBe("violet");
+    // A client without the verb takes no pick at all.
+    delete api.setWorkspaceLook;
+    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: "cyan" } })).toBe(false);
   });
 
   it("gone carries the phase and the provider's words onto the view and its status", async () => {

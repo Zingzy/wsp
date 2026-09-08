@@ -10,7 +10,7 @@ import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from ".
 import { useStore } from "../src/protocol/store.js";
 
 const view = (id: string): WorkspaceView => ({ id, name: id, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] };
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] };
 
 function fakeApi(record: Preferences, refuse?: () => Error) {
   const listeners = new Set<(e: ProtocolEvent) => void>();

@@ -5,6 +5,7 @@
 // and a probe that reads the canvas back so a test can check the paint.
 import type { TerminalConfig } from "@wsp/protocol";
 import "../../src/index.css";
+import { terminalThemeFromApp } from "../../src/components/ThreadTerminalDrawer";
 import type { GhosttyTheme } from "../../src/terminal/ghostty/core";
 import { appTerminalFontSize, GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { terminalSurfaceSettings } from "../../src/terminal/ghosttyConfig";
@@ -55,14 +56,19 @@ const APP: Record<"dark" | "light", GhosttyTheme> = {
   light: { background: { r: 255, g: 255, b: 255 }, foreground: { r: 28, g: 33, b: 41 }, cursor: { r: 38, g: 56, b: 78 } },
 };
 
-const scheme = new URLSearchParams(location.search).get("theme") === "light" ? "light" : "dark";
+const params = new URLSearchParams(location.search);
+const scheme = params.get("theme") === "light" ? "light" : "dark";
+// ?palette=app is the person's file naming no colors of its own: the pane opens on the theme the
+// stylesheet holds, as the drawer opens it, so the slots the app itself brings can be read back.
+const fromApp = params.get("palette") === "app";
 document.documentElement.classList.toggle("dark", scheme === "dark");
 // Something behind the terminal to show through: the app's column color under stripes, so the blend is visible in a screenshot.
 const page = document.getElementById("page")!;
 page.style.background = scheme === "dark" ? "repeating-linear-gradient(135deg, #0e1218 0 24px, #2a3550 24px 48px)" : "repeating-linear-gradient(135deg, #ffffff 0 24px, #c9d6ee 24px 48px)";
 
-const file = FILES[scheme];
-const settings = terminalSurfaceSettings(file, APP[scheme], undefined, false);
+const BARE: TerminalConfig = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], palette: Array<null>(16).fill(null) };
+const file = fromApp ? BARE : FILES[scheme];
+const settings = terminalSurfaceSettings(file, fromApp ? terminalThemeFromApp() : APP[scheme], undefined, false);
 const surface = GhosttyTerminalSurface.create(document.getElementById("mount")!, {
   ...settings,
   onData: () => {},
@@ -71,6 +77,14 @@ const surface = GhosttyTerminalSurface.create(document.getElementById("mount")!,
   beforeKey: () => true,
   onLinkActivate: () => {},
 }).then(s => {
+  if (fromApp) {
+    // One word per slot, so every one of the sixteen is on the canvas to be read back.
+    for (let slot = 0; slot < 8; slot++) s.write(`\x1b[3${slot}mslot-${slot}\x1b[0m `);
+    s.write("\r\n");
+    for (let slot = 0; slot < 8; slot++) s.write(`\x1b[9${slot}mslot-${slot + 8}\x1b[0m `);
+    s.write("\r\n$ ");
+    return s;
+  }
   s.write("\x1b[1mwsp\x1b[0m on \x1b[31mred\x1b[0m \x1b[32mgreen\x1b[0m \x1b[33myellow\x1b[0m \x1b[34mblue\x1b[0m \x1b[35mpink\x1b[0m \x1b[36mteal\x1b[0m\r\n");
   s.write(`theme ${file.theme}, background-opacity ${file.backgroundOpacity}, cursor ${file.cursorStyle}\r\n$ `);
   return s;
@@ -137,4 +151,29 @@ async function probe(): Promise<Probe> {
   return { corner: at(2, 2), paletteOne, underline, cols: s.cols, rows: s.rows, textSize, cellHeight, metaSize, metaCellHeight };
 }
 
-Object.assign(window, { probe });
+/** What the pane brought of its own: the background it drew and, per slot, whether that slot's word was painted in it. */
+export interface PaletteProbe {
+  background: [number, number, number];
+  /** A slot the theme left for libghostty reports a null colour, so a hole fails the assertion rather than throwing. */
+  slots: { slot: number; color: [number, number, number] | null; painted: boolean }[];
+}
+
+async function probePalette(): Promise<PaletteProbe> {
+  const s = await surface;
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const { width, height } = s.canvas;
+  const data = s.canvas.getContext("2d")!.getImageData(0, 0, width, height).data;
+  const opaque = new Set<string>();
+  for (let i = 0; i < data.length; i += 4) if (data[i + 3]! > 250) opaque.add(`${data[i]},${data[i + 1]},${data[i + 2]}`);
+  const { background, palette } = settings.theme;
+  return {
+    background: [background.r, background.g, background.b],
+    slots: (palette ?? []).map((color, slot) => ({
+      slot,
+      color: color === null ? null : ([color.r, color.g, color.b] as [number, number, number]),
+      painted: color !== null && opaque.has(`${color.r},${color.g},${color.b}`),
+    })),
+  };
+}
+
+Object.assign(window, { probe, probePalette });

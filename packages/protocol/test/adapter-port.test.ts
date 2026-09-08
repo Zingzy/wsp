@@ -20,6 +20,8 @@ const PORT_NAMES = [
   "SessionRenamer",
   "SessionTitleReader",
   "catalogRefused",
+  "endAfterResult",
+  "endRun",
 ];
 /** Matches whatever keywords a declaration uses, so a duplicate written as an interface, class or const cannot hide from a type-only pattern. */
 const declarationOf = (name: string): RegExp => new RegExp(`^export (?:\\w+ )+${name}\\b`, "m");

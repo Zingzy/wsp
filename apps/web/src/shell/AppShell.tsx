@@ -9,6 +9,7 @@ import { WorkspaceSwitcher } from "../components/switcher/WorkspaceSwitcher.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, type SidebarWidthStore } from "../components/ui/sidebar.js";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
+import { tintAttr } from "../components/workspaceLook.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -17,6 +18,7 @@ import { cn } from "../lib/utils.js";
 import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
+import { useSpaceTint } from "../sidebar/sidebarMode.js";
 import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { DisconnectedBanner } from "./DisconnectedBanner.js";
@@ -49,6 +51,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const terminalOpen = useTerminalDrawerStore(s => selectTerminalUiState(s.byWorkspaceId, workspaceId).terminalOpen);
   const toggleTerminal = useTerminalDrawerStore(s => s.toggle);
   const useSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  // The current space's hue rides the sidebar element, so the glass recipe and the macOS material both take it.
+  const spaceTint = useSpaceTint();
   const rightPanelOpen = workspaceId !== null && panel.isOpen;
 
   const layoutControls = (
@@ -80,6 +84,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         side="left"
         collapsible="offcanvas"
         data-app-sidebar=""
+        {...tintAttr(spaceTint)}
         className={cn(isDesktopMac() ? "sidebar-vibrancy" : "sidebar-glass", "border-r border-sidebar-border text-sidebar-foreground")}
         resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: SIDEBAR_MAX_WIDTH, width: sidebarWidthStore }}
       >

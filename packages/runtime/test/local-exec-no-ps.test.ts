@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { grandchild, sweepStrays } from "./strays.js";
+import { gone, grandchild, sweepStrays } from "./strays.js";
 
 // A whole file of its own because the mock is the case: node hands only five errnos to a spawn's async error path
 // and throws every other one straight out of execFile, so the reading of a turn's tree has to survive a throw where
@@ -59,7 +59,7 @@ describe("local exec stream where the group read cannot spawn", () => {
     expect(lines).toEqual([]);
     expect(await stream.exited).toBeNull();
     expect(spawns.ps).toBeGreaterThan(0);
-    await vi.waitFor(() => expect(() => process.kill(busy, 0)).toThrow(), { timeout: 5_000 });
+    await gone(busy);
   }, 20_000);
 
   it("a stream with no idle limit, as the exec verb runs one, never reads its tree at all", async () => {

@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceTint } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -793,6 +793,51 @@ export function relayedRefusal(name: string): string {
   return `${name} is ${THIS_COMPUTER}; it answers only requests from ${THIS_COMPUTER}, never one relayed from a machine`;
 }
 
+/** The prompt row's lead, the same on every surface that shows a relayed permission prompt: the tool the harness
+ * wants to run, and what it wants to run it on where the harness named one. No question mark: the options under it
+ * are the question. */
+export function permissionAskLine(toolName: string, detail?: string): string {
+  return detail === undefined || detail === "" ? `Permission for ${toolName}` : `Permission for ${toolName}: ${detail}`;
+}
+
+/** What an answered prompt row reads once it is closed, one word per outcome. The option's own label rides beside it
+ * only where it says something the outcome does not, which is the pick that also changed the access for the rest of
+ * the turn: "Allowed: Allow" and "Denied: Deny" name the same fact twice. */
+export function permissionOutcomeLine(outcome: PermissionOutcome, picked?: { label: string; effect: PermissionEffect }): string {
+  const named = picked?.effect === "mode" ? `: ${picked.label}` : "";
+  switch (outcome) {
+    case "allowed":
+      return `Allowed${named}`;
+    case "denied":
+      return `Denied${named}`;
+    case "unanswered":
+      return "Nobody answered; denied";
+    case "cancelled":
+      return "Cancelled with the turn";
+    default: {
+      const _exhaustive: never = outcome;
+      return "";
+    }
+  }
+}
+
+/** What the harness is told when a person picked deny in the chat: the agent reads it as the call's result, so it
+ * says who refused rather than reading as a tool that failed. */
+export const PERMISSION_DENIED_LINE = "the person denied this in the chat";
+
+/** One option on a prompt that also puts the rest of the turn in another access mode, as the row shows it; the mode
+ * arrives as the CLI's own slug and the runtime's harness table lends it the words the picker uses. */
+export function permissionModeOptionLabel(modeLabel: string): string {
+  return `Allow, then ${modeLabel}`;
+}
+
+/** What the harness is told when a prompt nobody answered ran its wait out: the runtime denies it in the person's
+ * place rather than let the wait take the turn, and the sentence says so, since the agent reads it as the tool's
+ * result and decides what to do next. */
+export function permissionUnansweredLine(waitMs: number): string {
+  return `nobody answered this permission prompt in ${fmtDuration(waitMs)}, so wsp denied it; ask again, or start the thread at an access that does not ask`;
+}
+
 /** The one sentence a local workspace refuses a verb its machine cannot take with. This computer is not a machine
  * wsp forks, pauses or snapshots, so the verbs that move a provider fork have no meaning on it; `action` is the verb
  * as the person typed it. The capability behind each is false, so the road that reads the capability says this. */
@@ -1186,4 +1231,10 @@ export function terminalConfigLines(config: TerminalConfig): string[] {
     ["background-blur", config.backgroundBlur?.toString()],
   ];
   return [`Read ${config.files.join(", ")}`, ...rows.filter(([, value]) => value !== undefined).map(([key, value]) => `${key} = ${value}`)];
+}
+
+/** A tint's or a glyph's id as a picker names it. The ids are one word each, so the word is the id with its first
+ * letter up; a second table of names would drift from the list the wire validates against. */
+export function lookWord(id: WorkspaceTint | WorkspaceGlyph): string {
+  return id.charAt(0).toUpperCase() + id.slice(1);
 }

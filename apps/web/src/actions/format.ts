@@ -18,6 +18,8 @@ export const WORKSPACE_WORDS = {
   importProject: "Import project",
   exportProject: "Export project",
   rename: "Rename workspace",
+  colour: "Colour",
+  icon: "Icon",
   fork: "Fork workspace",
   copyId: "Copy machine id",
   forget: "Forget workspace",
@@ -107,6 +109,7 @@ export const PROJECTS_WAIT = "Projects wait for the rebuild";
 export const CLIENT_CANNOT_IMPORT = "This client cannot import projects";
 export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
 export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename workspaces";
+export const CLIENT_CANNOT_LOOK = "This client cannot set a workspace's colour or icon";
 export const NO_WORKSPACE_FORK = "Forking a workspace is not in the runtime yet; take a project snapshot in the Machine tab and start a workspace from it";
 
 export function forgetRefusal(state: WorkspaceState): string | null {
@@ -172,3 +175,11 @@ export const noDiffLine = (fileName: string, scopeLabel: string): string => `${f
 /** A row button on the object's own row names the object: Forget api, New thread in api. */
 export const rowVerb = (verb: string, name: string): string => `${verb} ${name}`;
 export const rowNewThread = (name: string): string => `New thread in ${name}`;
+
+/** What the road to this computer says under its name: what a pick will do, since there is one local workspace per
+ * host and the second pick is a selection, and why it cannot be picked at all. */
+export const THIS_COMPUTER_HINTS = {
+  fresh: "This computer itself, no machine to fork",
+  existing: "Already a workspace; go to it",
+  offline: "Not connected to wsp",
+} as const;

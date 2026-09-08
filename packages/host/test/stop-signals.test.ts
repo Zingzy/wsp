@@ -2,24 +2,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { localExecStream } from "@wsp/runtime";
+import { endLocalRuns, localExecStream } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExecStream } from "@wsp/protocol";
 import { stopOnSignals, type CliIO, type StopProcess } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
-import { grandchild, sweepStrays } from "../../runtime/test/strays.js";
+import { alive, gone, grandchild, sweepStrays } from "../../runtime/test/strays.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const quietIO = (errors: string[] = []): CliIO => ({ log: () => {}, error: l => errors.push(l), ask: noPrompt, askSecret: noPrompt });
-
-const alive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 /** Where the signals arrive and how the process ends, handed to the stop in place of this one: the test runner
  * cannot be sent a real signal, and the stop registers before any turn starts, the way the host does at its start. */
@@ -70,31 +61,25 @@ describe("a serving host stopping on a signal", () => {
     await running.stream.exited;
   }, 20_000);
 
-  it("the first signal ends every live turn's group before the close, and exits 0 once the close is done", async () => {
+  it("the first signal closes, the close is where this computer's turns end, and it exits 0 after", async () => {
     const host = standInHost();
-    let goneWhileClosing: boolean | undefined;
     let closes = 0;
-    let pid = 0;
+    // What the wiring's own close does at this point, and the only place a stop ends the turns from.
     const handle = {
       close: async () => {
         closes++;
-        // A signal reaches this close, not the turn's own group, so a close that takes its time finds the tree
-        // already ended rather than still running: the reaper needs a moment after the kill, not the other way round.
-        await new Promise(resolve => setTimeout(resolve, 300));
-        goneWhileClosing = !alive(pid);
+        await endLocalRuns(20);
       },
     } as unknown as HostHandle;
     stopOnSignals(handle, quietIO(), host.self);
     const running = await turn("first");
-    pid = running.pid;
     host.signal("SIGINT");
     await vi.waitFor(() => expect(host.exits).toEqual([0]), { timeout: 5_000 });
     expect(closes).toBe(1);
-    expect(goneWhileClosing).toBe(true);
-    expect(alive(pid)).toBe(false);
+    await gone(running.pid);
   }, 20_000);
 
-  it("a second signal while the close hangs takes what is left and exits at once, with the shell's code for it", async () => {
+  it("a close that hangs holds the turn until a second signal, which ends it without the grace and exits at once", async () => {
     const host = standInHost();
     let closes = 0;
     const handle = {
@@ -104,15 +89,15 @@ describe("a serving host stopping on a signal", () => {
       },
     } as unknown as HostHandle;
     stopOnSignals(handle, quietIO(), host.self);
-    const first = await turn("before");
+    const running = await turn("hanging");
     host.signal("SIGINT");
-    await vi.waitFor(() => expect(alive(first.pid)).toBe(false), { timeout: 5_000 });
+    await vi.waitFor(() => expect(closes).toBe(1), { timeout: 5_000 });
+    // The close never finishes, so nothing has ended the turn and nothing has exited: this is the escape hatch's road.
     expect(host.exits).toEqual([]);
-    // A turn that got as far as starting while the close hung is still this host's to end.
-    const during = await turn("during");
+    expect(alive(running.pid)).toBe(true);
     host.signal("SIGINT");
-    expect(host.exits).toEqual([130]);
-    await vi.waitFor(() => expect(alive(during.pid)).toBe(false), { timeout: 5_000 });
+    await vi.waitFor(() => expect(host.exits).toEqual([130]), { timeout: 5_000 });
+    await gone(running.pid);
     expect(closes).toBe(1);
   }, 20_000);
 });

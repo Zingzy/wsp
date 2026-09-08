@@ -71,9 +71,13 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     ],
     efforts: CLAUDE_EFFORTS,
     contextWindows: CLAUDE_CONTEXT_WINDOWS,
+    // default is the mode this CLI raises its own prompts in: with --permission-prompt-tool they reach the host over
+    // the control channel and the person answers them in the chat (measured on 2.1.263, 2026-09-08).
+    keptMode: "default",
+    bypassMode: "bypassPermissions",
     permissionModes: [
-      option("default", "Default", "Tools that need permission are refused; nobody is here to answer a prompt"),
-      option("acceptEdits", "Accept edits", "Edits land without asking; commands that need permission are refused"),
+      option("default", "Default", "Every tool that needs permission is asked about in the chat"),
+      option("acceptEdits", "Accept edits", "Edits land without asking; commands that need permission are asked about"),
       option("plan", "Plan", "Read and plan only; no changes"),
       { ...option("bypassPermissions", "Bypass", "Run every tool without asking"), isDefault: true },
       option("auto", "Auto", "The auto mode classifier decides each permission; runs as Default where it is not enabled"),
@@ -98,6 +102,10 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
       { ...option("gpt-5.2", "GPT-5.2"), efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" },
     ],
     efforts: levels(["low", "medium", "high", "xhigh", "max", "ultra"], "low"),
+    // `codex exec` runs non-interactively and its JSON stream carries no approval request, so this CLI cannot ask
+    // anyone anything: the narrowest sandbox a turn can still work in is the whole answer for a kept machine.
+    keptMode: "workspace-write",
+    bypassMode: "danger-full-access",
     permissionModes: [
       option("read-only", "Read only", "No edits, no commands that write"),
       option("workspace-write", "Workspace write", "Edits and commands inside the working folder"),
@@ -109,6 +117,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     label: "Gemini CLI",
     models: [],
     efforts: [],
+    keptMode: "default",
+    bypassMode: "yolo",
     permissionModes: [
       option("default", "Default", "Ask before every tool"),
       option("auto_edit", "Auto edit", "Edits land without asking"),
@@ -120,6 +130,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     label: "OpenCode",
     models: [],
     efforts: [],
+    keptMode: "default",
+    bypassMode: "auto",
     permissionModes: [option("default", "Default", "Ask as configured"), option("auto", "Auto", "Approve everything not explicitly denied")],
   }),
   fromTable({
@@ -134,6 +146,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     label: "Hermes Agent",
     models: [],
     efforts: levels(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]),
+    keptMode: "default",
+    bypassMode: "yolo",
     permissionModes: [option("default", "Default", "Ask before dangerous commands"), option("yolo", "Yolo", "Run dangerous commands without asking")],
   }),
 ];

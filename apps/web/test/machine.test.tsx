@@ -11,6 +11,7 @@ import type {
   SnapshotLineage,
   SnapshotRollbackResult,
   SysSample,
+  WorkspaceLook,
   WorkspacePhase,
   WorkspaceSize,
   WorkspaceStatus,
@@ -61,6 +62,7 @@ const CAPS: Capabilities = {
   callbackRelay: true,
   snapshotListing: true,
   templates: false,
+  kept: false,
   sizes: [
     { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
     { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 },
@@ -294,6 +296,21 @@ describe("machine facts", () => {
   it("renders an empty state without a workspace", () => {
     render(<MachineSurface workspaceId="ws_missing" />);
     expect(screen.getByText("No workspace selected.")).toBeDefined();
+  });
+});
+
+describe("the workspace's colour and icon", () => {
+  it("the tab carries the same picker the row's menu opens, and a pick goes to the runtime from here too", async () => {
+    const api = { ...fakeApi([view("ws_a", "api")]), setWorkspaceLook: vi.fn(async (_id: string, _look: WorkspaceLook) => ({ ...view("ws_a", "api"), tint: "cyan" as const })) };
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_a" />);
+    await waitFor(() => expect(document.querySelector("[data-workspace-look]")).not.toBeNull());
+    // Both facts on the tab, since it has the room the menu's dialog gives one at a time.
+    expect(screen.getByRole("group", { name: "Colour" })).toBeDefined();
+    expect(screen.getByRole("group", { name: "Icon" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Colour: Cyan" }));
+    await waitFor(() => expect(api.setWorkspaceLook).toHaveBeenCalledWith("ws_a", { tint: "cyan" }));
+    await waitFor(() => expect(useStore.getState().workspaces[0]!.tint).toBe("cyan"));
   });
 });
 

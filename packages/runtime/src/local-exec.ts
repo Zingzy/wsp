@@ -8,24 +8,26 @@
 // on `exited`. A stream started with an input channel gets the child's stdin,
 // seeded with the launch's lines and appended to by write(); one started
 // without gets no stdin at all, so the binary reads EOF rather than hanging on
-// a silent open pipe. That command leads a process group of its own, as the
-// guest's setsid leader does, because a turn is a tree and not one process:
-// the harness starts test workers and packagers that a signal to the shell
-// alone leaves burning the computer's cores, so teardown, kill and a cut all
-// end the group. A group of its own is a group no terminal signal reaches, so
-// the host ends every one of them through endLocalTurnGroups as it stops,
-// before its close and again on a second signal, and this module keeps the
-// set and one exit sweep for the app that quits without a signal at all. Only
-// a host killed outright leaves a turn behind, as it did before the group. The
-// turn runs under the same two limits a cloud turn does, idle and wall, read
-// from the one rule machine-exec reads, so a hung agent ends with the same
-// line on either kind, and the idle limit reads the same activity on both:
-// bytes, the person's messages, and the work the turn's own tree is doing
-// while it prints nothing. Nothing outlives the host on purpose, so the
-// factory offers no attach.
+// a silent open pipe. The child leads a process group of its own and every
+// signal goes to that group, never to the leader alone: a harness leaves its
+// own children behind when it goes, and a grandchild that outlives the leader
+// holds the inherited stdout pipe, so a signal to the leader alone left the
+// stream unended and the harness running (seven such processes were found on
+// one box, the oldest fourteen hours past its turn's reply) and left a cut
+// turn's test workers and packagers burning that box's cores. The group is
+// taken at every ending, the leader's own exit included, which is what the
+// cloud road's reap does at the same point. Its own group also means a turn no
+// longer goes with the terminal's Ctrl-C, so the host ends what is running
+// here as it stops (endLocalRuns); the host owns those signals and this module
+// handles none. The turn runs under the same two limits a cloud turn does,
+// idle and wall, read from the one rule machine-exec reads, so a hung agent
+// ends with the same line on either kind, and the idle limit reads the same
+// activity on both: bytes, the person's messages, and the work the turn's own
+// tree is doing while it prints nothing. The run dies with the host that
+// launched it, so the factory offers no attach and no sweep.
 
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
+import { RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { readsWork, turnActivity, turnCut, type MachineExecOptions } from "./machine-exec.js";
 
@@ -37,6 +39,39 @@ export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "d
 /** How often the limits are read against the clock, and the turn's tree with them; the cloud road reads both at its
  * poll. */
 const CHECK_MS = 1_000;
+/** Every process group a turn on this computer is running in, across every factory this process made: a turn leads
+ * a group of its own, so nothing else on this computer knows where to find it. A group is dropped the moment its
+ * stream settles, which is what makes the set the answer to whether a recorded pid is still that turn's. */
+const groups = new Set<number>();
+
+/** One turn's whole group, by the pid its spawn recorded: the child leads the group, so a negative pid is every
+ * process the turn started. A group whose last member is already gone answers ESRCH, which is the same nothing to
+ * do as no group at all. */
+function signalGroup(pid: number, sig: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, sig);
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Ends every turn running on this computer and everything those turns started: SIGTERM to each group, SIGKILL to
+ * whatever is still there once the grace passes, and answers the groups it had to kill. What a host calls as it
+ * stops, since a local turn's process cannot be re-opened by the host that comes next and answers nobody after this
+ * one goes.
+ */
+export async function endLocalRuns(graceMs = RUN_STOP_MS): Promise<readonly number[]> {
+  const ending = [...groups];
+  if (ending.length === 0) return [];
+  for (const pid of ending) signalGroup(pid, "SIGTERM");
+  await new Promise<void>(resolve => setTimeout(resolve, graceMs));
+  // A group id is the kernel's again once its last member goes, so a turn that went down on the TERM is read out of
+  // the set rather than killed by the pid it used to be: this computer may have given that pid to something else.
+  const killed = ending.filter(pid => groups.has(pid));
+  for (const pid of killed) signalGroup(pid, "SIGKILL");
+  return killed;
+}
 
 /** Cumulative CPU as ps prints it, in the ticks the activity clock counts: `[dd-][hh:]mm:ss[.cc]`, where this Mac's
  * ps carries hundredths and Linux's whole seconds. Anything else reads as no CPU at all. */
@@ -69,36 +104,6 @@ function readGroupWork(pgid: number, then: (ticks: number | undefined) => void):
   } catch {
     then(undefined);
   }
-}
-
-/** Every turn group this process started that is still running. A group of the turn's own is one no signal at the
- * host reaches, so ending them is the host's to ask for: its stop calls endLocalTurnGroups before it closes. This
- * module handles no signal itself. Two owners of one signal cannot both be right about what it means, and nothing
- * during an emit can tell whose signal it is: a `once` wrapper has already unregistered itself by the time its own
- * handler runs, so a listener count read there says nothing about who else was there. */
-const liveGroups = new Set<number>();
-let hooked = false;
-
-/** Ends every live turn's process group: what the host's stop calls before it closes, and again on a second signal
- * while that close runs. A turn that ended on its own is already out of the set, so nothing is signalled twice. */
-export function endLocalTurnGroups(): void {
-  for (const group of liveGroups) {
-    try {
-      process.kill(-group, "SIGKILL");
-    } catch {
-      continue;
-    }
-  }
-  liveGroups.clear();
-}
-
-/** The last sweep, and not a signal handler: an app that quits its own window closes the host and exits with no
- * signal ever arriving, and whatever teardown's SIGTERM left behind goes here. */
-function sweepGroupsOnExit(pgid: number): void {
-  liveGroups.add(pgid);
-  if (hooked) return;
-  hooked = true;
-  process.once("exit", endLocalTurnGroups);
 }
 
 /** One complete line at a time out of a growing byte stream: what precedes each newline is yielded, the tail waits
@@ -171,24 +176,19 @@ export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
     const child: ChildProcessWithoutNullStreams = spawn("bash", ["-c", command], {
       cwd: opts.root,
       env: { ...env },
-      // The turn leads its own process group, so one signal reaches everything it started.
-      detached: true,
       // No input channel means stdin is EOF, never a silent open pipe.
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+      // Its own process group, so a signal can reach what the turn started without reaching this host.
+      detached: true,
     }) as ChildProcessWithoutNullStreams;
     const pgid = child.pid;
-    if (pgid !== undefined) sweepGroupsOnExit(pgid);
+    if (pgid !== undefined) groups.add(pgid);
 
-    /** The whole group, not the shell that leads it: a SIGKILL to the leader alone left this turn's test workers and
-     * packagers running on a machine until it sat at load 25 (2026-09-08). Nothing goes out once the child has been
-     * reaped, since the group id is a pid the computer is free to hand to someone else. */
-    const endGroup = (signal: "SIGTERM" | "SIGKILL"): void => {
+    /** Nothing goes out once the stream settled, since the group id is then a pid this computer is free to hand to
+     * someone else; while it runs, every signal goes to the group and never to the leader alone. */
+    const signal = (sig: NodeJS.Signals): void => {
       if (pgid === undefined || finished !== undefined) return;
-      try {
-        process.kill(-pgid, signal);
-      } catch {
-        // the group ended before the signal reached it
-      }
+      signalGroup(pgid, sig);
     };
 
     const lines = new Lines();
@@ -210,13 +210,13 @@ export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
     const settle = (code: number | null): void => {
       if (finished !== undefined) return;
       clearInterval(check);
-      if (pgid !== undefined) liveGroups.delete(pgid);
+      if (pgid !== undefined) groups.delete(pgid);
       finished = cut === undefined ? code : null;
       if (cut === undefined) lines.end();
       else lines.fail(cut);
       resolveExit(finished);
     };
-    // A limit that passes kills the group; the close that follows ends the stream with the cut's words.
+    // A limit that passes kills the turn's group; the close that follows ends the stream with the cut's words.
     let reading = false;
     const check = setInterval(() => {
       const at = now();
@@ -231,12 +231,16 @@ export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
       cut = turnCut(limits, at - startedAt, quietMs);
       if (cut !== undefined) {
         clearInterval(check);
-        endGroup("SIGKILL");
+        signal("SIGKILL");
       }
     }, checkMs);
     check.unref();
     child.on("error", () => settle(null));
-    child.on("close", (code, signal) => settle(code ?? (signal !== null ? -1 : 0)));
+    // The leader is gone and what it started is not: those processes hold the stdout it handed them, so close waits
+    // on them and the turn would read as still running. The group goes here, at the one ending every other passes
+    // through, so no ending has to remember to take it.
+    child.on("exit", () => signal("SIGKILL"));
+    child.on("close", (code, exitSignal) => settle(code ?? (exitSignal !== null ? -1 : 0)));
 
     let inputClosed = false;
     if (input !== undefined) {
@@ -245,8 +249,8 @@ export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
 
     return {
       lines: lines.iterate(),
-      teardown: () => endGroup("SIGTERM"),
-      kill: () => endGroup("SIGKILL"),
+      teardown: () => signal("SIGTERM"),
+      kill: () => signal("SIGKILL"),
       write: async line => {
         if (input === undefined) throw new Error("this stream has no input channel");
         if (finished !== undefined || inputClosed) return "gone";

@@ -126,7 +126,7 @@ describe("makeApi wrappers", () => {
 
   it("capabilities sends capabilities.get and unwraps the flags", async () => {
     const { api, lastSent } = await connect();
-    const capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+    const capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, capabilities });
     expect(await api.capabilities()).toEqual(capabilities);
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "capabilities.get" });

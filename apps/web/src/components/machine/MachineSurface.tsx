@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The machine surface of the right panel: facts, live utilisation, spend,
-// lineage with rollback, pause, wake, upgrade, rebuild and forget for one
-// workspace's machine. Pause, wake, rebuild, forget and copy id read the
-// workspace registry; the tab keeps its own confirmations for the two that ask.
+// The machine surface of the right panel: facts, the workspace's own colour
+// and icon, live utilisation, spend, lineage with rollback, pause, wake,
+// upgrade, rebuild and forget for one workspace's machine. Pause, wake,
+// rebuild, forget and copy id read the workspace registry; the tab keeps its
+// own confirmations for the two that ask.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { runAction } from "../../actions/contextMenu.js";
@@ -10,7 +11,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { LINEAGE_MARKS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceKind, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { LINEAGE_MARKS, LOOK_PARTS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceKind, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -27,6 +28,7 @@ import {
 import { Button, WARN_BUTTON } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
+import { LOOK_WORDS, WorkspaceLookPicker } from "../workspaceLook.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import {
   bytesOfLabel,
@@ -73,6 +75,7 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
         <Facts workspace={workspace} status={status} awakeMs={last ? last.awakeMs : null} pendingSize={pendingSize} />
+        <Look workspace={workspace} />
         <Live workspace={workspace} />
         {driven && <Usage workspace={workspace} status={status} series={series} />}
         <Lineage workspace={workspace} />
@@ -227,6 +230,22 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
         </p>
       )}
     </Section>
+  );
+}
+
+/** The workspace's own hue and glyph, the same rows the row's menu opens in a dialog, each under the tab's own
+ * section heading rather than a label style of its own. */
+function Look({ workspace }: { workspace: WorkspaceView }) {
+  return (
+    <>
+      {LOOK_PARTS.map(part => (
+        <Section key={part} label={LOOK_WORDS[part]}>
+          <div className="mt-2">
+            <WorkspaceLookPicker workspace={workspace} part={part} />
+          </div>
+        </Section>
+      ))}
+    </>
   );
 }
 

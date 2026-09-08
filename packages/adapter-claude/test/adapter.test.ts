@@ -391,6 +391,42 @@ describe("interrupt policy (teardown, then SIGKILL)", () => {
   });
 });
 
+describe("the process a finished turn leaves", () => {
+  const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+  const result = `{"type":"result","subtype":"success","is_error":false,"result":"ok","duration_ms":5,"usage":{"output_tokens":3},"session_id":"${FIXTURE_SESSION_ID}"}`;
+
+  it("a CLI that does not go on the EOF its result closed the channel with is ended with its tree, and the turn still reads as its reply", async () => {
+    const exec = manualExec({ slowTeardown: true });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", resultExitMs: 15, interruptGraceMs: 15 });
+    const { events, onEvent } = collect();
+
+    const session = adapter.start({ prompt: "go", onEvent });
+    exec.push(init);
+    exec.push(result);
+    const turn = await session.finished;
+
+    expect(exec.order).toEqual(["closeInput", "teardown", "kill"]);
+    expect(turn).toMatchObject({ status: "completed", text: "ok" });
+    expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+  });
+
+  it("a CLI that goes on its own is left alone: nothing is signalled after the channel closed", async () => {
+    const exec = manualExec();
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", resultExitMs: 15, interruptGraceMs: 15 });
+    const { events, onEvent } = collect();
+
+    const session = adapter.start({ prompt: "go", onEvent });
+    exec.push(init);
+    exec.push(result);
+    await until(() => events.some(e => e.type === "turn.done"));
+    exec.end(0);
+    expect((await session.finished).status).toBe("completed");
+    await new Promise(r => setTimeout(r, 60));
+
+    expect(exec.order).toEqual(["closeInput"]);
+  });
+});
+
 describe("steer over the stdin channel", () => {
   const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
   const result = `{"type":"result","subtype":"success","is_error":false,"result":"ok","duration_ms":5,"session_id":"${FIXTURE_SESSION_ID}"}`;

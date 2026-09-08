@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { MACHINE_OS_WORD, THREAD_ARCHIVE_MS, workspaceState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { MACHINE_OS_WORD, THREAD_ARCHIVE_MS, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -29,6 +29,7 @@ import {
   stateSlotWord,
   threadPill,
   reachNote,
+  daemonGoneLine,
   workspaceMetaLine,
 } from "../src/sidebar/workspaceRows.js";
 import { formatRelativeTimeLabel } from "../src/lib/timestampFormat.js";
@@ -216,9 +217,28 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
   });
 
+  it("a row with no state word says its daemon is gone on the meta line, since nothing else on it would", () => {
+    const local = (reach: ReachState) => project({ reach: { state: reach } }, { kind: "local" });
+    const line = (reach: ReachState) => workspaceMetaLine({ project: local(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
+    // The two are different facts: nothing answering on the port, and no daemon road at all.
+    expect(line("no-daemon")).toBe("no daemon answering");
+    expect(line("unsupported")).toBe("no daemon on this machine");
+    expect(line("reachable")).toBe("this computer");
+    // Its state word is still empty by design, which is why the line is where this goes.
+    expect(stateSlotWord({ ...local("no-daemon"), indicator: { label: "Unreachable", tone: "neutral", pulse: false } })).toBe("");
+    // What the runtime is doing to the daemon still leads: a note means an attempt is in flight.
+    expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
+    // The Spaces header says it above what the machine is, in the same place the row gives it.
+    expect(spaceHeaderLines({ project: local("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual(["no daemon answering", "this computer"]);
+    // A driven kind's own state word already reads Unreachable for it, so its line keeps the spend.
+    expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" } }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("$0.29 today · $0.110/hr · active");
+    expect(daemonGoneLine("slow")).toBeUndefined();
+    expect(daemonGoneLine(null)).toBeUndefined();
+  });
+
   it("thread pills key on the session status, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {
-    expect(threadPill({ status: "running", indicator: { label: "Working", tone: "neutral", pulse: true } })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("muted-foreground") });
-    expect(threadPill({ status: "failed", indicator: { label: "Ended", tone: "neutral", pulse: false } })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("muted-foreground") });
+    expect(threadPill({ status: "running", indicator: { label: "Working", tone: "neutral", pulse: true } })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("sidebar-whisper") });
+    expect(threadPill({ status: "failed", indicator: { label: "Ended", tone: "neutral", pulse: false } })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("sidebar-whisper") });
     expect(threadPill({ status: "failed", indicator: { label: "Stopped short", tone: "neutral", pulse: false } })).toMatchObject({ label: "Stopped short" });
     expect(threadPill({ status: "completed", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
     expect(threadPill({ status: "interrupted", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();

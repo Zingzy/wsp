@@ -10,6 +10,7 @@
 import { AFTER_CUT_LINE, NOTIFY_ME, toolCallFacts, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
+  PermissionPrompt,
   TimelineEntry,
   TurnState,
   TurnSummary,
@@ -58,6 +59,9 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
   const timeline: TimelineEntry[] = [];
   const turns: TurnSummary[] = [];
   const startsBySession = new Map<string, number>();
+  /** Where each relayed permission prompt sits in the timeline, so its close lands on the row it opened rather than
+   * on a second row after the work the answer let through. */
+  const promptRows = new Map<string, number>();
   let turn: TurnBuild | null = null;
   let model: string | null = null;
   let harness: SessionHarness | null = null;
@@ -202,6 +206,35 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         closeOpenMessage(t);
         const label = event.notify === NOTIFY_ME ? "told you" : `told thread ${event.notify.slice(0, 8)}`;
         addWork(t, { createdAt: at, label, detail: event.text, tone: "notice", sourceActivityKind: "runtime.notify" }, at);
+        continue;
+      }
+      case "session.permission": {
+        const t = turnFor(event, at);
+        closeOpenMessage(t);
+        const permission: PermissionPrompt = {
+          askId: event.askId,
+          turnId: t.summary.turnId,
+          sessionId: t.summary.sessionId,
+          toolName: event.toolName,
+          ...(event.toolUseId !== undefined ? { toolUseId: event.toolUseId } : {}),
+          input: event.input,
+          ...(event.detail !== undefined ? { detail: event.detail } : {}),
+          options: event.options,
+          createdAt: at,
+          outcome: null,
+          optionId: null,
+        };
+        promptRows.set(event.askId, push({ id: `permission:${event.askId}`, kind: "permission", createdAt: at, permission }));
+        continue;
+      }
+      case "session.permission.closed": {
+        const index = promptRows.get(event.askId);
+        const row = index === undefined ? undefined : timeline[index];
+        if (index === undefined || row?.kind !== "permission") continue;
+        replace(index, {
+          ...row,
+          permission: { ...row.permission, outcome: event.outcome, optionId: event.optionId ?? null },
+        });
         continue;
       }
       case "session.done": {

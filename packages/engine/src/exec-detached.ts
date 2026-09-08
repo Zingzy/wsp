@@ -24,6 +24,13 @@ const POLL_MS = 2_000;
 const FIRST_POLL_MS = 250;
 const NO_EXIT_NOTE = "wsp: the command ended without reporting an exit code";
 
+/** Whether one command fits an exec body, the backend's wrapper counted: the one place the measured cap is read, so
+ * every road that builds a command out of a list pages it against the same rule. A body over the cap is refused with
+ * 413 by the provider, which reads as the road failing rather than as the command being too long. */
+export function execFits(command: string): boolean {
+  return Buffer.byteLength(command) + EXEC_ENVELOPE_BYTES <= EXEC_BODY_MAX;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
@@ -63,9 +70,8 @@ function uploadSequence(files: GuestWrite[], before: string[], after: string[]):
   };
   const last = (): string => [head, ...before, "set -o pipefail", ...plan.flatMap(land), ...after].join("\n");
   const piece = (path: string, i: number, part: string): string => [head, `printf %s ${shellQuote(part)} > ${shellQuote(path)}.${i} || exit 1`, "echo WSP_PIECE"].join("\n");
-  const fits = (cmd: string): boolean => Buffer.byteLength(cmd) + EXEC_ENVELOPE_BYTES <= EXEC_BODY_MAX;
   const execs: string[] = [];
-  while (!fits(last())) {
+  while (!execFits(last())) {
     const f = plan.filter(f => f.pieces === 0).sort((a, b) => b.b64.length - a.b64.length)[0];
     if (f === undefined) throw new Error("the lines around the upload do not fit one exec body");
     // Base64 decodes in groups of four, so a piece boundary on a multiple of four keeps the joined text decodable.

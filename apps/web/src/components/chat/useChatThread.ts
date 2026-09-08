@@ -13,6 +13,7 @@
 // thread: the runtime runs a workspace's threads side by side and holds
 // each to one turn, so a fresh view owes the left one nothing.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SESSION_EVENT_TYPES } from "@wsp/protocol";
 import type { ImageRecord, SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { ProtocolEvent } from "../../protocol/client";
@@ -92,11 +93,10 @@ export interface ThreadState {
 }
 
 const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, sending: null, known: [], named: null, stray: null };
-const SESSION_TYPES: ReadonlySet<string> = new Set(["session.start", "session.delta", "session.done", "session.end", "session.steer", "session.notify"]);
 const now = () => new Date().toISOString();
 
 function isSessionEvent(e: ProtocolEvent): e is SessionEvent {
-  return SESSION_TYPES.has(e.type);
+  return SESSION_EVENT_TYPES.has(e.type as SessionEvent["type"]);
 }
 
 function append(state: ThreadState, e: SessionEvent, at: string): ThreadState {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  WORKSPACE_GLYPHS,
+  WORKSPACE_TINTS,
+  lookWord,
   Recipe,
   RecipeSource,
   Capabilities,
@@ -38,6 +41,8 @@ import {
   RuntimeErrorResponse,
   RuntimeRequest,
   RuntimeResponse,
+  SESSION_EVENT_TYPES,
+  SessionAnswerResult,
   SessionEvent,
   SessionInterruptResult,
   SessionSteerResult,
@@ -115,6 +120,51 @@ describe("protocol views", () => {
   });
 });
 
+describe("a workspace's look", () => {
+  const view = { id: "ws_1", name: "task-1", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z" };
+
+  it("the six hues leave out the greens that mean running and the red that means danger, and none of them repeats", () => {
+    expect(WORKSPACE_TINTS).toHaveLength(6);
+    expect(new Set(WORKSPACE_TINTS).size).toBe(6);
+    for (const taken of ["green", "emerald", "lime", "red", "amber", "orange", "yellow"]) expect(WORKSPACE_TINTS).not.toContain(taken);
+  });
+
+  it("about two dozen glyphs, each one word so its name needs no second table, and none of them an emoji", () => {
+    expect(WORKSPACE_GLYPHS.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(WORKSPACE_GLYPHS).size).toBe(WORKSPACE_GLYPHS.length);
+    for (const glyph of WORKSPACE_GLYPHS) expect(glyph).toMatch(/^[a-z]+$/);
+    expect(lookWord("terminal")).toBe("Terminal");
+    expect(lookWord("cyan")).toBe("Cyan");
+  });
+
+  it("the view carries both, absent is none, and a hue outside the six is refused", () => {
+    expect(WorkspaceView.parse(view)).toEqual(view);
+    const looked = { ...view, tint: "cyan", glyph: "flask" };
+    expect(WorkspaceView.parse(looked)).toEqual(looked);
+    expect(() => WorkspaceView.parse({ ...view, tint: "emerald" })).toThrow();
+    expect(() => WorkspaceView.parse({ ...view, glyph: "🚀" })).toThrow();
+  });
+
+  it("the op takes one fact at a time, null to clear it, and refuses a hue the list does not hold", () => {
+    for (const req of [
+      { id: 1, op: "workspaces.look", workspaceId: "ws_1", tint: "violet" },
+      { id: 2, op: "workspaces.look", workspaceId: "ws_1", glyph: null },
+      { id: 3, op: "workspaces.look", workspaceId: "ws_1", tint: null, glyph: "rocket" },
+      { id: 4, op: "workspaces.look", workspaceId: "ws_1" },
+    ]) {
+      expect(RuntimeRequest.parse(req)).toEqual(req);
+    }
+    expect(() => RuntimeRequest.parse({ id: 5, op: "workspaces.look", workspaceId: "ws_1", tint: "red" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 6, op: "workspaces.look", tint: "cyan" })).toThrow();
+  });
+
+  it("the event carries both facts whole, so a cleared one reads null rather than going missing", () => {
+    const e = { type: "workspace.look", workspaceId: "ws_1", tint: "cyan", glyph: null };
+    expect(EventUnion.parse(e)).toEqual(e);
+    expect(() => EventUnion.parse({ type: "workspace.look", workspaceId: "ws_1", tint: "cyan" })).toThrow();
+  });
+});
+
 describe("protocol event union", () => {
   it("covers workspace.*, session.* (mirroring AdapterEvent), port.*, inbox.*", () => {
     const samples = [
@@ -177,6 +227,69 @@ describe("protocol event union", () => {
     expect(SessionEvent.parse(plain)).toEqual(plain);
     expect(() => SessionEvent.parse({ ...steered, prompt: undefined })).toThrow();
     expect(() => SessionEvent.parse({ ...steered, prompt: 7 })).toThrow();
+  });
+});
+
+describe("a relayed permission prompt on the wire", () => {
+  const ask = {
+    type: "session.permission",
+    workspaceId: "ws_1",
+    sessionId: "s1",
+    turnId: "turn_0001",
+    threadId: "thread_0001",
+    at: 1757320000000,
+    askId: "d9aa99d3-be4e-4a2b-8766-1b9494cde4f6",
+    toolName: "Write",
+    toolUseId: "toolu_1",
+    input: '{"file_path":"/root/out.txt","content":"hi"}',
+    detail: "out.txt",
+    options: [
+      { id: "allow", label: "Allow", effect: "allow" },
+      { id: "deny", label: "Deny", effect: "deny" },
+      { id: "mode:acceptEdits", label: "Allow, then Accept edits", effect: "mode", mode: "acceptEdits" },
+    ],
+    waitMs: 300_000,
+  };
+  const closed = { type: "session.permission.closed", workspaceId: "ws_1", sessionId: "s1", turnId: "turn_0001", threadId: "thread_0001", at: 1757320005000, askId: ask.askId, outcome: "allowed", optionId: "allow" };
+
+  it("both halves are session events, so a transcript replays a prompt and how it closed", () => {
+    for (const e of [ask, closed]) {
+      expect(SessionEvent.parse(e)).toEqual(e);
+      expect(EventUnion.parse(JSON.parse(JSON.stringify(e)))).toEqual(e);
+      expect(EventUnion.parse({ ...e, seq: 12 })).toEqual({ ...e, seq: 12 });
+    }
+    // Every session type is read off the union, so an added event is never missed by a client's own list.
+    expect([...SESSION_EVENT_TYPES]).toContain("session.permission");
+    expect([...SESSION_EVENT_TYPES]).toContain("session.permission.closed");
+    expect(SESSION_EVENT_TYPES.has("session.queued" as never)).toBe(false);
+  });
+
+  it("a prompt with nothing the harness did not name still parses, and one missing what it must name does not", () => {
+    const { detail: _d, toolUseId: _t, waitMs: _w, ...bare } = ask;
+    expect(SessionEvent.parse(bare)).toEqual(bare);
+    for (const key of ["askId", "toolName", "input", "options"] as const) {
+      expect(() => SessionEvent.parse({ ...ask, [key]: undefined })).toThrow();
+    }
+    expect(() => SessionEvent.parse({ ...ask, options: [{ id: "allow", label: "Allow", effect: "maybe" }] })).toThrow();
+  });
+
+  it("a close names its outcome from the four, and the option only where one closed it", () => {
+    for (const outcome of ["allowed", "denied", "unanswered", "cancelled"]) expect(SessionEvent.parse({ ...closed, outcome })).toMatchObject({ outcome });
+    expect(() => SessionEvent.parse({ ...closed, outcome: "timedout" })).toThrow();
+    const { optionId: _o, ...noOption } = closed;
+    expect(SessionEvent.parse(noOption)).toEqual(noOption);
+    expect(() => SessionEvent.parse({ ...closed, askId: undefined })).toThrow();
+  });
+
+  it("the answer op and its outcomes are on the wire, so a client can name an option and read what came of it", () => {
+    const req = { id: 31, op: "sessions.answer", sessionId: "s1", askId: ask.askId, optionId: "allow" };
+    expect(RuntimeRequest.parse(req)).toEqual(req);
+    expect(() => RuntimeRequest.parse({ ...req, askId: undefined })).toThrow();
+    expect(() => RuntimeRequest.parse({ ...req, optionId: undefined })).toThrow();
+    for (const outcome of ["answered", "gone", "unsupported", "not-found", "no-option"]) {
+      expect(SessionAnswerResult.parse({ outcome })).toEqual({ outcome });
+    }
+    expect(() => SessionAnswerResult.parse({ outcome: "denied" })).toThrow();
   });
 });
 
@@ -370,8 +483,8 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
 });
 
 describe("backend capabilities", () => {
-  it("requires every flag, containers, callbackRelay, templates and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+  it("requires every flag, containers, callbackRelay, templates, kept and the sizes list included, so no backend can leave one unstated", () => {
+    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { containers: _c, ...missing } = full;
     expect(() => Capabilities.parse(missing)).toThrow();
@@ -379,6 +492,9 @@ describe("backend capabilities", () => {
     expect(() => Capabilities.parse(noTemplates)).toThrow();
     const { callbackRelay: _r, ...noRelay } = full;
     expect(() => Capabilities.parse(noRelay)).toThrow();
+    // A backend that never says whether its machine is the person's own would have every turn's access decided for it.
+    const { kept: _k, ...noKept } = full;
+    expect(() => Capabilities.parse(noKept)).toThrow();
     const { sizes: _s, ...noSizes } = full;
     expect(() => Capabilities.parse(noSizes)).toThrow();
     expect(() => Capabilities.parse({ ...full, sizes: [{ cpu: 2, memMb: 4096 }] })).toThrow();

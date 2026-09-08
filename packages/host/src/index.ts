@@ -14,6 +14,7 @@ export {
   currentHomePointer,
   goldenRecipe,
   loadKeys,
+  localWiring,
   makeRuntime,
   serve,
   stopOnSignals,
