@@ -605,8 +605,9 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         await page!.waitForFunction(w => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - w) < 1, width);
         const read = await readSpaces();
         console.info(`spaces at ${width} ${theme}: ${JSON.stringify(read)}`);
-        // One workspace on screen: no workspace row anywhere, and only that workspace's threads under the header.
-        expect(read.workspaceRows).toBe(0);
+        // One workspace on screen: no workspace row anywhere, the one id under ws: being the header's own, which
+        // wears it so the arrow walk stops there, and only that workspace's threads under it.
+        expect(read.workspaceRows).toBe(1);
         expect(read.threads).toEqual(["thread:s1", "thread:s2"]);
         expect(read.name).toBe("api");
         expect(read.state).toBe("");

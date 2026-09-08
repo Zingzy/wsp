@@ -942,11 +942,11 @@ describe("Spaces mode", () => {
         session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) }),
       ]),
     );
-    // No workspace row at all: the header stands in for the one on screen, the dots for the rest.
-    expect(workspaceRowIds()).toEqual([]);
+    // No workspace row at all: the header stands in for the one on screen, wearing its id, the dots for the rest.
+    expect(workspaceRowIds()).toEqual(["ws:ws_a"]);
     expect(within(spaceHeader()!).getByText("api")).toBeDefined();
-    // Only that workspace's threads, in the list's own grammar.
-    expect(rowIds()).toEqual(["thread:s1"]);
+    // Only that workspace's threads, in the list's own grammar, under the header the walk starts on.
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1"]);
     expect(screen.queryByText("bump the lockfile")).toBeNull();
     expect(dots().map(d => d.getAttribute("aria-label"))).toEqual(["api", "web", "old"]);
     // The current dot is the only one carrying its name, so it is the wide one.
@@ -1019,6 +1019,43 @@ describe("Spaces mode", () => {
     expect(headerLines()).toContain("2 vCPU · 4 GB · Linux");
     act(() => getLive("ws_a").feedStatus("live"));
     await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+  });
+
+  it("the header is a stop in the arrow walk, and the walk carries on into the space's threads", async () => {
+    await mountSpaces(
+      fakeApi(THREE, statuses(), [
+        session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
+        session("s4", "ws_a", { prompt: "read the log", startedAt: iso(-9 * 60_000) }),
+      ]),
+    );
+    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "thread:s4"]));
+    spaceHeader()!.focus();
+    expect(document.activeElement).toBe(spaceHeader());
+    fireEvent.keyDown(spaceHeader()!, { key: "ArrowDown" });
+    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("thread:s1");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(spaceHeader());
+    fireEvent.keyDown(spaceHeader()!, { key: "End" });
+    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("thread:s4");
+  });
+
+  it("Enter on the header opens a thread on that workspace, and does nothing where that is refused", async () => {
+    const asked: string[] = [];
+    const off = onNewThreadRequest(request => asked.push(request.workspaceId));
+    try {
+      await mountSpaces(fakeApi(THREE, statuses()));
+      spaceHeader()!.focus();
+      fireEvent.keyDown(spaceHeader()!, { key: "Enter" });
+      await waitFor(() => expect(asked).toEqual(["ws_a"]));
+      // A machine that is gone takes no thread, so the header's Enter is the same refusal its menu row carries.
+      act(() => useStore.getState().select("ws_c"));
+      await waitFor(() => expect(within(spaceHeader()!).getByText("old")).toBeDefined());
+      fireEvent.keyDown(spaceHeader()!, { key: "Enter" });
+      await act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
+      expect(asked).toEqual(["ws_a"]);
+    } finally {
+      off();
+    }
   });
 
   it("the header grows the sidebar's one name box: the palette's ask and a double-click both open it in the name's slot", async () => {

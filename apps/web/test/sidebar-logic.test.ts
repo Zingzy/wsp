@@ -10,9 +10,12 @@ import {
   isThreadWorking,
   resolveAdjacentThreadId,
   searchSidebarThreadsByTitle,
+  sidebarThreadOrder,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
+  topSidebarThread,
 } from "../src/sidebar/Sidebar.logic.js";
+import { spaceWorkspaceId } from "../src/sidebar/sidebarMode.js";
 import {
   compactTimeLabel,
   defaultWorkspaceName,
@@ -186,5 +189,30 @@ describe("new workspace helpers", () => {
       detail: "no golden image yet",
     });
     expect(explainCreateRefusal("boom").detail).toBe("boom");
+  });
+});
+
+describe("what a space walks", () => {
+  const row = (id: string, status: "running" | "completed", startedAt: string) => ({ id, title: id, status, startedAt, endedAt: startedAt });
+
+  it("orders a workspace's threads the way the sidebar draws them: the working rows, then the idle shelf", () => {
+    const threads = [
+      row("idle-old", "completed", "2026-09-01T00:01:00Z"),
+      row("working-old", "running", "2026-09-01T00:02:00Z"),
+      row("idle-new", "completed", "2026-09-01T00:09:00Z"),
+      row("working-new", "running", "2026-09-01T00:08:00Z"),
+    ];
+    expect(sidebarThreadOrder(threads).map(t => t.id)).toEqual(["working-new", "working-old", "idle-new", "idle-old"]);
+    expect(topSidebarThread(threads)?.id).toBe("working-new");
+    expect(sidebarThreadOrder([])).toEqual([]);
+    expect(topSidebarThread([])).toBeNull();
+  });
+
+  it("shows the selected workspace, and the first in the sidebar's order while what is selected is not one", () => {
+    const ids = ["ws_a", "ws_b"];
+    expect(spaceWorkspaceId(ids, "ws_b")).toBe("ws_b");
+    expect(spaceWorkspaceId(ids, null)).toBe("ws_a");
+    expect(spaceWorkspaceId(ids, "creating:1")).toBe("ws_a");
+    expect(spaceWorkspaceId([], "ws_a")).toBeNull();
   });
 });

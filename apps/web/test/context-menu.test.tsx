@@ -293,7 +293,8 @@ describe("the Workspaces section's menu", () => {
     fireEvent.click(item(SIDEBAR_MODE_WORDS.spaces.title));
     await waitFor(() => expect(menu()).toBeNull());
     await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
+    // No workspace row: the one id under ws: is the header's, which wears it so the arrow walk stops there.
+    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
     // The menu then names the way back, from the one registry entry: nothing spells the two words twice.
     rightClick(screen.getByRole("button", { name: "Workspaces" }));
     await screen.findByRole("menu");
@@ -537,9 +538,10 @@ describe("a workspace row's name box", () => {
   it("in Spaces the header grows the same box: the menu opens it in the name's own slot and Enter names the workspace", async () => {
     const api = fakeApi([{ ...API }], [statusOf(API)]);
     await mountSpaces(api);
-    // No workspace row on screen at all, so the header is the only editor there can be.
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
+    // The header is the only thing wearing the workspace's row id, so it is the only editor there can be.
+    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
     const header = document.querySelector<HTMLElement>("[data-space-header]")!;
+    expect(header.dataset["rowId"]).toBe("ws:ws_a");
     rightClick(header);
     await screen.findByRole("menu");
     expect(labels()).toContain(WORKSPACE_WORDS.rename);
@@ -553,6 +555,19 @@ describe("a workspace row's name box", () => {
     await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "the name he typed"));
     await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
     expect(within(document.querySelector<HTMLElement>("[data-space-header]")!).getByText("the name he typed")).toBeDefined();
+  });
+
+  it("the menu key reaches the header's menu, which a browser sends as a menu with no pointer on what has focus", async () => {
+    await mountSpaces(fakeApi([{ ...API }], [statusOf(API)]));
+    const header = document.querySelector<HTMLElement>("[data-space-header]")!;
+    // A block a browser will never send that event to is a block whose actions are the mouse's alone.
+    expect(header.tabIndex).toBe(0);
+    header.focus();
+    expect(document.activeElement).toBe(header);
+    rightClick(header, { clientX: 0, clientY: 0 });
+    await screen.findByRole("menu");
+    expect(labels()).toContain(WORKSPACE_WORDS.rename);
+    expect(labels()).toContain(WORKSPACE_WORDS.newThread);
   });
 
   it("a double-click on the name opens the same box", async () => {

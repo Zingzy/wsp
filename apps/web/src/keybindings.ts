@@ -12,6 +12,7 @@ import {
 } from "./keybindingTypes.js";
 import { isDesktopShell } from "./lib/desktopShell.js";
 import { isMacPlatform } from "./lib/utils.js";
+import { readSidebarMode } from "./sidebar/sidebarMode.js";
 
 export interface ShortcutEventLike {
   type?: string;
@@ -43,6 +44,10 @@ export interface ShortcutMatchContext {
   terminalOwnsMod: boolean;
   /** The desktop shell holds the page, so the chords a browser keeps for its own tabs reach it. */
   desktopShell: boolean;
+  /** The sidebar is drawing Spaces, one workspace at a time, so the chord that walks a list of workspaces walks
+   * that workspace's threads instead. Read from the stored mode, so every surface labels a chord as the body it
+   * is looking at means it. */
+  spacesMode: boolean;
   [key: string]: boolean;
 }
 
@@ -184,6 +189,7 @@ function resolveContext(
     previewFocus: false,
     previewOpen: false,
     desktopShell: isDesktopShell(),
+    spacesMode: readSidebarMode() === "spaces",
     ...options?.context,
     terminalFocus,
     terminalOwnsMod: terminalFocus && !isMacPlatform(platform),
@@ -321,29 +327,18 @@ export function formatShortcutLabel(
   return parts.join("+");
 }
 
-/** The modifier keys a chord holds down, as KeyboardEvent.key spells them, in the label's order. */
-function shortcutModifierKeyNames(shortcut: KeybindingShortcut, platform: string): string[] {
-  const { metaKey, ctrlKey } = effectiveModifiers(shortcut, platform);
-  const names: string[] = [];
-  if (ctrlKey) names.push("Control");
-  if (shortcut.altKey) names.push("Alt");
-  if (shortcut.shiftKey) names.push("Shift");
-  if (metaKey) names.push("Meta");
-  return names;
-}
-
 /**
- * The modifier keys the command's chord holds down, empty when no rule for it reaches this shell. A listener that
- * waits for a chord to be let go reads the hold from the table here instead of naming a key of its own, so a
- * rebound chord moves its hold with it.
+ * The modifier keys an event is holding down, as KeyboardEvent.key spells them. A chord that puts a hold-to-walk
+ * overlay up reads its hold here, off the event that opened it, so a command bound to two chords ends on whichever
+ * one was pressed. Shift is left out: the two directions of such a chord differ by Shift alone, so a step back
+ * would otherwise commit the walk it is still stepping through.
  */
-export function shortcutHoldKeysForCommand(
-  keybindings: ResolvedKeybindingsConfig,
-  command: KeybindingCommand,
-  options?: ShortcutMatchOptions,
-): string[] {
-  const shortcut = findEffectiveShortcutForCommand(keybindings, command, options);
-  return shortcut === null ? [] : shortcutModifierKeyNames(shortcut, resolvePlatform(options));
+export function eventHoldKeys(event: ShortcutModifierStateLike): string[] {
+  const names: string[] = [];
+  if (event.ctrlKey) names.push("Control");
+  if (event.altKey) names.push("Alt");
+  if (event.metaKey) names.push("Meta");
+  return names;
 }
 
 export function shortcutLabelForCommand(

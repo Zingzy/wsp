@@ -40,7 +40,7 @@ import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
-import { useSidebarMode } from "./sidebarMode.js";
+import { spaceWorkspaceId, useSidebarMode } from "./sidebarMode.js";
 import { SpaceDots } from "./SpaceDots.js";
 import { SpaceHeader } from "./SpaceHeader.js";
 import { ThreadRow } from "./ThreadRow.js";
@@ -144,8 +144,8 @@ export function WorkspaceSidebar() {
   const visible = useMemo(() => visibleProjects(projects), [projects]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const sectionActions = useMemo(() => resolveActions(sidebarActions, { mode }, { setMode }), [mode, setMode]);
-  // Spaces draws the selected workspace, and the first one in the sidebar's order until something is selected.
-  const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === selectedId) ?? visible[0] ?? null);
+  const spaceId = spaceWorkspaceId(projects.map(project => project.id), selectedId);
+  const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === spaceId) ?? null);
   const tripTarget = trip === null ? undefined : workspaces.find(w => w.id === trip.workspaceId);
   const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting);
 

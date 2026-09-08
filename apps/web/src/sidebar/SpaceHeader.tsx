@@ -6,16 +6,19 @@
 // sidebar's one name box in the same slot, as it does on a row, so the mode
 // keeps one editor and one grammar. The words come from workspaceRows.ts; the
 // block carries the workspace's menu, since in this mode no row of its own is
-// on screen to right-click.
-import type { MouseEvent } from "react";
+// on screen to right-click. It carries a row's keyboard reach with it: the id
+// every row wears, so the arrow walk stops here, Enter for the action the
+// row's own glyph carries, and the menu key, which a browser sends as a
+// context menu on whatever has focus.
+import type { KeyboardEvent, MouseEvent } from "react";
 import type { MemoryReading } from "@wsp/protocol";
-import { openContextMenu } from "../actions/contextMenu.js";
+import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
-import type { ResolvedAction } from "../actions/registry.js";
+import { actionById, type ResolvedAction } from "../actions/registry.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, workspaceRowId } from "./rowGrammar.js";
 import { dotClassForTone, spaceHeaderLines, stateSlotWord } from "./workspaceRows.js";
 
 export function SpaceHeader({
@@ -45,12 +48,20 @@ export function SpaceHeader({
   /** Opens the box here, as the menu's Rename does; absent where the rename is refused, so the name is text alone. */
   onRenameOpen?: (() => void) | undefined;
 }) {
+  const newThread = actionById(actions, "new-thread");
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.key !== "Enter" || newThread.refusal !== null) return;
+    event.preventDefault();
+    void runAction(newThread);
+  };
   return (
     <div
       data-space-header
-      className="mb-1 flex items-start gap-[var(--sidebar-control-gap)] border-b border-sidebar-border/60 px-2 pt-1.5 pb-2 text-sm"
-      // A header holding the box takes no menu over it, as a row being named does not.
-      {...(renaming ? {} : { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions) })}
+      data-sidebar-row
+      data-row-id={workspaceRowId(project.id)}
+      className="mb-1 flex items-start gap-[var(--sidebar-control-gap)] border-b border-sidebar-border/60 px-2 pt-1.5 pb-2 text-sm outline-hidden ring-ring focus-visible:ring-2"
+      // A header holding the box is the box's own stop and takes no menu over it, as a row being named does not.
+      {...(renaming ? {} : { tabIndex: 0, onKeyDown, onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions) })}
     >
       <span aria-hidden className={ROW_LEAD_CLASS}>
         <span className={cn("size-2 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />

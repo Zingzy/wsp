@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The copied matcher over our default rules: every default resolves on both
-// platforms, when-clauses gate the terminal chords, labels follow the platform.
+// platforms, when-clauses gate the terminal chords, labels follow the platform,
+// and the Tab pair means what the sidebar body it is read in means by it.
 import { describe, expect, it } from "vitest";
 import { compileResolvedKeybindingsConfig, DEFAULT_KEYBINDINGS, DEFAULT_RESOLVED_KEYBINDINGS, parseKeybindingShortcut, parseKeybindingWhenExpression } from "../src/keybindingDefaults.js";
-import { browserTabClaimsShortcut, formatShortcutLabel, resolveShortcutCommand, shortcutLabelForCommand, type ShortcutEventLike } from "../src/keybindings.js";
+import { browserTabClaimsShortcut, eventHoldKeys, formatShortcutLabel, resolveShortcutCommand, shortcutLabelForCommand, type ShortcutEventLike } from "../src/keybindings.js";
+import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
 
 const MAC = "MacIntel";
 const LINUX = "Linux x86_64";
@@ -156,7 +158,8 @@ describe("workspace switch", () => {
     expect(resolve(tab({ shiftKey: true }), LINUX)).toBeNull();
     expect(resolve(digit(2, { metaKey: true }), MAC)).toBeNull();
     expect(resolve(digit(2, { ctrlKey: true }), LINUX)).toBeNull();
-    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC })).toBeNull();
+    // The option arrows are left, since a browser tab keeps no arrow chord; they are the switch a tab still offers.
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC })).toBe("⌥Right");
     expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.select.2", { platform: MAC })).toBeNull();
   });
 
@@ -175,5 +178,82 @@ describe("workspace switch", () => {
     expect(label("workspace.previous", MAC)).toBe("⌃⇧Tab");
     expect(label("workspace.select.3", MAC)).toBe("⌘3");
     expect(label("workspace.select.3", LINUX)).toBe("Ctrl+3");
+  });
+});
+
+describe("the switch chords per sidebar body", () => {
+  const resolve = (event: ShortcutEventLike, platform: string, context: Record<string, boolean> = {}) =>
+    resolveShortcutCommand(event, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context });
+  const DESKTOP = { desktopShell: true };
+  const SPACES = { desktopShell: true, spacesMode: true };
+  const tab = (mods: Partial<ShortcutEventLike> = {}) => key("Tab", { ctrlKey: true, code: "Tab", ...mods });
+  const arrow = (name: "ArrowLeft" | "ArrowRight", mods: Partial<ShortcutEventLike> = {}) => key(name, { altKey: true, code: name, ...mods });
+
+  it("gives the Tab pair the workspaces in the list and the space's threads in Spaces", () => {
+    expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
+    expect(resolve(tab({ shiftKey: true }), MAC, DESKTOP)).toBe("workspace.previous");
+    expect(resolve(tab(), MAC, SPACES)).toBe("thread.next");
+    expect(resolve(tab({ shiftKey: true }), MAC, SPACES)).toBe("thread.previous");
+    expect(resolve(tab(), LINUX, SPACES)).toBe("thread.next");
+  });
+
+  it("moves between workspaces on the option arrows in both bodies, and in a browser tab, which keeps no arrow", () => {
+    const bodies: Record<string, boolean>[] = [DESKTOP, SPACES, {}, { spacesMode: true }];
+    for (const context of bodies) {
+      expect(resolve(arrow("ArrowRight"), MAC, context)).toBe("workspace.next");
+      expect(resolve(arrow("ArrowLeft"), MAC, context)).toBe("workspace.previous");
+      expect(resolve(arrow("ArrowRight"), LINUX, context)).toBe("workspace.next");
+    }
+  });
+
+  it("leaves the arrows to a focused terminal, as it leaves it the Tab pair", () => {
+    expect(resolve(arrow("ArrowRight"), MAC, { ...DESKTOP, terminalFocus: true })).toBeNull();
+    expect(resolve(arrow("ArrowLeft"), LINUX, { ...DESKTOP, terminalFocus: true })).toBeNull();
+    expect(resolve(tab(), MAC, { ...SPACES, terminalFocus: true })).toBeNull();
+  });
+
+  it("takes no arrow that is not the option's own", () => {
+    expect(resolve(key("ArrowRight", { code: "ArrowRight" }), MAC, DESKTOP)).toBeNull();
+    expect(resolve(key("ArrowRight", { code: "ArrowRight", metaKey: true }), MAC, DESKTOP)).toBeNull();
+    expect(resolve(arrow("ArrowRight", { shiftKey: true }), MAC, DESKTOP)).toBeNull();
+    expect(resolve(arrow("ArrowRight", { ctrlKey: true }), MAC, DESKTOP)).toBeNull();
+  });
+
+  it("labels each command as the body it is read in means it", () => {
+    const label = (command: "workspace.next" | "workspace.previous" | "thread.next" | "thread.previous", context: Record<string, boolean>) =>
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, command, { platform: MAC, context });
+    expect(label("workspace.next", DESKTOP)).toBe("⌃Tab");
+    expect(label("workspace.previous", DESKTOP)).toBe("⌃⇧Tab");
+    expect(label("thread.next", DESKTOP)).toBeNull();
+    expect(label("workspace.next", SPACES)).toBe("⌥Right");
+    expect(label("workspace.previous", SPACES)).toBe("⌥Left");
+    expect(label("thread.next", SPACES)).toBe("⌃Tab");
+    expect(label("thread.previous", SPACES)).toBe("⌃⇧Tab");
+  });
+
+  it("reads the body off the stored mode where a caller names none", () => {
+    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    try {
+      expect(resolve(tab(), MAC, DESKTOP)).toBe("thread.next");
+    } finally {
+      window.localStorage.removeItem(SIDEBAR_MODE_KEY);
+    }
+    expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
+    window.localStorage.setItem(SIDEBAR_MODE_KEY, "nonsense");
+    try {
+      expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
+    } finally {
+      window.localStorage.removeItem(SIDEBAR_MODE_KEY);
+    }
+  });
+});
+
+describe("the hold a chord carries", () => {
+  it("is the modifiers the event really holds, without Shift, which only picks the direction", () => {
+    expect(eventHoldKeys({ metaKey: false, ctrlKey: true, shiftKey: false, altKey: false })).toEqual(["Control"]);
+    expect(eventHoldKeys({ metaKey: false, ctrlKey: true, shiftKey: true, altKey: false })).toEqual(["Control"]);
+    expect(eventHoldKeys({ metaKey: false, ctrlKey: false, shiftKey: true, altKey: true })).toEqual(["Alt"]);
+    expect(eventHoldKeys({ metaKey: true, ctrlKey: true, shiftKey: false, altKey: true })).toEqual(["Control", "Alt", "Meta"]);
+    expect(eventHoldKeys({ metaKey: false, ctrlKey: false, shiftKey: false, altKey: false })).toEqual([]);
   });
 });
