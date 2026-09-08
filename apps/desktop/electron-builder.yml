@@ -13,6 +13,8 @@ files:
 extraResources:
   - from: build/app/node_modules/@wsp/daemon
     to: node_modules/@wsp/daemon
+  - from: build/app/node_modules/node-pty
+    to: node_modules/node-pty
 mac:
   target:
     - target: dir

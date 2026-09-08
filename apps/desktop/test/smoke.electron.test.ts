@@ -5,12 +5,12 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { serve, startHost, workspaceAsset, type CliIO, type HostHandle } from "@wsp/host";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
+import { executableIn, treeHere } from "./packaged.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
 import { THEME_WORDS } from "../../web/src/settings/format.js";
@@ -22,8 +22,9 @@ const TOKEN = /^[A-Za-z0-9_-]{32}$/;
 function builtApp(): string {
   const fromEnv = process.env["WSP_DESKTOP_APP"];
   if (fromEnv !== undefined) return fromEnv;
-  const dir = process.arch === "arm64" ? "mac-arm64" : "mac";
-  return fileURLToPath(new URL(`../dist/${dir}/wsp.app/Contents/MacOS/wsp`, import.meta.url));
+  const tree = treeHere();
+  if (tree === undefined) throw new Error(`no packaged tree for ${process.platform}-${process.arch}`);
+  return executableIn(tree);
 }
 
 const GOLDEN = {
