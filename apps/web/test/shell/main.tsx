@@ -16,8 +16,12 @@
 // terminal over a fake daemon wire, the host answering a translucent Ghostty
 // config, so the pane's material can be measured with each tab active;
 // ?sidebar=<px> opens the sidebar at that remembered width so the rows can
-// be measured at several; ?local=1 puts this computer in the list beside the
-// cloud machines, so a mixed list of both kinds can be measured.
+// be measured at several; ?spaces=1 opens it in the Spaces body, one
+// workspace under its header with a dot per workspace at the bottom.
+// ?images=<n> puts n images in the composer so the
+// thumbnail row above the text can be measured. ?local=1 puts this computer
+// in the list beside the cloud machines, so a mixed list of both kinds can
+// be measured.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DESKTOP_MAC_CLASS, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -29,6 +33,8 @@ import { useRightPanelStore } from "../../src/rightPanelStore";
 import { AppShell } from "../../src/shell/AppShell";
 import { openPanelTerminal } from "../../src/shell/shellCommands";
 import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
+import { SIDEBAR_MODE_KEY } from "../../src/sidebar/sidebarMode";
+import { useComposerImagesStore } from "../../src/components/chat/composerImages";
 import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
 import "../../src/index.css";
@@ -69,7 +75,7 @@ const sessions: SessionView[] = [
 // carries the effort lists its app-server reports, each model with the effort that model runs at, so the effort
 // picker draws its default against a pick rather than against the binary.
 const catalogs: HarnessCatalog[] = [
-  { harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }], efforts: [], contextWindows: [], permissionModes: [], steers: true, renames: true },
+  { harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }], efforts: [], contextWindows: [], permissionModes: [], steers: true, renames: true, images: true },
   {
     harness: "codex",
     label: "Codex",
@@ -84,6 +90,7 @@ const catalogs: HarnessCatalog[] = [
     permissionModes: [],
     steers: false,
     renames: false,
+    images: false,
   },
 ];
 
@@ -163,6 +170,8 @@ useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(show
 // ?sidebar=<px> is the width the shell remembers; it is written here, after a test's init script has cleared storage.
 const sidebarWidth = params.get("sidebar");
 if (sidebarWidth !== null) window.localStorage.setItem("wsp:sidebar-width", sidebarWidth);
+// ?spaces=1 is the remembered sidebar body, on the same road and for the same reason as the width.
+if (params.get("spaces") === "1") window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
 useStore.getState().bind(api);
 // The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
 useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
@@ -177,6 +186,22 @@ if (params.get("panel") === "terminal" && shown !== null) {
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useRightPanelStore.getState().open(shown, "preview");
   void openPanelTerminal(shown);
+}
+// ?images=<n> puts n images in the composer, as a paste would, so the thumbnail row can be measured; the bytes are a
+// tiny gradient of a known colour, since what is measured is the row and not the picture.
+if (params.get("images") !== null) {
+  const swatch = (hue: number): File => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 32;
+    canvas.height = 32;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = `hsl(${hue} 70% 55%)`;
+    ctx.fillRect(0, 0, 32, 32);
+    const bytes = Uint8Array.from(atob(canvas.toDataURL("image/png").split(",")[1]!), c => c.charCodeAt(0));
+    return new File([bytes], `shot-${hue}.png`, { type: "image/png" });
+  };
+  const count = Number(params.get("images")) || 1;
+  void useComposerImagesStore.getState().add(shown ?? "ws_a", Array.from({ length: count }, (_, i) => swatch(i * 60)));
 }
 if (params.get("oom") === "1") {
   const GiB = 1024 ** 3;

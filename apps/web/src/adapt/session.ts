@@ -88,9 +88,9 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     const full: WorkLogEntry = { ...entry, id: `${t.summary.turnId}:w${t.ordinal}`, turnId: t.summary.turnId };
     return push({ id: full.id, kind: "work", createdAt: at, entry: full });
   };
-  const addMessage = (t: TurnBuild, role: ChatMessage["role"], text: string, at: string, streaming: boolean, steered = false): number => {
+  const addMessage = (t: TurnBuild, role: ChatMessage["role"], text: string, at: string, streaming: boolean, steered = false, carried?: Pick<ChatMessage, "attachments" | "requestId">): number => {
     t.ordinal += 1;
-    const m: ChatMessage = { id: `${t.summary.turnId}:m${t.ordinal}`, role, text, turnId: t.summary.turnId, streaming, createdAt: at, updatedAt: at, ...(steered ? { steered } : {}) };
+    const m: ChatMessage = { id: `${t.summary.turnId}:m${t.ordinal}`, role, text, turnId: t.summary.turnId, streaming, createdAt: at, updatedAt: at, ...(steered ? { steered } : {}), ...carried };
     return push(messageEntry(m));
   };
   // The reply's content and cost, applied once at session.done; the state is set separately, so a turn whose process
@@ -178,7 +178,12 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         model = event.model ?? model;
         harness = event.harness ?? harness;
         turn = openTurn(event, event.turnId ?? `${event.sessionId}#${count}`, count, at);
-        if (event.prompt !== undefined) addMessage(turn, "user", event.prompt, at, false);
+        if (event.prompt !== undefined) {
+          addMessage(turn, "user", event.prompt, at, false, false, {
+            ...(event.attachments !== undefined ? { attachments: event.attachments } : {}),
+            ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
+          });
+        }
         if (event.afterCut === true) addWork(turn, { createdAt: at, label: AFTER_CUT_LINE, tone: "notice", sourceActivityKind: "runtime.resume" }, at);
         continue;
       }

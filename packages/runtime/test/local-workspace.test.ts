@@ -7,12 +7,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { relayedRefusal } from "@wsp/protocol";
+import { relayedRefusal, type PortForward } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
-import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
+import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
+import { serveRuntime, type ForwardsSource } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
+import { WsClient } from "./ws-client.js";
 
 /** A scripted adapter that runs one real command on the machine it was given through ctx.execStream and answers with
  * its output: on a local workspace ctx.execStream is the local child factory, so a reply landing proves the runtime
@@ -138,12 +140,137 @@ describe("local workspace", () => {
     await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow(cannot);
   });
 
-  it("a request relayed from a machine is refused with the one sentence", async () => {
+  it("every verb refuses a request relayed from a machine with the one sentence", async () => {
     const rt = runtime();
     const ws = await rt.workspaces.createLocal("mac");
-    await expect(rt.sessions.start(ws.id, { prompt: "hi", origin: "relayed" })).rejects.toThrow(relayedRefusal("mac"));
-    // A request from this computer is not refused.
-    expect((await rt.sessions.start(ws.id, { prompt: "hi", origin: "here" }).then(h => h.finished)).status).toBe("completed");
+    const thread = await rt.sessions.start(ws.id, { prompt: "hi" });
+    await thread.finished;
+    const sessionId = thread.view().id;
+    const bundler = {} as ProjectImportOptions["bundler"];
+    const lander = {} as ProjectExportOptions["lander"];
+    const verbs: [string, () => Promise<unknown>][] = [
+      ["workspaces.createLocal", () => rt.workspaces.createLocal("mac", "relayed")],
+      ["workspaces.get", () => rt.workspaces.get(ws.id, "relayed")],
+      ["workspaces.nap", () => rt.workspaces.nap(ws.id, "relayed")],
+      ["workspaces.wake", () => rt.workspaces.wake(ws.id, "relayed")],
+      ["workspaces.upgrade", () => rt.workspaces.upgrade(ws.id, { cpu: 4 }, "relayed")],
+      ["workspaces.updateImage", () => rt.workspaces.updateImage(ws.id, "relayed")],
+      ["workspaces.rebuild", () => rt.workspaces.rebuild(ws.id, "relayed")],
+      ["workspaces.rename", () => rt.workspaces.rename(ws.id, "mac2", "relayed")],
+      ["workspaces.snapshot", () => rt.workspaces.snapshot(ws.id, "relayed")],
+      ["workspaces.updateDaemon", () => rt.workspaces.updateDaemon(ws.id, "relayed")],
+      ["workspaces.delete", () => rt.workspaces.delete(ws.id, "relayed")],
+      ["workspaces.forget", () => rt.workspaces.forget(ws.id, "relayed")],
+      ["workspaces.touch", () => rt.workspaces.touch(ws.id, "relayed")],
+      ["workspaces.exec", () => rt.workspaces.exec(ws.id, "true", undefined, "relayed")],
+      ["workspaces.execStream", () => rt.workspaces.execStream(ws.id, ["true"], undefined, "relayed")],
+      ["workspaces.daemonReach", () => rt.workspaces.daemonReach(ws.id, "relayed")],
+      ["workspaces.portReach", () => rt.workspaces.portReach(ws.id, 3000, "relayed")],
+      ["workspaces.portProbe", () => rt.workspaces.portProbe(ws.id, 3000, "relayed")],
+      ["sessions.start", () => rt.sessions.start(ws.id, { prompt: "hi" }, "relayed")],
+      ["sessions.history", () => rt.sessions.history(ws.id, "relayed")],
+      ["sessions.list", () => rt.sessions.list(ws.id, "relayed")],
+      ["sessions.interrupt", () => rt.sessions.interrupt(sessionId, "relayed")],
+      ["sessions.steer", () => rt.sessions.steer(sessionId, { prompt: "hi" }, "relayed")],
+      ["sessions.rename", () => rt.sessions.rename(sessionId, "a name", "relayed")],
+      ["harnesses.list", () => rt.harnesses.list(ws.id, "relayed")],
+      ["projects.import", () => rt.projects.import({ workspaceId: ws.id, source: "/s", dest: "/d", bundler }, "relayed")],
+      ["projects.export", () => rt.projects.export({ workspaceId: ws.id, source: "/s", dest: "/d", lander }, "relayed")],
+      ["status.history", () => rt.status.history(ws.id, "relayed")],
+    ];
+    // Every verb is asked, so a verb that stops refusing is named rather than hidden behind the first failure.
+    const answered: string[] = [];
+    for (const [name, call] of verbs) {
+      const said = await call().then(() => "answered it", (e: unknown) => (e instanceof Error ? e.message : String(e)));
+      if (said !== relayedRefusal("mac")) answered.push(`${name}: ${said}`);
+    }
+    expect(answered).toEqual([]);
+    // Nothing was driven: the workspace is still there under its own name, and a request from this computer runs.
+    expect((await rt.workspaces.get(ws.id)).name).toBe("mac");
+    expect((await rt.sessions.start(ws.id, { prompt: "hi" }, "here").then(h => h.finished)).status).toBe("completed");
+  });
+
+  it("a cloud workspace takes a relayed request, so the rule is the kind's and not the verb's", async () => {
+    const rt = runtime();
+    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" }, "relayed");
+    expect((await rt.workspaces.get(cloud.id, "relayed")).name).toBe("b1");
+    await rt.workspaces.touch(cloud.id, "relayed");
+  });
+
+  it("the lists served to a relayed request leave the local workspace and its threads out", async () => {
+    const rt = runtime();
+    const local = await rt.workspaces.createLocal("mac");
+    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    await (await rt.sessions.start(local.id, { prompt: "hi" })).finished;
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["b1", "mac"]);
+    expect((await rt.workspaces.list("relayed")).map(w => w.name)).toEqual(["b1"]);
+    expect((await rt.status.list()).map(w => w.name).sort()).toEqual(["b1", "mac"]);
+    expect((await rt.status.list(undefined, "relayed")).map(w => w.name)).toEqual(["b1"]);
+    expect((await rt.sessions.list()).map(v => v.workspaceId)).toEqual([local.id]);
+    expect(await rt.sessions.list(undefined, "relayed")).toEqual([]);
+  });
+
+  it("origin rides the wire on every verb, not only on a thread start", async () => {
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
+    try {
+      const c = await WsClient.connect(srv.port, { token: "secret" });
+      const napped = await c.request("workspaces.nap", { workspaceId: ws.id, origin: "relayed" });
+      expect(napped.ok).toBe(false);
+      expect(napped["error"]).toBe(relayedRefusal("mac"));
+      expect((await c.request("workspaces.list", { origin: "relayed" }))["workspaces"]).toEqual([]);
+      // A client on this computer names no origin, and the workspace answers it.
+      expect((await c.request("workspaces.list"))["workspaces"]).toHaveLength(1);
+      expect((await c.request("workspaces.rename", { workspaceId: ws.id, name: "mini", origin: "relayed" }))["error"]).toBe(relayedRefusal("mac"));
+      c.close();
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("the port forwards the host holds read the same rule: a relayed request neither lists nor stops one on this computer", async () => {
+    const rt = runtime();
+    const local = await rt.workspaces.createLocal("mac");
+    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const row = (workspaceId: string, port: number, name: string): PortForward => ({ workspaceId, port, startedAt: "2026-09-08T00:00:00.000Z", name, kind: "url" });
+    // The host forwards a builder's ports too, and no workspace record names a builder.
+    const rows = [row(local.id, 8123, "mac"), row(cloud.id, 8124, "b1"), row("m_builder", 8125, "setup (builder)")];
+    const stops: string[] = [];
+    const forwards: ForwardsSource = {
+      list: () => rows,
+      stop: (workspaceId, port) => {
+        stops.push(`${workspaceId}:${port}`);
+        return true;
+      },
+      on: () => () => {},
+    };
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", forwards });
+    try {
+      const c = await WsClient.connect(srv.port, { token: "secret" });
+      const ports = async (params?: Record<string, unknown>): Promise<number[]> => ((await c.request("forwards.list", params))["forwards"] as PortForward[]).map(f => f.port);
+      const stopped = async (workspaceId: string, port: number): Promise<string> => (await c.request("forwards.stop", { workspaceId, port, origin: "relayed" }))["error"] as string ?? "stopped it";
+      // Both halves are read before anything is asserted, so a half that stops holding is named rather than hidden.
+      const seen = {
+        listedHere: await ports(),
+        listedRelayed: await ports({ origin: "relayed" }),
+        localStop: await stopped(local.id, 8123),
+        cloudStop: await stopped(cloud.id, 8124),
+        builderStop: await stopped("m_builder", 8125),
+        asked: stops,
+      };
+      expect(seen).toEqual({
+        listedHere: [8123, 8124, 8125],
+        listedRelayed: [8124, 8125],
+        localStop: relayedRefusal("mac"),
+        cloudStop: "stopped it",
+        builderStop: "stopped it",
+        asked: [`${cloud.id}:8124`, "m_builder:8125"],
+      });
+      c.close();
+    } finally {
+      await srv.close();
+    }
   });
 
   it("delete drops the record and nothing else; the computer is not stopped", async () => {

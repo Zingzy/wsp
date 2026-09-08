@@ -141,9 +141,9 @@ describe("the MCP server over the host", () => {
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "local", "name", "size"]);
     expect(Object.keys((tools.find(t => t.name === "rename")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["name", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "model", "notify", "task", "title", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "images", "model", "notify", "task", "title", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "size", "task", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "detach", "effort", "message", "model", "thread"]);
+    expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "detach", "effort", "images", "message", "model", "thread"]);
     expect(Object.keys((tools.find(t => t.name === "threads_wait")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["threads", "timeout"]);
     expect(Object.keys((tools.find(t => t.name === "exec")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["argv", "cwd", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
@@ -284,6 +284,23 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
     expect(claude.starts).toHaveLength(1);
     expect(await rt.sessions.list()).toHaveLength(1);
+  });
+
+  it("an images list on thread_new and send reads each file here and carries its bytes; a file that is not an image is a tool error", async () => {
+    const path = join(dir, "shot.png");
+    writeFileSync(path, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(1016, 3)]));
+    await call("new", { name: "alpha" });
+    const opened = await call("thread_new", { workspace: "alpha", task: "what is this?", images: [path] });
+    expect(opened.isError).toBe(false);
+    expect(claude.starts.at(-1)!.images).toEqual([{ mediaType: "image/png", bytes: readFileSync(path).toString("base64") }]);
+    const threadId = (opened.structured as { threadId: string }).threadId;
+    await call("send", { thread: threadId, message: "and this?", images: [path] });
+    expect(claude.starts.at(-1)!.images).toHaveLength(1);
+    const notes = join(dir, "notes.pdf");
+    writeFileSync(notes, "%PDF-1.7 nope");
+    expect(await call("send", { thread: threadId, message: "look", images: [notes] })).toEqual(
+      failedWith(`${notes} is not PNG, JPEG, GIF or WebP; a message carries those four`, "usage"),
+    );
   });
 
   it("pause naps the workspace; a workspace that is not there is a tool error in one line", async () => {

@@ -209,6 +209,7 @@ describe("thread actions", () => {
     permissionModes: [],
     steers: false,
     renames: true,
+    images: true,
     ...over,
   });
   const thread = (

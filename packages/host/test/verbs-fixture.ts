@@ -49,6 +49,9 @@ export function scriptedAgent(reply: (prompt: string) => string, names?: (title:
   const renames: { sessionId: string; title: string }[] = [];
   const adapter: HarnessAdapterFactory = () => ({
     steers: false,
+    // Stands in for a harness that reads an image, as both the real ones do; a case about an agent that reads none
+    // builds its own adapter.
+    attachments: "inline",
     ...(names === undefined
       ? {}
       : {

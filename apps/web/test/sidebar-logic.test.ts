@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { workspaceState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { MACHINE_OS_WORD, workspaceState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -16,6 +16,7 @@ import {
 import {
   compactTimeLabel,
   defaultWorkspaceName,
+  machineLine,
   idleCountdownLabel,
   dotClassForTone,
   stateSlotWord,
@@ -142,6 +143,14 @@ describe("workspace row labels", () => {
     expect(slot("paused", "Paused", "paused")).toBe("Paused");
     expect(slot("gone", "Gone", "neutral")).toBe("Gone");
     expect(slot("waking", "Waking", "neutral", true)).toBe("Waking");
+  });
+
+  it("one machine line for the row and the Spaces header: the kind's words where it has them, else the size and the OS word, nothing before a status", () => {
+    expect(machineLine(project({}, { kind: "local" }))).toBe("this computer");
+    expect(machineLine(project({}))).toBe(`2 vCPU · 4 GB · ${MACHINE_OS_WORD}`);
+    expect(machineLine({ status: null, workspace: project({}).workspace })).toBeNull();
+    // A kind with its own words says them before any status has arrived, since no size is behind them.
+    expect(machineLine({ status: null, workspace: { ...project({}).workspace, kind: "local" } })).toBe("this computer");
   });
 
   it("this computer's row says what it is and nothing about spend, naps or state: it runs while the host does", () => {

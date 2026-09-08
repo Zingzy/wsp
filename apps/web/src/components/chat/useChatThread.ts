@@ -13,7 +13,7 @@
 // thread: the runtime runs a workspace's threads side by side and holds
 // each to one turn, so a fresh view owes the left one nothing.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
+import type { ImageRecord, SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { ProtocolEvent } from "../../protocol/client";
 import { deriveSession, type TimelineEntry, type TurnSummary } from "./adapt";
@@ -55,7 +55,7 @@ export interface ChatThreadHandle {
   /** The last send's start, once it landed: the key its rows waited under (the thread id the view held or was pinned to, or the workspace id before the thread had one) and the thread that start carried. Null while a send is in flight, after one that settled without a start, and before any. */
   readonly named: NamedStart | null;
   /** Optimistic user message for a send, with the request id the send carries; the session.start stamped with it replaces it. */
-  readonly appendUserTurn: (prompt: string, requestId: string) => void;
+  readonly appendUserTurn: (prompt: string, requestId: string, attachments?: ReadonlyArray<ImageRecord>) => void;
   /** A send that failed before the runtime emitted anything. */
   readonly appendLocalError: (message: string) => void;
   readonly setSending: (sending: boolean) => void;
@@ -78,7 +78,7 @@ export interface Sent {
 export interface ThreadState {
   readonly events: ReadonlyArray<SessionEvent>;
   readonly arrivals: ReadonlyArray<string>;
-  readonly pendingPrompt: (Sent & { readonly at: string }) | null;
+  readonly pendingPrompt: (Sent & { readonly at: string; readonly attachments?: ReadonlyArray<ImageRecord> }) | null;
   readonly localErrors: ReadonlyArray<{ message: string; at: string }>;
   readonly fresh: boolean;
   /** A send in flight, with the turn that had settled when it began, until its session.start lands or a reload rebuilds this. */
@@ -324,12 +324,14 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
   const model = deriveSession(state.events, { at: (_e, index) => state.arrivals[index] });
   const entries: TimelineEntry[] = [...model.timeline];
   if (state.pendingPrompt !== null) {
-    const { text, at } = state.pendingPrompt;
+    const { text, at, requestId, attachments } = state.pendingPrompt;
     entries.push({
       id: "pending-user",
       kind: "message",
       createdAt: at,
-      message: { id: "pending-user", role: "user", text, turnId: null, streaming: false, createdAt: at, updatedAt: at },
+      // The records and the request id ride the row the send makes, so the person's own thumbnails are there at the
+      // click rather than a roundtrip later, when the runtime echoes its session.start back.
+      message: { id: "pending-user", role: "user", text, turnId: null, streaming: false, createdAt: at, updatedAt: at, requestId, ...(attachments !== undefined ? { attachments } : {}) },
     });
   }
   state.localErrors.forEach(({ message, at }, index) => {
@@ -464,7 +466,11 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
       }),
     [],
   );
-  const appendUserTurn = useCallback((text: string, requestId: string) => setState(s => ({ ...s, pendingPrompt: { text, requestId, at: now() } })), []);
+  const appendUserTurn = useCallback(
+    (text: string, requestId: string, attachments: ReadonlyArray<ImageRecord> = []) =>
+      setState(s => ({ ...s, pendingPrompt: { text, requestId, at: now(), ...(attachments.length > 0 ? { attachments } : {}) } })),
+    [],
+  );
   const appendLocalError = useCallback(
     (message: string) =>
       setState(s => ({
