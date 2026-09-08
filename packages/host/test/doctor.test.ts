@@ -9,13 +9,17 @@ import { gunzipSync } from "node:zlib";
 import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
-import { TOOLS_PATH } from "@wsp/engine";
-import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { GUEST_USER_ENV, TOOLS_PATH } from "@wsp/engine";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
 import {
   connectDaemonSocket,
+  DAEMON_LOG,
+  DAEMON_UNIT,
+  DAEMON_UNIT_PATH,
+  daemonUnit,
   deployDaemon,
   deployScript,
   stopDaemonScript,
@@ -406,9 +410,12 @@ describe("guest environment", () => {
     const lines = script.split("\n");
     const exported = lines.indexOf("export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS='.preview.example.com'");
     expect(exported).toBeGreaterThan(-1);
-    expect(exported).toBeLessThan(lines.findIndex(l => l.startsWith("setsid nohup node")));
+    expect(exported).toBeLessThan(lines.indexOf("systemctl daemon-reload"));
+    // The daemon's own copy comes from its unit: a restart inherits nothing from the exec that deployed it.
+    expect(daemonUnit(".preview.example.com")).toContain("Environment=__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.preview.example.com");
     // Without a suffix nothing is written: a backend with no preview edge has no host to allow.
     expect(deployScript("aabbcc")).not.toContain("VITE");
+    expect(daemonUnit()).not.toContain("VITE");
   });
 
   it("the suffix is the preview host with the machine-and-port label cut off, and nothing on a backend without preview URLs", async () => {
@@ -440,7 +447,7 @@ describe("deployScript", () => {
     const token = "aabbccddeeff00112233445566778899";
     const script = deployScript(token);
     expect(script).toContain(writeDaemonTokenScript(token));
-    expect(script.indexOf("umask 077")).toBeLessThan(script.indexOf("setsid nohup node"));
+    expect(script.indexOf("umask 077")).toBeLessThan(script.indexOf("systemctl restart"));
     expect(redact(script)).not.toContain(token);
     expect(redact(rotateDaemonTokenScript(token))).not.toContain(token);
   });
@@ -475,7 +482,7 @@ describe("deployScript", () => {
     expect(script).toContain("export npm_config_nodedir=/usr/local");
     const cleanup = script.indexOf("rm -rf /root/wsp-daemon/node_modules/node-pty/prebuilds");
     expect(cleanup).toBeGreaterThan(script.indexOf("npm install"));
-    expect(cleanup).toBeLessThan(script.indexOf("setsid"));
+    expect(cleanup).toBeLessThan(script.indexOf("systemctl restart"));
     // The deploy also runs as the update of a live workspace; its owner's npm and node-gyp caches are the golden
     // build's sweep to take, not this script's.
     expect(script).not.toMatch(/rm -rf[^\n]*\/root\/\.(npm|cache)/);
@@ -486,11 +493,66 @@ describe("deployScript", () => {
     const stop = script.indexOf(stopDaemonScript());
     expect(stop).toBeGreaterThan(script.indexOf("npm install"));
     expect(stop).toBeGreaterThan(script.indexOf("umask 077"));
-    expect(stop).toBeLessThan(script.indexOf("setsid nohup node"));
+    expect(stop).toBeLessThan(script.indexOf("systemctl restart"));
     // The pid is read off the socket table for the daemon's port, never matched by name.
     expect(stopDaemonScript()).toContain("ss -ltnpH 'sport = :7070'");
     expect(stopDaemonScript()).not.toMatch(/pkill|killall|pgrep/);
     expect(stopDaemonScript()).toContain('kill "$old"');
+  });
+
+  it("stops the unit before killing the port holder, since Restart=always would put the old daemon straight back", () => {
+    const stop = stopDaemonScript();
+    expect(stop.indexOf("systemctl stop wsp-daemon.service")).toBeLessThan(stop.indexOf('old="$('));
+    // A machine whose daemon predates the unit has no unit to stop, and the deploy must not die on that.
+    expect(stop).toContain("systemctl stop wsp-daemon.service 2>/dev/null || true");
+  });
+
+  it("leaves the daemon under a supervisor that restarts it, never a bare background process", () => {
+    const script = deployScript("aabbcc", ".preview.example.com");
+    expect(script).not.toContain("setsid");
+    expect(script).not.toContain("nohup");
+    expect(script).toContain(`cat > ${DAEMON_UNIT_PATH} <<'WSP_UNIT'`);
+    expect(script).toContain(daemonUnit(".preview.example.com"));
+    const lines = script.split("\n");
+    const reload = lines.indexOf("systemctl daemon-reload");
+    expect(lines.indexOf(`cat > ${DAEMON_UNIT_PATH} <<'WSP_UNIT'`)).toBeLessThan(reload);
+    expect(reload).toBeLessThan(lines.indexOf(`systemctl enable ${DAEMON_UNIT}`));
+    expect(lines.indexOf(`systemctl enable ${DAEMON_UNIT}`)).toBeLessThan(lines.indexOf(`systemctl restart ${DAEMON_UNIT}`));
+    // The port check waits for the bind instead of guessing how long the daemon takes to reach it.
+    expect(script).toContain(`for _ in $(seq 20); do ss -ltnH 'sport = :7070' | grep -q . && break; sleep 0.25; done`);
+    expect(script).toContain(`ss -ltn | grep -q 7070 && echo DAEMON_UP || { cat ${DAEMON_LOG}; echo DAEMON_DOWN; }`);
+  });
+
+  it("refuses a guest with no systemd rather than starting a daemon nothing would restart", () => {
+    const lines = deployScript("aabbcc").split("\n");
+    const check = lines.indexOf("command -v systemctl >/dev/null || { echo NO_SYSTEMD; false; }");
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(lines.indexOf("mkdir -p /root/wsp-daemon /root/inbox"));
+    expect(lines[0]).toBe("set -e");
+  });
+
+  it("the unit restarts the daemon forever, keeps a killed child from taking it, and caps the cgroup at a share of the machine", () => {
+    const unit = daemonUnit();
+    expect(unit).toContain("Restart=always");
+    expect(unit).toContain("RestartSec=1");
+    // Without this the unit gives up after five restarts in ten seconds, which is the dead machine again.
+    expect(unit).toContain("StartLimitIntervalSec=0");
+    // systemd's default (stop) would end the daemon whenever a test run under a terminal was killed.
+    expect(unit).toContain("OOMPolicy=continue");
+    expect(unit).toContain(`MemoryMax=${DAEMON_MEMORY_MAX_PERCENT}%`);
+    expect(DAEMON_MEMORY_MAX_PERCENT).toBe(80);
+    // Enabled with an install section, so a machine that reboots or comes back from a snapshot has its daemon.
+    expect(unit).toContain("WantedBy=multi-user.target");
+    expect(unit).toContain("ExecStart=/bin/sh -c 'exec node /root/wsp-daemon/start.mjs'");
+    expect(unit).toContain(`StandardOutput=append:${DAEMON_LOG}`);
+    expect(unit).toContain(`StandardError=append:${DAEMON_LOG}`);
+  });
+
+  it("the unit states the environment the daemon hands to every pty, since a restart inherits none of the deploy's", () => {
+    const unit = daemonUnit();
+    expect(unit).toContain(`Environment=PATH=${TOOLS_PATH}`);
+    for (const [name, value] of Object.entries(GUEST_USER_ENV)) expect(unit).toContain(`Environment=${name}=${value}`);
+    expect(GUEST_USER_ENV["HOME"]).toBe("/root");
   });
 
   it("names the node version on stdout before installing, so the deploy log can carry it", () => {

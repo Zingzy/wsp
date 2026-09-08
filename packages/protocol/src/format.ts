@@ -710,6 +710,12 @@ export function biggerSizeLine(current: WorkspaceSize, offers: readonly MachineS
 export const DAEMON_UPDATING = "updating the helper";
 export const DAEMON_UPDATE_FAILED = "could not update the helper";
 
+/** The same two lines for the daemon the runtime is putting back after the machine answered with none, in the
+ * words of the thing a person is waiting on: the row is grey because nothing answers, and this says wsp is on it
+ * rather than that the machine is lost. */
+export const DAEMON_RESTARTING = "restarting the helper";
+export const DAEMON_RESTART_FAILED = "could not restart the helper";
+
 /** Why a nap's vault export was refused: its size against the cap, both in the one byte rule. */
 export function vaultOverCapLine(bytes: number, capBytes: number): string {
   return `the export was ${fmtBytes(bytes)}, over the ${fmtBytes(capBytes)} cap`;

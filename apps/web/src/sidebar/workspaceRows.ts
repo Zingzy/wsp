@@ -30,10 +30,10 @@ export function reachNote(reach: ReachState | null): string | null {
   return reach === "slow" ? "edge slow" : null;
 }
 
-/** The row's line for a daemon that is not there, on a kind whose row shows no state word: nothing on the row would
- * otherwise say it, and it was readable only on the Machine tab's Reach. no-daemon is a machine that answers with
- * nothing on the daemon's port, unsupported one with no daemon road at all; the two are different facts and the
- * line says which. Nothing for every other reach. */
+/** The row's line for a daemon that is not there. no-daemon is a machine that answers with nothing on the daemon's
+ * port, unsupported one with no daemon road at all; the two are different facts and the line says which. Nothing
+ * for every other reach. Every kind shows it: a driven kind's state word reads Unreachable, which is also what a
+ * machine gone dark reads, and one of the two is a helper wsp puts back by itself while the machine is fine. */
 export function daemonGoneLine(reach: ReachState | null): string | undefined {
   if (reach === "no-daemon") return "no daemon answering";
   return reach === "unsupported" ? "no daemon on this machine" : undefined;
@@ -47,9 +47,7 @@ export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput,
   return [
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
-    // A row with no state word has nowhere else to say its daemon is gone, and it is the thing a person waiting on
-    // a terminal is waiting on; a driven kind's state word already reads Unreachable for it.
-    kindWords(workspaceKind(project.workspace)).driven ? undefined : daemonGoneLine(project.reach),
+    daemonGoneLine(project.reach),
   ].filter((line): line is string => line !== undefined);
 }
 

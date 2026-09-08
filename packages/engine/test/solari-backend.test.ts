@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { isMissing } from "../src/errors.js";
-import { EXEC_ENV, REQUEST_ID_HEADER, SolariBackend } from "../src/solari-backend.js";
+import { REQUEST_ID_HEADER, SolariBackend } from "../src/solari-backend.js";
+import { EXEC_ENV } from "../src/golden-import.js";
 
 function fakeFetch(routes: Record<string, { status: number; body: unknown; headers?: Record<string, string> }>) {
   return vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {

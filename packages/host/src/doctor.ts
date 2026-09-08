@@ -10,8 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, OWNER_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, whoseMachine, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
+import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, whoseMachine, type Machine, type MachineBackend } from "@wsp/engine";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir } from "./assets.js";
@@ -108,12 +108,56 @@ function nodeBootstrap(): string {
  * dev server answers 403 through the preview edge. Next.js and webpack-dev-server have no env equivalent. */
 export const VITE_ALLOWED_HOSTS_ENV = "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS";
 
+/** The supervisor's name for the daemon, the one string the unit file, the stop and the start all read. */
+export const DAEMON_UNIT = "wsp-daemon.service";
+export const DAEMON_UNIT_PATH = `/etc/systemd/system/${DAEMON_UNIT}`;
+export const DAEMON_LOG = "/root/daemon.log";
+
+/** The unit the daemon runs under. Until 2026-09-08 it was started with setsid over the provider's exec and had no
+ * supervisor at all: the kernel's memory killer took one and the machine sat with no daemon for five hours while
+ * its turns, which go over that same exec, kept running. Restart=always is the whole point of the file, so the
+ * start rate limit that would give up after five restarts is off. OOMPolicy=continue keeps a killed child (a test
+ * run under a terminal) from taking the daemon with it, which systemd's default of stop would do. MemoryMax is a
+ * share of the machine, not a figure, because every terminal the daemon opens sits in its cgroup. The environment
+ * is stated here rather than inherited: a restart at boot or after a kill inherits nothing from the exec that
+ * deployed the daemon. */
+export function daemonUnit(previewHostSuffix?: string): string {
+  return [
+    "[Unit]",
+    "Description=wsp daemon",
+    "After=network.target",
+    "StartLimitIntervalSec=0",
+    "",
+    "[Service]",
+    "Type=simple",
+    "WorkingDirectory=/root/wsp-daemon",
+    `Environment=PATH=${TOOLS_PATH}`,
+    ...Object.entries(GUEST_USER_ENV).map(([name, value]) => `Environment=${name}=${value}`),
+    ...(previewHostSuffix !== undefined ? [`Environment=${VITE_ALLOWED_HOSTS_ENV}=${previewHostSuffix}`] : []),
+    // Through sh so node is found on the unit's PATH: a machine that shipped its own node keeps it where it is.
+    "ExecStart=/bin/sh -c 'exec node /root/wsp-daemon/start.mjs'",
+    "Restart=always",
+    "RestartSec=1",
+    `MemoryMax=${DAEMON_MEMORY_MAX_PERCENT}%`,
+    "OOMPolicy=continue",
+    `StandardOutput=append:${DAEMON_LOG}`,
+    `StandardError=append:${DAEMON_LOG}`,
+    "",
+    "[Install]",
+    "WantedBy=multi-user.target",
+    "",
+  ].join("\n");
+}
+
 /** Stops whatever holds the daemon's port before the new daemon starts: an update lands on a machine whose daemon
- * is running, and a second bind would fail while the port check still read the old one as up. The pid comes from
- * the socket table, the one place the guest names it (nothing else may bind the port; the machine context says so).
- * A fresh machine has no holder and skips through. */
+ * is running, and a second bind would fail while the port check still read the old one as up. The unit goes first,
+ * since an explicit stop is the only thing Restart=always yields to and killing the pid under it would have
+ * systemd put the old daemon straight back. What is left is a daemon from before the unit: its pid comes from the
+ * socket table, the one place the guest names it (nothing else may bind the port; the machine context says so).
+ * A fresh machine has neither and skips through. */
 export function stopDaemonScript(): string {
   return [
+    `systemctl stop ${DAEMON_UNIT} 2>/dev/null || true`,
     `old="$(ss -ltnpH 'sport = :${DAEMON_PORT}' | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | head -n 1)"`,
     'if [ -n "$old" ]; then',
     '  kill "$old" 2>/dev/null || true',
@@ -127,18 +171,19 @@ export function stopDaemonScript(): string {
   ].join("\n");
 }
 
-/** The in-guest install+start sequence. The setsid line ends in a bare `&`
- * with the sleep on the same statement: `&` already terminates a command, so
- * joining it with `;` would be a bash syntax error (a live run died on it).
- * `previewHostSuffix` (".preview.example.com") is what dev servers must accept
- * to answer through the edge; absent on a backend without preview URLs. */
+/** The in-guest install+start sequence. `previewHostSuffix` (".preview.example.com") is what dev servers must
+ * accept to answer through the edge; absent on a backend without preview URLs. The daemon is left running under
+ * its unit, so nothing here has to outlive the exec. */
 export function deployScript(token: string, previewHostSuffix?: string): string {
   return [
     "set -e",
     'export PATH="/usr/local/bin:$PATH"',
-    // The daemon started below hands its environment to every pty and harness launch, and the exec running
-    // this carries PATH and nothing else (measured 2026-09-05).
-    "export HOME=/root USER=root",
+    // Nothing else supervises a process on these machines, and an unsupervised daemon is what this deploy exists
+    // to stop shipping; a guest without systemd says so here rather than starting one nothing would restart.
+    "command -v systemctl >/dev/null || { echo NO_SYSTEMD; false; }",
+    // The exec running this carries PATH and nothing else (measured 2026-09-05), and npm and the bundle's build
+    // read the guest's home. What the daemon itself hands to every pty comes from its unit, not from here.
+    EXEC_ENV,
     "mkdir -p /root/wsp-daemon /root/inbox",
     "tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon",
     nodeBootstrap(),
@@ -161,8 +206,13 @@ export function deployScript(token: string, previewHostSuffix?: string): string 
       : []),
     writeDaemonTokenScript(token),
     stopDaemonScript(),
-    "setsid nohup node /root/wsp-daemon/start.mjs > /root/daemon.log 2>&1 < /dev/null & sleep 1.5",
-    "ss -ltn | grep -q 7070 && echo DAEMON_UP || { cat /root/daemon.log; echo DAEMON_DOWN; }",
+    `cat > ${DAEMON_UNIT_PATH} <<'WSP_UNIT'\n${daemonUnit(previewHostSuffix)}WSP_UNIT`,
+    "systemctl daemon-reload",
+    // Enabled as well as started: a machine that reboots or comes back from a snapshot brings the daemon with it.
+    `systemctl enable ${DAEMON_UNIT}`,
+    `systemctl restart ${DAEMON_UNIT}`,
+    `for _ in $(seq 20); do ss -ltnH 'sport = :${DAEMON_PORT}' | grep -q . && break; sleep 0.25; done`,
+    `ss -ltn | grep -q ${DAEMON_PORT} && echo DAEMON_UP || { cat ${DAEMON_LOG}; echo DAEMON_DOWN; }`,
   ].join("\n");
 }
 

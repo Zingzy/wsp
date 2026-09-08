@@ -217,7 +217,7 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
   });
 
-  it("a row with no state word says its daemon is gone on the meta line, since nothing else on it would", () => {
+  it("a row says its daemon is gone on the meta line, whatever kind of machine it is", () => {
     const local = (reach: ReachState) => project({ reach: { state: reach } }, { kind: "local" });
     const line = (reach: ReachState) => workspaceMetaLine({ project: local(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
     // The two are different facts: nothing answering on the port, and no daemon road at all.
@@ -230,10 +230,21 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     // The Spaces header says it above what the machine is, in the same place the row gives it.
     expect(spaceHeaderLines({ project: local("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual(["no daemon answering", "this computer"]);
-    // A driven kind's own state word already reads Unreachable for it, so its line keeps the spend.
-    expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" } }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("$0.29 today · $0.110/hr · active");
     expect(daemonGoneLine("slow")).toBeUndefined();
     expect(daemonGoneLine(null)).toBeUndefined();
+  });
+
+  it("a fork whose daemon died says so too: Unreachable alone reads as a lost machine, and this one is fine", () => {
+    const driven = (reach: ReachState) => project({ reach: { state: reach } });
+    const line = (reach: ReachState) => workspaceMetaLine({ project: driven(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
+    expect(line("no-daemon")).toBe("no daemon answering");
+    // Nothing else changed: a reach that says nothing about the daemon leaves the spend and the countdown alone.
+    expect(line("reachable")).toBe("$0.29 today · $0.110/hr · active");
+    expect(line("slow")).toBe("$0.29 today · $0.110/hr · edge slow · active");
+    // While the runtime is putting the daemon back, that is what the row says instead.
+    expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "restarting the helper" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("restarting the helper");
+    // The Spaces header leads with it above the size, where the row's line sits.
+    expect(spaceHeaderLines({ project: driven("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })[0]).toBe("no daemon answering");
   });
 
   it("thread pills key on the session status, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {

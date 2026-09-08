@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { EXEC_BODY_MAX } from "@wsp/protocol";
 import { DEADLINE_EXIT, INLINE_EXEC_MS, execDetached, putFiles } from "../src/exec-detached.js";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { EXEC_ENV } from "../src/solari-backend.js";
+import { EXEC_ENV } from "../src/golden-import.js";
 
 interface Step {
   out?: string;

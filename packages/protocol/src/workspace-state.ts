@@ -130,12 +130,19 @@ export function sendRefusal(kind: SendRefusalKind, goneWords?: string): string |
 
 const isBlock = (kind: SendRefusalKind): kind is SendBlock => kind in BLOCK_WORDS;
 
+/** A probe that found the machine: the edge answered, promptly or late. */
+const ANSWERED: ReadonlySet<ReachState> = new Set<ReachState>(["reachable", "slow"]);
+/** A probe nothing answered: silence, or the edge dialling the guest and finding the daemon port dead. */
+const UNANSWERED: ReadonlySet<ReachState> = new Set<ReachState>(["unreachable", "no-daemon"]);
+
 /** The reach word a row shows after one probe. A single silence after an answer keeps the answer's word: one slow
- * edge answer, one DNS blip or one busy second on the box is not the machine gone dark, so the word turns only on
- * the second silence in a row. Every answer, and a silence after anything but an answer, shows as it came. */
+ * edge answer, one DNS blip, one busy second on the box or one probe that landed while the daemon was restarting
+ * is not the machine gone dark, so the word turns only on the second silence in a row. Every answer, and a silence
+ * after anything but an answer, shows as it came. This is also the window the runtime waits out before it puts a
+ * daemon back: the word the row is given is already the second unanswered probe. */
 export function reachShown(lastProbe: ReachState | undefined, probed: ReachState): ReachState {
-  if (probed !== "unreachable") return probed;
-  return lastProbe === "reachable" || lastProbe === "slow" ? lastProbe : "unreachable";
+  if (!UNANSWERED.has(probed)) return probed;
+  return lastProbe !== undefined && ANSWERED.has(lastProbe) ? lastProbe : probed;
 }
 
 /** Whether the latest poll's probes failed before leaving this computer. A road that fails here fails for every

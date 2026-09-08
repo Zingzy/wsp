@@ -33,3 +33,12 @@ export function workScoreLine(adj = WORK_OOM_SCORE_ADJ): string {
 export function workArgv(file: string, args: readonly string[]): { file: string; args: string[] } {
   return { file: "/bin/sh", args: ["-c", `${workScoreLine()}; exec "$0" "$@"`, file, ...args] };
 }
+
+/** The share of the machine's memory the daemon's cgroup may hold, as a percentage systemd reads. A share rather
+ * than a figure because everything the daemon starts sits in that cgroup with it: the cap bounds the daemon and
+ * the terminals under it away from the machine's own services, so a runaway build meets the kernel inside the
+ * unit instead of taking the guest agent with it. Chosen against the smallest machine wsp forks, 4 GB, where
+ * systemd resolved it to 3225 MB and left 806 MB for the provider's agent, sshd and the rest (measured
+ * 2026-09-08). The daemon itself no longer counts against that 806 MB, which is the whole point: it used to be
+ * accounted inside the agent's own cgroup, and that is where the kernel found it. */
+export const DAEMON_MEMORY_MAX_PERCENT = 80;
