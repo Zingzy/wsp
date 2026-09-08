@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
+import { THEME_WORDS } from "../../web/src/settings/format.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
@@ -147,8 +148,12 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const source = () => launched!.app.evaluate(({ nativeTheme }) => nativeTheme.themeSource);
     // The page's first word is the record's default; the pin before it is not a fact the page can be asked about.
     await vi.waitFor(async () => expect(await source()).toBe("system"));
+    // The chord reaches the shell once the store is ready, which the sidebar's empty state says; the page is on screen
+    // before the pick, so the click waits on a fact and not on a guess about React's timing.
+    await win.waitForSelector("text=No workspaces yet");
     await win.keyboard.press("Meta+,");
-    await win.getByRole("radio", { name: "Light" }).click();
+    await win.waitForSelector("[data-settings-page]");
+    await win.getByRole("radio", { name: THEME_WORDS.light.title }).click();
     await vi.waitFor(async () => expect(await source()).toBe("light"));
     expect(await win.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(false);
     // Pinned dark again by hand, a reload has to say light on its own: the record on the host, and the page's cache before it.
