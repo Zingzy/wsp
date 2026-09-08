@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
@@ -123,8 +123,9 @@ describe("wsp up", () => {
     const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath), adapters: {}, local: wiring });
     runtimes.push(rt);
     // The one thing that decides where an agent's shell begins: a turn that started in the home folder is one cd
-    // from the checkouts the person works in themselves.
-    expect((await rt.workspaces.exec("ws_l", "pwd")).stdout.trim()).toBe(work);
+    // from the checkouts the person works in themselves. Both sides read through realpath: macOS reaches its temp
+    // dir through a symlink, so a shell's pwd and the path built here are two spellings of one folder.
+    expect(realpathSync((await rt.workspaces.exec("ws_l", "pwd")).stdout.trim())).toBe(realpathSync(work));
     expect((await rt.workspaces.exec("ws_l", "printf mine > seen.txt")).exitCode).toBe(0);
     expect(existsSync(join(work, "seen.txt"))).toBe(true);
     expect(existsSync(join(home, "seen.txt"))).toBe(false);

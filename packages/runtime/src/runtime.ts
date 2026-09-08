@@ -1583,31 +1583,34 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return false;
   };
 
-  /** The folder a resumed session's harness ran in, from its row or, past the index cap, its start event. The CLI
-   * keys a session to that folder, so a resume anywhere else opens nothing. */
-  const folderOf = (workspaceId: string, resume: string): string | undefined => {
-    for (const s of sessions.values()) {
-      if (s.view.workspaceId === workspaceId && s.view.claudeSessionId === resume && s.view.cwd !== undefined) return s.view.cwd;
+  /** What a resumed session's turns carry, read the one way for every such fact: its own rows newest first, then,
+   * past the session index cap, the newest start event of that session. The index keeps SESSION_INDEX_CAP rows per
+   * workspace and drops the oldest finished ones while the transcript keeps the thread, so the events are where a
+   * long-lived thread's own facts survive. Nothing from before a fact was recorded, and the start then fills what
+   * its catalog marks. */
+  const resumedFact = (workspaceId: string, resume: string, fact: "cwd" | "permissionMode"): string | undefined => {
+    const rows = [...sessions.values()];
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const view = rows[i]!.view;
+      if (view.workspaceId === workspaceId && view.claudeSessionId === resume && view[fact] !== undefined) return view[fact];
     }
     const events = transcripts.get(workspaceId) ?? [];
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i]!;
-      if (e.type === "session.start" && e.sessionId === resume && e.cwd !== undefined) return e.cwd;
+      if (e.type === "session.start" && e.sessionId === resume && e[fact] !== undefined) return e[fact];
     }
     return undefined;
   };
 
-  /** The access a resumed thread's turns run at: what its latest turn recorded, from its row. A send that names
-   * none keeps the thread's own rather than falling back to the adapter's unnamed default, which is bypass on every
-   * harness here; without this a second turn on a thread the person opened at its harness's prompts would quietly
-   * skip them. Nothing before there was a picker, and the start then fills what its catalog marks. */
-  const accessOf = (workspaceId: string, resume: string | undefined): string | undefined => {
-    if (resume === undefined) return undefined;
-    for (const s of sessions.values()) {
-      if (s.view.workspaceId === workspaceId && s.view.claudeSessionId === resume && s.view.permissionMode !== undefined) return s.view.permissionMode;
-    }
-    return undefined;
-  };
+  /** The folder a resumed session's harness ran in. The CLI keys a session to that folder, so a resume anywhere
+   * else opens nothing. */
+  const folderOf = (workspaceId: string, resume: string): string | undefined => resumedFact(workspaceId, resume, "cwd");
+
+  /** The access a resumed thread's turns run at: what its latest turn recorded. A send that names none keeps the
+   * thread's own rather than falling back to the adapter's unnamed default, which is bypass on every harness here;
+   * without this a second turn on a thread the person opened at its harness's prompts would quietly skip them. */
+  const accessOf = (workspaceId: string, resume: string | undefined): string | undefined =>
+    resume === undefined ? undefined : resumedFact(workspaceId, resume, "permissionMode");
 
   /** What the runtime is doing to a machine's daemon, by workspace: the line its row shows while an update runs and
    * the sentence left there when one failed. Held here rather than on the record because it says what this process
@@ -3366,6 +3369,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       );
     };
 
+    /** The row that says a prompt is closed, and the end of its wait. Both the harness's own close and the runtime
+     * ending the turn under it come through here: a turn cut from this side never reaches the adapter's close, and a
+     * row left open would keep offering options that answer nothing. */
+    const closeAsk = (askId: string, outcome: PermissionOutcome, optionId?: string): void => {
+      const held = open.get(askId);
+      if (held === undefined) return;
+      clearTimeout(held.timer);
+      open.delete(askId);
+      record({
+        type: "session.permission.closed",
+        workspaceId,
+        sessionId: view.claudeSessionId ?? view.id,
+        turnId,
+        threadId,
+        askId,
+        outcome,
+        ...(optionId !== undefined ? { optionId } : {}),
+      });
+    };
+
+    /** Every prompt still waiting, closed as going with its turn; the caller is ending the turn. */
+    const closeOpenAsks = (): void => {
+      for (const askId of [...open.keys()]) closeAsk(askId, "cancelled");
+    };
+
     /** The one place a pick becomes an outcome and the line the agent reads as the call's result: a person's deny
      * says the person denied it, and the wait's says nobody answered, which is a different thing to an agent. */
     const answer = async (askId: string, o: { optionId: string; by: PermissionAnswerer }): Promise<SessionAnswerResult["outcome"]> => {
@@ -3373,7 +3401,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (held === undefined) return "gone";
       const option = held.ask.options.find(candidate => candidate.id === o.optionId);
       if (option === undefined) return "no-option";
-      if (answerAsk === undefined) return "unsupported";
+      // A turn that raised a prompt has the road that raised it; with none there is nothing left to answer it.
+      if (answerAsk === undefined) return "gone";
       const outcome: PermissionOutcome = o.by === "wait" ? "unanswered" : option.effect === "deny" ? "denied" : "allowed";
       const denyMessage = o.by === "wait" ? permissionUnansweredLine(permissionWaitMs) : PERMISSION_DENIED_LINE;
       return (await answerAsk(askId, { optionId: o.optionId, outcome, denyMessage })) === "answered" ? "answered" : "gone";
@@ -3408,6 +3437,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(opening.attachments !== undefined ? { attachments: [...opening.attachments] } : {}),
             ...(event.model !== undefined ? { model: event.model } : {}),
             ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
+            ...(view.permissionMode !== undefined ? { permissionMode: view.permissionMode } : {}),
             ...(event.tools !== undefined ? { tools: event.tools } : {}),
             ...(event.harness !== undefined ? { harness: event.harness } : {}),
           });
@@ -3472,23 +3502,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           record({ type: "session.permission", workspaceId, sessionId, turnId, threadId, ...ask, options: [...ask.options], waitMs: permissionWaitMs });
           return;
         }
-        case "permission.close": {
-          const held = open.get(event.askId);
-          if (held === undefined) return;
-          clearTimeout(held.timer);
-          open.delete(event.askId);
-          record({
-            type: "session.permission.closed",
-            workspaceId,
-            sessionId,
-            turnId,
-            threadId,
-            askId: event.askId,
-            outcome: event.outcome,
-            ...(event.optionId !== undefined ? { optionId: event.optionId } : {}),
-          });
+        case "permission.close":
+          closeAsk(event.askId, event.outcome, event.optionId);
           return;
-        }
         case "session.end":
           // The process exited: the turn is over now, so the row takes the reply's status here (synchronously,
           // before the event is recorded, so a waiter woken by it reads the settled row, not the running one).
@@ -3546,6 +3562,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     const end = (reason: string): void => {
       if (ended || view.status !== "running") return;
+      // Before `ended` shuts the forward road: the interrupt below reaches the harness, whose own close would then
+      // be dropped, so the rows and the waits are ended here.
+      closeOpenAsks();
       ended = true;
       settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), turnLive }, reason, () => reason);
       void persistSessions(workspaceId);

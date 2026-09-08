@@ -563,6 +563,10 @@ export const SessionStartEvent = z.object({
   afterCut: z.literal(true).optional(),
   model: z.string().optional(),
   cwd: z.string().optional(),
+  /** The access this turn ran at, as the harness's own slug; the runtime's pick, not the CLI's echo. It rides the
+   * row so a resume past the session index cap still reads what the thread was opened at rather than falling back
+   * to the adapter's unnamed default. Absent on a turn from before it was recorded. */
+  permissionMode: z.string().optional(),
   tools: z.array(z.string()).optional(),
   harness: SessionHarness.optional(),
 });

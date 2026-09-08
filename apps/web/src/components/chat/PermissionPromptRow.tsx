@@ -6,6 +6,9 @@
 // buttons go and the outcome takes their place as one muted line, so a
 // transcript read later says what was picked without pretending it is still
 // open. No chip, no badge, no colour of its own: nothing here is a state word.
+// The input wraps whole where every other tool row truncates: this is the row
+// where consent is given, and a command cut mid-word is one a person cannot
+// judge.
 import type { PermissionPrompt } from "../../adapt";
 import { permissionAskLine, permissionOutcomeLine } from "@wsp/protocol";
 import { Button } from "../ui/button";
@@ -41,7 +44,7 @@ export function PermissionPromptRow({
     <div className="min-w-0 border-b border-border/60 px-1 pb-2 pt-1" data-permission-prompt={permission.askId} data-permission-open={open ? "true" : "false"}>
       <div className="flex min-w-0 flex-col gap-1">
         <span className="truncate text-sm leading-relaxed text-foreground/80">{permissionAskLine(permission.toolName, permission.detail)}</span>
-        {line === "" ? null : <span className="truncate font-mono text-xs leading-4 text-muted-foreground">{line}</span>}
+        {line === "" ? null : <span className="break-words whitespace-pre-wrap font-mono text-xs leading-4 text-muted-foreground">{line}</span>}
         {open ? (
           <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
             {permission.options.map(option => (
@@ -59,7 +62,7 @@ export function PermissionPromptRow({
           </div>
         ) : (
           <span className="font-mono text-xs leading-4 text-muted-foreground" data-permission-outcome={permission.outcome ?? undefined}>
-            {permissionOutcomeLine(permission.outcome!, picked?.label)}
+            {permissionOutcomeLine(permission.outcome!, picked)}
           </span>
         )}
       </div>

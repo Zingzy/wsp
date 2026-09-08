@@ -84,7 +84,6 @@ export class SolariBackend implements MachineBackend {
     snapshotListing: true,
     templates: true,
     kept: false, // a fork wsp made and can rebuild in a minute: a turn that wrecks its disk costs nothing else
-
     sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: rateUsdPerHour(size) })),
   };
 

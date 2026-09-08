@@ -64,10 +64,25 @@ describe.skipIf(skipped !== undefined)("the relayed permission prompt row laid o
     // The closed one has no option left and says what closed it, in one muted mono line.
     expect(await page!.locator(closed).getAttribute("data-permission-open")).toBe("false");
     expect(await page!.locator(`${closed} [data-permission-option]`).count()).toBe(0);
-    expect(await page!.locator(`${closed} [data-permission-outcome]`).textContent()).toBe("Allowed: Allow");
+    expect(await page!.locator(`${closed} [data-permission-outcome]`).textContent()).toBe("Allowed");
     const outcome = await page!.evaluate(skinOf(`${closed} [data-permission-outcome]`));
     expect(outcome).toMatchObject({ background: "rgba(0, 0, 0, 0)", border: "0px", radius: "0px" });
     expect(String((outcome as { font: string }).font).toLowerCase()).toMatch(/mono/);
+
+    // The text the decision rests on is shown whole: every other tool row can afford to truncate, this is the row
+    // where consent is given. Read off the element rather than the class: nothing is clipped, nothing is elided,
+    // and it took more than one line to say it, so the wrap is what is on screen.
+    const input = await page!.evaluate(`(() => {
+      const el = document.querySelector('${open} .font-mono');
+      const s = getComputedStyle(el);
+      return { text: el.textContent, clipped: el.scrollWidth > el.clientWidth + 1, overflow: s.textOverflow, whiteSpace: s.whiteSpace, lines: Math.round(el.getBoundingClientRect().height / parseFloat(s.lineHeight)) };
+    })()`);
+    const shown = input as { text: string; clipped: boolean; overflow: string; whiteSpace: string; lines: number };
+    expect(shown.text).toBe("command: pnpm exec vitest run packages/api/test/health.test.ts description: Run the health route's test");
+    expect(shown.clipped).toBe(false);
+    expect(shown.overflow).toBe("clip");
+    expect(shown.whiteSpace).toBe("pre-wrap");
+    expect(shown.lines).toBeGreaterThan(1);
 
     // Both rows sit in the timeline at the same width and wear the same rule under them as the rows around them.
     const widths = await page!.evaluate(`[document.querySelector('${open}').getBoundingClientRect().width, document.querySelector('${closed}').getBoundingClientRect().width]`);

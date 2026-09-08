@@ -10,7 +10,6 @@
 // to the provider.
 import { randomUUID } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
-import { hostname } from "node:os";
 import { basename, resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";

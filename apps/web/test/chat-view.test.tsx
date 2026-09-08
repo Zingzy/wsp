@@ -398,7 +398,8 @@ describe("ChatView", () => {
     await waitFor(() => expect(document.querySelector('[data-permission-prompt="ask_1"]')!.getAttribute("data-permission-open")).toBe("false"));
     const closed = document.querySelector<HTMLElement>('[data-permission-prompt="ask_1"]')!;
     expect(closed.querySelectorAll("[data-permission-option]")).toHaveLength(0);
-    expect(within(closed).getByText("Allowed: Allow")).toBeDefined();
+    // The option's name is left off where it repeats the outcome; a mode pick is the one that adds to it.
+    expect(within(closed).getByText("Allowed")).toBeDefined();
     expect(closed.querySelector("[data-permission-outcome]")!.getAttribute("data-permission-outcome")).toBe("allowed");
   });
 

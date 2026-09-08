@@ -230,6 +230,31 @@ describe("a permission prompt relayed into the chat", () => {
     expect(turn.answers).toHaveLength(0);
   });
 
+  it("a turn the runtime cuts under an open prompt closes its row and stops its wait, so no row waits on an answer forever", async () => {
+    // The cut roads (a nap, a machine gone, a zombie, a delete) all end the turn from this side rather than through
+    // the harness, so this is the road the adapter's own close never travels.
+    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const handle = await rt.sessions.start(cloud.id, { prompt: "write it" });
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+    const turn = turns[0]!;
+    turn.raise();
+    await vi.waitFor(async () => expect(prompts(await history(cloud.id))).toHaveLength(1));
+
+    await rt.workspaces.nap(cloud.id);
+    const cut = await history(cloud.id);
+    expect(closes(cut)).toMatchObject([{ askId: "ask_1", outcome: "cancelled" }]);
+    expect(closes(cut)[0]).not.toHaveProperty("optionId");
+    // The row closes before the turn ends, so a transcript reads the prompt going with the turn, not after it.
+    expect(cut.findIndex(e => e.type === "session.permission.closed")).toBeLessThan(cut.findIndex(e => e.type === "session.end"));
+    // A paused workspace refuses the verb in its own words, as a send gets, and the closed row offers nothing anyway.
+    await expect(rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW })).rejects.toThrow("Workspace is paused; wake it to send");
+
+    // The wait went with it: nothing denies a prompt on a turn that is over, and no second row lands.
+    await new Promise(resolve => setTimeout(resolve, WAIT_MS * 4));
+    expect(turn.answers).toHaveLength(0);
+    expect(closes(await history(cloud.id))).toHaveLength(1);
+  });
+
   it("answers what it can rather than throwing: an unknown session, an unknown prompt, an option the prompt never carried", async () => {
     const { handle, turn, workspaceId } = await started();
     turn.raise();
@@ -306,6 +331,33 @@ describe("the access a thread starts at", () => {
     // A pick still wins over the thread's own.
     await (await rt.sessions.start(local.id, { prompt: "three", thread: first.view().threadId, permissionMode: "plan" })).finished;
     expect(picks).toEqual(["default", "default", "plan"]);
+  });
+
+  it("a resumed thread whose rows fell off the index cap reads its access off its own start event, not off the adapter's default", async () => {
+    const { rt, picks } = recording();
+    const local = await rt.workspaces.createLocal("mac");
+    const first = await rt.sessions.start(local.id, { prompt: "one" });
+    await first.finished;
+    expect(picks).toEqual(["default"]);
+    // The start row carries the access, which is what survives the cap: the index keeps 200 rows per workspace and
+    // drops the oldest finished ones, while the transcript keeps the thread.
+    const start = (await rt.sessions.history(local.id)).find(e => e.type === "session.start");
+    expect(start).toMatchObject({ permissionMode: "default" });
+    const harnessSession = first.view().claudeSessionId!;
+    await rt.close();
+
+    // The state the cap leaves: the transcript holds the thread, the index holds no row of it. A send that names
+    // the harness session, as `wsp send` and the MCP door do, is the road that still resumes it.
+    const kept = (await store.get("transcripts", local.id)) as { events: unknown[] };
+    await store.put("sessions", local.id, { workspaceId: local.id, sessions: [] });
+    const after = recording();
+    expect(((await store.get("transcripts", local.id)) as { events: unknown[] }).events).toHaveLength(kept.events.length);
+    const resumed = await after.rt.sessions.start(local.id, { prompt: "two", resume: harnessSession });
+    await resumed.finished;
+    // Without the fallback this reached the adapter as nothing, which every adapter here reads as its own
+    // skip-everything flag, on the person's own computer.
+    expect(after.picks).toEqual(["default"]);
+    await after.rt.close();
   });
 
   it("a throwaway machine's list and its threads are unchanged: bypass is the default and carries no machine's name", async () => {

@@ -1172,14 +1172,20 @@ describe("the words a relayed permission prompt shows", () => {
     expect(permissionAskLine("Write", "out.txt")).not.toContain("?");
   });
 
-  it("says how a closed prompt closed, naming the option a person picked", () => {
-    expect(permissionOutcomeLine("allowed", "Allow")).toBe("Allowed: Allow");
+  it("says how a closed prompt closed, naming the option only where it says something the outcome does not", () => {
+    const allow = { label: "Allow", effect: "allow" as const };
+    const deny = { label: "Deny", effect: "deny" as const };
+    const mode = { label: "Allow, then Accept edits", effect: "mode" as const };
+    // "Allowed: Allow" and "Denied: Deny" name one fact twice; the mode pick is the one that says more.
+    expect(permissionOutcomeLine("allowed", allow)).toBe("Allowed");
     expect(permissionOutcomeLine("allowed")).toBe("Allowed");
-    expect(permissionOutcomeLine("denied", "Deny")).toBe("Denied: Deny");
-    // Nobody picked either of these, so neither names an option.
+    expect(permissionOutcomeLine("denied", deny)).toBe("Denied");
+    expect(permissionOutcomeLine("allowed", mode)).toBe("Allowed: Allow, then Accept edits");
+    // Nobody picked either of these, so neither names an option, whatever it is handed.
     expect(permissionOutcomeLine("unanswered")).toBe("Nobody answered; denied");
     expect(permissionOutcomeLine("cancelled")).toBe("Cancelled with the turn");
-    expect(permissionOutcomeLine("unanswered", "Deny")).toBe("Nobody answered; denied");
+    expect(permissionOutcomeLine("unanswered", deny)).toBe("Nobody answered; denied");
+    expect(permissionOutcomeLine("cancelled", mode)).toBe("Cancelled with the turn");
   });
 
   it("tells the agent nobody answered rather than that a person refused, since the two are different facts", () => {

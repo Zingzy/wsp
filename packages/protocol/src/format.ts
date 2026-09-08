@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceTint } from "./index.js";
+import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceTint } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
@@ -799,14 +799,16 @@ export function permissionAskLine(toolName: string, detail?: string): string {
   return detail === undefined || detail === "" ? `Permission for ${toolName}` : `Permission for ${toolName}: ${detail}`;
 }
 
-/** What an answered prompt row reads once it is closed, one word per outcome; the option's own label rides beside it
- * where a person picked one, so a row says which of several allows it was. */
-export function permissionOutcomeLine(outcome: PermissionOutcome, optionLabel?: string): string {
+/** What an answered prompt row reads once it is closed, one word per outcome. The option's own label rides beside it
+ * only where it says something the outcome does not, which is the pick that also changed the access for the rest of
+ * the turn: "Allowed: Allow" and "Denied: Deny" name the same fact twice. */
+export function permissionOutcomeLine(outcome: PermissionOutcome, picked?: { label: string; effect: PermissionEffect }): string {
+  const named = picked?.effect === "mode" ? `: ${picked.label}` : "";
   switch (outcome) {
     case "allowed":
-      return optionLabel === undefined ? "Allowed" : `Allowed: ${optionLabel}`;
+      return `Allowed${named}`;
     case "denied":
-      return optionLabel === undefined ? "Denied" : `Denied: ${optionLabel}`;
+      return `Denied${named}`;
     case "unanswered":
       return "Nobody answered; denied";
     case "cancelled":
