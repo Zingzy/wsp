@@ -138,7 +138,8 @@ describe("app shell", () => {
     const wrapper = document.querySelector<HTMLElement>("[data-slot='sidebar-wrapper']")!;
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("312px");
     await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
+    // Spaces: the one workspace row is the space's header.
+    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
     await act(async () => answer!({ ...DEFAULT_PREFERENCES, sidebarMode: "list" }));
     await waitFor(() => expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(2));
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("16rem");

@@ -941,11 +941,11 @@ describe("Spaces mode", () => {
         session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) }),
       ]),
     );
-    // No workspace row at all: the header stands in for the one on screen, the dots for the rest.
-    expect(workspaceRowIds()).toEqual([]);
+    // No workspace row at all: the header stands in for the one on screen, wearing its id, the dots for the rest.
+    expect(workspaceRowIds()).toEqual(["ws:ws_a"]);
     expect(within(spaceHeader()!).getByText("api")).toBeDefined();
-    // Only that workspace's threads, in the list's own grammar.
-    expect(rowIds()).toEqual(["thread:s1"]);
+    // Only that workspace's threads, in the list's own grammar, under the header the walk starts on.
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1"]);
     expect(screen.queryByText("bump the lockfile")).toBeNull();
     expect(dots().map(d => d.getAttribute("aria-label"))).toEqual(["api", "web", "old"]);
     // The current dot is the only one carrying its name, so it is the wide one.
@@ -1018,6 +1018,58 @@ describe("Spaces mode", () => {
     expect(headerLines()).toContain("2 vCPU · 4 GB · Linux");
     act(() => getLive("ws_a").feedStatus("live"));
     await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+  });
+
+  it("the header is a stop in the arrow walk, and the walk carries on into the space's threads", async () => {
+    await mountSpaces(
+      fakeApi(THREE, statuses(), [
+        session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
+        session("s4", "ws_a", { prompt: "read the log", startedAt: iso(-9 * 60_000) }),
+      ]),
+    );
+    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "thread:s4"]));
+    spaceHeader()!.focus();
+    expect(document.activeElement).toBe(spaceHeader());
+    fireEvent.keyDown(spaceHeader()!, { key: "ArrowDown" });
+    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("thread:s1");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(spaceHeader());
+    fireEvent.keyDown(spaceHeader()!, { key: "End" });
+    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("thread:s4");
+  });
+
+  it("is the rows' own button, so what activates a row activates it, and it opens the workspace as its row does in the list", async () => {
+    const asked: string[] = [];
+    const off = onNewThreadRequest(request => asked.push(request.workspaceId));
+    try {
+      await mountSpaces(fakeApi(THREE, statuses(), [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) })]));
+      // A real button is what makes Space and Enter both activate it, which jsdom cannot deliver for itself.
+      expect(spaceHeader()!.tagName).toBe("BUTTON");
+      expect(spaceHeader()!.getAttribute("type")).toBe("button");
+      expect(spaceHeader()!.tabIndex).toBe(0);
+      act(() => useStore.getState().select("ws_a", "s1"));
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("s1"));
+      expect(spaceHeader()!.getAttribute("data-active")).toBe("false");
+      fireEvent.click(spaceHeader()!);
+      // The list's own row does exactly this on a click, and the same key road reaches both.
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBeNull());
+      expect(useStore.getState().selectedId).toBe("ws_a");
+      // Selecting leaves it plain: the one workspace on screen has nothing to say by being tinted, and the wide
+      // dot is where the sidebar says which workspace this is. The list's rows keep their own tint.
+      expect(spaceHeader()!.getAttribute("data-active")).toBe("false");
+      // Opening a thread stays on its own roads: the menu, the palette and the new-thread chord.
+      expect(asked).toEqual([]);
+    } finally {
+      off();
+    }
+  });
+
+  it("hands the name box a plain box to sit in, since an input may not sit inside a button", async () => {
+    const api = { ...fakeApi(THREE, statuses()), renameWorkspace: vi.fn(async (id: string, name: string) => ({ ...view(id, name) })) };
+    await mountSpaces(api);
+    act(() => requestRenameWorkspace("ws_a"));
+    await screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename });
+    expect(spaceHeader()!.tagName).toBe("DIV");
   });
 
   it("the header grows the sidebar's one name box: the palette's ask and a double-click both open it in the name's slot", async () => {

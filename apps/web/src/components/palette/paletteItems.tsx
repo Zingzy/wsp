@@ -4,7 +4,7 @@
 // one row per workspace to switch to, recent threads at rest and every thread
 // whose title holds the typed query. Pure apart from the callbacks it is
 // handed, so the list is testable without the dialog.
-import { ArrowDownIcon, ArrowUpIcon, MessageSquareIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, MessageSquareIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import type { SidebarMode } from "@wsp/protocol";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { sidebarActions } from "../../actions/sidebarActions.js";
@@ -13,6 +13,7 @@ import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/
 import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
 import { cn } from "../../lib/utils.js";
 import { SETTINGS_WORDS } from "../../settings/format.js";
+import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
 import { compactTimeLabel, dotClassForTone } from "../../sidebar/workspaceRows.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
@@ -26,6 +27,9 @@ export interface PaletteHandlers {
   /** One step down the sidebar's workspaces, and back up; both wrap. */
   readonly nextWorkspace: () => void;
   readonly previousWorkspace: () => void;
+  /** The same step one level down, over the threads of the workspace Spaces has on screen. */
+  readonly nextThread: () => void;
+  readonly previousThread: () => void;
   /** Which body the sidebar draws; the row that runs this comes from the sidebar registry, as the section menu's does. */
   readonly setSidebarMode: (mode: SidebarMode) => void;
   readonly openSettings: () => void;
@@ -92,6 +96,9 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
   items.push(...resolveActions(sidebarActions, { mode: input.sidebarMode }, { setMode: handlers.setSidebarMode }).map(action => actionItem(action, action.hint ?? "")));
 
   const oneWorkspace = input.projects.length < 2;
+  const walk = threadWalk(input.projects, selectedId);
+  const oneThread = walk.length < 2;
+  const threadWalkDescription = walk.length === 0 ? "No threads to walk" : "Only one thread";
   items.push(
     {
       kind: "action",
@@ -112,6 +119,26 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       shortcutCommand: "workspace.previous",
       ...(oneWorkspace ? { disabled: true, description: "Only one workspace" } : {}),
       run: sync(handlers.previousWorkspace),
+    },
+    {
+      kind: "action",
+      value: "action:next-thread",
+      searchTerms: ["next thread", "switch thread", "cycle threads"],
+      icon: <ChevronDownIcon className={ITEM_ICON_CLASS} />,
+      title: "Next thread",
+      shortcutCommand: "thread.next",
+      ...(oneThread ? { disabled: true, description: threadWalkDescription } : {}),
+      run: sync(handlers.nextThread),
+    },
+    {
+      kind: "action",
+      value: "action:previous-thread",
+      searchTerms: ["previous thread", "switch thread", "cycle threads"],
+      icon: <ChevronUpIcon className={ITEM_ICON_CLASS} />,
+      title: "Previous thread",
+      shortcutCommand: "thread.previous",
+      ...(oneThread ? { disabled: true, description: threadWalkDescription } : {}),
+      run: sync(handlers.previousThread),
     },
     {
       kind: "action",

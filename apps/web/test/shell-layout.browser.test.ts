@@ -603,8 +603,9 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         await page!.waitForFunction(w => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - w) < 1, width);
         const read = await readSpaces();
         console.info(`spaces at ${width} ${theme}: ${JSON.stringify(read)}`);
-        // One workspace on screen: no workspace row anywhere, and only that workspace's threads under the header.
-        expect(read.workspaceRows).toBe(0);
+        // One workspace on screen: the one id under ws: is the header's, which wears the row's id so the arrow
+        // walk stops there, and under it only that workspace's threads.
+        expect(read.workspaceRows).toBe(1);
         expect(read.threads).toEqual(["thread:s1", "thread:s2"]);
         expect(read.name).toBe("api");
         expect(read.state).toBe("");
@@ -639,9 +640,12 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         await page!.locator("[data-space-dot][aria-label=api]").click();
         await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "api");
         // The pointer leaves the row and its hover fades out before the shot, so what is saved is the rest state:
-        // no dot carries a fill of its own.
+        // no dot carries a fill of its own. Every dot is waited on, not the first: the case hovers two of them, and
+        // their fades run on their own clocks.
         await page!.mouse.move(600, 700);
-        await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-space-dot]")!).backgroundColor === "rgba(0, 0, 0, 0)");
+        await page!.waitForFunction(() =>
+          [...document.querySelectorAll("[data-space-dot]")].every(el => getComputedStyle(el).backgroundColor === "rgba(0, 0, 0, 0)"),
+        );
         const atRest = await page!.locator("[data-space-dot]").evaluateAll(els => els.map(el => getComputedStyle(el).backgroundColor));
         expect(atRest).toEqual(["rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)"]);
         const path = join(SHOTS_DIR, `sidebar-spaces-${width}-${theme}.png`);
