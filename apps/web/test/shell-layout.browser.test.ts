@@ -44,7 +44,8 @@ import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTE
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
 import { textContrast } from "./contrast";
-import { launchRender, renderSkipped, startVite, stopRender, type ViteChild } from "./vite-child";
+import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS_DIR = join(tmpdir(), "wsp-render");

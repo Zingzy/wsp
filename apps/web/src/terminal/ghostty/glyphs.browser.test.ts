@@ -8,7 +8,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { launchRender, renderSkipped, startVite, stopRender, type ViteChild } from "../../../test/vite-child";
+import { launchRender, renderSkipped, stopRender } from "../../../test/render-browser";
+import { startVite, type ViteChild } from "../../../test/vite-child";
 import type { CellSignature } from "../../../test/glyphs/probe";
 import { DEFAULT_TERMINAL_TEXT_FACES, TERMINAL_SYMBOLS_FACE } from "./fontChain";
 

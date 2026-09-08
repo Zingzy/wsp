@@ -15,7 +15,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appTerminalFontSize } from "../src/terminal/ghostty/surface";
 import { wcagContrast } from "./contrast";
 import type { PaletteProbe, Probe } from "./terminal-theme/main";
-import { launchRender, renderSkipped, startVite, stopRender, type ViteChild } from "./vite-child";
+import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS_DIR = join(tmpdir(), "wsp-render");

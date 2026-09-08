@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast } from "./contrast";
-import { launchRender, renderSkipped, startVite, stopRender, type ViteChild } from "./vite-child";
+import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS = join(tmpdir(), "wsp-render");

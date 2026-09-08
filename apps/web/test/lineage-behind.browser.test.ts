@@ -9,7 +9,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { launchRender, renderSkipped, startVite, stopRender, type ViteChild } from "./vite-child";
+import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS = join(WEB_DIR, "artifacts", "render");
