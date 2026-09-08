@@ -29,6 +29,8 @@ export const KEYBINDING_COMMANDS = [
   "chat.new",
   "workspace.next",
   "workspace.previous",
+  "thread.next",
+  "thread.previous",
   ...WORKSPACE_SELECT_SLOTS.map(workspaceSelectCommand),
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];

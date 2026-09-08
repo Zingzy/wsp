@@ -11,7 +11,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
 import { useSelectedWorkspaceId, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
-import { goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
+import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { requestNewWorkspace } from "../../shell/shellRequests.js";
 import { useSidebarMode } from "../../sidebar/sidebarMode.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
@@ -69,6 +69,8 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       toggleRightPanel,
       nextWorkspace: () => goToAdjacentWorkspace(1),
       previousWorkspace: () => goToAdjacentWorkspace(-1),
+      nextThread: () => cycleThreadInSpace(1),
+      previousThread: () => cycleThreadInSpace(-1),
       setSidebarMode,
     }),
     [select, setSidebarMode, toggleRightPanel, toggleSidebar],
@@ -140,6 +142,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
             highlightedItemValue={highlightedItemValue}
             isActionsOnly={query.startsWith(">")}
             keybindings={keybindings}
+            shortcuts={{ context: { spacesMode: sidebarMode === "spaces" } }}
             onExecuteItem={executeItem}
           />
         </CommandPaletteContent>

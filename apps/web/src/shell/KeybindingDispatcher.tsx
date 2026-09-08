@@ -9,20 +9,25 @@ import { useEffect, useRef } from "react";
 import { surfaceShortcutTargetsTypingContext } from "../components/RightPanelTabs.js";
 import { useSidebar } from "../components/ui/sidebar.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
-import { resolveShortcutCommand } from "../keybindings.js";
+import { eventHoldKeys, resolveShortcutCommand } from "../keybindings.js";
 import type { ResolvedKeybindingsConfig } from "../keybindingTypes.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { isPreviewFocused } from "../lib/previewFocus.js";
 import { isTerminalFocused } from "../lib/terminalFocus.js";
 import { useSelectedWorkspaceId } from "../protocol/store.js";
+import { useSidebarMode } from "../sidebar/sidebarMode.js";
 import { cancelWorkspaceSwitch, commitWorkspaceSwitch, runShellCommand, type ShellCommandTarget } from "./shellCommands.js";
-import { switchHoldKeys, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
+import { releasesSwitchHold, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
 
 export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: { keybindings?: ResolvedKeybindingsConfig }) {
   const { toggleSidebar } = useSidebar();
   const workspaceId = useSelectedWorkspaceId();
+  const [sidebarMode] = useSidebarMode();
   const target = useRef<ShellCommandTarget>({ workspaceId, toggleSidebar });
   target.current = { workspaceId, toggleSidebar };
+  // Which body a chord is read in, held per render rather than looked up per keydown; the listeners are bound once.
+  const spacesMode = useRef(sidebarMode === "spaces");
+  spacesMode.current = sidebarMode === "spaces";
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -35,7 +40,7 @@ export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDING
         return;
       }
       const command = resolveShortcutCommand(event, keybindings, {
-        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
+        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused(), spacesMode: spacesMode.current },
       });
       if (command === null) return;
       // An unchorded key inside an input is the user's text, whatever a rule says.
@@ -43,11 +48,10 @@ export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDING
       if (!chorded && event.target instanceof Element && surfaceShortcutTargetsTypingContext(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
-      runShellCommand(command, target.current);
+      runShellCommand(command, target.current, eventHoldKeys(event));
     };
     const onKeyUp = (event: KeyboardEvent): void => {
-      if (!useWorkspaceSwitcher.getState().open) return;
-      if (!switchHoldKeys(keybindings).includes(event.key)) return;
+      if (!releasesSwitchHold(useWorkspaceSwitcher.getState(), event.key)) return;
       commitWorkspaceSwitch();
     };
     // A chord that takes focus away (the system's own window switch) never delivers its key up here, so the hold
@@ -86,9 +90,9 @@ export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDING
     window.addEventListener("focusout", scheduleReport);
     const stopChords = onShellChord(chord => {
       const command = resolveShortcutCommand(chord, keybindings, {
-        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
+        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused(), spacesMode: spacesMode.current },
       });
-      if (command !== null) runShellCommand(command, target.current);
+      if (command !== null) runShellCommand(command, target.current, eventHoldKeys(chord));
     });
     return () => {
       if (pending !== null) clearTimeout(pending);

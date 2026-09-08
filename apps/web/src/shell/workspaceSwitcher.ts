@@ -4,11 +4,9 @@
 // because a turn ending elsewhere re-sorts the sidebar, and a card must not
 // move out from under the highlight while a person is stepping through them.
 // Nothing is selected until the commit, so stepping past a workspace never
-// mounts its threads.
+// mounts its threads. The hold is the one the chord that opened it was
+// carrying, so a command bound to two chords ends on whichever was pressed.
 import { create } from "zustand";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
-import { shortcutHoldKeysForCommand } from "../keybindings.js";
-import type { ResolvedKeybindingsConfig } from "../keybindingTypes.js";
 
 interface WorkspaceSwitcherState {
   /** The workspace ids the overlay walks, in sidebar order; empty while it is closed. */
@@ -18,7 +16,9 @@ interface WorkspaceSwitcherState {
   open: boolean;
   /** The workspace that was selected when it opened, so a card can say which one that is. */
   from: string | null;
-  openAt: (ids: ReadonlyArray<string>, at: number, from: string | null) => void;
+  /** The modifier keys the chord that opened it is holding down; letting one of them go commits the walk. */
+  hold: ReadonlyArray<string>;
+  openAt: (ids: ReadonlyArray<string>, at: number, from: string | null, hold: ReadonlyArray<string>) => void;
   step: (step: 1 | -1) => void;
   close: () => void;
 }
@@ -28,9 +28,10 @@ export const useWorkspaceSwitcher = create<WorkspaceSwitcherState>(set => ({
   at: 0,
   open: false,
   from: null,
-  openAt: (ids, at, from) => set({ ids, at, open: true, from }),
+  hold: [],
+  openAt: (ids, at, from, hold) => set({ ids, at, open: true, from, hold }),
   step: step => set(s => (s.open ? { at: stepSwitcherAt(s.ids.length, s.at, step) } : s)),
-  close: () => set({ ids: [], at: 0, open: false, from: null }),
+  close: () => set({ ids: [], at: 0, open: false, from: null, hold: [] }),
 }));
 
 /**
@@ -52,14 +53,8 @@ export function highlightedWorkspaceId(state: Pick<WorkspaceSwitcherState, "ids"
   return state.open ? state.ids[state.at] ?? null : null;
 }
 
-/** The keys the switch chord holds down, from the one keybinding table; letting one go commits the overlay. The two
- * directions share the hold, so it is the modifiers both chords carry: Shift is only one step's, and a table that
- * binds the two directions under different modifiers has no hold at all rather than one that never comes up. Empty
- * in a browser tab too, where the chords are the browser's and the overlay never opens. */
-export function switchHoldKeys(
-  keybindings: ResolvedKeybindingsConfig = DEFAULT_RESOLVED_KEYBINDINGS,
-  options?: { platform?: string; context?: { desktopShell?: boolean } },
-): string[] {
-  const back = shortcutHoldKeysForCommand(keybindings, "workspace.previous", options);
-  return shortcutHoldKeysForCommand(keybindings, "workspace.next", options).filter(key => back.includes(key));
+/** Whether letting this key go ends the walk: it is one of the modifiers the chord that opened the overlay was
+ * holding. A closed overlay is let go by nothing. */
+export function releasesSwitchHold(state: Pick<WorkspaceSwitcherState, "open" | "hold">, key: string): boolean {
+  return state.open && state.hold.includes(key);
 }
