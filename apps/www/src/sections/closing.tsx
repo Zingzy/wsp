@@ -3,7 +3,7 @@ import { ArrowUpRight } from "lucide-react";
 import { CopyCommand } from "@/components/copy-command";
 import clouds from "@/assets/clouds.webp";
 import { Dither } from "@/components/dither";
-import { AUTHOR, EMAIL, INSTALL, ISSUES, NPM, README, RELEASES, REPO, SOLARI, X } from "@/links";
+import { AUTHOR, DOCS, EMAIL, INSTALL, ISSUES, NPM, README, RELEASES, REPO, SOLARI, X } from "@/links";
 import { Wordmark } from "./nav";
 
 const NEXT = [
@@ -75,6 +75,9 @@ export function Closing() {
           </div>
           <div className="flex flex-col gap-2 md:col-span-3">
             <p className="text-foreground">project</p>
+            <a href={DOCS} className="hover:text-foreground">
+              docs
+            </a>
             <a href={REPO} className="hover:text-foreground">
               github
             </a>
