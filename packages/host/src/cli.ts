@@ -14,6 +14,7 @@ import {
   HARNESS_ADAPTERS,
   SolariBackend,
   createRuntime,
+  endLocalTurnGroups,
   goldenHead,
   hostIdentity,
   jsonFileStore,
@@ -32,7 +33,7 @@ import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
-import { runInit, type InitIO } from "./init.js";
+import { exitCodeOf, runInit, type InitIO } from "./init.js";
 import { FIRST_WORKSPACE } from "./init-first.js";
 import { recipePath } from "./init-recipe.js";
 import { historyCache } from "./recipe-file.js";
@@ -457,21 +458,38 @@ function collectThisComputer(onRung: (rung: Rung, rows: number) => void): Promis
   return collect(nodeHost(), { onRung });
 }
 
-/** Ctrl-C and a service stop both end with the lock removed. `once` leaves a
- * second signal to node's default exit, so a close that hangs cannot trap the terminal. */
-function stopOnSignals(handle: HostHandle, io: CliIO): void {
+/** The signals a serving host stops on. It is the only owner of them: nothing under it registers a handler of its
+ * own, so no other listener can end this process while a close runs. */
+const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+/** What a stop needs of the process it is ending: where signals arrive and how it exits. The default is this
+ * process; a test hands in its own, since a real signal would take the test runner with it. */
+export interface StopProcess {
+  on(signal: (typeof STOP_SIGNALS)[number], listener: () => void): unknown;
+  exit(code: number): void;
+}
+
+/** Ctrl-C and a service stop both end with the lock removed. A turn's process group is the turn's own and no signal
+ * here reaches it, so the groups go first, then the close, then the exit. A second signal while that close runs
+ * takes whatever group is left and exits at once, so a close that hangs can neither trap the terminal nor leave a
+ * harness running on the computer. */
+export function stopOnSignals(handle: HostHandle, io: CliIO, self: StopProcess = process): void {
   let stopping: Promise<void> | undefined;
-  const stop = (): void => {
-    stopping ??= handle.close().then(
-      () => process.exit(0),
+  const stop = (sig: (typeof STOP_SIGNALS)[number]): void => {
+    endLocalTurnGroups();
+    if (stopping !== undefined) {
+      self.exit(exitCodeOf(sig));
+      return;
+    }
+    stopping = handle.close().then(
+      () => self.exit(0),
       (e: unknown) => {
         io.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`);
-        process.exit(1);
+        self.exit(1);
       },
     );
   };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
+  for (const sig of STOP_SIGNALS) self.on(sig, () => stop(sig));
 }
 
 /** A folder a `~/`-relative answer or a flag named: where it is, and whether there is one there. The one place both
