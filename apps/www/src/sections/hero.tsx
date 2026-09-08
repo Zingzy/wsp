@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { CopyCommand } from "@/components/copy-command";
 import clouds from "@/assets/clouds.webp";
 import { Dither } from "@/components/dither";
-import { INSTALL, RELEASES, REPO } from "@/links";
+import { DOCS, INSTALL, RELEASES } from "@/links";
 
 const HERO_FADE = [0.2, 0.14] as const;
 
@@ -45,13 +45,13 @@ export function Hero() {
             Download for macOS
           </Button>
           <Button
-            render={<a href={REPO} />}
+            render={<a href={DOCS} />}
             nativeButton={false}
             variant="ghost"
             size="lg"
             className="h-12 gap-1.5 rounded-none px-4 text-base text-muted-foreground hover:bg-transparent hover:text-foreground"
           >
-            Read the source
+            Read the docs
             <ArrowUpRight data-icon="inline-end" />
           </Button>
         </div>
