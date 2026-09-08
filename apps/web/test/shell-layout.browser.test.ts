@@ -21,7 +21,9 @@
 // state word in its slot at the right edge only off running, the meta line
 // in one order cut from the right, no import or export glyph, the thread
 // title up to a fixed time column, and the Spaces body draws one workspace
-// under its header with a dot per workspace at the sidebar's bottom. Vite
+// under its header with a dot per workspace at the sidebar's bottom, the
+// threads quiet for over a day sit in an Archived group shut under that
+// workspace's idle shelf, in the shelf header's own row grammar. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -654,6 +656,90 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       }
     }
   }, 120_000);
+
+  it("the Archived group sits shut under the idle shelf, one row grammar with the Idle header and no colour of its own, and opens to rows of the same height, in both themes", async () => {
+    const readGroups = () =>
+      page!.evaluate(() => {
+        const read = (rowId: string) => {
+          const row = document.querySelector<HTMLElement>(`[data-row-id='${rowId}']`)!;
+          const word = row.querySelector<HTMLElement>("span")!;
+          const box = row.getBoundingClientRect();
+          const style = getComputedStyle(word);
+          const rowStyle = getComputedStyle(row);
+          return {
+            text: (row.textContent ?? "").trim(),
+            expanded: row.getAttribute("aria-expanded"),
+            y: box.y,
+            height: box.height,
+            x: box.x,
+            right: box.right,
+            color: style.color,
+            size: style.fontSize,
+            weight: style.fontWeight,
+            background: rowStyle.backgroundColor,
+            border: rowStyle.borderBottomWidth,
+            radius: rowStyle.borderBottomRightRadius,
+          };
+        };
+        // Only the first workspace's own block: the other two draw their own thread rows further down the list.
+        const block = document.querySelector<HTMLElement>("[data-row-id='ws:ws_a']")!.closest<HTMLElement>("[data-sidebar='menu-item']")!;
+        return {
+          idle: read("settled:ws_a"),
+          archived: read("archived:ws_a"),
+          threads: Array.from(block.querySelectorAll<HTMLElement>("[data-row-id^='thread:']")).map(row => ({
+            id: row.getAttribute("data-row-id"),
+            y: row.getBoundingClientRect().y,
+            height: row.getBoundingClientRect().height,
+          })),
+          sidebar: document.querySelector<HTMLElement>("[data-slot=sidebar]")!.getBoundingClientRect().right,
+        };
+      });
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&archived=1&sidebar=300`);
+      await page!.waitForSelector("[data-row-id='archived:ws_a']");
+      const shut = await readGroups();
+      console.info(`archived group ${theme} shut: ${JSON.stringify(shut)}`);
+      // Shut, carrying its count, and under the idle shelf it belongs to rather than above it.
+      expect(shut.archived.expanded).toBe("false");
+      expect(shut.archived.text).toBe("Archived (2)");
+      expect(shut.idle.text).toBe("Idle");
+      expect(shut.archived.y).toBeGreaterThan(shut.idle.y);
+      // The two threads it holds are not drawn; the working row and the one idle row are.
+      expect(shut.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2"]);
+      for (const thread of shut.threads) expect(thread.y).toBeLessThan(shut.archived.y);
+      // One row grammar with the header above it: same height, same left edge, same muted word, and the group
+      // header is a plain row, not a chip or a badge, so it carries no fill, no border and no rounding of its own.
+      expect(shut.archived.height).toBe(32);
+      expect(shut.archived.height).toBe(shut.idle.height);
+      expect(shut.archived.x).toBe(shut.idle.x);
+      expect(shut.archived.color).toBe(shut.idle.color);
+      expect(shut.archived.size).toBe(shut.idle.size);
+      expect(shut.archived.weight).toBe(shut.idle.weight);
+      expect(shut.archived.background).toBe("rgba(0, 0, 0, 0)");
+      expect(shut.archived.border).toBe("0px");
+      expect(shut.archived.right).toBeLessThanOrEqual(shut.sidebar);
+      const path = join(SHOTS_DIR, `sidebar-archived-shut-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar archived shut screenshot: ${path}`);
+      // One click opens it, and what it holds are ordinary thread rows at the ordinary thread-row height.
+      await page!.locator("[data-row-id='archived:ws_a']").click();
+      await page!.waitForFunction(
+        () => document.querySelector("[data-row-id='ws:ws_a']")!.closest("[data-sidebar='menu-item']")!.querySelectorAll("[data-row-id^='thread:']").length === 4,
+      );
+      const open = await readGroups();
+      console.info(`archived group ${theme} open: ${JSON.stringify(open)}`);
+      expect(open.archived.expanded).toBe("true");
+      expect(open.archived.text).toBe("Archived");
+      expect(open.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2", "thread:s5", "thread:s6"]);
+      expect(new Set(open.threads.map(t => Math.round(t.height))).size).toBe(1);
+      for (const id of ["thread:s5", "thread:s6"]) {
+        expect(open.threads.find(t => t.id === id)!.y).toBeGreaterThan(open.archived.y);
+      }
+      const openPath = join(SHOTS_DIR, `sidebar-archived-open-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path: openPath });
+      console.info(`sidebar archived open screenshot: ${openPath}`);
+    }
+  }, 60_000);
 
   it("a status toast with a 200-character token stays inside the sidebar's width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);

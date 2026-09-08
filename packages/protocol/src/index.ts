@@ -27,6 +27,10 @@ export const EXEC_CHUNK_BYTES = 262_144;
  * a tool event or a log line well inside this, so it is the one rule that ends a turn the harness left hanging: a
  * fixed wall clock cut a build that was still working at 15 minutes on 2026-09-06. */
 export const TURN_IDLE_MS = 10 * 60_000;
+/** How long a thread sits idle before the sidebar folds it out of that workspace's shelf into its Archived group.
+ * The fold reads the thread's own last activity, so a thread that takes a new turn leaves the archive by itself and
+ * there is no archived flag anywhere to set or clear. */
+export const THREAD_ARCHIVE_MS = 24 * 60 * 60_000;
 /** The longest one turn may run however much it prints, a safety cap only; a per-workspace setting is a follow-up. */
 export const TURN_WALL_MS = 6 * 60 * 60_000;
 /** The close code a host sends the clients on its own socket as it stops: the socket did not break under them, the

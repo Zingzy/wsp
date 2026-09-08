@@ -158,17 +158,19 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
-    // Every workspace with an idle thread gets the Idle header, whether or not one of its threads is working.
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "settled:ws_b", "thread:s3"]);
+    // Every workspace with an idle thread gets the Idle header, whether or not one of its threads is working; the
+    // one idle two days is past the archive threshold, so its workspace gets the Archived group shut instead.
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "archived:ws_b"]);
     expect(rowOf("fix the port list").textContent).toContain("3m");
     expect(rowOf("upgrade node").textContent).toContain("50m");
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
     // a session without a prompt falls back to the harness session id
     expect(rowOf("59094224-bb3d").textContent).toContain("2d");
     // status pills: the running one works, the one that never settled ended, the idle one is plain
     expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined();
     expect(within(rowOf("59094224-bb3d")).getByLabelText("Ended")).toBeDefined();
     expect(within(rowOf("upgrade node")).queryByLabelText(/Idle|Completed/)).toBeNull();
-    expect(screen.getAllByRole("button", { name: /^Idle/ })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /^Idle/ })).toHaveLength(1);
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
@@ -321,6 +323,71 @@ describe("rows from the fixture wire", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Idle/ }));
     expect(screen.queryByText("upgrade node")).toBeNull();
     expect(screen.getByRole("button", { name: "Idle (3)" })).toBeDefined();
+  });
+
+  it("threads idle past the archive threshold fold into an Archived group under Idle, shut, carrying their count", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [
+          session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-2 * 24 * 60 * 60_000), endedAt: iso(-25 * 60 * 60_000) }),
+          session("s3", "ws_a", { status: "interrupted", prompt: "drop the old shim", startedAt: iso(-9 * 24 * 60 * 60_000), endedAt: iso(-8 * 24 * 60 * 60_000) }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
+    // The archive sits under the idle shelf, shut, and the two threads quiet for over a day are not drawn.
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a"]);
+    const archived = (): HTMLElement => document.querySelector<HTMLElement>("[data-row-id='archived:ws_a']")!;
+    expect(archived().getAttribute("aria-expanded")).toBe("false");
+    expect(archived().textContent).toContain("Archived (2)");
+    expect(screen.queryByText("bump the lockfile")).toBeNull();
+    // One click opens it, and the rows arrive newest end first, as the shelf orders its own.
+    fireEvent.click(archived());
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a", "thread:s2", "thread:s3"]);
+    expect(archived().textContent).toContain("Archived");
+    expect(archived().textContent).not.toContain("(2)");
+    expect(window.localStorage.getItem("wsp:sidebar-archived-open")).toBe('["ws_a"]');
+    fireEvent.click(archived());
+    expect(screen.queryByText("bump the lockfile")).toBeNull();
+    expect(window.localStorage.getItem("wsp:sidebar-archived-open")).toBe("[]");
+  });
+
+  it("one click on an archived thread's row opens that thread", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [
+          session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "bump the lockfile", threadId: "thr_old", startedAt: iso(-3 * 24 * 60 * 60_000), endedAt: iso(-2 * 24 * 60 * 60_000) }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Archived (1)" })).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
+    fireEvent.click(rowOf("bump the lockfile"));
+    expect(useStore.getState().selectedId).toBe("ws_a");
+    expect(useStore.getState().selectedThreadId).toBe("thr_old");
+  });
+
+  it("a workspace whose threads are every one archived still draws the group rather than an empty workspace", async () => {
+    await mount(
+      fakeApi(
+        [API],
+        [status(API)],
+        [session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-9 * 24 * 60 * 60_000), endedAt: iso(-8 * 24 * 60 * 60_000) })],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Archived (1)" })).toBeDefined());
+    expect(rowIds()).toEqual(["ws:ws_a", "archived:ws_a"]);
+    // No idle shelf to head, since every row it would hold has fallen past it.
+    expect(screen.queryByRole("button", { name: /^Idle/ })).toBeNull();
   });
 
   it("an idle thread's title reads in the muted foreground; a working one's does not", async () => {

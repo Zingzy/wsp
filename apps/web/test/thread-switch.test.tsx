@@ -13,7 +13,9 @@ import { press, typeInto } from "./composer-harness.js";
 import { installFakeLayout } from "./fake-layout.js";
 
 const WS = "ws_switch";
-const T0 = Date.parse("2026-09-05T11:00:00.000Z");
+// An hour before the run, not a fixed date: these rows must stay on the idle shelf, and a fixed date walks past the
+// archive threshold as soon as the calendar moves, which shuts them into the archive and hides them from the sidebar.
+const T0 = Date.now() - 60 * 60_000;
 const workspace: WorkspaceView = { id: WS, name: "api", machineId: "m_api", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z", claudeSessionId: "sess_b" };
 const manifest: GoldenManifest = {
   head: 1,
