@@ -6,7 +6,9 @@
 // every surface follows a toggle at once; the current workspace is resolved
 // here too, since the shell paints its hue on a surface the sidebar does not
 // own.
+import { useMemo } from "react";
 import type { WorkspaceTint } from "@wsp/protocol";
+import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useStore } from "../protocol/store.js";
 
@@ -39,14 +41,24 @@ export function currentSpaceId(ids: ReadonlyArray<string>, selectedId: string | 
   return selectedId !== null && ids.includes(selectedId) ? selectedId : ids[0] ?? null;
 }
 
+/** The workspace Spaces has on screen, off the one order the sidebar draws its rows in. A selection that is no
+ * workspace of the list, which is what a creation in flight leaves behind, falls back to a first row, so a caller
+ * ordering its own ids would fall back to a different workspace than the body draws. */
+export function useCurrentSpaceId(): string | null {
+  const workspaces = useStore(s => s.workspaces);
+  const statuses = useStore(s => s.statuses);
+  const sessions = useStore(s => s.sessions);
+  const selectedId = useStore(s => s.selectedId);
+  const ordered = useMemo(() => sidebarWorkspaceOrder({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
+  return currentSpaceId(ordered, selectedId);
+}
+
 /** The hue the shell paints the sidebar's surface with: the current space's, and none outside Spaces mode, where the
- * hue draws on the rails alone. The store holds the workspaces in the order the sidebar draws them, so the first row
- * here is the first row there. */
+ * hue draws on the rails alone. */
 export function useSpaceTint(): WorkspaceTint | undefined {
   const [mode] = useSidebarMode();
+  const current = useCurrentSpaceId();
   const workspaces = useStore(s => s.workspaces);
-  const selectedId = useStore(s => s.selectedId);
   if (mode !== "spaces") return undefined;
-  const current = currentSpaceId(workspaces.map(w => w.id), selectedId);
   return workspaces.find(w => w.id === current)?.tint;
 }

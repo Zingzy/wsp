@@ -79,25 +79,30 @@ export function tintAttr(tint: WorkspaceTint | undefined): { "data-space-tint"?:
   return tint === undefined ? {} : { "data-space-tint": tint };
 }
 
-/** A workspace's glyph in its own hue, wherever the workspace is drawn: the dots row and the Spaces header's lead. */
+/** A workspace's glyph wherever the workspace is drawn, in the ink of whatever draws it. In Spaces the hue is
+ * declared on the sidebar itself for the wash, so every glyph under it would take the hue by inheritance alone: a
+ * caller that wants the hue asks for it with TINTED_INK, and the rest stay the ink of their row. */
 export function WorkspaceGlyphMark({ glyph, className }: { glyph: WorkspaceGlyph; className?: string }) {
   const Icon = GLYPH_ICONS[glyph];
-  return <Icon aria-hidden data-space-glyph={glyph} className={cn("shrink-0 text-[var(--space-tint,currentColor)]", className)} />;
+  return <Icon aria-hidden data-space-glyph={glyph} className={cn("shrink-0", className)} />;
 }
+
+/** Draws in the workspace's hue where one is declared above, and in the ink around it where none is. */
+export const TINTED_INK = "text-[var(--space-tint,currentColor)]";
 
 const CELL_CLASS = "flex size-7 cursor-pointer items-center justify-center rounded-md outline-hidden ring-ring transition-colors duration-150 hover:bg-accent focus-visible:ring-2";
 const PICKED_CLASS = "ring-2 ring-ring";
 
-/** The rows the menu's dialog and the Machine tab both draw: the six hues, then the glyphs, each with the way back to
- * none. A pick goes to the runtime as it is made, the way a name box sends on Enter; there is nothing to confirm. */
-export function WorkspaceLookPicker({ workspace, part }: { workspace: WorkspaceView; part?: LookPart }) {
+/** One row of the two the menu's dialog and the Machine tab draw: the six hues, or the glyphs, each with the way back
+ * to none. The heading is the caller's, so the tab keeps its own section style and the dialog its title. A pick goes
+ * to the runtime as it is made, the way a name box sends on Enter; there is nothing to confirm. */
+export function WorkspaceLookPicker({ workspace, part }: { workspace: WorkspaceView; part: LookPart }) {
   const setLook = useStore(s => s.setWorkspaceLook);
   const send = (look: WorkspaceLook): void => void setLook({ workspaceId: workspace.id, look });
   return (
     <div data-workspace-look className="flex flex-col gap-3">
       {part === "glyph" ? null : (
         <div className="flex flex-col gap-1.5">
-          {part === undefined ? <span className="text-[11px] text-muted-foreground">{WORKSPACE_WORDS.colour}</span> : null}
           <div role="group" aria-label={WORKSPACE_WORDS.colour} className="flex flex-wrap items-center gap-1">
             <button
               type="button"
@@ -126,7 +131,6 @@ export function WorkspaceLookPicker({ workspace, part }: { workspace: WorkspaceV
       )}
       {part === "tint" ? null : (
         <div className="flex flex-col gap-1.5" {...tintAttr(workspace.tint)}>
-          {part === undefined ? <span className="text-[11px] text-muted-foreground">{WORKSPACE_WORDS.icon}</span> : null}
           <div role="group" aria-label={WORKSPACE_WORDS.icon} className="flex flex-wrap items-center gap-1">
             <button
               type="button"
@@ -146,7 +150,7 @@ export function WorkspaceLookPicker({ workspace, part }: { workspace: WorkspaceV
                 className={cn(CELL_CLASS, workspace.glyph === glyph && PICKED_CLASS)}
                 onClick={() => send({ glyph })}
               >
-                <WorkspaceGlyphMark glyph={glyph} className="size-4" />
+                <WorkspaceGlyphMark glyph={glyph} className={cn("size-4", TINTED_INK)} />
               </button>
             ))}
           </div>

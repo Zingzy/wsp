@@ -581,16 +581,16 @@ describe("store workspaces", () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
     useStore.getState().bind(api);
     await flush();
-    emit({ type: "workspace.look", workspaceId: "ws_a", tint: "teal", glyph: "flask" });
-    expect(useStore.getState().workspaces[0]!).toMatchObject({ tint: "teal", glyph: "flask" });
-    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ tint: "teal", glyph: "flask" });
+    emit({ type: "workspace.look", workspaceId: "ws_a", tint: "cyan", glyph: "flask" });
+    expect(useStore.getState().workspaces[0]!).toMatchObject({ tint: "cyan", glyph: "flask" });
+    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ tint: "cyan", glyph: "flask" });
     // Clearing one is a null, not a missing key, so the row loses it instead of keeping the old hue.
     emit({ type: "workspace.look", workspaceId: "ws_a", tint: null, glyph: "flask" });
     expect(useStore.getState().workspaces[0]!).not.toHaveProperty("tint");
     expect(useStore.getState().statuses["ws_a"]).not.toHaveProperty("tint");
     expect(useStore.getState().workspaces[0]!.glyph).toBe("flask");
     // A workspace no row holds is not invented by a look.
-    emit({ type: "workspace.look", workspaceId: "ws_gone", tint: "pink", glyph: null });
+    emit({ type: "workspace.look", workspaceId: "ws_gone", tint: "magenta", glyph: null });
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a"]);
     expect(useStore.getState().statuses["ws_gone"]).toBeUndefined();
   });
@@ -612,7 +612,7 @@ describe("store workspaces", () => {
     expect(useStore.getState().workspaces[0]!.tint).toBe("violet");
     // A client without the verb takes no pick at all.
     delete api.setWorkspaceLook;
-    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: "teal" } })).toBe(false);
+    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: "cyan" } })).toBe(false);
   });
 
   it("gone carries the phase and the provider's words onto the view and its status", async () => {

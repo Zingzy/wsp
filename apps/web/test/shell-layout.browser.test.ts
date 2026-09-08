@@ -657,6 +657,75 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
     }
   }, 120_000);
 
+  // The hue is ink: it draws the header's glyph, the current dot's name and a thread rail. The floor it has to clear
+  // is the one the sidebar's own meta text clears, on the surface the hue itself has just washed, in both themes.
+  it("every workspace hue clears the sidebar's own readable floor on the surface it washes, in both themes", async () => {
+    const AA = 4.5;
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&spaces=1&tint=1`);
+      await page!.waitForSelector("[data-space-header][data-space-tint]");
+      const measured = await page!.evaluate(() => {
+        // Every colour goes through a canvas so it is read as the sRGB bytes the screen paints, gamut clamping and
+        // all; getComputedStyle hands back the oklch it was written in, which no contrast formula can take.
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+        const bytes = (css: string): [number, number, number] => {
+          ctx.fillStyle = "#000";
+          ctx.fillStyle = css;
+          ctx.fillRect(0, 0, 1, 1);
+          const d = ctx.getImageData(0, 0, 1, 1).data;
+          return [d[0]!, d[1]!, d[2]!];
+        };
+        const luminance = (c: [number, number, number]): number => {
+          const [r, g, b] = c.map(v => { const u = v / 255; return u <= 0.04045 ? u / 12.92 : ((u + 0.055) / 1.055) ** 2.4; }) as [number, number, number];
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        const ratio = (a: string, b: string): number => {
+          const [la, lb] = [luminance(bytes(a)), luminance(bytes(b))];
+          return Math.round(((Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)) * 100) / 100;
+        };
+        const read = (el: Element, prop: string): string => getComputedStyle(el).getPropertyValue(prop).trim();
+        const washed = getComputedStyle(document.querySelector<HTMLElement>("[data-app-sidebar] > [data-slot='sidebar-inner']")!).backgroundColor;
+        const plain = read(document.documentElement, "--sidebar");
+        const ids = Array.from(document.styleSheets)
+          .flatMap(sheet => Array.from(sheet.cssRules ?? []))
+          .flatMap(rule => Array.from(rule.cssText.matchAll(/--space-tint-([a-z]+):/g)).map(m => m[1]!));
+        const hues: Record<string, { onWashed: number; onPlain: number }> = {};
+        for (const id of [...new Set(ids)]) {
+          const el = document.createElement("div");
+          el.setAttribute("data-space-tint", id);
+          document.body.appendChild(el);
+          const colour = read(el, "--space-tint");
+          hues[id] = { onWashed: ratio(colour, washed), onPlain: ratio(colour, plain) };
+          el.remove();
+        }
+        return { washed, meta: ratio(read(document.documentElement, "--sidebar-muted-foreground"), washed), hues };
+      });
+      console.info(`hue contrast ${theme}: ${JSON.stringify(measured)}`);
+      // Six hues, not five: a hue dropped from the stylesheet and left in the protocol would show up here.
+      expect(Object.keys(measured.hues)).toHaveLength(6);
+      for (const [id, { onWashed, onPlain }] of Object.entries(measured.hues)) {
+        expect({ theme, id, onWashed: onWashed >= AA, onPlain: onPlain >= AA }).toEqual({ theme, id, onWashed: true, onPlain: true });
+      }
+      // The wash itself stays inside sRGB, so the screen paints it rather than clamping it. Mixing in sRGB left the
+      // dark theme's surface at a negative red channel; the oklab mix is what keeps it in range.
+      const [L, a, b] = (/oklab\((-?[\d.]+) (-?[\d.]+) (-?[\d.]+)\)/.exec(measured.washed) ?? []).slice(1).map(Number) as [number, number, number];
+      const [l, m, o] = [
+        (L + 0.3963377774 * a + 0.2158037573 * b) ** 3,
+        (L - 0.1055613458 * a - 0.0638541728 * b) ** 3,
+        (L - 0.0894841775 * a - 1.291485548 * b) ** 3,
+      ];
+      const linear = [
+        4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * o,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * o,
+        -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * o,
+      ];
+      console.info(`wash ${theme} in linear sRGB: ${JSON.stringify(linear.map(v => Math.round(v * 10000) / 10000))}`);
+      for (const channel of linear) expect({ theme, inGamut: channel >= -0.001 && channel <= 1.001 }).toEqual({ theme, inGamut: true });
+    }
+  }, 120_000);
+
   it("two tinted spaces: the hue paints the sidebar's surface, the dot and the glyph, and in the list body the rail alone, in both themes", async () => {
     const readLook = () =>
       page!.evaluate(() => {
@@ -670,12 +739,18 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
           sidebarTint: document.querySelector<HTMLElement>("[data-app-sidebar]")!.getAttribute("data-space-tint"),
           headerTint: header?.getAttribute("data-space-tint") ?? null,
           headerGlyph: glyphColour(header?.querySelector("span[aria-hidden]")),
-          dots: Array.from(document.querySelectorAll<HTMLElement>("[data-space-dot]")).map(dot => ({
-            label: dot.getAttribute("aria-label") ?? "",
-            tint: dot.getAttribute("data-space-tint"),
-            fill: getComputedStyle(dot.querySelector<HTMLElement>("span[aria-hidden]")!).backgroundColor,
-            glyph: glyphColour(dot),
-          })),
+          dots: Array.from(document.querySelectorAll<HTMLElement>("[data-space-dot]")).map(dot => {
+            const name = dot.querySelector<HTMLElement>("[data-space-tint]");
+            return {
+              label: dot.getAttribute("aria-label") ?? "",
+              fill: getComputedStyle(dot.querySelector<HTMLElement>("span[aria-hidden]")!).backgroundColor,
+              // A napping dot is a ring, so its state colour is the border; the hue must be off both.
+              ring: getComputedStyle(dot.querySelector<HTMLElement>("span[aria-hidden]")!).borderColor,
+              glyph: glyphColour(dot),
+              nameTint: name?.getAttribute("data-space-tint") ?? null,
+              nameColour: name === null ? null : getComputedStyle(name).color,
+            };
+          }),
         };
       });
     for (const theme of ["dark", "light"] as const) {
@@ -686,34 +761,39 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
 
       await page!.goto(`${base}?theme=${theme}&spaces=1&tint=1`);
       await page!.waitForSelector("[data-space-header][data-space-tint]");
-      const teal = await readLook();
-      console.info(`tinted spaces ${theme}: ${JSON.stringify(teal)}`);
+      const tinted = await readLook();
+      console.info(`tinted spaces ${theme}: ${JSON.stringify(tinted)}`);
       // The hue reaches the sidebar's own surface, so the whole column reads as this space and not only its rows.
-      expect(teal.sidebarTint).toBe("teal");
-      expect(teal.headerTint).toBe("teal");
-      expect(teal.surface).not.toBe(plain.surface);
-      // The dot is drawn in the hue, and the glyph beside it in the same colour; the plain workspace keeps its state dot.
-      const [first, second, third] = teal.dots as [(typeof teal.dots)[number], (typeof teal.dots)[number], (typeof teal.dots)[number]];
-      expect([first.tint, second.tint, third.tint]).toEqual(["teal", "violet", null]);
-      expect(first.glyph).toBe(first.fill);
-      expect(teal.headerGlyph).toBe(first.fill);
-      expect(first.fill).not.toBe(second.fill);
-      expect(first.fill).not.toBe(third.fill);
-      // Only the current dot carries a glyph; the others are a dot alone at this width.
+      expect(tinted.sidebarTint).toBe("cyan");
+      expect(tinted.headerTint).toBe("cyan");
+      expect(tinted.surface).not.toBe(plain.surface);
+      // Giving the workspaces hues moves no dot's fill at all: the running one is still the green that means running,
+      // the napping one still hollow, the gone one still muted. This row is the only place the state of the
+      // workspaces that are not on screen shows, so it stays a state row.
+      const [first, second, third] = tinted.dots as [(typeof tinted.dots)[number], (typeof tinted.dots)[number], (typeof tinted.dots)[number]];
+      expect(tinted.dots.map(dot => [dot.fill, dot.ring])).toEqual(plain.dots.map(dot => [dot.fill, dot.ring]));
+      expect(new Set([first.fill, second.fill, third.fill]).size).toBe(3);
+      expect([first.fill, second.fill, third.fill, first.ring, second.ring, third.ring]).not.toContain(tinted.headerGlyph);
+      // The hue reaches the current dot's name and stops there; the other dots carry no hue at all.
+      expect([first.nameTint, second.nameTint, third.nameTint]).toEqual(["cyan", null, null]);
+      expect(first.nameColour).toBe(tinted.headerGlyph);
+      // Only the current dot carries a glyph, and it takes the row's own ink, not the hue the sidebar is washed in.
       expect([second.glyph, third.glyph]).toEqual([null, null]);
+      expect(first.glyph).not.toBe(tinted.headerGlyph);
 
       await page!.locator("[data-space-dot][aria-label=web]").click();
       await page!.waitForFunction(() => document.querySelector("[data-app-sidebar]")?.getAttribute("data-space-tint") === "violet");
       const violet = await readLook();
-      expect(violet.surface).not.toBe(teal.surface);
-      expect(violet.headerGlyph).toBe(second.fill);
+      expect(violet.surface).not.toBe(tinted.surface);
+      expect(violet.dots[1]!.nameColour).toBe(violet.headerGlyph);
+      expect(violet.headerGlyph).not.toBe(tinted.headerGlyph);
       // The workspace with no hue takes the sidebar back to its plain surface.
       await page!.locator("[data-space-dot][aria-label=old]").click();
       await page!.waitForFunction(() => document.querySelector("[data-app-sidebar]")?.getAttribute("data-space-tint") === null);
       expect((await readLook()).surface).toBe(plain.surface);
 
       await page!.locator("[data-space-dot][aria-label=api]").click();
-      await page!.waitForFunction(() => document.querySelector("[data-app-sidebar]")?.getAttribute("data-space-tint") === "teal");
+      await page!.waitForFunction(() => document.querySelector("[data-app-sidebar]")?.getAttribute("data-space-tint") === "cyan");
       await page!.mouse.move(600, 700);
       const spacesShot = join(SHOTS_DIR, `sidebar-tinted-spaces-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path: spacesShot });
@@ -730,7 +810,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         })),
       );
       console.info(`tinted rails ${theme}: ${JSON.stringify(rails)}`);
-      expect(rails.map(rail => rail.tint)).toEqual(["teal", "violet"]);
+      expect(rails.map(rail => rail.tint)).toEqual(["cyan", "violet"]);
       expect(rails[0]!.threads).toEqual(["thread:s1", "thread:s2"]);
       expect(rails[0]!.border).not.toBe(rails[1]!.border);
       // Nothing else in the list body wears the hue, and the surface stays the plain one.
@@ -740,7 +820,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       await page!.goto(`${base}?theme=${theme}&spaces=1&tint=1&mac=1`);
       await page!.waitForSelector("[data-space-header][data-space-tint]");
       const mac = await readLook();
-      expect(mac.sidebarTint).toBe("teal");
+      expect(mac.sidebarTint).toBe("cyan");
       expect(mac.surface).toMatch(/\/ 0\.\d+\)$|, 0\.\d+\)$/);
 
       await page!.goto(`${base}?theme=${theme}&tint=1`);
@@ -759,7 +839,7 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       );
       console.info(`colour picker ${theme}: ${JSON.stringify(swatches)}`);
       expect(swatches).toHaveLength(7);
-      expect(swatches.filter(s => s.pressed === "true").map(s => s.label)).toEqual(["Colour: Teal"]);
+      expect(swatches.filter(s => s.pressed === "true").map(s => s.label)).toEqual(["Colour: Cyan"]);
       // One height for every cell, so the row reads as one control and not a ladder.
       expect(new Set(swatches.map(s => Math.round(s.box))).size).toBe(1);
       const pickerShot = join(SHOTS_DIR, `workspace-colour-picker-${theme}.png`);

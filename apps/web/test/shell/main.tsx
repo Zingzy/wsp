@@ -60,7 +60,7 @@ const workspaces = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...vi
 // ?tint=1 gives the first two workspaces a hue and a glyph and leaves the third with neither, so one page holds two
 // tinted spaces and a plain one.
 if (params.get("tint") === "1") {
-  Object.assign(workspaces[0]!, { tint: "teal", glyph: "flask" });
+  Object.assign(workspaces[0]!, { tint: "cyan", glyph: "flask" });
   Object.assign(workspaces[1]!, { tint: "violet", glyph: "rocket" });
 }
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle

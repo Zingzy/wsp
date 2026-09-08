@@ -15,7 +15,7 @@ import { openContextMenu } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
 import type { ResolvedAction } from "../actions/registry.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
-import { WorkspaceGlyphMark, tintAttr } from "../components/workspaceLook.js";
+import { TINTED_INK, WorkspaceGlyphMark, tintAttr } from "../components/workspaceLook.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS } from "./rowGrammar.js";
@@ -57,7 +57,7 @@ export function SpaceHeader({
       {...(renaming ? {} : { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions) })}
     >
       <span aria-hidden className={ROW_LEAD_CLASS}>
-        {project.workspace.glyph === undefined ? <StateDot project={project} /> : <WorkspaceGlyphMark glyph={project.workspace.glyph} className="size-3.5" />}
+        {project.workspace.glyph === undefined ? <StateDot project={project} /> : <WorkspaceGlyphMark glyph={project.workspace.glyph} className={cn("size-3.5", TINTED_INK)} />}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
         <span className="flex items-center gap-2">

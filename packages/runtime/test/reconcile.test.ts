@@ -247,21 +247,21 @@ describe("a workspace's look", () => {
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
 
-    expect(await rt.workspaces.look(ws.id, { tint: "teal" })).toMatchObject({ id: ws.id, tint: "teal" });
+    expect(await rt.workspaces.look(ws.id, { tint: "cyan" })).toMatchObject({ id: ws.id, tint: "cyan" });
     // The glyph alone: the hue it was not sent stays as it is.
-    expect(await rt.workspaces.look(ws.id, { glyph: "flask" })).toMatchObject({ tint: "teal", glyph: "flask" });
-    expect(await store.get("workspaces", ws.id)).toMatchObject({ tint: "teal", glyph: "flask" });
+    expect(await rt.workspaces.look(ws.id, { glyph: "flask" })).toMatchObject({ tint: "cyan", glyph: "flask" });
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ tint: "cyan", glyph: "flask" });
     // Its own event, both facts whole, and never workspace.created: the machine was not touched.
     expect(events.filter(e => e.type === "workspace.look")).toMatchObject([
-      { workspaceId: ws.id, tint: "teal", glyph: null },
-      { workspaceId: ws.id, tint: "teal", glyph: "flask" },
+      { workspaceId: ws.id, tint: "cyan", glyph: null },
+      { workspaceId: ws.id, tint: "cyan", glyph: "flask" },
     ]);
     expect(events.filter(e => e.type === "workspace.created")).toEqual([]);
     expect(backend.machines[0]!.killed).toBe(false);
 
     await rt.close();
     const next = createRuntime({ backend, store, adapters: {} });
-    expect(await next.workspaces.get(ws.id)).toMatchObject({ tint: "teal", glyph: "flask" });
+    expect(await next.workspaces.get(ws.id)).toMatchObject({ tint: "cyan", glyph: "flask" });
     await next.close();
   });
 

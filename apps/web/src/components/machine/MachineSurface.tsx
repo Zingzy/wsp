@@ -11,7 +11,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { LINEAGE_MARKS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { LINEAGE_MARKS, LOOK_PARTS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -28,7 +28,7 @@ import {
 import { Button, WARN_BUTTON } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
-import { WorkspaceLookPicker } from "../workspaceLook.js";
+import { LOOK_WORDS, WorkspaceLookPicker } from "../workspaceLook.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import {
   bytesOfLabel,
@@ -222,14 +222,19 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
   );
 }
 
-/** The workspace's own hue and glyph, the same rows the row's menu opens in a dialog. */
+/** The workspace's own hue and glyph, the same rows the row's menu opens in a dialog, each under the tab's own
+ * section heading rather than a label style of its own. */
 function Look({ workspace }: { workspace: WorkspaceView }) {
   return (
-    <Section label="Appearance">
-      <div className="mt-2">
-        <WorkspaceLookPicker workspace={workspace} />
-      </div>
-    </Section>
+    <>
+      {LOOK_PARTS.map(part => (
+        <Section key={part} label={LOOK_WORDS[part]}>
+          <div className="mt-2">
+            <WorkspaceLookPicker workspace={workspace} part={part} />
+          </div>
+        </Section>
+      ))}
+    </>
   );
 }
 

@@ -14,7 +14,7 @@ import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
-import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
+import { SIDEBAR_MODE_KEY, useSpaceTint } from "../src/sidebar/sidebarMode.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
@@ -923,8 +923,13 @@ describe("Solari out of reach from this computer", () => {
   });
 });
 
+/** What the shell reads to wash its own surface, mounted beside the body so one render answers for both. */
+function TintProbe() {
+  return <span data-tint-probe>{useSpaceTint() ?? "none"}</span>;
+}
+
 describe("a workspace's own colour and glyph", () => {
-  const TINTED: WorkspaceView = { ...view("ws_a", "api"), tint: "teal", glyph: "flask" };
+  const TINTED: WorkspaceView = { ...view("ws_a", "api"), tint: "cyan", glyph: "flask" };
   const PLAIN = view("ws_b", "web");
   const both = () => [{ ...TINTED }, { ...PLAIN }];
   const threads = () => [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }), session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-4 * 60_000) })];
@@ -943,25 +948,32 @@ describe("a workspace's own colour and glyph", () => {
     return api;
   }
 
-  it("in the dots row the hue is the dot's colour and the current dot carries the glyph; a workspace with neither keeps its state dot", async () => {
+  it("in the dots row every dot keeps its state colour, and the hue reaches the current one's name alone", async () => {
     await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
     const [tint, plain] = dots() as [HTMLElement, HTMLElement];
-    expect(tint.getAttribute("data-space-tint")).toBe("teal");
-    expect(leadOf(tint).className).toContain("bg-[var(--space-tint)]");
-    expect(leadOf(tint).className).not.toContain("bg-success");
-    expect(plain.getAttribute("data-space-tint")).toBeNull();
+    // Both workspaces are running, so both dots are the green that says so, hue or no hue.
+    expect(leadOf(tint).className).toContain("bg-success");
     expect(leadOf(plain).className).toContain("bg-success");
-    // The glyph rides the current dot alone, since only that one has the room for it.
+    expect(tint.getAttribute("data-space-tint")).toBeNull();
+    // The name of the one on screen is where the hue shows, and only there.
+    const name = tint.querySelector<HTMLElement>("[data-space-tint]")!;
+    expect(name.getAttribute("data-space-tint")).toBe("cyan");
+    expect(name.textContent).toBe("api");
+    expect(name.className).toContain("text-[var(--space-tint)]");
+    // The glyph rides the current dot alone, since only that one has the room for it, and takes the row's own ink.
     expect(tint.querySelector("[data-space-glyph='flask']")).not.toBeNull();
+    expect(tint.querySelector("[data-space-glyph]")!.className.baseVal ?? "").not.toContain("--space-tint");
     fireEvent.click(plain);
     await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
     expect(document.querySelector("[data-space-dots] [data-space-glyph]")).toBeNull();
+    // The workspace with no hue puts no hue on its name either.
+    expect(document.querySelector("[data-space-dots] [data-space-tint]")).toBeNull();
   });
 
   it("the header's lead is the glyph in the hue, and the state dot moves to the state slot so running is still said", async () => {
     await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
     const header = spaceHeader()!;
-    expect(header.getAttribute("data-space-tint")).toBe("teal");
+    expect(header.getAttribute("data-space-tint")).toBe("cyan");
     expect(leadOf(header).querySelector("[data-space-glyph='flask']")).not.toBeNull();
     const state = header.querySelector<HTMLElement>("[data-space-state]")!;
     expect(state.querySelector(".bg-success")).not.toBeNull();
@@ -979,11 +991,35 @@ describe("a workspace's own colour and glyph", () => {
     expect(header.querySelector("[data-space-state]")!.querySelector("span[aria-hidden]")).toBeNull();
   });
 
+  // The store keeps its workspaces sorted by id; the sidebar draws the running ones first, so a napping workspace
+  // whose id sorts first parts the two orders. A creation in flight holds its own key as the selection, which is in
+  // neither order, and both fall back to a first row: the shell's wash has to be the header's workspace even then.
+  it("the wash the shell paints and the header the body draws are the same workspace when the two orders differ", async () => {
+    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    const napping: WorkspaceView = { ...view("ws_aaa", "old", "napping"), tint: "azure" };
+    const running: WorkspaceView = { ...view("ws_zzz", "api"), tint: "magenta" };
+    const api = fakeApi([napping, running], [status(napping), status(running)]);
+    api.createFromGoldenHead.mockImplementation(() => new Promise(() => {}));
+    useStore.getState().bind(api);
+    render(
+      <SidebarProvider defaultOpen>
+        <TintProbe />
+        <WorkspaceSidebar />
+      </SidebarProvider>,
+    );
+    await waitFor(() => expect(spaceHeader()).not.toBeNull());
+    await act(async () => void useStore.getState().createWorkspace("fresh"));
+    await waitFor(() => expect(useStore.getState().selectedId).toBe(useStore.getState().creations[0]!.key));
+    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_aaa", "ws_zzz"]);
+    expect(within(spaceHeader()!).getByText("api")).toBeDefined();
+    expect(document.querySelector("[data-tint-probe]")!.textContent).toBe("magenta");
+  });
+
   it("in the list body the hue draws on the tinted workspace's branch rail and nowhere else", async () => {
     await mount(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()), "api");
     await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_b"]));
     // One element in the whole body wears the hue, and it is the rail the tinted workspace's threads hang from.
-    expect(tinted()).toEqual(["teal"]);
+    expect(tinted()).toEqual(["cyan"]);
     const rail = document.querySelector<HTMLElement>("[data-space-tint]")!;
     expect(rail.getAttribute("data-slot")).toBe("sidebar-menu-sub");
     expect(rail.querySelector("[data-row-id='thread:s1']")).not.toBeNull();

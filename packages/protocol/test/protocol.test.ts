@@ -132,12 +132,12 @@ describe("a workspace's look", () => {
     expect(new Set(WORKSPACE_GLYPHS).size).toBe(WORKSPACE_GLYPHS.length);
     for (const glyph of WORKSPACE_GLYPHS) expect(glyph).toMatch(/^[a-z]+$/);
     expect(lookWord("terminal")).toBe("Terminal");
-    expect(lookWord("teal")).toBe("Teal");
+    expect(lookWord("cyan")).toBe("Cyan");
   });
 
   it("the view carries both, absent is none, and a hue outside the six is refused", () => {
     expect(WorkspaceView.parse(view)).toEqual(view);
-    const looked = { ...view, tint: "teal", glyph: "flask" };
+    const looked = { ...view, tint: "cyan", glyph: "flask" };
     expect(WorkspaceView.parse(looked)).toEqual(looked);
     expect(() => WorkspaceView.parse({ ...view, tint: "emerald" })).toThrow();
     expect(() => WorkspaceView.parse({ ...view, glyph: "🚀" })).toThrow();
@@ -153,7 +153,7 @@ describe("a workspace's look", () => {
       expect(RuntimeRequest.parse(req)).toEqual(req);
     }
     expect(() => RuntimeRequest.parse({ id: 5, op: "workspaces.look", workspaceId: "ws_1", tint: "red" })).toThrow();
-    expect(() => RuntimeRequest.parse({ id: 6, op: "workspaces.look", tint: "teal" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 6, op: "workspaces.look", tint: "cyan" })).toThrow();
   });
 
   it("the event carries both facts whole, so a cleared one reads null rather than going missing", () => {

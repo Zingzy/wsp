@@ -154,6 +154,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --animate-ghost-pulse: ghost-pulse 2.4s infinite;
   --animate-status-ping: status-ping 2s infinite;
   --animate-squiggle: squiggle 0.9s linear infinite;
+  /* The sidebar's move between two spaces, over the length the track sets on itself so the clock that ends the
+     travel and the animation that draws it stay one number. Held at the end, since the body that left is dropped a
+     frame or two after the travel is over. */
+  --animate-space-slide-forward: space-slide-forward var(--space-slide-ms) ease-out both;
+  --animate-space-slide-back: space-slide-back var(--space-slide-ms) ease-out both;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-warning-surface: var(--warning-surface);
@@ -254,6 +259,24 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     }
     100% {
       opacity: 1;
+    }
+  }
+  /* A travel taking over from one still running hands the track's own offset over as --space-slide-from, so it
+     carries on from where it is instead of jumping to the side it would have started from at rest. */
+  @keyframes space-slide-forward {
+    from {
+      transform: translateX(var(--space-slide-from, 0px));
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @keyframes space-slide-back {
+    from {
+      transform: translateX(var(--space-slide-from, -50%));
+    }
+    to {
+      transform: translateX(0);
     }
   }
   @keyframes squiggle {
@@ -2071,55 +2094,77 @@ html.desktop-mac:has([data-terminal-translucent]) :is([data-right-panel-tabbar],
   background: var(--background);
 }
 
-/* One workspace's own hue, by the id its record carries: six from the palette's
-   ramps, none of them the greens that mean running or the red that means
-   danger. Every surface drawn in a workspace's colour reads --space-tint, so a
-   component names no colour and the hue has one home. */
-[data-space-tint="slate"] {
-  --space-tint: var(--color-slate-500);
-}
+/* One workspace's own hue, by the id its record carries. Six one-word ids, each
+   a token with a step per theme: no one lightness clears the readable floor
+   against both a near-white and a near-black sidebar, so the light theme takes
+   the darker step and the dark theme the lighter one. The six sit 27 degrees
+   apart and none comes within 43 of the green that means running or 44 of the
+   red that means danger, so a workspace's colour never speaks the state
+   language. Every surface drawn in a workspace's colour reads --space-tint, so
+   a component names no colour and the hue has one home. */
+:root {
+  --space-tint-cyan: oklch(0.501 0.077 206);
+  --space-tint-azure: oklch(0.504 0.094 233);
+  --space-tint-blue: oklch(0.517 0.19 260);
+  --space-tint-violet: oklch(0.537 0.246 287);
+  --space-tint-purple: oklch(0.541 0.241 314);
+  --space-tint-magenta: oklch(0.537 0.209 341);
+  /* How much of the hue goes into the sidebar's own colour in Spaces mode:
+     enough to tell two spaces apart, quiet enough to leave the rows their
+     contrast. The dark theme takes far more because its sidebar is black and
+     the mix runs in oklab, where a few percent off black paints nothing. The
+     second number is the alpha the hue lies at over the macOS window material,
+     which has no colour to mix into. */
+  --space-wash: 10%;
+  --space-wash-material: 7%;
 
-[data-space-tint="teal"] {
-  --space-tint: var(--color-teal-500);
+  @variant dark {
+    --space-tint-cyan: oklch(0.625 0.096 206);
+    --space-tint-azure: oklch(0.629 0.117 233);
+    --space-tint-blue: oklch(0.64 0.174 260);
+    --space-tint-violet: oklch(0.65 0.178 287);
+    --space-tint-purple: oklch(0.664 0.234 314);
+    --space-tint-magenta: oklch(0.67 0.261 341);
+    --space-wash: 30%;
+    --space-wash-material: 11%;
+  }
 }
 
 [data-space-tint="cyan"] {
-  --space-tint: var(--color-cyan-500);
+  --space-tint: var(--space-tint-cyan);
 }
 
-[data-space-tint="indigo"] {
-  --space-tint: var(--color-indigo-500);
+[data-space-tint="azure"] {
+  --space-tint: var(--space-tint-azure);
+}
+
+[data-space-tint="blue"] {
+  --space-tint: var(--space-tint-blue);
 }
 
 [data-space-tint="violet"] {
-  --space-tint: var(--color-violet-500);
+  --space-tint: var(--space-tint-violet);
 }
 
-[data-space-tint="pink"] {
-  --space-tint: var(--color-pink-500);
+[data-space-tint="purple"] {
+  --space-tint: var(--space-tint-purple);
 }
 
-/* How much of the hue the sidebar's surface takes in Spaces mode: a flat few
-   percent, enough to tell two spaces apart and quiet enough to leave the rows
-   their contrast. The dark theme takes more, since the mix runs toward black. */
-:root {
-  --space-tint-fill: 7%;
-}
-
-.dark {
-  --space-tint-fill: 11%;
+[data-space-tint="magenta"] {
+  --space-tint: var(--space-tint-magenta);
 }
 
 /* Spaces mode tints the sidebar's own surface. The inner layer is the one both
    the glass recipe and the macOS vibrancy leave to the app, so the mix happens
    in one place; over the window's own material there is no token to mix into,
-   only the material behind it. */
+   only the material behind it. The mix runs in oklab, which keeps the paint
+   inside sRGB where a mix in sRGB leaves it and the screen clamps. */
 [data-app-sidebar][data-space-tint] > [data-slot="sidebar-inner"] {
-  background: color-mix(in srgb, var(--space-tint) var(--space-tint-fill), var(--sidebar));
+  background: color-mix(in oklab, var(--space-tint) var(--space-wash), var(--sidebar));
 }
 
 .desktop-mac [data-app-sidebar][data-space-tint] > [data-slot="sidebar-inner"] {
-  background: color-mix(in srgb, var(--space-tint) var(--space-tint-fill), transparent);
+  background: color-mix(in oklab, var(--space-tint) var(--space-wash-material), transparent);
 }
 
 /* In the list body the hue draws in one place only: the rail the thread rows of

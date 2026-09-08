@@ -170,6 +170,43 @@ afterEach(() => {
   provideDaemonWire(WS, null);
 });
 
+describe("the space header's menu", () => {
+  // In Spaces mode no row of the workspace is on screen, so the header carries its menu. The chords are what a
+  // person learns the keys from, and the header is the only place they would see them for these actions.
+  it("carries the same chords the workspace row's menu shows for the same actions", async () => {
+    const chordsOfMenu = (): Array<[string | null | undefined, string | null]> =>
+      items().map(el => [el.querySelector("[data-menu-label]")?.textContent, el.querySelector("kbd")?.textContent ?? null]);
+
+    await mountSidebar(fakeApi([API], [statusOf(API)]), "api");
+    rightClick(rowOf("api"));
+    await screen.findByRole("menu");
+    const fromRow = chordsOfMenu();
+    useContextMenuStore.getState().choose(null);
+    cleanup();
+
+    // The name reads twice in Spaces, on the header and on its own dot, so the shared mount's one-name wait
+    // cannot be used; the header arriving is what says the body is up.
+    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.getState().bind(fakeApi([API], [statusOf(API)]));
+    render(
+      <SidebarProvider defaultOpen>
+        <WorkspaceSidebar />
+        <ContextMenuHost />
+      </SidebarProvider>,
+    );
+    const header = await waitFor(() => document.querySelector("[data-space-header]")!);
+    rightClick(header);
+    await screen.findByRole("menu");
+    expect(chordsOfMenu()).toEqual(fromRow);
+    // Not a vacuous match: these three actions do carry a chord, so an empty column would fail here.
+    expect(chordsOfMenu().filter(([, chord]) => chord !== null).map(([label]) => label)).toEqual([
+      WORKSPACE_WORDS.newThread,
+      WORKSPACE_WORDS.openTerminal,
+      WORKSPACE_WORDS.openBrowser,
+    ]);
+  });
+});
+
 describe("a workspace row's menu", () => {
   it("opens at the pointer with every registry action in order; disabled rows are dimmed with their refusal; arrows walk it and Escape hands focus back", async () => {
     await mountSidebar(fakeApi([API], [statusOf(API)]), "api");
@@ -316,21 +353,21 @@ describe("a workspace's colour and icon", () => {
     const api = fakeApi([API], [statusOf(API)]);
     const dialog = await openPicker(api, WORKSPACE_WORDS.colour);
     expect(within(dialog).getByText(API.name)).toBeDefined();
-    // The hues the ticket allows, and none of the state greens or the danger red.
+    // The hues the palette offers, none of them near the green that means running or the red that means danger.
     expect(within(dialog).getAllByRole("button").map(b => b.getAttribute("aria-label")).filter(label => label?.startsWith("Colour:"))).toEqual([
       "Colour: None",
-      "Colour: Slate",
-      "Colour: Teal",
       "Colour: Cyan",
-      "Colour: Indigo",
+      "Colour: Azure",
+      "Colour: Blue",
       "Colour: Violet",
-      "Colour: Pink",
+      "Colour: Purple",
+      "Colour: Magenta",
     ]);
     expect(swatch(dialog, "Colour: None").getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(swatch(dialog, "Colour: Teal"));
-    await waitFor(() => expect(api.setWorkspaceLook).toHaveBeenCalledWith("ws_a", { tint: "teal" }));
-    await waitFor(() => expect(useStore.getState().workspaces[0]!.tint).toBe("teal"));
-    await waitFor(() => expect(swatch(dialog, "Colour: Teal").getAttribute("aria-pressed")).toBe("true"));
+    fireEvent.click(swatch(dialog, "Colour: Cyan"));
+    await waitFor(() => expect(api.setWorkspaceLook).toHaveBeenCalledWith("ws_a", { tint: "cyan" }));
+    await waitFor(() => expect(useStore.getState().workspaces[0]!.tint).toBe("cyan"));
+    await waitFor(() => expect(swatch(dialog, "Colour: Cyan").getAttribute("aria-pressed")).toBe("true"));
     // None is the way back, and it clears the hue rather than sending another one.
     fireEvent.click(swatch(dialog, "Colour: None"));
     await waitFor(() => expect(api.setWorkspaceLook).toHaveBeenCalledWith("ws_a", { tint: null }));
