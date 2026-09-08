@@ -25,10 +25,10 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, NOTHING_TO_SERVE_LINE, TURN_END_WORDS, WS_PORT_OFFSET, authRefusal, fmtDuration, portsAsked, shellQuote, usageRefusal, type PortsAsked } from "@wsp/protocol";
-import { agentHomes, LocalBackend } from "@wsp/engine";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, NOTHING_TO_SERVE_LINE, THIS_COMPUTER, TURN_END_WORDS, WS_PORT_OFFSET, authRefusal, fmtDuration, portsAsked, shellQuote, usageRefusal, type PortsAsked } from "@wsp/protocol";
+import { agentHomes, LocalBackend, NoProviderBackend, type MachineBackend } from "@wsp/engine";
 import { assetDir } from "./assets.js";
-import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
+import { claudeEnvs, deployDaemon, doctor, localDoctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
@@ -39,6 +39,7 @@ import { historyCache } from "./recipe-file.js";
 import { scanTools } from "./scan.js";
 import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, wrap, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
+import { runLocalInit } from "./init-local.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { addressLines, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import type { LocalDaemon } from "./local-daemon.js";
@@ -85,9 +86,13 @@ usage:
                      none does
   wsp init           set up your first golden image in six screens: Agents,
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser
+                     on this Mac, and Build, then the browser. With no provider
+                     key it seals nothing and makes this computer your
+                     workspace instead
   wsp doctor         run the reach loop end to end against one live machine
-                     (--yes also deletes the snapshots this host left behind)
+                     (--yes also deletes the snapshots this host left behind);
+                     --local proves the other half instead, a thread on this
+                     computer and its reply, with no machine and no key
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (${MCP_AGENT_IDS}),
@@ -147,6 +152,14 @@ options:
                      caches left behind, secret-shaped files cut unless a
                      rewrite drops their credentials, and the sessions your
                      agents have for the folder travelling with it
+  --no-local         init: leave this computer alone. The workspace step ticks
+                     it by default, since a workspace here forks nothing and
+                     bills nothing; this is the one way to end an init without
+                     one. Refused on a run with no provider key, where it is
+                     the only workspace there is
+  --local            doctor: prove a thread on this computer and its reply
+                     instead of the reach loop, which needs no provider key,
+                     forks nothing and bills nothing
   --non-interactive  init: ask nothing, but still run the sign-ins on the
                      machine: each one prints the page to open on this computer,
                      the code when the flow shows one, and the command that
@@ -176,6 +189,8 @@ keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
 for the optional Anthropic key at the same time and can save both to that file.
 With a Solari key present, a missing Anthropic key is only noted at start.
+Without one, init and up take the local road: this computer is the workspace,
+nothing is forked and nothing is sealed.
 `;
 
 export interface CliIO {
@@ -194,7 +209,9 @@ export interface CliIO {
 }
 
 export interface Keys {
-  solari: string;
+  /** The machine provider's key. Absent on a computer set up with no provider: wsp init took the local road, so
+   * this computer is the workspace and the provider module wired in its place refuses every machine road. */
+  solari?: string;
   anthropic?: string;
 }
 
@@ -308,10 +325,15 @@ export function keySources(): KeySources {
   return { env: process.env, cwd: process.cwd(), home: wspHome() };
 }
 
+/** What an empty answer at the Solari prompt means for the command that asked. `refuse` is the road every command
+ * that needs a machine takes: nothing it does has any meaning without one. `local` is wsp init's and wsp up's: this
+ * computer is a workspace of its own, so a run with no provider key goes on with no provider and seals nothing. */
+export type NoSolari = "refuse" | "local";
+
 export async function loadKeys(
   io: CliIO,
   sources: KeySources = keySources(),
-  ask: { anthropic: boolean } = { anthropic: true },
+  ask: { anthropic: boolean; noSolari?: NoSolari } = { anthropic: true },
 ): Promise<Keys> {
   const homeEnv = join(sources.home, ".env");
   const layers = keyLayers(sources);
@@ -320,11 +342,19 @@ export async function loadKeys(
   let solari = find("SOLARI_API_KEY");
   let anthropic = find("ANTHROPIC_API_KEY");
   if (solari !== undefined) return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
+  // Nobody at a keyboard and no key on this computer: the local road is the answer already given, since there is
+  // nothing to type it into. Every other command still refuses through its IO's own words below. The Claude key
+  // rides on either way: it is the agents' key, not the provider's, and a local thread uses it as a fork would.
+  const withoutProvider = (): Keys => (anthropic !== undefined ? { anthropic } : {});
+  if (ask.noSolari === "local" && io.isTTY !== true) return withoutProvider();
 
   // The prompt's own refusal travels as it is: the CLI's IOs refuse a secret as auth, and another caller (the desktop's
   // setup check) recognises the refusal it handed in.
-  solari = (await io.askSecret("Solari API key\nNo Solari key found.\nconsole.getsolari.com")).trim();
-  if (!solari) throw authRefusal("A Solari API key is needed to start.");
+  solari = (await io.askSecret(`Solari API key\nNo Solari key found.\nconsole.getsolari.com${ask.noSolari === "local" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : ""}`)).trim();
+  if (!solari) {
+    if (ask.noSolari === "local") return withoutProvider();
+    throw authRefusal("A Solari API key is needed to start.");
+  }
   const set: Record<string, string> = { SOLARI_API_KEY: solari };
 
   if (anthropic === undefined && ask.anthropic) {
@@ -436,9 +466,16 @@ export function statesHere(statePath: string): string[] {
   return [...new Set([statePath, resolve(defaultStatePath())])];
 }
 
+/** The machine provider this computer is set up for: Solari behind the key, and behind no key the module that holds
+ * no machine and refuses every road with the one sentence saying how to get one. The one place that choice is made,
+ * so nothing above it asks whether there is a key. */
+export function providerBackend(keys: Keys): MachineBackend {
+  return keys.solari === undefined ? new NoProviderBackend() : new SolariBackend({ apiKey: keys.solari });
+}
+
 export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys)): Runtime {
   return createRuntime({
-    backend: new SolariBackend({ apiKey: keys.solari }),
+    backend: providerBackend(keys),
     local: localWiring(),
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
@@ -533,10 +570,19 @@ function workspaceEnvsFor(keys: Keys): { workspaceEnvs?: (golden: GoldenVersion)
   return anthropic !== undefined ? { workspaceEnvs: golden => claudeEnvs(anthropic, golden) } : {};
 }
 
+/** wsp init's flags that only mean something on the golden road, each with how it was given: the local road refuses
+ * them rather than take them and do nothing. One row per flag, beside the table that parses them. */
+const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string }) => boolean][] = [
+  ["--recipe", f => f.recipe !== undefined],
+  ["--project", f => f.project !== undefined],
+  ["--first-workspace", f => f.firstWorkspace !== undefined],
+  ["--import", f => f.importFolder !== undefined],
+];
+
 async function init(
   io: CliIO,
   opts: SharedOpts,
-  flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; upCommand: string; forkCommand: string },
+  flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
   if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
   const held = servingHost(opts.statePath);
@@ -548,7 +594,33 @@ async function init(
   const say = flags.json ? jsonCliIO() : io;
   const screen = terminalInitIO(flags.json);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
-  const keys = await loadKeys(say, undefined, { anthropic: false });
+  const keys = await loadKeys(say, undefined, { anthropic: false, noSolari: "local" });
+  // No provider key: there is no machine to build an image on, so the run makes this computer the workspace and
+  // serves the app on it. Every flag about the golden is about a road this run does not take.
+  if (keys.solari === undefined) {
+    if (flags.noLocal) throw usageRefusal(`wsp init: with no provider key ${THIS_COMPUTER} is all this run makes, so --no-local would leave it with nothing. Drop it, or set SOLARI_API_KEY first.`);
+    // Every other flag is about a golden: what goes on the image, what forks from it and what lands on that fork.
+    // This road builds no image, and the workspace it makes is this computer, whose files are already here.
+    const aboutGolden = GOLDEN_FLAGS.filter(([, given]) => given(flags)).map(([name]) => name);
+    if (aboutGolden.length > 0) {
+      throw usageRefusal(`wsp init: with no provider key there is no image to build and nothing to fork, and ${THIS_COMPUTER} already has your files, so ${aboutGolden.join(", ")} would do nothing here. Drop them, or set SOLARI_API_KEY first.`);
+    }
+    const local = await runLocalInit(
+      {
+        yes: flags.yes,
+        nonInteractive: flags.nonInteractive,
+        statePath: opts.statePath,
+        ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
+        upCommand: flags.upCommand,
+        runtime: () => makeRuntime(keys, opts.statePath),
+        roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
+        host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort }, say),
+      },
+      screen,
+    );
+    if (local.handle !== undefined) stopOnSignals(local.handle, say);
+    return local.code;
+  }
   const result = await runInit(
     {
       yes: flags.yes,
@@ -557,6 +629,7 @@ async function init(
       ...(project !== undefined ? { project } : {}),
       ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
       ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
+      ...(flags.noLocal ? { noLocal: true } : {}),
       collect: collectThisComputer,
       recipe: (onHistory, onProject, onHistoryProgress) =>
         computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, onHistoryProgress, cache: historyCache(opts.statePath), ...(project !== undefined ? { folders: [project] } : {}) }),
@@ -565,7 +638,7 @@ async function init(
         return exists ? scanProject(nodeHost(), path) : undefined;
       },
       keys,
-      pricing: new SolariBackend({ apiKey: keys.solari }).pricing,
+      pricing: providerBackend(keys).pricing,
       statePath: opts.statePath,
       home: homedir(),
       secrets: keychainReader(),
@@ -618,7 +691,9 @@ async function servesNothing(rt: Runtime): Promise<boolean> {
 }
 
 export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | undefined> {
-  const keys = await loadKeys(io, undefined, { anthropic: false });
+  // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
+  // what wrote it, and asking for a key to serve it would take that road away the next morning.
+  const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
   if (await servesNothing(rt)) {
     io.error(NOTHING_TO_SERVE_LINE);
@@ -853,6 +928,8 @@ interface SharedFlags {
   project?: string;
   "first-workspace"?: string;
   import?: string;
+  "no-local"?: boolean;
+  local?: boolean;
   service?: boolean;
 }
 
@@ -896,6 +973,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         // --json has nobody to answer the screens: its objects are for whoever is driving the run.
         nonInteractive: values["non-interactive"] === true || values.json === true,
         json: values.json === true,
+        noLocal: values["no-local"] === true,
         ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
         ...(values.project !== undefined ? { project: values.project } : {}),
         ...(values["first-workspace"] !== undefined ? { firstWorkspace: values["first-workspace"] } : {}),
@@ -908,6 +986,17 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     json: false,
     cliOnly: "forks a live machine and bills while it runs; a person decides that at a terminal",
     run: async (io, opts, values) => {
+      // The local road touches no provider, so it asks for no provider key: it is the whole of the doctor for a
+      // person whose wsp init took the local road.
+      if (values.local === true) {
+        const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
+        const rt = makeRuntime(keys, opts.statePath);
+        try {
+          return await localDoctor(rt, io);
+        } finally {
+          await rt.close();
+        }
+      }
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);
       return doctor(rt, io, {
@@ -1021,6 +1110,8 @@ export const SHARED_OPTIONS: Options = {
   project: { type: "string" },
   "first-workspace": { type: "string" },
   import: { type: "string" },
+  "no-local": { type: "boolean" },
+  local: { type: "boolean" },
   service: { type: "boolean" },
 };
 
@@ -1041,7 +1132,7 @@ export const COMMAND_LINES: readonly CommandLine[] = [
 export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
   const verb = findVerb(argv);
   // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
-  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, runtime: async statePath => makeRuntime(await loadKeys(io, undefined, { anthropic: false }), statePath) });
+  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, runtime: async statePath => makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath) });
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom);
   let values: SharedFlags;
   let positionals: string[];

@@ -1,25 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The last thing wsp init asks, once the golden is sealed: make the first
-// workspace and put a project on it. Yes forks from the golden just sealed,
-// imports the folder under the consent the app's import dialog starts from,
-// and answers with the address that opens the app on that workspace; No forks
-// nothing and leaves the plain address. The agent's road skips the questions
-// and reads the same two answers off --first-workspace and --import.
+// workspace and put a project on it, and whether this computer becomes a
+// workspace too. Yes forks from the golden just sealed, imports the folder
+// under the consent the app's import dialog starts from, and answers with the
+// address that opens the app on that workspace; No forks nothing. The tick
+// beside it is on by default and costs nothing, so a person who answers No to
+// the fork still ends in a workspace. The agent's road skips the questions and
+// reads the same answers off --first-workspace, --import and --no-local.
 import type { Readable, Writable } from "node:stream";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { isCancel, log } from "@clack/prompts";
-import { canTravel, defaultAgents, defaultConsent, fmtBytes, importRequest, plural, workspaceHash, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
+import { canTravel, defaultAgents, defaultConsent, fmtBytes, importRequest, plural, THIS_COMPUTER, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import type { CreatedWorkspace } from "@wsp/runtime";
 import { confirmPrompt, textPrompt } from "./init-layout.js";
-import type { HostHandle } from "./server.js";
+import type { HostHandle, WorkspaceRoads } from "./server.js";
 
 /** The name a first workspace takes when nobody names one. */
 export const FIRST_WORKSPACE = "first";
 
 export const FIRST_QUESTION = "Make your first workspace and import a project now?";
 export const FOLDER_QUESTION = "Which folder on this Mac?";
+/** The tick beside the fork: this computer as a workspace of its own. It boots nothing and bills nothing, so it is
+ * on by default and a No to the fork above still leaves a workspace to open the app on. */
+export const ALSO_LOCAL_QUESTION = `Also make ${THIS_COMPUTER} a workspace?`;
+export const ALSO_LOCAL_HINT = "Threads run here, on your own machine, under your own sign-ins and the tools already on your PATH. Nothing is forked and nothing bills.";
 /** What the No answer leaves behind, the wizard's last line. */
 export const DONE_LINE = "Done. wsp up starts the app; opening it now.";
 
@@ -29,16 +35,28 @@ export interface FirstWorkspace {
   folder?: string;
 }
 
+/** The whole workspace step: the fork the question asked for, when it asked for one, and whether this computer
+ * becomes a workspace too. Both can be on, either can be off, and a step that leaves both off ends with none. */
+export interface WorkspaceStep {
+  fork?: FirstWorkspace;
+  local: boolean;
+}
+
 export interface FirstAsk {
   /** Whether the person is at a terminal to answer; without one the flags and the defaults decide. */
   interactive: boolean;
   /** Nobody at a terminal (an agent driving, or no terminal): only a flag forks, since a workspace bills and the
-   * caller did not ask for one. Off, a run that asks nothing still takes the question's default, a fork. */
+   * caller did not ask for one. Off, a run that asks nothing still takes the question's default, a fork. This
+   * computer is not a fork and bills nothing, so the tick stands whether anyone is here or not. */
   unattended: boolean;
   /** --first-workspace; naming one answers the question yes. */
   name?: string;
   /** --import; naming a folder answers the question yes and skips the folder prompt. */
   folder?: string;
+  /** --no-local: the tick off, the one way to end an init with no local workspace. */
+  noLocal?: boolean;
+  /** This host already holds its one local workspace, so the tick has nothing to make and is not asked. */
+  hasLocal?: boolean;
   input: Readable;
   output: Writable;
 }
@@ -68,16 +86,20 @@ export function checkImportFolder(folder: string): void {
   if (!dir) throw new Error(`--import ${folder}: not a folder`);
 }
 
-/** The last question, or the flags in its place; nothing means no workspace is forked, and the cancel symbol is esc
- * at the confirm. Esc at the folder prompt is not a cancel: the Yes above it already asked for a workspace. */
-export async function askFirst(o: FirstAsk): Promise<FirstWorkspace | undefined | symbol> {
+/** The workspace step, or the flags in its place: the fork the question asks for and the tick beside it. The cancel
+ * symbol is esc at the fork confirm, which ends the step with nothing made, the tick included. Esc at the folder
+ * prompt is not a cancel: the Yes above it already asked for a workspace. */
+export async function askFirst(o: FirstAsk): Promise<WorkspaceStep | symbol> {
   const named = o.name !== undefined || o.folder !== undefined;
   const name = o.name ?? FIRST_WORKSPACE;
   const folder = folderOf(o.folder);
+  // The tick has nothing to make on a host that already holds its one local workspace, and --no-local turns it off.
+  const offered = o.noLocal !== true && o.hasLocal !== true;
+  const forked = { name, ...(folder !== undefined ? { folder } : {}) };
   // A flag is an answer already given; asking again would ask an agent's caller a question nobody is there to read.
-  if (named) return { name, ...(folder !== undefined ? { folder } : {}) };
-  if (o.unattended) return undefined;
-  if (!o.interactive) return { name };
+  if (named) return { fork: forked, local: offered };
+  if (o.unattended) return { local: offered };
+  if (!o.interactive) return { fork: { name }, local: offered };
   const go = await confirmPrompt({
     message: FIRST_QUESTION,
     hint: "Enter forks a workspace from the golden just sealed and imports a folder onto it. No leaves the app with none; you can make one there.",
@@ -86,7 +108,9 @@ export async function askFirst(o: FirstAsk): Promise<FirstWorkspace | undefined 
     output: o.output,
   });
   if (isCancel(go)) return go;
-  if (!go) return undefined;
+  const local = offered ? await askAlsoLocal(o) : false;
+  if (isCancel(local)) return local;
+  if (!go) return { local };
   const typed = await textPrompt({
     message: FOLDER_QUESTION,
     hint: "The folder lands on the machine at the path it has here; caches stay behind and secret-shaped files are cut. Enter with nothing imports no project.",
@@ -95,7 +119,13 @@ export async function askFirst(o: FirstAsk): Promise<FirstWorkspace | undefined 
   });
   // Esc here leaves the folder, not the Yes just given: it forks the workspace with no project, as Enter on nothing does.
   const picked = isCancel(typed) ? undefined : folderOf(typed);
-  return { name, ...(picked !== undefined ? { folder: picked } : {}) };
+  return { fork: { name, ...(picked !== undefined ? { folder: picked } : {}) }, local };
+}
+
+/** The tick on its own, asked whether the fork above it was taken or not and asked alone on the road with no golden
+ * to fork: a person who wants no cloud workspace is who the question is for. */
+export async function askAlsoLocal(o: Pick<FirstAsk, "input" | "output">): Promise<boolean | symbol> {
+  return confirmPrompt({ message: ALSO_LOCAL_QUESTION, hint: ALSO_LOCAL_HINT, initialValue: true, input: o.input, output: o.output });
 }
 
 /** What the run built: the workspace the address opens on, and what landed on it when a folder was named. */
@@ -162,6 +192,20 @@ export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
     spinner.stop();
     log.warn(`${o.first.folder} was not imported: ${errorText(e)}. The workspace is up; import it from the app.`, out);
     return { workspace };
+  }
+}
+
+/** The tick taken: this computer as a workspace, through the same road the app's own row takes. A host that refuses
+ * it (one is already there, a name taken) is one line and never unwinds the run: the fork above it still stands and
+ * the address still opens. */
+export async function runLocal(roads: Pick<WorkspaceRoads, "createLocalWorkspace">, output: Writable): Promise<WorkspaceView | undefined> {
+  try {
+    const workspace = await roads.createLocalWorkspace();
+    log.step(`Workspace ${workspace.name} (${workspace.id}) is ${THIS_COMPUTER}; its threads run here, under your own sign-ins.`, { output });
+    return workspace;
+  } catch (e) {
+    log.warn(`${THIS_COMPUTER} was not made a workspace: ${errorText(e)}. wsp new --local makes it from a terminal.`, { output });
+    return undefined;
   }
 }
 

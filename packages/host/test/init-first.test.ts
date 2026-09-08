@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The last question's own parts: how a typed folder is read, what the flags
-// answer without asking, the two lines the import prints, and the address the
-// app opens on.
+// The workspace step's own parts: how a typed folder is read, what the flags
+// answer without asking, the tick beside the fork, the two lines the import
+// prints, and the address the app opens on.
 import { describe, expect, it } from "vitest";
 import { PassThrough } from "node:stream";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ProjectImportResult, ProjectPlan } from "@wsp/protocol";
-import { appUrl, askFirst, folderOf, importedLine, planLine } from "../src/init-first.js";
+import { stripVTControlCharacters } from "node:util";
+import { isCancel } from "@clack/prompts";
+import type { ProjectImportResult, ProjectPlan, WorkspaceView } from "@wsp/protocol";
+import { ALSO_LOCAL_QUESTION, FIRST_QUESTION, FOLDER_QUESTION, appUrl, askFirst, folderOf, importedLine, planLine, runLocal, type FirstAsk } from "../src/init-first.js";
+
+/** The two keys the step is answered with. */
+const ENTER = "\r";
+const ESC = "\x1b";
 
 const streams = () => ({ input: new PassThrough(), output: new PassThrough() });
 
@@ -45,33 +51,106 @@ describe("the folder a person types", () => {
 describe("the flags in the question's place", () => {
   it("--import alone forks under the default name and imports that folder, asking nothing", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: true, unattended: false, folder: "/Users/me/code/proj", input, output })).toEqual({ name: "first", folder: "/Users/me/code/proj" });
+    expect(await askFirst({ interactive: true, unattended: false, folder: "/Users/me/code/proj", input, output })).toEqual({ fork: { name: "first", folder: "/Users/me/code/proj" }, local: true });
     expect(output.read()).toBeNull();
   });
 
   it("--first-workspace alone forks under that name and imports nothing", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: true, unattended: false, name: "proj", input, output })).toEqual({ name: "proj" });
+    expect(await askFirst({ interactive: true, unattended: false, name: "proj", input, output })).toEqual({ fork: { name: "proj" }, local: true });
     expect(output.read()).toBeNull();
   });
 
   it("--yes at a terminal with no flags takes the default: the workspace is forked and no project imported", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: false, unattended: false, input, output })).toEqual({ name: "first" });
+    expect(await askFirst({ interactive: false, unattended: false, input, output })).toEqual({ fork: { name: "first" }, local: true });
     expect(output.read()).toBeNull();
   });
 
-  it("with nobody at a terminal only a flag forks: no flag, no workspace; a name or a folder, that fork", async () => {
+  it("with nobody at a terminal only a flag forks: no flag, no fork; a name or a folder, that fork. The tick stands either way, since this computer bills nothing", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: false, unattended: true, input, output })).toBeUndefined();
-    expect(await askFirst({ interactive: false, unattended: true, name: "proj", input, output })).toEqual({ name: "proj" });
-    expect(await askFirst({ interactive: false, unattended: true, folder: "/Users/me/code/proj", input, output })).toEqual({ name: "first", folder: "/Users/me/code/proj" });
+    expect(await askFirst({ interactive: false, unattended: true, input, output })).toEqual({ local: true });
+    expect(await askFirst({ interactive: false, unattended: true, name: "proj", input, output })).toEqual({ fork: { name: "proj" }, local: true });
+    expect(await askFirst({ interactive: false, unattended: true, folder: "/Users/me/code/proj", input, output })).toEqual({ fork: { name: "first", folder: "/Users/me/code/proj" }, local: true });
+    expect(output.read()).toBeNull();
+  });
+
+  it("--no-local turns the tick off on every road, and a host that already holds one is not asked either", async () => {
+    const { input, output } = streams();
+    expect(await askFirst({ interactive: false, unattended: true, noLocal: true, input, output })).toEqual({ local: false });
+    expect(await askFirst({ interactive: false, unattended: false, noLocal: true, input, output })).toEqual({ fork: { name: "first" }, local: false });
+    expect(await askFirst({ interactive: true, unattended: false, name: "proj", hasLocal: true, input, output })).toEqual({ fork: { name: "proj" }, local: false });
     expect(output.read()).toBeNull();
   });
 
   it("reads a relative --import against this computer's working directory", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: false, unattended: true, folder: "code/proj", input, output })).toEqual({ name: "first", folder: resolve("code/proj") });
+    expect(await askFirst({ interactive: false, unattended: true, folder: "code/proj", input, output })).toEqual({ fork: { name: "first", folder: resolve("code/proj") }, local: true });
+  });
+});
+
+describe("the tick beside the fork", () => {
+  /** The step answered at a terminal: each keypress once the question it answers has been drawn. */
+  const answer = async (o: { fork: string; tick?: string; folder?: string }, ask: Partial<FirstAsk> = {}) => {
+    const { input, output } = streams();
+    const drawn: string[] = [];
+    output.on("data", (c: Buffer) => drawn.push(stripVTControlCharacters(c.toString())));
+    const step = askFirst({ interactive: true, unattended: false, input, output, ...ask });
+    const press = async (key: string, until: string): Promise<void> => {
+      const start = Date.now();
+      while (!drawn.join("").includes(until)) {
+        if (Date.now() - start > 5000) throw new Error(`${until} was never drawn; the screen said ${JSON.stringify(drawn.join(""))}`);
+        await new Promise(r => setTimeout(r, 5));
+      }
+      input.write(key);
+    };
+    await press(o.fork, FIRST_QUESTION);
+    if (o.tick !== undefined) await press(o.tick, ALSO_LOCAL_QUESTION);
+    if (o.folder !== undefined) await press(o.folder, FOLDER_QUESTION);
+    return { step: await step, drawn: () => drawn.join("") };
+  };
+
+  it("is on by default: Enter through the step forks and makes this computer a workspace too", async () => {
+    const { step, drawn } = await answer({ fork: ENTER, tick: ENTER, folder: ENTER });
+    expect(step).toEqual({ fork: { name: "first" }, local: true });
+    expect(drawn()).toContain("Also make this computer a workspace?");
+  });
+
+  it("No to the fork still asks the tick, so a person who wants no cloud workspace ends with one here", async () => {
+    const { step } = await answer({ fork: "n", tick: ENTER });
+    expect(step).toEqual({ local: true });
+  });
+
+  it("No to the tick leaves this computer alone", async () => {
+    const { step } = await answer({ fork: "n", tick: "n" });
+    expect(step).toEqual({ local: false });
+  });
+
+  it("esc at the fork ends the step with nothing made, the tick included: it is never asked", async () => {
+    const { step, drawn } = await answer({ fork: ESC });
+    expect(isCancel(step)).toBe(true);
+    expect(drawn()).not.toContain(ALSO_LOCAL_QUESTION);
+  });
+});
+
+describe("the tick taken", () => {
+  it("makes this computer a workspace through the app's own road and says which one it is", async () => {
+    const output = new PassThrough();
+    const said: string[] = [];
+    output.on("data", (c: Buffer) => said.push(stripVTControlCharacters(c.toString())));
+    const workspace = { id: "ws_local", name: "mac", kind: "local" } as WorkspaceView;
+    expect(await runLocal({ createLocalWorkspace: async () => workspace }, output)).toBe(workspace);
+    expect(said.join("")).toContain("Workspace mac (ws_local) is this computer");
+  });
+
+  it("a host that refuses it is one line and no throw: the fork beside it still stands", async () => {
+    const output = new PassThrough();
+    const said: string[] = [];
+    output.on("data", (c: Buffer) => said.push(stripVTControlCharacters(c.toString())));
+    const refused = async (): Promise<WorkspaceView> => { throw new Error("one local workspace per host"); };
+    expect(await runLocal({ createLocalWorkspace: refused }, output)).toBeUndefined();
+    expect(said.join("")).toContain("this computer was not made a workspace: one local workspace per host");
+    expect(said.join("")).toContain("wsp new --local");
   });
 });
 

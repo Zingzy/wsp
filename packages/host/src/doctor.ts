@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, OWNER_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, whoseMachine, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
+import { DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir } from "./assets.js";
@@ -482,6 +482,83 @@ export interface DoctorOptions {
   /** The state file whose records decided which rows are orphans; named in the offer, since a run under a different
    * --state reads the usual file's goldens as recorded by nothing. */
   statePath?: string;
+}
+
+/** The word the local road asks the agent for and reads back: random per run, so a reply that carries it was written
+ * by a turn this run started rather than left in a store by an earlier one. */
+export const localPrompt = (word: string): string => `Reply with exactly this word and nothing else: ${word}`;
+
+/** The doctor's local road: no machine, no provider and no bill. This computer is the workspace, a thread runs on it
+ * through the harness whose binary answered here, and its reply is read. It proves the half of wsp a person with no
+ * provider key has: the local backend, the turn's child process, the adapter, the transcript. A workspace this run
+ * made is forgotten at the end; the one this host already holds is left where it is. */
+export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
+  const timings = new Timings();
+  let failed: string | undefined;
+  let made: string | undefined;
+  try {
+    io.log(`doctor: proving a thread on ${THIS_COMPUTER}, with no machine and nothing billing`);
+
+    const workspace = await timings.time(
+      "local workspace",
+      async () => {
+        const held = (await rt.workspaces.list()).find(isLocalWorkspace);
+        if (held !== undefined) return held;
+        const fresh = await rt.workspaces.createLocal();
+        made = fresh.id;
+        return fresh;
+      },
+      w => `${w.name} (${made === undefined ? "already here" : "made for this run"})`,
+    );
+
+    const harness = await timings.time(
+      "harness here",
+      async () => {
+        const rows = await rt.harnesses.list(workspace.id);
+        const answered = rows.find(r => r.source === "harness");
+        if (answered === undefined) {
+          const refused = rows.filter(r => r.refusal !== undefined).map(r => `${r.label}: ${r.refusal!}`);
+          throw new Error(`no agent on this computer described itself${refused.length > 0 ? ` (${refused.join("; ")})` : ", so none of the ones wsp knows is installed and signed in here"}`);
+        }
+        return answered;
+      },
+      h => `${h.label} ${h.version ?? "version unknown"}`,
+    );
+
+    const word = `wsp-${randomBytes(3).toString("hex")}`;
+    await timings.time(
+      "thread and its reply",
+      async () => {
+        const handle = await rt.sessions.start(workspace.id, { prompt: localPrompt(word), harness: harness.harness });
+        const result = await handle.finished;
+        if (result.status !== "completed") throw new Error(`the turn ended ${result.status}${result.text === undefined ? "" : `: ${result.text.slice(0, 200)}`}`);
+        if (result.text === undefined || !result.text.includes(word)) throw new Error(`the reply did not carry the word this run asked for: ${JSON.stringify(result.text?.slice(0, 200) ?? null)}`);
+        return result;
+      },
+      () => `${harness.label} answered with the word it was asked for`,
+    );
+
+    await timings.time(
+      "tidy",
+      async () => {
+        // Delete on this kind drops the record and nothing else: this computer is not a machine to stop.
+        if (made !== undefined) await rt.workspaces.delete(made);
+      },
+      () => (made === undefined ? "the workspace was already here and stays" : "the workspace this run made is forgotten"),
+    );
+    made = undefined;
+  } catch (e) {
+    failed = e instanceof Error ? e.message : String(e);
+    if (made !== undefined) await rt.workspaces.delete(made).catch(() => {});
+  }
+
+  timings.print(io.log);
+  if (failed !== undefined) {
+    io.error(`\nDOCTOR FAIL: ${failed}`);
+    return 1;
+  }
+  io.log(`\nDOCTOR PASS: ${THIS_COMPUTER} is a workspace, a thread ran on it and its reply came back.`);
+  return 0;
 }
 
 export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
