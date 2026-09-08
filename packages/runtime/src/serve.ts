@@ -8,7 +8,7 @@ import { randomBytes } from "node:crypto";
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { HOST_STOPPING_CLOSE, RuntimeRequest, type ExecEvent, type ForwardEvent, type PortForward } from "@wsp/protocol";
+import { HOST_STOPPING_CLOSE, RELAY_TICKET_REFUSAL, RuntimeRequest, TICKET_ORIGIN, type ExecEvent, type ForwardEvent, type PortForward, type WorkspaceOrigin } from "@wsp/protocol";
 import type { HostFolders, HostTerminalConfig, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -48,7 +48,7 @@ export interface RuntimeServer {
 }
 
 interface Ticket {
-  purpose: string;
+  purpose: keyof typeof TICKET_ORIGIN;
   expiresAt: number;
 }
 
@@ -108,13 +108,18 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const url = new URL(req.url ?? "/", "ws://localhost");
     const ticketParam = url.searchParams.get("ticket");
     let authed = false;
+    // What this socket is, decided when it is let in and never again: the ticket it redeemed says whether its
+    // requests reached the host from a machine. Origin rides the wire from the client, so a socket that lied about
+    // it would drive what only this computer may; the host stamps the road's own answer over what arrives.
+    let stamped: WorkspaceOrigin | undefined;
     if (ticketParam !== null) {
       const ticket = tickets.get(ticketParam);
       tickets.delete(ticketParam); // single-use, spent even when expired
-      if (!ticket || ticket.purpose !== "connect" || now() > ticket.expiresAt) {
+      if (!ticket || now() > ticket.expiresAt) {
         ws.close(4401, "unauthorized");
         return;
       }
+      stamped = TICKET_ORIGIN[ticket.purpose];
       authed = true;
     }
 
@@ -157,13 +162,17 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           return;
         }
 
-        const origin = msg.origin;
+        const origin = stamped ?? msg.origin;
         try {
           switch (msg.op) {
             case "auth":
               send({ id: msg.id, ok: true });
               return;
             case "ticket.issue": {
+              if (stamped !== undefined) {
+                send({ id: msg.id, ok: false, error: RELAY_TICKET_REFUSAL });
+                return;
+              }
               const ticket = randomBytes(24).toString("base64url");
               const expiresAt = now() + ticketTtlMs;
               tickets.set(ticket, { purpose: msg.purpose, expiresAt });
@@ -195,6 +204,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.createLocal":
               send({ id: msg.id, ok: true, workspace: await rt.workspaces.createLocal(msg.name, origin) });
               return;
+            case "workspaces.createSsh": {
+              const { id, op, address, origin: _sent, ...rest } = msg;
+              void op;
+              const { notice, ...workspace } = await rt.workspaces.createSsh(address, rest, origin);
+              send({ id, ok: true, workspace, ...(notice !== undefined ? { notice } : {}) });
+              return;
+            }
             case "workspaces.list":
               send({ id: msg.id, ok: true, workspaces: await rt.workspaces.list(origin) });
               return;

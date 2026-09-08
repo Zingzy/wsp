@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { relayedRefusal, type PortForward } from "@wsp/protocol";
+import { alreadyRecorded, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, THIS_COMPUTER, type PortForward } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -93,7 +93,7 @@ describe("local workspace", () => {
   it("there is one local workspace per host", async () => {
     const rt = runtime();
     await rt.workspaces.createLocal("mac");
-    await expect(rt.workspaces.createLocal("mac2")).rejects.toThrow("one local workspace per host");
+    await expect(rt.workspaces.createLocal("mac2")).rejects.toThrow(alreadyRecorded(THIS_COMPUTER, "mac"));
   });
 
   it("a thread starts on the local workspace and its reply lands, run through the local exec stream", async () => {
@@ -149,7 +149,6 @@ describe("local workspace", () => {
     const bundler = {} as ProjectImportOptions["bundler"];
     const lander = {} as ProjectExportOptions["lander"];
     const verbs: [string, () => Promise<unknown>][] = [
-      ["workspaces.createLocal", () => rt.workspaces.createLocal("mac", "relayed")],
       ["workspaces.get", () => rt.workspaces.get(ws.id, "relayed")],
       ["workspaces.nap", () => rt.workspaces.nap(ws.id, "relayed")],
       ["workspaces.wake", () => rt.workspaces.wake(ws.id, "relayed")],
@@ -186,6 +185,9 @@ describe("local workspace", () => {
       if (said !== relayedRefusal("mac")) answered.push(`${name}: ${said}`);
     }
     expect(answered).toEqual([]);
+    // Recording one is refused by the rule about who records a machine, not by the kind: its own sentence, since a
+    // relayed request may not make a workspace of any kind on this computer.
+    await expect(rt.workspaces.createLocal("mac2", "relayed")).rejects.toThrow(relayedRecordRefusal("mac2"));
     // Nothing was driven: the workspace is still there under its own name, and a request from this computer runs.
     expect((await rt.workspaces.get(ws.id)).name).toBe("mac");
     expect((await rt.sessions.start(ws.id, { prompt: "hi" }, "here").then(h => h.finished)).status).toBe("completed");
@@ -225,6 +227,31 @@ describe("local workspace", () => {
       expect((await c.request("workspaces.list"))["workspaces"]).toHaveLength(1);
       expect((await c.request("workspaces.rename", { workspaceId: ws.id, name: "mini", origin: "relayed" }))["error"]).toBe(relayedRefusal("mac"));
       c.close();
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("a machine's socket is stamped relayed by the host, whatever origin its client sends", async () => {
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
+    try {
+      const here = await WsClient.connect(srv.port, { token: "secret" });
+      const relay = await here.request("ticket.issue", { purpose: "relay" });
+      const machine = await WsClient.connect(srv.port, { ticket: relay["ticket"] as string });
+      // The client fills the field in with this computer's own word; the road it arrived on answers for it instead.
+      expect((await machine.request("workspaces.get", { workspaceId: ws.id, origin: "here" }))["error"]).toBe(relayedRefusal("mac"));
+      expect((await machine.request("workspaces.list", { origin: "here" }))["workspaces"]).toEqual([]);
+      // Nor can it mint itself a ticket to come back as one of the person's own clients.
+      expect((await machine.request("ticket.issue", { purpose: "connect" }))["error"]).toBe(RELAY_TICKET_REFUSAL);
+      // The same ticket road with a connect purpose is a client of the person's own, and the workspace answers it.
+      const connect = await here.request("ticket.issue", { purpose: "connect" });
+      const mine = await WsClient.connect(srv.port, { ticket: connect["ticket"] as string });
+      expect((await mine.request("workspaces.get", { workspaceId: ws.id }))["workspace"]).toMatchObject({ name: "mac" });
+      here.close();
+      machine.close();
+      mine.close();
     } finally {
       await srv.close();
     }
@@ -428,7 +455,7 @@ describe("one registry for what a workspace's kind means", () => {
   const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
   /** A comparison on the kind, or a switch arm for it, anywhere in source: every road reads a capability or asks the
    * kind's module in the runtime's registry table instead. */
-  const RULE = /\bkind\s*[!=]==\s*"(local|cloud)"|case "(local|cloud)":/;
+  const RULE = /\bkind\s*[!=]==\s*"(local|cloud|ssh)"|case "(local|cloud|ssh)":/;
   const sourceFiles = (): string[] => {
     const out: string[] = [];
     for (const top of ["packages", "apps"]) {

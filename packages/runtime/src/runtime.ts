@@ -32,6 +32,7 @@ import {
   tarOf,
   parseMergeOutput,
   plural,
+  agentHomes,
   agentsOnMachine,
   guestAgentHomes,
   guestTmpPath,
@@ -157,7 +158,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, localMachineRefusal, machineCapRefusal, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENY, PERMISSION_DENIED_LINE, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, alreadyRecorded, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, noKindLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENY, PERMISSION_DENIED_LINE, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -474,6 +475,15 @@ interface WorkspaceRecord extends WorkspaceView {
   firstLife: boolean;
   /** The provider's view of the current machine when it was created; a wake compares against it. */
   shape?: MachineShape;
+  /** The machine's login environment as it was read when the workspace was recorded: where its home is, who a turn
+   * runs as and the PATH it gets. Only a kind whose machine wsp did not make carries one, since a fork's is the
+   * golden's and the same on every one of them. */
+  login?: Readonly<Record<string, string>>;
+  /** What the machine itself answered about who it is, on the one dial that recorded the workspace, where its kind
+   * can ask: two records of one machine under different addresses, ports or keys carry the same string, and it is
+   * what says a second workspace would stand on a machine one already stands on. A kind whose id is the machine
+   * (a fork at the provider, this computer) carries none and is compared by that id. */
+  machineIdentity?: string;
   /** With phase gone: the provider's words when the machine was found missing; cleared when a fresh machine lands. */
   gone?: string;
 }
@@ -584,10 +594,32 @@ export interface LocalWiring {
   close?: () => Promise<void>;
 }
 
+/** What a host wires for the machines it reaches over ssh: the backend that dials them, and the one call that
+ * records one. Absent, the runtime serves no ssh workspace and `createSsh` is refused. The one place the ssh
+ * variant is registered beside the cloud default. */
+export interface SshWiring {
+  backend: MachineBackend;
+  /** One dial that proves the machine answers and reads what its record stands on: the handle, the name the address
+   * suggests, the machine's own login environment and its size. The address is the person's own word for the
+   * machine (user@host), read here and nowhere else in the runtime. */
+  adopt: (address: string, opts: { port?: number; keyPath?: string }) => Promise<{
+    machine: Machine;
+    name: string;
+    login: Readonly<Record<string, string>>;
+    shape: MachineShape;
+    /** What the machine answered about who it is, so one machine carries one workspace however it was addressed. */
+    identity?: string;
+    /** The key the machine answered the connection with, shown to the person once so they can compare it. */
+    hostKey?: string;
+  }>;
+}
+
 export interface RuntimeOptions {
   backend: MachineBackend;
   /** The local computer as a workspace, when a host wires it; the cloud backend serves every other workspace. */
   local?: LocalWiring;
+  /** The machines this host reaches over ssh, when a host wires them. */
+  ssh?: SshWiring;
   store: Store;
   adapters: Record<string, HarnessAdapterFactory>;
   /** Required for golden.prepare / golden.seal; the scripted golden.build carries its own. */
@@ -846,6 +878,10 @@ export interface Runtime {
     /** The one local workspace: this computer. Refused when this host wired no local backend, when one already
      * exists (one per host), and for a name another workspace holds. It forks nothing; the machine already exists. */
     createLocal(name?: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    /** A workspace on a machine the person already has, reached over ssh at `user@host`. Refused when this host
+     * wired no ssh backend, when the machine does not answer the dial, when a workspace already stands on it, and
+     * for a name another workspace holds. It forks nothing; the machine already exists. */
+    createSsh(address: string, opts?: { name?: string; port?: number; keyPath?: string }, origin?: WorkspaceOrigin): Promise<CreatedWorkspace>;
     get(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
     /** Every workspace this host holds, less the ones the caller's origin may not drive. */
     list(origin?: WorkspaceOrigin): Promise<WorkspaceView[]>;
@@ -1308,6 +1344,7 @@ async function readBodyUpTo(res: Response, cap: number): Promise<string> {
 export function createRuntime(opts: RuntimeOptions): Runtime {
   const { backend, store, adapters } = opts;
   const local = opts.local;
+  const ssh = opts.ssh;
 
   /** The one place a workspace's kind means anything: the module that answers for machines of that kind. The backend
    * that holds the machine, how a turn's process is launched on it, where each harness keeps its sessions there, the
@@ -1316,9 +1353,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * here and its wiring, nothing more. */
   interface KindModule {
     backend: MachineBackend;
-    execStream: (machine: Machine, opts?: MachineExecOptions) => ExecStreamFactory;
-    home: (agentId: string) => string;
-    env: Readonly<Record<string, string>>;
+    /** How a turn's process is launched on this workspace's machine, under the limits the registry hands every turn. */
+    execStream: (entry: LiveWorkspace, opts?: MachineExecOptions) => ExecStreamFactory;
+    /** Where the harness keeps its sessions on this workspace's machine: a fixed folder on a kind whose machines
+     * wsp makes alike, the record's own on a machine that already existed and answered with its home. */
+    home: (entry: LiveWorkspace, agentId: string) => string;
+    /** The login environment a turn runs under there, read the same way. */
+    env: (entry: LiveWorkspace) => Readonly<Record<string, string>>;
     /** Whether a request relayed from a machine may drive a workspace of this kind; a local one answers only this computer. */
     relayed: boolean;
     /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
@@ -1344,24 +1385,48 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (local?.daemonRoad === undefined) throw new Error("this host wired no daemon for its local workspace, so nothing on this computer can be dialled");
     return local.daemonRoad();
   };
+  /** The login a machine that already existed answered with, off its own record. A record written before its kind
+   * read one is a record no such kind ever wrote. */
+  const loginOf = (entry: LiveWorkspace): Readonly<Record<string, string>> => entry.record.login ?? {};
+  const sshRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
+    throw new Error(noSshDaemonLine(entry.record.name));
+  };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
-    cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true, hasDaemon: entry => Boolean(entry.machine.previewUrl), daemonRoad: cloudRoad },
+    cloud: { backend, execStream: (entry, o) => machineExecStream(entry.machine, o), home: (_entry, id) => cloudHome(id), env: () => GUEST_LOGIN_ENV, relayed: true, hasDaemon: entry => Boolean(entry.machine.previewUrl), daemonRoad: cloudRoad },
     local:
       local === undefined
         ? undefined
-        : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), home: local.home, env: local.env, relayed: false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
+        : { backend: local.backend, execStream: (_entry, o) => local.execStream(o), home: (_entry, id) => local.home(id), env: () => local.env, relayed: false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
+    ssh:
+      ssh === undefined
+        ? undefined
+        : {
+            backend: ssh.backend,
+            // The run's script, log and exit code live under the machine's own home, not a folder every login on it
+            // shares: on the person's own machine another account's /tmp folder is theirs, and a turn that cannot
+            // write in it would launch nothing.
+            execStream: (entry, o) => machineExecStream(entry.machine, { ...o, runDir: posix.join(loginOf(entry)["HOME"] ?? "/tmp", ".wsp", "run") }),
+            // The machine is the person's own, so each harness reads the store their own shell would under the home
+            // the machine answered with; the catalog's rule for where that is written once and read here.
+            home: (entry, id) => agentHomes(loginOf(entry)["HOME"] ?? "/")[id] ?? join(loginOf(entry)["HOME"] ?? "/", `.${id}`),
+            env: loginOf,
+            // A machine wsp reaches is a machine: a request relayed from one drives it, as it drives a fork.
+            relayed: true,
+            hasDaemon: () => false,
+            daemonRoad: sshRoad,
+          },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
     const found = modules[kind];
-    if (found === undefined) throw new Error(`this host has no ${kind} backend wired, so it serves no ${kind} workspace`);
+    if (found === undefined) throw new Error(noKindLine(kind));
     return found;
   };
   const backendFor = (kind: WorkspaceKind): MachineBackend => moduleOf(kind).backend;
-  const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry.machine, o);
+  const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry, o);
   /** The capability a verb reads before it runs: a machine whose capability is false refuses the verb with the one
    * sentence, which reads for the local computer, the only machine short of these capabilities today. */
   const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes">, action: string): void => {
-    if (backendFor(entry.record.kind).capabilities[can] !== true) throw new Error(localMachineRefusal(entry.record.name, action));
+    if (backendFor(entry.record.kind).capabilities[can] !== true) throw new Error(undrivenRefusal(entry.record.name, machineWord(entry.record.kind), action));
   };
   /** Whether a workspace holds one of the account's machine slots: only a kind whose machines the provider can nap
    * does, the same capability the pause and wake refusals read, so this computer is never counted against the cap
@@ -1387,6 +1452,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (line !== undefined) throw new Error(line);
   };
   const drivesId = (workspaceId: string, origin: WorkspaceOrigin | undefined): boolean => refusalFor(live.get(workspaceId)?.record, origin) === undefined;
+  /** Recording a machine that already exists is this computer's own act, whatever the kind takes once it is
+   * recorded: the address and the key a record stands on are the person's to name, so a request relayed from a
+   * machine is refused before anything is dialled and again where the record is written. */
+  const refuseRecording = (named: string, origin: WorkspaceOrigin | undefined): void => {
+    if (origin === "relayed") throw new Error(relayedRecordRefusal(named));
+  };
+  /** What a record says its machine is, for the one rule that one workspace stands on one machine: what the machine
+   * itself answered where its kind can ask, else the id, which is the machine on every other kind. */
+  const identityOf = (record: WorkspaceRecord): string => record.machineIdentity ?? record.machineId;
   const bus = eventBus();
   const pingTimeoutMs = opts.wake?.pingTimeoutMs ?? WAKE_PING_TIMEOUT_MS;
   const pauseDeadlineMs = opts.nap?.pauseDeadlineMs ?? PAUSE_DEADLINE_MS;
@@ -2643,6 +2717,47 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return forking.has(name) ? nameTakenRefusal(name) : undefined;
   };
 
+  /** The one road that records a machine that already exists: this computer, or one the person reaches over ssh.
+   * Nothing is forked, so the record stands on the machine the kind's module hands back, and one record stands on
+   * one machine. Its phase is running and its auto-nap window is off from the start: a machine wsp does not run
+   * neither naps nor wakes. */
+  const recordExisting = async (
+    kind: WorkspaceKind,
+    name: string,
+    origin: WorkspaceOrigin | undefined,
+    read: () => Promise<{ machine: Machine; size: WorkspaceSize; shape?: MachineShape; login?: Readonly<Record<string, string>>; identity?: string }>,
+  ): Promise<WorkspaceView> => {
+    const n = nameGiven(name);
+    refuseRecording(n, origin);
+    const refusal = nameRefusal(n);
+    if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
+    const { machine, size, shape, login, identity } = await read();
+    const standing = identity ?? machine.id;
+    const existing = [...live.values()].find(e => identityOf(e.record) === standing);
+    if (existing !== undefined) throw Object.assign(new Error(alreadyRecorded(machineWord(kind), existing.record.name)), { kind: "conflict" });
+    const record: WorkspaceRecord = {
+      id: `ws_${randomBytes(4).toString("hex")}`,
+      name: n,
+      kind,
+      machineId: machine.id,
+      phase: "running",
+      golden: "",
+      createdAt: new Date().toISOString(),
+      spec: {},
+      size,
+      firstLife: false,
+      idleWindowMs: null,
+      ...(shape !== undefined ? { shape } : {}),
+      ...(login !== undefined ? { login } : {}),
+      ...(identity !== undefined ? { machineIdentity: identity } : {}),
+    };
+    attach(record, machine);
+    await persist(record);
+    const v = view(record);
+    bus.emit({ type: "workspace.created", workspace: v });
+    return v;
+  };
+
   const workspaces: Runtime["workspaces"] = {
     async create(opts, origin) {
       await ready();
@@ -2693,33 +2808,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const { backend: mine } = moduleOf("local");
       // The one place a local workspace's default name lives: this computer's own, so the command line, the app and
       // the MCP tool all land on the same one rather than each defaulting it.
-      const n = nameGiven(name ?? hostname());
-      refuseRelayed({ kind: "local", name: n }, origin);
-      const refusal = nameRefusal(n);
-      if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
-      const machine = await mine.get(LOCAL_MACHINE_ID);
-      // The machine already exists and is the only one, so one record may stand on it: one local workspace per host.
-      const existing = [...live.values()].find(e => e.record.machineId === machine.id);
-      if (existing !== undefined) throw Object.assign(new Error(`this computer is already the workspace ${existing.record.name}; there is one local workspace per host`), { kind: "conflict" });
-      // A local workspace never naps (a computer runs while the host does), so its auto-nap window is off from the start.
-      const record: WorkspaceRecord = {
-        id: `ws_${randomBytes(4).toString("hex")}`,
-        name: n,
-        kind: "local",
-        machineId: machine.id,
-        phase: "running",
-        golden: "",
-        createdAt: new Date().toISOString(),
-        spec: {},
-        size: mine.pricing.defaultSize,
-        firstLife: false,
-        idleWindowMs: null,
-      };
-      attach(record, machine);
-      await persist(record);
-      const v = view(record);
-      bus.emit({ type: "workspace.created", workspace: v });
-      return v;
+      return recordExisting("local", name ?? hostname(), origin, async () => ({ machine: await mine.get(LOCAL_MACHINE_ID), size: mine.pricing.defaultSize }));
+    },
+
+    async createSsh(address, opts, origin) {
+      await ready();
+      if (ssh === undefined) throw new Error(noKindLine("ssh"));
+      // Nothing is dialled for a request relayed from a machine: the address and the key are this computer's to name,
+      // and a dial made on a machine's word would reach whatever it named.
+      refuseRecording(opts?.name ?? address, origin);
+      // The dial is made before a name is held: a machine that does not answer leaves no record and no held name.
+      const adopted = await ssh.adopt(address, { ...(opts?.port !== undefined ? { port: opts.port } : {}), ...(opts?.keyPath !== undefined ? { keyPath: opts.keyPath } : {}) });
+      const workspace = await recordExisting("ssh", opts?.name ?? adopted.name, origin, async () => ({
+        machine: adopted.machine,
+        size: { cpu: adopted.shape.cpu ?? 0, memMb: adopted.shape.memMb ?? 0 },
+        shape: adopted.shape,
+        login: adopted.login,
+        ...(adopted.identity !== undefined ? { identity: adopted.identity } : {}),
+      }));
+      // The key the machine answered with, said once where the person is looking, so they can compare it with the
+      // machine's own; the record keeps it as the machine's identity.
+      return { ...workspace, ...(adopted.hostKey !== undefined ? { notice: sshHostKeyNotice(adopted.hostKey) } : {}) };
     },
 
     async list(origin) {
@@ -3211,7 +3320,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const factory = adapters[harness];
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
     const kind = moduleOf(entry.record.kind);
-    return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, execStream: execFactoryFor(entry), home: kind.home, env: kind.env }) };
+    return { harness, adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, execStream: execFactoryFor(entry), home: id => kind.home(entry, id), env: kind.env(entry) }) };
   };
 
   type LiveSession = { view: SessionView; turnId: string; handle: SessionHandle; turnLive?: TurnLive };

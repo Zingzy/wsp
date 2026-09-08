@@ -24,10 +24,11 @@ import {
   type LocalWiring,
   type Machine,
   type Runtime,
+  type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, NOTHING_TO_SERVE_LINE, TURN_END_WORDS, WS_PORT_OFFSET, authRefusal, fmtDuration, portsAsked, shellQuote, usageRefusal, type PortsAsked } from "@wsp/protocol";
-import { agentHomes, LocalBackend } from "@wsp/engine";
+import { agentHomes, LocalBackend, SshBackend, parseSshAddress, sshIdentity, sshMachineName } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
@@ -424,6 +425,29 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   };
 }
 
+/** The machines this computer reaches over ssh: the ssh client here dials them with the person's own key, and one
+ * dial both proves a machine answers and reads what its record stands on. Nothing is kept between dials; a record's
+ * id is the whole address. */
+export function sshWiring(): SshWiring {
+  const backend = new SshBackend();
+  return {
+    backend,
+    adopt: async (address, opts) => {
+      const reach = parseSshAddress(address, opts);
+      const { machine, login, shape, hostKey } = await backend.adopt(reach);
+      return {
+        machine,
+        name: sshMachineName(reach),
+        login,
+        shape,
+        // What the machine answered about itself, so the same machine under another address, port or key is the
+        // workspace it already is; a client that logged no key leaves the record on its address alone.
+        ...(hostKey !== undefined ? { identity: sshIdentity(hostKey, login.USER), hostKey } : {}),
+      };
+    },
+  };
+}
+
 /** What every command of the shared parse works on: the port pair the one rule reads off the flags, whether a
  * person named either port, and the state file. wsp up and wsp init take theirs from this one call. */
 export interface SharedOpts extends PortsAsked {
@@ -444,6 +468,7 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
   return createRuntime({
     backend: new SolariBackend({ apiKey: keys.solari }),
     local: localWiring(),
+    ssh: sshWiring(),
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,

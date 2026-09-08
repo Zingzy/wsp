@@ -169,6 +169,26 @@ describe("machineExecStream", () => {
     expect(guest.getScript()).toContain("claude -p 'hi' </dev/null");
   });
 
+  it("a run folder the machine will not make fails the launch, rather than reading as a run already there", async () => {
+    const { backend, machine } = await makeMachine();
+    // What a machine answers when the run folder belongs to another login on it: the mkdir fails and the folder is
+    // not there to claim. Read as a replay, the launch would say it went and leave the reader on a log nobody writes.
+    backend.execImpl = async (_m, cmd) =>
+      cmd.includes("WSP_LAUNCHED")
+        ? { exitCode: 1, stdout: "", stderr: "mkdir: cannot create directory '/tmp/wsp-run/ab12cd34ef56.d': Permission denied\n" }
+        : { exitCode: 0, stdout: "", stderr: "" };
+    const stream = machineExecStream(machine, { pollMs: 5 })("true", { env: {} });
+    const read = async (): Promise<string> => {
+      try {
+        for await (const _ of stream.lines) void _;
+        return "streamed it";
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    };
+    expect(await read()).toContain("remote launch failed");
+  });
+
   it("when the poll sees the exit code the run's process group gets TERM then KILL after the log tail is read, and its files go", async () => {
     const { backend, machine } = await makeMachine();
     const guest = scriptGuest(backend, [{ append: "almost" }, { append: " done\n", exit: 0 }, {}]);
@@ -208,7 +228,7 @@ describe("machineExecStream", () => {
     expect(await stream.exited).toBe(0);
     const launch = launchCalls(guest.calls);
     expect(launch).toHaveLength(1);
-    expect(launch[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\nmkdir \/tmp\/wsp-run\/[0-9a-f]{12}\.d 2>\/dev\/null \|\| \{ echo WSP_LAUNCHED; exit 0; \}\nset -o pipefail\nprintf %s '[A-Za-z0-9+/=]+' \| base64 -d > '\/tmp\/wsp-run\/[0-9a-f]{12}\.sh' \|\| exit 1\nsetsid bash /);
+    expect(launch[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\nmkdir \/tmp\/wsp-run\/[0-9a-f]{12}\.d 2>\/dev\/null \|\| \{ \[ -d \/tmp\/wsp-run\/[0-9a-f]{12}\.d \] && \{ echo WSP_LAUNCHED; exit 0; \}; echo "no run folder on this machine: \/tmp\/wsp-run\/[0-9a-f]{12}\.d" >&2; exit 1; \}\nset -o pipefail\nprintf %s '[A-Za-z0-9+/=]+' \| base64 -d > '\/tmp\/wsp-run\/[0-9a-f]{12}\.sh' \|\| exit 1\nsetsid bash /);
     expect(solariBody(launch[0]!)).toBeLessThanOrEqual(EXEC_BODY_MAX);
   });
 
@@ -327,7 +347,7 @@ describe("machineExecStream", () => {
     const launch = launchCalls(guest.calls);
     expect(launch.filter(c => c.endsWith("echo WSP_PIECE"))).toHaveLength(4);
     expect(launch).toHaveLength(5);
-    expect(launch.at(-1)).toMatch(/mkdir \/tmp\/wsp-run\/[a-f0-9]+\.d 2>\/dev\/null \|\| \{ echo WSP_LAUNCHED; exit 0; \}\nset -o pipefail\n.*\nmkfifo \/tmp\/wsp-run\/[a-f0-9]+\.fifo\nsetsid bash /s);
+    expect(launch.at(-1)).toMatch(/mkdir \/tmp\/wsp-run\/[a-f0-9]+\.d 2>\/dev\/null \|\| \{ \[ -d \/tmp\/wsp-run\/[a-f0-9]+\.d \] && \{ echo WSP_LAUNCHED; exit 0; \}; echo "no run folder on this machine: \/tmp\/wsp-run\/[a-f0-9]+\.d" >&2; exit 1; \}\nset -o pipefail\n.*\nmkfifo \/tmp\/wsp-run\/[a-f0-9]+\.fifo\nsetsid bash /s);
     expect(guest.getInput()).toBe(`${prompt}\n`);
     expect(guest.getScript()).toContain("claude -p --input-format stream-json");
   });

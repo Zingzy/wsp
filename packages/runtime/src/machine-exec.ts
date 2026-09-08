@@ -353,8 +353,10 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     const posted: Promise<ExecResult> = untilReached(
       () =>
         putFiles(machine, files, {
-          // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
-          before: [`mkdir ${claim(base)} 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
+          // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second
+          // a no-op. A mkdir that fails for any other reason (a run folder another login on the machine owns) fails
+          // the launch: read as a replay it would answer launched and leave the reader polling a log nobody writes.
+          before: [`mkdir ${claim(base)} 2>/dev/null || { [ -d ${claim(base)} ] && { echo WSP_LAUNCHED; exit 0; }; echo "no run folder on this machine: ${claim(base)}" >&2; exit 1; }`],
           after: [...(input === undefined ? [] : [`mkfifo ${base}.fifo`]), `setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`],
           timeoutMs: execTimeoutMs,
         }),

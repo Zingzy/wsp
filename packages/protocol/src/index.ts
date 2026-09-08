@@ -185,10 +185,11 @@ export type PortProbeView = z.infer<typeof PortProbeView>;
 export const WorkspaceProject = z.object({ name: z.string(), dest: z.string(), importedAt: z.string() });
 export type WorkspaceProject = z.infer<typeof WorkspaceProject>;
 
-/** What a workspace's machine is: cloud, a fork wsp made at a provider, or local, this computer itself. A missing
- * kind reads cloud, since every record written before local workspaces existed was one. The one fact every road
- * that varies by machine kind reads; nothing switches on it outside the backend registry. */
-export const WorkspaceKind = z.enum(["cloud", "local"]);
+/** What a workspace's machine is: cloud, a fork wsp made at a provider, local, this computer itself, or ssh, a
+ * machine of the person's own that wsp only reaches. A missing kind reads cloud, since every record written before
+ * local workspaces existed was one. The one fact every road that varies by machine kind reads; nothing switches on
+ * it outside the backend registry. */
+export const WorkspaceKind = z.enum(["cloud", "local", "ssh"]);
 export type WorkspaceKind = z.infer<typeof WorkspaceKind>;
 
 /** Where a request to a workspace verb came from: here, this computer's own app, CLI or MCP, or relayed from a
@@ -1837,8 +1838,16 @@ export type DaemonEvent = z.infer<typeof DaemonEvent>;
 
 // --- runtime wire protocol (serveRuntime) ------------------------------------
 
-export const TicketPurpose = z.enum(["connect"]);
+/** What a single-use ticket opens the next socket for: `connect`, another client of the person's own, or `relay`,
+ * the road a machine's requests reach this host by. The purpose is what a socket's origin is read off, so a relayed
+ * socket is one this host minted a relay ticket for and nothing a client says on the wire can make one. */
+export const TicketPurpose = z.enum(["connect", "relay"]);
 export type TicketPurpose = z.infer<typeof TicketPurpose>;
+
+/** Where a socket redeeming a ticket of each purpose reached the host from. A connect ticket is minted over a socket
+ * that already carries this computer's token, so its origin is whatever its requests say (here in practice); a relay
+ * ticket is minted for a machine, so every request on it is relayed however the client fills the field in. */
+export const TICKET_ORIGIN: Record<TicketPurpose, WorkspaceOrigin | undefined> = { connect: undefined, relay: "relayed" };
 
 const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
@@ -1872,6 +1881,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * no local backend, when one already exists, or for a name another workspace holds. Replies with { workspace }. */
   /** Makes this computer the host's one local workspace; the name defaults to this computer's own. */
   z.object({ id: reqId, op: z.literal("workspaces.createLocal"), name: z.string().optional() }),
+  /** Records a machine the person already has, reached over ssh at `address` (user@host), with the port and key
+   * they named where those are not ssh's own. Forks nothing; refused when this host wired no ssh backend, when the
+   * machine does not answer the dial, when a workspace already stands on it, or for a name another workspace holds.
+   * The name defaults to what the address calls the machine. Replies with { workspace }. */
+  z.object({ id: reqId, op: z.literal("workspaces.createSsh"), address: z.string(), name: z.string().optional(), port: z.number().int().optional(), keyPath: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
   z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.nap"), workspaceId: z.string() }),
@@ -2221,7 +2235,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { NO_REBUILD_NEEDED, actionRefusal, computerOffline, goneRefusal, imageMoveRefusal, isBilling, kindWords, needsRebuild, reachShown, sendRefusal, workspaceKind, workspaceState, workspaceWord, WORKSPACE_KIND_WORDS, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { NO_REBUILD_NEEDED, actionRefusal, computerOffline, goneRefusal, imageMoveRefusal, isBilling, kindWords, machineWord, needsRebuild, reachShown, sendRefusal, workspaceKind, workspaceState, workspaceWord, WORKSPACE_KIND_WORDS, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";

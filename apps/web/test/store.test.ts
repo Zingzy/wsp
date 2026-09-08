@@ -210,12 +210,12 @@ describe("store creations", () => {
   it("a host that refuses this computer says so in its own sentence, with no creation row to carry it", async () => {
     const { api } = fakeApi([view("ws_a")], []);
     api.createLocalWorkspace = async () => {
-      throw new Error("this computer is already the workspace mac; there is one local workspace per host");
+      throw new Error("this computer is already the workspace mac; one workspace stands on one machine");
     };
     useStore.getState().bind(api);
     await flush();
     expect(await useStore.getState().createLocalWorkspace()).toBeNull();
-    expect(useStore.getState().toast).toBe("this computer is already the workspace mac; there is one local workspace per host");
+    expect(useStore.getState().toast).toBe("this computer is already the workspace mac; one workspace stands on one machine");
     expect(useStore.getState().creations).toEqual([]);
   });
 

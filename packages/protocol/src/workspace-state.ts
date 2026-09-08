@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { THIS_COMPUTER } from "./format.js";
+import { OVER_SSH, THIS_COMPUTER } from "./format.js";
 import type { MachineState, ReachState, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
@@ -23,17 +23,29 @@ export interface WorkspaceKindWords {
    * that already exists and simply runs while the host does. The state word beside the name, the state dot, the
    * spend, the rate, the nap countdown, the usage chart and the pause and upgrade buttons all ride this. */
   driven: boolean;
+  /** Whether a machine of this kind ever serves a daemon, which is what the terminal, files and ports ride. False
+   * says the reach word `unsupported` is this kind's steady state rather than something missing from one machine,
+   * so a row says what the machine is instead of that its daemon is not there. */
+  daemon: boolean;
 }
 
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: null, driven: true },
-  local: { machine: THIS_COMPUTER, driven: false },
+  cloud: { machine: null, driven: true, daemon: true },
+  local: { machine: THIS_COMPUTER, driven: false, daemon: true },
+  ssh: { machine: OVER_SSH, driven: false, daemon: false },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
   return WORKSPACE_KIND_WORDS[kind];
+}
+
+/** What a refusal calls this workspace's machine. Only a kind wsp does not drive reaches one, since the capability
+ * behind every driven move is what refuses on the others, so the driven kinds fall back to this computer's word
+ * rather than carrying a second phrase no sentence prints. */
+export function machineWord(kind: WorkspaceKind): string {
+  return WORKSPACE_KIND_WORDS[kind].machine ?? THIS_COMPUTER;
 }
 
 export interface WorkspaceStateInput {

@@ -6,7 +6,7 @@
 // menus are built from.
 import { PauseIcon, PlayIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { goneRefusal, localMachineRefusal, type HarnessCatalog, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { goneRefusal, machineWord, undrivenRefusal, type HarnessCatalog, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
 import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THIS_COMPUTER_HINTS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { NEW_LOCAL_ACTION, SIDEBAR_MODE_ACTION, sidebarActions, type SidebarTarget, type SidebarVerbs } from "../src/actions/sidebarActions.js";
@@ -109,7 +109,7 @@ describe("workspace actions", () => {
   it("this computer refuses the pause with the runtime's own sentence, wherever it is offered, and keeps every verb that is about threads", () => {
     const mac = workspace("running", { kind: "local", displayName: "zingzy-mac" });
     const actions = resolveActions(workspaceActions, mac, workspaceVerbs());
-    expect(actionById(actions, "phase").refusal).toBe(localMachineRefusal("zingzy-mac", "be paused"));
+    expect(actionById(actions, "phase").refusal).toBe(undrivenRefusal("zingzy-mac", machineWord("local"), "be paused"));
     expect(actionById(actions, "new-thread").refusal).toBeNull();
     expect(actionById(actions, "open-terminal").refusal).toBeNull();
     expect(actionById(actions, "copy-id").refusal).toBeNull();

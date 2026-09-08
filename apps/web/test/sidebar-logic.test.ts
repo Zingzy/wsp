@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { MACHINE_OS_WORD, THREAD_ARCHIVE_MS, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { MACHINE_OS_WORD, OVER_SSH, THREAD_ARCHIVE_MS, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -234,6 +234,20 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" } }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("$0.29 today · $0.110/hr · active");
     expect(daemonGoneLine("slow")).toBeUndefined();
     expect(daemonGoneLine(null)).toBeUndefined();
+  });
+
+  it("a machine over ssh serves no daemon at all, so its row says what the machine is rather than that one is missing", () => {
+    const over = (reach: ReachState) => project({ reach: { state: reach } }, { kind: "ssh" });
+    const line = (reach: ReachState) => workspaceMetaLine({ project: over(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
+    // unsupported is this kind's steady state, not a daemon that went away, and the row has nowhere else to say
+    // what the machine is.
+    expect(line("unsupported")).toBe(OVER_SSH);
+    expect(line("reachable")).toBe(OVER_SSH);
+    // The Spaces header reads the same rule, and what the runtime is doing still leads on both surfaces.
+    expect(spaceHeaderLines({ project: over("unsupported"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual([OVER_SSH]);
+    expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonNote: "updating the helper" }, { kind: "ssh" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
+    // This computer keeps the note: its host wires a daemon, so one missing is a fact worth the line.
+    expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" } }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("no daemon on this machine");
   });
 
   it("thread pills key on the session status, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {
