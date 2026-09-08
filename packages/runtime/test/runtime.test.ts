@@ -5723,7 +5723,7 @@ describe("gone machines", () => {
   it("the reach poll finds a running machine gone: the workspace moves to gone, its turn ends, the idle window drops and the bill stops", async () => {
     const backend = stubBackend();
     const store = memoryStore();
-    const rt = createRuntime({ backend, store, adapters: { claude: held }, status: { pollIntervalMs: 5, costIntervalMs: 5, reconcileMinMs: 0 } });
+    const rt = createRuntime({ backend, store, adapters: { claude: held }, status: { pollIntervalMs: 5, costIntervalMs: 5, reconcileMinMs: 0 }, goneConfirmMs: 5 });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const port = await closedPort();
     backend.machines[0]!.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
@@ -5756,6 +5756,48 @@ describe("gone machines", () => {
       expect(last.status.idleAt).toBeUndefined();
     } finally {
       stop();
+      await rt.close();
+    }
+  });
+
+  it("the host's metrics answer 404 while the state read says running: the workspace stays running and its turn works on", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: { claude: held }, status: { pollIntervalMs: 5, costIntervalMs: 5, reconcileMinMs: 0 }, goneConfirmMs: 5 });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const m = backend.machines[0]!;
+    const port = await closedPort();
+    m.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    await rt.sessions.start(ws.id, { prompt: "work" });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const asks = { metrics: 0 };
+    const metrics = m.metrics.bind(m);
+    m.metrics = async () => {
+      asks.metrics++;
+      return metrics();
+    };
+    const stop = rt.status.watch();
+    try {
+      // The guest misses the probe and the host has lost the VM; the state read by id is the only word on gone.
+      m.hostLost = true;
+      // Several passes read the metrics 404 with the guest still missing; none of them is a verdict.
+      await until(() => asks.metrics >= 3);
+
+      expect(m.killed).toBe(false);
+      expect(await rt.workspaces.get(ws.id)).toMatchObject({ phase: "running" });
+      expect(events.some(e => e.type === "workspace.gone")).toBe(false);
+      expect(events.some(e => e.type === "session.end")).toBe(false);
+      expect((await rt.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+      const rows = events.filter((e): e is EventUnion & { type: "workspace.status" } => e.type === "workspace.status");
+      expect(rows.filter(r => r.status.machineState === "gone")).toEqual([]);
+      expect(rows.at(-1)!.status).toMatchObject({ phase: "running", machineState: "running", reach: { state: "unreachable" } });
+      // The gap is one line per spell, however many passes read it.
+      expect(warn.mock.calls.map(c => String(c[0])).filter(l => /^host metrics for/.test(l))).toHaveLength(1);
+    } finally {
+      stop();
+      warn.mockRestore();
       await rt.close();
     }
   });
@@ -5801,14 +5843,17 @@ describe("a workspace behind the golden's head", () => {
     const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
     const record = (await store.get("workspaces", ws.id)) as { phase: string };
     await store.put("workspaces", ws.id, { ...record, phase });
-    // The store's word has to be the provider's too: a napping record over a running machine hydrates running.
+    // The store's word has to be the provider's too: a record over a machine that runs hydrates running, whichever
+    // phase it was left at.
     if (phase === "napping") backend.machines[0]!.paused = true;
+    else backend.machines[0]!.killed = true;
     await rt.close();
     const later = createRuntime({ backend, store, adapters: {} });
     try {
       await expect(later.workspaces.updateImage(ws.id)).rejects.toMatchObject({ kind: "conflict", message: why });
+      // Nothing was replaced: the refusal lands before any fork.
       expect(backend.machines).toHaveLength(1);
-      expect(backend.machines[0]!.killed).toBe(false);
+      expect((await later.workspaces.get(ws.id)).machineId).toBe("m1");
     } finally {
       await later.close();
     }

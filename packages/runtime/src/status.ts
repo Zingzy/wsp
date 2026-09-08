@@ -10,7 +10,7 @@
 // awake and billing forever.
 
 import { isMissing, roadFailed, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
-import { appendCostPoint, goneWords, hostLostAnswer, reachShown, type EventUnion, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { appendCostPoint, goneWords, reachShown, type EventUnion, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import type { Store } from "./store.js";
 
@@ -305,23 +305,28 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     persist(() => o.store.delete(COST_HISTORIES, id));
   };
 
-  /** The host's word on a machine the gateway calls running: a metrics read the host answers missing is the VM lost
-   * before the gateway's record followed (documented: a pause or snapshot then fails with 409); any other failure of
-   * the read says nothing about the machine. */
-  const hostLost = async (r: StatusRecord): Promise<string | undefined> => {
-    if (r.metrics === undefined) return undefined;
+  /** The host's own read of a machine the state read calls running, logged once per spell and never a verdict: one
+   * metrics 404 over a machine whose state read said running, and that a direct read found running two minutes
+   * later, killed two live turns on 2026-09-08. Gone is the state read's word alone. */
+  const noteMetricsGap = async (r: StatusRecord): Promise<void> => {
+    if (r.metrics === undefined) return;
+    let gap: string;
     try {
       await r.metrics();
-      return undefined;
+      doubted.delete(r.id);
+      return;
     } catch (e) {
-      return isMissing(e) ? providerSaid(e) : undefined;
+      if (!isMissing(e)) return;
+      gap = providerSaid(e);
     }
+    if (doubted.get(r.id) === r.machineId) return;
+    doubted.set(r.id, r.machineId);
+    console.warn(`host metrics for ${r.machineId} (workspace ${r.id}) answered ${gap}; the state read says running and the record follows the state read`);
   };
 
   /** The provider's word, or our own when it cannot be had (weather is not a reason to report a running workspace
-   * as anything else). A host that has lost the VM is one witness; the record settles gone only when the guest
-   * itself missed this pass too, since a guest that answers is not lost whatever a secondary endpoint says. */
-  const askProvider = async (r: StatusRecord, guestMissed: boolean): Promise<MachineState> => {
+   * as anything else). Only the state read by id names a machine gone. */
+  const askProvider = async (r: StatusRecord): Promise<MachineState> => {
     let state: MachineState;
     let answer: string | undefined;
     try {
@@ -331,34 +336,20 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       state = "gone";
       answer = providerSaid(e);
     }
-    if (state === "running") {
-      const lost = await hostLost(r);
-      if (lost === undefined) doubted.delete(r.id);
-      else if (guestMissed) {
-        state = "gone";
-        answer = hostLostAnswer(lost);
-      } else if (doubted.get(r.id) !== r.machineId) {
-        doubted.set(r.id, r.machineId);
-        console.warn(`host metrics for ${r.machineId} (workspace ${r.id}) answered ${lost} while the guest answered; the record stays running until the guest misses too`);
-      }
-    }
+    if (state === "running") await noteMetricsGap(r);
     reconciled.set(r.id, { state, at: clock.now() });
     if (state === "running") sawAwake(r.id);
     if (state === "gone") goneReasons.set(r.id, goneWords(r.machineId, { by: "status poll", at: clock.now(), ...(answer !== undefined ? { answer } : {}) }));
     return state;
   };
 
-  const machineState = async (r: StatusRecord, reconcile: StatusListOptions["reconcile"], reachFailed: boolean, guestMissed = false): Promise<MachineState> => {
-    if (reconcile === "always") return askProvider(r, guestMissed);
+  const machineState = async (r: StatusRecord, reconcile: StatusListOptions["reconcile"], reachFailed: boolean): Promise<MachineState> => {
+    if (reconcile === "always") return askProvider(r);
     if (!reachFailed) return machineStateOf(r.phase);
     const known = reconciled.get(r.id);
     if (known && clock.now() - known.at < reconcileMinMs) return known.state;
-    return askProvider(r, guestMissed);
+    return askProvider(r);
   };
-
-  /** The guest itself did not answer the probe: silence, or the edge dialled it and found nothing listening. An
-   * answer of any other kind, the daemon's or the edge's, is not this. */
-  const guestMissed = (p: Probed): boolean => p.state === "unreachable" || p.state === "no-daemon";
 
   /** undefined when the guest answered; otherwise what went wrong and how long it took. */
   const probeExec = async (r: StatusRecord): Promise<string | undefined> => {
@@ -402,14 +393,13 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     r: StatusRecord,
     reach: ReachStatus,
     reconcile: StatusListOptions["reconcile"],
-    missed: boolean,
   ): Promise<{ state: MachineState; reach: ReachStatus; reason?: string }> => {
     const s = suspectOf(r);
     const elapsed = clock.now() - s.badSince;
     if (s.zombie === undefined && elapsed < zombieWindowMs) {
-      return { state: await machineState(r, reconcile, reach.state === "unreachable", missed), reach };
+      return { state: await machineState(r, reconcile, reach.state === "unreachable"), reach };
     }
-    const provider = await machineState(r, reconcile, true, missed);
+    const provider = await machineState(r, reconcile, true);
     if (provider !== "running") {
       suspects.delete(r.id);
       return { state: provider, reach };
@@ -482,10 +472,10 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
           suspects.delete(r.id);
           // An answer the guest did not send is a reason to ask the provider, never a verdict on the guest: the
           // state on show stays as it was, and a machine the provider has paused is caught by its own word.
-          return done(await machineState(r, reconcile, !probed.fromDaemon, guestMissed(probed)), status);
+          return done(await machineState(r, reconcile, !probed.fromDaemon), status);
         }
         // The window and the exec probe run on the raw silence; only the word on the row waits for a second one.
-        const judged = await judge(r, status, reconcile, guestMissed(probed));
+        const judged = await judge(r, status, reconcile);
         const reach = judged.reach.state === "zombie" ? judged.reach : { ...judged.reach, state: shown };
         memory.shown = reach.state;
         return { ...done(judged.state, reach), ...(judged.reason !== undefined ? { reason: judged.reason } : {}) };

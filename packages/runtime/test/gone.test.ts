@@ -7,7 +7,7 @@
 // refuses in words (Not pausable) is a refusal, not a vanish.
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { goneRefusal, goneWords, hostLostAnswer, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
+import { goneRefusal, goneWords, NOT_GONE, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
 import { createRuntime, type RuntimeOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -17,20 +17,27 @@ import { until } from "./until.js";
 const WINDOW = 5 * 60_000;
 const POLL = 15_000;
 const COST = 60_000;
+/** Short enough that releasing the confirm never fires the poll or the cost ticker with it. */
+const CONFIRM = 4_000;
 const T0 = Date.parse("2026-09-07T01:20:00Z");
 
 type Cost = EventUnion & { type: "workspace.cost" };
 
-function testRuntime(extra: Partial<RuntimeOptions> = {}) {
-  const backend = stubBackend();
+type Seed = { backend?: ReturnType<typeof stubBackend>; store?: ReturnType<typeof memoryStore> };
+
+function testRuntime(extra: Partial<RuntimeOptions> = {}, seed: Seed = {}) {
+  const backend = seed.backend ?? stubBackend();
+  const store = seed.store ?? memoryStore();
   const fc = fakeClock(T0);
   const rt = createRuntime({
     backend,
-    store: memoryStore(),
+    store,
     adapters: {},
     clock: fc.clock,
     idle: { defaultWindowMs: WINDOW },
     status: { costIntervalMs: COST, pollIntervalMs: POLL, reconcileMinMs: 0, probeTimeoutMs: 5_000 },
+    // The confirming read runs on the same tick unless a test is about the wait itself.
+    goneConfirmMs: 0,
     ...extra,
   });
   const statuses: WorkspaceStatus[] = [];
@@ -41,7 +48,7 @@ function testRuntime(extra: Partial<RuntimeOptions> = {}) {
     if (e.type === "workspace.status") statuses.push(e.status);
     if (e.type === "workspace.cost") costs.push(e);
   });
-  return { rt, backend, fc, statuses, costs, events };
+  return { rt, backend, store, fc, statuses, costs, events };
 }
 
 const missing = (message: string) => Object.assign(new Error(message), { kind: "missing", status: 404 });
@@ -128,9 +135,10 @@ describe("a 404 settles the record gone through one road", () => {
         // The poll left in flight lands now, a minute on: its reach failed, it asks the provider and hears gone, and
         // the row it built on the running record it read is dropped, so nothing after the gone row says running.
         const rows = statuses.length;
-        expect(reads.n).toBe(polls + 1);
+        // The kill pass read the state twice: the poll's read and the one that confirmed its verdict.
+        expect(reads.n).toBe(polls + 2);
         edge.drop(edge.held.shift()!);
-        await until(() => reads.n >= polls + 2);
+        await until(() => reads.n >= polls + 3);
         await new Promise(r => setImmediate(r));
         expect(statuses.slice(rows)).toEqual([]);
         expect(edge.held.length).toBe(0);
@@ -183,7 +191,9 @@ describe("a 404 settles the record gone through one road", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-      backend.machines[0]!.pause = async () => {
+      const m = backend.machines[0]!;
+      m.pause = async () => {
+        m.killed = true;
         throw missing("Sandbox not found");
       };
       await expect(rt.workspaces.nap(ws.id)).rejects.toThrow("Sandbox not found");
@@ -274,7 +284,7 @@ describe("the host's metrics as the early warning", () => {
     return (await rows)[0]!;
   };
 
-  it("a metrics 404 with the daemon's probe missed on the same pass settles the record gone through the poll's road, with words that name the metrics read, and the idle window is dropped", async () => {
+  it("a metrics 404 with the daemon's probe missed on the same pass leaves the record running: the state read said running, so the row does, and the gap is one logged line", async () => {
     const { rt, backend, fc, statuses, costs } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -291,23 +301,66 @@ describe("the host's metrics as the early warning", () => {
 
         m.hostLost = true;
         fc.advance(POLL);
+        await until(() => edge.held.length >= 1);
+        edge.drop(edge.held.shift()!);
+        await until(() => asks.state >= 2 && doubtLines(warn).length === 1);
+        // A second pass with the guest missing again: still one witness, and one witness is not a verdict.
+        fc.advance(POLL);
+        await until(() => edge.held.length >= 1);
+        edge.drop(edge.held.shift()!);
+        await until(() => asks.state >= 3);
+
+        const record = await rt.workspaces.get(ws.id);
+        expect(m.killed).toBe(false);
+        expect(record.phase).toBe("running");
+        expect(record.gone).toBeUndefined();
+        expect(statuses.filter(s => s.machineState === "gone")).toEqual([]);
+        expect(statuses.at(-1)).toMatchObject({ id: ws.id, phase: "running", machineState: "running" });
+        expect(statuses.at(-1)!.idleAt).toBe(T0 + WINDOW);
+        expect(costs.filter(c => c.phase === "gone")).toEqual([]);
+        expect(goneLines(warn)).toEqual([]);
+        expect(doubtLines(warn)).toEqual([`host metrics for m1 (workspace ${ws.id}) answered 404 host no longer knows this VM; the state read says running and the record follows the state read`]);
+        expect(asks).toEqual({ state: 3, metrics: 3 });
+      } finally {
+        stop();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a metrics 404 over a machine the state read answers 404 for settles the record gone as before, and the words quote that read", async () => {
+    const { rt, backend, fc, statuses, costs } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const edge = await edgeHolding(m);
+      const asks = countAsks(m);
+      const stop = rt.status.watch();
+      try {
+        await until(() => edge.held.length >= 1);
+        edge.answer(edge.held.shift()!);
+        await until(() => asks.state >= 1 && asks.metrics >= 1);
+
+        m.hostLost = true;
+        m.killed = true;
+        fc.advance(POLL);
         const seenAt = fc.clock.now();
         await until(() => edge.held.length >= 1);
         edge.drop(edge.held.shift()!);
         await until(async () => (await rt.workspaces.get(ws.id)).phase === "gone" && costs.at(-1)!.phase === "gone");
 
         const record = await rt.workspaces.get(ws.id);
-        // The gateway's own record never moved: the state read said running both times.
-        expect(m.killed).toBe(false);
-        expect(record.gone).toBe(goneWords("m1", { by: "status poll", at: seenAt, answer: hostLostAnswer("404 host no longer knows this VM") }));
-        expect(record.gone).toBe("machine m1 is gone at the provider: the status poll found it gone at 2026-09-07T01:20:15Z (metrics 404 host no longer knows this VM; the state read still said running)");
+        expect(record.gone).toBe(goneWords("m1", { by: "status poll", at: seenAt }));
+        expect(record.gone).toBe("machine m1 is gone at the provider: the status poll found it gone at 2026-09-07T01:20:15Z");
         expect(statuses.at(-1)).toMatchObject({ id: ws.id, phase: "gone", machineState: "gone", reach: { state: "gone" }, reason: record.gone });
         expect(statuses.at(-1)!.idleAt).toBeUndefined();
-        expect((await rt.status.list())[0]!.idleAt).toBeUndefined();
         expect(costs.at(-1)).toMatchObject({ phase: "gone", rateUsdPerHour: 0, at: new Date(seenAt).toISOString() });
         expect(goneLines(warn)).toEqual([`workspace ${ws.id} is gone: ${record.gone}`]);
+        // The metrics read never spoke: the state read answered 404 before it was reached.
         expect(doubtLines(warn)).toEqual([]);
-        expect(asks).toEqual({ state: 2, metrics: 2 });
+        expect(asks.metrics).toBe(1);
       } finally {
         stop();
       }
@@ -331,7 +384,7 @@ describe("the host's metrics as the early warning", () => {
       expect(first).toMatchObject({ phase: "running", machineState: "running", reach: { state: "reachable" } });
       expect(first.reason).toBeUndefined();
       expect(asks).toEqual({ state: 1, metrics: 1 });
-      expect(doubtLines(warn)).toEqual([`host metrics for m1 (workspace ${ws.id}) answered 404 host no longer knows this VM while the guest answered; the record stays running until the guest misses too`]);
+      expect(doubtLines(warn)).toEqual([`host metrics for m1 (workspace ${ws.id}) answered 404 host no longer knows this VM; the state read says running and the record follows the state read`]);
 
       const second = await pass(rt, edge, "always");
       expect(second).toMatchObject({ machineState: "running", reach: { state: "reachable" } });
@@ -376,11 +429,12 @@ describe("the host's metrics as the early warning", () => {
       expect(statuses.filter(s => s.machineState === "gone")).toEqual([]);
       expect(await m.exec("echo ok")).toMatchObject({ exitCode: 0 });
 
-      // The guest missing on a later pass is the second witness the 404 was waiting for.
-      const gone = rt.status.list({ reconcile: "on-failure" });
+      // The guest missing on a later pass adds no witness the state read has not already outvoted.
+      const later = rt.status.list({ reconcile: "on-failure" });
       await until(() => edge.held.length >= 1);
       edge.drop(edge.held.shift()!);
-      expect((await gone)[0]).toMatchObject({ machineState: "gone", reach: { state: "gone" } });
+      expect((await later)[0]).toMatchObject({ machineState: "running" });
+      expect(goneLines(warn)).toEqual([]);
     } finally {
       warn.mockRestore();
     }
@@ -421,6 +475,247 @@ describe("the host's metrics as the early warning", () => {
       expect(await pass(rt, edge, "on-failure")).toMatchObject({ machineState: "running", reach: { state: "reachable" } });
       expect(asks).toEqual({ state: 1, metrics: 1 });
       expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("a gone verdict is checked against the state read before it ends a turn", () => {
+  /** A machine whose next state read answers 404 and whose later ones answer as they always did. */
+  const flakeOnce = (m: StubMachine): void => {
+    const state = m.state.bind(m);
+    let flaky = true;
+    m.state = async () => {
+      if (!flaky) return state();
+      flaky = false;
+      throw missing("Sandbox not found");
+    };
+  };
+
+  it("one 404 over a machine that is there: the record stays running, the row is corrected, and the log says it is not gone", async () => {
+    const { rt, backend, fc, statuses, events } = testRuntime({ goneConfirmMs: CONFIRM });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const edge = await edgeHolding(m);
+      const stop = rt.status.watch();
+      try {
+        await until(() => edge.held.length >= 1);
+        edge.answer(edge.held.shift()!);
+        await until(() => statuses.length >= 1);
+
+        flakeOnce(m);
+        const reads = countReads(m);
+        fc.advance(POLL);
+        const seenAt = fc.clock.now();
+        await until(() => edge.held.length >= 1);
+        const timers = fc.pending();
+        edge.drop(edge.held.shift()!);
+        // The verdict is waiting on its confirming read: nothing has ended, and the record has not moved.
+        await until(() => fc.pending() > timers);
+        expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+        expect(reads.n).toBe(1);
+
+        fc.advance(CONFIRM);
+        await until(() => reads.n >= 2);
+        await new Promise(r => setImmediate(r));
+        const saw = goneWords("m1", { by: "status poll", at: seenAt, answer: "404 Sandbox not found" });
+        expect(warn.mock.calls.map(c => String(c[0]))).toEqual([`workspace ${ws.id} is not gone: ${saw}, and the state read that followed said running`]);
+        expect(events.filter(e => e.type === "workspace.gone")).toEqual([]);
+        const record = await rt.workspaces.get(ws.id);
+        expect(record.phase).toBe("running");
+        expect(record.gone).toBeUndefined();
+        expect(statuses.at(-1)).toMatchObject({ id: ws.id, phase: "running", machineState: "running", reason: NOT_GONE });
+        // The window was never dropped, so it still runs from the create that armed it.
+        expect(statuses.at(-1)!.idleAt).toBe(T0 + WINDOW);
+      } finally {
+        stop();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the state read agrees after the wait: the record settles gone and its turn ends, and nothing settled before the wait was up", async () => {
+    const { rt, backend, fc, events } = testRuntime({ goneConfirmMs: CONFIRM });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const edge = await edgeHolding(m);
+      const stop = rt.status.watch();
+      try {
+        await until(() => edge.held.length >= 1);
+        edge.answer(edge.held.shift()!);
+        await until(async () => (await rt.workspaces.get(ws.id)).phase === "running");
+
+        m.killed = true;
+        fc.advance(POLL);
+        const seenAt = fc.clock.now();
+        await until(() => edge.held.length >= 1);
+        const timers = fc.pending();
+        edge.drop(edge.held.shift()!);
+        await until(() => fc.pending() > timers);
+        expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+
+        fc.advance(CONFIRM);
+        await until(async () => (await rt.workspaces.get(ws.id)).phase === "gone");
+        expect((await rt.workspaces.get(ws.id)).gone).toBe(goneWords("m1", { by: "status poll", at: seenAt }));
+        expect(events.filter(e => e.type === "workspace.gone")).toHaveLength(1);
+        expect(goneLines(warn)).toHaveLength(1);
+      } finally {
+        stop();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the state read a short wait later says paused: a machine the provider holds is not a machine it lost", async () => {
+    const { rt, backend, fc, events } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const edge = await edgeHolding(m);
+      const stop = rt.status.watch();
+      try {
+        await until(() => edge.held.length >= 1);
+        edge.answer(edge.held.shift()!);
+        await until(async () => (await rt.workspaces.get(ws.id)).phase === "running");
+
+        // The 404 the poll met is followed by a read that finds the machine paused at the provider.
+        const state = m.state.bind(m);
+        let flaky = true;
+        m.state = async () => {
+          if (!flaky) return state();
+          flaky = false;
+          m.paused = true;
+          throw missing("Sandbox not found");
+        };
+        fc.advance(POLL);
+        const seenAt = fc.clock.now();
+        await until(() => edge.held.length >= 1);
+        edge.drop(edge.held.shift()!);
+        await until(() => warn.mock.calls.length >= 1);
+
+        expect((await rt.workspaces.get(ws.id)).gone).toBeUndefined();
+        expect(events.filter(e => e.type === "workspace.gone")).toEqual([]);
+        expect(warn.mock.calls.map(c => String(c[0]))).toEqual([
+          `workspace ${ws.id} is not gone: ${goneWords("m1", { by: "status poll", at: seenAt, answer: "404 Sandbox not found" })}, and the state read that followed said paused`,
+        ]);
+      } finally {
+        stop();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a pause the provider answers 404 for over a machine that is there is a refused pause, not a vanish", async () => {
+    const { rt, backend, fc, statuses } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      m.pause = async () => {
+        throw missing("Sandbox not found");
+      };
+      await expect(rt.workspaces.nap(ws.id)).rejects.toThrow("Sandbox not found");
+      const record = await rt.workspaces.get(ws.id);
+      expect(record.phase).toBe("running");
+      expect(record.gone).toBeUndefined();
+      expect(statuses.map(s => s.phase)).toEqual(["pausing", "running"]);
+      expect(warn.mock.calls.map(c => String(c[0]))).toEqual([
+        `workspace ${ws.id} is not gone: ${goneWords("m1", { by: "pause", at: T0, answer: "404 Sandbox not found" })}, and the state read that followed said running`,
+      ]);
+      // The row carries the provider's answer, as any refused pause does.
+      expect(statuses.at(-1)).toMatchObject({ phase: "running", machineState: "running", reason: "Sandbox not found" });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("a record marked gone recovers on a state read that says running", () => {
+  /** A record settled gone by a wake over a machine the provider then has again: what the incident left behind. */
+  const wronglyGone = async (t: ReturnType<typeof testRuntime>) => {
+    const ws = await t.rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const m = t.backend.machines[0]!;
+    m.killed = true;
+    await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal("wake", (await t.rt.workspaces.get(ws.id)).gone));
+    expect((await t.rt.workspaces.get(ws.id)).phase).toBe("gone");
+    m.killed = false;
+    return { ws, m };
+  };
+
+  it("a wake: the record follows the read back to running and nothing is resumed", async () => {
+    const t = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { ws, m } = await wronglyGone(t);
+      expect(await t.rt.workspaces.wake(ws.id)).toMatchObject({ phase: "running", machineId: "m1" });
+      const record = await t.rt.workspaces.get(ws.id);
+      expect(record.phase).toBe("running");
+      expect(record.gone).toBeUndefined();
+      expect(m.resumes).toBe(0);
+      expect(t.backend.machines).toHaveLength(1);
+      expect(t.statuses.at(-1)).toMatchObject({ id: ws.id, phase: "running", machineState: "running", reason: NOT_GONE });
+      expect((await t.rt.status.list())[0]).toMatchObject({ phase: "running", machineState: "running", machineId: "m1" });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a rebuild: the healthy machine is kept rather than abandoned, and no second machine is built", async () => {
+    const t = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { ws, m } = await wronglyGone(t);
+      expect(await t.rt.workspaces.rebuild(ws.id)).toMatchObject({ phase: "running", machineId: "m1" });
+      expect(t.backend.machines).toHaveLength(1);
+      expect(m.killed).toBe(false);
+      expect((await t.rt.workspaces.get(ws.id)).gone).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the sweep: a machine the listing still carries under a gone record is read once and the record follows it", async () => {
+    const t = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { ws, m } = await wronglyGone(t);
+      const reads = countReads(m);
+      await t.rt.reap();
+      expect(reads.n).toBe(1);
+      expect((await t.rt.workspaces.get(ws.id))).toMatchObject({ phase: "running", machineId: "m1" });
+      expect((await t.rt.workspaces.get(ws.id)).gone).toBeUndefined();
+      expect(t.backend.machines).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a stored gone record whose machine the provider still runs hydrates running, and the words go with it", async () => {
+    const t = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { ws } = await wronglyGone(t);
+      await t.rt.close();
+      expect(await t.store.get("workspaces", ws.id)).toMatchObject({ phase: "gone" });
+
+      const second = testRuntime({}, { store: t.store, backend: t.backend });
+      try {
+        expect(await second.rt.workspaces.get(ws.id)).toMatchObject({ phase: "running", machineId: "m1" });
+        expect((await second.rt.workspaces.get(ws.id)).gone).toBeUndefined();
+        expect(await t.store.get("workspaces", ws.id)).toMatchObject({ phase: "running" });
+        expect(((await t.store.get("workspaces", ws.id)) as { gone?: string }).gone).toBeUndefined();
+      } finally {
+        await second.rt.close();
+      }
     } finally {
       warn.mockRestore();
     }

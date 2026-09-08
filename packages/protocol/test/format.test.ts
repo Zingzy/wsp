@@ -50,7 +50,6 @@ import {
   goldenBuildLine,
   goneWords,
   harnessExitLine,
-  hostLostAnswer,
   isCodeSearchTool,
   listedName,
   machineCapRefusal,
@@ -115,6 +114,7 @@ import {
   exportFromLine,
   EXPORT_SESSIONS_NOTE,
   NO_THREADS_NOTE,
+  NOT_GONE,
   NOT_LANDED_WORD,
   repoLine,
   secretsNote,
@@ -704,12 +704,8 @@ describe("goneWords", () => {
     expect(goneWords("sb_1", { by: "sweep", at, answer: "" })).toBe("machine sb_1 is gone at the provider: the sweep found it gone at 2026-09-07T01:21:10Z");
   });
 
-  it("quotes the host's metrics answer when it, not the state read, gave the machine away", () => {
-    const at = Date.parse("2026-09-07T01:21:10Z");
-    expect(hostLostAnswer("404 Sandbox not found")).toBe("metrics 404 Sandbox not found; the state read still said running");
-    expect(goneWords("sb_1", { by: "status poll", at, answer: hostLostAnswer("404 Sandbox not found") })).toBe(
-      "machine sb_1 is gone at the provider: the status poll found it gone at 2026-09-07T01:21:10Z (metrics 404 Sandbox not found; the state read still said running)",
-    );
+  it("says the record follows the state read when a verdict did not hold", () => {
+    expect(NOT_GONE).toBe("running at the provider after all; the record follows the state read");
   });
 });
 
