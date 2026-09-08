@@ -128,6 +128,63 @@ describe("index.css", () => {
       html.desktop-mac:has([data-terminal-translucent]) :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not(:has([data-terminal-translucent])), [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
         background: var(--background);
       }
+
+      /* One workspace's own hue, by the id its record carries: six from the palette's
+         ramps, none of them the greens that mean running or the red that means
+         danger. Every surface drawn in a workspace's colour reads --space-tint, so a
+         component names no colour and the hue has one home. */
+      [data-space-tint="slate"] {
+        --space-tint: var(--color-slate-500);
+      }
+
+      [data-space-tint="teal"] {
+        --space-tint: var(--color-teal-500);
+      }
+
+      [data-space-tint="cyan"] {
+        --space-tint: var(--color-cyan-500);
+      }
+
+      [data-space-tint="indigo"] {
+        --space-tint: var(--color-indigo-500);
+      }
+
+      [data-space-tint="violet"] {
+        --space-tint: var(--color-violet-500);
+      }
+
+      [data-space-tint="pink"] {
+        --space-tint: var(--color-pink-500);
+      }
+
+      /* How much of the hue the sidebar's surface takes in Spaces mode: a flat few
+         percent, enough to tell two spaces apart and quiet enough to leave the rows
+         their contrast. The dark theme takes more, since the mix runs toward black. */
+      :root {
+        --space-tint-fill: 7%;
+      }
+
+      .dark {
+        --space-tint-fill: 11%;
+      }
+
+      /* Spaces mode tints the sidebar's own surface. The inner layer is the one both
+         the glass recipe and the macOS vibrancy leave to the app, so the mix happens
+         in one place; over the window's own material there is no token to mix into,
+         only the material behind it. */
+      [data-app-sidebar][data-space-tint] > [data-slot="sidebar-inner"] {
+        background: color-mix(in srgb, var(--space-tint) var(--space-tint-fill), var(--sidebar));
+      }
+
+      .desktop-mac [data-app-sidebar][data-space-tint] > [data-slot="sidebar-inner"] {
+        background: color-mix(in srgb, var(--space-tint) var(--space-tint-fill), transparent);
+      }
+
+      /* In the list body the hue draws in one place only: the rail the thread rows of
+         a tinted workspace hang from. */
+      [data-slot="sidebar-menu-sub"][data-space-tint] {
+        border-color: var(--space-tint);
+      }
       "
     `);
   });

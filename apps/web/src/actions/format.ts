@@ -19,6 +19,8 @@ export const WORKSPACE_WORDS = {
   importProject: "Import project",
   exportProject: "Export project",
   rename: "Rename workspace",
+  colour: "Colour",
+  icon: "Icon",
   fork: "Fork workspace",
   copyId: "Copy machine id",
   forget: "Forget workspace",
@@ -111,6 +113,7 @@ export const PROJECTS_WAIT = "Projects wait for the rebuild";
 export const CLIENT_CANNOT_IMPORT = "This client cannot import projects";
 export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
 export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename workspaces";
+export const CLIENT_CANNOT_LOOK = "This client cannot set a workspace's colour or icon";
 export const NO_WORKSPACE_FORK = "Forking a workspace is not in the runtime yet; take a project snapshot in the Machine tab and start a workspace from it";
 
 export function forgetRefusal(state: WorkspaceState): string | null {

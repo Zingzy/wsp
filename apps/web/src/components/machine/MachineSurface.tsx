@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The machine surface of the right panel: facts, live utilisation, spend,
-// lineage with rollback, pause, wake, upgrade, rebuild and forget for one
-// workspace's machine. Pause, wake, rebuild, forget and copy id read the
-// workspace registry; the tab keeps its own confirmations for the two that ask.
+// The machine surface of the right panel: facts, the workspace's own colour
+// and icon, live utilisation, spend, lineage with rollback, pause, wake,
+// upgrade, rebuild and forget for one workspace's machine. Pause, wake,
+// rebuild, forget and copy id read the workspace registry; the tab keeps its
+// own confirmations for the two that ask.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { runAction } from "../../actions/contextMenu.js";
@@ -27,6 +28,7 @@ import {
 import { Button, WARN_BUTTON } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
+import { WorkspaceLookPicker } from "../workspaceLook.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import {
   bytesOfLabel,
@@ -70,6 +72,7 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
         <Facts workspace={workspace} status={status} awakeMs={last ? last.awakeMs : null} pendingSize={pendingSize} />
+        <Look workspace={workspace} />
         <Live workspace={workspace} />
         <Usage workspace={workspace} status={status} series={series} />
         <Lineage workspace={workspace} />
@@ -215,6 +218,17 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
           This provider's machines cannot run containers; install services natively.
         </p>
       )}
+    </Section>
+  );
+}
+
+/** The workspace's own hue and glyph, the same rows the row's menu opens in a dialog. */
+function Look({ workspace }: { workspace: WorkspaceView }) {
+  return (
+    <Section label="Appearance">
+      <div className="mt-2">
+        <WorkspaceLookPicker workspace={workspace} />
+      </div>
     </Section>
   );
 }

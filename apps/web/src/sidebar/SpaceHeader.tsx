@@ -2,17 +2,20 @@
 // The one workspace on screen in Spaces mode, above its threads: the row's
 // own line one (the lead slot with the state dot, the name, the state's word
 // in muted mono off running) and under it the machine's lines, three or four
-// lines once rather than repeated per row. Renaming turns the name into the
-// sidebar's one name box in the same slot, as it does on a row, so the mode
-// keeps one editor and one grammar. The words come from workspaceRows.ts; the
-// block carries the workspace's menu, since in this mode no row of its own is
-// on screen to right-click.
+// lines once rather than repeated per row. A workspace with a glyph picked
+// puts it in the lead in its own hue, and the state dot moves to the state
+// slot at the other end of that line, so the running dot is never lost to a
+// glyph. Renaming turns the name into the sidebar's one name box in the same
+// slot, as it does on a row, so the mode keeps one editor and one grammar.
+// The words come from workspaceRows.ts; the block carries the workspace's
+// menu, since in this mode no row of its own is on screen to right-click.
 import type { MouseEvent } from "react";
 import type { MemoryReading } from "@wsp/protocol";
 import { openContextMenu } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
 import type { ResolvedAction } from "../actions/registry.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
+import { WorkspaceGlyphMark, tintAttr } from "../components/workspaceLook.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS } from "./rowGrammar.js";
@@ -48,12 +51,13 @@ export function SpaceHeader({
   return (
     <div
       data-space-header
+      {...tintAttr(project.workspace.tint)}
       className="mb-1 flex items-start gap-[var(--sidebar-control-gap)] border-b border-sidebar-border/60 px-2 pt-1.5 pb-2 text-sm"
       // A header holding the box takes no menu over it, as a row being named does not.
       {...(renaming ? {} : { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions) })}
     >
       <span aria-hidden className={ROW_LEAD_CLASS}>
-        <span className={cn("size-2 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />
+        {project.workspace.glyph === undefined ? <StateDot project={project} /> : <WorkspaceGlyphMark glyph={project.workspace.glyph} className="size-3.5" />}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
         <span className="flex items-center gap-2">
@@ -71,7 +75,8 @@ export function SpaceHeader({
               {project.displayName}
             </span>
           )}
-          <span data-space-state className={cn(ROW_META_CLASS, "shrink-0 text-right")}>
+          <span data-space-state className={cn(ROW_META_CLASS, "flex shrink-0 items-center gap-1.5 text-right")}>
+            {project.workspace.glyph === undefined ? null : <StateDot project={project} />}
             {stateSlotWord(project)}
           </span>
         </span>
@@ -83,4 +88,9 @@ export function SpaceHeader({
       </span>
     </div>
   );
+}
+
+/** The workspace's state as a dot, wherever the header puts it: the lead, or the state slot when a glyph has the lead. */
+function StateDot({ project }: { project: SidebarProjectSnapshot }) {
+  return <span aria-hidden className={cn("size-2 shrink-0 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />;
 }

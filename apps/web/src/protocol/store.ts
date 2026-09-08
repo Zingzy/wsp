@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, foldThreads, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, foldThreads, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -120,6 +120,10 @@ interface State {
    * with in place of the row. True once the runtime took the name; a refusal (a name another workspace holds, a blank
    * one) is false and a toast, so the caller can leave the name where a person can still see it. */
   renameWorkspace(opts: { workspaceId: string; name: string }): Promise<boolean>;
+  /** Sets the workspace's hue or its glyph through the runtime, which holds them beside the record, and puts what it
+   * answers with on the row. A key left out keeps that fact as it is and null clears it. False on a client without
+   * the verb or a refusal, which lands in the toast. */
+  setWorkspaceLook(opts: { workspaceId: string; look: WorkspaceLook }): Promise<boolean>;
   /** Asks the runtime for the catalogs as the workspace's machine reports them; a refusal leaves the table's in place. */
   loadHarnesses(workspaceId: string): Promise<void>;
 }
@@ -340,6 +344,20 @@ export const useStore = create<State>((set, get) => {
         return false;
       }
     },
+    async setWorkspaceLook({ workspaceId, look }) {
+      const api = get().api;
+      if (!api?.setWorkspaceLook) return false;
+      try {
+        const workspace = await api.setWorkspaceLook(workspaceId, look);
+        // The record answers with the whole look, and a cleared fact is absent from it, so the row takes it the way
+        // the event does rather than through a merge, which cannot unset a key.
+        get().applyEvent({ type: "workspace.look", workspaceId, tint: workspace.tint ?? null, glyph: workspace.glyph ?? null });
+        return true;
+      } catch (e: unknown) {
+        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+        return false;
+      }
+    },
     async loadHarnesses(workspaceId) {
       const api = get().api;
       if (!api?.listHarnesses) return;
@@ -386,6 +404,18 @@ export const useStore = create<State>((set, get) => {
             statuses: s.statuses[e.workspaceId] ? { ...s.statuses, [e.workspaceId]: { ...s.statuses[e.workspaceId]!, name: e.name } } : s.statuses,
           }));
           return;
+        case "workspace.look": {
+          // Both facts travel whole, so a cleared one leaves the record rather than lingering under a merge.
+          const put = <T extends WorkspaceView>(w: T): T => {
+            const { tint: _tint, glyph: _glyph, ...rest } = w;
+            return { ...rest, ...(e.tint !== null ? { tint: e.tint } : {}), ...(e.glyph !== null ? { glyph: e.glyph } : {}) } as T;
+          };
+          set(s => ({
+            workspaces: s.workspaces.map(w => (w.id === e.workspaceId ? put(w) : w)),
+            statuses: s.statuses[e.workspaceId] ? { ...s.statuses, [e.workspaceId]: put(s.statuses[e.workspaceId]!) } : s.statuses,
+          }));
+          return;
+        }
         case "workspace.deleted":
           set(s => {
             const { [e.workspaceId]: _s, ...statuses } = s.statuses;

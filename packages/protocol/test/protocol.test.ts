@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  WORKSPACE_GLYPHS,
+  WORKSPACE_TINTS,
+  lookWord,
   Recipe,
   RecipeSource,
   Capabilities,
@@ -112,6 +115,51 @@ describe("protocol views", () => {
 
     const status = { ...view, machineState: "running", reach: { state: "unsupported" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
     expect(WorkspaceStatus.parse(status)).toEqual(status);
+  });
+});
+
+describe("a workspace's look", () => {
+  const view = { id: "ws_1", name: "task-1", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z" };
+
+  it("the six hues leave out the greens that mean running and the red that means danger, and none of them repeats", () => {
+    expect(WORKSPACE_TINTS).toHaveLength(6);
+    expect(new Set(WORKSPACE_TINTS).size).toBe(6);
+    for (const taken of ["green", "emerald", "lime", "red", "amber", "orange", "yellow"]) expect(WORKSPACE_TINTS).not.toContain(taken);
+  });
+
+  it("about two dozen glyphs, each one word so its name needs no second table, and none of them an emoji", () => {
+    expect(WORKSPACE_GLYPHS.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(WORKSPACE_GLYPHS).size).toBe(WORKSPACE_GLYPHS.length);
+    for (const glyph of WORKSPACE_GLYPHS) expect(glyph).toMatch(/^[a-z]+$/);
+    expect(lookWord("terminal")).toBe("Terminal");
+    expect(lookWord("teal")).toBe("Teal");
+  });
+
+  it("the view carries both, absent is none, and a hue outside the six is refused", () => {
+    expect(WorkspaceView.parse(view)).toEqual(view);
+    const looked = { ...view, tint: "teal", glyph: "flask" };
+    expect(WorkspaceView.parse(looked)).toEqual(looked);
+    expect(() => WorkspaceView.parse({ ...view, tint: "emerald" })).toThrow();
+    expect(() => WorkspaceView.parse({ ...view, glyph: "🚀" })).toThrow();
+  });
+
+  it("the op takes one fact at a time, null to clear it, and refuses a hue the list does not hold", () => {
+    for (const req of [
+      { id: 1, op: "workspaces.look", workspaceId: "ws_1", tint: "violet" },
+      { id: 2, op: "workspaces.look", workspaceId: "ws_1", glyph: null },
+      { id: 3, op: "workspaces.look", workspaceId: "ws_1", tint: null, glyph: "rocket" },
+      { id: 4, op: "workspaces.look", workspaceId: "ws_1" },
+    ]) {
+      expect(RuntimeRequest.parse(req)).toEqual(req);
+    }
+    expect(() => RuntimeRequest.parse({ id: 5, op: "workspaces.look", workspaceId: "ws_1", tint: "red" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 6, op: "workspaces.look", tint: "teal" })).toThrow();
+  });
+
+  it("the event carries both facts whole, so a cleared one reads null rather than going missing", () => {
+    const e = { type: "workspace.look", workspaceId: "ws_1", tint: "cyan", glyph: null };
+    expect(EventUnion.parse(e)).toEqual(e);
+    expect(() => EventUnion.parse({ type: "workspace.look", workspaceId: "ws_1", tint: "cyan" })).toThrow();
   });
 });
 

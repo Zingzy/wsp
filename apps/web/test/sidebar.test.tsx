@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -80,6 +80,19 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     listSessions: vi.fn(async () => sessions),
     subscribe: vi.fn(() => () => {}),
     getGolden: async () => undefined,
+    // The look sits on the record beside the name, so the fixture writes it there and answers with the row.
+    setWorkspaceLook: vi.fn(async (id: string, look: WorkspaceLook) => {
+      const row = workspaces.find(w => w.id === id)!;
+      if (look.tint !== undefined) {
+        if (look.tint === null) delete row.tint;
+        else row.tint = look.tint;
+      }
+      if (look.glyph !== undefined) {
+        if (look.glyph === null) delete row.glyph;
+        else row.glyph = look.glyph;
+      }
+      return row;
+    }),
   };
 }
 
@@ -907,6 +920,75 @@ describe("Solari out of reach from this computer", () => {
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "unreachable", offline: true } }) }));
     await screen.findByText(PROVIDER_UNREACHED_LINE);
     expect(stateSlot(rowOf("api")).textContent).toBe("Unreachable");
+  });
+});
+
+describe("a workspace's own colour and glyph", () => {
+  const TINTED: WorkspaceView = { ...view("ws_a", "api"), tint: "teal", glyph: "flask" };
+  const PLAIN = view("ws_b", "web");
+  const both = () => [{ ...TINTED }, { ...PLAIN }];
+  const threads = () => [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }), session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-4 * 60_000) })];
+  const leadOf = (el: HTMLElement): HTMLElement => el.querySelector<HTMLElement>("span[aria-hidden]")!;
+  const tinted = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-tint]")).map(el => el.getAttribute("data-space-tint") ?? "");
+
+  async function mountSpaces(api: FakeApi): Promise<FakeApi> {
+    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.getState().bind(api);
+    render(
+      <SidebarProvider defaultOpen>
+        <WorkspaceSidebar />
+      </SidebarProvider>,
+    );
+    await waitFor(() => expect(spaceHeader()).not.toBeNull());
+    return api;
+  }
+
+  it("in the dots row the hue is the dot's colour and the current dot carries the glyph; a workspace with neither keeps its state dot", async () => {
+    await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
+    const [tint, plain] = dots() as [HTMLElement, HTMLElement];
+    expect(tint.getAttribute("data-space-tint")).toBe("teal");
+    expect(leadOf(tint).className).toContain("bg-[var(--space-tint)]");
+    expect(leadOf(tint).className).not.toContain("bg-success");
+    expect(plain.getAttribute("data-space-tint")).toBeNull();
+    expect(leadOf(plain).className).toContain("bg-success");
+    // The glyph rides the current dot alone, since only that one has the room for it.
+    expect(tint.querySelector("[data-space-glyph='flask']")).not.toBeNull();
+    fireEvent.click(plain);
+    await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
+    expect(document.querySelector("[data-space-dots] [data-space-glyph]")).toBeNull();
+  });
+
+  it("the header's lead is the glyph in the hue, and the state dot moves to the state slot so running is still said", async () => {
+    await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
+    const header = spaceHeader()!;
+    expect(header.getAttribute("data-space-tint")).toBe("teal");
+    expect(leadOf(header).querySelector("[data-space-glyph='flask']")).not.toBeNull();
+    const state = header.querySelector<HTMLElement>("[data-space-state]")!;
+    expect(state.querySelector(".bg-success")).not.toBeNull();
+    expect(state.textContent).toBe("");
+  });
+
+  it("a workspace with no glyph keeps the state dot in the lead and nothing in the state slot but its word", async () => {
+    useStore.setState({ selectedId: "ws_b" });
+    await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
+    await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
+    const header = spaceHeader()!;
+    expect(header.getAttribute("data-space-tint")).toBeNull();
+    expect(leadOf(header).querySelector("[data-space-glyph]")).toBeNull();
+    expect(leadOf(header).querySelector(".bg-success")).not.toBeNull();
+    expect(header.querySelector("[data-space-state]")!.querySelector("span[aria-hidden]")).toBeNull();
+  });
+
+  it("in the list body the hue draws on the tinted workspace's branch rail and nowhere else", async () => {
+    await mount(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()), "api");
+    await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_b"]));
+    // One element in the whole body wears the hue, and it is the rail the tinted workspace's threads hang from.
+    expect(tinted()).toEqual(["teal"]);
+    const rail = document.querySelector<HTMLElement>("[data-space-tint]")!;
+    expect(rail.getAttribute("data-slot")).toBe("sidebar-menu-sub");
+    expect(rail.querySelector("[data-row-id='thread:s1']")).not.toBeNull();
+    // The row itself is untouched: no glyph, no hue on the lead, the state dot as it always was.
+    expect(rowOf("api").querySelector("[data-space-glyph]")).toBeNull();
   });
 });
 

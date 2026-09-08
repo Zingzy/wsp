@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The workspace's actions, one registry: what a workspace row, the palette,
 // the Machine tab and the row's context menu offer for one machine.
-import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { isBilling, needsRebuild, workspaceState, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PaletteIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, ShapesIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
+import { isBilling, needsRebuild, workspaceState, type LookPart, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
   CLIENT_CANNOT_IMPORT,
+  CLIENT_CANNOT_LOOK,
   CLIENT_CANNOT_REBUILD,
   CLIENT_CANNOT_RENAME_WORKSPACE,
   FORGET_HINT,
@@ -67,6 +68,8 @@ export interface WorkspaceVerbs {
   readonly forget?: ((workspaceId: string) => void) | undefined;
   /** Opens the name box on the workspace's own row; the row is the only editor, as it is for a thread. */
   readonly rename?: ((workspaceId: string) => void) | undefined;
+  /** Opens the picker for one fact of the workspace's look; absent on a client whose host cannot hold it. */
+  readonly pickLook?: ((workspaceId: string, part: LookPart) => void) | undefined;
   /** Open the trip's dialog; absent on a client whose host cannot read or land folders here. */
   readonly importProject?: ((workspaceId: string) => void) | undefined;
   readonly exportProject?: ((workspaceId: string) => void) | undefined;
@@ -167,6 +170,26 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb("Rename", target.displayName),
     refusal: (_target, verbs) => (verbs.rename === undefined ? CLIENT_CANNOT_RENAME_WORKSPACE : null),
     run: (target, verbs) => verbs.rename?.(target.id),
+  },
+  {
+    id: "colour",
+    group: "edit",
+    icon: () => PaletteIcon,
+    searchTerms: ["workspace colour", "workspace color", "tint", "hue", "space theme"],
+    title: () => WORKSPACE_WORDS.colour,
+    rowLabel: target => rowVerb("Colour", target.displayName),
+    refusal: (_target, verbs) => (verbs.pickLook === undefined ? CLIENT_CANNOT_LOOK : null),
+    run: (target, verbs) => verbs.pickLook?.(target.id, "tint"),
+  },
+  {
+    id: "icon",
+    group: "edit",
+    icon: () => ShapesIcon,
+    searchTerms: ["workspace icon", "glyph", "symbol", "space icon"],
+    title: () => WORKSPACE_WORDS.icon,
+    rowLabel: target => rowVerb("Icon", target.displayName),
+    refusal: (_target, verbs) => (verbs.pickLook === undefined ? CLIENT_CANNOT_LOOK : null),
+    run: (target, verbs) => verbs.pickLook?.(target.id, "glyph"),
   },
   {
     id: "fork",
