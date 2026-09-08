@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
-import type { AdapterEvent, ForwardEvent, PortForward, TurnResult } from "@wsp/protocol";
+import { HOST_STOPPING_CLOSE, type AdapterEvent, type ForwardEvent, type PortForward, type TurnResult } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 import { createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
 import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
@@ -30,6 +30,16 @@ describe("serveRuntime auth", () => {
     const c = await WsClient.connect(srv.port);
     void c.request("auth", { token: "wrong" });
     expect(await c.closed()).toBe(4401);
+  });
+
+  it("a stop closes every client on the host-stopping code, not by cutting the socket under it", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port);
+    await c.request("auth", { token: "secret" });
+    const closed = c.closed();
+    await srv.close();
+    srv = undefined;
+    expect(await closed).toBe(HOST_STOPPING_CLOSE);
   });
 
   it("closes 4401 when the first op is not auth", async () => {

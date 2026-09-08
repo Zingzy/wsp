@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
-import { createClaudeAdapter } from "../src/adapter.js";
+import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { userMessageLine } from "../src/landmines.js";
 
 const FIXTURE_SESSION_ID = "e16ed170-8257-4668-879e-fe836341633c";
@@ -12,6 +12,9 @@ function fixtureLines(): string[] {
   const raw = readFileSync(new URL("./fixtures/stream-session.jsonl", import.meta.url), "utf8");
   return raw.split("\n").filter((line) => line.trim().length > 0);
 }
+
+/** What the guest calls the run every scripted stream stands for. */
+const RUN_HANDLE = "/tmp/wsp-run/ab12";
 
 interface ScriptedExec {
   factory: ExecStreamFactory;
@@ -30,6 +33,7 @@ function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean
       resolveExit = resolve;
     });
     const stream: ExecStream = {
+      run: RUN_HANDLE,
       lines: (async function* () {
         yield* lines;
         if (opts.hang) await exited;
@@ -137,6 +141,50 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(exec.calls[0]?.command).toContain("--model 'claude-opus-5'");
     expect(exec.calls[0]?.command).toContain("--effort 'low'");
     expect(exec.calls[0]?.command).toContain("--permission-mode 'plan'");
+  });
+
+  it("a launched session carries the run its stream reported, so a later host can re-open it", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const session = adapter.start({ prompt: "go", onEvent: () => {} });
+    await session.finished;
+    expect(session.run).toBe(RUN_HANDLE);
+  });
+
+  it("attaches to a run an earlier process launched: the run's own lines settle the turn and no command is launched", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const attached: { run: string; input: boolean }[] = [];
+    exec.factory.attach = async (run, options) => {
+      attached.push({ run, input: options.input });
+      return exec.factory("", { env: {} });
+    };
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    const session = await adapter.attach!({ run: RUN_HANDLE, sessionId: "e16ed170-8257-4668-879e-fe836341633c", startedAt: 1, onEvent });
+    expect(session).not.toBe("gone");
+    const result = await (session as ClaudeSession).finished;
+    expect(attached).toEqual([{ run: RUN_HANDLE, input: true }]);
+    expect((session as ClaudeSession).command).toBeUndefined();
+    expect(result.status).toBe("completed");
+    expect(events[0]).toMatchObject({ type: "session.start", sessionId: "e16ed170-8257-4668-879e-fe836341633c" });
+    expect(events.filter(e => e.type === "turn.delta").length).toBeGreaterThan(0);
+    expect(events.slice(-2)).toMatchObject([{ type: "turn.done" }, { type: "session.end", exitCode: 0, sawResult: true }]);
+  });
+
+  it("a machine that no longer holds the run is passed through as gone, with no session and no event", async () => {
+    const exec = scriptedExec(fixtureLines());
+    exec.factory.attach = async () => "gone";
+    const { events, onEvent } = collect();
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    expect(await adapter.attach!({ run: RUN_HANDLE, sessionId: "s", startedAt: 1, onEvent })).toBe("gone");
+    expect(events).toEqual([]);
+    expect(exec.calls).toEqual([]);
+  });
+
+  it("an adapter whose exec cannot attach has no attach of its own", () => {
+    const exec = scriptedExec([]);
+    delete exec.factory.attach;
+    expect(createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" }).attach).toBeUndefined();
   });
 
   it("probes the catalog through the exec it is handed, under the session's config dir, and reads the answer", async () => {

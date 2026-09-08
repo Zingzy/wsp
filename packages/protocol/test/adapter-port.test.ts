@@ -8,6 +8,7 @@ const PACKAGES = join(ROOT, "packages");
 const PORT_FILE = "packages/protocol/src/adapter-port.ts";
 /** What an adapter is written against; each of these may be declared in PORT_FILE and nowhere else. */
 const PORT_NAMES = [
+  "AdapterAttachOptions",
   "AdapterEvent",
   "ExecStream",
   "ExecStreamFactory",
