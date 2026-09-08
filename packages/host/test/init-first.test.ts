@@ -135,6 +135,13 @@ describe("the tick beside the fork", () => {
     expect(step).toEqual({ local: false });
   });
 
+  it("esc at the tick reads as No and keeps the answer already given to the fork, as esc at the folder prompt does", async () => {
+    const kept = await answer({ fork: ENTER, tick: ESC, folder: ENTER });
+    expect(kept.step).toEqual({ fork: { name: "first" }, local: false });
+    const none = await answer({ fork: "n", tick: ESC });
+    expect(none.step).toEqual({ local: false });
+  });
+
   it("esc at the fork ends the step with nothing made, the tick included: it is never asked", async () => {
     const { step, drawn } = await answer({ fork: ESC });
     expect(isCancel(step)).toBe(true);

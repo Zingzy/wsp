@@ -326,10 +326,12 @@ export function keySources(): KeySources {
   return { env: process.env, cwd: process.cwd(), home: wspHome() };
 }
 
-/** What an empty answer at the Solari prompt means for the command that asked. `refuse` is the road every command
- * that needs a machine takes: nothing it does has any meaning without one. `local` is wsp init's and wsp up's: this
- * computer is a workspace of its own, so a run with no provider key goes on with no provider and seals nothing. */
-export type NoSolari = "refuse" | "local";
+/** What no Solari key means for the command that asked. `refuse` is the road every command that needs a machine
+ * takes: nothing it does has any meaning without one. `offer` is wsp init's: at a terminal the key is asked for with
+ * the way to skip it, and an empty answer takes the local road, since this computer is a workspace of its own. `local`
+ * is the road of up, new --local and doctor --local: init already answered, so nothing is asked and the run goes on
+ * with no provider. */
+export type NoSolari = "refuse" | "offer" | "local";
 
 export async function loadKeys(
   io: CliIO,
@@ -343,17 +345,17 @@ export async function loadKeys(
   let solari = find("SOLARI_API_KEY");
   let anthropic = find("ANTHROPIC_API_KEY");
   if (solari !== undefined) return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
-  // Nobody at a keyboard and no key on this computer: the local road is the answer already given, since there is
-  // nothing to type it into. Every other command still refuses through its IO's own words below. The Claude key
-  // rides on either way: it is the agents' key, not the provider's, and a local thread uses it as a fork would.
+  // No key on this computer and either a road init already answered or nobody at a keyboard to type one: the local
+  // road is taken without a question. Every other command still refuses through its IO's own words below. The Claude
+  // key rides on either way: it is the agents' key, not the provider's, and a local thread uses it as a fork would.
   const withoutProvider = (): Keys => (anthropic !== undefined ? { anthropic } : {});
-  if (ask.noSolari === "local" && io.isTTY !== true) return withoutProvider();
+  if (ask.noSolari === "local" || (ask.noSolari === "offer" && io.isTTY !== true)) return withoutProvider();
 
   // The prompt's own refusal travels as it is: the CLI's IOs refuse a secret as auth, and another caller (the desktop's
   // setup check) recognises the refusal it handed in.
-  solari = (await io.askSecret(`Solari API key\nNo Solari key found.\nconsole.getsolari.com${ask.noSolari === "local" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : ""}`)).trim();
+  solari = (await io.askSecret(`Solari API key\nNo Solari key found.\nconsole.getsolari.com${ask.noSolari === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : ""}`)).trim();
   if (!solari) {
-    if (ask.noSolari === "local") return withoutProvider();
+    if (ask.noSolari === "offer") return withoutProvider();
     throw authRefusal("A Solari API key is needed to start.");
   }
   const set: Record<string, string> = { SOLARI_API_KEY: solari };
@@ -617,7 +619,7 @@ async function init(
   const say = flags.json ? jsonCliIO() : io;
   const screen = terminalInitIO(flags.json);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
-  const keys = await loadKeys(say, undefined, { anthropic: false, noSolari: "local" });
+  const keys = await loadKeys(say, undefined, { anthropic: false, noSolari: "offer" });
   // A provider with no size to boot a builder on has no image to build, so the run makes this computer the workspace
   // and serves the app on it. Every flag about the golden is about a road this run does not take.
   if (providerBackend(keys).capabilities.sizes.length === 0) {
@@ -1009,7 +1011,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     json: false,
     cliOnly: "forks a live machine and bills while it runs, or with --local runs a thread on this computer; a person decides that at a terminal",
     run: async (io, opts, values) => {
-      // The local road touches no provider, so it asks for no provider key: it is the whole of the doctor for a
+      // The local road touches no provider, so a missing key is not asked for: it is the whole of the doctor for a
       // person whose wsp init took the local road.
       if (values.local === true) {
         const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });

@@ -85,8 +85,8 @@ export function checkImportFolder(folder: string): void {
 }
 
 /** The workspace step, or the flags in its place: the fork the question asks for and the tick beside it. The cancel
- * symbol is esc at the fork confirm, which ends the step with nothing made, the tick included. Esc at the folder
- * prompt is not a cancel: the Yes above it already asked for a workspace. */
+ * symbol is esc at the fork confirm, which ends the step with nothing made, the tick included. Esc at the tick or the
+ * folder prompt is not a cancel: the answer above it stands, and the question it was pressed at reads as No. */
 export async function askFirst(o: FirstAsk): Promise<WorkspaceStep | symbol> {
   const named = o.name !== undefined || o.folder !== undefined;
   const name = o.name ?? FIRST_WORKSPACE;
@@ -105,8 +105,8 @@ export async function askFirst(o: FirstAsk): Promise<WorkspaceStep | symbol> {
     output: o.output,
   });
   if (isCancel(go)) return go;
-  const local = offered ? await askAlsoLocal(o) : false;
-  if (isCancel(local)) return local;
+  const asked = offered ? await askAlsoLocal(o) : false;
+  const local = asked === true;
   if (!go) return { local };
   const typed = await textPrompt({
     message: FOLDER_QUESTION,

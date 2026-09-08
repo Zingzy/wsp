@@ -208,10 +208,10 @@ describe("loadKeys", () => {
     expect(existsSync(join(home, ".env"))).toBe(false);
   });
 
-  it("on the local road an empty answer is the answer: no provider key, and the question said so", async () => {
+  it("init offers the key at a terminal, and an empty answer is the answer: no provider key, and the question said so", async () => {
     setup();
     const io = fakeIO([""], true);
-    expect(await loadKeys(io, { env: {}, cwd, home }, { anthropic: false, noSolari: "local" })).toEqual({});
+    expect(await loadKeys(io, { env: {}, cwd, home }, { anthropic: false, noSolari: "offer" })).toEqual({});
     expect(stripVTControlCharacters(io.output[0]!)).toBe(
       "Solari API key\nNo Solari key found.\nconsole.getsolari.com\nEnter with nothing skips the cloud: this computer alone becomes your workspace, and nothing is sealed.",
     );
@@ -219,17 +219,24 @@ describe("loadKeys", () => {
     expect(existsSync(join(home, ".env"))).toBe(false);
   });
 
-  it("on the local road with nobody at a keyboard nothing is asked at all", async () => {
+  it("init with nobody at a keyboard asks nothing at all", async () => {
     setup();
     const io = fakeIO([]);
-    expect(await loadKeys(io, { env: {}, cwd, home }, { anthropic: false, noSolari: "local" })).toEqual({});
+    expect(await loadKeys(io, { env: {}, cwd, home }, { anthropic: false, noSolari: "offer" })).toEqual({});
+    expect(io.output).toEqual([]);
+  });
+
+  it("the local road asks nothing even at a terminal: init already answered, and up, new --local and doctor --local seal nothing to skip", async () => {
+    setup();
+    const io = fakeIO([], true);
+    expect(await loadKeys(io, { env: { ANTHROPIC_API_KEY: ANTHROPIC }, cwd, home }, { anthropic: false, noSolari: "local" })).toEqual({ anthropic: ANTHROPIC });
     expect(io.output).toEqual([]);
   });
 
   it("the Claude key rides the local road: it is the agents' key, not the provider's, and a thread here uses it", async () => {
     setup();
     const io = fakeIO([""], true);
-    expect(await loadKeys(io, { env: { ANTHROPIC_API_KEY: ANTHROPIC }, cwd, home }, { anthropic: false, noSolari: "local" })).toEqual({ anthropic: ANTHROPIC });
+    expect(await loadKeys(io, { env: { ANTHROPIC_API_KEY: ANTHROPIC }, cwd, home }, { anthropic: false, noSolari: "offer" })).toEqual({ anthropic: ANTHROPIC });
   });
 
   it("the local road is the caller's to ask for: every other command still refuses an empty answer", async () => {
