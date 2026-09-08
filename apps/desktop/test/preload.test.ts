@@ -37,6 +37,8 @@ describe("the preload's bridge", () => {
     const wsp = await bridge();
     wsp.setTerminalFocus(true);
     expect(send).toHaveBeenLastCalledWith("terminal:focus", true);
+    wsp.setTheme("light");
+    expect(send).toHaveBeenLastCalledWith("theme:set", "light");
     const chords: unknown[] = [];
     const stop = wsp.onShellChord(chord => chords.push(chord));
     expect(on).toHaveBeenLastCalledWith("shell:chord", expect.any(Function));

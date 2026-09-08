@@ -10,7 +10,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ContextMenuItem, SessionView, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type ContextMenuItem, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -37,7 +37,6 @@ import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { requestRenameWorkspace } from "../src/shell/shellRequests.js";
-import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
@@ -141,7 +140,7 @@ beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
   useDiffRevealStore.setState({ pendingByWorkspaceId: {} });
@@ -500,7 +499,7 @@ describe("a workspace row's name box", () => {
   /** The Spaces body draws no workspace row, and the current name reads twice (header and dot), so the shared
    * mount's one-name wait cannot be used: the header arriving is what says the body is up. */
   const mountSpaces = async (api: FakeApi): Promise<void> => {
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
     useStore.getState().bind(api);
     render(
       <SidebarProvider defaultOpen>

@@ -5,6 +5,7 @@ import { choosePorts } from "../src/ports.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { connectDaemon } from "@wsp/runtime";
 import { LocalDaemon } from "../src/local-daemon.js";
 
 describe("local daemon", () => {
@@ -45,6 +46,20 @@ describe("local daemon", () => {
     expect(await choosePorts({ port: hostPorts[0]!, wsPort: hostPorts[1]!, named: true })).toEqual({ ports: { port: hostPorts[0], wsPort: hostPorts[1] } });
     // Nothing of the daemon's lands on disk beside the host's files: the folder holds the inbox it made and nothing else.
     expect(readdirSync(root)).toEqual([".wsp-inbox"]);
+  });
+
+  it("hands out one road for the panes and the probe: an http route the probe fetches and every link turns into ws, with the token beside it", async () => {
+    daemon = await LocalDaemon.start({ root });
+    const road = daemon.road;
+    expect(road.url).toBe(`http://127.0.0.1:${daemon.port}`);
+    expect(road.expiresAt).toBe(Number.MAX_SAFE_INTEGER);
+    expect(road.daemonToken).toMatch(/^[0-9a-f]{48}$/);
+    // The status probe fetches that url; a WebSocket server answers a plain GET 426, which is what it reads as a daemon.
+    expect((await fetch(road.url)).status).toBe(426);
+    // The browser's link dials the same url as ws, with the token in the first frame.
+    const link = connectDaemon({ previewUrl: road.url, token: road.daemonToken!, onEvent: () => {} });
+    await link.ready;
+    link.close();
   });
 
   it("serves the files under the workspace folder", async () => {

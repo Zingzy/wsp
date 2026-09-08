@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
-import { useCreation, useReady, useSelectedId, useSelectedThreadId, useStore } from "./protocol/store.js";
+import { useCreation, useReady, useSelectedId, useSelectedThreadId, useSettingsOpen, useStore } from "./protocol/store.js";
 import { Mark } from "./brand/Brand.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./components/ui/empty.js";
 import { WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
+import { SettingsPage } from "./settings/SettingsPage.js";
+import { useThemeEffect } from "./settings/theme.js";
 import { AppShell } from "./shell/AppShell.js";
 import { WorkspaceCreation } from "./shell/WorkspaceCreation.js";
 import { WorkspaceThread } from "./shell/WorkspaceThread.js";
@@ -34,16 +36,20 @@ export function App({ wsUrl, token }: { wsUrl: string; token: string }) {
     return () => { live = false; client.close(); };
   }, [wsUrl, token, bind, setConn, noteGap]);
   useEffect(() => wireTerminals(useStore), []);
+  useThemeEffect();
   return <Shell />;
 }
 
 type Golden = "unknown" | "none" | "present";
 
-/** The center slot: the selected workspace's thread with the terminal drawer under it, or the creation in progress. */
+/** The center slot: the settings page while it is open, else the selected workspace's thread with the terminal drawer
+ * under it, or the creation in progress. */
 function WorkspaceCenter() {
   const workspaceId = useSelectedId();
   const threadId = useSelectedThreadId();
   const creation = useCreation(workspaceId);
+  const settingsOpen = useSettingsOpen();
+  if (settingsOpen) return <SettingsPage />;
   if (creation) return <WorkspaceCreation creation={creation} />;
   if (!workspaceId) {
     return (

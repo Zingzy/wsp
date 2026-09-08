@@ -17,28 +17,34 @@
 // config, so the pane's material can be measured with each tab active;
 // ?sidebar=<px> opens the sidebar at that remembered width so the rows can
 // be measured at several; ?spaces=1 opens it in the Spaces body, one
-// workspace under its header with a dot per workspace at the bottom.
-// ?images=<n> puts n images in the composer so the
-// thumbnail row above the text can be measured.
+// workspace under its header with a dot per workspace at the bottom;
+// ?images=<n> puts n images in the composer so the thumbnail row above the
+// text can be measured; ?settings=1 puts the settings page in the centre,
+// with the theme rule mounted so a pick on it moves the page's theme as the
+// app's would; ?size=file is the record saying the terminal's text size comes
+// from the Ghostty file; ?local=1 puts this computer in the list beside the
+// cloud machines, so a mixed list of both kinds can be measured.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DESKTOP_MAC_CLASS, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
 import { useRightPanelStore } from "../../src/rightPanelStore";
+import { SettingsPage } from "../../src/settings/SettingsPage";
+import { useThemeEffect } from "../../src/settings/theme";
 import { AppShell } from "../../src/shell/AppShell";
 import { openPanelTerminal } from "../../src/shell/shellCommands";
 import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
-import { SIDEBAR_MODE_KEY } from "../../src/sidebar/sidebarMode";
 import { useComposerImagesStore } from "../../src/components/chat/composerImages";
 import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
 import "../../src/index.css";
 
 const params = new URLSearchParams(window.location.search);
-document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
+const theme = params.get("theme") === "light" ? "light" : "dark";
+document.documentElement.classList.toggle("dark", theme === "dark");
 document.documentElement.classList.toggle(DESKTOP_MAC_CLASS, params.get("mac") === "1");
 // The bridge alone tells the page which shell holds it; with ?shell=desktop the chords a browser tab keeps for its
 // own tabs reach the page, which is what the switcher's chord needs. It carries the two picture calls, which is what
@@ -55,7 +61,10 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   golden: "snap_g",
   createdAt: "2026-09-05T11:00:00Z",
 });
-const workspaces = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" }];
+const cloud = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" }];
+// ?local=1 adds this computer to the list, so a mixed list can be measured: two cloud rows and one local beside them.
+const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
 // one; ws_b has only idle ones, the shape that used to draw no Idle header at all, one of them on Codex so both a
 // coloured and a monochrome agent mark sit in the shots.
@@ -103,7 +112,9 @@ const api: Api = {
   createFromGoldenHead: async () => workspaces[0]!,
   watchStatuses: async () =>
     workspaces.map(w =>
-      statusOf(w, params.get("offline") === "1" ? { reach: { state: statusOf(w).reach.state, offline: true } } : w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
+      w.id === MAC.id
+        ? statusOf(w, { kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 })
+        : statusOf(w, params.get("offline") === "1" ? { reach: { state: statusOf(w).reach.state, offline: true } } : w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
     ),
   forget: async () => {},
   nap: async id => workspaces.find(w => w.id === id)!,
@@ -160,11 +171,16 @@ function fakeWire(): TerminalWire {
 const toast = params.get("toast");
 const shown = params.get("ws");
 useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(shown !== null ? { selectedId: shown } : {}) });
-// ?sidebar=<px> is the width the shell remembers; it is written here, after a test's init script has cleared storage.
+// ?sidebar=<px> is the width the host's record holds, and ?spaces=1 the body it holds; the fixture's api answers no
+// preferences op, so the record is put in place here as the host's answer would put it.
 const sidebarWidth = params.get("sidebar");
-if (sidebarWidth !== null) window.localStorage.setItem("wsp:sidebar-width", sidebarWidth);
-// ?spaces=1 is the remembered sidebar body, on the same road and for the same reason as the width.
-if (params.get("spaces") === "1") window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}) } });
+const settings = params.get("settings") === "1";
+if (settings) useStore.setState({ settingsOpen: true });
+function ThemeRule() {
+  useThemeEffect();
+  return null;
+}
 useStore.getState().bind(api);
 // The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
 useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
@@ -204,6 +220,7 @@ if (params.get("oom") === "1") {
 }
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
-    <AppShell>{shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
+    {settings ? <ThemeRule /> : null}
+    <AppShell>{settings ? <SettingsPage /> : shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
   </TooltipProvider>,
 );

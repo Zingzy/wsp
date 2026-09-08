@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import type { TerminalConfig } from "@wsp/protocol";
-import { appScheme, terminalSurfaceSettings } from "./ghosttyConfig";
+import { appScheme, terminalBaseSize, terminalSurfaceSettings } from "./ghosttyConfig";
 import type { GhosttyTheme } from "./ghostty/core";
 import { appTerminalFontSize } from "./ghostty/surface";
 
@@ -64,10 +64,19 @@ describe("terminalSurfaceSettings", () => {
     expect(terminalSurfaceSettings({ ...FILE, fontFamily: [], fontSize: undefined }, APP, undefined, false).font).toEqual({ size: appTerminalFontSize() });
   });
 
-  it("the size is the pane's, never the file's: a file at 16 leaves the pane's zoom on the surface, and the app's own size where the pane has no zoom", () => {
-    expect(terminalSurfaceSettings({ ...FILE, fontSize: 16 }, APP, { size: 12 }, false).font).toEqual({ family: "Berkeley Mono", fallbacks: ["Symbols Nerd Font Mono"], size: 12 });
-    expect(terminalSurfaceSettings({ ...FILE, fontSize: 16 }, APP, undefined, false).font).toEqual({ family: "Berkeley Mono", fallbacks: ["Symbols Nerd Font Mono"], size: appTerminalFontSize() });
-    expect(terminalSurfaceSettings({ ...FILE, fontFamily: [], fontSize: 16 }, APP, undefined, false).font).toEqual({ size: appTerminalFontSize() });
+  it("the size is the base the preference names plus the workspace's zoom: the app's own by default, the file's when asked, and the app's again for a file naming none", () => {
+    const file = { ...FILE, fontSize: 16 };
+    expect(terminalSurfaceSettings(file, APP, undefined, false).font).toEqual({ family: "Berkeley Mono", fallbacks: ["Symbols Nerd Font Mono"], size: appTerminalFontSize() });
+    expect(terminalSurfaceSettings(file, APP, undefined, false, { source: "app", zoom: -2 }).font).toEqual({ family: "Berkeley Mono", fallbacks: ["Symbols Nerd Font Mono"], size: appTerminalFontSize() - 2 });
+    expect(terminalSurfaceSettings(file, APP, undefined, false, { source: "file", zoom: 0 }).font.size).toBe(16);
+    expect(terminalSurfaceSettings(file, APP, undefined, false, { source: "file", zoom: 3 }).font.size).toBe(19);
+    expect(terminalSurfaceSettings({ ...FILE, fontSize: undefined }, APP, undefined, false, { source: "file", zoom: 1 }).font.size).toBe(appTerminalFontSize() + 1);
+    expect(terminalSurfaceSettings(null, APP, undefined, false, { source: "file", zoom: 0 }).font).toEqual({ size: appTerminalFontSize() });
+    expect(terminalBaseSize("file", file)).toBe(16);
+    expect(terminalBaseSize("file", null)).toBe(appTerminalFontSize());
+    // A zoom past what the surface draws stops at its edge.
+    expect(terminalSurfaceSettings(file, APP, undefined, false, { source: "file", zoom: 40 }).font.size).toBe(32);
+    expect(terminalSurfaceSettings(file, APP, undefined, false, { source: "app", zoom: -40 }).font.size).toBe(6);
     // The token the app ships is what the pane lands on, and it is the chat's size, not the meta one.
     expect(appTerminalFontSize()).toBe(14);
   });

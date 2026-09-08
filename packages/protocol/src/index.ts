@@ -863,6 +863,69 @@ export const TerminalConfig = z.object({
 });
 export type TerminalConfig = z.infer<typeof TerminalConfig>;
 
+// --- preferences (the person's view of the app, kept on the host so every client agrees) ---
+
+/** Which side of the stylesheet the page draws: the computer's own, or one side pinned. */
+export const ThemePreference = z.enum(["system", "light", "dark"]);
+export type ThemePreference = z.infer<typeof ThemePreference>;
+
+/** Which body the sidebar draws: every workspace and its threads, or Spaces, one workspace at a time. */
+export const SidebarMode = z.enum(["list", "spaces"]);
+export type SidebarMode = z.infer<typeof SidebarMode>;
+
+/** Where the terminal pane's text size comes from before a zoom moves it: the app's own size, or the size the person's Ghostty file names. */
+export const TerminalSizeSource = z.enum(["app", "file"]);
+export type TerminalSizeSource = z.infer<typeof TerminalSizeSource>;
+
+/** One record on the host's state; the desktop app and a browser tab on the same host read and write this one. sidebarWidth
+ * absent is the sidebar's own default; terminalZoom is the pixels a workspace's panes add to the base size, by workspace id. */
+export const Preferences = z.object({
+  theme: ThemePreference,
+  sidebarMode: SidebarMode,
+  sidebarWidth: z.number().int().positive().optional(),
+  terminalSize: TerminalSizeSource,
+  terminalZoom: z.record(z.string(), z.number().int()),
+});
+export type Preferences = z.infer<typeof Preferences>;
+
+/** What preferences.set takes: any of the record's fields; a null sidebarWidth clears it back to the default, and
+ * terminalZoom names only the workspaces it moves, a null entry dropping that workspace's zoom. */
+export const PreferencesPatch = Preferences.partial().extend({
+  sidebarWidth: z.number().int().positive().nullable().optional(),
+  terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
+});
+export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
+
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {} };
+
+/** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
+export function preferencesFrom(stored: unknown): Preferences {
+  const parsed = Preferences.partial().safeParse(stored ?? {});
+  return parsed.success ? applyPreferencesPatch(DEFAULT_PREFERENCES, parsed.data) : DEFAULT_PREFERENCES;
+}
+
+/** The record with the patch's fields over it. The one merge rule, read by the host that keeps the record and the client
+ * that paints ahead of the host's answer, so both land on the same record. */
+export function applyPreferencesPatch(current: Preferences, patch: PreferencesPatch): Preferences {
+  const sidebarWidth = patch.sidebarWidth === undefined ? current.sidebarWidth : patch.sidebarWidth;
+  const terminalZoom = { ...current.terminalZoom };
+  for (const [workspaceId, zoom] of Object.entries(patch.terminalZoom ?? {})) {
+    if (zoom === null) delete terminalZoom[workspaceId];
+    else terminalZoom[workspaceId] = zoom;
+  }
+  return {
+    theme: patch.theme ?? current.theme,
+    sidebarMode: patch.sidebarMode ?? current.sidebarMode,
+    terminalSize: patch.terminalSize ?? current.terminalSize,
+    terminalZoom,
+    ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
+  };
+}
+
+/** The host's record changed, by any client; every socket gets the whole record. */
+export const PreferencesChangedEvent = z.object({ type: z.literal("preferences.changed"), preferences: Preferences });
+export type PreferencesChangedEvent = z.infer<typeof PreferencesChangedEvent>;
+
 // --- desktop shell bridge (preload to page) -----------------------------------
 
 /** One installed font file the desktop shell hands the page for its terminal, registered under the family the file names. */
@@ -929,6 +992,8 @@ export interface DesktopBridge {
   setTerminalFocus(focused: boolean): void;
   /** A chord the shell stood aside from, for the page's keybindings to answer; returns the unsubscribe. */
   onShellChord(handler: (chord: ShellChord) => void): () => void;
+  /** The theme the page draws, so the window's frame, glass and traffic-light bar follow it. */
+  setTheme(theme: ThemePreference): void;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------
@@ -1272,6 +1337,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   ForwardCloseEvent.extend(sequenced),
   ProjectImportEvent.extend(sequenced),
   ProjectExportEvent.extend(sequenced),
+  PreferencesChangedEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -1527,6 +1593,7 @@ const DAEMON_CONTENTS = [
   "b749121a659b9c45b07285ee0f4e95f15aae26ddbc1bcba75745e83c2ae032c6",
   "b0b88a03c649769e0676ca38eaa5035825b71302c97a2858dcf8eb57131288be",
   "cae44a68bd72d81717b52a71c3890da918025cbd0d071db884102936e5cf4345",
+  "c5c3b15cad1b45ed110b072a18d0d895f661c489f73828de78a3b9f3589f05c6",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -1537,7 +1604,8 @@ const DAEMON_CONTENTS = [
  * or proc ops. Version 3 browses the imported project folders named in DAEMON_ROOTS_PATH beside its home.
  * Version 4 starts from a script that sets the guest PATH itself. Version 5 fetches its Node through the catalog's
  * curl function. Version 6 puts itself last for the kernel's memory killer and starts every shell it opens at the
- * work score instead. */
+ * work score instead. Version 7 picks the road to the listening ports by platform, so the same daemon serves them
+ * on a Linux guest and on the person's own Mac. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -1803,6 +1871,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
    * light:...,dark:... value and is dark when absent. */
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
+  /** Replies with { preferences: Preferences }: the record on this host's state, the defaults until a client set something. */
+  z.object({ id: reqId, op: z.literal("preferences.get") }),
+  /** Lands the patch on the record, keeps it, pushes preferences.changed to every socket and replies with { preferences: Preferences }. */
+  z.object({ id: reqId, op: z.literal("preferences.set"), patch: PreferencesPatch }),
   /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the
@@ -1974,7 +2046,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, computerOffline, goneRefusal, imageMoveRefusal, isBilling, needsRebuild, reachShown, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { actionRefusal, computerOffline, goneRefusal, imageMoveRefusal, isBilling, kindWords, needsRebuild, reachShown, sendRefusal, workspaceKind, workspaceState, workspaceWord, WORKSPACE_KIND_WORDS, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";

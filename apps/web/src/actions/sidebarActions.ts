@@ -4,7 +4,8 @@
 // entry, and it names the mode a pick moves to, so the palette row and the
 // menu row can never say two things about it.
 import { GalleryHorizontalEndIcon, ListIcon } from "lucide-react";
-import { otherMode, type SidebarMode } from "../sidebar/sidebarMode.js";
+import type { SidebarMode } from "@wsp/protocol";
+import { otherMode } from "../sidebar/sidebarMode.js";
 import { SIDEBAR_MODE_WORDS } from "./format.js";
 import type { ActionEntry } from "./registry.js";
 

@@ -126,7 +126,7 @@ export interface StatusApi {
 
 /** A workspace as the tracker needs it: the view, the size the provider built
  * (views carry no size), and roads to the machine that never go through
- * backend.get. daemonReach is absent on backends without preview URLs. */
+ * backend.get. daemonReach is absent on a machine whose kind has no road to a daemon. */
 export interface StatusRecord extends WorkspaceView {
   size: WorkspaceSize;
   /** The awake rate for this workspace's size on its own backend: a cloud fork's from the provider's pricing, a local
@@ -135,7 +135,9 @@ export interface StatusRecord extends WorkspaceView {
   /** Which write of the record this view is of; the poll drops a row built on a view the record has moved past. */
   generation: number;
   idleAt?: number;
-  daemonReach?: () => Promise<PreviewReach>;
+  /** Where this machine's daemon answers and when that route expires; the probe fetches the one and the row carries
+   * the other, so whatever else a kind's road hands out (a token) stays off this. */
+  daemonReach?: () => Promise<Pick<PreviewReach, "url" | "expiresAt">>;
   providerState: () => Promise<MachineState>;
   /** The host's own word on the machine; absent on backends without one. */
   metrics?: () => Promise<void>;
@@ -479,7 +481,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         if (!daemonReach) return done(await machineState(r, reconcile, false), { state: "unsupported" });
 
         const memory = probesOf(r);
-        let route: PreviewReach | undefined;
+        let route: Pick<PreviewReach, "url" | "expiresAt"> | undefined;
         let probed: Probed;
         try {
           route = await daemonReach();

@@ -4,7 +4,7 @@
 // and the Tab pair means what the sidebar body it is read in means by it.
 import { describe, expect, it } from "vitest";
 import { compileResolvedKeybindingsConfig, DEFAULT_KEYBINDINGS, DEFAULT_RESOLVED_KEYBINDINGS, parseKeybindingShortcut, parseKeybindingWhenExpression } from "../src/keybindingDefaults.js";
-import { SIDEBAR_MODE_KEY } from "../src/sidebar/sidebarMode.js";
+import { useStore } from "../src/protocol/store.js";
 import { browserTabClaimsShortcut, eventHoldKeys, formatShortcutLabel, resolveShortcutCommand, shortcutLabelForCommand, type ShortcutEventLike } from "../src/keybindings.js";
 
 const MAC = "MacIntel";
@@ -58,6 +58,9 @@ describe("default shortcuts", () => {
     expect(resolve(cmd("j", { shiftKey: true }), MAC)).toBe("preview.toggle");
     expect(resolve(cmd("k"), MAC)).toBe("commandPalette.toggle");
     expect(resolve(ctrl("k"), LINUX)).toBe("commandPalette.toggle");
+    expect(resolve(cmd(","), MAC)).toBe("settings.toggle");
+    expect(resolve(ctrl(","), LINUX)).toBe("settings.toggle");
+    expect(resolve(cmd(","), MAC, { terminalFocus: true })).toBe("settings.toggle");
   });
 
   it("gates the terminal chords on terminalFocus and hands mod+n to chat otherwise", () => {
@@ -261,13 +264,14 @@ describe("the switch chords per sidebar body", () => {
     expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: LINUX, context: SPACES })).toBe("Ctrl+Alt+Right");
   });
 
-  it("reads as the list where a caller names no body, and reads no storage of its own to find one", () => {
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, "spaces");
+  it("reads as the list where a caller names no body, and reads no record of its own to find one", () => {
+    const before = useStore.getState().preferences;
+    useStore.setState({ preferences: { ...before, sidebarMode: "spaces" } });
     try {
       expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
       expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.next", { platform: MAC, context: DESKTOP })).toBeNull();
     } finally {
-      window.localStorage.removeItem(SIDEBAR_MODE_KEY);
+      useStore.setState({ preferences: before });
     }
   });
 });

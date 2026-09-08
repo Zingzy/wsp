@@ -6,6 +6,7 @@
 // modifier is held, so this listens for that key coming up, for the Escape
 // that cancels, and for the window losing focus with the hold unresolved.
 import { useEffect, useRef } from "react";
+import { isCommandPaletteOpen } from "../commandPaletteBus.js";
 import { surfaceShortcutTargetsTypingContext } from "../components/RightPanelTabs.js";
 import { useSidebar } from "../components/ui/sidebar.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
@@ -14,15 +15,14 @@ import type { ResolvedKeybindingsConfig } from "../keybindingTypes.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { isPreviewFocused } from "../lib/previewFocus.js";
 import { isTerminalFocused } from "../lib/terminalFocus.js";
-import { useSelectedWorkspaceId } from "../protocol/store.js";
-import { useSidebarMode } from "../sidebar/sidebarMode.js";
+import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
 import { cancelWorkspaceSwitch, commitWorkspaceSwitch, runShellCommand, type ShellCommandTarget } from "./shellCommands.js";
 import { releasesSwitchHold, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
 
 export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: { keybindings?: ResolvedKeybindingsConfig }) {
   const { toggleSidebar } = useSidebar();
   const workspaceId = useSelectedWorkspaceId();
-  const [sidebarMode] = useSidebarMode();
+  const sidebarMode = useStore(s => s.preferences.sidebarMode);
   const target = useRef<ShellCommandTarget>({ workspaceId, toggleSidebar });
   target.current = { workspaceId, toggleSidebar };
   // Which body a chord is read in, held per render rather than looked up per keydown; the listeners are bound once.
@@ -37,6 +37,13 @@ export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDING
       if (event.key === "Escape" && useWorkspaceSwitcher.getState().open) {
         event.preventDefault();
         cancelWorkspaceSwitch();
+        return;
+      }
+      // Escape leaves the settings page, the one centre view with no row of its own to pick; a palette over it takes
+      // the key first.
+      if (event.key === "Escape" && useStore.getState().settingsOpen && !isCommandPaletteOpen()) {
+        event.preventDefault();
+        useStore.getState().closeSettings();
         return;
       }
       const command = resolveShortcutCommand(event, keybindings, {

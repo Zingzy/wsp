@@ -2,15 +2,18 @@
 // The terminal font as this viewer chose it, kept in localStorage; with no
 // choice the pane draws with the family the collector read from the person's
 // terminal config (the boot payload), and with neither its own default stack.
-// The size is the other half: one per workspace, the app's own text size until
-// a zoom chord steps it, and kept beside the sidebar's width.
+// The size is the other half: a base the preferences record names, the app's
+// own text size or the Ghostty file's, and per workspace the pixels a zoom
+// chord added, kept on the same record so every client draws the pane alike.
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { bootPayload } from "../boot.js";
 import type { TerminalViewportConfig } from "../components/ThreadTerminalDrawer.js";
-import { appTerminalFontSize, terminalFontSize } from "./ghostty/surface.js";
+import { useStore } from "../protocol/store.js";
+import { terminalFontSize } from "./ghostty/surface.js";
+import { terminalBaseSize } from "./ghosttyConfig.js";
+import { terminalFile } from "./terminalFile.js";
 
 export const TERMINAL_FONT_KEY = "wsp:terminal-font";
-export const TERMINAL_FONT_SIZE_PREFIX = "wsp:terminal-font-size:";
 const CHANGE_EVENT = "wsp:terminal-font-change";
 /** The step Ghostty's own zoom takes, in css px. */
 const FONT_SIZE_STEP = 1;
@@ -49,41 +52,28 @@ export function effectiveTerminalFont(): string | undefined {
   return readTerminalFont() ?? detectedTerminalFont();
 }
 
-const sizeKey = (workspaceId: string): string => `${TERMINAL_FONT_SIZE_PREFIX}${workspaceId}`;
+/** The pixels this workspace's panes add to the base size; none until a zoom chord moves it. */
+export const terminalZoomOf = (zoom: Readonly<Record<string, number>>, workspaceId: string): number => zoom[workspaceId] ?? 0;
 
-/** The size this workspace's panes draw at: the app's own text size until a zoom chord moves it. */
-export function readTerminalFontSize(workspaceId: string): number {
-  try {
-    const raw = window.localStorage.getItem(sizeKey(workspaceId))?.trim();
-    return terminalFontSize(raw === undefined || raw.length === 0 ? undefined : Number(raw));
-  } catch {
-    return appTerminalFontSize();
-  }
+/** One step of the terminal's own zoom, held so the size stays inside what the surface draws over the base the panes
+ * draw from; the patch names this workspace alone, so another client's zoom on another workspace is kept. */
+export function stepTerminalZoom(workspaceId: string, steps: number): void {
+  const { preferences, setPreferences } = useStore.getState();
+  const base = terminalBaseSize(preferences.terminalSize, terminalFile());
+  const zoom = terminalFontSize(base + terminalZoomOf(preferences.terminalZoom, workspaceId) + steps * FONT_SIZE_STEP) - base;
+  void setPreferences({ terminalZoom: { [workspaceId]: zoom } });
 }
 
-function writeTerminalFontSize(workspaceId: string, size: number | null): void {
-  try {
-    if (size === null) window.localStorage.removeItem(sizeKey(workspaceId));
-    else window.localStorage.setItem(sizeKey(workspaceId), String(size));
-  } catch {
-    return;
-  }
-  window.dispatchEvent(new Event(CHANGE_EVENT));
-}
-
-/** One step of the terminal's own zoom, clamped to the sizes the surface draws. */
-export function stepTerminalFontSize(workspaceId: string, steps: number): void {
-  writeTerminalFontSize(workspaceId, terminalFontSize(readTerminalFontSize(workspaceId) + steps * FONT_SIZE_STEP));
-}
-
-/** The panes back on the app's own text size, with nothing of this workspace's own left behind. */
-export function resetTerminalFontSize(workspaceId: string): void {
-  writeTerminalFontSize(workspaceId, null);
+/** The panes back on the base size, with nothing of this workspace's own left on the record. */
+export function resetTerminalZoom(workspaceId: string): void {
+  const { preferences, setPreferences } = useStore.getState();
+  if (!(workspaceId in preferences.terminalZoom)) return;
+  void setPreferences({ terminalZoom: { [workspaceId]: null } });
 }
 
 function subscribe(onChange: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
-    if (event.key === null || event.key === TERMINAL_FONT_KEY || event.key.startsWith(TERMINAL_FONT_SIZE_PREFIX)) onChange();
+    if (event.key === null || event.key === TERMINAL_FONT_KEY) onChange();
   };
   window.addEventListener("storage", onStorage);
   window.addEventListener(CHANGE_EVENT, onChange);
@@ -101,13 +91,13 @@ export function useTerminalFont(): { family: string; detected: string | undefine
   return { family, detected: detectedTerminalFont(), setFamily };
 }
 
-/** The viewport config for the effective family and this workspace's size, saying whether the viewer typed the family,
- * since a typed family beats the one in their terminal config file where a detected one does not; its identity changes
- * only with those, so a chunk of output never rebuilds it. */
+/** The viewport config for the effective family and this workspace's sizing, saying whether the viewer typed the
+ * family, since a typed family beats the one in their terminal config file where a detected one does not; its
+ * identity changes only with those, so a chunk of output never rebuilds it. */
 export function useTerminalViewportConfig(workspaceId: string): TerminalViewportConfig {
   const family = useSyncExternalStore(subscribe, effectiveTerminalFont, effectiveTerminalFont);
   const chosenFont = useSyncExternalStore(subscribe, chosen, chosen) !== "";
-  const readSize = useCallback(() => readTerminalFontSize(workspaceId), [workspaceId]);
-  const size = useSyncExternalStore(subscribe, readSize, readSize);
-  return useMemo(() => ({ font: { ...(family !== undefined ? { family } : {}), size }, chosenFont }), [family, size, chosenFont]);
+  const source = useStore(s => s.preferences.terminalSize);
+  const zoom = useStore(s => terminalZoomOf(s.preferences.terminalZoom, workspaceId));
+  return useMemo(() => ({ font: family !== undefined ? { family } : {}, chosenFont, sizing: { source, zoom } }), [family, chosenFont, source, zoom]);
 }

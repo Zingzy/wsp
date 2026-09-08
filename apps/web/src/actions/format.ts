@@ -4,8 +4,7 @@
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
 import { agentName } from "@wsp/catalog";
-import { actionRefusal, goneRefusal, isBilling, keepsRename, workspaceWord, type HarnessCatalog, type SessionRenameOutcome, type WorkspaceState } from "@wsp/protocol";
-import type { SidebarMode } from "../sidebar/sidebarMode.js";
+import { actionRefusal, goneRefusal, isBilling, keepsRename, workspaceWord, type HarnessCatalog, type SessionRenameOutcome, type SidebarMode, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -24,11 +23,11 @@ export const WORKSPACE_WORDS = {
   forget: "Forget workspace",
 } as const;
 
-/** The sidebar's body toggle as the palette and the Workspaces section menu name it, keyed by the mode a pick moves
- * to: the words, and the sentence under them for what that body shows. */
-export const SIDEBAR_MODE_WORDS: Record<SidebarMode, { readonly title: string; readonly hint: string }> = {
-  spaces: { title: "Show Spaces", hint: "One workspace at a time, with a dot per workspace at the bottom" },
-  list: { title: "Show the workspace list", hint: "Every workspace and its threads" },
+/** The sidebar's two bodies, keyed by mode: the body's name as the settings page lists it, the toggle's words as the
+ * palette and the Workspaces section menu name a pick that moves to it, and the sentence under both for what it shows. */
+export const SIDEBAR_MODE_WORDS: Record<SidebarMode, { readonly name: string; readonly title: string; readonly hint: string }> = {
+  spaces: { name: "Spaces", title: "Show Spaces", hint: "One workspace at a time, with a dot per workspace at the bottom" },
+  list: { name: "List", title: "Show the workspace list", hint: "Every workspace and its threads" },
 };
 
 export const THREAD_WORDS = {
@@ -60,25 +59,23 @@ export function phaseWord(state: WorkspaceState): string {
   return isBilling(state) ? WORKSPACE_WORDS.pause : WORKSPACE_WORDS.wake;
 }
 
+/** The phase slot's two words per state: what its button offers, and the verb a machine that cannot take the move
+ * is refused for, in the runtime's own words. One table, so a state whose button changes cannot leave the refusal
+ * beside it naming the other verb. */
+const PHASE_SLOT: Record<WorkspaceState, { button: string; cannot: string }> = {
+  running: { button: "Pause", cannot: "be paused" },
+  unreachable: { button: "Pause", cannot: "be paused" },
+  paused: { button: "Wake", cannot: "be woken" },
+  gone: { button: "Wake", cannot: "be woken" },
+  pausing: { button: "Pausing…", cannot: "be paused" },
+  waking: { button: "Waking…", cannot: "be woken" },
+};
+
 /** The word the phase button on the machine's own surface shows: the verb, or the moving state while it moves. */
-export function phaseButtonWord(state: WorkspaceState): string {
-  switch (state) {
-    case "running":
-    case "unreachable":
-      return "Pause";
-    case "paused":
-    case "gone":
-      return "Wake";
-    case "pausing":
-      return "Pausing…";
-    case "waking":
-      return "Waking…";
-    default: {
-      const _exhaustive: never = state;
-      return "";
-    }
-  }
-}
+export const phaseButtonWord = (state: WorkspaceState): string => PHASE_SLOT[state].button;
+
+/** The verb the machine cannot take, for the one sentence a machine wsp does not drive refuses with. */
+export const phaseCannot = (state: WorkspaceState): string => PHASE_SLOT[state].cannot;
 
 export const phaseHint = (state: WorkspaceState): string => (isBilling(state) ? "Suspend the VM and keep the disk" : "Boot the VM from its disk");
 export const FORGET_HINT = "The machine is gone; forget the workspace to drop it from this computer";

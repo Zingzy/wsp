@@ -26,6 +26,7 @@ export const KEYBINDING_COMMANDS = [
   "rightPanel.toggle",
   "preview.toggle",
   "commandPalette.toggle",
+  "settings.toggle",
   "chat.new",
   "workspace.next",
   "workspace.previous",

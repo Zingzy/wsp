@@ -4,16 +4,17 @@
 // one row per workspace to switch to, recent threads at rest and every thread
 // whose title holds the typed query. Pure apart from the callbacks it is
 // handed, so the list is testable without the dialog.
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, MessageSquareIcon, PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, MessageSquareIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import type { SidebarMode } from "@wsp/protocol";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { sidebarActions } from "../../actions/sidebarActions.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
 import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
 import { cn } from "../../lib/utils.js";
+import { SETTINGS_WORDS } from "../../settings/format.js";
 import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
-import type { SidebarMode } from "../../sidebar/sidebarMode.js";
 import { compactTimeLabel, dotClassForTone } from "../../sidebar/workspaceRows.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
 
@@ -31,6 +32,7 @@ export interface PaletteHandlers {
   readonly previousThread: () => void;
   /** Which body the sidebar draws; the row that runs this comes from the sidebar registry, as the section menu's does. */
   readonly setSidebarMode: (mode: SidebarMode) => void;
+  readonly openSettings: () => void;
 }
 
 export interface PaletteItemsInput {
@@ -146,6 +148,16 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       title: "Toggle sidebar",
       shortcutCommand: "sidebar.toggle",
       run: sync(handlers.toggleSidebar),
+    },
+    {
+      kind: "action",
+      value: "action:settings",
+      searchTerms: ["settings", "preferences", "theme", "appearance", "light mode", "dark mode", "terminal size"],
+      icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+      title: SETTINGS_WORDS.title,
+      description: SETTINGS_WORDS.hint,
+      shortcutCommand: "settings.toggle",
+      run: sync(handlers.openSettings),
     },
     {
       kind: "action",

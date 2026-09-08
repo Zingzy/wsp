@@ -40,6 +40,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
   const select = useStore(s => s.select);
+  const openSettings = useStore(s => s.openSettings);
   const selectedId = useSelectedWorkspaceId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
   const [sidebarMode, setSidebarMode] = useSidebarMode();
@@ -72,8 +73,9 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       nextThread: () => cycleThreadInSpace(1),
       previousThread: () => cycleThreadInSpace(-1),
       setSidebarMode,
+      openSettings,
     }),
-    [select, setSidebarMode, toggleRightPanel, toggleSidebar],
+    [openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
     () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, sidebarMode, handlers, verbs }),
