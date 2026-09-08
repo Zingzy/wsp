@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { stopRender, stopVite } from "./vite-child";
+import { launchRender, RENDER_ARGS, stopRender, stopVite } from "./vite-child";
 
 // The child prints once its script has run, so a signal never races its handler.
 const started = (script: string) => {
@@ -48,4 +51,23 @@ it("stopRender with no browser still stops vite", async () => {
   const c = await started("setInterval(() => {}, 1000)");
   await stopRender(undefined, c);
   expect(c.signalCode).toBe("SIGTERM");
+});
+
+it("launchRender hands Chromium the cap on its shared memory, which no render file may spend a whole disk on", async () => {
+  let got: string[] | undefined;
+  await launchRender(options => {
+    got = options.args;
+    return Promise.resolve({} as never);
+  });
+  expect(got).toEqual(RENDER_ARGS);
+  expect(RENDER_ARGS).toContain("--enable-low-end-device-mode");
+});
+
+it("every render file launches through launchRender, so the cap has one home", () => {
+  const webDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const render = readdirSync(webDir, { recursive: true, encoding: "utf8" }).filter(f => f.endsWith(".browser.test.ts") && !f.includes("node_modules"));
+  expect(render.length).toBeGreaterThan(10);
+  const bodies = render.map(f => [f, readFileSync(join(webDir, f), "utf8")] as const);
+  expect(bodies.filter(([, body]) => body.includes("chromium.launch(")).map(([f]) => f)).toEqual([]);
+  expect(bodies.filter(([, body]) => !body.includes("launchRender()")).map(([f]) => f)).toEqual([]);
 });
