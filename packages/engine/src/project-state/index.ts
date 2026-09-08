@@ -82,6 +82,14 @@ export function agentHomes(homeDir: string, env?: Readonly<Record<string, string
   return Object.fromEntries(CATALOG_AGENTS.map(a => [a.id, own(a) || join(homeDir, a.stateHome)]));
 }
 
+/** Where one harness keeps its sessions under a home directory: the folder the person's own store variable names
+ * where their environment sets one, else the catalog's own for that harness, else a folder named after the harness,
+ * which is what an id the catalog does not carry would get. The one rule, read by every kind whose machine answers
+ * with a home of its own (this computer, a machine over ssh). */
+export function agentHome(homeDir: string, agentId: string, env?: Readonly<Record<string, string | undefined>>): string {
+  return agentHomes(homeDir, env)[agentId] ?? join(homeDir, `.${agentId}`);
+}
+
 /** Every catalog agent's home on the guest, by id: the entry's own guest home where it names one, else stateHome under the guest's home. */
 export function guestAgentHomes(): Record<string, string> {
   return Object.fromEntries(CATALOG_AGENTS.map(a => [a.id, a.guestStateHome ?? join(GUEST_HOME, a.stateHome)]));

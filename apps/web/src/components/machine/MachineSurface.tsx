@@ -176,10 +176,10 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
           {phaseLabel(workspace.phase)}
           {diverged && <span className="text-muted-foreground"> · machine {diverged}</span>}
         </Row>
-        <Row label="Reach" k="reach" title={status ? reachLabel(status.reach.state) : "pending"}>
+        <Row label="Reach" k="reach" title={status ? reachLabel(status.reach.state, workspaceKind(workspace)) : "pending"}>
           {status ? (
             <span className={cn(zombie && "text-destructive-foreground")} data-reach={status.reach.state}>
-              {reachLabel(status.reach.state)}
+              {reachLabel(status.reach.state, workspaceKind(workspace))}
             </span>
           ) : (
             "pending"

@@ -9,8 +9,8 @@
 // meaning on a computer and throw, since the runtime refuses them by capability
 // before it ever reaches here.
 
-import { spawn } from "node:child_process";
 import { cpus, totalmem } from "node:os";
+import { runChild } from "./child-exec.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
 import type { Capabilities } from "@wsp/protocol";
 
@@ -35,52 +35,11 @@ export interface LocalBackendOptions {
   env?: Readonly<Record<string, string | undefined>>;
 }
 
-/** One shell command on this computer: bash -c, cwd the backend's root, the person's own environment. A negative
- * exit stands for a signal, as a child's does; a timeout kills the child and answers 124, the code a cut guest exec
- * answers with. */
+/** One shell command on this computer: bash -c, cwd the backend's root, the person's own environment. The child
+ * itself is read by the shared runner, so a timeout, a signal and a streamed line mean here what they mean on a
+ * machine reached over ssh. */
 async function runShell(root: string, env: Readonly<Record<string, string | undefined>>, cmd: string, opts: { timeoutMs?: number; onLine?: (line: string) => void } = {}): Promise<ExecResult> {
-  return new Promise<ExecResult>(resolve => {
-    const child = spawn("bash", ["-c", cmd], { cwd: root, env: env as NodeJS.ProcessEnv });
-    let stdout = "";
-    let stderr = "";
-    let pending = "";
-    const feed = (chunk: string): void => {
-      if (opts.onLine === undefined) return;
-      pending += chunk;
-      let nl: number;
-      while ((nl = pending.indexOf("\n")) !== -1) {
-        opts.onLine(pending.slice(0, nl));
-        pending = pending.slice(nl + 1);
-      }
-    };
-    let timedOut = false;
-    const timer = opts.timeoutMs === undefined ? undefined : setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, opts.timeoutMs);
-    const text = (b: Buffer): string => b.toString("utf8");
-    child.stdout.on("data", (b: Buffer) => {
-      const chunk = text(b);
-      stdout += chunk;
-      feed(chunk);
-    });
-    child.stderr.on("data", (b: Buffer) => {
-      stderr += text(b);
-    });
-    const done = (exitCode: number): void => {
-      if (timer !== undefined) clearTimeout(timer);
-      if (opts.onLine !== undefined && pending !== "") opts.onLine(pending);
-      resolve({ exitCode, stdout, stderr });
-    };
-    child.on("error", e => {
-      stderr += `${e instanceof Error ? e.message : String(e)}\n`;
-      done(127);
-    });
-    child.on("close", (code, signal) => {
-      if (timedOut) return done(124);
-      done(code ?? (signal !== null ? -1 : 0));
-    });
-  });
+  return runChild("bash", ["-c", cmd], { cwd: root, env, ...opts });
 }
 
 /** This computer as a Machine: exec and run spawn a shell on it, state is always running while the host is, and the

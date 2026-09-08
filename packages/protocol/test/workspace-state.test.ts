@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, computerOffline, goneRefusal, isBilling, isLocalWorkspace, kindWords, localMachineRefusal, needsRebuild, reachShown, relayedRefusal, sendRefusal, stillWorkingRefusal, THIS_COMPUTER, workspaceKind, workspaceState, workspaceWord, WORKSPACE_KIND_WORDS, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, computerOffline, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, OVER_SSH, reachShown, type ReachState, relayedRefusal, type SendBlock, sendRefusal, stillWorkingRefusal, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, type WorkspaceState, workspaceWord } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -150,17 +150,21 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and says what it is", () => {
-    expect(kindWords("cloud")).toEqual({ machine: null, driven: true });
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, driven: false });
+    expect(kindWords("cloud")).toEqual({ machine: null, driven: true, daemon: true });
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, driven: false, daemon: true });
+    // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it, and
+    // it serves no daemon at all, so a row for one says what the machine is rather than that its daemon is missing.
+    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, driven: false, daemon: false });
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {
-    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local"]);
+    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "ssh"]);
   });
 
   it("the phrase for this computer has one home: the refusals read it too", () => {
     expect(THIS_COMPUTER).toBe("this computer");
     expect(relayedRefusal("mac")).toContain(THIS_COMPUTER);
-    expect(localMachineRefusal("mac", "be paused")).toBe(`mac is ${THIS_COMPUTER}, not a machine wsp runs; it cannot be paused`);
+    expect(undrivenRefusal("mac", machineWord("local"), "be paused")).toBe(`mac is ${THIS_COMPUTER}, not a machine wsp runs; it cannot be paused`);
+    expect(undrivenRefusal("box", machineWord("ssh"), "be paused")).toBe(`box is ${OVER_SSH}, not a machine wsp runs; it cannot be paused`);
   });
 });

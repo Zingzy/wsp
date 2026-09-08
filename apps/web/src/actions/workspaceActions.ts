@@ -2,7 +2,7 @@
 // The workspace's actions, one registry: what a workspace row, the palette,
 // the Machine tab and the row's context menu offer for one machine.
 import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PaletteIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, ShapesIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { NO_REBUILD_NEEDED, isBilling, kindWords, localMachineRefusal, needsRebuild, workspaceKind, workspaceState, type LookPart, type MachineState, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NO_REBUILD_NEEDED, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type LookPart, type MachineState, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
@@ -93,7 +93,7 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     hint: target => phaseHint(stateOf(target)),
     // A machine wsp neither forked nor pays for takes neither verb, in the runtime's own sentence and the verb this
     // slot's own button offers, so what is offered and what would be thrown say the same thing.
-    refusal: target => (kindWords(target.kind).driven ? phaseRefusal(stateOf(target)) : localMachineRefusal(target.displayName, phaseCannot(stateOf(target)))),
+    refusal: target => (kindWords(target.kind).driven ? phaseRefusal(stateOf(target)) : undrivenRefusal(target.displayName, machineWord(target.kind), phaseCannot(stateOf(target)))),
     run: (target, verbs) => verbs.togglePhase(target.id),
   },
   {

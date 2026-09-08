@@ -367,10 +367,17 @@ export function forgetNotice(threads: number): string {
   return `Its record and ${fmtThreads(threads)} leave this computer; the machine is already gone.`;
 }
 
-/** What deleting a workspace takes, the one sentence every client's confirmation shows: the machine goes at the
- * provider, the record and the threads go from here. */
-export function deleteNotice(threads: number): string {
-  return `Its machine is deleted at the provider; its record and ${fmtThreads(threads)} leave this computer.`;
+/** What a delete does to a machine wsp did not fork: nothing. The one phrase, read by the question a client asks
+ * before a delete and by the line the command line prints after; each supplies the "its" its own sentence needs. */
+export const MACHINE_LEFT = "machine is left as it is";
+
+/** What deleting a workspace takes, the one sentence every client's confirmation shows: a machine wsp forked goes at
+ * the provider, a machine that already existed is left as it is, and either way the record and the threads go from
+ * here. `driven` is the kind's own word for which of the two it is, named by every caller so a road that forgets it
+ * cannot land on the wrong half. */
+export function deleteNotice(threads: number, driven: boolean): string {
+  const machine = driven ? "Its machine is deleted at the provider" : `Its ${MACHINE_LEFT}`;
+  return `${machine}; its record and ${fmtThreads(threads)} leave this computer.`;
 }
 
 /** Text cut to one line: its first non-empty line with the whitespace collapsed, so a multi-paragraph brief is one
@@ -799,12 +806,52 @@ export const NO_PROVIDER_LINE = "no machine provider is set up on this computer,
  * sidebar row's second line and the Machine tab's lineage all read this one phrase. */
 export const THIS_COMPUTER = "this computer";
 
+/** What an ssh workspace's machine is, in every sentence and every row that names it: a machine of the person's own
+ * that wsp reaches and never runs. */
+export const OVER_SSH = "a machine over ssh";
+
 /** The one sentence a local workspace refuses a request relayed from a machine with. A local workspace is this
  * computer; it answers only its own person, so a request that reached the host from a machine wsp runs cannot drive
  * it. Today no machine has a road into the host, so nothing relays yet; the rule and its test land now. */
 export function relayedRefusal(name: string): string {
   return `${name} is ${THIS_COMPUTER}; it answers only requests from ${THIS_COMPUTER}, never one relayed from a machine`;
 }
+
+/** The one sentence a request relayed from a machine is refused with when it would record a machine that already
+ * exists. Which of the person's own machines wsp holds is theirs to say, whatever the kind: the address and the key
+ * a record stands on are named on this computer, so nothing a machine asks for reaches that road. */
+export function relayedRecordRefusal(named: string): string {
+  return `recording ${named} is this computer's own act; a request relayed from a machine cannot record a machine here`;
+}
+
+/** What a first dial says about the machine it reached: the host key it answered with, for the person to compare
+ * against the machine's own before they trust the road. Printed once, when the workspace is recorded. */
+export function sshHostKeyNotice(hostKey: string): string {
+  return `its host key is ${hostKey}; compare it with the machine's own before a thread runs there`;
+}
+
+/** What a verb is refused with when this host wired no module for the kind it names. */
+export function noKindLine(kind: string): string {
+  return `this host has no ${kind} backend wired, so it serves no ${kind} workspace`;
+}
+
+/** What a road is refused with when the record names no home on its machine: every path a turn runs there is built
+ * from it, and the dial that records a workspace refuses a machine that names none, so a record without one is one
+ * to make again rather than one to guess a folder for. */
+export function noMachineHomeLine(name: string): string {
+  return `${name} carries no home folder for its machine; record it again with wsp new --ssh`;
+}
+
+/** What the roads that need a daemon are refused with on a machine reached over ssh: the connection carries a
+ * command and nothing else yet, so the panes that ride a daemon have nothing to dial. */
+export function noSshDaemonLine(name: string): string {
+  return `${name} is reached over ssh, which carries no daemon yet: its terminal, files and ports are not served`;
+}
+
+/** The one sentence a socket a machine's requests arrive on is refused a ticket with. A ticket authenticates the
+ * next socket, and a socket this host minted no relay ticket for is one of the person's own, so a machine that
+ * could mint one would hand itself the origin the relay stamps on it. */
+export const RELAY_TICKET_REFUSAL = "a request relayed from a machine cannot mint a ticket into this host";
 
 /** The prompt row's lead, the same on every surface that shows a relayed permission prompt: the tool the harness
  * wants to run, and what it wants to run it on where the harness named one. No question mark: the options under it
@@ -860,11 +907,19 @@ export function permissionUnansweredLine(waitMs: number): string {
   return `nobody answered this permission prompt in ${fmtDuration(waitMs)}, so wsp denied it; ask again, or start the thread at an access that does not ask`;
 }
 
-/** The one sentence a local workspace refuses a verb its machine cannot take with. This computer is not a machine
- * wsp forks, pauses or snapshots, so the verbs that move a provider fork have no meaning on it; `action` is the verb
- * as the person typed it. The capability behind each is false, so the road that reads the capability says this. */
-export function localMachineRefusal(name: string, action: string): string {
-  return `${name} is ${THIS_COMPUTER}, not a machine wsp runs; it cannot ${action}`;
+/** The one sentence a second workspace on a machine that already carries one is refused with. wsp forks a machine
+ * for every workspace it makes and records one for every machine it does not, so one record stands on one machine
+ * whatever the kind: this computer, or a machine reached over ssh. */
+export function alreadyRecorded(machine: string, name: string): string {
+  return `${machine} is already the workspace ${name}; one workspace stands on one machine`;
+}
+
+/** The one sentence a workspace on a machine wsp does not run refuses a verb that machine cannot take with. This
+ * computer and a machine reached over ssh are not machines wsp forks, pauses or snapshots, so the verbs that move a
+ * fork have no meaning on either; `machine` is the kind's own word for what it is and `action` is the verb as the
+ * person typed it. The capability behind each is false, so the road that reads the capability says this. */
+export function undrivenRefusal(name: string, machine: string, action: string): string {
+  return `${name} is ${machine}, not a machine wsp runs; it cannot ${action}`;
 }
 
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how

@@ -69,8 +69,10 @@ import {
   imageTypeOf,
   imagesRefusal,
   importConsented,
+  MACHINE_LEFT,
   importRequest,
   kindWords,
+  machineWord,
   needsRebuild,
   noAdapterLine,
   notAFileLine,
@@ -304,10 +306,21 @@ export interface VerbDeps {
   runtime?(statePath: string): Promise<LocalRuntime>;
 }
 
-/** What new --local asks of a runtime in this process, and nothing more: typed here so the verbs stay clear of the
- * runtime package, which the tool door may not import. */
+/** What a person names when they record a machine of their own: where it is, and the port, key and name they give
+ * it where those are not what the address and the machine already say. */
+export interface SshAsked {
+  name?: string;
+  port?: number;
+  keyPath?: string;
+}
+
+/** What the verbs that record a machine already there ask of a runtime in this process, and nothing more: typed
+ * here so the verbs stay clear of the runtime package, which the tool door may not import. */
 export interface LocalRuntime {
-  workspaces: { createLocal(name?: string): Promise<WorkspaceView> };
+  workspaces: {
+    createLocal(name?: string): Promise<WorkspaceView>;
+    createSsh(address: string, opts?: SshAsked): Promise<WorkspaceView & { notice?: string }>;
+  };
   close(): Promise<void>;
 }
 
@@ -536,6 +549,10 @@ export function renameLine(renamed: Renamed): string {
   return `thread ${renamed.threadId} ${words[renamed.outcome]}`;
 }
 
+/** Whether wsp forked this workspace's machine and can take it away again, or it is a machine that already existed
+ * and is only recorded here. Every line about what a delete takes reads it. */
+const driven = (workspace: WorkspaceView): boolean => kindWords(workspaceKind(workspace)).driven;
+
 /** What dropping a workspace takes off this computer, counted before anyone is asked: its record and its threads. */
 export interface Dropping {
   workspace: WorkspaceView;
@@ -563,7 +580,7 @@ export function forgotLine(f: Dropping): string {
 
 /** The one confirmation a delete asks, in the words every client shows: what a forget takes, and the machine too. */
 export function deleteQuestion(d: Dropping): string {
-  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads)}`;
+  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, driven(d.workspace))}`;
 }
 
 /** Kills the workspace's machine at the provider, then drops its record here; a machine already gone is no error. */
@@ -572,7 +589,8 @@ export async function deleteWorkspace(client: HostClient, d: Dropping): Promise<
 }
 
 export function deletedLine(d: Dropping): string {
-  return `deleted ${d.workspace.name} ${d.workspace.id}: machine ${d.workspace.machineId} is gone at the provider, and its record and ${fmtThreads(d.threads)} are gone from this computer`;
+  const machine = driven(d.workspace) ? `machine ${d.workspace.machineId} is gone at the provider` : `its ${MACHINE_LEFT}`;
+  return `deleted ${d.workspace.name} ${d.workspace.id}: ${machine}, and its record and ${fmtThreads(d.threads)} are gone from this computer`;
 }
 
 /** The most characters a folder cell holds before its front is cut: the end of a path is what a person recognises. */
@@ -666,22 +684,53 @@ export async function create(client: HostClient, out: Out, golden: string, name:
  * refuses a second one and a name another workspace holds. The name defaults to this computer's own. */
 export async function createLocalWorkspace(client: HostClient, out: Out, name?: string): Promise<WorkspaceCreateResult> {
   const { workspace } = await client.request<{ workspace: WorkspaceView }>("workspaces.createLocal", name === undefined ? {} : { name });
-  return createdLocal(out, workspace);
+  return createdExisting(out, workspace);
 }
 
 /** The same with no host serving: the record goes into the state file through a runtime in this process, so an empty
  * state gains the one thing wsp up needs to serve. The runtime is closed once the record is written. */
 export async function createLocalWorkspaceHere(rt: LocalRuntime, out: Out, name?: string): Promise<WorkspaceCreateResult> {
   try {
-    return createdLocal(out, await rt.workspaces.createLocal(name));
+    return createdExisting(out, await rt.workspaces.createLocal(name));
   } finally {
     await rt.close();
   }
 }
 
-function createdLocal(out: Out, workspace: WorkspaceView): WorkspaceCreateResult {
-  const created: WorkspaceCreateResult = { workspace };
-  out.emit(created, `created ${workspace.name} ${workspace.id} (this computer)`);
+/** A workspace on a machine the person already has, reached over ssh. It forks nothing, so there is no image and no
+ * size to pick; the dial is made before the record exists, so a machine that does not answer leaves nothing behind. */
+export async function createSshWorkspace(client: HostClient, out: Out, address: string, asked: SshAsked = {}): Promise<WorkspaceCreateResult> {
+  const { workspace, notice } = await client.request<{ workspace: WorkspaceView; notice?: string }>("workspaces.createSsh", { address, ...asked });
+  return createdExisting(out, workspace, notice);
+}
+
+/** The same with no host serving, the road an empty state takes. */
+export async function createSshWorkspaceHere(rt: LocalRuntime, out: Out, address: string, asked: SshAsked = {}): Promise<WorkspaceCreateResult> {
+  try {
+    const { notice, ...workspace } = await rt.workspaces.createSsh(address, asked);
+    return createdExisting(out, workspace, notice);
+  } finally {
+    await rt.close();
+  }
+}
+
+/** The words a person gave beside the address, read once for the command line and the tool alike: a port that is a
+ * number, a key that is a path on this computer, and the name they chose for the workspace. */
+export function sshAsked(name?: string, port?: string, keyPath?: string): SshAsked {
+  const dialled = port === undefined ? undefined : Number(port);
+  if (dialled !== undefined && (!Number.isInteger(dialled) || dialled < 1 || dialled > 65535)) throw usageRefusal(`--ssh-port takes a port, got ${JSON.stringify(port)}`);
+  return {
+    ...(name !== undefined ? { name } : {}),
+    ...(dialled !== undefined ? { port: dialled } : {}),
+    ...(keyPath !== undefined ? { keyPath: absolutePath("--ssh-key is a path on this computer", keyPath) } : {}),
+  };
+}
+
+/** The line every recorded machine is announced with: its kind's own word for what the machine is, and under it
+ * anything the one dial that recorded it has to say (the key a machine over ssh answered with). */
+function createdExisting(out: Out, workspace: WorkspaceView, notice?: string): WorkspaceCreateResult {
+  const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
+  out.emit(created, `created ${workspace.name} ${workspace.id} (${machineWord(workspaceKind(workspace))})${notice !== undefined ? `\n${notice}` : ""}`);
   return created;
 }
 
@@ -1532,19 +1581,32 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "new",
-    usage: "wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new --local [name]",
-    about: "a workspace from the golden's head or, with --from, a project golden; --local is this computer",
-    options: { from: { type: "string" }, size: { type: "string" }, local: { type: "boolean" } },
+    usage: "wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>] [--ssh-key <path>]",
+    about: "a workspace from the golden's head or, with --from, a project golden; --local is this computer, --ssh a machine of your own",
+    options: { from: { type: "string" }, size: { type: "string" }, local: { type: "boolean" }, ssh: { type: "string" }, "ssh-port": { type: "string" }, "ssh-key": { type: "string" } },
     run: async ctx => {
       const [name] = ctx.args;
       const from = flag(ctx.flags, "from");
       const size = flag(ctx.flags, "size");
+      const address = flag(ctx.flags, "ssh");
+      // Neither forks anything, so both refuse the words that pick an image or a size.
+      const forksNothing = (word: string): void => {
+        if (from !== undefined || size !== undefined) throw usageRefusal(`${word} forks nothing, so it takes no --from or --size`);
+        if (ctx.args.length > 1) throw usageRefusal(`${word} takes at most a name`);
+      };
       if (ctx.flags["local"] === true) {
-        if (ctx.args.length > 1) throw usageRefusal("wsp new --local takes at most a name");
-        if (from !== undefined || size !== undefined) throw usageRefusal("wsp new --local forks nothing, so it takes no --from or --size");
+        if (address !== undefined) throw usageRefusal("wsp new takes --local or --ssh, not both");
+        forksNothing("wsp new --local");
         // With no host serving the record is written straight into the state file: the way into an empty state.
         if (ctx.runtime !== undefined && servingHost(ctx.statePath) === undefined) await createLocalWorkspaceHere(await ctx.runtime(ctx.statePath), ctx.out, name);
         else await createLocalWorkspace(await ctx.client(), ctx.out, name);
+        return 0;
+      }
+      if (address !== undefined) {
+        forksNothing("wsp new --ssh");
+        const asked = sshAsked(name, flag(ctx.flags, "ssh-port"), flag(ctx.flags, "ssh-key"));
+        if (ctx.runtime !== undefined && servingHost(ctx.statePath) === undefined) await createSshWorkspaceHere(await ctx.runtime(ctx.statePath), ctx.out, address, asked);
+        else await createSshWorkspace(await ctx.client(), ctx.out, address, asked);
         return 0;
       }
       const client = await ctx.client();
@@ -1554,13 +1616,25 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: "A new workspace forked from the golden image's head, or with from, from a project golden (the project already in place), booted and reachable when this returns. With local true it is this computer instead, which forks nothing: one local workspace per host, its name this computer's own when none is given, no from or size.",
-      input: { name: z.string().optional().describe("the workspace name; required unless local, where it defaults to this computer's name"), from: z.string().optional().describe("a project golden: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"), size: SizeIn, local: z.boolean().optional().describe("true makes the one local workspace, this computer, forking nothing") },
+      description: "A new workspace forked from the golden image's head, or with from, from a project golden (the project already in place), booted and reachable when this returns. With local true it is this computer instead, which forks nothing: one local workspace per host, its name this computer's own when none is given, no from or size. With ssh it is a machine the person already has, reached at user@host with their own key, which forks nothing either.",
+      input: {
+        name: z.string().optional().describe("the workspace name; required unless local or ssh, where it defaults to what the machine is called"),
+        from: z.string().optional().describe("a project golden: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"),
+        size: SizeIn,
+        local: z.boolean().optional().describe("true makes the one local workspace, this computer, forking nothing"),
+        ssh: z.string().optional().describe("a machine of the person's own as user@host, reached over ssh; forks nothing"),
+        ssh_port: z.number().int().optional().describe("the port ssh dials, when it is not the port in the address or 22"),
+        ssh_key: z.string().optional().describe("the private key file ssh logs in with, absolute; absent leaves ssh its own config and agent"),
+      },
       output: Created.shape,
-      call: async ({ name, from, size: word, local }, deps) => {
+      call: async ({ name, from, size: word, local, ssh, ssh_port: sshPort, ssh_key: sshKey }, deps) => {
         const client = await deps.client();
+        if (local === true || ssh !== undefined) {
+          if (from !== undefined || word !== undefined) throw usageRefusal("a workspace on a machine that already exists forks nothing, so it takes no from or size");
+          if (local === true && ssh !== undefined) throw usageRefusal("a workspace is local or reached over ssh, not both");
+        }
+        if (ssh !== undefined) return asJson(await createSshWorkspace(client, QUIET, ssh, sshAsked(name, sshPort === undefined ? undefined : String(sshPort), sshKey)));
         if (local === true) {
-          if (from !== undefined || word !== undefined) throw usageRefusal("a local workspace forks nothing, so it takes no from or size");
           return asJson(await createLocalWorkspace(client, QUIET, name));
         }
         if (name === undefined) throw usageRefusal("a cloud workspace needs a name");
@@ -1781,7 +1855,7 @@ export const VERBS: readonly Verb[] = [
         // The command line asks a person before this and the app will; over MCP the second call is that step, so a
         // machine is never killed by one tool call the caller made on its own.
         if (confirm !== true) {
-          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads)} Ask the person, then call delete again with confirm true.`, going), isError: true };
+          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, driven(d.workspace))} Ask the person, then call delete again with confirm true.`, going), isError: true };
         }
         await deleteWorkspace(client, d);
         return asText(deletedLine(d), going);

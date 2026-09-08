@@ -14,7 +14,7 @@ import { WebSocketServer } from "ws";
 import { HELP, cli, localWiring, localWorkFolder, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { PLAN_ONLY, dialHost, messageTo, threadRows } from "../src/verbs.js";
+import { PLAN_ONLY, deleteQuestion, deletedLine, dialHost, messageTo, threadRows } from "../src/verbs.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -503,6 +503,15 @@ describe("wsp verbs over the host", () => {
     const missing = await run("forget", "nope", "--yes");
     expect(missing.code).toBe(1);
     expect(missing.io.errors).toEqual(["wsp forget: no workspace nope"]);
+  });
+
+  it("a machine wsp did not fork is left as it is: the delete question and its line say so", () => {
+    const workspace = { id: "ws_mine", name: "box", machineId: "ssh://dev@box:22", phase: "running", kind: "ssh", golden: "", createdAt: "2026-09-08T00:00:00.000Z" } as const;
+    expect(deleteQuestion({ workspace, threads: 1 })).toBe("Delete box?\nIts machine is left as it is; its record and 1 thread leave this computer.");
+    expect(deletedLine({ workspace, threads: 1 })).toBe("deleted box ws_mine: its machine is left as it is, and its record and 1 thread are gone from this computer");
+    // A fork is wsp's to take away, and its line still names the machine that goes.
+    const fork = { ...workspace, kind: "cloud", machineId: "m_ab12" } as const;
+    expect(deletedLine({ workspace: fork, threads: 0 })).toBe("deleted box ws_mine: machine m_ab12 is gone at the provider, and its record and 0 threads are gone from this computer");
   });
 
   it("delete asks once in the words the app shows, kills the machine at the provider, and drops the record and its threads", async () => {
