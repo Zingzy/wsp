@@ -23,10 +23,15 @@ export const HTTP_URL_MAX = 8192;
 export const EXEC_BODY_MAX = 16 * 1024;
 /** How much of a detached command's output one poll exec reads; a full read is followed by another at once. */
 export const EXEC_CHUNK_BYTES = 262_144;
-/** How long a turn's stream may go without a byte before the runtime cuts it. A turn that is working writes a delta,
- * a tool event or a log line well inside this, so it is the one rule that ends a turn the harness left hanging: a
- * fixed wall clock cut a build that was still working at 15 minutes on 2026-09-06. */
+/** How long a turn may do nothing at all before the runtime cuts it: no byte on its stream, no message from the
+ * person, and no work in the process tree it started. It is the one rule that ends a turn the harness left hanging:
+ * a fixed wall clock cut a build that was still working at 15 minutes on 2026-09-06. */
 export const TURN_IDLE_MS = 10 * 60_000;
+/** How hard the process tree a turn started has to be working for the turn to count as alive while it prints
+ * nothing: ticks per second, where a tick is 10 ms of CPU or a megabyte of I/O anything the turn started moved. Five
+ * percent of one core clears it, which a vitest batch or a packager does many times over; a harness process waking
+ * on its own timers stays under it, so a turn nothing is working on is still cut at TURN_IDLE_MS. */
+export const TURN_WORK_TICKS_PER_S = 5;
 /** How long a thread sits idle before the sidebar folds it out of that workspace's shelf into its Archived group.
  * The fold reads the thread's own last activity, so a thread that takes a new turn leaves the archive by itself and
  * there is no archived flag anywhere to set or clear. */
