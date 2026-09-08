@@ -17,7 +17,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.resetModules();
   delete window.wsp;
+  window.localStorage.clear();
   document.documentElement.classList.add("dark");
 });
 
@@ -51,6 +53,26 @@ describe("the theme", () => {
     expect(isDark()).toBe(false);
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "dark" } }));
     expect(isDark()).toBe(true);
+  });
+
+  it("a load paints the theme this browser last applied before the host answers, and the record wins the moment it arrives", async () => {
+    // A fresh boot: the store and the theme rule read again with the cache in place, the html on the stylesheet's dark default.
+    window.localStorage.setItem("wsp:theme", "light");
+    vi.resetModules();
+    const { useStore: bootStore } = await import("../src/protocol/store.js");
+    const { useThemeEffect: bootEffect } = await import("../src/settings/theme.js");
+    expect(bootStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, theme: "light" });
+    expect(isDark()).toBe(true);
+    renderHook(() => bootEffect());
+    expect(isDark()).toBe(false);
+    // The host's record says dark: it paints and the cache follows it, never the other way round.
+    act(() => bootStore.getState().applyEvent({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, theme: "dark" } }));
+    expect(isDark()).toBe(true);
+    expect(window.localStorage.getItem("wsp:theme")).toBe("dark");
+    window.localStorage.setItem("wsp:theme", "sepia");
+    vi.resetModules();
+    const { useStore: cleanStore } = await import("../src/protocol/store.js");
+    expect(cleanStore.getState().preferences).toEqual(DEFAULT_PREFERENCES);
   });
 
   it("the desktop shell hears each value, so the window's frame draws the same side", () => {

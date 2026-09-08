@@ -3,12 +3,13 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { DEFAULT_PREFERENCES, NOTIFY_ME, applyPreferencesPatch, foldThreads, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, applyPreferencesPatch, foldThreads, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
+import { bootPreferences } from "./themeCache.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
 export interface CostTick {
@@ -86,7 +87,8 @@ interface State {
   ready: boolean;
   /** How many reconnects the runtime could not replay events for; anything built from sessions.history reloads when it moves. */
   gaps: number;
-  /** The person's view preferences, the host's one record; the defaults until the host answers. */
+  /** The person's view preferences, the host's one record; until the host answers, the defaults with the theme this
+   * browser last applied, so the first paint is the side the person picked. */
   preferences: Preferences;
   /** Whether the centre shows the settings page in place of the selected workspace's thread. */
   settingsOpen: boolean;
@@ -271,7 +273,7 @@ export const useStore = create<State>((set, get) => {
     sessions: {},
     ready: false,
     gaps: 0,
-    preferences: DEFAULT_PREFERENCES,
+    preferences: bootPreferences(),
     settingsOpen: false,
     noteGap() { set(s => ({ gaps: s.gaps + 1 })); },
     bind(api) {
