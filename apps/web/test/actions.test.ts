@@ -6,7 +6,7 @@
 // menus are built from.
 import { PauseIcon, PlayIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { goneRefusal, type HarnessCatalog, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { goneRefusal, localMachineRefusal, type HarnessCatalog, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
 import { FILE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
@@ -22,6 +22,7 @@ const workspace = (state: WorkspaceState, over: Partial<WorkspaceTarget> = {}): 
   id: "ws_a",
   displayName: "api",
   machineId: "m_a",
+  kind: "cloud",
   phase: state === "paused" ? "napping" : state === "unreachable" ? "running" : state,
   machineState: state === "gone" ? "gone" : null,
   reach: state === "gone" ? "gone" : state === "paused" ? "napping" : state === "unreachable" ? "unreachable" : "reachable",
@@ -90,6 +91,15 @@ describe("workspace actions", () => {
     expect(waking.title).toBe(WORKSPACE_WORDS.wake);
     expect(waking.refusal).toBe("Workspace is waking");
     expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "phase").refusal).toBe(goneRefusal("wake"));
+  });
+
+  it("this computer refuses the pause with the runtime's own sentence, wherever it is offered, and keeps every verb that is about threads", () => {
+    const mac = workspace("running", { kind: "local", displayName: "zingzy-mac" });
+    const actions = resolveActions(workspaceActions, mac, workspaceVerbs());
+    expect(actionById(actions, "phase").refusal).toBe(localMachineRefusal("zingzy-mac", "be paused"));
+    expect(actionById(actions, "new-thread").refusal).toBeNull();
+    expect(actionById(actions, "open-terminal").refusal).toBeNull();
+    expect(actionById(actions, "copy-id").refusal).toBeNull();
   });
 
   it("a gone workspace offers rebuild and forget and refuses the machine actions; a zombie offers rebuild alone; a client without the verbs says so", () => {
@@ -166,8 +176,10 @@ describe("workspace actions", () => {
   it("one target builder serves every surface: the status's phase, machine state, reach and reason lead, the record fills in", () => {
     const view: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_old", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z", gone: "the record's words" };
     const status: WorkspaceStatus = { ...view, machineId: "m_new", phase: "napping", machineState: "paused", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, reason: "the status's words" };
-    expect(workspaceTarget(view, status)).toEqual({ id: "ws_a", displayName: "api", machineId: "m_new", phase: "napping", machineState: "paused", reach: "napping", reason: "the status's words" });
-    expect(workspaceTarget(view, null)).toEqual({ id: "ws_a", displayName: "api", machineId: "m_old", phase: "running", machineState: null, reach: null, reason: "the record's words" });
+    expect(workspaceTarget(view, status)).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_new", phase: "napping", machineState: "paused", reach: "napping", reason: "the status's words" });
+    expect(workspaceTarget(view, null)).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_old", phase: "running", machineState: null, reach: null, reason: "the record's words" });
+    // A record from before local workspaces existed carries no kind and reads as a fork; one that does keeps it.
+    expect(workspaceTarget({ ...view, kind: "local" }, null).kind).toBe("local");
   });
 
   it("the row buttons' labels name the workspace, and the keybindings come from the one table", () => {
