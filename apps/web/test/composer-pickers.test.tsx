@@ -347,6 +347,32 @@ describe("composer pickers", () => {
     expect(started[0]?.effort).toBeUndefined();
   });
 
+  it("marks the effort the picked model runs at, not the one the binary's own default model runs at", async () => {
+    const { api, started } = fixtureApi({ table: [CODEX_TABLE, CLAUDE_TABLE] });
+    await setup(api);
+    await waitFor(() => expect(picker("model")).not.toBeNull());
+    await openModelMenu();
+    fireEvent.click(modelMenu()!.querySelector<HTMLElement>('[data-composer-harness="codex"]')!);
+    // GPT-5.6-Sol leads the tab and its app-server reports low for it.
+    await waitFor(() => expect(picker("effort")?.textContent).toBe("Low"));
+    fireEvent.click(option("gpt-5.5")!);
+    await waitFor(() => expect(pickerValue("model")).toBe("gpt-5.5"));
+    // The app-server reports medium for GPT-5.5, so that is what the button reads and the menu marks.
+    expect(picker("effort")?.textContent).toBe("Medium");
+    expect(pickerValue("effort")).toBe("medium");
+    fireEvent.click(picker("effort")!);
+    expect(option("medium")?.textContent).toContain("default");
+    expect(option("medium")?.getAttribute("aria-checked")).toBe("true");
+    expect(option("low")?.textContent).not.toContain("default");
+    expect(option("low")?.getAttribute("aria-checked")).toBe("false");
+    // Still a default shown, still nothing sent for a picker left alone.
+    await typeInto(composerEditor(), "go");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ harness: "codex", model: "gpt-5.5" });
+    expect(started[0]?.effort).toBeUndefined();
+  });
+
   it("a model with no effort levels hides the Reasoning section and the button reads the context alone", async () => {
     const flash = { value: "claude-flash", label: "Flash", isDefault: true, efforts: [], contextWindows: ["200k", "1m"] };
     const { api } = fixtureApi({ table: [{ ...CLAUDE, models: [flash] }] });

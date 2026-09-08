@@ -7,7 +7,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, HOST_STOPPING_LINE, ThreadView, markedDefault, notifyLine, unknownAgentLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, HOST_STOPPING_LINE, ThreadView, effortsFor, markedDefault, notifyLine, unknownAgentLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -671,7 +671,7 @@ describe("wsp verbs over the host", () => {
     expect(claude.starts.at(-1)?.cwd).toBe("/root/work/proj");
   });
 
-  it("--model, --effort and --access on thread new, fork --send and send reach the start as the fields the composer sends; a new thread without --model runs the catalog's default, the model the composer shows", async () => {
+  it("--model, --effort and --access on thread new, fork --send and send reach the start as the fields the composer sends; a new thread without them runs the catalog's defaults, the ones the composer shows", async () => {
     await run("new", "alpha");
     const picked = await run("thread", "new", "--in", "alpha", "--model", "claude-sonnet-5", "--effort", "low", "--access", "plan", "review it");
     expect(picked.code).toBe(0);
@@ -681,8 +681,9 @@ describe("wsp verbs over the host", () => {
     expect(bare.code).toBe(0);
     const shown = markedDefault(harnessCatalog("claude")!.models)!.value;
     expect(shown).toBe("claude-opus-5");
-    expect(claude.starts.at(-1)).toMatchObject({ model: shown });
-    expect(claude.starts.at(-1)!.effort).toBeUndefined();
+    const level = markedDefault(effortsFor(harnessCatalog("claude")!, markedDefault(harnessCatalog("claude")!.models) ?? null))!.value;
+    expect(claude.starts.at(-1)).toMatchObject({ model: shown, effort: level });
+    // The access mode is the one pick no catalog reads off a binary, so the CLI's own default stands.
     expect(claude.starts.at(-1)!.permissionMode).toBeUndefined();
     const [, thread] = await rt.sessions.list();
 
@@ -696,8 +697,7 @@ describe("wsp verbs over the host", () => {
 
     const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "bypassPermissions");
     expect(forked.code).toBe(0);
-    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions" });
-    expect(claude.starts.at(-1)!.effort).toBeUndefined();
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions", effort: level });
   });
 
   it("a model, effort or access mode the agent's catalog does not list is refused with that list, in the composer's words, and nothing starts", async () => {

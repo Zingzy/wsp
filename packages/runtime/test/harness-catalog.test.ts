@@ -56,6 +56,8 @@ describe("harness catalogs", () => {
       ["low", "medium", "high", "xhigh"],
       ["low", "medium", "high", "xhigh"],
     ]);
+    // The app-server reports a default effort per model, not one for the binary: Sol runs low, the other four medium.
+    expect(codex.models.map(o => o.defaultEffort)).toEqual(["low", "medium", "medium", "medium", "medium"]);
     expect(codex.efforts.map(o => o.value)).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
     // The effort the app-server reports for the default model, so the tab shows a default with no probe at all.
     expect(codex.efforts.find(o => o.isDefault)?.value).toBe("low");
@@ -86,17 +88,48 @@ describe("harness catalogs", () => {
   });
 });
 
+describe("the default effort of a pick", () => {
+  const codex = harnessCatalog("codex")!;
+  const model = (value: string) => codex.models.find(m => m.value === value) ?? null;
+  const shown = (value: string | null) => markedDefault(effortsFor(codex, value === null ? null : model(value)))?.value;
+
+  it("is the picked model's own, so the picker marks what that model will run rather than what the binary's default model runs", () => {
+    expect(shown("gpt-5.5")).toBe("medium");
+    expect(shown("gpt-5.6-terra")).toBe("medium");
+    expect(shown("gpt-5.6-sol")).toBe("low");
+    // One mark on the list, not the model's beside the catalog's.
+    expect(effortsFor(codex, model("gpt-5.5")).filter(o => o.isDefault).map(o => o.value)).toEqual(["medium"]);
+  });
+
+  it("is the catalog's mark for a model that names none, and for no model at all", () => {
+    const claude = harnessCatalog("claude")!;
+    expect(markedDefault(effortsFor(claude, markedDefault(claude.models) ?? null))?.value).toBe("high");
+    expect(markedDefault(effortsFor(claude, null))?.value).toBe("high");
+    // A model the binary routes to another provider names no efforts and no default of its own.
+    expect(markedDefault(effortsFor(codex, { value: "anthropic/claude-sonnet-4.5", label: "anthropic/claude-sonnet-4.5" }))?.value).toBe("low");
+    expect(shown(null)).toBe("low");
+  });
+
+  it("marks nothing when the model names a default its own list does not carry", () => {
+    const odd = { ...codex, models: [{ value: "gpt-5.5", label: "GPT-5.5", efforts: ["low", "high"], defaultEffort: "medium" }] };
+    expect(effortsFor(odd, odd.models[0]!).some(o => o.isDefault)).toBe(false);
+  });
+});
+
 describe("startPicks", () => {
   const claude = harnessCatalog("claude")!;
   const MODELS = "Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)";
+  /** A catalog whose default model takes two of the five efforts and whose other model takes none. */
+  const narrowed = { ...claude, models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, efforts: ["high", "max"] }, { value: "claude-haiku-4-5", label: "Haiku", efforts: [] }] };
 
-  it("a start that opens a thread without a model runs the catalog's default, the one the composer shows; a resume keeps the thread's own", () => {
-    expect(startPicks(claude, {}, true)).toEqual({ model: "claude-opus-5" });
+  it("a start that opens a thread without a model or effort runs the defaults the composer shows; a resume keeps the thread's own", () => {
+    // Claude names no default effort per model, so the catalog's own mark is what the pick runs at.
+    expect(startPicks(claude, {}, true)).toEqual({ model: "claude-opus-5", effort: "high" });
     expect(startPicks(claude, {}, false)).toEqual({});
     expect(startPicks(claude, { model: "claude-sonnet-5", effort: "low", permissionMode: "plan" }, true)).toEqual({ model: "claude-sonnet-5", effort: "low", permissionMode: "plan" });
     expect(startPicks(claude, { effort: "max" }, false)).toEqual({ effort: "max" });
     const noDefault = { ...claude, models: claude.models.map(({ isDefault: _d, ...m }) => m) };
-    expect(startPicks(noDefault, {}, true)).toEqual({});
+    expect(startPicks(noDefault, {}, true)).toEqual({ effort: "high" });
   });
 
   it("refuses a value the catalog does not list, naming the list in the composer's words", () => {
@@ -107,8 +140,15 @@ describe("startPicks", () => {
     );
   });
 
+  it("a model that takes no effort at all is given none, and one that takes some runs the default its own list carries", () => {
+    expect(startPicks(narrowed, { model: "claude-haiku-4-5" }, true)).toEqual({ model: "claude-haiku-4-5" });
+    expect(startPicks(narrowed, {}, true)).toEqual({ model: "claude-opus-5", effort: "high" });
+    // A model whose own list drops the catalog's marked effort is left to the CLI, since nothing in its list is marked.
+    const off = { ...claude, models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, efforts: ["low", "max"] }] };
+    expect(startPicks(off, {}, true)).toEqual({ model: "claude-opus-5" });
+  });
+
   it("an effort is checked against the model's own list where the model has one, the chosen or the default model", () => {
-    const narrowed = { ...claude, models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, efforts: ["high", "max"] }, { value: "claude-haiku-4-5", label: "Haiku", efforts: [] }] };
     expect(startPicks(narrowed, { effort: "max" }, true)).toEqual({ model: "claude-opus-5", effort: "max" });
     expect(() => startPicks(narrowed, { effort: "low" }, true)).toThrow('effort "low" is not one Opus 5 takes; one of: High (high), Max (max)');
     expect(() => startPicks(narrowed, { model: "claude-haiku-4-5", effort: "low" }, true)).toThrow("Haiku takes no effort");
@@ -125,9 +165,12 @@ describe("startPicks", () => {
 
   it("a start on the Codex table runs its default model and refuses a model or effort that table does not carry", () => {
     const codex = harnessCatalog("codex")!;
-    expect(startPicks(codex, {}, true)).toEqual({ model: "gpt-5.6-sol" });
+    expect(startPicks(codex, {}, true)).toEqual({ model: "gpt-5.6-sol", effort: "low" });
     expect(markedDefault(effortsFor(codex, markedDefault(codex.models) ?? null))?.value).toBe("low");
     expect(startPicks(codex, { model: "gpt-5.5", effort: "high", permissionMode: "read-only" }, true)).toEqual({ model: "gpt-5.5", effort: "high", permissionMode: "read-only" });
+    // The model's own default, not the catalog's low, which is the effort the binary reports for gpt-5.6-sol.
+    expect(startPicks(codex, { model: "gpt-5.5" }, true)).toEqual({ model: "gpt-5.5", effort: "medium" });
+    expect(startPicks(codex, { model: "gpt-5.5" }, false)).toEqual({ model: "gpt-5.5" });
     expect(() => startPicks(codex, { model: "gpt-4" }, true)).toThrow('model "gpt-4" is not one codex takes');
     expect(() => startPicks(codex, { model: "gpt-5.5", effort: "ultra" }, true)).toThrow('effort "ultra" is not one GPT-5.5 takes');
   });
@@ -190,6 +233,17 @@ describe("catalogFromProbe", () => {
     expect(() => startPicks(catalog, { effort: "off" }, true)).toThrow('effort "off" is not one codex takes');
     // A model that named an empty list still takes none.
     expect(effortsFor(catalog, catalog.models.find(m => m.value === "claude-haiku-4-5-20251001")!)).toEqual([]);
+  });
+
+  it("carries each model's own default effort, so a pick runs what the binary reports for that model", () => {
+    const perModel = { ...probe, models: probe.models.map(m => (m.slug === "claude-next-6" ? { ...m, defaultEffort: "turbo" } : m)) };
+    const catalog = catalogFromProbe(harnessCatalog("claude")!, perModel);
+    expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
+    expect(catalog.models.map(m => m.defaultEffort)).toEqual([undefined, undefined, "turbo"]);
+    expect(markedDefault(effortsFor(catalog, catalog.models[2]!))?.value).toBe("turbo");
+    expect(startPicks(catalog, { model: "claude-next-6" }, true)).toEqual({ model: "claude-next-6", effort: "turbo" });
+    // The models that named none keep the catalog's mark, which the binary reports for the model it would run.
+    expect(markedDefault(effortsFor(catalog, catalog.models[0]!))?.value).toBe("high");
   });
 
   it("marks the effort the binary reports for the model it would run, and keeps the table's mark where it reports none", () => {

@@ -2,13 +2,14 @@
 // What the composer's pickers stand for and what rides sessions.start, from
 // one harness catalog, the picks remembered for the workspace and the values
 // of a turn that is running. A pick wins, then the running value, then the
-// catalog's default; a pick the resolved model cannot take shows as nothing
-// and is not sent. Only picks ride the wire: the runtime runs a new thread on
-// the catalog's default model when none is picked, the same one the picker
-// shows, and an untouched effort or access leaves the CLI's own default in
-// place; a context window rides as a suffix on the model, so it brings the
-// model along.
-import { contextWindowsFor, effortsFor, markedDefault, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
+// default marked for that pick, which for an effort is the picked model's own
+// where its binary names one; a pick the resolved model cannot take shows as
+// nothing and is not sent. Only picks ride the wire: the runtime runs a new
+// thread on the model and the effort the catalog marks when neither is picked,
+// the same ones the pickers show, and an untouched access leaves the CLI's own
+// default in place; a context window rides as a suffix on the model, so it
+// brings the model along.
+import { contextWindowsFor, effortsFor, markedDefault, modelOf, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
 import type { ComposerOptions } from "./composerOptionsStore";
 
 export interface ResolvedPicks {
@@ -24,11 +25,9 @@ export type ComposerStart = StartPicks & Partial<Record<"harness" | "contextWind
 const ONE_M = /\[1m\]$/;
 
 /** The model the next start runs with, or null when nothing was picked and the catalog marks no default; a picked
- * slug the catalog does not list still counts, named by itself. */
+ * slug the catalog does not list still counts, named by itself, as it is on a start. */
 export function resolveModel(catalog: HarnessCatalog, input: { picked: string | undefined; running: string | undefined }): HarnessModel | null {
-  const value = input.picked ?? input.running ?? markedDefault(catalog.models)?.value;
-  if (value === undefined) return null;
-  return catalog.models.find(o => o.value === value) ?? { value, label: value };
+  return modelOf(catalog, input.picked ?? input.running ?? markedDefault(catalog.models)?.value);
 }
 
 /** The running session's values, from the runtime's row for it; the CLI announces the model with its own 1M suffix. */

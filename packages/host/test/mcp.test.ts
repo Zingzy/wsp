@@ -425,8 +425,8 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "plan"]]);
     const bare = await call("thread_new", { workspace: "alpha", task: "hello" });
     expect(bare.isError).toBe(false);
-    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-opus-5" });
-    expect(claude.starts.at(-1)!.effort).toBeUndefined();
+    // The model and the effort the composer shows for it, since a tool that names neither runs what the app would.
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-opus-5", effort: "high" });
     const threadId = (bare.structured as { threadId: string }).threadId;
     const sent = await call("send", { thread: threadId, message: "now think", model: "claude-fable-5-1", effort: "max" });
     expect(sent.isError).toBe(false);

@@ -598,15 +598,16 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
-  it("a start without picks hands the harness the catalog's default model and nothing else, so the CLI's own defaults apply to the rest", async () => {
+  it("a start without picks hands the harness the model and effort the catalog marks, the ones the composer shows, and nothing else", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
-    expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "model", "onEvent"]);
+    expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "model", "effort", "onEvent"]);
     const view = handle.view();
     expect(view.model).toBe("claude-opus-5");
-    expect(view.effort).toBeUndefined();
+    expect(view.effort).toBe("high");
+    // The CLI's own default still applies to the access mode, which no catalog reads off a binary.
     expect(view.permissionMode).toBeUndefined();
     m.done("done");
     m.end();
