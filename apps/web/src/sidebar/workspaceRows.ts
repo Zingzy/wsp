@@ -3,7 +3,7 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import { MACHINE_OS_WORD, fmtSize, isBilling, kindWords, outOfMemoryRowLine, workspaceKind, workspaceState, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { MACHINE_OS_WORD, fmtSize, isBilling, kindWords, outOfMemoryRowLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -18,7 +18,7 @@ export const NO_NAP_SCHEDULED = "active";
 
 /** Countdown to the runtime's auto-nap while the machine bills; "active" when nothing is scheduled. */
 export function idleCountdownLabel(status: WorkspaceStatus | null, nowMs: number): string | null {
-  if (!status || !isBilling(workspaceState({ phase: status.phase, machineState: status.machineState, reach: status.reach.state }))) return null;
+  if (!status || !isBilling(workspaceStateOf(status, status))) return null;
   if (status.idleAt === undefined) return NO_NAP_SCHEDULED;
   const remaining = status.idleAt - nowMs;
   if (remaining < 60_000) return "naps soon";

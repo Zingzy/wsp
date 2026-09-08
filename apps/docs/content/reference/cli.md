@@ -20,9 +20,13 @@ usage:
                      none does
   wsp init           set up your first golden image in six screens: Agents,
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser
+                     on this Mac, and Build, then the browser. With no provider
+                     key it seals nothing and makes this computer your
+                     workspace instead
   wsp doctor         run the reach loop end to end against one live machine
-                     (--yes also deletes the snapshots this host left behind)
+                     (--yes also deletes the snapshots this host left behind);
+                     --local proves the other half instead, a thread on this
+                     computer and its reply, with no machine and no key
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (claude, codex, gemini, opencode),
@@ -38,8 +42,10 @@ verbs; every one takes --json for its raw values. The recipe verbs read this
 computer and write beside the state file; the rest speak to the host wsp up
 started:
   wsp workspaces
-      every workspace this host runs: what its machine is, its state where the
-      kind has one, and its project folder
+      every workspace this host runs: what its machine is, its state as the
+      sidebar shows it (running, paused, waking or unreachable, off the phase
+      with the provider's word for the machine and the daemon reach beside it)
+      where the kind has one, and its project folder
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -75,9 +81,10 @@ started:
       answer stands either way: no rule decides one. All of them repeat. Review
       it, then wsp init --recipe
   wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
-    --local [name]
+    --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>]
+    [--ssh-key <path>]
       a workspace from the golden's head or, with --from, a project golden;
-      --local is this computer
+      --local is this computer, --ssh a machine of your own
   wsp rename <workspace> "<name>"
       names the workspace on this computer; the name is unique here, so one
       another workspace holds is refused
@@ -187,6 +194,14 @@ options:
                      caches left behind, secret-shaped files cut unless a
                      rewrite drops their credentials, and the sessions your
                      agents have for the folder travelling with it
+  --no-local         init: leave this computer alone. The workspace step ticks
+                     it by default, since a workspace here forks nothing and
+                     bills nothing; this is the one way to end an init without
+                     one. Refused on a run with no provider key, where it is
+                     the only workspace there is
+  --local            doctor: prove a thread on this computer and its reply
+                     instead of the reach loop, which needs no provider key,
+                     forks nothing and bills nothing
   --non-interactive  init: ask nothing, but still run the sign-ins on the
                      machine: each one prints the page to open on this computer,
                      the code when the flow shows one, and the command that
@@ -216,6 +231,8 @@ keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
 for the optional Anthropic key at the same time and can save both to that file.
 With a Solari key present, a missing Anthropic key is only noted at start.
+Without one, init and up take the local road: this computer is the workspace,
+nothing is forked and nothing is sealed.
 ```
 
 ## wsp up
@@ -236,9 +253,13 @@ usage:
                      none does
   wsp init           set up your first golden image in six screens: Agents,
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser
+                     on this Mac, and Build, then the browser. With no provider
+                     key it seals nothing and makes this computer your
+                     workspace instead
   wsp doctor         run the reach loop end to end against one live machine
-                     (--yes also deletes the snapshots this host left behind)
+                     (--yes also deletes the snapshots this host left behind);
+                     --local proves the other half instead, a thread on this
+                     computer and its reply, with no machine and no key
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (claude, codex, gemini, opencode),
@@ -254,8 +275,10 @@ verbs; every one takes --json for its raw values. The recipe verbs read this
 computer and write beside the state file; the rest speak to the host wsp up
 started:
   wsp workspaces
-      every workspace this host runs: what its machine is, its state where the
-      kind has one, and its project folder
+      every workspace this host runs: what its machine is, its state as the
+      sidebar shows it (running, paused, waking or unreachable, off the phase
+      with the provider's word for the machine and the daemon reach beside it)
+      where the kind has one, and its project folder
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -291,9 +314,10 @@ started:
       answer stands either way: no rule decides one. All of them repeat. Review
       it, then wsp init --recipe
   wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
-    --local [name]
+    --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>]
+    [--ssh-key <path>]
       a workspace from the golden's head or, with --from, a project golden;
-      --local is this computer
+      --local is this computer, --ssh a machine of your own
   wsp rename <workspace> "<name>"
       names the workspace on this computer; the name is unique here, so one
       another workspace holds is refused
@@ -403,6 +427,14 @@ options:
                      caches left behind, secret-shaped files cut unless a
                      rewrite drops their credentials, and the sessions your
                      agents have for the folder travelling with it
+  --no-local         init: leave this computer alone. The workspace step ticks
+                     it by default, since a workspace here forks nothing and
+                     bills nothing; this is the one way to end an init without
+                     one. Refused on a run with no provider key, where it is
+                     the only workspace there is
+  --local            doctor: prove a thread on this computer and its reply
+                     instead of the reach loop, which needs no provider key,
+                     forks nothing and bills nothing
   --non-interactive  init: ask nothing, but still run the sign-ins on the
                      machine: each one prints the page to open on this computer,
                      the code when the flow shows one, and the command that
@@ -432,6 +464,8 @@ keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
 for the optional Anthropic key at the same time and can save both to that file.
 With a Solari key present, a missing Anthropic key is only noted at start.
+Without one, init and up take the local road: this computer is the workspace,
+nothing is forked and nothing is sealed.
 ```
 
 ## wsp init
@@ -452,9 +486,13 @@ usage:
                      none does
   wsp init           set up your first golden image in six screens: Agents,
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser
+                     on this Mac, and Build, then the browser. With no provider
+                     key it seals nothing and makes this computer your
+                     workspace instead
   wsp doctor         run the reach loop end to end against one live machine
-                     (--yes also deletes the snapshots this host left behind)
+                     (--yes also deletes the snapshots this host left behind);
+                     --local proves the other half instead, a thread on this
+                     computer and its reply, with no machine and no key
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (claude, codex, gemini, opencode),
@@ -470,8 +508,10 @@ verbs; every one takes --json for its raw values. The recipe verbs read this
 computer and write beside the state file; the rest speak to the host wsp up
 started:
   wsp workspaces
-      every workspace this host runs: what its machine is, its state where the
-      kind has one, and its project folder
+      every workspace this host runs: what its machine is, its state as the
+      sidebar shows it (running, paused, waking or unreachable, off the phase
+      with the provider's word for the machine and the daemon reach beside it)
+      where the kind has one, and its project folder
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -507,9 +547,10 @@ started:
       answer stands either way: no rule decides one. All of them repeat. Review
       it, then wsp init --recipe
   wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
-    --local [name]
+    --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>]
+    [--ssh-key <path>]
       a workspace from the golden's head or, with --from, a project golden;
-      --local is this computer
+      --local is this computer, --ssh a machine of your own
   wsp rename <workspace> "<name>"
       names the workspace on this computer; the name is unique here, so one
       another workspace holds is refused
@@ -619,6 +660,14 @@ options:
                      caches left behind, secret-shaped files cut unless a
                      rewrite drops their credentials, and the sessions your
                      agents have for the folder travelling with it
+  --no-local         init: leave this computer alone. The workspace step ticks
+                     it by default, since a workspace here forks nothing and
+                     bills nothing; this is the one way to end an init without
+                     one. Refused on a run with no provider key, where it is
+                     the only workspace there is
+  --local            doctor: prove a thread on this computer and its reply
+                     instead of the reach loop, which needs no provider key,
+                     forks nothing and bills nothing
   --non-interactive  init: ask nothing, but still run the sign-ins on the
                      machine: each one prints the page to open on this computer,
                      the code when the flow shows one, and the command that
@@ -648,6 +697,8 @@ keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
 for the optional Anthropic key at the same time and can save both to that file.
 With a Solari key present, a missing Anthropic key is only noted at start.
+Without one, init and up take the local road: this computer is the workspace,
+nothing is forked and nothing is sealed.
 ```
 
 ## wsp recipe
@@ -680,7 +731,9 @@ usage: wsp recipe [--tick used|installed|default] [--set <id>=on|off] [--signin 
 
 ```text
 usage: wsp workspaces
-  every workspace this host runs: what its machine is, its state where the kind
+  every workspace this host runs: what its machine is, its state as the sidebar
+  shows it (running, paused, waking or unreachable, off the phase with the
+  provider's word for the machine and the daemon reach beside it) where the kind
   has one, and its project folder
 
   --json         print the raw protocol values, one JSON line each
@@ -701,9 +754,9 @@ usage: wsp threads [--in <workspace>]
 ## wsp new
 
 ```text
-usage: wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new --local [name]
+usage: wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>] [--ssh-key <path>]
   a workspace from the golden's head or, with --from, a project golden; --local
-  is this computer
+  is this computer, --ssh a machine of your own
 
   --json         print the raw protocol values, one JSON line each
   --state PATH   the state file the host serves
@@ -803,9 +856,13 @@ usage:
                      none does
   wsp init           set up your first golden image in six screens: Agents,
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser
+                     on this Mac, and Build, then the browser. With no provider
+                     key it seals nothing and makes this computer your
+                     workspace instead
   wsp doctor         run the reach loop end to end against one live machine
-                     (--yes also deletes the snapshots this host left behind)
+                     (--yes also deletes the snapshots this host left behind);
+                     --local proves the other half instead, a thread on this
+                     computer and its reply, with no machine and no key
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (claude, codex, gemini, opencode),
@@ -821,8 +878,10 @@ verbs; every one takes --json for its raw values. The recipe verbs read this
 computer and write beside the state file; the rest speak to the host wsp up
 started:
   wsp workspaces
-      every workspace this host runs: what its machine is, its state where the
-      kind has one, and its project folder
+      every workspace this host runs: what its machine is, its state as the
+      sidebar shows it (running, paused, waking or unreachable, off the phase
+      with the provider's word for the machine and the daemon reach beside it)
+      where the kind has one, and its project folder
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -858,9 +917,10 @@ started:
       answer stands either way: no rule decides one. All of them repeat. Review
       it, then wsp init --recipe
   wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
-    --local [name]
+    --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>]
+    [--ssh-key <path>]
       a workspace from the golden's head or, with --from, a project golden;
-      --local is this computer
+      --local is this computer, --ssh a machine of your own
   wsp rename <workspace> "<name>"
       names the workspace on this computer; the name is unique here, so one
       another workspace holds is refused
@@ -970,6 +1030,14 @@ options:
                      caches left behind, secret-shaped files cut unless a
                      rewrite drops their credentials, and the sessions your
                      agents have for the folder travelling with it
+  --no-local         init: leave this computer alone. The workspace step ticks
+                     it by default, since a workspace here forks nothing and
+                     bills nothing; this is the one way to end an init without
+                     one. Refused on a run with no provider key, where it is
+                     the only workspace there is
+  --local            doctor: prove a thread on this computer and its reply
+                     instead of the reach loop, which needs no provider key,
+                     forks nothing and bills nothing
   --non-interactive  init: ask nothing, but still run the sign-ins on the
                      machine: each one prints the page to open on this computer,
                      the code when the flow shows one, and the command that
@@ -999,6 +1067,8 @@ keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
 for the optional Anthropic key at the same time and can save both to that file.
 With a Solari key present, a missing Anthropic key is only noted at start.
+Without one, init and up take the local road: this computer is the workspace,
+nothing is forked and nothing is sealed.
 ```
 
 ## wsp send
@@ -1085,9 +1155,13 @@ usage:
                      none does
   wsp init           set up your first golden image in six screens: Agents,
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser
+                     on this Mac, and Build, then the browser. With no provider
+                     key it seals nothing and makes this computer your
+                     workspace instead
   wsp doctor         run the reach loop end to end against one live machine
-                     (--yes also deletes the snapshots this host left behind)
+                     (--yes also deletes the snapshots this host left behind);
+                     --local proves the other half instead, a thread on this
+                     computer and its reply, with no machine and no key
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (claude, codex, gemini, opencode),
@@ -1103,8 +1177,10 @@ verbs; every one takes --json for its raw values. The recipe verbs read this
 computer and write beside the state file; the rest speak to the host wsp up
 started:
   wsp workspaces
-      every workspace this host runs: what its machine is, its state where the
-      kind has one, and its project folder
+      every workspace this host runs: what its machine is, its state as the
+      sidebar shows it (running, paused, waking or unreachable, off the phase
+      with the provider's word for the machine and the daemon reach beside it)
+      where the kind has one, and its project folder
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -1140,9 +1216,10 @@ started:
       answer stands either way: no rule decides one. All of them repeat. Review
       it, then wsp init --recipe
   wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
-    --local [name]
+    --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>]
+    [--ssh-key <path>]
       a workspace from the golden's head or, with --from, a project golden;
-      --local is this computer
+      --local is this computer, --ssh a machine of your own
   wsp rename <workspace> "<name>"
       names the workspace on this computer; the name is unique here, so one
       another workspace holds is refused
@@ -1252,6 +1329,14 @@ options:
                      caches left behind, secret-shaped files cut unless a
                      rewrite drops their credentials, and the sessions your
                      agents have for the folder travelling with it
+  --no-local         init: leave this computer alone. The workspace step ticks
+                     it by default, since a workspace here forks nothing and
+                     bills nothing; this is the one way to end an init without
+                     one. Refused on a run with no provider key, where it is
+                     the only workspace there is
+  --local            doctor: prove a thread on this computer and its reply
+                     instead of the reach loop, which needs no provider key,
+                     forks nothing and bills nothing
   --non-interactive  init: ask nothing, but still run the sign-ins on the
                      machine: each one prints the page to open on this computer,
                      the code when the flow shows one, and the command that
@@ -1281,6 +1366,8 @@ keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
 overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
 for the optional Anthropic key at the same time and can save both to that file.
 With a Solari key present, a missing Anthropic key is only noted at start.
+Without one, init and up take the local road: this computer is the workspace,
+nothing is forked and nothing is sealed.
 ```
 
 ## wsp mcp

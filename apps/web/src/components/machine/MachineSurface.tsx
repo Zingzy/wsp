@@ -11,7 +11,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { LINEAGE_MARKS, LOOK_PARTS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceKind, workspaceState, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { LINEAGE_MARKS, LOOK_PARTS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceKind, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -166,7 +166,7 @@ function Facts({ workspace, status, awakeMs, pendingSize }: FactsProps) {
   const diverged = status ? divergentMachineState(workspace.phase, status.machineState) : null;
   const zombie = status?.reach.state === "zombie";
   const rebuild = needsRebuild({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
-  const billing = isBilling(workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state }));
+  const billing = isBilling(workspaceStateOf(workspace, status));
   const outOfMemory = useOutOfMemoryReading(workspace.id, workspace.phase);
   const driven = kindWords(workspaceKind(workspace)).driven;
   return (
@@ -432,7 +432,7 @@ function LiveRow({ label, k, samples, y, text, tier, stale, unavailable }: LiveR
 function Usage({ workspace, status, series }: { workspace: WorkspaceView; status: WorkspaceStatus | null; series: WorkspaceCostEvent[] }) {
   const cost = useCost(workspace.id);
   const [range, setRange] = useState<UsageRange>("all");
-  const billing = isBilling(workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state }));
+  const billing = isBilling(workspaceStateOf(workspace, status));
   const rate = billing ? cost?.rateUsdPerHour ?? status?.rateUsdPerHour ?? 0 : 0;
   return (
     <Section label="Usage" aside={<UsageRangeToggle range={range} onChange={setRange} />}>

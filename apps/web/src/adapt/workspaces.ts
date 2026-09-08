@@ -4,7 +4,7 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import { foldThreads, workspaceState, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, workspaceStateOf, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
@@ -54,11 +54,6 @@ export function sidebarWorkspaceOrder(input: SidebarInput): string[] {
 /** The latest turn start or end in the workspace, or its creation while it has none. */
 function lastActivityMs(workspace: Pick<WorkspaceView, "createdAt">, threads: ReadonlyArray<ThreadView>): number {
   return Math.max(Date.parse(workspace.createdAt), ...threads.flatMap(t => [t.startedAt ?? 0, t.endedAt ?? 0]));
-}
-
-/** The one state word's key for a workspace as the app knows it: its phase, and the machine state and reach of its status when one has arrived. */
-export function workspaceStateOf(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null): WorkspaceState {
-  return workspaceState({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state });
 }
 
 export function workspaceIndicator(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null): StatusIndicator {
