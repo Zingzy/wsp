@@ -1593,6 +1593,7 @@ const DAEMON_CONTENTS = [
   "b749121a659b9c45b07285ee0f4e95f15aae26ddbc1bcba75745e83c2ae032c6",
   "b0b88a03c649769e0676ca38eaa5035825b71302c97a2858dcf8eb57131288be",
   "cae44a68bd72d81717b52a71c3890da918025cbd0d071db884102936e5cf4345",
+  "c5c3b15cad1b45ed110b072a18d0d895f661c489f73828de78a3b9f3589f05c6",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -1603,7 +1604,8 @@ const DAEMON_CONTENTS = [
  * or proc ops. Version 3 browses the imported project folders named in DAEMON_ROOTS_PATH beside its home.
  * Version 4 starts from a script that sets the guest PATH itself. Version 5 fetches its Node through the catalog's
  * curl function. Version 6 puts itself last for the kernel's memory killer and starts every shell it opens at the
- * work score instead. */
+ * work score instead. Version 7 picks the road to the listening ports by platform, so the same daemon serves them
+ * on a Linux guest and on the person's own Mac. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -2044,7 +2046,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, computerOffline, goneRefusal, imageMoveRefusal, isBilling, needsRebuild, reachShown, sendRefusal, workspaceState, workspaceWord, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
+export { actionRefusal, computerOffline, goneRefusal, imageMoveRefusal, isBilling, kindWords, needsRebuild, reachShown, sendRefusal, workspaceKind, workspaceState, workspaceWord, WORKSPACE_KIND_WORDS, type ImageMoveInput, type SendBlock, type SendRefusalKind, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStateInput } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";

@@ -11,17 +11,17 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
-import { procNetTcpSource, startDaemon, type DaemonHandle, type PortSnapshotSource } from "@wsp/daemon";
+import { portSourceFor, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
-import type { DaemonEvent } from "@wsp/protocol";
+import type { DaemonEvent, DaemonReachView } from "@wsp/protocol";
 
 /** Loopback only: a firewall prompt on macOS or Windows is a wall a local workspace must never hit, and nothing off
  * this computer has any business on its daemon. */
 const LOOPBACK = "127.0.0.1";
 
-/** The daemon reads listening ports from /proc/net/tcp, which only Linux has; on this person's own macOS the port
- * pane reads empty rather than failing the connect. The Linux read is the guest's road, kept for a Linux host. */
-const portSource = (): PortSnapshotSource => (platform() === "linux" ? procNetTcpSource() : async () => []);
+/** The loopback token is minted when the daemon starts and lives as long as the process holding it, so the road to
+ * it never expires; the view's expiry is a number, so it carries the furthest one. */
+const NEVER = Number.MAX_SAFE_INTEGER;
 
 export interface LocalDaemonOptions {
   /** The folder the daemon's files and git ops resolve inside, and its ptys start in: the workspace's folder. */
@@ -42,7 +42,7 @@ export class LocalDaemon {
     // The inbox dir must exist before the watcher reads it; a cloud guest ships one, this computer makes its own.
     const inboxDir = join(opts.root, ".wsp-inbox");
     mkdirSync(inboxDir, { recursive: true });
-    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, root: opts.root, inboxDir, portsSource: portSource() });
+    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, root: opts.root, inboxDir, portsSource: portSourceFor(platform()) });
     return new LocalDaemon(handle, token, opts.root);
   }
 
@@ -51,10 +51,17 @@ export class LocalDaemon {
     return this.handle.port;
   }
 
+  /** How anything on this computer dials this daemon: the loopback route and the token that opens it, in the shape a
+   * cloud workspace's preview route arrives in, so the browser's link and the status probe read one view. The route
+   * is http, which the probe fetches (the socket answers 426 to a plain GET) and every link turns into ws. */
+  get road(): DaemonReachView {
+    return { url: `http://${LOOPBACK}:${this.handle.port}`, expiresAt: NEVER, daemonToken: this.token };
+  }
+
   /** A link to this daemon, the same one a cloud workspace's daemon is reached by. The caller owns it and closes it;
    * closing the daemon cuts every link it handed out. */
   link(onEvent: (e: DaemonEvent) => void = () => {}): DaemonReach {
-    return connectDaemon({ previewUrl: `ws://${LOOPBACK}:${this.handle.port}`, token: this.token, onEvent });
+    return connectDaemon({ previewUrl: this.road.url, token: this.token, onEvent });
   }
 
   async close(): Promise<void> {

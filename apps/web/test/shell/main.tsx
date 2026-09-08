@@ -22,7 +22,8 @@
 // text can be measured; ?settings=1 puts the settings page in the centre,
 // with the theme rule mounted so a pick on it moves the page's theme as the
 // app's would; ?size=file is the record saying the terminal's text size comes
-// from the Ghostty file.
+// from the Ghostty file; ?local=1 puts this computer in the list beside the
+// cloud machines, so a mixed list of both kinds can be measured.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -60,7 +61,10 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   golden: "snap_g",
   createdAt: "2026-09-05T11:00:00Z",
 });
-const workspaces = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" }];
+const cloud = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" }];
+// ?local=1 adds this computer to the list, so a mixed list can be measured: two cloud rows and one local beside them.
+const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
 // one; ws_b has only idle ones, the shape that used to draw no Idle header at all, one of them on Codex so both a
 // coloured and a monochrome agent mark sit in the shots.
@@ -108,7 +112,9 @@ const api: Api = {
   createFromGoldenHead: async () => workspaces[0]!,
   watchStatuses: async () =>
     workspaces.map(w =>
-      statusOf(w, params.get("offline") === "1" ? { reach: { state: statusOf(w).reach.state, offline: true } } : w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
+      w.id === MAC.id
+        ? statusOf(w, { kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 })
+        : statusOf(w, params.get("offline") === "1" ? { reach: { state: statusOf(w).reach.state, offline: true } } : w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
     ),
   forget: async () => {},
   nap: async id => workspaces.find(w => w.id === id)!,

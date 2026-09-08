@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { DaemonEvent } from "@wsp/protocol";
-import { parseProcNetTcp, PortWatcher, procNetTcpSource, type ListeningPort } from "../src/ports.js";
+import { isLoopbackHost, lsofSource, parseLsofListeners, parseProcNetTcp, portSourceFor, PortWatcher, procNetTcpSource, type ListeningPort } from "../src/ports.js";
 
 // Fixture provenance: hand-written from the documented /proc/net/tcp format
 // (proc(5); kernel net/ipv4/tcp_ipv4.c get_tcp4_sock printf layout), since no
@@ -196,5 +196,96 @@ describe("PortWatcher port.close detail", () => {
     });
     expect(closed).toEqual([{ type: "port.close", port: 3000, at }]);
     expect(DaemonEvent.safeParse(closed[0]).success).toBe(true);
+  });
+});
+
+// Fixture provenance: hand-written from the documented lsof -F field output
+// (lsof(8): a process set opens with p and carries c, u; each file set opens
+// with f and carries n), since no macOS box was available at authoring time.
+// Three processes: one on *:7000 and [::1]:5000, node on 127.0.0.1:3000 and
+// [::1]:3000, one on 0.0.0.0:49152. Swap in a real capture from the first Mac
+// run when available.
+const lsofFixture = readFileSync(join(import.meta.dirname, "fixtures", "lsof-listen.txt"), "utf8");
+
+describe("loopback in a text address, as lsof prints it", () => {
+  it.each([
+    ["127.0.0.1", true],
+    ["127.0.0.2", true],
+    ["::1", true],
+    ["::ffff:127.0.0.1", true],
+    ["0.0.0.0", false],
+    ["192.168.1.1", false],
+    ["::", false],
+    ["fe80::1", false],
+    ["::ffff:192.168.1.1", false],
+    ["*", false],
+    ["", false],
+    ["not-an-address", false],
+  ])("%s", (host, loopback) => {
+    expect(isLoopbackHost(host)).toBe(loopback);
+  });
+});
+
+describe("parseLsofListeners", () => {
+  it("one row per listening socket, carrying its process set's pid, command name and uid", () => {
+    expect(parseLsofListeners(lsofFixture)).toEqual([
+      { port: 7000, pid: 712, uid: 501, process: "ControlCenter", loopback: false },
+      { port: 5000, pid: 712, uid: 501, process: "ControlCenter", loopback: true },
+      { port: 3000, pid: 1042, uid: 501, process: "node", loopback: true },
+      { port: 3000, pid: 1042, uid: 501, process: "node", loopback: true },
+      { port: 49152, pid: 88, uid: 0, process: "rapportd", loopback: false },
+    ]);
+  });
+
+  it("no row carries an argv or a socket inode: lsof names neither", () => {
+    for (const row of parseLsofListeners(lsofFixture)) {
+      expect(row.command).toBeUndefined();
+      expect(row.inode).toBeUndefined();
+    }
+  });
+
+  it("a line that is not a field, and a name with no port, are skipped", () => {
+    expect(parseLsofListeners("lsof: WARNING: can't stat()\np9\ncsh\nu0\nf3\nnpipe\nf4\nn127.0.0.1:8080\n")).toEqual([
+      { port: 8080, pid: 9, uid: 0, process: "sh", loopback: true },
+    ]);
+  });
+});
+
+describe("the darwin road", () => {
+  let fakeBin: string | undefined;
+  const put = (script: string): void => {
+    fakeBin = mkdtempSync(join(tmpdir(), "wsp-lsof-"));
+    writeFileSync(join(fakeBin, "lsof"), script, { mode: 0o755 });
+    chmodSync(join(fakeBin, "lsof"), 0o755);
+    process.env["PATH"] = `${fakeBin}${delimiter}${process.env["PATH"] ?? ""}`;
+  };
+  const path = process.env["PATH"];
+  afterEach(() => {
+    process.env["PATH"] = path;
+    if (fakeBin !== undefined) rmSync(fakeBin, { recursive: true, force: true });
+    fakeBin = undefined;
+  });
+
+  it("asks lsof and folds its rows to one per port", async () => {
+    put(`#!/bin/sh\ncat <<'OUT'\n${lsofFixture}OUT\n`);
+    expect(await lsofSource()()).toEqual([
+      { port: 7000, pid: 712, uid: 501, process: "ControlCenter", loopback: false },
+      { port: 5000, pid: 712, uid: 501, process: "ControlCenter", loopback: true },
+      { port: 3000, pid: 1042, uid: 501, process: "node", loopback: true },
+      { port: 49152, pid: 88, uid: 0, process: "rapportd", loopback: false },
+    ]);
+  });
+
+  it("lsof exiting non-zero with nothing listening reads as no ports, not as a failed poll", async () => {
+    put("#!/bin/sh\nexit 1\n");
+    await expect(lsofSource()()).resolves.toEqual([]);
+  });
+});
+
+describe("the road per platform", () => {
+  it("Linux reads /proc, macOS asks lsof, and a platform with no road reads empty rather than failing the pane", async () => {
+    expect(portSourceFor("linux")).toBeInstanceOf(Function);
+    expect(portSourceFor("darwin")).toBeInstanceOf(Function);
+    await expect(portSourceFor("win32")()).resolves.toEqual([]);
   });
 });

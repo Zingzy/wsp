@@ -559,6 +559,12 @@ export interface LocalWiring {
   execStream: (opts?: MachineExecOptions) => ExecStreamFactory;
   home: (agentId: string) => string;
   env: Readonly<Record<string, string>>;
+  /** Where this computer's daemon listens and the token that opens it, in the shape a cloud fork's preview route
+   * arrives in, so the panes and the status probe read one view. The host starts that daemon on the first call and
+   * closes it in close(); a host that wires none leaves the local workspace's panes with nothing to dial. */
+  daemonRoad?: () => Promise<DaemonReachView>;
+  /** Frees whatever the wiring holds open on this computer when the runtime closes. */
+  close?: () => Promise<void>;
 }
 
 export interface RuntimeOptions {
@@ -1280,15 +1286,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     env: Readonly<Record<string, string>>;
     /** Whether a request relayed from a machine may drive a workspace of this kind; a local one answers only this computer. */
     relayed: boolean;
+    /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
+     * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
+     * word and the status poller read it before this seam existed. */
+    hasDaemon: (entry: LiveWorkspace) => boolean;
+    /** The road to this machine's daemon: where it listens, when the route expires and the token that opens it. A
+     * cloud fork's preview route with the token this runtime wrote on the guest; this computer's loopback daemon
+     * with the token it holds in memory. Throws with the backend's own words when the machine has no road. */
+    daemonRoad: (entry: LiveWorkspace) => Promise<DaemonReachView>;
   }
   const cloudHome = (id: string): string => {
     const home = guestAgentHomes()[id];
     if (home === undefined) throw new Error(`the catalog has no home for ${id}`);
     return home;
   };
+  const cloudRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
+    const reach = await entry.ws.daemonReach();
+    const token = await daemonTokenOf(entry.machine);
+    return { url: reach.url, expiresAt: reach.expiresAt, ...(token !== undefined ? { daemonToken: token } : {}) };
+  };
+  const localRoad = async (): Promise<DaemonReachView> => {
+    if (local?.daemonRoad === undefined) throw new Error("this host wired no daemon for its local workspace, so nothing on this computer can be dialled");
+    return local.daemonRoad();
+  };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
-    cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true },
-    local: local === undefined ? undefined : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), home: local.home, env: local.env, relayed: false },
+    cloud: { backend, execStream: (machine, o) => machineExecStream(machine, o), home: cloudHome, env: GUEST_LOGIN_ENV, relayed: true, hasDaemon: entry => Boolean(entry.machine.previewUrl), daemonRoad: cloudRoad },
+    local:
+      local === undefined
+        ? undefined
+        : { backend: local.backend, execStream: (_machine, o) => local.execStream(o), home: local.home, env: local.env, relayed: false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
     const found = modules[kind];
@@ -1613,8 +1639,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * would reset its idle timer for a fact the runtime already knows. The nap
    * countdown rides along as the poller sends it: a client replaces the whole
    * status, so leaving it out would blank the row until the next poll. */
-  /** The reach a status pushed for a running machine claims: the edge answers where the backend mints a route. */
-  const reachOf = (entry: LiveWorkspace): ReachState => (entry.machine.previewUrl ? "reachable" : "unsupported");
+  /** The reach a status pushed for a running machine claims: the daemon answers wherever this kind has a road to it. */
+  const reachOf = (entry: LiveWorkspace): ReachState => (moduleOf(entry.record.kind).hasDaemon(entry) ? "reachable" : "unsupported");
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
     const size = entry.record.size;
     const idleAt = entry.record.phase === "running" ? idle.idleAt(entry.record.id) : undefined;
@@ -2816,9 +2842,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async daemonReach(id, origin) {
       const entry = await entryOf(id, origin);
-      const reach = await entry.ws.daemonReach();
-      const daemonToken = await daemonTokenOf(entry.machine);
-      return { url: reach.url, expiresAt: reach.expiresAt, ...(daemonToken !== undefined ? { daemonToken } : {}) };
+      return moduleOf(entry.record.kind).daemonRoad(entry);
     },
 
     async portReach(id, port, origin) {
@@ -4473,7 +4497,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         rateUsdPerHour: backendFor(e.record.kind).pricing.rateUsdPerHour(e.record.size),
         generation: e.generation,
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
-        ...(e.machine.previewUrl ? { daemonReach: () => e.ws.daemonReach() } : {}),
+        ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
         providerState: () => e.machine.state(),
         ...(e.machine.metrics !== undefined ? { metrics: e.machine.metrics.bind(e.machine) } : {}),
         exec: (cmd, o) => e.machine.exec(cmd, o),
@@ -4664,6 +4688,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     close: async () => {
       idle.close();
+      await local?.close?.();
       closed = true;
       beat?.();
       beat = undefined;

@@ -283,7 +283,7 @@ export class ProcSampler extends EventEmitter {
     const ports = new Set<number>();
     for (const file of ["tcp", "tcp6"]) {
       const text = await readFile(`${this.procRoot}/net/${file}`, "latin1").catch(() => "");
-      for (const row of parseProcNetTcp(text)) if (inodes.has(row.inode)) ports.add(row.port);
+      for (const row of parseProcNetTcp(text)) if (row.inode !== undefined && inodes.has(row.inode)) ports.add(row.port);
     }
     const procs = this.lastAt === undefined ? (await this.scan()).procs : this.lastProcs;
     const children = procs.filter(p => p.ppid === pid).map(p => p.pid);

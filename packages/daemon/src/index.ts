@@ -28,7 +28,11 @@ export {
 } from "./main.js";
 export {
   parseProcNetTcp,
+  parseLsofListeners,
   isLoopbackHex,
+  isLoopbackHost,
+  lsofSource,
+  portSourceFor,
   procNetTcpSource,
   PortWatcher,
   type ListeningPort,
