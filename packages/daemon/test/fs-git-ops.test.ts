@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rootsPathIn } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { FS_READ_CAP_BYTES, listDir } from "../src/fs-ops.js";
@@ -15,8 +16,8 @@ import { startDaemon, type DaemonHandle } from "../src/main.js";
 const TOKEN = "fs-token";
 const root = mkdtempSync(join(tmpdir(), "wsp-fsgit-root-"));
 const outside = mkdtempSync(join(tmpdir(), "wsp-fsgit-outside-"));
-// The daemon reads its roots beside its home; the default names the guest's /root, which no test may reach.
-const rootsPath = join(root, ".wsp", "roots");
+// The daemon reads its roots beside its home; the option's default names the guest's /root, which no test may reach.
+const rootsPath = rootsPathIn(root);
 const repo = join(root, "repo");
 const bigRepo = join(root, "bigrepo");
 const deep = join(root, "deep");
