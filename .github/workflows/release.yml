@@ -63,8 +63,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @wsp/desktop run build:mac
-      - name: Drive the packaged app
-        run: pnpm --filter @wsp/desktop smoke
+      # The screen smoke measures a real Mac's window and fails on a hosted runner's display; it runs in the merge
+      # gate on a Mac. Here the packaged tree is checked without a screen.
+      - name: Check the packaged trees
+        run: pnpm --filter @wsp/desktop exec vitest run --minWorkers=1 --maxWorkers=1 test/pty-native.test.ts
       - name: Zip each bundle
         env:
           VERSION: ${{ needs.draft.outputs.version }}

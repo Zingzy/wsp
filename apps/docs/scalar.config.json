@@ -44,6 +44,12 @@
     "header": [
       {
         "type": "link",
+        "title": "Home",
+        "align": "end",
+        "to": "https://wspx.vercel.app"
+      },
+      {
+        "type": "link",
         "title": "GitHub",
         "align": "end",
         "to": "https://github.com/Zingzy/wsp",
