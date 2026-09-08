@@ -154,7 +154,8 @@ async function probe(): Promise<Probe> {
 /** What the pane brought of its own: the background it drew and, per slot, whether that slot's word was painted in it. */
 export interface PaletteProbe {
   background: [number, number, number];
-  slots: { slot: number; color: [number, number, number]; painted: boolean }[];
+  /** A slot the theme left for libghostty reports a null colour, so a hole fails the assertion rather than throwing. */
+  slots: { slot: number; color: [number, number, number] | null; painted: boolean }[];
 }
 
 async function probePalette(): Promise<PaletteProbe> {
@@ -169,8 +170,8 @@ async function probePalette(): Promise<PaletteProbe> {
     background: [background.r, background.g, background.b],
     slots: (palette ?? []).map((color, slot) => ({
       slot,
-      color: [color!.r, color!.g, color!.b],
-      painted: opaque.has(`${color!.r},${color!.g},${color!.b}`),
+      color: color === null ? null : ([color.r, color.g, color.b] as [number, number, number]),
+      painted: color !== null && opaque.has(`${color.r},${color.g},${color.b}`),
     })),
   };
 }

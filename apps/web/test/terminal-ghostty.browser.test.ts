@@ -69,18 +69,18 @@ describe.skipIf(skipped !== undefined)("a translucent Ghostty theme on the surfa
     console.info(`terminal theme screenshot: ${path}`);
   }, 30_000);
 
-  // libghostty's own sixteen are drawn for a dark pane: on a light one its yellow reads at 1.57 to 1
-  // and its green at 1.96, which is text nobody can read. A file naming no palette must therefore get
-  // the app's own, and the app's own must read on the pane it is drawn against, in either theme.
-  it.each(["dark", "light"] as const)("%s: a file naming no palette takes the app's sixteen, and every hue it brings reads at AA on the pane", async scheme => {
+  // libghostty's own sixteen were drawn for a dark pane: on a light one its yellow reads at 1.57 to 1
+  // and its green at 1.96, and its two white slots at 1.64 and 1.17, which is text nobody can read.
+  // Its two black slots do the same to a dark pane at 1.20 and 3.45. A file naming no palette must
+  // therefore get the app's own, and every one of the sixteen is ink a program can print, so every
+  // one of them is measured against the pane it is drawn on, in either theme. No slot is excused:
+  // a slot that cannot be read is a slot whose output is lost.
+  it.each(["dark", "light"] as const)("%s: a file naming no palette takes the app's sixteen, and every one of them reads at AA on the pane", async scheme => {
     await page!.goto(`${base}?theme=${scheme}&palette=app`);
     const probe = await page!.evaluate(() => (window as unknown as { probePalette: () => Promise<PaletteProbe> }).probePalette());
     expect(probe.slots).toHaveLength(16);
-    // Slots 0, 7, 8 and 15 are the greys a program uses as a background as often as ink; the twelve hues are text.
-    const hues = probe.slots.filter(s => ![0, 7, 8, 15].includes(s.slot));
-    expect(hues).toHaveLength(12);
-    const read = hues.map(s => ({ slot: s.slot, ratio: wcagContrast(s.color, probe.background), painted: s.painted }));
-    console.info(`${scheme}: the pane's own hues read at ${read.map(r => `${r.slot}:${r.ratio.toFixed(2)}`).join(", ")} to 1`);
+    const read = probe.slots.map(s => ({ slot: s.slot, ratio: s.color === null ? 0 : wcagContrast(s.color, probe.background), painted: s.painted }));
+    console.info(`${scheme}: the pane's own sixteen read at ${read.map(r => `${r.slot}:${r.ratio.toFixed(2)}`).join(", ")} to 1`);
     for (const r of read) {
       expect(r.painted, `slot ${r.slot} of the app's palette never reached the canvas: ${JSON.stringify(probe.slots[r.slot])}`).toBe(true);
       expect(r.ratio, `slot ${r.slot} reads at ${r.ratio} on the ${scheme} pane`).toBeGreaterThanOrEqual(4.5);

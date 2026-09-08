@@ -77,11 +77,19 @@ describe("index.css", () => {
 
       /* The counts in the top rows: the sidebar's quiet text at part opacity.
          Declared where the contrast tokens are, so the sidebar's own step-ups
-         reach it. Drawn from the sidebar's ink and not the app's, since every row
-         that carries it is a sidebar row. */
+         reach it. Two surfaces read it, the sidebar's rows and the workspace
+         switcher's cards, and the switcher is portaled outside [data-app-sidebar]:
+         it takes the root's copy, which is why this token is declared on both and
+         cannot be scoped to the sidebar alone. */
       :root,
       [data-app-sidebar] {
         --top-row-meta: color-mix(in srgb, var(--contrast-sidebar-whisper) var(--top-row-meta-alpha), transparent);
+        /* A meta line that carries a sentence rather than a figure: the line for a provider out of
+           reach, what the runtime is doing to a machine's daemon, a drop with memory near full. The
+           whisper the counts take reads at 2.90:1 in light and 3.00:1 in dark, which is right for a
+           number the eye lands on and wrong for a sentence someone has to read through, so prose takes
+           a higher part of the same ink and clears AA on both surfaces. */
+        --sidebar-prose: color-mix(in srgb, var(--contrast-sidebar-whisper) 75%, transparent);
         /* The word a sidebar row at rest carries, the search row's included. The dark sidebar holds it
            at 80 percent of its quiet ink and still reads at 5.43:1; on a light surface that same 80
            percent lands at 4.47:1, and at 4.14:1 over the search row's tint, so light takes the ink

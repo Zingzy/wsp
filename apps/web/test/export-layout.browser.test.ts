@@ -280,13 +280,16 @@ describe.skipIf(skipped !== undefined)("the export dialog laid out in Chromium",
     }
   }, 40_000);
 
-  it("with no threads the sessions section is one muted line and the slot sits right under the summary", async () => {
-    await open("theme=dark&threads=0");
+  it.each(["dark", "light"] as const)("in the %s theme with no threads the sessions section is one muted line and the slot sits right under the summary", async theme => {
+    await open(`theme=${theme}&threads=0`);
     expect(await page!.locator("[data-k=agents] li").count()).toBe(0);
     expect(await page!.locator("[data-k=agents] p").last().textContent()).toBe("No threads here. Every agent's sessions for the folder come home with it.");
     const caches = await box("[data-k=caches]");
     const progress = await box("[data-k=progress]");
     expect(progress.y - (caches.y + caches.height)).toBeLessThan(40);
-    await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, "export-plain-dark.png") });
+    const ratios = await textContrast(page!, "[role=dialog] .text-muted-foreground");
+    console.info(`${theme}: the empty dialog's muted lines read at ${ratios.map(r => r.toFixed(2)).join(", ")} to 1`);
+    for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `export-plain-${theme}.png`) });
   }, 30_000);
 });
