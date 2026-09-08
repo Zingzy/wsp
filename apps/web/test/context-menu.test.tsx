@@ -427,6 +427,8 @@ describe("a thread row's menu", () => {
     await screen.findByRole("menu");
     fireEvent.click(item(THREAD_WORDS.rename));
     const input = (await screen.findByRole("textbox", { name: THREAD_WORDS.rename })) as HTMLInputElement;
+    // The field takes focus in an effect, one turn after it is in the tree; the keys go to a field that holds it.
+    await waitFor(() => expect(document.activeElement).toBe(input));
     // Home and End move the caret in a field; the sidebar reads them as go-to-first-row and would take the focus.
     fireEvent.keyDown(input, { key: "Home" });
     fireEvent.keyDown(input, { key: "End" });

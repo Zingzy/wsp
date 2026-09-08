@@ -7,10 +7,15 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { guestAgentHomes, tarOf, type TarEntry } from "@wsp/engine";
 import { storeUnreadLine } from "@wsp/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { projectLander } from "../src/project-export.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+
+// The lander's scratch home goes under the OS temp directory, which every process here shares; this file lists its own.
+const TEMP = mkdtempSync(join(tmpdir(), "wsp-export-test-"));
+process.env["TMPDIR"] = TEMP;
+afterAll(() => rmSync(TEMP, { recursive: true, force: true }));
 
 const dirs: string[] = [];
 afterEach(() => {
