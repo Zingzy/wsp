@@ -15,6 +15,8 @@ import { startDaemon, type DaemonHandle } from "../src/main.js";
 const TOKEN = "fs-token";
 const root = mkdtempSync(join(tmpdir(), "wsp-fsgit-root-"));
 const outside = mkdtempSync(join(tmpdir(), "wsp-fsgit-outside-"));
+// The daemon reads its roots beside its home; the default names the guest's /root, which no test may reach.
+const rootsPath = join(root, ".wsp", "roots");
 const repo = join(root, "repo");
 const bigRepo = join(root, "bigrepo");
 const deep = join(root, "deep");
@@ -118,7 +120,7 @@ let c: Awaited<ReturnType<typeof connect>>;
 
 beforeAll(async () => {
   buildRepo();
-  daemon = await startDaemon({ port: 0, token: TOKEN, root, portsSource: async () => [] });
+  daemon = await startDaemon({ port: 0, token: TOKEN, root, rootsPath, portsSource: async () => [] });
   c = await connect(daemon.port);
 });
 
@@ -366,7 +368,6 @@ describe("roots beyond home", () => {
   it("lists and reads under a folder the roots file names, refuses what is outside every root, and reads a later line without a restart", async () => {
     const project = mkdtempSync(join(tmpdir(), "wsp-fsgit-project-"));
     writeFileSync(join(project, "README.md"), "# proj\n");
-    const rootsPath = join(root, ".wsp", "roots");
     mkdirSync(join(root, ".wsp"), { recursive: true });
     writeFileSync(rootsPath, `${project}\n`);
     const d = await startDaemon({ port: 0, token: TOKEN, root, rootsPath, portsSource: async () => [] });

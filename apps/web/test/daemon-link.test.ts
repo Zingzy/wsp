@@ -28,7 +28,9 @@ let inboxDir: string | undefined;
 
 async function startTestDaemon(): Promise<DaemonHandle> {
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-link-inbox-"));
-  return startDaemon({ port: 0, token: TOKEN, inboxDir, portsSource: async () => [], portsIntervalMs: 1000 });
+  // Its roots file goes in a folder this test owns: the default names the guest's /root, another user's folder here.
+  const rootsPath = join(inboxDir, "roots");
+  return startDaemon({ port: 0, token: TOKEN, inboxDir, rootsPath, portsSource: async () => [], portsIntervalMs: 1000 });
 }
 
 afterEach(async () => {

@@ -114,7 +114,8 @@ describe("daemon-fs over a real daemon link", () => {
     git("commit", "-q", "-m", "init");
     writeFileSync(join(repo, "a.txt"), "two\n");
 
-    daemon = await startDaemon({ port: 0, token: TOKEN, root, portsSource: async () => [] });
+    // Its roots file goes beside its own root: the default names the guest's /root, another user's folder here.
+    daemon = await startDaemon({ port: 0, token: TOKEN, root, rootsPath: join(root, ".wsp", "roots"), portsSource: async () => [] });
     const statuses: string[] = [];
     link = connectDaemonLink({
       reach: async () => ({ url: `http://127.0.0.1:${daemon!.port}/`, daemonToken: TOKEN }),

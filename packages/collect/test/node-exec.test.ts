@@ -35,6 +35,10 @@ const gone = async (pid: number): Promise<boolean> => {
   return !alive(pid);
 };
 
+/** The case below needs a real interactive shell that sources an rc file, and zsh is the one every Mac ships; the
+ * GitHub Linux runner has none, so where it is missing the case says so rather than reading a pid file nothing wrote. */
+const zsh = ["/bin/zsh", "/usr/bin/zsh"].find(p => existsSync(p));
+
 const scratch = (): string => {
   const d = mkdtempSync(join(tmpdir(), "wsp-exec-"));
   dirs.push(d);
@@ -94,10 +98,10 @@ describe("nodeExec.run", () => {
     expect(await gone(pid)).toBe(true);
   }, 15_000);
 
-  it("the budget ends the whole process group: a job a real zshrc started is dead when the run ends", async () => {
+  it.skipIf(zsh === undefined)("the budget ends the whole process group: a job a real zshrc started is dead when the run ends", async () => {
     const d = scratch();
     writeFileSync(join(d, ".zshrc"), `sleep 100 & echo $! > ${join(d, "job")}; echo $$ > ${join(d, "pid")}; wait\n`);
-    const out = nodeExec.run("/bin/zsh", ["-ic", ":"], { env: { ZDOTDIR: d }, timeoutMs: 500 });
+    const out = nodeExec.run(zsh!, ["-ic", ":"], { env: { ZDOTDIR: d }, timeoutMs: 500 });
     const shell = await pidIn(join(d, "pid"));
     const job = await pidIn(join(d, "job"));
     expect(alive(shell)).toBe(true);

@@ -42,7 +42,10 @@ export class LocalDaemon {
     // The inbox dir must exist before the watcher reads it; a cloud guest ships one, this computer makes its own.
     const inboxDir = join(opts.root, ".wsp-inbox");
     mkdirSync(inboxDir, { recursive: true });
-    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, root: opts.root, inboxDir, portsSource: portSourceFor(platform()) });
+    // The roots file sits beside the daemon's home, and this daemon's root is the person's; the default names the
+    // guest's home, /root, which on a Linux computer is another user's folder and answers EACCES on every op.
+    const rootsPath = join(opts.root, ".wsp", "roots");
+    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, root: opts.root, inboxDir, rootsPath, portsSource: portSourceFor(platform()) });
     return new LocalDaemon(handle, token, opts.root);
   }
 

@@ -17,10 +17,12 @@ describe("the release workflow", () => {
     expect(workflow).not.toContain("schedule:");
   });
 
-  it("leaves npm to the person who holds the one time password", () => {
-    expect(workflow).not.toContain("npm publish");
-    expect(workflow).not.toContain("pnpm release");
+  it("publishes the command line package on its own identity, with no npm credential anywhere", () => {
+    expect(workflow).toContain("npm publish --provenance --access public");
+    expect(workflow).toContain("id-token: write");
     expect(workflow).not.toContain("NPM_TOKEN");
+    expect(workflow).not.toContain("NODE_AUTH_TOKEN");
+    expect(workflow).not.toContain("pnpm release");
     expect(workflow).toContain("--draft");
   });
 
