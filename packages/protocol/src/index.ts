@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, titleLine } from "./format.js";
+import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTint } from "./workspace-look.js";
 
@@ -281,7 +282,8 @@ export const SessionView = z.object({
    * agent's tool calls move rides the delta events instead. */
   cwd: z.string().optional(),
   /** What the session runs with, as the harness's own slugs: the start request's model until the harness announces
-   * its own; effort and permission mode as requested, since the CLI never echoes them. */
+   * its own; effort as requested, since the CLI never echoes it, and the permission mode the turn is at, which is
+   * the start's until a pick moves a running turn to another one. */
   model: z.string().optional(),
   effort: z.string().optional(),
   permissionMode: z.string().optional(),
@@ -484,6 +486,18 @@ export interface StartPicks {
   model?: string;
   effort?: string;
   permissionMode?: string;
+}
+
+/**
+ * A remembered pick read against the list in front of us: the value where that list carries it, nothing where it
+ * does not. Every reader of a pick kept for later needs this and there is one rule for all of them, because a pick
+ * is remembered per workspace while the lists belong to a harness and no two harnesses share one (claude's access
+ * modes and codex's are disjoint sets, as are their models and efforts). A pick the resolved harness does not take
+ * is not a request to refuse: it is a pick that does not apply here, so it is dropped and that list's own default
+ * runs. startPicks refuses a value a caller NAMED, which is a different thing and stays an error.
+ */
+export function listedPick(options: ReadonlyArray<HarnessOption>, value: string | undefined): string | undefined {
+  return value !== undefined && options.some(o => o.value === value) ? value : undefined;
 }
 
 const optionWords = (options: ReadonlyArray<HarnessOption>): string => options.map(o => `${o.label} (${o.value})`).join(", ");
@@ -1026,6 +1040,13 @@ export const Preferences = z.object({
   sidebarWidth: z.number().int().positive().optional(),
   terminalSize: TerminalSizeSource,
   terminalZoom: z.record(z.string(), z.number().int()),
+  /** The access mode the composer last picked in a workspace, by workspace id, in the harness's own slug. It is on
+   * this record rather than in one browser's storage because the host reads it too: a thread opened with no access
+   * named runs at the person's last pick for that workspace, whichever client or CLI opened it. Keyed by workspace
+   * alone, as the composer's other picks are, so it is read through listedPick: a workspace's threads may run on
+   * either harness and their mode lists are disjoint, and a pick the harness in front of us does not take drops to
+   * that harness's own default rather than refusing the send. */
+  access: z.record(z.string(), z.string()),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1037,15 +1058,16 @@ export const LABS_ENV = "WSP_LABS";
 export const labsFromEnv = (env: Record<string, string | undefined>): boolean => env[LABS_ENV] === "1";
 
 /** What preferences.set takes: any of the record's fields but labs, which is the host's to say; a null sidebarWidth
- * clears it back to the default, and terminalZoom names only the workspaces it moves, a null entry dropping that
- * workspace's zoom. */
+ * clears it back to the default, and terminalZoom and access name only the workspaces they move, a null entry
+ * dropping that workspace's zoom or pick. */
 export const PreferencesPatch = Preferences.omit({ labs: true }).partial().extend({
   sidebarWidth: z.number().int().positive().nullable().optional(),
   terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
+  access: z.record(z.string(), z.string().nullable()).optional(),
 });
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1062,11 +1084,17 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     if (zoom === null) delete terminalZoom[workspaceId];
     else terminalZoom[workspaceId] = zoom;
   }
+  const access = { ...current.access };
+  for (const [workspaceId, mode] of Object.entries(patch.access ?? {})) {
+    if (mode === null) delete access[workspaceId];
+    else access[workspaceId] = mode;
+  }
   return {
     theme: patch.theme ?? current.theme,
     sidebarMode: patch.sidebarMode ?? current.sidebarMode,
     terminalSize: patch.terminalSize ?? current.terminalSize,
     terminalZoom,
+    access,
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
   };
@@ -1771,8 +1799,9 @@ export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
 
 /** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it
- * when a project lands, the daemon reads it on every files and diff op and browses those folders beside its home. */
-export const DAEMON_ROOTS_PATH = "/root/.wsp/roots";
+ * when a project lands, the daemon reads it on every files and diff op and browses those folders beside its home.
+ * The guest's home is /root, so this is rootsPathIn answered there; the value is hashed into DAEMON_CONTENT_SHA. */
+export const DAEMON_ROOTS_PATH = rootsPathIn("/root");
 
 /** The version a hello announces, 1 when it carries none. */
 export function daemonVersionOf(hello: { version?: number }): number {
@@ -1959,6 +1988,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
    * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string() }),
+  /** Puts the session's running turn into another access mode from its next tool call on; replies with a
+   * SessionAccessResult. Takes the runtime's session id, as sessions.interrupt does. */
+  z.object({ id: reqId, op: z.literal("sessions.access"), sessionId: z.string(), permissionMode: z.string() }),
   /** Names the session's harness session in the harness's own store and keeps the name on the thread's rows; replies
    * with a SessionRenameResult. Takes the runtime's session id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.rename"), sessionId: z.string(), title: z.string() }),
@@ -2119,6 +2151,18 @@ export type SessionSteerOutcome = z.infer<typeof SessionSteerOutcome>;
 export const SessionSteerResult = z.object({ outcome: SessionSteerOutcome });
 export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
 
+// --- session access (what a pick made while a turn runs gets back) ---------------------
+
+/** set: the harness took the mode and this turn's next tool call runs at it. unsupported: the harness takes no
+ * access change on a turn already under way (Claude Code's bypass, which is a launch flag on that CLI), so the pick
+ * waits for the person's next message. not-running: the turn ended, or its process is gone, before the pick reached
+ * it. not-found: this runtime holds no such session. None is an error reply, as a mode the harness's own list does
+ * not carry is. */
+export const SessionAccessOutcome = z.enum(["set", "not-running", "unsupported", "not-found"]);
+export type SessionAccessOutcome = z.infer<typeof SessionAccessOutcome>;
+export const SessionAccessResult = z.object({ outcome: SessionAccessOutcome });
+export type SessionAccessResult = z.infer<typeof SessionAccessResult>;
+
 // --- session answer (what picking an option on a relayed permission prompt gets back) --
 
 /** answered: the harness took the answer and the tool call it blocks ran or was refused as the option says, and a
@@ -2227,7 +2271,7 @@ export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { LOOK_PARTS, WORKSPACE_GLYPHS, WORKSPACE_TINTS, WorkspaceGlyph, WorkspaceLook, WorkspaceTint, type LookPart } from "./workspace-look.js";
-export { underProject } from "./project-path.js";
+export { rootsPathIn, underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";

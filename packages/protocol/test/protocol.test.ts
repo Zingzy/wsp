@@ -7,6 +7,8 @@ import {
   RecipeSource,
   Capabilities,
   GoldenVersion,
+  DAEMON_ROOTS_PATH,
+  rootsPathIn,
   DAEMON_VERSION,
   daemonVersionOf,
   DaemonAuthRequest,
@@ -42,6 +44,7 @@ import {
   RuntimeRequest,
   RuntimeResponse,
   SESSION_EVENT_TYPES,
+  SessionAccessResult,
   SessionAnswerResult,
   SessionEvent,
   SessionInterruptResult,
@@ -290,6 +293,17 @@ describe("a relayed permission prompt on the wire", () => {
       expect(SessionAnswerResult.parse({ outcome })).toEqual({ outcome });
     }
     expect(() => SessionAnswerResult.parse({ outcome: "denied" })).toThrow();
+  });
+
+  it("the access op and its outcomes are on the wire, so a pick made mid-turn can be sent and its answer read", () => {
+    const req = { id: 32, op: "sessions.access", sessionId: "s1", permissionMode: "bypassPermissions" };
+    expect(RuntimeRequest.parse(req)).toEqual(req);
+    expect(() => RuntimeRequest.parse({ ...req, permissionMode: undefined })).toThrow();
+    expect(() => RuntimeRequest.parse({ ...req, sessionId: undefined })).toThrow();
+    for (const outcome of ["set", "not-running", "unsupported", "not-found"]) {
+      expect(SessionAccessResult.parse({ outcome })).toEqual({ outcome });
+    }
+    expect(() => SessionAccessResult.parse({ outcome: "refused" })).toThrow();
   });
 });
 
@@ -809,6 +823,17 @@ describe("daemon files and diff ops", () => {
     expect(DaemonResponse.parse(err)).toEqual(err);
     expect(DaemonErrorResponse.parse({ id: 1, ok: false, error: "plain" })).toEqual({ id: 1, ok: false, error: "plain" });
     expect(() => DaemonErrorResponse.parse({ ...err, code: "whatever" })).toThrow();
+  });
+
+  it("names the roots file beside a home, and the guest's is that rule answered at /root", () => {
+    expect(rootsPathIn("/root")).toBe("/root/.wsp/roots");
+    // The value, not the expression: the runtime writes this exact path into a guest and DAEMON_CONTENT_SHA hashes it,
+    // so a home-derived answer that moved it would redeploy every machine or reach none.
+    expect(DAEMON_ROOTS_PATH).toBe("/root/.wsp/roots");
+    expect(DAEMON_ROOTS_PATH).toBe(rootsPathIn("/root"));
+    expect(rootsPathIn("/Users/z")).toBe("/Users/z/.wsp/roots");
+    expect(rootsPathIn("/Users/z/")).toBe("/Users/z/.wsp/roots");
+    expect(rootsPathIn("/")).toBe("/.wsp/roots");
   });
 });
 

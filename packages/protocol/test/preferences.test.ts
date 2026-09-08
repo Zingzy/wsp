@@ -10,7 +10,7 @@ describe("the preferences record", () => {
     expect(preferencesFrom({})).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom({ theme: "sepia" })).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom("nonsense")).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, labs: false });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, labs: false });
   });
 
   it("a stored record keeps what it has and takes the defaults for the rest", () => {
@@ -19,13 +19,25 @@ describe("the preferences record", () => {
 
   it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
-    expect(one).toEqual({ theme: "dark", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, labs: false });
+    expect(one).toEqual({ theme: "dark", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, labs: false });
     const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
     expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
     const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
-    expect(three).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, labs: false });
+    expect(three).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, labs: false });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
+  });
+
+  it("the access pick lands per workspace and stands beside the rest, a null entry dropping that workspace's", () => {
+    const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { access: { ws_a: "bypassPermissions" } });
+    expect(one.access).toEqual({ ws_a: "bypassPermissions" });
+    // A pick in one workspace leaves another's alone, and a patch that names none leaves every pick standing.
+    const two = applyPreferencesPatch(one, { access: { ws_b: "plan" } });
+    expect(two.access).toEqual({ ws_a: "bypassPermissions", ws_b: "plan" });
+    expect(applyPreferencesPatch(two, { theme: "dark" }).access).toEqual(two.access);
+    expect(applyPreferencesPatch(two, { access: { ws_a: null } }).access).toEqual({ ws_b: "plan" });
+    // A record from a host that kept no picks reads as none, not as undefined a caller has to guard.
+    expect(preferencesFrom({ theme: "light" }).access).toEqual({});
   });
 
   it("labs comes from the host's environment alone, and no patch carries it", () => {
@@ -41,6 +53,9 @@ describe("the preferences record", () => {
     expect(PreferencesPatch.safeParse({ theme: "sepia" }).success).toBe(false);
     expect(PreferencesPatch.safeParse({ sidebarWidth: -4 }).success).toBe(false);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: 1.5 } }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ access: { ws_a: "plan" } }).success).toBe(true);
+    expect(PreferencesPatch.safeParse({ access: { ws_a: null } }).success).toBe(true);
+    expect(PreferencesPatch.safeParse({ access: { ws_a: 3 } }).success).toBe(false);
   });
 
   it("the runtime takes preferences.get and preferences.set with a patch, and the changed event carries the whole record", () => {

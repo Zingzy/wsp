@@ -836,6 +836,15 @@ export function permissionModeOptionLabel(modeLabel: string): string {
   return `Allow, then ${modeLabel}`;
 }
 
+/** What the composer says under the box when a person picked an access while a turn was running and that harness
+ * takes no such change mid-turn: the pick is kept and it reaches the agent with the next thing they send. Short
+ * because that slot is one line the width of the box and it truncates from the right: a longer sentence lost the
+ * half that carries the answer at the window this app is smallest in (measured 2026-09-08, 364 px of slot at a
+ * 1200 px viewport), and a line that says when the pick lands is no use cut before the "when". */
+export function accessFromNextMessage(modeLabel: string): string {
+  return `${modeLabel} from your next message`;
+}
+
 /** What the harness is told when a prompt nobody answered ran its wait out: the runtime denies it in the person's
  * place rather than let the wait take the turn, and the sentence says so, since the agent reads it as the tool's
  * result and decides what to do next. */

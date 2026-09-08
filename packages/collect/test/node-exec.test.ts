@@ -94,10 +94,14 @@ describe("nodeExec.run", () => {
     expect(await gone(pid)).toBe(true);
   }, 15_000);
 
-  it("the budget ends the whole process group: a job a real zshrc started is dead when the run ends", async () => {
+  // The shell is a fixture here, not the subject: what this proves is that the budget takes the group, whatever
+  // started the job in it. It is bash, which every Mac and every Linux runner has, read through --rcfile so the
+  // person's own rc file is never sourced; macOS's bash 3.2 honours the flag for an interactive shell as well.
+  it("the budget ends the whole process group: a job a real rc file started is dead when the run ends", async () => {
     const d = scratch();
-    writeFileSync(join(d, ".zshrc"), `sleep 100 & echo $! > ${join(d, "job")}; echo $$ > ${join(d, "pid")}; wait\n`);
-    const out = nodeExec.run("/bin/zsh", ["-ic", ":"], { env: { ZDOTDIR: d }, timeoutMs: 500 });
+    const rc = join(d, "rc");
+    writeFileSync(rc, `sleep 100 & echo $! > ${join(d, "job")}; echo $$ > ${join(d, "pid")}; wait\n`);
+    const out = nodeExec.run("/bin/bash", ["--rcfile", rc, "-ic", ":"], { timeoutMs: 500 });
     const shell = await pidIn(join(d, "pid"));
     const job = await pidIn(join(d, "job"));
     expect(alive(shell)).toBe(true);

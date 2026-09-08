@@ -68,15 +68,16 @@ describe("local exec stream", () => {
   it("a child that prints nothing while the tree it started burns a core is not cut at the idle limit", async () => {
     const marker = join(root, "busy.pid");
     // The tree is read once the stream has been quiet for half the limit, so the limit leaves room for the pair of
-    // readings a rate takes.
-    const factory = localExecStream({ root, idleMs: 600, deadlineMs: 30_000, pollMs: 20 });
-    const stream = factory(`( while :; do :; done ) & echo $! > ${marker}; sleep 1.6; echo still working; sleep 20`, { env: {} });
+    // readings a rate takes. Linux's ps prints whole seconds of CPU where this Mac's prints hundredths, so the pair
+    // only differs once the tree has burned a whole second: the limit is long enough for that on either computer.
+    const factory = localExecStream({ root, idleMs: 4_000, deadlineMs: 30_000, pollMs: 100 });
+    const stream = factory(`( while :; do :; done ) & echo $! > ${marker}; sleep 8.5; echo still working; sleep 20`, { env: {} });
     const busy = await grandchild(marker);
     // The line lands more than two idle limits into a silent turn, so only the tree's work can have held the turn
     // open. A cut turn never delivers it: its own words wait on the child's streams closing, which a grandchild
     // holding the inherited pipe never lets happen.
     const first = stream.lines[Symbol.asyncIterator]().next();
-    const late = new Promise<string>(resolve => setTimeout(() => resolve("nothing reached the reader"), 5_000));
+    const late = new Promise<string>(resolve => setTimeout(() => resolve("nothing reached the reader"), 12_000));
     expect(await Promise.race([first, late])).toEqual({ value: "still working", done: false });
     stream.kill();
     expect(await stream.exited).not.toBe(0);
