@@ -3,6 +3,8 @@
 // line: the prompt reaches the caller as an event, the answer goes back down
 // the same stdin channel the CLI reads, the row closes once and only once, and
 // a prompt whose process dies with it closes as cancelled rather than waiting.
+// The same channel carries this host's own request in the other direction: a
+// running turn moved to another access mode, settled on the CLI's own answer.
 import { describe, expect, it } from "vitest";
 import type { AdapterEvent, ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
@@ -203,5 +205,80 @@ describe("a turn that raises a permission prompt", () => {
     io.push(resultLine);
     io.end();
     await session.finished;
+  });
+});
+
+describe("a running turn moved to another access mode", () => {
+  const answered = (line: string, error?: string): string =>
+    JSON.stringify({
+      type: "control_response",
+      response: { subtype: error === undefined ? "success" : "error", request_id: JSON.parse(line).request_id, ...(error !== undefined ? { error } : {}) },
+    });
+
+  it("writes the CLI's own set_permission_mode down the channel and settles once the CLI answers it", async () => {
+    const { session, io } = start();
+    io.push(initLine);
+    await settle();
+    const moved = session.setAccess("bypassPermissions");
+    await settle();
+    expect(JSON.parse(io.stdin[1]!)).toMatchObject({ type: "control_request", request: { subtype: "set_permission_mode", mode: "bypassPermissions" } });
+    io.push(answered(io.stdin[1]!));
+    expect(await moved).toBe("set");
+    io.push(resultLine);
+    io.end();
+    await session.finished;
+  });
+
+  it("a mode the CLI will not take comes back refused rather than reading as applied", async () => {
+    const { session, io } = start();
+    io.push(initLine);
+    await settle();
+    const moved = session.setAccess("sideways");
+    await settle();
+    io.push(answered(io.stdin[1]!, "invalid permission mode"));
+    expect(await moved).toBe("refused");
+    io.push(resultLine);
+    io.end();
+    await session.finished;
+  });
+
+  it("a turn that has not announced itself, and one whose channel is shut, take nothing and write nothing", async () => {
+    const { session, io } = start();
+    expect(await session.setAccess("plan")).toBe("gone");
+    expect(io.stdin).toHaveLength(1);
+    io.push(initLine);
+    await settle();
+    io.gone();
+    expect(await session.setAccess("plan")).toBe("gone");
+    expect(io.stdin).toHaveLength(1);
+    io.end(null as unknown as number);
+    await session.finished.catch(() => {});
+  });
+
+  it("a turn that replies with the request open settles it at the result, not minutes later when the process goes", async () => {
+    const { session, io } = start();
+    io.push(initLine);
+    await settle();
+    const moved = session.setAccess("plan");
+    await settle();
+    expect(io.stdin).toHaveLength(2);
+    // The result closes the channel, so nothing can answer this any more; the caller hears at once rather than
+    // waiting on a CLI that lingers past its reply.
+    io.push(resultLine);
+    expect(await moved).toBe("gone");
+    io.end();
+    await session.finished;
+  });
+
+  it("a process that dies with the request open settles it as gone rather than leaving the caller waiting", async () => {
+    const { session, io } = start();
+    io.push(initLine);
+    await settle();
+    const moved = session.setAccess("plan");
+    await settle();
+    expect(io.stdin).toHaveLength(2);
+    io.end(null as unknown as number);
+    expect(await moved).toBe("gone");
+    await session.finished.catch(() => {});
   });
 });

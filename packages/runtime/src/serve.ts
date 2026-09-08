@@ -296,6 +296,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "sessions.answer":
               send({ id: msg.id, ok: true, ...(await rt.sessions.answer(msg.sessionId, { askId: msg.askId, optionId: msg.optionId }, origin)) });
               return;
+            case "sessions.access":
+              send({ id: msg.id, ok: true, ...(await rt.sessions.access(msg.sessionId, msg.permissionMode, origin)) });
+              return;
             case "sessions.rename":
               send({ id: msg.id, ok: true, ...(await rt.sessions.rename(msg.sessionId, msg.title, origin)) });
               return;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { THREAD_AGENTS } from "@wsp/catalog";
-import { HarnessCatalog, catalogSourceLine, effortsFor, keptAccess, markedDefault, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
+import { HarnessCatalog, catalogSourceLine, effortsFor, keptAccess, listedPick, markedDefault, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog } from "../src/harness-catalog.js";
 
 describe("harness catalogs", () => {
@@ -175,6 +175,19 @@ describe("startPicks", () => {
     expect(startPicks(noDefault, {}, true)).toEqual({ effort: "high", permissionMode: "bypassPermissions" });
     // On a machine the person keeps the same start runs the mode its harness asks in, and nothing else changes.
     expect(startPicks(keptAccess(claude, THIS_COMPUTER), {}, true)).toEqual({ model: "claude-opus-5", effort: "high", permissionMode: "default" });
+  });
+
+  it("listedPick keeps a remembered pick this list carries and drops one it does not, which is not a refusal", () => {
+    // The one rule every reader of a remembered pick uses: the composer's pickers, its start options and the
+    // runtime's own read of the record. A pick belongs to a harness and is kept per workspace, so the reader in
+    // front of it may be another harness's list.
+    expect(listedPick(claude.permissionModes, "plan")).toBe("plan");
+    expect(listedPick(claude.permissionModes, "read-only")).toBeUndefined();
+    expect(listedPick(claude.permissionModes, undefined)).toBeUndefined();
+    expect(listedPick(harnessCatalog("pi")!.permissionModes, "plan")).toBeUndefined();
+    // Dropped, the start runs that list's own default, and never the value a caller named: that one still refuses.
+    expect(startPicks(claude, { permissionMode: listedPick(claude.permissionModes, "read-only") }, true).permissionMode).toBe("bypassPermissions");
+    expect(() => startPicks(claude, { permissionMode: "read-only" }, true)).toThrow(/not one claude takes/);
   });
 
   it("refuses a value the catalog does not list, naming the list in the composer's words", () => {

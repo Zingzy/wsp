@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// node scripts/release-notes.mjs v1.2.3: the notes for that tag's draft release,
-// from the commits since the tag before it plus the README's lines on unsigned
-// bundles. Prints markdown; writes nothing.
+// node scripts/release-notes.mjs v1.2.3 [--signed]: the notes for that tag's
+// draft release, from the commits since the tag before it plus the README's
+// lines on opening a downloaded bundle. Prints markdown; writes nothing.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,7 +10,8 @@ import { isReleaseTag, versionFromTag } from "./tag-version.mjs";
 
 // The README owns this text so the page a stranger reads and the notes they get
 // with the download cannot drift apart; the markers are how it is lifted out.
-const UNSIGNED = /<!-- unsigned:start -->\n([\s\S]*?)<!-- unsigned:end -->/;
+const BUNDLES = /<!-- bundles:start -->\n([\s\S]*?)<!-- bundles:end -->/;
+const UNSIGNED = /<!-- unsigned:start -->\n([\s\S]*?)<!-- unsigned:end -->\n?/;
 const RENUMBER = /^chore: v\d/;
 // The name on npm has one home, the manifest of the package that is published under it.
 const PACKAGE = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).name;
@@ -64,14 +65,24 @@ export function bundleNames(version) {
   };
 }
 
-/** The README's lines on unsigned bundles, so the notes say what the page says. */
-export function unsignedNote(readme) {
-  const found = UNSIGNED.exec(readme);
-  if (found === null) throw new Error("README.md has no unsigned:start and unsigned:end markers to read the bundle lines from");
-  return found[1].trim();
+/** The README's lines on opening a downloaded bundle, so the notes say what the page says. The paragraph on unsigned
+ * bundles, marked on its own inside them, is left out once an identity signs the bundles; the README keeps it until
+ * the person deletes it. */
+export function bundleNote(readme, signed) {
+  const found = BUNDLES.exec(readme);
+  if (found === null) throw new Error("README.md has no bundles:start and bundles:end markers to read the download lines from");
+  return found[1]
+    .replace(UNSIGNED, (_, paragraph) => (signed ? "" : paragraph))
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
-export function releaseNotes({ version, previous, changes, unsigned }) {
+/** The command line: the tag, and --signed when an identity signs the bundles the notes describe. */
+export function cliArgs(argv) {
+  return { tag: argv.find(arg => arg !== "--signed") ?? "", signed: argv.includes("--signed") };
+}
+
+export function releaseNotes({ version, previous, changes, bundles }) {
   const names = bundleNames(version);
   return [
     previous === undefined ? "## What changed" : `## What changed since ${previous}`,
@@ -85,12 +96,12 @@ export function releaseNotes({ version, previous, changes, unsigned }) {
     `- \`${names.appImage}\`: Linux on x64.`,
     `- The command line: \`npm i -g ${PACKAGE}@${version}\`.`,
     "",
-    unsigned,
+    bundles,
     "",
   ].join("\n");
 }
 
-function notesFor(repo, tag) {
+function notesFor(repo, tag, signed) {
   const git = args => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
   const previous = previousTag(git(["tag", "--list", "v*"]).split("\n"), tag);
   const subjects = previous === undefined ? [] : git(["log", "--no-merges", "--pretty=format:%s", `${previous}..${tag}`]).split("\n");
@@ -98,13 +109,14 @@ function notesFor(repo, tag) {
     version: versionFromTag(tag),
     previous,
     changes: changeLines(subjects),
-    unsigned: unsignedNote(readFileSync(join(repo, "README.md"), "utf8")),
+    bundles: bundleNote(readFileSync(join(repo, "README.md"), "utf8"), signed),
   });
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    process.stdout.write(notesFor(fileURLToPath(new URL("../../..", import.meta.url)), process.argv[2] ?? ""));
+    const { tag, signed } = cliArgs(process.argv.slice(2));
+    process.stdout.write(notesFor(fileURLToPath(new URL("../../..", import.meta.url)), tag, signed));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     process.exitCode = 1;

@@ -7,6 +7,7 @@ import {
   biggerSizeLine,
   catalogSourceLine,
   PERMISSION_DENIED_LINE,
+  accessFromNextMessage,
   permissionAskLine,
   permissionModeOptionLabel,
   permissionOutcomeLine,
@@ -1200,5 +1201,15 @@ describe("the words a relayed permission prompt shows", () => {
 
   it("a mode option reads as an allow that also stops the asking, in the picker's own words for the mode", () => {
     expect(permissionModeOptionLabel("Accept edits")).toBe("Allow, then Accept edits");
+  });
+
+  it("a pick the running turn's harness would not take says when it lands, in the picker's own words for the mode", () => {
+    const line = accessFromNextMessage("Bypass on this computer");
+    expect(line).toBe("Bypass on this computer from your next message");
+    // It says what happens, not that something failed: the pick is kept either way.
+    expect(line).not.toMatch(/could not|failed|unsupported/);
+    // The slot is one line that truncates from the right, and the longest label this can carry is the one that
+    // names the machine; the render test measures the paint, this holds the budget the measurement was against.
+    expect(line.length).toBeLessThan(54);
   });
 });

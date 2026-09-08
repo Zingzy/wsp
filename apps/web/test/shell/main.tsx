@@ -32,7 +32,7 @@
 // from the Ghostty file; ?local=1 puts this computer in the list beside the
 // cloud machines, so a mixed list of both kinds can be measured.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, THIS_COMPUTER, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
@@ -101,8 +101,18 @@ const sessions: SessionView[] = [
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one. Codex
 // carries the effort lists its app-server reports, each model with the effort that model runs at, so the effort
 // picker draws its default against a pick rather than against the binary.
+// The access modes are the kept-machine list, as the runtime hands it for a workspace on this computer: the mode
+// the harness asks in marked, and bypass named after the machine it would touch. One list serves every workspace
+// here, which is what a fixture can do; the runtime decides per machine.
+const ACCESS_MODES = [
+  { value: "default", label: "Default", description: "Every tool that needs permission is asked about in the chat", isDefault: true },
+  { value: "acceptEdits", label: "Accept edits", description: "Edits land without asking; commands that need permission are asked about" },
+  { value: "plan", label: "Plan", description: "Read and plan only; no changes" },
+  { value: "bypassPermissions", label: `Bypass on ${THIS_COMPUTER}`, description: "Run every tool without asking" },
+];
+
 const catalogs: HarnessCatalog[] = [
-  { harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }], efforts: [], contextWindows: [], permissionModes: [], steers: true, renames: true, images: true },
+  { harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }], efforts: [], contextWindows: [], permissionModes: ACCESS_MODES, steers: true, renames: true, images: true },
   {
     harness: "codex",
     label: "Codex",
@@ -231,6 +241,9 @@ const api: Api = {
             ? lingering
             : [],
   answerPermission: async () => "answered",
+  // Bypass is a launch flag on this CLI, so a pick of it while a turn runs is the one the harness will not take;
+  // the composer then says when it lands, which is the line this fixture is here to draw.
+  setSessionAccess: async () => "unsupported",
   listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
   snapshotStorage: async () => null,
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
