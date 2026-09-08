@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
 import type { ListeningPort } from "../src/ports.js";
@@ -112,23 +112,39 @@ describe("daemon ops: ports, manifest, inbox", () => {
     const b = await connect(daemon.port);
     expect((await a.request("sys.watch")).ok).toBe(true);
     expect((await b.request("sys.watch")).ok).toBe(true);
-    const deadline = Date.now() + 2000;
-    while ((a.events.filter(e => e.type === "sys.sample").length < 2 || b.events.filter(e => e.type === "sys.sample").length < 2) && Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 10));
-    }
-    const sample = a.events.find(e => e.type === "sys.sample")!;
+    const samples = (c: { events: WireMsg[] }) => c.events.filter(e => e.type === "sys.sample");
+    // Both sockets saw the same stream, so the daemon ran one sampler, not one per socket. The second subscriber can
+    // miss the sample the first was already sent, so the wait is for a sample both hold and not for a count each.
+    const sample = await vi.waitFor(
+      () => {
+        const shared = samples(a).find(s => samples(b).some(t => t["at"] === s["at"]));
+        expect(shared).toBeDefined();
+        return shared!;
+      },
+      { timeout: 10_000, interval: 10 },
+    );
     expect(sample).toMatchObject({ type: "sys.sample", cpu: 25, load1: 1.25, mem: { used: 2_000, total: 8_000 }, disk: { used: 30_000, total: 100_000 } });
     expect(typeof sample["at"]).toBe("number");
-    // Both sockets saw the same stream, so the daemon ran one sampler, not one per socket.
     expect(b.events).toContainEqual(sample);
+
     a.close();
+    // The close is a round trip the daemon has to read; a read counted after it is the sampler the other socket holds.
     await new Promise(r => setTimeout(r, 60));
     const readsWithOneLeft = sysReads;
-    await new Promise(r => setTimeout(r, 60));
-    expect(sysReads).toBeGreaterThan(readsWithOneLeft);
+    await vi.waitFor(() => expect(sysReads).toBeGreaterThan(readsWithOneLeft), { timeout: 10_000, interval: 10 });
+
     b.close();
-    await new Promise(r => setTimeout(r, 60));
-    const readsAfterLast = sysReads;
+    // The last close stops the sampler, and a loaded box is slow to notice: the count holding still over four
+    // intervals is the stop, and it has to keep holding after that.
+    const readsAfterLast = await vi.waitFor(
+      async () => {
+        const before = sysReads;
+        await new Promise(r => setTimeout(r, 80));
+        expect(sysReads).toBe(before);
+        return before;
+      },
+      { timeout: 10_000, interval: 10 },
+    );
     await new Promise(r => setTimeout(r, 80));
     expect(sysReads).toBe(readsAfterLast);
   });
@@ -190,12 +206,17 @@ describe("daemon ops: ports, manifest, inbox", () => {
       await new Promise(r => setTimeout(r, 20));
     }
     expect((await a.request("pty.list"))["ptys"]).toContainEqual(expect.objectContaining({ id: ptyId, exited: true }));
-    const seen = a.events.filter(e => e.type === "proc.snapshot").length;
-    deadline = Date.now() + 2000;
-    while (a.events.filter(e => e.type === "proc.snapshot").length <= seen && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
-    const after = labelled().at(-1)!;
+    // The snapshot after the exit can be one the sampler had already built, so the wait is on a snapshot that dropped
+    // the label rather than on the next one to arrive.
+    const after = await vi.waitFor(
+      () => {
+        const last = labelled().at(-1)!;
+        expect(last.pty).toBeUndefined();
+        return last;
+      },
+      { timeout: 10_000, interval: 10 },
+    );
     expect(after.pid).toBe(pid);
-    expect(after.pty).toBeUndefined();
 
     expect((await a.request("proc.unwatch")).ok).toBe(true);
     rmSync(join(procRoot, String(pid)), { recursive: true, force: true });
@@ -239,12 +260,19 @@ describe("daemon ops: ports, manifest, inbox", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-ops-rescan-"));
     writeFileSync(join(dir, "a.png"), "a".repeat(10));
     writeFileSync(join(dir, "b.bin"), "b".repeat(20));
-    const d = await startDaemon({ port: 0, token: TOKEN, inboxDir: dir });
+    const d = await startDaemon({ port: 0, token: TOKEN, inboxDir: dir, inboxQuietMs: 50, inboxPollMs: 25 });
     try {
       const c = await connect(d.port);
-      const res = await c.request("inbox.rescan");
-      expect(res.ok).toBe(true);
-      expect(res["count"]).toBe(2);
+      // A file the watch has reported is mid-upload until its size holds still, and a rescan leaves those to the settle
+      // sweep. FSEvents reports files written just before the watch started, so the count is waited on, not read once.
+      await vi.waitFor(
+        async () => {
+          const res = await c.request("inbox.rescan");
+          expect(res.ok).toBe(true);
+          expect(res["count"]).toBe(2);
+        },
+        { timeout: 10_000, interval: 25 },
+      );
       // WS ordering: both events land before the reply does
       expect(c.events).toContainEqual({ type: "inbox.file", path: join(dir, "a.png"), bytes: 10 });
       expect(c.events).toContainEqual({ type: "inbox.file", path: join(dir, "b.bin"), bytes: 20 });
