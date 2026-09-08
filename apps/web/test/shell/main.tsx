@@ -10,7 +10,8 @@
 // refusal line above the box can be measured for the running, paused and gone
 // workspaces and the model picker's agent marks for their size and colour;
 // ?ws=ws_a&linger=1 replays a turn that replied but whose process has not
-// exited; ?shell=desktop puts a desktop bridge on the page so the workspace
+// exited; ?ws=ws_a&chat=1 replays one whose reply is markdown of every kind the
+// chat draws, so the message body and its code blocks can be measured; ?shell=desktop puts a desktop bridge on the page so the workspace
 // switch chord reaches it; ?mac=1 marks the html the way the macOS preload
 // does; ?panel=terminal opens the right panel with a Browser tab and a
 // terminal over a fake daemon wire, the host answering a translucent Ghostty
@@ -18,6 +19,9 @@
 // ?sidebar=<px> opens the sidebar at that remembered width so the rows can
 // be measured at several; ?spaces=1 opens it in the Spaces body, one
 // workspace under its header with a dot per workspace at the bottom;
+// ?tint=1 gives the first two workspaces a hue and a glyph of their own;
+// ?archived=1 gives the first workspace two threads quiet for days, so the
+// Archived group nested in its idle shelf can be measured shut and opened;
 // ?images=<n> puts n images in the composer so the thumbnail row above the
 // text can be measured; ?settings=1 puts the settings page in the centre,
 // with the theme rule mounted so a pick on it moves the page's theme as the
@@ -65,14 +69,30 @@ const cloud = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("w
 // ?local=1 adds this computer to the list, so a mixed list can be measured: two cloud rows and one local beside them.
 const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
 const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
+// ?tint=1 gives the first two workspaces a hue and a glyph and leaves the third with neither, so one page holds two
+// tinted spaces and a plain one.
+if (params.get("tint") === "1") {
+  Object.assign(workspaces[0]!, { tint: "cyan", glyph: "flask" });
+  Object.assign(workspaces[1]!, { tint: "violet", glyph: "rocket" });
+}
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
 // one; ws_b has only idle ones, the shape that used to draw no Idle header at all, one of them on Codex so both a
 // coloured and a monochrome agent mark sit in the shots.
+// Two of the first workspace's threads quiet for days, added only with ?archived=1 so every other case keeps the
+// four rows it measures: past the protocol's threshold they fold into the Archived group under that workspace's
+// idle shelf, which is what the group's own case reads.
+const archived: SessionView[] = params.get("archived") !== "1"
+  ? []
+  : [
+      { id: "s5", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Rotate the daemon token and restart the host.", startedBy: "person", startedAt: Date.now() - 3 * 24 * 60 * 60_000, endedAt: Date.now() - 2 * 24 * 60 * 60_000 },
+      { id: "s6", workspaceId: "ws_a", harness: "codex", status: "interrupted", prompt: "Drop the preview shim from the packing list.", startedBy: "cli", startedAt: Date.now() - 9 * 24 * 60 * 60_000, endedAt: Date.now() - 8 * 24 * 60 * 60_000 },
+    ];
 const sessions: SessionView[] = [
   { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000 },
   { id: "s2", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Reply with exactly the word hi.", startedBy: "cli", startedAt: Date.now() - 30 * 60_000, endedAt: Date.now() - 24 * 60_000 },
   { id: "s3", workspaceId: "ws_b", harness: "codex", status: "completed", prompt: "Bump the lockfile and run the gate.", startedBy: "cli", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 },
   { id: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
+  ...archived,
 ];
 
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one. Codex
@@ -105,6 +125,41 @@ const lingering: SessionEvent[] = [
   { type: "session.done", ...linger, result: { status: "completed", durationMs: 900, costUsd: 0.001 } },
 ];
 
+// ?chat=1 replays one answered turn whose reply is the markdown the chat actually has to draw: prose, a
+// sentence with inline code in it, a fenced block the highlighter colours, a quote, a list and a table. It is
+// the surface the ticket names, and the parts that can go wrong in light are the ones that carry their own
+// ground: a code block, an inline code chip and a quote's rule all sit on a near-white card.
+const chatTurn = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_2", threadId: "thr_chat" };
+const CHAT_MARKDOWN = [
+  "Bumped the lockfile and ran the gate. The failing file was `apps/web/test/tokens.test.ts`, which pins",
+  "the stylesheet's additions, so the new token needed the snapshot taken again.",
+  "",
+  "```ts",
+  'const ROW_META_CLASS = "font-mono text-[11px] tabular-nums";',
+  "export function metaLine(project: Project): string {",
+  "  // A machine wsp does not drive says what it is instead of what it costs.",
+  "  return driven(project) ? costLine(project) : machineLine(project);",
+  "}",
+  "```",
+  "",
+  "> The gate runs once, on the branch merged with origin/main in a fresh worktree.",
+  "",
+  "- `pnpm test` green without creds",
+  "- `tsc --noEmit` clean",
+  "",
+  "| file | tests | state |",
+  "| --- | --- | --- |",
+  "| tokens.test.ts | 5 | green |",
+  "| sidebar.test.tsx | 55 | green |",
+  "",
+  "Full notes in [the tracker](https://example.invalid/439).",
+].join("\n");
+const chatHistory: SessionEvent[] = [
+  { type: "session.start", ...chatTurn, prompt: "Bump the lockfile and run the gate." },
+  { type: "session.delta", ...chatTurn, kind: "text", text: CHAT_MARKDOWN },
+  { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
+];
+
 const api: Api = {
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
@@ -124,7 +179,7 @@ const api: Api = {
   startSession: async o => ({ id: "s2", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
-  sessionHistory: async id => (id === "ws_a" && params.get("linger") === "1" ? lingering : []),
+  sessionHistory: async id => (id !== "ws_a" ? [] : params.get("chat") === "1" ? chatHistory : params.get("linger") === "1" ? lingering : []),
   listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
   snapshotStorage: async () => null,
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
@@ -139,6 +194,19 @@ const api: Api = {
   renameWorkspace: async (id, name) => {
     const row = workspaces.find(w => w.id === id)!;
     row.name = name;
+    return row;
+  },
+  // The look sits on the record beside the name, so the fixture writes it there and answers with the row.
+  setWorkspaceLook: async (id, look) => {
+    const row = workspaces.find(w => w.id === id)!;
+    if (look.tint !== undefined) {
+      if (look.tint === null) delete row.tint;
+      else row.tint = look.tint;
+    }
+    if (look.glyph !== undefined) {
+      if (look.glyph === null) delete row.glyph;
+      else row.glyph = look.glyph;
+    }
     return row;
   },
   listHarnesses: async () => catalogs,

@@ -145,6 +145,7 @@ import type {
   WorkspaceCostEvent,
   WorkspaceCreateStage,
   WorkspaceKind,
+  WorkspaceLook,
   WorkspaceOrigin,
   WorkspacePhase,
   WorkspaceProject,
@@ -848,6 +849,10 @@ export interface Runtime {
      * records so a sweep that records this machine after the store lost its workspace document restores it under
      * the name a person gave rather than the fork's. */
     rename(id: string, name: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    /** The hue and the glyph a person picked for this workspace. A key left out keeps that fact as it is and null
+     * clears it, so the colour picker and the icon picker each send their own without reading the other's. The record
+     * alone changes and the machine is untouched, so this goes out as workspace.look. */
+    look(id: string, look: WorkspaceLook, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
     /** Snapshots the running machine as a project golden: the golden it stands on plus the project as it is now, so a
      * fork of the snapshot starts a task with the project in place. Refused in one sentence when the workspace is not
      * running or holds no project; a machine that was ever resumed is refused by the engine (kind notFirstLife). The
@@ -1584,8 +1589,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.screen !== undefined ? { screen: r.screen } : {}),
     ...(r.project !== undefined ? { project: r.project } : {}),
     ...(r.gone !== undefined ? { gone: r.gone } : {}),
+    ...(r.tint !== undefined ? { tint: r.tint } : {}),
+    ...(r.glyph !== undefined ? { glyph: r.glyph } : {}),
     ...(daemonNotes.has(r.id) ? { daemonNote: daemonNotes.get(r.id)! } : {}),
   });
+
+  /** One fact of a workspace's look: a value sets it, null clears it back to none, and undefined leaves what the
+   * record holds, so a picker sends its own fact without reading the other's. */
+  const putLook = <K extends "tint" | "glyph">(r: WorkspaceRecord, key: K, value: WorkspaceRecord[K] | null | undefined): void => {
+    if (value === undefined) return;
+    if (value === null) delete r[key];
+    else r[key] = value;
+  };
 
   const persist = async (r: WorkspaceRecord): Promise<void> => {
     const entry = live.get(r.id);
@@ -2795,6 +2810,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await persist(entry.record);
       await store.put(WORKSPACE_NAMES, id, { workspaceId: id, name } satisfies NamedWorkspace);
       bus.emit({ type: "workspace.renamed", workspaceId: id, name });
+      return view(entry.record);
+    },
+
+    async look(id, look, origin) {
+      const entry = await entryOf(id, origin);
+      putLook(entry.record, "tint", look.tint);
+      putLook(entry.record, "glyph", look.glyph);
+      await persist(entry.record);
+      bus.emit({ type: "workspace.look", workspaceId: id, tint: entry.record.tint ?? null, glyph: entry.record.glyph ?? null });
       return view(entry.record);
     },
 

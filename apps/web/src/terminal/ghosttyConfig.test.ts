@@ -13,6 +13,7 @@ const APP: GhosttyTheme = {
 };
 const NONE: TerminalConfig = { files: [], fontFamily: [], palette: Array<null>(16).fill(null) };
 const red = { r: 243, g: 139, b: 168 };
+const green = { r: 166, g: 227, b: 161 };
 const FILE: TerminalConfig = {
   files: ["/Users/dev/.config/ghostty/config"],
   fontFamily: ["Berkeley Mono", "Symbols Nerd Font Mono"],
@@ -86,6 +87,17 @@ describe("terminalSurfaceSettings", () => {
     expect(settings.theme.palette).toBeUndefined();
     expect(settings.cursor).toEqual({ style: "underline" });
     expect(terminalSurfaceSettings({ ...FILE, cursorStyle: undefined, cursorStyleBlink: undefined }, APP, undefined, false).cursor).toBeUndefined();
+  });
+
+  it("the app's palette stands in every slot the file leaves alone, and the file's slot wins where it names one", () => {
+    const themed: GhosttyTheme = { ...APP, palette: [...Array<null>(15).fill(null), green] };
+    // A file naming nothing hands the pane the app's own slots, which is how a light pane gets a light palette.
+    expect(terminalSurfaceSettings(NONE, themed, undefined, false).theme.palette).toEqual(themed.palette);
+    expect(terminalSurfaceSettings(null, themed, undefined, false).theme.palette).toEqual(themed.palette);
+    // Slot one is the file's, slot fifteen still the app's, and the fourteen neither names stay libghostty's.
+    expect(terminalSurfaceSettings(FILE, themed, undefined, false).theme.palette).toEqual([null, red, ...Array<null>(13).fill(null), green]);
+    // With no palette on either side nothing is sent, so libghostty keeps all sixteen.
+    expect(terminalSurfaceSettings(NONE, APP, undefined, false).theme.palette).toBeUndefined();
   });
 
   it("the scheme is the html element's dark class", () => {

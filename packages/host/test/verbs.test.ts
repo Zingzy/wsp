@@ -72,13 +72,17 @@ describe("wsp verbs over the host", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  /** --state goes before any `--`, where exec's command begins. */
-  async function run(...argv: string[]): Promise<{ code: number; io: Captured }> {
+  /** A verb still in flight: its io is readable while it runs, so a test can wait on a line it has already printed.
+   * --state goes before any `--`, where exec's command begins. */
+  function starting(...argv: string[]): { io: Captured; ended: Promise<number> } {
     const io = captured();
     const cut = argv.indexOf("--");
     const at = cut === -1 ? argv.length : cut;
-    const code = await cli([...argv.slice(0, at), "--state", statePath, ...argv.slice(at)], io);
-    return { code, io };
+    return { io, ended: cli([...argv.slice(0, at), "--state", statePath, ...argv.slice(at)], io) };
+  }
+  async function run(...argv: string[]): Promise<{ code: number; io: Captured }> {
+    const { io, ended } = starting(...argv);
+    return { code: await ended, io };
   }
   const json = (io: Captured): unknown[] => io.lines.map(l => JSON.parse(l) as unknown);
   /** A verb run with a person at the keyboard: every question it asks is recorded and answered with reply. */
@@ -1111,13 +1115,15 @@ describe("wsp verbs over the host", () => {
     const third = await run("send", row!.threadId!, "--detach", "third");
     expect(third.io.lines).toEqual([`thread ${row!.threadId}`]);
     expect(held.starts).toHaveLength(3);
-    const fourth = run("send", row!.threadId!, "--detach", "fourth");
-    await new Promise(r => setTimeout(r, 30));
+    const fourth = starting("send", row!.threadId!, "--detach", "fourth");
+    // The waiting line is the runtime's answer that this start is behind the running turn: releasing that turn before
+    // the line lands leaves the fourth start nothing to queue behind, so the fact is waited on and not a sleep.
+    await vi.waitFor(() => expect(fourth.io.errors).toEqual(["waiting behind the running turn"]), { timeout: 10_000, interval: 10 });
     expect(held.starts).toHaveLength(3);
     held.release(2, "third done");
-    const queued = await fourth;
-    expect(queued.io.errors).toEqual(["waiting behind the running turn", "queued behind the running turn; it has ended and this turn started"]);
-    expect(queued.io.lines).toEqual([`thread ${row!.threadId}`]);
+    await fourth.ended;
+    expect(fourth.io.errors).toEqual(["waiting behind the running turn", "queued behind the running turn; it has ended and this turn started"]);
+    expect(fourth.io.lines).toEqual([`thread ${row!.threadId}`]);
     expect(held.starts.map(s => s.prompt)).toEqual(["build it", "more", "third", "fourth"]);
     held.release(3, "fourth done");
   });

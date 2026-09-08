@@ -109,15 +109,15 @@ function SwitcherCardView({ card, highlighted }: { card: SwitcherCard; highlight
   );
 }
 
-/** The well keeps its box whether or not a picture has been taken, so a first capture does not move the card. */
+/** The well keeps its box whether or not a picture has been taken, so a first capture does not move the card.
+ * A picture draws its own edge; an empty well is a fill, and a fill cannot hold an edge on a light card, where
+ * the muted tint lands two parts in 255 of the white under it. So the empty well wears a hairline instead,
+ * which reads on both surfaces, and the ring is drawn inside the box so it moves nothing when the picture lands. */
 function CardPreview({ card }: { card: SwitcherCard }) {
+  const empty = card.image === null;
   return (
-    <div className="mb-1 flex h-[5.5rem] items-center justify-center overflow-hidden rounded-sm bg-muted/40" data-card-preview>
-      {card.image === null ? (
-        <span className="font-mono text-[10px] text-muted-foreground/60">no capture yet</span>
-      ) : (
-        <img alt="" className="h-full w-full object-cover object-top" src={card.image} />
-      )}
+    <div className={cn("mb-1 flex h-[5.5rem] items-center justify-center overflow-hidden rounded-sm bg-muted/40", empty && "ring-1 ring-border ring-inset")} data-card-preview data-card-preview-empty={empty ? "" : undefined}>
+      {empty ? <span className="font-mono text-[10px] text-muted-foreground/60">no capture yet</span> : <img alt="" className="h-full w-full object-cover object-top" src={card.image} />}
     </div>
   );
 }

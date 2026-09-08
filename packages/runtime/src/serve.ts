@@ -221,6 +221,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.rename":
               send({ id: msg.id, ok: true, workspace: await rt.workspaces.rename(msg.workspaceId, msg.name, origin) });
               return;
+            case "workspaces.look":
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.look(msg.workspaceId, { ...(msg.tint !== undefined ? { tint: msg.tint } : {}), ...(msg.glyph !== undefined ? { glyph: msg.glyph } : {}) }, origin) });
+              return;
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });

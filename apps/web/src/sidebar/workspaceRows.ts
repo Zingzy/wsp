@@ -30,6 +30,14 @@ export function reachNote(reach: ReachState | null): string | null {
   return reach === "slow" ? "edge slow" : null;
 }
 
+/** The sentences a meta line can carry in place of its counts, in the order a surface draws them: what the
+ * runtime is doing to the machine's daemon, then a drop with memory near full. Written once because two
+ * surfaces draw them and both have to tell them from a figure: prose takes the ink that reads at AA, the
+ * counts beside it keep the whisper. */
+export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "outOfMemory">): string[] {
+  return [daemonNote(project), outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory)].filter((line): line is string => line !== undefined);
+}
+
 export interface WorkspaceMetaInput {
   readonly project: Pick<SidebarProjectSnapshot, "state" | "status" | "workspace" | "reach">;
   /** The meter's last tick for this workspace; null before the first. */
@@ -46,9 +54,8 @@ export interface WorkspaceMetaInput {
  * on the row a person may be waiting on. A machine wsp does not drive spends nothing and naps never, so its line
  * says what the machine is instead. */
 export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
-  const note = daemonNote(project);
-  if (note !== undefined) return note;
-  if (outOfMemory !== undefined) return outOfMemoryRowLine(outOfMemory);
+  const [sentence] = metaSentences({ project, outOfMemory });
+  if (sentence !== undefined) return sentence;
   const machine = machineLine(project);
   if (!kindWords(workspaceKind(project.workspace)).driven && machine !== null) return machine;
   return [
@@ -94,7 +101,7 @@ export const rateLabel = (rateUsdPerHour: number | null): string | null => (rate
  * a machine wsp does not drive stops there: it spends nothing and naps never, so a rate under the words for what
  * the machine is would name an hour nobody is charged for. */
 export function spaceHeaderLines({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
-  const lines: (string | null)[] = [daemonNote(project) ?? null, outOfMemory === undefined ? null : outOfMemoryRowLine(outOfMemory), machineLine(project)];
+  const lines: (string | null)[] = [...metaSentences({ project, outOfMemory }), machineLine(project)];
   if (kindWords(workspaceKind(project.workspace)).driven) {
     const nap = idleCountdownLabel(project.status, nowMs);
     lines.push(
@@ -114,7 +121,10 @@ export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "i
   return project.state === "running" ? "" : project.indicator.label;
 }
 
-const PLAIN = { colorClass: "text-muted-foreground/70", dotClass: "bg-muted-foreground/60" };
+// The base the sidebar's whispered tiers mix from, not the app's muted ink: the same colour on a
+// dark surface, and on a light one the step an alpha needs there. A row in the command palette
+// draws it from the root's copy of the token.
+const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whisper/60" };
 
 const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli", agent: "agent" };
 

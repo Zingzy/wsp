@@ -24,8 +24,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.
 import { cn } from "../lib/utils.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, workspaceRowId } from "./rowGrammar.js";
-import { NEW_THREAD_TITLE, dotClassForTone, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, TWO_LINE_ROW_CLASS, workspaceRowId } from "./rowGrammar.js";
+import { NEW_THREAD_TITLE, dotClassForTone, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
 
 /** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
 const GLYPH_CLASS = "peer-data-[size=lg]/menu-button:top-1 right-2";
@@ -78,6 +78,8 @@ export function WorkspaceRow({
   const KindGlyph = workspaceKindGlyph(workspaceKind(project.workspace));
   const gone = project.state === "gone";
   const meta = workspaceMetaLine({ project, cost, outOfMemory, nowMs });
+  // The same slot carries counts most of the time and a sentence when something needs reading.
+  const metaIsProse = metaSentences({ project, outOfMemory }).includes(meta);
   const forgetAction = actionById(actions, "forget");
   const rebuildAction = actionById(actions, "rebuild");
   const newThreadAction = actionById(actions, "new-thread");
@@ -120,7 +122,7 @@ export function WorkspaceRow({
               {stateSlotWord(project)}
             </span>
           </span>
-          <span data-workspace-meta className={cn(ROW_META_CLASS, "truncate")} title={meta}>
+          <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={meta}>
             {meta}
           </span>
         </span>

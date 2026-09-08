@@ -8,6 +8,7 @@ import { z } from "zod";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, titleLine } from "./format.js";
 import { shellQuote } from "./shell-quote.js";
+import { WorkspaceGlyph, WorkspaceLook, WorkspaceTint } from "./workspace-look.js";
 
 /** The one rule for a URL a guest may hand to the laptop: http or https in any
  * case, no whitespace or control characters, at most HTTP_URL_MAX bytes, and
@@ -27,6 +28,10 @@ export const EXEC_CHUNK_BYTES = 262_144;
  * a tool event or a log line well inside this, so it is the one rule that ends a turn the harness left hanging: a
  * fixed wall clock cut a build that was still working at 15 minutes on 2026-09-06. */
 export const TURN_IDLE_MS = 10 * 60_000;
+/** How long a thread sits idle before the sidebar folds it out of that workspace's shelf into its Archived group.
+ * The fold reads the thread's own last activity, so a thread that takes a new turn leaves the archive by itself and
+ * there is no archived flag anywhere to set or clear. */
+export const THREAD_ARCHIVE_MS = 24 * 60 * 60_000;
 /** The longest one turn may run however much it prints, a safety cap only; a per-workspace setting is a follow-up. */
 export const TURN_WALL_MS = 6 * 60 * 60_000;
 /** The close code a host sends the clients on its own socket as it stops: the socket did not break under them, the
@@ -188,6 +193,10 @@ export const WorkspaceView = z.object({
   screen: z.object({ streamUrl: z.string() }).optional(),
   /** With phase gone: the provider's words when it stopped knowing the machine; every refusal quotes them. */
   gone: z.string().optional(),
+  /** The hue a person picked for this workspace; absent is none, and nothing is tinted. */
+  tint: WorkspaceTint.optional(),
+  /** The glyph a person picked for this workspace; absent is none, and the state dot stands alone. */
+  glyph: WorkspaceGlyph.optional(),
   /** One line for the machine's row while the runtime is doing something to the machine's daemon, or why the last
    * attempt failed; absent whenever there is nothing to say. Not persisted: it says what this process is doing. */
   daemonNote: z.string().optional(),
@@ -638,6 +647,14 @@ export const WorkspaceUpgradedEvent = z.object({
 /** A person named the workspace: its record alone changed, and every client puts the name on the row it holds. The
  * machine was not touched, so nothing that meters it reads this. */
 export const WorkspaceRenamedEvent = z.object({ type: z.literal("workspace.renamed"), workspaceId: z.string(), name: z.string() });
+/** A person picked the workspace's hue or its glyph: the record alone changed, and both facts travel whole so a
+ * client never has to merge one key into what it holds. null on either is none picked. */
+export const WorkspaceLookEvent = z.object({
+  type: z.literal("workspace.look"),
+  workspaceId: z.string(),
+  tint: WorkspaceTint.nullable(),
+  glyph: WorkspaceGlyph.nullable(),
+});
 export const WorkspaceDeletedEvent = z.object({ type: z.literal("workspace.deleted"), workspaceId: z.string() });
 /** The provider stopped knowing the machine: the workspace's phase is gone from here until a rebuild or a delete.
  * Sessions on it ended, the rate is 0, the idle window is dropped; reason carries the provider's words. */
@@ -1318,6 +1335,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceWokenEvent.extend(sequenced),
   WorkspaceUpgradedEvent.extend(sequenced),
   WorkspaceRenamedEvent.extend(sequenced),
+  WorkspaceLookEvent.extend(sequenced),
   WorkspaceDeletedEvent.extend(sequenced),
   WorkspaceGoneEvent.extend(sequenced),
   WorkspaceStatusEvent.extend(sequenced),
@@ -1735,6 +1753,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * workspace holds, one a fork is landing under and a blank one are refused (kind "conflict"); a name the workspace
    * already carries comes back untouched. Threads running on the machine are untouched. */
   z.object({ id: reqId, op: z.literal("workspaces.rename"), workspaceId: z.string(), name: z.string() }),
+  /** Sets the workspace's look and replies with its fresh { workspace }. A key left out keeps that fact as it is and
+   * null clears it, so the colour picker and the icon picker each send their own without reading the other's. The
+   * record alone changes: nothing on the machine is touched. */
+  z.object({ id: reqId, op: z.literal("workspaces.look"), workspaceId: z.string() }).extend(WorkspaceLook.shape),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Drops a workspace whose machine the provider no longer has: the record, its transcripts and its sessions leave the
    * store, workspace.deleted follows, and nothing is asked of the provider. Refused with the reason (kind "conflict")
@@ -2053,6 +2075,7 @@ export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX
 export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
+export { LOOK_PARTS, WORKSPACE_GLYPHS, WORKSPACE_TINTS, WorkspaceGlyph, WorkspaceLook, WorkspaceTint, type LookPart } from "./workspace-look.js";
 export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
