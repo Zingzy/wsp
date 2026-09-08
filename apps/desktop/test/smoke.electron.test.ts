@@ -281,13 +281,15 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
       WORKSPACE_WORDS.openMachine,
+      WORKSPACE_WORDS.importProject,
+      WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
       WORKSPACE_WORDS.forget,
     ]);
-    expect(rows.filter(r => r.type === "separator")).toHaveLength(4);
-    expect(rows.find(r => r.label === WORKSPACE_WORDS.rename)).toMatchObject({ enabled: false, toolTip: "Renaming is not in the runtime yet" });
+    expect(rows.filter(r => r.type === "separator")).toHaveLength(5);
+    expect(rows.find(r => r.label === WORKSPACE_WORDS.rename)).toMatchObject({ enabled: true });
     expect(rows.find(r => r.label === WORKSPACE_WORDS.openTerminal)).toMatchObject({ enabled: true, accelerator: "CommandOrControl+J" });
     // The shell's page got the native menu, not the in-app one.
     expect(await win.locator("[data-context-menu]").count()).toBe(0);
