@@ -157,6 +157,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           return;
         }
 
+        // Where this request reached the host from rides the envelope, so every verb below hands the runtime the
+        // same fact and the runtime reads the rule once.
+        const origin = msg.origin;
         try {
           switch (msg.op) {
             case "auth":
@@ -182,64 +185,64 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // Watch before the snapshot so no change falls between them;
               // socket close releases the watcher via detaches.
               detaches.push(rt.status.watch());
-              send({ id: msg.id, ok: true, statuses: await rt.status.list() });
+              send({ id: msg.id, ok: true, statuses: await rt.status.list(undefined, origin) });
               return;
             case "workspaces.create": {
-              const { id, op, ...rest } = msg;
+              const { id, op, origin: from, ...rest } = msg;
               void op;
-              const { notice, ...workspace } = await rt.workspaces.create(rest);
+              const { notice, ...workspace } = await rt.workspaces.create(rest, from);
               send({ id, ok: true, workspace, ...(notice !== undefined ? { notice } : {}) });
               return;
             }
             case "workspaces.createLocal":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.createLocal(msg.name) });
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.createLocal(msg.name, origin) });
               return;
             case "workspaces.list":
-              send({ id: msg.id, ok: true, workspaces: await rt.workspaces.list() });
+              send({ id: msg.id, ok: true, workspaces: await rt.workspaces.list(origin) });
               return;
             case "workspaces.get":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.get(msg.workspaceId) });
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.get(msg.workspaceId, origin) });
               return;
             case "workspaces.nap":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.nap(msg.workspaceId) });
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.nap(msg.workspaceId, origin) });
               return;
             case "workspaces.wake":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.wake(msg.workspaceId) });
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.wake(msg.workspaceId, origin) });
               return;
             case "workspaces.upgrade": {
               const spec = {
                 ...(msg.cpu !== undefined ? { cpu: msg.cpu } : {}),
                 ...(msg.memMb !== undefined ? { memMb: msg.memMb } : {}),
               };
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.upgrade(msg.workspaceId, spec) });
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.upgrade(msg.workspaceId, spec, origin) });
               return;
             }
             case "workspaces.updateImage":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.updateImage(msg.workspaceId) });
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.updateImage(msg.workspaceId, origin) });
               return;
             case "workspaces.rename":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.rename(msg.workspaceId, msg.name) });
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.rename(msg.workspaceId, msg.name, origin) });
               return;
             case "workspaces.delete":
-              await rt.workspaces.delete(msg.workspaceId);
+              await rt.workspaces.delete(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });
               return;
             case "workspaces.forget":
-              await rt.workspaces.forget(msg.workspaceId);
+              await rt.workspaces.forget(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });
               return;
             case "workspaces.snapshot":
-              send({ id: msg.id, ok: true, projectGolden: await rt.workspaces.snapshot(msg.workspaceId) });
+              send({ id: msg.id, ok: true, projectGolden: await rt.workspaces.snapshot(msg.workspaceId, origin) });
               return;
             case "projectGoldens.list":
               send({ id: msg.id, ok: true, projectGoldens: await rt.golden.projects() });
               return;
             case "workspaces.touch":
-              await rt.workspaces.touch(msg.workspaceId);
+              await rt.workspaces.touch(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });
               return;
             case "workspaces.daemonReach":
-              send({ id: msg.id, ok: true, reach: await rt.workspaces.daemonReach(msg.workspaceId) });
+              send({ id: msg.id, ok: true, reach: await rt.workspaces.daemonReach(msg.workspaceId, origin) });
               return;
             case "sessions.start": {
               const handle = await rt.sessions.start(msg.workspaceId, {
@@ -253,31 +256,30 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
                 ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
                 ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
-                ...(msg.origin !== undefined ? { origin: msg.origin } : {}),
                 ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
                 ...(msg.notify !== undefined ? { notify: msg.notify } : {}),
                 ...(msg.title !== undefined ? { title: msg.title } : {}),
-              });
+              }, origin);
               send({ id: msg.id, ok: true, session: handle.view(), outcome: handle.outcome, turnId: handle.turnId });
               return;
             }
             case "harnesses.list":
-              send({ id: msg.id, ok: true, harnesses: await rt.harnesses.list(msg.workspaceId) });
+              send({ id: msg.id, ok: true, harnesses: await rt.harnesses.list(msg.workspaceId, origin) });
               return;
             case "sessions.list":
-              send({ id: msg.id, ok: true, sessions: await rt.sessions.list(msg.workspaceId) });
+              send({ id: msg.id, ok: true, sessions: await rt.sessions.list(msg.workspaceId, origin) });
               return;
             case "sessions.history":
-              send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId) });
+              send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId, origin) });
               return;
             case "sessions.interrupt":
-              send({ id: msg.id, ok: true, ...(await rt.sessions.interrupt(msg.sessionId)) });
+              send({ id: msg.id, ok: true, ...(await rt.sessions.interrupt(msg.sessionId, origin)) });
               return;
             case "sessions.rename":
-              send({ id: msg.id, ok: true, ...(await rt.sessions.rename(msg.sessionId, msg.title)) });
+              send({ id: msg.id, ok: true, ...(await rt.sessions.rename(msg.sessionId, msg.title, origin)) });
               return;
             case "sessions.steer":
-              send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) })) });
+              send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) }, origin)) });
               return;
             case "golden.get":
               send({ id: msg.id, ok: true, manifest: await rt.golden.get(msg.name) });
@@ -305,7 +307,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, storage: (await rt.golden.storage()) ?? null });
               return;
             case "cost.history":
-              send({ id: msg.id, ok: true, points: await rt.status.history(msg.workspaceId) });
+              send({ id: msg.id, ok: true, points: await rt.status.history(msg.workspaceId, origin) });
               return;
             case "snapshots.rollback": {
               const name = msg.name ?? "default";
@@ -322,13 +324,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, reach: await rt.golden.builderReach(msg.builderId) });
               return;
             case "workspaces.portReach":
-              send({ id: msg.id, ok: true, reach: await rt.workspaces.portReach(msg.workspaceId, msg.port) });
+              send({ id: msg.id, ok: true, reach: await rt.workspaces.portReach(msg.workspaceId, msg.port, origin) });
               return;
             case "workspaces.portProbe":
-              send({ id: msg.id, ok: true, probe: await rt.workspaces.portProbe(msg.workspaceId, msg.port) });
+              send({ id: msg.id, ok: true, probe: await rt.workspaces.portProbe(msg.workspaceId, msg.port, origin) });
               return;
             case "workspaces.rebuild":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.rebuild(msg.workspaceId) });
+              send({ id: msg.id, ok: true, workspace: await rt.workspaces.rebuild(msg.workspaceId, origin) });
               return;
             case "forwards.list":
               send({ id: msg.id, ok: true, forwards: opts.forwards?.list() ?? [] });
@@ -338,7 +340,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true });
               return;
             case "workspaces.exec": {
-              const stream = await rt.workspaces.execStream(msg.workspaceId, msg.argv, msg.cwd);
+              const stream = await rt.workspaces.execStream(msg.workspaceId, msg.argv, msg.cwd, origin);
               const execId = randomBytes(6).toString("hex");
               let running = true;
               detaches.push(() => {
@@ -370,12 +372,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "project.import": {
               const { workspaceId, source, dest, replace, carry, rewrite, agents } = msg;
-              send({ id: msg.id, ok: true, imported: await rt.projects.import({ workspaceId, source, dest, replace, carry, rewrite, agents, bundler: bundler(source) }) });
+              send({ id: msg.id, ok: true, imported: await rt.projects.import({ workspaceId, source, dest, replace, carry, rewrite, agents, bundler: bundler(source) }, origin) });
               return;
             }
             case "project.export": {
               const { workspaceId, source, dest, replace, agents } = msg;
-              send({ id: msg.id, ok: true, exported: await rt.projects.export({ workspaceId, source, dest, replace, agents, lander: lander() }) });
+              send({ id: msg.id, ok: true, exported: await rt.projects.export({ workspaceId, source, dest, replace, agents, lander: lander() }, origin) });
               return;
             }
           }

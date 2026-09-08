@@ -421,6 +421,19 @@ describe("runtime wire types", () => {
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
   });
 
+  it("every request carries where it reached the host from, on the envelope and not per op", () => {
+    const relayed = [
+      { id: 1, op: "workspaces.list", origin: "relayed" },
+      { id: 2, op: "workspaces.nap", workspaceId: "ws_1", origin: "relayed" },
+      { id: 3, op: "sessions.start", workspaceId: "ws_1", prompt: "go", origin: "relayed" },
+      { id: 4, op: "workspaces.exec", workspaceId: "ws_1", argv: ["ls"], origin: "here" },
+    ];
+    for (const r of relayed) expect(RuntimeRequest.parse(r)).toEqual(r);
+    // A client on this computer names none, and nothing is added to what it sent.
+    expect(RuntimeRequest.parse({ id: 5, op: "workspaces.list" })).toEqual({ id: 5, op: "workspaces.list" });
+    expect(() => RuntimeRequest.parse({ id: 6, op: "workspaces.list", origin: "machine" })).toThrow();
+  });
+
   it("sessions.start carries the composer's model, effort and permission mode as the harness's own slugs", () => {
     const picked = { id: 22, op: "sessions.start", workspaceId: "ws_1", prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits", contextWindow: "1m" };
     expect(RuntimeRequest.parse(picked)).toEqual(picked);
