@@ -25,6 +25,7 @@ export {
 } from "./cli.js";
 export { SECTION_BEGIN, SECTION_END, sectionText } from "./agents-md.js";
 export { servingHost, type HostLock } from "./host-lock.js";
+export { LocalDaemon, type LocalDaemonOptions } from "./local-daemon.js";
 export {
   startCallbackRelay,
   systemOpener,

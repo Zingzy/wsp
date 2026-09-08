@@ -362,6 +362,27 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · $0.110/hr · active"));
   });
 
+  it("this computer's row: the laptop glyph where the state dot goes, no state word, and what the machine is on the meta line, beside cloud rows that keep all three", async () => {
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    await mount(fakeApi([API, WEB, MAC], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB), { ...status(MAC), kind: "local", rateUsdPerHour: 0 }]), "api");
+    await waitFor(() => expect(rowOf("zingzy-mac")).toBeDefined());
+    const lead = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-lead]")!;
+    expect(lead(rowOf("zingzy-mac")).dataset["workspaceLead"]).toBe("glyph");
+    expect(lead(rowOf("zingzy-mac")).querySelector("svg")).not.toBeNull();
+    expect(lead(rowOf("api")).dataset["workspaceLead"]).toBe("dot");
+    expect(lead(rowOf("api")).querySelector("svg")).toBeNull();
+    expect(metaOf(rowOf("zingzy-mac")).textContent).toBe("this computer");
+    expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
+    // The cloud rows beside it are untouched: the spend, the countdown and the paused word all still read.
+    expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · $0.110/hr · naps in 14m");
+    expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
+    // One row grammar for both kinds: the same lead slot and the same height.
+    const boxOf = (row: HTMLElement) => [...row.firstElementChild!.classList].filter(c => /^(size-|mt-)/.test(c)).sort();
+    expect(boxOf(rowOf("zingzy-mac"))).toEqual(boxOf(rowOf("api")));
+    const heightOf = (row: HTMLElement) => [...row.classList].filter(c => /^(h-|py-)/.test(c)).sort();
+    expect(heightOf(rowOf("zingzy-mac"))).toEqual(heightOf(rowOf("api")));
+  });
+
   it("every two-line row is one height, the thread rows share the workspace rows' grammar, and the Idle row is the kit row", async () => {
     await mount(
       fakeApi(

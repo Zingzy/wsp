@@ -3,7 +3,7 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import { isBilling, outOfMemoryRowLine, workspaceState, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { isBilling, kindWords, outOfMemoryRowLine, workspaceKind, workspaceState, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -40,11 +40,14 @@ export interface WorkspaceMetaInput {
  * note, the nap countdown last. The cost always leads, an honest zero before the meter's first tick, so no row draws
  * a blank line. The width cuts it from the right; nothing here decides what to leave out. What the runtime is doing
  * to the machine's daemon, or a drop with memory near full, takes the whole line while it lasts: it is the one thing
- * on the row a person may be waiting on. */
+ * on the row a person may be waiting on. A machine wsp does not drive spends nothing and naps never, so its line
+ * says what the machine is instead. */
 export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
   const note = project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
   if (note !== undefined) return note;
   if (outOfMemory !== undefined) return outOfMemoryRowLine(outOfMemory);
+  const words = kindWords(workspaceKind(project.workspace));
+  if (words.machine !== null) return words.machine;
   return [
     accruedTodayLabel(cost?.accruedUsd ?? 0),
     isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null,
@@ -62,8 +65,10 @@ export function accruedTodayLabel(accruedUsd: number | null): string | null {
 
 const rateLabel = (rateUsdPerHour: number | null): string | null => (rateUsdPerHour === null ? null : `$${rateUsdPerHour.toFixed(3)}/hr`);
 
-/** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. */
-export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "indicator">): string {
+/** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. A
+ * machine wsp does not drive has no state of its own to name, so its slot stays empty whatever the reach says. */
+export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "indicator" | "workspace">): string {
+  if (!kindWords(workspaceKind(project.workspace)).driven) return "";
   return project.state === "running" ? "" : project.indicator.label;
 }
 

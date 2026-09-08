@@ -2,7 +2,7 @@
 // The workspace's actions, one registry: what a workspace row, the palette,
 // the Machine tab and the row's context menu offer for one machine.
 import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { isBilling, needsRebuild, workspaceState, type MachineState, type ReachState, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { isBilling, kindWords, localMachineRefusal, needsRebuild, workspaceKind, workspaceState, type MachineState, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
@@ -33,6 +33,8 @@ export interface WorkspaceTarget {
   readonly id: string;
   readonly displayName: string;
   readonly machineId: string;
+  /** What kind of machine it is; the verbs only wsp's own forks take read it. */
+  readonly kind: WorkspaceKind;
   readonly phase: WorkspacePhase;
   readonly machineState: MachineState | null;
   readonly reach: ReachState | null;
@@ -46,6 +48,7 @@ export function workspaceTarget(workspace: WorkspaceView, status: WorkspaceStatu
     id: workspace.id,
     displayName: workspace.name,
     machineId: status?.machineId ?? workspace.machineId,
+    kind: workspaceKind(workspace),
     phase: status?.phase ?? workspace.phase,
     machineState: status?.machineState ?? null,
     reach: status?.reach.state ?? null,
@@ -85,7 +88,9 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb(phaseWord(stateOf(target)).split(" ")[0]!, target.displayName),
     buttonWord: target => phaseButtonWord(stateOf(target)),
     hint: target => phaseHint(stateOf(target)),
-    refusal: target => phaseRefusal(stateOf(target)),
+    // A machine wsp neither forked nor pays for takes neither verb, in the runtime's own sentence, so what this
+    // offers and what that throws say the same thing.
+    refusal: target => (kindWords(target.kind).driven ? phaseRefusal(stateOf(target)) : localMachineRefusal(target.displayName, "be paused")),
     run: (target, verbs) => verbs.togglePhase(target.id),
   },
   {

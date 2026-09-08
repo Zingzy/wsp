@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { workspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { workspaceState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -136,10 +136,21 @@ describe("workspace row labels", () => {
   });
 
   it("the state slot says nothing while running, since the dot says it, and the state's word otherwise", () => {
-    expect(stateSlotWord({ state: "running", indicator: { label: "Running", tone: "running", pulse: false } })).toBe("");
-    expect(stateSlotWord({ state: "paused", indicator: { label: "Paused", tone: "paused", pulse: false } })).toBe("Paused");
-    expect(stateSlotWord({ state: "gone", indicator: { label: "Gone", tone: "neutral", pulse: false } })).toBe("Gone");
-    expect(stateSlotWord({ state: "waking", indicator: { label: "Waking", tone: "neutral", pulse: true } })).toBe("Waking");
+    const slot = (state: WorkspaceState, label: string, tone: "running" | "paused" | "neutral", pulse = false) =>
+      stateSlotWord({ state, indicator: { label, tone, pulse }, workspace: project({}).workspace });
+    expect(slot("running", "Running", "running")).toBe("");
+    expect(slot("paused", "Paused", "paused")).toBe("Paused");
+    expect(slot("gone", "Gone", "neutral")).toBe("Gone");
+    expect(slot("waking", "Waking", "neutral", true)).toBe("Waking");
+  });
+
+  it("this computer's row says what it is and nothing about spend, naps or state: it runs while the host does", () => {
+    const local = project({}, { kind: "local" });
+    expect(workspaceMetaLine({ project: local, cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("this computer");
+    expect(workspaceMetaLine({ project: project({ idleAt: now + 14.5 * 60_000 }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("this computer");
+    expect(stateSlotWord({ ...local, indicator: { label: "Unreachable", tone: "neutral", pulse: false } })).toBe("");
+    // What the runtime is doing to its daemon still takes the line: it is the one thing there a person waits on.
+    expect(workspaceMetaLine({ project: project({ daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
   });
 
   it("thread pills key on the session status, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {

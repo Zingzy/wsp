@@ -18,7 +18,8 @@
 // workspace and thread rows keep one grammar: one height per row kind, the
 // state word in its slot at the right edge only off running, the meta line
 // in one order cut from the right, no import or export glyph, the thread
-// title up to a fixed time column. Vite serves test/shell to Playwright's
+// title up to a fixed time column, and a mixed list of a local machine and two
+// cloud ones keeps that one grammar with the kind's glyph in the local lead. Vite serves test/shell to Playwright's
 // browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -28,7 +29,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal } from "@wsp/protocol";
+import { PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTER } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { startVite, stopRender, type ViteChild } from "./vite-child";
 
@@ -567,6 +568,50 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
       }
     }
   }, 120_000);
+
+  it("a mixed list keeps one row grammar: this computer's row leads with the kind's glyph, says what it is and shows no state word, while the cloud rows beside it keep their dot, spend and word, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&local=1`);
+      await page!.waitForSelector("[data-row-id='ws:ws_m']");
+      const local = page!.locator("[data-row-id='ws:ws_m']");
+      const cloud = page!.locator("[data-row-id='ws:ws_a']");
+      const paused = page!.locator("[data-row-id='ws:ws_b']");
+      // One glyph in the lead where it means something: the laptop, no dot beside it, no chip and no badge.
+      expect(await local.locator("[data-workspace-lead]").getAttribute("data-workspace-lead")).toBe("glyph");
+      expect(await local.locator("[data-workspace-lead] svg").count()).toBe(1);
+      expect(await cloud.locator("[data-workspace-lead]").getAttribute("data-workspace-lead")).toBe("dot");
+      expect(await page!.locator("[data-slot=badge]").count()).toBe(0);
+      expect((await local.locator("[data-workspace-meta]").textContent())?.trim()).toBe(THIS_COMPUTER);
+      expect((await local.locator("[data-workspace-state]").textContent())?.trim()).toBe("");
+      expect((await cloud.locator("[data-workspace-meta]").textContent())?.trim()).toContain("$0.110/hr");
+      expect((await paused.locator("[data-workspace-state]").textContent())?.trim()).toBe("Paused");
+      // Uniform rows: one height for every kind, the lead slots and the names in one column.
+      const rows = await page!.locator("[data-row-id^='ws:']").evaluateAll(list =>
+        list.map(row => {
+          const lead = row.querySelector<HTMLElement>("[data-workspace-lead]")!;
+          const name = row.querySelector<HTMLElement>("[data-workspace-name]")!;
+          return { height: row.getBoundingClientRect().height, lead: lead.getBoundingClientRect(), nameX: name.getBoundingClientRect().x };
+        }),
+      );
+      for (const row of rows) {
+        expect(row.height).toBe(rows[0]!.height);
+        expect(Math.abs(row.lead.x - rows[0]!.lead.x)).toBeLessThan(0.5);
+        expect(Math.abs(row.lead.width - rows[0]!.lead.width)).toBeLessThan(0.5);
+        expect(Math.abs(row.nameX - rows[0]!.nameX)).toBeLessThan(0.5);
+      }
+      // This computer's line is short enough to be drawn whole at the default width.
+      expect(await local.locator("[data-workspace-meta]").evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
+      // The glyph reads at the weight of the neutral dot it stands in for, never a colour of its own.
+      const [glyph, neutralDot] = await Promise.all([
+        local.locator("[data-workspace-lead] svg").evaluate(el => getComputedStyle(el).color),
+        page!.locator("[data-row-id='ws:ws_c'] [data-workspace-lead] > span").evaluate(el => getComputedStyle(el).backgroundColor),
+      ]);
+      expect(glyph).toBe(neutralDot);
+      const path = join(SHOTS_DIR, `sidebar-mixed-kinds-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`mixed-kind sidebar screenshot: ${path}`);
+    }
+  }, 30_000);
 
   it("a status toast with a 200-character token stays inside the sidebar's width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);

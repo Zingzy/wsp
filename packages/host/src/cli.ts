@@ -41,6 +41,7 @@ import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, wrap, type Pr
 import { TAGLINE, opening } from "./init-opening.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { addressLines, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
+import { LocalDaemon } from "./local-daemon.js";
 import {
   httpProbe,
   installService,
@@ -379,11 +380,29 @@ function statePathFrom(flag?: string): string {
 export function localWiring(root = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
   const homes = agentHomes(root, env);
   const login = Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined));
+  // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer.
+  let daemon: Promise<LocalDaemon> | undefined;
+  let shutting = false;
   return {
     backend: new LocalBackend({ root, env }),
     execStream: o => localExecStream({ root, ...o }),
     home: id => homes[id] ?? join(root, `.${id}`),
     env: login,
+    daemonRoad: async () => {
+      const started = await (daemon ??= LocalDaemon.start({ root }));
+      // A dial that lands while the host is closing must leave no socket behind: a listening one keeps this process up.
+      if (shutting) {
+        await started.close().catch(() => {});
+        throw new Error("this host is closing; its local workspace has no daemon to dial");
+      }
+      return started.road;
+    },
+    close: async () => {
+      shutting = true;
+      const started = daemon;
+      daemon = undefined;
+      await started?.then(d => d.close(), () => {});
+    },
   };
 }
 
