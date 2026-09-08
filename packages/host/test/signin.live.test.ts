@@ -146,7 +146,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
           adapters: {},
           goldenRecipe: { ...recipe, setup: SETUP, deployDaemon: async m => `node ${(await deployDaemon(m)).node}` },
         }),
-      ports: { port: 0, wsPort: 0 },
+      ports: { port: 0, wsPort: 0, named: true },
       upCommand: "wsp up",
       forkCommand: "wsp new first",
       roads: () => ({

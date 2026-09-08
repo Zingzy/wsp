@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The first thing wsp init prints: the wordmark in shaded greys, then the
-// badge line that opens the clack frame. Off a terminal, or under --yes, one
-// plain line with the version.
+// badge line that opens the clack frame, then the state file this run sets up
+// and the flag that starts a fresh one. Off a terminal, or under --yes, one
+// plain line with the version and that same state line.
 import { styleText } from "node:util";
-import { intro } from "@clack/prompts";
+import { intro, log } from "@clack/prompts";
+import { stateFileLine } from "@wsp/protocol";
 import type { InitIO } from "./init.js";
-import { colourDepth, grey } from "./init-layout.js";
+import { colourDepth, grey, muted } from "./init-layout.js";
 
 export const TAGLINE = "your setup, on cloud machines, for coding agents";
 
@@ -29,12 +31,15 @@ export function wordmark(colour = true): string[] {
   return WORDMARK.map((row, i) => row.replace(/█+|[^█ ]+/g, run => grey(run.startsWith("█") ? FILL[i]! : OUTLINE, run)));
 }
 
-export function opening(io: Pick<InitIO, "output" | "isTTY" | "env">, o: { command: string; version: string; yes: boolean }): void {
+export function opening(io: Pick<InitIO, "output" | "isTTY" | "env">, o: { command: string; version: string; yes: boolean; statePath: string }): void {
   const out = { output: io.output };
+  const depth = colourDepth(io.isTTY, io.env);
   if (!io.isTTY || o.yes) {
     intro(`wsp ${o.version}`, out);
+    log.message(stateFileLine(o.statePath), out);
     return;
   }
-  io.output.write(`\n${wordmark(colourDepth(io.isTTY, io.env) >= 8).join("\n")}\n\n`);
+  io.output.write(`\n${wordmark(depth >= 8).join("\n")}\n\n`);
   intro(`${styleText("inverse", ` ${o.command} `)}  ${styleText("dim", `${TAGLINE}  ${o.version}`)}`, out);
+  log.message(muted(stateFileLine(o.statePath), depth), out);
 }

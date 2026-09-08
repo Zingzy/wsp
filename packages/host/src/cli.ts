@@ -23,7 +23,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { EXIT_CODES, EXIT_WORDS, ExitClass, TURN_END_WORDS, authRefusal, fmtDuration, shellQuote, usageRefusal } from "@wsp/protocol";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, TURN_END_WORDS, WS_PORT_OFFSET, authRefusal, fmtDuration, portsAsked, shellQuote, usageRefusal, type PortsAsked } from "@wsp/protocol";
 import { agentHomes } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
@@ -110,8 +110,10 @@ exit codes; every failure is one line on stderr, the failure object with --json:
 ${exitCodeHelp()}
 
 options:
-  --port N           app port (default 4400)
-  --ws-port N        runtime websocket port (default 4410)
+  --port N           app port (default ${DEFAULT_PORT}); the runtime websocket
+                     port follows ${WS_PORT_OFFSET} above it
+  --ws-port N        runtime websocket port on its own (default
+                     ${DEFAULT_WS_PORT}); --port alone moves both
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
   --yes              init: take every default and ask nothing (required off a
@@ -365,6 +367,22 @@ function statePathFrom(flag?: string): string {
   return resolve(flag ?? defaultStatePath());
 }
 
+/** What every command of the shared parse works on: the port pair the one rule reads off the flags, whether a
+ * person named either port, and the state file. wsp up and wsp init take theirs from this one call. */
+export interface SharedOpts extends PortsAsked {
+  statePath: string;
+}
+
+export function optsFor(values: Pick<SharedFlags, "port" | "ws-port" | "state">): SharedOpts {
+  return { ...portsAsked({ port: values.port, wsPort: values["ws-port"] }), statePath: statePathFrom(values.state) };
+}
+
+/** The state files a host on this computer could be serving: the one this run works on and this computer's default,
+ * read so a port one of them holds is named as that host rather than as a bare node process. */
+export function statesHere(statePath: string): string[] {
+  return [...new Set([statePath, resolve(defaultStatePath())])];
+}
+
 export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys)): Runtime {
   return createRuntime({
     backend: new SolariBackend({ apiKey: keys.solari }),
@@ -463,7 +481,7 @@ function workspaceEnvsFor(keys: Keys): { workspaceEnvs?: (golden: GoldenVersion)
 
 async function init(
   io: CliIO,
-  opts: { port: number; wsPort: number; statePath: string },
+  opts: SharedOpts,
   flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
   if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
@@ -475,7 +493,7 @@ async function init(
   // Under --json every line this run says, the host's own included, goes to stderr so stdout is the objects' alone.
   const say = flags.json ? jsonCliIO() : io;
   const screen = terminalInitIO(flags.json);
-  opening(screen, { command: "init", version: VERSION, yes: flags.yes });
+  opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
   const keys = await loadKeys(say, undefined, { anthropic: false });
   const result = await runInit(
     {
@@ -501,7 +519,7 @@ async function init(
       brew: () => readBrewTable(nodeHost()),
       scan: recipe => scanTools(nodeHost(), recipe),
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
-      ports: { port: opts.port, wsPort: opts.wsPort },
+      ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
       upCommand: flags.upCommand,
       forkCommand: flags.forkCommand,
       relay: async (rt, builder, hooks) =>
@@ -516,7 +534,7 @@ async function init(
           builder,
         }),
       roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
-      host: rt => hostFor(rt, keys, opts, say),
+      host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort }, say),
     },
     screen,
   );
@@ -783,7 +801,7 @@ interface Command {
   json: boolean;
   /** Why the MCP server has no tool for it. */
   cliOnly: string;
-  run(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, values: SharedFlags): Promise<number>;
+  run(io: CliIO, opts: SharedOpts, values: SharedFlags): Promise<number>;
 }
 
 /** The commands the shared parse serves, by word; a line with no word is `up`. */
@@ -975,11 +993,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
     io.log(HELP);
     return 0;
   }
-  const opts = {
-    port: values.port !== undefined ? Number(values.port) : 4400,
-    wsPort: values["ws-port"] !== undefined ? Number(values["ws-port"]) : 4410,
-    statePath: statePathFrom(values.state),
-  };
+  const opts = optsFor(values);
   const word = positionals[0] ?? "up";
   const command = COMMANDS[word];
   const json = values.json === true;
