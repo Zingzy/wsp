@@ -1,0 +1,109 @@
+name: release
+
+# A pushed v1.2.3 tag is the only thing that builds bundles. Nothing here reaches
+# npm: the command line package is published by hand, because that needs the one
+# time password.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.9.0"
+
+jobs:
+  draft:
+    name: Draft release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: The tag and the manifests say the same version
+        id: version
+        run: |
+          version="$(node packages/wspx/scripts/tag-version.mjs "$GITHUB_REF_NAME")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Write the notes
+        run: node packages/wspx/scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
+      - name: Open the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null || echo none)"
+          case "$draft" in
+            none) gh release create "$GITHUB_REF_NAME" --draft --title "wsp $VERSION" --notes-file notes.md ;;
+            true) gh release edit "$GITHUB_REF_NAME" --title "wsp $VERSION" --notes-file notes.md ;;
+            *) echo "the release on $GITHUB_REF_NAME is already published; nothing here rewrites it"; exit 1 ;;
+          esac
+
+  mac:
+    name: macOS bundles
+    needs: draft
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wsp/desktop run build:mac
+      - name: Drive the packaged app
+        run: pnpm --filter @wsp/desktop smoke
+      - name: Zip each bundle
+        env:
+          VERSION: ${{ needs.draft.outputs.version }}
+        run: |
+          ditto -c -k --keepParent apps/desktop/dist/mac-arm64/wsp.app "wsp-$VERSION-mac-arm64.zip"
+          ditto -c -k --keepParent apps/desktop/dist/mac/wsp.app "wsp-$VERSION-mac-x64.zip"
+      - name: Attach them to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.draft.outputs.version }}
+        run: gh release upload "$GITHUB_REF_NAME" "wsp-$VERSION-mac-arm64.zip" "wsp-$VERSION-mac-x64.zip" --clobber
+
+  linux:
+    name: Linux AppImage
+    needs: draft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wsp/desktop run build:linux
+      - name: Name the AppImage after the release
+        env:
+          VERSION: ${{ needs.draft.outputs.version }}
+        run: |
+          shopt -s nullglob
+          set -- apps/desktop/dist/*.AppImage
+          if [ "$#" -ne 1 ]; then
+            echo "expected one AppImage in apps/desktop/dist, found $#"
+            exit 1
+          fi
+          mv "$1" "wsp-$VERSION.AppImage"
+      - name: Attach it to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.draft.outputs.version }}
+        run: gh release upload "$GITHUB_REF_NAME" "wsp-$VERSION.AppImage" --clobber
