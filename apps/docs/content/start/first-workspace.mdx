@@ -1,0 +1,59 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Your first workspace
+
+Twenty minutes from a fresh install to a thread, most of it the image building. This page assumes `npm i -g @zingzy/wsp` is done and your Solari key is in `~/.wsp/.env`.
+
+## 1. Seal the image
+
+```bash
+wsp init
+```
+
+Six screens, every row ticked from what this computer runs. Enter through them, finish the sign-ins in your browser as the build reaches them, and wait for `Golden v1 sealed.` The first seal also forks one workspace for you, named `first`, and starts serving the app at `http://127.0.0.1:4400`.
+
+## 2. Put a project on it
+
+```bash
+wsp import ~/code/app --to first
+```
+
+The plan prints: the repository, the files and their size, the caches left behind, each secret-shaped file with its default. Answer once and the folder lands at the same path on the machine. Then keep that state:
+
+```bash
+wsp snapshot first
+```
+
+That is a project golden. `wsp new second --from app` later gives you a machine with the project already in place and nothing to upload.
+
+## 3. Open a thread
+
+```bash
+wsp thread new --in first --cwd ~/code/app --notify me "Read the failing test in test/auth.test.ts and fix the cause, not the symptom. Run the whole test file before you reply."
+```
+
+The first line on stdout is `thread <id>`. The reply streams to stderr as it arrives and lands on stdout when it is complete. `--notify me` puts each later turn's reply in front of you, so nothing polls. The same thread is in the app's sidebar, where you can read and answer it.
+
+## 4. Continue it
+
+```bash
+wsp send <id> "Now do the same for the session test."
+```
+
+A send into a thread that has replied starts a new turn. Into one whose turn is still running, it joins the turn when the agent can take input mid-turn, or waits behind it.
+
+## 5. Walk away
+
+An idle workspace naps after twenty minutes without a person, a thread or a command touching it, and costs nothing while it naps. The next thread, send or exec wakes it. `wsp pause first` naps it now; `wsp wake first` wakes it ahead of the next message.
+
+<Callout type="info">
+  A 2 vCPU, 4 GB machine runs one build or one agent at a time. Put a second builder on a second workspace, `wsp fork first --name second`, not a second heavy thread on the same one.
+</Callout>
+
+## What you have now
+
+- One golden image with your setup on it, sealed once.
+- One workspace, `first`, with your project on it, and a project golden to fork more from.
+- One thread you can read from the app, the command line, or an agent over MCP.
+
+The next things to read are [The model](/start/the-model), for the words this page used, and [Threads](/work/threads), for everything a thread can do.

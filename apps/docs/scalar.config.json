@@ -1,0 +1,247 @@
+{
+  "$schema": "https://registry.scalar.com/@scalar/schemas/config",
+  "scalar": "2.0.0",
+  "info": {
+    "title": "wsp docs",
+    "description": "Your setup, on cloud machines, for coding agents."
+  },
+  "assetsDir": "assets",
+  "siteConfig": {
+    "logo": {
+      "darkMode": "assets/logo-dark.svg",
+      "lightMode": "assets/logo-light.svg"
+    },
+    "theme": "none",
+    "head": {
+      "title": "wsp docs",
+      "meta": [
+        {
+          "name": "description",
+          "content": "How to put your coding-agent setup on cloud machines with wsp: install, the image, workspaces, threads, sign-ins, the MCP tools and the command line."
+        }
+      ],
+      "styles": [
+        {
+          "path": "assets/custom.css",
+          "tagPosition": "head"
+        }
+      ],
+      "links": [
+        {
+          "rel": "icon",
+          "href": "/favicon.png"
+        }
+      ],
+      "scripts": [
+        {
+          "path": "assets/highlight-shell.js",
+          "tagPosition": "head"
+        }
+      ]
+    }
+  },
+  "navigation": {
+    "header": [
+      {
+        "type": "link",
+        "title": "GitHub",
+        "align": "end",
+        "to": "https://github.com/Zingzy/wsp",
+        "newTab": true
+      },
+      {
+        "type": "link",
+        "title": "Install",
+        "style": "button",
+        "align": "end",
+        "to": "/start/install"
+      }
+    ],
+    "routes": {
+      "/": {
+        "type": "group",
+        "title": "wsp docs",
+        "mode": "flat",
+        "children": {
+          "/": {
+            "type": "page",
+            "title": "What wsp is",
+            "filepath": "content/start/what-wsp-is.mdx"
+          },
+          "/start": {
+            "type": "group",
+            "title": "Start here",
+            "mode": "flat",
+            "children": {
+              "/install": {
+                "type": "page",
+                "title": "Install",
+                "filepath": "content/start/install.mdx"
+              },
+              "/first-workspace": {
+                "type": "page",
+                "title": "Your first workspace",
+                "filepath": "content/start/first-workspace.mdx"
+              },
+              "/the-model": {
+                "type": "page",
+                "title": "The model",
+                "filepath": "content/start/the-model.mdx"
+              }
+            }
+          },
+          "/setup": {
+            "type": "group",
+            "title": "Setup",
+            "mode": "flat",
+            "children": {
+              "/init": {
+                "type": "page",
+                "title": "wsp init, screen by screen",
+                "filepath": "content/setup/init.mdx"
+              },
+              "/recipes": {
+                "type": "page",
+                "title": "Recipes and the agent path",
+                "filepath": "content/setup/recipes.mdx"
+              },
+              "/sign-ins": {
+                "type": "page",
+                "title": "Sign-ins and the relay",
+                "filepath": "content/setup/sign-ins.mdx"
+              },
+              "/keys": {
+                "type": "page",
+                "title": "Keys and secrets",
+                "filepath": "content/setup/keys.mdx"
+              },
+              "/the-host": {
+                "type": "page",
+                "title": "The host",
+                "filepath": "content/setup/the-host.mdx"
+              }
+            }
+          },
+          "/work": {
+            "type": "group",
+            "title": "Working",
+            "mode": "flat",
+            "children": {
+              "/workspaces": {
+                "type": "page",
+                "title": "Workspaces",
+                "filepath": "content/work/workspaces.mdx"
+              },
+              "/threads": {
+                "type": "page",
+                "title": "Threads",
+                "filepath": "content/work/threads.mdx"
+              },
+              "/the-app": {
+                "type": "page",
+                "title": "The app",
+                "filepath": "content/work/the-app.mdx"
+              },
+              "/import-export": {
+                "type": "page",
+                "title": "Import and export",
+                "filepath": "content/work/import-export.mdx"
+              },
+              "/costs": {
+                "type": "page",
+                "title": "Costs, naps and limits",
+                "filepath": "content/work/costs.mdx"
+              }
+            }
+          },
+          "/agents": {
+            "type": "group",
+            "title": "Agents",
+            "mode": "flat",
+            "children": {
+              "/inside": {
+                "type": "page",
+                "title": "Agents inside a workspace",
+                "filepath": "content/agents/inside.mdx"
+              },
+              "/mcp": {
+                "type": "page",
+                "title": "The MCP tools",
+                "filepath": "content/agents/mcp.mdx"
+              },
+              "/driving": {
+                "type": "page",
+                "title": "Driving wsp from an agent",
+                "filepath": "content/agents/driving.mdx"
+              },
+              "/building": {
+                "type": "page",
+                "title": "The loop for building",
+                "filepath": "content/agents/building.mdx"
+              }
+            }
+          },
+          "/reference": {
+            "type": "group",
+            "title": "Reference",
+            "mode": "flat",
+            "children": {
+              "/cli": {
+                "type": "page",
+                "title": "Command line",
+                "filepath": "content/reference/cli.md"
+              },
+              "/contract": {
+                "type": "page",
+                "title": "The contract",
+                "filepath": "content/reference/contract.mdx"
+              },
+              "/providers": {
+                "type": "page",
+                "title": "Providers and capabilities",
+                "filepath": "content/reference/providers.mdx"
+              },
+              "/reach": {
+                "type": "page",
+                "title": "How a browser reaches a machine",
+                "filepath": "content/reference/reach.mdx"
+              },
+              "/configuration": {
+                "type": "page",
+                "title": "Files, ports and state",
+                "filepath": "content/reference/configuration.mdx"
+              },
+              "/troubleshooting": {
+                "type": "page",
+                "title": "Troubleshooting",
+                "filepath": "content/reference/troubleshooting.mdx"
+              }
+            }
+          },
+          "/project": {
+            "type": "group",
+            "title": "Project",
+            "mode": "flat",
+            "children": {
+              "/contributing": {
+                "type": "page",
+                "title": "Contributing",
+                "filepath": "content/project/contributing.mdx"
+              },
+              "/releases": {
+                "type": "page",
+                "title": "Releases",
+                "filepath": "content/project/releases.mdx"
+              },
+              "/license": {
+                "type": "page",
+                "title": "License",
+                "filepath": "content/project/license.mdx"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

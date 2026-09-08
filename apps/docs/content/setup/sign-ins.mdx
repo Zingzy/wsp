@@ -1,0 +1,72 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Sign-ins and the relay
+
+Tools on the machine need to be signed in: Claude Code, Codex, gh, gcloud, aws and the rest. Some sign-ins can be copied from this computer. Others must happen on the machine, and those are the interesting ones, because a machine in the cloud has no browser and the sign-in page wants to redirect back to `localhost`.
+
+wsp makes the page open in your own browser and makes the callback land back inside the machine. Only the URL and a port number ever travel. No code and no token is read by anything in wsp.
+
+## Four kinds of sign-in
+
+| kind | what happens | examples |
+| --- | --- | --- |
+| oauth | a browser page with a callback to a local port | Claude Code, Codex, gcloud, aws, wrangler, vercel, netlify, fly, supabase, railway, doppler, gemini, cloudflared, pi |
+| device | a code typed on a page the machine names | gh, hermes |
+| key | a key pasted or exported | opencode |
+| none | nothing to run on a headless machine | op, kubectl |
+
+Each has a status command wsp asks on the machine to prove the login, `gh auth status`, `wrangler whoami`, `claude auth status` and so on, and never anything the login itself printed. Some have a no-browser fallback for a retry: `aws configure sso --use-device-code`, `supabase login --no-browser`, `codex login --device-auth`.
+
+## Copy, machine, key or skip
+
+The Sign-ins screen, and `wsp recipe --signin`, answer each login one of four ways.
+
+- **copy** brings the login from this computer. A macOS Keychain item is read with your consent, through the system's own dialog, and placed as the tool's file on the machine: the GitHub CLI's `hosts.yml`, for example. A credential file is copied. A Claude Code `apiKeyHelper` is run here and its key lands in a file on the machine. Nothing is cached or logged, and a refused dialog flips the row to sign in on the machine at no cost.
+- **machine** means you sign in on the builder before the seal, through the relay below. This is the only answer for a browser or device flow.
+- **key** sets an API key in the machine's environment. The value is typed hidden, rides the environment and never a command line, and lands in `/etc/profile.d/wsp-secrets.sh` at mode 600. One variable is asked once however many rows want it.
+- **skip** leaves the tool signed out.
+
+The Claude Code OAuth credential is never copied, whatever you tick. The vendor's terms forbid a host to collect or intermediate it, and a copy would transit the wsp process. Sign in on the machine, or use an API key.
+
+## The relay
+
+Here is what happens when a tool on the machine asks for a browser.
+
+1. **The shim.** The image sets `BROWSER=/usr/local/bin/wsp-open` and puts the same script at `/usr/local/bin/xdg-open`, since only some tools read `BROWSER` and the rest exec `xdg-open` by name. The shim is a few lines of POSIX shell: it posts the URL to a root-only unix socket the helper listens on and exits at once, because gh, gcloud and aws block until it returns. `DISPLAY` is unset for every terminal, because the image ships `DISPLAY=:0` with no X server behind it, which gcloud, gemini and railway read as a browser existing.
+
+2. **The port.** The helper reads the callback port out of the URL's `redirect_uri`, accepted only for `localhost`, `127.0.0.1` or `[::1]` with an explicit port from 1024 up. For a tool whose URL names no port, aws for one, it pairs the request with the next loopback listener that appears within five seconds. A listener already there when the request came is not the flow's, so a dev server on 3000 never gets your laptop's 3000 bound.
+
+3. **The forward.** The host on your computer listens on that same port, on both `127.0.0.1` and `::1`, and tunnels every connection back to the machine's loopback, dialing `127.0.0.1` then `::1` because a Node tool listening on `localhost` binds `[::1]` only.
+
+4. **The page.** The URL is shown to you: a banner in the app naming the site, a hyperlink in the terminal, or a JSON line for an agent. You click. The page opens in your browser. When you finish, the provider redirects to `localhost:<port>` on your computer, the tunnel carries it to the tool waiting on the machine, and the tool completes.
+
+<Callout type="info">
+  Some tools print the URL without asking for a browser. The helper scans terminal output for URLs too, cleaning hyperlink escapes, colour codes and readline's soft wraps first, so the same forward works for them.
+</Callout>
+
+A callback forward lives three minutes with no listener spotted and at most fifteen once one is. Ports under 1024 are refused, since binding them here would need root. A callback that arrives while the link to the machine is redialing is held for up to a minute rather than failed. The host never logs the URL.
+
+## In the terminal
+
+When you run `wsp init` in a terminal, each login answered `machine` runs in a terminal on the builder shown in yours, the way ssh would. The URL the tool prints is re-shown as a hyperlink with one line: press **o** to open it on this computer. The offer lasts sixty seconds and ends the moment you type anything printable, though Enter and arrow keys do not count, since gh asks for an Enter before its own open. If the machine asked for a page that returns through a forwarded port, **o** opens that page instead of the printed link.
+
+After the pass, a summary offers per failed row: **r** to retry, **f** to retry with the tool's no-browser fallback when it has one, **s** to skip.
+
+## For an agent
+
+Under `--non-interactive` or `--json`, nothing is drawn. Each sign-in prints the page to open, the code when the flow shows one, and the command that opens it, then waits:
+
+```json
+{"event":"sign-in","tool":"gh","label":"GitHub CLI login","browserUrl":"https://github.com/login/device","code":"8F4A-C21B","nextCommand":"open 'https://github.com/login/device'","waitSeconds":960}
+```
+
+The run asks the tool's own status command on the machine every five seconds for the first minute, then every twenty, and moves on when it says signed in or when the wait passes. A page arriving with a callback port wins over anything the tool printed. The outcome is one more line, `sign-in-result`, with `state` `signed-in` or `not-signed-in` and a note. The run seals either way.
+
+Each login gets what the tool itself waits plus a minute, else fifteen minutes.
+
+## What never travels
+
+- Private keys under `~/.ssh`, GPG keys, `.env` files and `.netrc`, whatever is ticked.
+- Any value exported in your shell files whose name contains KEY, TOKEN, SECRET or PASSWORD. The lines are cut from the copy and the names are listed so you can set them on the machine.
+- The Claude Code OAuth credential.
+- Codes and tokens from sign-in pages. The relay reads a port number and nothing else.

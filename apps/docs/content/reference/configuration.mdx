@@ -1,0 +1,75 @@
+# Files, ports and state
+
+Where wsp keeps things, on your computer and on a machine, and the knobs that move them.
+
+## On your computer
+
+Everything sits beside the state file. The default home is `~/.wsp`; `WSP_HOME` moves it, and `--state <path>` on any verb names another state file. In a checkout that has a `.env`, the default state file is `./.wsp/state.json` instead, so a repository's own setup stays apart from your personal one.
+
+| path | what it is |
+| --- | --- |
+| `~/.wsp/state.json` | workspaces, threads, the golden manifest, cost series |
+| `~/.wsp/.env` | `SOLARI_API_KEY`, and `ANTHROPIC_API_KEY` if you use one; mode 600 |
+| `~/.wsp/recipe.json` | the recipe: catalog ids, ticks, sign-in answers |
+| `~/.wsp/golden-recipe.json` | the saved manifest with every tick |
+| `~/.wsp/golden-import.json` | the import result: sign-in and secret outcomes, build times |
+| `~/.wsp/host.lock` | the serving host's pid and ports |
+| `~/.wsp/host-token` | the app's WebSocket token; mode 600 |
+| `~/.wsp/host.log` | the service run's output |
+| `~/.wsp/init.log` | the last five init runs, secrets redacted |
+| `~/.wsp/history-cache.json` | counts per agent session file, so the next scan is fast |
+| `~/.wsp/current-home` | which home the running host serves, for the desktop app |
+
+Keys are read from the environment first, then `./.env`, then `~/.wsp/.env`.
+
+The MCP install writes into each agent's own files: `~/.claude.json`, `~/.codex/config.toml`, `~/.gemini/settings.json`, `~/.config/opencode/opencode.json`; the skill into `~/.claude/skills/wsp/SKILL.md` and its siblings; and a marked section into `AGENTS.md` and `CLAUDE.md` in the folder the command ran in.
+
+The service unit is `~/Library/LaunchAgents/com.wsp.host.<tag>.plist` on macOS or `~/.config/systemd/user/wsp-host-<tag>.service` on Linux, where the tag is the first eight hex characters of the state path's hash.
+
+The app keeps its own preferences in the browser: sidebar width, right panel state per workspace, terminal font size per workspace, composer drafts and queued messages, model and effort picks per workspace.
+
+## Ports
+
+| port | what listens |
+| --- | --- |
+| `127.0.0.1:4400` | the app, HTTP; `--port` |
+| `127.0.0.1:4410` | the runtime, WebSocket; `--ws-port` |
+| `0.0.0.0:7070` on the machine | the helper |
+| `localhost:<port>` on your computer | a forward: a link the machine printed, or a sign-in callback; 1024 and up |
+
+Both host ports bind loopback only. Port `0` picks a free one. The desktop app reads `WSP_PORT` and `WSP_WS_PORT`.
+
+## On a machine
+
+| path | what it is |
+| --- | --- |
+| `/root` | home; every machine runs as root |
+| `/root/.wsp-daemon-token` | the helper's token, rotated at every host start |
+| `/root/.wsp/manifest.json` | long-running processes the helper knows how to restart |
+| `/root/.wsp/roots` | the imported project folders the file browser may enter |
+| `/root/.wsp/open.sock` | the socket the browser shim posts sign-in URLs to |
+| `/root/inbox` | files dropped in by the host |
+| `/root/.claude-cfg` | Claude Code's config, through `CLAUDE_CONFIG_DIR` |
+| `/root/.codex` | Codex's home |
+| `/tmp/wsp-run` | the scripts and logs of detached turns and commands |
+| `/etc/profile.d/wsp-golden.sh` | the `PATH` every login shell gets |
+| `/etc/profile.d/wsp-secrets.sh` | keys you handed the machine, by name, mode 600 |
+| `/etc/wsp/machine-context.md` | what every agent is told about the machine |
+| `/etc/wsp/skills/wsp-machine/SKILL.md` | the same, in full, as a skill |
+| `/usr/local/bin/wsp-open`, `/usr/local/bin/xdg-open` | the browser shim |
+| `/home/linuxbrew/.linuxbrew` | Homebrew, when a recipe brought a formula |
+
+The `PATH` every shell gets, in order: `/root/.local/bin`, `/usr/local/sbin`, `/usr/local/bin`, Homebrew's `bin` and `sbin`, `/root/go/bin`, `/root/.cargo/bin`, pnpm's home, `/root/.bun/bin`, then the system paths.
+
+## Environment variables
+
+| variable | where | effect |
+| --- | --- | --- |
+| `SOLARI_API_KEY` | your computer | the provider key |
+| `ANTHROPIC_API_KEY` | your computer, then the machine at create | Claude Code by the token |
+| `WSP_HOME` | your computer | moves `~/.wsp` |
+| `WSP_PORT`, `WSP_WS_PORT` | the desktop app | the ports it serves on |
+| `WSP_LIVE=1` | the repository | runs the live tests that create real machines |
+| `BROWSER=/usr/local/bin/wsp-open` | the machine | routes sign-in pages through wsp |
+| `CLAUDE_CONFIG_DIR=/root/.claude-cfg` | the machine | Claude Code's config home |
+| `CODEX_HOME=/root/.codex` | the machine | Codex's home |
