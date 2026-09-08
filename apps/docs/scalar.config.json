@@ -37,7 +37,8 @@
           "tagPosition": "head"
         }
       ]
-    }
+    },
+    "subdomain": "wsp"
   },
   "navigation": {
     "header": [
