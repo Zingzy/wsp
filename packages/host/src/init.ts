@@ -12,14 +12,14 @@ import { stripVTControlCharacters, styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type HistoryProgress, type Manifest, type ManifestEntry, type ProjectScan, type Rung } from "@wsp/collect";
 import { SnapshotFailedError, describeAge, type BackendPricing } from "@wsp/engine";
-import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory, ToolPin } from "@wsp/protocol";
+import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory, ToolPin, WorkspaceView } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, BUILDER_DISK_GB, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, notHereLine, packageOf, PORT_TAKEN_REFUSAL, portTakenLine, portsPickedLine, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, stateFileLine, type AppPorts, type PortsAsked } from "@wsp/protocol";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, notHereLine, packageOf, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -64,12 +64,13 @@ import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { buildTakes, buildTimes, readBuildTimes } from "./init-times.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
-import { DONE_LINE, appUrl, askFirst, checkImportFolder, runFirst, type FirstResult } from "./init-first.js";
+import { DONE_LINE, appUrl, askFirst, checkImportFolder, runFirst, runLocal, type FirstResult } from "./init-first.js";
 import type { Tone } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
 import { builderLink, flowHooks, keyAsks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
 import { handoffStage } from "./init-handoff.js";
-import { choosePorts, type PortProbes } from "./ports.js";
+import { type PortProbes } from "./ports.js";
+import { openApp, pickPorts } from "./init-serve.js";
 import type { CallbackRelay } from "./relay.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
 
@@ -110,6 +111,8 @@ export interface InitOptions {
   firstWorkspace?: string;
   /** --import: the folder whose project lands on that first workspace, and an answer of yes to the last question. */
   importFolder?: string;
+  /** --no-local: the workspace step's tick off, so a run that asks nothing leaves this computer alone. */
+  noLocal?: boolean;
   /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
   collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   /** Reads this computer against the catalog and the agents' session histories for the recipe the screens start
@@ -718,10 +721,6 @@ function isCapRefusal(e: unknown): boolean {
   return e instanceof Error && "kind" in e && e.kind === "concurrency";
 }
 
-function overSsh(env: Record<string, string | undefined>): boolean {
-  return env["SSH_CONNECTION"] !== undefined || env["SSH_TTY"] !== undefined || env["SSH_CLIENT"] !== undefined;
-}
-
 /** The shell's own code for a death by that signal; the serving host's stop reads it for the same reason. */
 export function exitCodeOf(sig: "SIGINT" | "SIGTERM" | "SIGHUP"): number {
   return sig === "SIGINT" ? 130 : sig === "SIGHUP" ? 129 : 143;
@@ -759,15 +758,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const serves = io.isTTY && opts.nonInteractive !== true;
   let ports: AppPorts = { port: opts.ports.port, wsPort: opts.ports.wsPort };
   if (serves) {
-    const chosen = await choosePorts(opts.ports, opts.ports);
-    if ("taken" in chosen) {
-      log.error(portTakenLine(chosen.taken.port, chosen.taken.holder), out);
-      log.step(stateFileLine(opts.statePath), out);
-      cancel(PORT_TAKEN_REFUSAL, out);
-      return { code: 1 };
-    }
-    ports = chosen.ports;
-    if (chosen.moved !== undefined) log.step(portsPickedLine(ports, chosen.moved.port, chosen.moved.holder), out);
+    const chosen = await pickPorts({ ports: opts.ports, statePath: opts.statePath, output: io.output });
+    if (chosen === undefined) return { code: 1 };
+    ports = chosen;
   }
 
   let manifest: Manifest;
@@ -1363,6 +1356,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // Only the first seal ever offers a workspace; a rebuild leaves the existing ones on the version they came from.
   const existing = await rt.workspaces.list();
   let first: FirstResult | undefined;
+  let local: WorkspaceView | undefined;
   if (existing.length > 0) {
     log.step(`Your ${existing.length} workspace${existing.length === 1 ? " stays" : "s stay"} on the golden version ${existing.length === 1 ? "it was" : "they were"} forked from; upgrade ${existing.length === 1 ? "it" : "them"} from the app. New workspaces fork v${version}.`, out);
   } else {
@@ -1371,16 +1365,20 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       unattended: !serves,
       ...(opts.firstWorkspace !== undefined ? { name: opts.firstWorkspace } : {}),
       ...(opts.importFolder !== undefined ? { folder: opts.importFolder } : {}),
+      ...(opts.noLocal === true ? { noLocal: true } : {}),
       input: io.input,
       output: io.output,
     });
-    // No and esc both end with nothing forked; neither unwinds the seal, which is already on the account by here.
-    if (isCancel(ask) || ask === undefined) {
+    // Esc ends the step with nothing made; it does not unwind the seal, which is already on the account by here.
+    if (isCancel(ask)) {
       if (handle !== undefined) log.step(DONE_LINE, out);
     } else {
-      first = await runFirst({ first: ask, handle: roads, goldenVersion: version, output: io.output, spin: label => spin(io.output, label, io.isTTY) });
+      if (ask.fork !== undefined) first = await runFirst({ first: ask.fork, handle: roads, goldenVersion: version, output: io.output, spin: label => spin(io.output, label, io.isTTY) });
+      if (ask.local) local = await runLocal(roads, io.output);
+      if (first === undefined && local === undefined && handle !== undefined) log.step(DONE_LINE, out);
     }
   }
+  const opened = first?.workspace ?? local;
   if (handle === undefined) {
     io.json?.({
       event: "done",
@@ -1389,16 +1387,16 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       snapshotId: sealed.version.snapshotId,
       recipe: small.path,
       nextCommand: opts.upCommand,
-      ...(first !== undefined ? { workspace: { id: first.workspace.id, name: first.workspace.name } } : { forkCommand: opts.forkCommand }),
+      ...(opened !== undefined ? { workspace: { id: opened.id, name: opened.name } } : { forkCommand: opts.forkCommand }),
     });
     log.step(logLine(), out);
-    outro(`Done. Golden v${version} is sealed; ${opts.upCommand} starts the app${first === undefined ? `, and ${opts.forkCommand} forks a workspace from it` : ""}.`, out);
+    outro(`Done. Golden v${version} is sealed; ${opts.upCommand} starts the app${opened === undefined ? `, and ${opts.forkCommand} forks a workspace from it` : ""}.`, out);
     await closeRuntime();
     return result;
   }
-  const url = appUrl(handle.port, first?.workspace.id);
+  const url = appUrl(handle.port, opened?.id);
   runLog.note(`app ${url}`);
-  await openApp(url, handle, io, interactive, logLine(), out);
+  await openApp(url, handle, io, interactive, logLine());
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
   return { ...result, handle };
 }
@@ -1462,16 +1460,3 @@ function sealSummary(landed: ImportResult | undefined, logins: readonly LoginOut
   ];
 }
 
-/** The app's address once the golden is sealed: opened here on a terminal the person is at, printed (with the ssh
- * forward when the address is remote) under --yes or over ssh. */
-async function openApp(url: string, handle: HostHandle, io: InitIO, interactive: boolean, logLine: string, out: { output: Writable }): Promise<void> {
-  if (!interactive || overSsh(io.env)) {
-    const lines = [`Open ${url}`];
-    if (overSsh(io.env)) lines.push(dim(`loopback address; forward it first: ssh -L ${handle.port}:127.0.0.1:${handle.port} <this host>`));
-    lines.push(logLine);
-    log.step(lines.join("\n"), out);
-    return;
-  }
-  const opened = await io.open(url);
-  log.step([`${opened ? "Opened" : "Open"} ${url}`, logLine].join("\n"), out);
-}

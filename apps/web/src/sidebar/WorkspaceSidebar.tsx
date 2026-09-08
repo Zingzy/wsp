@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState, type WorkspaceTint } from "@wsp/protocol";
+import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, isLocalWorkspace, workspaceState, type WorkspaceSize, type WorkspaceState, type WorkspaceTint } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { sidebarActions } from "../actions/sidebarActions.js";
@@ -121,7 +121,7 @@ export function WorkspaceSidebar() {
   const createWorkspace = useStore(s => s.createWorkspace);
   const createLocal = useStore(s => s.createLocalWorkspace);
   // One local workspace per host: the section's road to this computer says whether a pick makes it or goes to it.
-  const hasLocal = useStore(s => s.workspaces.some(w => workspaceKind(w) === "local"));
+  const hasLocal = useStore(s => s.workspaces.some(w => isLocalWorkspace(w)));
   const capabilities = useCapabilities();
   const selectedId = useSelectedId();
   const selectedThreadId = useSelectedThreadId();

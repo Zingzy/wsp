@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, computerOffline, goneRefusal, isBilling, kindWords, localMachineRefusal, needsRebuild, reachShown, relayedRefusal, sendRefusal, stillWorkingRefusal, THIS_COMPUTER, workspaceKind, workspaceState, workspaceWord, WORKSPACE_KIND_WORDS, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, computerOffline, goneRefusal, isBilling, isLocalWorkspace, kindWords, localMachineRefusal, needsRebuild, reachShown, relayedRefusal, sendRefusal, stillWorkingRefusal, THIS_COMPUTER, workspaceKind, workspaceState, workspaceWord, WORKSPACE_KIND_WORDS, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -129,6 +129,13 @@ describe("what a workspace's kind changes about its words", () => {
     expect(workspaceKind({ kind: undefined })).toBe("cloud");
     expect(workspaceKind({ kind: "cloud" })).toBe("cloud");
     expect(workspaceKind({ kind: "local" })).toBe("local");
+  });
+
+  it("whether a workspace is this computer is one predicate, so the app's rows and wsp init's tick cannot disagree", () => {
+    expect(isLocalWorkspace({ kind: "local" })).toBe(true);
+    expect(isLocalWorkspace({ kind: "cloud" })).toBe(false);
+    // A record from before local workspaces existed is a provider fork, here as everywhere.
+    expect(isLocalWorkspace({ kind: undefined })).toBe(false);
   });
 
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and says what it is", () => {

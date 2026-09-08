@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
-import { DEFAULT_PORT, DEFAULT_WS_PORT, recordRestoredLine, type BootPayload, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, recordRestoredLine, type BootPayload, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import { hostFolders } from "./host-folders.js";
@@ -51,6 +51,9 @@ export interface HostOptions {
 export interface WorkspaceRoads {
   /** Forks the golden's head into a new workspace, with the envs and labels the app's own create gives it. */
   createWorkspace(name: string): Promise<CreatedWorkspace>;
+  /** Makes this computer the one local workspace, as the app's own This computer row does; it forks nothing and
+   * needs no golden, so it is the one road into an empty state. */
+  createLocalWorkspace(): Promise<WorkspaceView>;
   /** Reads a folder on this computer as the app's import dialog reads it; nothing is packed or uploaded. */
   planProject(source: string): Promise<ProjectPlan>;
   /** Lands that folder on a workspace's machine through the bundler the app's import goes through. */
@@ -215,6 +218,7 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
         labels: { [WSP_LABEL]: "1", [HOST_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
       });
     },
+    createLocalWorkspace: () => rt.workspaces.createLocal(),
     planProject: source => bundlerFor(source).plan(),
     importProject: o => rt.projects.import({ ...o, bundler: bundlerFor(o.source) }),
   };
@@ -239,7 +243,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const log = opts.log ?? (() => {});
 
   const homes = agentHomes(homedir());
-  const { bundlerFor, createWorkspace, planProject, importProject } = workspaceRoads(rt, homes, opts);
+  const { bundlerFor, createWorkspace, createLocalWorkspace, planProject, importProject } = workspaceRoads(rt, homes, opts);
 
   // Before the runtime socket: the app lists and stops the relay's forwards through it.
   const relay = startCallbackRelay({
@@ -347,6 +351,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     wsPort: rtServer.port,
     authToken,
     createWorkspace,
+    createLocalWorkspace,
     planProject,
     importProject,
     close: async () => {

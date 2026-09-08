@@ -784,6 +784,11 @@ export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
  * or any workspace record, this computer's included, serves; an empty one has nothing for the app to show. */
 export const NOTHING_TO_SERVE_LINE = "nothing to serve yet; wsp new --local makes this computer a workspace, or wsp init seals a golden";
 
+/** The one sentence every machine road answers with on a computer set up with no machine provider key: wsp init took
+ * the local road, so this computer is a workspace and there is nothing to fork, pause or seal until a key is here.
+ * The provider module a keyless host wires says it, and so does the command line before it asks for anything. */
+export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; set SOLARI_API_KEY and run wsp init again to seal a golden";
+
 /** What a local workspace's machine is, in every sentence and every row that names it: the refusals below, the
  * sidebar row's second line and the Machine tab's lineage all read this one phrase. */
 export const THIS_COMPUTER = "this computer";
