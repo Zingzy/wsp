@@ -237,6 +237,44 @@ describe("wsp verbs over the host", () => {
     expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "gone"]]);
   });
 
+  it("rebuild is the road out of gone: a new machine under the same workspace, its id and state printed; a machine that answers is refused in the row's own words", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    const refused = await run("rebuild", "alpha");
+    expect(refused.code).toBe(1);
+    expect(refused.io.errors).toEqual(["wsp rebuild: Rebuild replaces a gone or zombie machine; this one answers"]);
+    expect(backend.machines).toHaveLength(1);
+
+    await handle!.close();
+    handle = undefined;
+    backend.machines[0]!.killed = true; // deleted at the provider while no host ran
+    await restartHost({ claude: claude.adapter });
+    expect((await rt.workspaces.get(alpha!.id)).phase).toBe("gone");
+
+    const built = await run("rebuild", "alpha");
+    expect(built.code).toBe(0);
+    expect(built.io.errors).toEqual([]);
+    const after = await rt.workspaces.get(alpha!.id);
+    expect(after).toMatchObject({ id: alpha!.id, name: "alpha", phase: "running", golden: alpha!.golden });
+    expect(after.machineId).not.toBe(alpha!.machineId);
+    expect(built.io.lines).toEqual([`alpha running on ${after.machineId}`]);
+    // The verb every other one sends a gone workspace to now answers on it.
+    const woken = await run("wake", "alpha");
+    expect(woken.code).toBe(0);
+    expect(woken.io.lines).toEqual(["alpha running"]);
+
+    const asJson = await run("rebuild", "alpha", "--json");
+    expect(asJson.code).toBe(1);
+    expect(asJson.io.lines).toEqual([]);
+    expect(asJson.io.errors.map(l => JSON.parse(l) as unknown)).toEqual([{ error: "Rebuild replaces a gone or zombie machine; this one answers", class: "provider", exit: EXIT_CODES.provider }]);
+    const missing = await run("rebuild", "nope");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp rebuild: no workspace nope"]);
+    const extra = await run("rebuild", "alpha", "beta");
+    expect(extra.code).toBe(EXIT_CODES.usage);
+    expect(extra.io.errors).toEqual(["wsp rebuild: wsp rebuild takes one workspace"]);
+  });
+
   it("fork's help says it makes a new machine from the source's golden version, in wsp --help and wsp fork --help", async () => {
     const line = "a new machine from the source's golden version";
     expect(HELP).toContain(line);
