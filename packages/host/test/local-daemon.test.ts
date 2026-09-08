@@ -1,6 +1,6 @@
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { portClash } from "../src/ports.js";
+import { choosePorts } from "../src/ports.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -40,7 +40,8 @@ describe("local daemon", () => {
     const hostPorts = [await free(), await free()];
     daemon = await LocalDaemon.start({ root });
     expect(hostPorts).not.toContain(daemon.port);
-    expect(await portClash(hostPorts)).toBeUndefined();
+    // The host's own pick, with both ports named: it binds exactly the pair asked for, nothing taken, nothing stepped over.
+    expect(await choosePorts({ port: hostPorts[0]!, wsPort: hostPorts[1]!, named: true })).toEqual({ ports: { port: hostPorts[0], wsPort: hostPorts[1] } });
     // Nothing of the daemon's lands on disk beside the host's files: the folder holds the inbox it made and nothing else.
     expect(readdirSync(root)).toEqual([".wsp-inbox"]);
   });

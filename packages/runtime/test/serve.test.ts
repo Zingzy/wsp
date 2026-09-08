@@ -412,7 +412,8 @@ describe("serveRuntime golden wizard ops", () => {
   it("golden.prepare replies with the builder and its screen, golden.seal writes v1 of desktop kind, and no machine survives", async () => {
     const backend = stubBackend();
     const store = memoryStore();
-    const runtime = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    // Pinned: the seal names its snapshot for this host, so an unpinned identity would name it after this machine.
+    const runtime = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe, hostId: "box:h1" });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     await c.request("events.subscribe");
@@ -431,10 +432,10 @@ describe("serveRuntime golden wizard ops", () => {
 
     const sealed = await c.request("golden.seal", { builderId: "m1" });
     expect(sealed.ok).toBe(true);
-    expect(sealed["version"]).toMatchObject({ version: 1, kind: "desktop", snapshotId: "snap_golden-v1", smoke: { cmd: "claude --version", exitCode: 0 } });
+    expect(sealed["version"]).toMatchObject({ version: 1, kind: "desktop", snapshotId: "snap_wsp-h1-default-v1", smoke: { cmd: "claude --version", exitCode: 0 } });
     expect((sealed["manifest"] as { head: number }).head).toBe(1);
     expect(backend.machines.map(m => [m.id, m.kind, m.killed])).toEqual([["m1", "desktop", true], ["m2", "desktop", true]]);
-    expect(backend.machines[1]!.spec.fromSnapshot).toBe("snap_golden-v1");
+    expect(backend.machines[1]!.spec.fromSnapshot).toBe("snap_wsp-h1-default-v1");
     expect(backend.machines[1]!.execLog).toEqual(["claude --version", "test -x /usr/local/bin/wsp-open"]);
     expect(await store.list("builders")).toEqual([]);
     expect((await c.request("golden.get", { name: "default" }))["manifest"]).toEqual(sealed["manifest"]);

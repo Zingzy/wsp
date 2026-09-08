@@ -4092,13 +4092,13 @@ describe("runtime golden update and the post-seal grace", () => {
     const b = await rt.golden.prepare();
     const { version } = await rt.golden.seal(b.id);
     expect(version.version).toBe(1);
-    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true]]);
+    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1-default-v1", true]]);
     expect(frames.at(-1)).toBe("sealed:v1; builder kept for one more change");
     // A caller with no process left to end the window asks for no keep: the builder goes with the seal and leaves no record.
     const again = started();
     const b2 = await again.rt.golden.prepare();
     await again.rt.golden.seal(b2.id, { keepBuilder: false });
-    expect(again.backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true]]);
+    expect(again.backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true]]);
     expect(await again.store.list("builders")).toEqual([]);
     const sealedAt = new Date(clock.now()).toISOString();
     expect(await store.get("builders", b.id)).toMatchObject({ firstLife: true, sealed: { at: sealedAt, version: 1 }, import: { recipeHash: "h1" } });
@@ -4127,15 +4127,15 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(await store.get("builders", b.id)).toMatchObject({ firstLife: true, import: { recipeHash: "h1" } });
     await rt.close();
     backend.beforeSnapshot = undefined;
-    const again = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), snapshotRetryMs: 1 });
+    const again = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), snapshotRetryMs: 1, hostId: "h1" });
     expect((await again.golden.prepare()).id).toBe(b.id);
-    expect((await again.golden.seal(b.id)).version.snapshotId).toBe("snap_golden-v1");
+    expect((await again.golden.seal(b.id)).version.snapshotId).toBe("snap_wsp-h1-default-v1");
     expect(backend.machines).toHaveLength(2);
 
     const dropped = stubBackend();
     dropped.execImpl = dfOk;
     dropped.beforeSnapshot = m => { m.killed = true; throw refused(); };
-    const lost = createRuntime({ backend: dropped, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith(importOf()), snapshotRetryMs: 1 });
+    const lost = createRuntime({ backend: dropped, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith(importOf()), snapshotRetryMs: 1, hostId: "h1" });
     const b2 = await lost.golden.prepare();
     await expect(lost.golden.seal(b2.id)).rejects.toMatchObject({ kind: "snapshotFailed", attempts: 1, builderState: "gone" });
     expect(await lost.golden.builders()).toEqual([]);
@@ -4165,7 +4165,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(result.road).toBe("builder");
     expect(result.previousDropped).toBe(false);
     // The kept builder was sealed as v1, so v2 records v1's snapshot as its parent.
-    expect(result.version).toMatchObject({ version: 2, snapshotId: "snap_golden-v2", parentSnapshotId: "snap_golden-v1", smoke: { cmd: "codex --version", exitCode: 0 }, retired: [{ id: "shell/bashrc", name: "~/.bashrc" }] });
+    expect(result.version).toMatchObject({ version: 2, snapshotId: "snap_wsp-h1-default-v2", parentSnapshotId: "snap_wsp-h1-default-v1", smoke: { cmd: "codex --version", exitCode: 0 }, retired: [{ id: "shell/bashrc", name: "~/.bashrc" }] });
     expect(result.manifest).toMatchObject({ head: 2, versions: [{ version: 1 }, { version: 2 }] });
     expect(await rt.golden.get()).toEqual(result.manifest);
     expect(frames).toEqual([
@@ -4182,7 +4182,7 @@ describe("runtime golden update and the post-seal grace", () => {
       "installing-mcp:none configured",
       expect.stringMatching(/^installing-mcp:machine context: \d+(\.\d+)? KB written; no agent on the machine$/),
       "ready:",
-      "snapshotting:golden-v2",
+      "snapshotting:wsp-h1-default-v2",
       "smoke-forking:codex --version",
       "smoke-forking:1 agent answers: Codex",
       "sealed:v2; builder kept for one more change",
@@ -4191,7 +4191,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(ran[0]).toBe("true");
     expect(ran.some(c => c.includes("rm -rf -- '\\''/root/.bashrc'\\''"))).toBe(false);
     expect(ran.some(c => c.includes("npm install -g cowsay"))).toBe(true);
-    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], ["snap_golden-v2", true]]);
+    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v2", true]]);
     expect(await store.get("builders", b.id)).toMatchObject({ sealed: { at: new Date(clock.now()).toISOString(), version: 2 }, import: { recipeHash: "h2", recipe: snapshot("h2", [".zshrc", ".config/starship.toml"]) } });
     expect(await store.get("golden-recipes", "default@v2")).toEqual(snapshot("h2", [".zshrc", ".config/starship.toml"]));
     expect(await rt.golden.recipe()).toEqual(snapshot("h2", [".zshrc", ".config/starship.toml"]));
@@ -4258,15 +4258,15 @@ describe("runtime golden update and the post-seal grace", () => {
     rt.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });
     const result = await rt.golden.upgrade({ delta: deltaOf() });
     expect(result.road).toBe("fork");
-    expect(result.manifest).toMatchObject({ head: 2, versions: [{ version: 1, snapshotId: "snap_golden-v1" }, { version: 2, snapshotId: "snap_golden-v2", parentSnapshotId: "snap_golden-v1" }] });
+    expect(result.manifest).toMatchObject({ head: 2, versions: [{ version: 1, snapshotId: "snap_wsp-h1-default-v1" }, { version: 2, snapshotId: "snap_wsp-h1-default-v2", parentSnapshotId: "snap_wsp-h1-default-v1" }] });
     expect(result.manifest.versions[0]).not.toHaveProperty("parentSnapshotId");
     expect(frames[0]).toBe("creating:fork of golden v1");
     const fork = backend.machines[2]!;
-    expect(fork.spec).toMatchObject({ kind: "sandbox", fromSnapshot: "snap_golden-v1", cpu: 2, memMb: 4096, onIdle: "kill", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": expect.stringMatching(/^h_/) } });
+    expect(fork.spec).toMatchObject({ kind: "sandbox", fromSnapshot: "snap_wsp-h1-default-v1", cpu: 2, memMb: 4096, onIdle: "kill", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": expect.stringMatching(/^h_/) } });
     expect(fork.execLog.some(c => c.includes("rm -rf -- '\\''/root/.bashrc'\\''"))).toBe(false);
     expect(fork.execLog.some(c => c.includes("npm install -g cowsay"))).toBe(true);
     expect(fork.killed).toBe(false);
-    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], ["snap_golden-v1", false], ["snap_golden-v2", true]]);
+    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v1", false], ["snap_wsp-h1-default-v2", true]]);
     expect(await store.list("builders")).toEqual([expect.objectContaining({ id: fork.id, firstLife: true, sealed: { at: expect.any(String), version: 2 } })]);
     expect(await store.get("golden-recipes", "default@v1")).toBeDefined();
     expect(await store.get("golden-recipes", "default@v2")).toBeDefined();
@@ -4278,7 +4278,7 @@ describe("runtime golden update and the post-seal grace", () => {
     await rt.golden.seal(b.id);
     const deleted = vi.spyOn(backend, "deleteSnapshot");
     const two = await rt.golden.upgrade({ delta: deltaOf("h2"), keepPrevious: false });
-    expect(deleted.mock.calls).toEqual([["snap_golden-v1"]]);
+    expect(deleted.mock.calls).toEqual([["snap_wsp-h1-default-v1"]]);
     expect(two.previousDropped).toBe(true);
     expect(two.manifest).toEqual({ head: 2, versions: [expect.objectContaining({ version: 2 })] });
     expect(await rt.golden.get()).toEqual(two.manifest);
@@ -4309,13 +4309,13 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(two.previousDropped).toBe(false);
     expect(two.manifest.versions.map(v => [v.version, v.templateId])).toEqual([[1, "tpl_wsp-h1-default-v1"], [2, "tpl_wsp-h1-default-v2"]]);
     expect(backend.templates.has("tpl_wsp-h1-default-v1")).toBe(true);
-    expect(backend.snapshots.map(r => r.id)).toContain("snap_golden-v1");
+    expect(backend.snapshots.map(r => r.id)).toContain("snap_wsp-h1-default-v1");
 
     await rt.workspaces.delete(ws.id);
     const three = await rt.golden.upgrade({ delta: deltaOf("h3"), keepPrevious: false });
     expect(three.previousDropped).toBe(true);
     expect(backend.templates.has("tpl_wsp-h1-default-v2")).toBe(false);
-    expect(backend.snapshots.map(r => r.id)).not.toContain("snap_golden-v2");
+    expect(backend.snapshots.map(r => r.id)).not.toContain("snap_wsp-h1-default-v2");
   });
 
   it("dropping the previous version on the fork road ends the fork builder first, since it descends from that snapshot", async () => {
@@ -4327,8 +4327,8 @@ describe("runtime golden update and the post-seal grace", () => {
     const two = await rt.golden.upgrade({ delta: deltaOf(), keepPrevious: false });
     expect(two.road).toBe("fork");
     expect(two.previousDropped).toBe(true);
-    expect(deleted.mock.calls).toEqual([["snap_golden-v1"]]);
-    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_golden-v1", true], ["snap_golden-v1", true], ["snap_golden-v2", true]]);
+    expect(deleted.mock.calls).toEqual([["snap_wsp-h1-default-v1"]]);
+    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v2", true]]);
     expect(await store.list("builders")).toEqual([]);
     expect(two.manifest).toEqual({ head: 2, versions: [expect.objectContaining({ version: 2 })] });
   });
@@ -4436,7 +4436,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const create = backend.create.bind(backend);
     let refused = false;
     backend.create = async spec => {
-      if (spec.fromSnapshot === "snap_golden-v2" && !refused) {
+      if (spec.fromSnapshot === "snap_wsp-h1-default-v2" && !refused) {
         refused = true;
         throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency" });
       }
@@ -4480,7 +4480,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const result = await next.golden.upgrade({ delta: deltaOf() });
     expect(result.road).toBe("fork");
     expect(first.backend.machines[0]!.killed).toBe(true);
-    expect(first.backend.machines[2]!.spec.fromSnapshot).toBe("snap_golden-v1");
+    expect(first.backend.machines[2]!.spec.fromSnapshot).toBe("snap_wsp-h1-default-v1");
     expect((await first.store.list("builders")).map(r => (r as { id: string }).id)).toEqual([first.backend.machines[2]!.id]);
   });
 
@@ -4537,7 +4537,7 @@ describe("runtime golden update and the post-seal grace", () => {
     await rt.golden.seal(b.id);
     const again = await rt.golden.prepare();
     expect(again.id).not.toBe(b.id);
-    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_golden-v1", true], [undefined, false]]);
+    expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1-default-v1", true], [undefined, false]]);
     expect(await store.get("builders", b.id)).toMatchObject({ sealed: { version: 1 } });
     expect(await store.get("builders", again.id)).not.toHaveProperty("sealed");
   });

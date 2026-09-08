@@ -2,6 +2,7 @@
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { currentHome, type CliIO } from "@wsp/host";
+import { DEFAULT_PORT, DEFAULT_WS_PORT } from "@wsp/protocol";
 import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell } from "electron";
 import { chooseFrom, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
@@ -79,7 +80,7 @@ function locate(): Promise<Located> {
   const env = process.env["WSP_HOME"];
   const pointer = currentHome();
   return locateHost({
-    port: envPort("WSP_PORT", 4400),
+    port: envPort("WSP_PORT", DEFAULT_PORT),
     ...(env !== undefined ? { env } : {}),
     ...(pointer !== undefined ? { pointer } : {}),
     cwd: process.cwd(),
@@ -94,8 +95,8 @@ async function showApp(located: Located): Promise<boolean> {
     const state = await checkSetup({ statePath });
     if (!state.ready) return false;
     session = await openHost({
-      port: envPort("WSP_PORT", 4400),
-      wsPort: envPort("WSP_WS_PORT", 4410),
+      port: envPort("WSP_PORT", DEFAULT_PORT),
+      wsPort: envPort("WSP_WS_PORT", DEFAULT_WS_PORT),
       statePath,
       webDir: WEB_DIR,
       io,

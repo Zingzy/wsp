@@ -148,7 +148,7 @@ export function stubBackend(): StubBackend {
           const nth = (snapshotsNamed.get(name) ?? 0) + 1;
           snapshotsNamed.set(name, nth);
           const id = nth === 1 ? `snap_${name}` : `snap_${name}-${nth}`;
-          snapshots.push({ id, sizeBytes: backend.snapshotBytes, createdAt: new Date().toISOString() });
+          snapshots.push({ id, name, sizeBytes: backend.snapshotBytes, createdAt: new Date().toISOString() });
           return id;
         },
         async pause(): Promise<void> {

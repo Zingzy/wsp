@@ -905,12 +905,25 @@ describe("host names snapshot storage at start", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  it("prints the count, the size the listing reports and the monthly cost above the free GB, sized from the listing and not from any machine", async () => {
+  it("prints the count, the size the listing reports and the monthly cost above the free GB, sized from the listing and not from any machine, and says whose the rest are", async () => {
     const { rt, backend } = testRuntime();
     backend.snapshots.push({ id: "snap_gold", sizeBytes: 8_500_000_000 }, { id: "snap_old-golden", sizeBytes: 20_000_000_000 }, { id: "snap_other", sizeBytes: 7_700_000_000 });
     const lines: string[] = [];
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
-    expect(lines).toEqual(["storage: 3 snapshots, 36.2 GB; about $1.31/month above the free 10 GB from 2026-10-01"]);
+    expect(lines).toEqual(["storage: 3 snapshots, 36.2 GB; about $1.31/month above the free 10 GB from 2026-10-01. 1 kept here, 8.5 GB; 2 not this host's, 27.7 GB"]);
+  });
+
+  it("a snapshot this host made that nothing records is counted apart, which is the answer to why the account holds so many", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    await store.put("goldens", "default", GOLDEN);
+    // Pinned: the mark on a name is read back against this host's own, so the identity has to be the test's.
+    const rt = createRuntime({ backend, store, adapters: {}, hostId: "box:h1" });
+    // Long past OWN_GRACE_MS whenever the suite runs: a marked row inside that window is still being recorded.
+    backend.snapshots.push({ id: "snap_gold", sizeBytes: 8_500_000_000 }, { id: "snap_left", name: "wsp-h1-default-v9", sizeBytes: 20_000_000_000, createdAt: "2026-09-01T00:00:00.000Z" });
+    const lines: string[] = [];
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
+    expect(lines).toEqual(["storage: 2 snapshots, 28.5 GB; about $0.93/month above the free 10 GB from 2026-10-01. 1 kept here, 8.5 GB; 1 this host's with nothing recording them, 20.0 GB"]);
   });
 
   it("says nothing with no snapshots on the account, and names a listing the provider refused", async () => {

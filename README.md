@@ -60,6 +60,14 @@ serves the app at `http://127.0.0.1:4400` and the runtime behind it. `wsp up --s
 
 The command line and the MCP tools are the same verbs: `new`, `fork`, `snapshot`, `pause`, `threads`, `thread new`, `send`, `exec`, `import`, `export`, `rename`. `wsp --help` lists them; the app's palette runs them too.
 
+<!-- unsigned:start -->
+### Opening a downloaded bundle
+
+The bundles are not signed yet, so the first open of `wsp.app` is refused: right click it in Finder, pick Open, and pick Open again in the dialog. Every open after that is a double click.
+
+The Linux AppImage needs the run bit before it starts: `chmod +x wsp-*.AppImage`.
+<!-- unsigned:end -->
+
 ## What is next
 
 Your own computer as a workspace, so agents can start each other locally as well as in the cloud. Spaces: one workspace at a time in the sidebar, with its own tint. Images in threads. Pi and Gemini threads.

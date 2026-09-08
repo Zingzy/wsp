@@ -92,6 +92,9 @@ export interface Machine {
 /** One snapshot as the provider lists it; sizeBytes is what storage is billed on. */
 export interface SnapshotRow {
   id: string;
+  /** The name the snapshot was taken under, which is where wsp's owner mark rides (snapshot-names.ts); absent on a
+   * backend whose listing carries none. */
+  name?: string;
   sizeBytes: number;
   createdAt?: string;
   /** The snapshot this one was taken under, as the provider chains them; null at a root. */
@@ -105,6 +108,9 @@ export interface TemplateRow {
   name: string;
   status: "building" | "ready" | "failed";
   error?: string;
+  /** When the provider says it was promoted or built; absent on a built-in and on a backend that reports none. It
+   * is what gives a template the same grace a snapshot gets before anything may call it an orphan. */
+  createdAt?: string;
 }
 
 /** How the provider bills snapshot storage: the free GB shared by every snapshot on the account, the price of

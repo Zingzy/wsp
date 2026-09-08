@@ -3,13 +3,14 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, promoteVersion, sealGolden, smokeTally, templateName, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, promoteVersion, sealGolden, smokeTally, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import { shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
+import { goldenName } from "../src/snapshot-names.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, TemplateRow } from "../src/machine.js";
 
 /** A fake whose kill() resolves like the provider's DELETE does: a call for
@@ -157,7 +158,7 @@ describe("golden pipeline", () => {
     await expect(
       buildGolden({ backend, hostId: "h1", setup: "true", smoke: "boom --version" }),
     ).rejects.toThrow(/smoke/);
-    expect(deletedSnapshots).toEqual(["snap_golden-v1"]); // the image that failed smoke does not survive
+    expect(deletedSnapshots).toEqual(["snap_wsp-h1-default-v1"]); // the image that failed smoke does not survive
     expect(killed).toEqual(["m1", "m2"]); // builder and smoke fork both gone
   });
 
@@ -167,7 +168,7 @@ describe("golden pipeline", () => {
       backend, hostId: "h1", baseTemplate: "base", setup: "echo setup", smoke: "true",
     });
     expect(version.version).toBe(1);
-    expect(version.snapshotId).toBe("snap_golden-v1");
+    expect(version.snapshotId).toBe("snap_wsp-h1-default-v1");
     expect(version.baseTemplate).toBe("base");
     expect(version.kind).toBe("sandbox");
     expect(version.setupSha).toBe(createHash("sha256").update("echo setup").digest("hex"));
@@ -176,7 +177,7 @@ describe("golden pipeline", () => {
     expect(manifest.head).toBe(1);
     expect(manifest.versions).toEqual([version]);
     expect(created.map(c => c.kind)).toEqual(["sandbox", "sandbox"]);
-    expect(created[1]!.fromSnapshot).toBe("snap_golden-v1");
+    expect(created[1]!.fromSnapshot).toBe("snap_wsp-h1-default-v1");
     expect(killed).toEqual(["m1", "m2"]);
   });
 
@@ -210,7 +211,7 @@ describe("golden pipeline", () => {
     expect(m.id).toBe("m3");
     expect(m.kind).toBe("desktop");
     const forkSpec = created[2]!;
-    expect(forkSpec.fromSnapshot).toBe("snap_golden-v1");
+    expect(forkSpec.fromSnapshot).toBe("snap_wsp-h1-default-v1");
     expect(forkSpec.envs).toEqual({ FOO: "bar" });
     expect(forkSpec.labels).toEqual({ wsp: "1" });
     expect(forkSpec.template).toBeUndefined();
@@ -276,7 +277,7 @@ describe("interactive golden: prepare then seal", () => {
     await sealGolden(builder, { backend, hostId: "h1", smoke: "true" });
     expect(created[0]).toMatchObject({ onIdle: "kill", idleTimeoutMs: BUILDER_IDLE_MS });
     expect(BUILDER_IDLE_MS).toBeGreaterThanOrEqual(4 * 60 * 60_000);
-    expect(created[1]).toMatchObject({ fromSnapshot: "snap_golden-v1" });
+    expect(created[1]).toMatchObject({ fromSnapshot: "snap_wsp-h1-default-v1" });
     expect(created[1]!.onIdle).toBeUndefined();
     expect(created[1]!.idleTimeoutMs).toBeUndefined();
   });
@@ -300,15 +301,15 @@ describe("interactive golden: prepare then seal", () => {
     const builder = await prepareBuilder({ backend, kind: "desktop", setup: "echo setup", onStage });
     const { manifest, version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "claude --version", onStage });
     expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
-    expect(created[1]).toMatchObject({ kind: "desktop", fromSnapshot: "snap_golden-v1" });
+    expect(created[1]).toMatchObject({ kind: "desktop", fromSnapshot: "snap_wsp-h1-default-v1" });
     expect(created[1]!.template).toBeUndefined();
-    expect(version).toMatchObject({ version: 1, kind: "desktop", baseTemplate: "default", snapshotId: "snap_golden-v1" });
+    expect(version).toMatchObject({ version: 1, kind: "desktop", baseTemplate: "default", snapshotId: "snap_wsp-h1-default-v1" });
     expect(version.templateId).toBeUndefined();
     expect(version.setupSha).toBe(builder.setupSha);
     expect(manifest.head).toBe(1);
     expect(sansBase(stages)).toEqual([
       "creating:desktop from default", "deploying-daemon", "installing-harness", "ready",
-      "snapshotting:golden-v1", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
+      "snapshotting:wsp-h1-default-v1", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
     ]);
   });
 
@@ -374,7 +375,7 @@ describe("interactive golden: prepare then seal", () => {
     expect((err as Error).message).toMatch(/m1/);
     expect(created).toHaveLength(1);
     expect(timeline.filter(t => t === "kill m1").length).toBeGreaterThanOrEqual(2);
-    expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
+    expect(deletedSnapshots).toEqual(["snap_wsp-h1-default-v1"]);
     expect(stages.at(-1)).toMatch(/^failed:/);
   });
 
@@ -410,7 +411,7 @@ describe("interactive golden: prepare then seal", () => {
     expect(timeline).toEqual(["create m1", "snapshot m1", "snapshot m1", "snapshot m1"]);
     expect(killed).toEqual([]);
     expect(sansBase(stages).slice(-4)).toEqual([
-      "snapshotting:golden-v1",
+      "snapshotting:wsp-h1-default-v1",
       "snapshotting:attempt 1 of 3 answered 502 Failed to snapshot sandbox (request req_1); the builder reads running, next attempt in 1ms",
       "snapshotting:attempt 2 of 3 answered 502 Failed to snapshot sandbox (request req_2); the builder reads running, next attempt in 1ms",
       "failed:the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_3) while the builder read running",
@@ -422,7 +423,7 @@ describe("interactive golden: prepare then seal", () => {
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "a" });
     const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, snapshotRetryMs: 1 });
-    expect(version.snapshotId).toBe("snap_golden-v1");
+    expect(version.snapshotId).toBe("snap_wsp-h1-default-v1");
     expect(timeline).toEqual(["create m1", "snapshot m1", "snapshot m1", "kill m1", "create m2", "kill m2"]);
     expect(stages.at(-1)).toBe("sealed:v1");
   });
@@ -466,7 +467,7 @@ describe("interactive golden: prepare then seal", () => {
     await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "smoke", manifest: one.manifest, onStage })).rejects.toThrow(/smoke failed/);
     expect(JSON.stringify(one.manifest)).toBe(before);
     expect(killed).toEqual(["m1", "m2", "m3", "m4"]);
-    expect(deletedSnapshots).toEqual(["snap_golden-v2"]);
+    expect(deletedSnapshots).toEqual(["snap_wsp-h1-default-v2"]);
     expect(stages.at(-1)).toMatch(/^failed:golden smoke failed/);
   });
 });
@@ -479,23 +480,24 @@ describe("golden templates", () => {
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "echo setup", onStage });
     const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "claude --version", onStage, name: "work", templateWait: FAST_WAIT });
-    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "promote snap_golden-v1", "create m2", "kill m2"]);
-    expect(promoted).toEqual([{ snapshotId: "snap_golden-v1", name: "wsp-h1-work-v1" }]);
-    expect(created[1]).toMatchObject({ kind: "sandbox", template: "tpl_snap_golden-v1" });
+    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "promote snap_wsp-h1-work-v1", "create m2", "kill m2"]);
+    expect(promoted).toEqual([{ snapshotId: "snap_wsp-h1-work-v1", name: "wsp-h1-work-v1" }]);
+    expect(created[1]).toMatchObject({ kind: "sandbox", template: "tpl_snap_wsp-h1-work-v1" });
     expect(created[1]!.fromSnapshot).toBeUndefined();
-    expect(version).toMatchObject({ version: 1, snapshotId: "snap_golden-v1", templateId: "tpl_snap_golden-v1" });
+    expect(version).toMatchObject({ version: 1, snapshotId: "snap_wsp-h1-work-v1", templateId: "tpl_snap_wsp-h1-work-v1" });
     expect(sansBase(stages).slice(4)).toEqual([
-      "snapshotting:golden-v1", "promoting:wsp-h1-work-v1", "promoting:tpl_snap_golden-v1 is ready", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
+      "snapshotting:wsp-h1-work-v1", "promoting:wsp-h1-work-v1", "promoting:tpl_snap_wsp-h1-work-v1 is ready", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
     ]);
   });
 
-  it("the template's name carries the host and the golden, the golden defaulting to the store's default key: one rule", async () => {
-    const { backend, promoted } = recordingBackend({}, { templates: true });
+  it("the snapshot and its template carry the same name, the host and the golden in it, the golden defaulting to the store's default key: one rule", async () => {
+    const { backend, promoted, snapshots } = recordingBackend({}, { templates: true });
     await buildGolden({ backend, hostId: "h1", setup: "true", smoke: "true" });
     expect(promoted.map(p => p.name)).toEqual(["wsp-h1-default-v1"]);
-    expect(templateName("h1", "default", 1)).toBe("wsp-h1-default-v1");
-    expect(templateName("9f3a1c2b", "default", 12)).toBe("wsp-9f3a1c2b-default-v12");
-    expect(templateName("9f3a1c2b", "default", 12)).toMatch(/^[a-z0-9-]+$/);
+    expect(snapshots).toEqual(["wsp-h1-default-v1"]);
+    expect(goldenName("h1", "default", 1)).toBe("wsp-h1-default-v1");
+    expect(goldenName("9f3a1c2b", "default", 12)).toBe("wsp-9f3a1c2b-default-v12");
+    expect(goldenName("9f3a1c2b", "default", 12)).toMatch(/^[a-z0-9-]+$/);
   });
 
   it("a template still building is read again until ready, each read a promoting line", async () => {
@@ -503,9 +505,9 @@ describe("golden templates", () => {
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true" });
     const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, templateWait: FAST_WAIT });
-    expect(version.templateId).toBe("tpl_snap_golden-v1");
+    expect(version.templateId).toBe("tpl_snap_wsp-h1-default-v1");
     expect(stages.filter(s => s.startsWith("promoting"))).toEqual([
-      "promoting:wsp-h1-default-v1", "promoting:tpl_snap_golden-v1 is building; asking again", "promoting:tpl_snap_golden-v1 is building; asking again", "promoting:tpl_snap_golden-v1 is ready",
+      "promoting:wsp-h1-default-v1", "promoting:tpl_snap_wsp-h1-default-v1 is building; asking again", "promoting:tpl_snap_wsp-h1-default-v1 is building; asking again", "promoting:tpl_snap_wsp-h1-default-v1 is ready",
     ]);
   });
 
@@ -513,17 +515,17 @@ describe("golden templates", () => {
     const { backend, created, deletedSnapshots, deletedTemplates } = recordingBackend({}, { templates: true, templateStatus: () => "failed" });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true" });
-    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, templateWait: FAST_WAIT })).rejects.toThrow("the provider failed the template tpl_snap_golden-v1: restore copy failed");
+    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, templateWait: FAST_WAIT })).rejects.toThrow("the provider failed the template tpl_snap_wsp-h1-default-v1: restore copy failed");
     expect(created).toHaveLength(1);
-    expect(deletedTemplates).toEqual(["tpl_snap_golden-v1"]);
-    expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
-    expect(stages.at(-1)).toBe("failed:the provider failed the template tpl_snap_golden-v1: restore copy failed");
+    expect(deletedTemplates).toEqual(["tpl_snap_wsp-h1-default-v1"]);
+    expect(deletedSnapshots).toEqual(["snap_wsp-h1-default-v1"]);
+    expect(stages.at(-1)).toBe("failed:the provider failed the template tpl_snap_wsp-h1-default-v1: restore copy failed");
   });
 
   it("a template that never reads ready inside the wait ends the seal naming the last status and the wait", async () => {
     const { backend } = recordingBackend({}, { templates: true, templateStatus: () => "building" });
     const builder = await prepareBuilder({ backend, setup: "true" });
-    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "true", templateWait: { readyMs: 20, pollMs: 1 } })).rejects.toThrow("the template tpl_snap_golden-v1 still reads building after 20ms");
+    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "true", templateWait: { readyMs: 20, pollMs: 1 } })).rejects.toThrow("the template tpl_snap_wsp-h1-default-v1 still reads building after 20ms");
   });
 
   it("forkGolden and the update's builder boot a durable version from its template and a version without one from its snapshot", async () => {
@@ -531,11 +533,11 @@ describe("golden templates", () => {
     const { manifest, version } = await buildGolden({ backend, hostId: "h1", setup: "true", smoke: "true" });
     await forkGolden(backend, manifest);
     await upgradeBuilder({ backend, head: version, delta: { import: { recipeHash: "h2", tools: [], agents: [] }, retired: [], retiredOnImage: [] }, setup: "true" });
-    expect(created.slice(2).map(c => [c.template, c.fromSnapshot])).toEqual([["tpl_snap_golden-v1", undefined], ["tpl_snap_golden-v1", undefined]]);
+    expect(created.slice(2).map(c => [c.template, c.fromSnapshot])).toEqual([["tpl_snap_wsp-h1-default-v1", undefined], ["tpl_snap_wsp-h1-default-v1", undefined]]);
     const { templateId: _t, ...volatile } = version;
     await forkGolden(backend, { head: 1, versions: [volatile] });
     await upgradeBuilder({ backend, head: volatile, delta: { import: { recipeHash: "h3", tools: [], agents: [] }, retired: [], retiredOnImage: [] }, setup: "true" });
-    expect(created.slice(4).map(c => [c.template, c.fromSnapshot])).toEqual([[undefined, "snap_golden-v1"], [undefined, "snap_golden-v1"]]);
+    expect(created.slice(4).map(c => [c.template, c.fromSnapshot])).toEqual([[undefined, "snap_wsp-h1-default-v1"], [undefined, "snap_wsp-h1-default-v1"]]);
   });
 
   it("a backend whose capabilities lack templates, or that lacks one of the calls, has no template road", async () => {
@@ -571,8 +573,8 @@ describe("golden templates", () => {
     const { backend, deletedSnapshots, deletedTemplates } = recordingBackend({ smoke: { exitCode: 2, stdout: "", stderr: "broken" } }, { templates: true });
     const builder = await prepareBuilder({ backend, setup: "true" });
     await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "smoke", templateWait: FAST_WAIT })).rejects.toThrow(/smoke failed/);
-    expect(deletedTemplates).toEqual(["tpl_snap_golden-v1"]);
-    expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
+    expect(deletedTemplates).toEqual(["tpl_snap_wsp-h1-default-v1"]);
+    expect(deletedSnapshots).toEqual(["snap_wsp-h1-default-v1"]);
   });
 
   it("promoteVersion leaves the count out when the provider will not give the listing, and the promote still lands", async () => {
@@ -618,7 +620,7 @@ describe("golden size", () => {
     const { backend, created } = recordingBackend({}, { built: clamped });
     const builder = await prepareBuilder({ backend, setup: "true", memMb: 8192 });
     const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true" });
-    expect(created[1]).toMatchObject({ fromSnapshot: "snap_golden-v1", cpu: 2, memMb: 2048 });
+    expect(created[1]).toMatchObject({ fromSnapshot: "snap_wsp-h1-default-v1", cpu: 2, memMb: 2048 });
     expect(version.size).toEqual({ cpu: 2, memMb: 2048 });
   });
 
@@ -1991,7 +1993,7 @@ describe("golden import stages", () => {
 
   describe("golden update", () => {
     const SNAPSHOT: RecipeDigest = { ticks: [], files: [] };
-    const head: GoldenVersion = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", kind: "desktop", setupSha: "s1", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "claude --version && gemini --version", exitCode: 0 }, size: { cpu: 2, memMb: 8192 }, base: [{ name: "node", version: "22.23.2" }, { name: "jq", version: "1.7.1" }] };
+    const head: GoldenVersion = { version: 1, snapshotId: "snap_wsp-h1-default-v1", baseTemplate: "base", kind: "desktop", setupSha: "s1", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "claude --version && gemini --version", exitCode: 0 }, size: { cpu: 2, memMb: 8192 }, base: [{ name: "node", version: "22.23.2" }, { name: "jq", version: "1.7.1" }] };
     const deltaOf = (over: Partial<GoldenDelta> = {}): GoldenDelta => ({
       import: importOf({ recipeHash: "h2", recipe: SNAPSHOT, tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }], agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }] }),
       retired: [
@@ -2060,7 +2062,7 @@ describe("golden import stages", () => {
       const builder = await prepareBuilder({ backend, setup: "true" });
       await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "boom --version", keepBuilder: true })).rejects.toThrow(/smoke/);
       expect(killed).toEqual(["m1", "m2"]);
-      expect(deletedSnapshots).toEqual(["snap_golden-v1"]);
+      expect(deletedSnapshots).toEqual(["snap_wsp-h1-default-v1"]);
     });
 
     it("applyDelta leaves every dropped row on the image, names them once, then runs the delta's stages and folds the retired agents out of the smoke", async () => {
@@ -2229,7 +2231,7 @@ describe("golden import stages", () => {
       const { stages, onStage } = stageRecorder();
       const labels = { wsp: "1", "wsp-builder": "1", "wsp-owner": "h_me", createdAt: "2026-09-04T00:00:00.000Z" };
       const builder = await upgradeBuilder({ backend, head, delta: deltaOf({ retired: [], retiredOnImage: [] }), setup: "true", fetch, onStage, labels });
-      expect(created[0]).toMatchObject({ kind: "desktop", fromSnapshot: "snap_golden-v1", cpu: 2, memMb: 8192, onIdle: "kill", idleTimeoutMs: BUILDER_IDLE_MS, labels });
+      expect(created[0]).toMatchObject({ kind: "desktop", fromSnapshot: "snap_wsp-h1-default-v1", cpu: 2, memMb: 8192, onIdle: "kill", idleTimeoutMs: BUILDER_IDLE_MS, labels });
       expect(created[0]!.template).toBeUndefined();
       expect(stages[0]).toBe("creating:fork of golden v1");
       expect(stages.at(-1)).toBe("ready");

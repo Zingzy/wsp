@@ -134,6 +134,20 @@ async function freePort(): Promise<number> {
   return port;
 }
 
+/** A port this test holds on ::1 alone and saw free on 127.0.0.1, so the relay's bind on that family is its own to release. */
+async function heldOnOneFamily(): Promise<{ server: Server; port: number }> {
+  for (let tries = 0; tries < 20; tries++) {
+    const port = await freePort();
+    const server = createServer();
+    const held = await new Promise<boolean>(resolve => {
+      server.once("error", () => resolve(false));
+      server.listen(port, "::1", () => resolve(true));
+    });
+    if (held) return { server, port };
+  }
+  throw new Error("no port free on both 127.0.0.1 and ::1 in 20 tries");
+}
+
 async function until(cond: () => boolean, ms = 3000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!cond()) {
@@ -474,10 +488,8 @@ describe("callback relay over a fake daemon link", () => {
     expect(lines).toContain("task-1: ignored a malformed callback.port event from the workspace");
     expect(RELAY_MIN_PORT).toBe(1024);
 
-    const taken = createServer();
+    const { server: taken, port } = await heldOnOneFamily();
     servers.push(taken);
-    await new Promise<void>(r => taken.listen(0, "::1", r));
-    const port = (taken.address() as { port: number }).port;
     link.emit({ type: "callback.port", port });
     await until(() => lines.some(l => l.includes("already in use")));
     expect(lines).toContain(`task-1: port ${port} is already in use on this computer; the sign-in callback is not forwarded`);

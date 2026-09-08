@@ -25,7 +25,7 @@ import {
   type Runtime,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { EXIT_CODES, EXIT_WORDS, ExitClass, NOTHING_TO_SERVE_LINE, TURN_END_WORDS, authRefusal, fmtDuration, shellQuote, usageRefusal } from "@wsp/protocol";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, NOTHING_TO_SERVE_LINE, TURN_END_WORDS, WS_PORT_OFFSET, authRefusal, fmtDuration, portsAsked, shellQuote, usageRefusal, type PortsAsked } from "@wsp/protocol";
 import { agentHomes, LocalBackend } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
@@ -86,6 +86,7 @@ usage:
                      Tools, Also on this Mac, Sign-ins, wsp for your agents
                      on this Mac, and Build, then the browser
   wsp doctor         run the reach loop end to end against one live machine
+                     (--yes also deletes the snapshots this host left behind)
   wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
                      computer; wsp mcp install --agent <id> puts the server in
                      that agent's own MCP config (${MCP_AGENT_IDS}),
@@ -112,15 +113,19 @@ exit codes; every failure is one line on stderr, the failure object with --json:
 ${exitCodeHelp()}
 
 options:
-  --port N           app port (default 4400)
-  --ws-port N        runtime websocket port (default 4410)
+  --port N           app port (default ${DEFAULT_PORT}); the runtime websocket
+                     port follows ${WS_PORT_OFFSET} above it
+  --ws-port N        runtime websocket port on its own (default
+                     ${DEFAULT_WS_PORT}); --port alone moves both
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
                      unless a saved recipe answered copy, so macOS has nothing
-                     to ask either and the sign-ins wait for the app's terminal
+                     to ask either and the sign-ins wait for the app's terminal.
+                     doctor: also delete the snapshots and templates this host
+                     left behind, which is not reversible
   --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
                      writes it; init writes <state dir>/recipe.json too) and go
                      straight to the sign-ins; this machine is still read for
@@ -379,6 +384,22 @@ export function localWiring(root = homedir()): LocalWiring {
   };
 }
 
+/** What every command of the shared parse works on: the port pair the one rule reads off the flags, whether a
+ * person named either port, and the state file. wsp up and wsp init take theirs from this one call. */
+export interface SharedOpts extends PortsAsked {
+  statePath: string;
+}
+
+export function optsFor(values: Pick<SharedFlags, "port" | "ws-port" | "state">): SharedOpts {
+  return { ...portsAsked({ port: values.port, wsPort: values["ws-port"] }), statePath: statePathFrom(values.state) };
+}
+
+/** The state files a host on this computer could be serving: the one this run works on and this computer's default,
+ * read so a port one of them holds is named as that host rather than as a bare node process. */
+export function statesHere(statePath: string): string[] {
+  return [...new Set([statePath, resolve(defaultStatePath())])];
+}
+
 export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys)): Runtime {
   return createRuntime({
     backend: new SolariBackend({ apiKey: keys.solari }),
@@ -478,7 +499,7 @@ function workspaceEnvsFor(keys: Keys): { workspaceEnvs?: (golden: GoldenVersion)
 
 async function init(
   io: CliIO,
-  opts: { port: number; wsPort: number; statePath: string },
+  opts: SharedOpts,
   flags: { yes: boolean; nonInteractive: boolean; json: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
   if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
@@ -490,7 +511,7 @@ async function init(
   // Under --json every line this run says, the host's own included, goes to stderr so stdout is the objects' alone.
   const say = flags.json ? jsonCliIO() : io;
   const screen = terminalInitIO(flags.json);
-  opening(screen, { command: "init", version: VERSION, yes: flags.yes });
+  opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
   const keys = await loadKeys(say, undefined, { anthropic: false });
   const result = await runInit(
     {
@@ -516,7 +537,7 @@ async function init(
       brew: () => readBrewTable(nodeHost()),
       scan: recipe => scanTools(nodeHost(), recipe),
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
-      ports: { port: opts.port, wsPort: opts.wsPort },
+      ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
       upCommand: flags.upCommand,
       forkCommand: flags.forkCommand,
       relay: async (rt, builder, hooks) =>
@@ -531,7 +552,7 @@ async function init(
           builder,
         }),
       roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
-      host: rt => hostFor(rt, keys, opts, say),
+      host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort }, say),
     },
     screen,
   );
@@ -804,7 +825,7 @@ interface Command {
   json: boolean;
   /** Why the MCP server has no tool for it. */
   cliOnly: string;
-  run(io: CliIO, opts: { port: number; wsPort: number; statePath: string }, values: SharedFlags): Promise<number>;
+  run(io: CliIO, opts: SharedOpts, values: SharedFlags): Promise<number>;
 }
 
 /** The commands the shared parse serves, by word; a line with no word is `up`. */
@@ -850,10 +871,14 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   doctor: {
     json: false,
     cliOnly: "forks a live machine and bills while it runs; a person decides that at a terminal",
-    run: async (io, opts) => {
+    run: async (io, opts, values) => {
       const keys = await loadKeys(io);
       const rt = makeRuntime(keys, opts.statePath);
-      return doctor(rt, io, keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {});
+      return doctor(rt, io, {
+        ...(keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {}),
+        ...(values.yes === true ? { yes: true } : {}),
+        statePath: opts.statePath,
+      });
     },
   },
 };
@@ -997,11 +1022,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<num
     io.log(HELP);
     return 0;
   }
-  const opts = {
-    port: values.port !== undefined ? Number(values.port) : 4400,
-    wsPort: values["ws-port"] !== undefined ? Number(values["ws-port"]) : 4410,
-    statePath: statePathFrom(values.state),
-  };
+  const opts = optsFor(values);
   const word = positionals[0] ?? "up";
   const command = COMMANDS[word];
   const json = values.json === true;

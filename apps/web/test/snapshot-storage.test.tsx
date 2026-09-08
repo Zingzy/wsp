@@ -10,6 +10,8 @@ import { useStore } from "../src/protocol/store.js";
 const GB = 1e9;
 const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, sizes: [] };
 const PRICING = { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" };
+/** Who made each snapshot rides on the wire beside the sum; this line reads the sum, and wsp up and the doctor read the split. */
+const owners = (count: number, bytes: number) => ({ kept: { count, bytes }, orphans: { count: 0, bytes: 0 }, others: { count: 0, bytes: 0 } });
 const WS: WorkspaceView = { id: "ws1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_golden-v1", createdAt: "2026-08-30T09:00:00Z" };
 const STATUS: WorkspaceStatus = { ...WS, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
 
@@ -53,17 +55,17 @@ const line = (): string | null => document.querySelector('[data-k="storage"]')?.
 
 describe("the storage line", () => {
   it("reads the count, the size from the listing and the monthly cost above the free GB", () => {
-    expect(storageLine({ count: 6, totalBytes: 49.8 * GB, ...PRICING, monthlyUsd: 39.8 * 0.05 })).toBe("6 snapshots · 49.8 GB · about $1.99/month above the free 10 GB from 2026-10-01");
-    expect(storageLine({ count: 1, totalBytes: 7.8 * GB, ...PRICING, monthlyUsd: 0 })).toBe("1 snapshot · 7.8 GB · inside the free 10 GB");
+    expect(storageLine({ count: 6, totalBytes: 49.8 * GB, ...PRICING, monthlyUsd: 39.8 * 0.05, ...owners(6, 49.8 * GB) })).toBe("6 snapshots · 49.8 GB · about $1.99/month above the free 10 GB from 2026-10-01");
+    expect(storageLine({ count: 1, totalBytes: 7.8 * GB, ...PRICING, monthlyUsd: 0, ...owners(1, 7.8 * GB) })).toBe("1 snapshot · 7.8 GB · inside the free 10 GB");
   });
 
   it("renders the account's storage as text and asks again when a golden seals", async () => {
-    const api = fakeApi({ count: 2, totalBytes: 16.3 * GB, ...PRICING, monthlyUsd: 6.3 * 0.05 });
+    const api = fakeApi({ count: 2, totalBytes: 16.3 * GB, ...PRICING, monthlyUsd: 6.3 * 0.05, ...owners(2, 16.3 * GB) });
     useStore.getState().bind(api);
     render(<SnapshotStorageLine />);
     await waitFor(() => expect(line()).toBe("2 snapshots · 16.3 GB · about $0.32/month above the free 10 GB from 2026-10-01"));
 
-    api.snapshotStorage.mockResolvedValue({ count: 3, totalBytes: 24.8 * GB, ...PRICING, monthlyUsd: 14.8 * 0.05 });
+    api.snapshotStorage.mockResolvedValue({ count: 3, totalBytes: 24.8 * GB, ...PRICING, monthlyUsd: 14.8 * 0.05, ...owners(3, 24.8 * GB) });
     act(() => api.emit({ type: "golden.stage", name: "default", stage: "snapshotting" }));
     expect(api.snapshotStorage).toHaveBeenCalledTimes(1);
     act(() => api.emit({ type: "golden.stage", name: "default", stage: "sealed" }));
@@ -72,7 +74,7 @@ describe("the storage line", () => {
   });
 
   it("sits in the machine panel's usage section as one line of text under the counters, with no bar for it", async () => {
-    useStore.getState().bind(fakeApi({ count: 2, totalBytes: 16.3 * GB, ...PRICING, monthlyUsd: 6.3 * 0.05 }));
+    useStore.getState().bind(fakeApi({ count: 2, totalBytes: 16.3 * GB, ...PRICING, monthlyUsd: 6.3 * 0.05, ...owners(2, 16.3 * GB) }));
     render(<MachineSurface workspaceId="ws1" />);
     await waitFor(() => expect(line()).toBe("2 snapshots · 16.3 GB · about $0.32/month above the free 10 GB from 2026-10-01"));
     const usage = document.querySelector('[data-k="storage"]')!.closest("section")!;

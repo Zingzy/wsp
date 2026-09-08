@@ -34,9 +34,11 @@ interface TemplateView {
   status: TemplateRow["status"];
   /** Null, not absent, on a custom template that has not failed (the reference's own listing example). */
   error?: string | null;
+  /** On a promoted or built template; the provider's built-ins list without one. */
+  createdAt?: string | null;
 }
 
-const templateRowOf = (t: TemplateView): TemplateRow => ({ id: t.templateId, name: t.name, status: t.status, ...(t.error !== undefined && t.error !== null ? { error: t.error } : {}) });
+const templateRowOf = (t: TemplateView): TemplateRow => ({ id: t.templateId, name: t.name, status: t.status, ...(t.error !== undefined && t.error !== null ? { error: t.error } : {}), ...(t.createdAt !== undefined && t.createdAt !== null ? { createdAt: t.createdAt } : {}) });
 
 const STATE_MAP: Record<SandboxView["state"], MachineState> = {
   starting: "starting",
@@ -236,8 +238,11 @@ export class SolariBackend implements MachineBackend {
   async listSnapshots(): Promise<SnapshotRow[]> {
     const page = await this.request<{ snapshots?: unknown }>("GET", "/snapshots");
     if (!Array.isArray(page.snapshots)) throw new Error("GET /snapshots answered without a snapshots array");
-    return (page.snapshots as { id: string; sizeBytes: number; createdAt?: string; parent?: string | null }[]).map(s => ({
+    // The name is read because a snapshot carries no metadata: POST /sandboxes/:id/snapshots takes a name alone and
+    // the listing answers no metadata field, so wsp's owner mark rides on the name (snapshot-names.ts).
+    return (page.snapshots as { id: string; name?: string | null; sizeBytes: number; createdAt?: string; parent?: string | null }[]).map(s => ({
       id: s.id,
+      ...(s.name !== undefined && s.name !== null ? { name: s.name } : {}),
       sizeBytes: s.sizeBytes,
       ...(s.createdAt !== undefined ? { createdAt: s.createdAt } : {}),
       ...(s.parent !== undefined ? { parent: s.parent } : {}),

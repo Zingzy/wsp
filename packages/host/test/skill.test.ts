@@ -116,7 +116,7 @@ describe("the wsp skill", () => {
     // The wizard the init line opens, named as the plan names it, so the person knows what is coming.
     for (const screen of ["Agents, Tools, Also on this Mac, Sign-ins, wsp for your agents on this Mac, and Build"]) expect(setup).toContain(screen);
     // The first wsp up of the run is the one that meets a busy port, so its branch lives with the command.
-    expect(setup.slice(setup.indexOf("\n2. "), setup.indexOf("\n3. "))).toContain("--port 4401 --ws-port 4411");
+    expect(setup.slice(setup.indexOf("\n2. "), setup.indexOf("\n3. "))).toContain("wsp up --port 4401 >");
     expect(setup).toContain("The host is yours to start");
     expect(setup).toContain("Never say the host is theirs because it holds their keys");
     expect(setup).toContain("The tools show up only after that agent restarts");

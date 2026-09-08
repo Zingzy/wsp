@@ -42,6 +42,8 @@ describe("golden templates", () => {
     // The doctor's road names a version the same way the seal does.
     const store = memoryStore();
     await store.put("goldens", "default", { head: 1, versions: [version(1)] });
+    // The snapshot the build sealed carries the same name as its template, since one rule names both.
+    await store.put("goldens", "default", { head: 1, versions: [{ ...version(1), snapshotId: "snap_wsp-9f3a1c2b-default-v1" }] });
     const doctorRt = createRuntime({ backend, store, adapters: {}, hostId: "zingzys-MacBook-Pro.local:9f3a1c2b" });
     expect(await doctorRt.golden.promote()).toEqual([{ golden: "default", version: 1, templateId: "tpl_wsp-9f3a1c2b-default-v1", sharing: 1 }]);
   });
@@ -52,8 +54,8 @@ describe("golden templates", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, hostId: "h1" });
     const frames: string[] = [];
     const { version: sealed } = await rt.golden.build({ setup: "true", smoke: "true", onStage: (stage, detail) => frames.push(detail === undefined ? stage : `${stage}:${detail}`) });
-    expect(sealed).toMatchObject({ version: 1, snapshotId: "snap_golden-v1", templateId: "tpl_wsp-h1-default-v1" });
-    expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v1", name: "wsp-h1-default-v1" }]);
+    expect(sealed).toMatchObject({ version: 1, snapshotId: "snap_wsp-h1-default-v1", templateId: "tpl_wsp-h1-default-v1" });
+    expect(backend.promoted).toEqual([{ snapshotId: "snap_wsp-h1-default-v1", name: "wsp-h1-default-v1" }]);
     expect(backend.machines[1]!.spec).toMatchObject({ template: "tpl_wsp-h1-default-v1" });
     expect(backend.machines[1]!.spec.fromSnapshot).toBeUndefined();
     expect(frames.filter(f => f.startsWith("promoting"))).toEqual(["promoting:wsp-h1-default-v1", "promoting:tpl_wsp-h1-default-v1 is ready"]);

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NOTHING_TO_SERVE_LINE } from "@wsp/protocol";
-import { cli, localWiring, up, type CliIO } from "../src/cli.js";
+import { cli, localWiring, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
@@ -123,5 +123,22 @@ describe("wsp up", () => {
     const initSource = readFileSync(new URL("../src/init.ts", import.meta.url), "utf8");
     expect(cliSource.match(/startHost\(/g)).toHaveLength(1);
     expect(initSource).not.toMatch(/startHost\(/);
+  });
+
+  it("--port alone derives the websocket port, and every command of the shared parse works on that one pair", () => {
+    expect(optsFor({ port: "4401", state: statePath })).toMatchObject({ port: 4401, wsPort: 4411, named: true });
+    expect(optsFor({ state: statePath })).toMatchObject({ port: 4400, wsPort: 4410, named: false });
+    expect(optsFor({ port: "4401", "ws-port": "9000", state: statePath })).toMatchObject({ port: 4401, wsPort: 9000, named: true });
+    // wsp up, wsp init and the rest read their pair from this one call, so neither can derive it its own way: the
+    // parse calls optsFor once (the second hit is its own declaration) and optsFor is the only reader of the rule.
+    const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
+    expect(cliSource.match(/optsFor\(/g)).toHaveLength(2);
+    expect(cliSource.match(/portsAsked\(/g)).toHaveLength(1);
+    expect(cliSource).not.toMatch(/\b(4400|4410)\b/);
+  });
+
+  it("the state files a taken port is asked about are this run's and this computer's default, each once", () => {
+    expect(statesHere(statePath)).toEqual([statePath, join(home, "state.json")]);
+    expect(statesHere(join(home, "state.json"))).toEqual([join(home, "state.json")]);
   });
 });
