@@ -307,6 +307,35 @@ describe("local workspace", () => {
     }
   });
 
+  it("status.list reads the same origin rule as every other listing, and hands over the state without the route the reach carries", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: { ...localWiring, daemonRoad: async () => ({ url: `http://127.0.0.1:${probe.port}`, expiresAt: Number.MAX_SAFE_INTEGER }) } });
+    await rt.workspaces.createLocal("mac");
+    await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
+    type Row = { name: string; reach: Record<string, unknown> };
+    try {
+      const here = await WsClient.connect(srv.port, { token: "secret" });
+      const mine = (await here.request("status.list"))["statuses"] as Row[];
+      expect(mine.map(r => r.name).sort()).toEqual(["b1", "mac"]);
+      // The runtime dialled the road and knows the route; no door but the app's own socket is handed it.
+      expect((await rt.status.list()).find(s => s.name === "mac")!.reach.url).toBe(`http://127.0.0.1:${probe.port}`);
+      for (const row of mine) expect(Object.keys(row.reach)).toEqual(["state"]);
+      expect(mine.find(r => r.name === "mac")!.reach["state"]).toBe("reachable");
+
+      const relay = await here.request("ticket.issue", { purpose: "relay" });
+      const machine = await WsClient.connect(srv.port, { ticket: relay["ticket"] as string });
+      // The origin the frame claims changes nothing: the road it arrived on answers for it, as on every other verb.
+      const relayed = (await machine.request("status.list", { origin: "here" }))["statuses"] as Row[];
+      expect(relayed.map(r => r.name)).toEqual(["b1"]);
+      for (const row of relayed) expect(Object.keys(row.reach)).toEqual(["state"]);
+      here.close();
+      machine.close();
+    } finally {
+      await srv.close();
+      await rt.close();
+    }
+  });
+
   it("the port forwards the host holds read the same rule: a relayed request neither lists nor stops one on this computer", async () => {
     const rt = runtime();
     const local = await rt.workspaces.createLocal("mac");

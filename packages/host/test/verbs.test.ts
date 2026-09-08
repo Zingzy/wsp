@@ -3,6 +3,7 @@
 // the protocol on localhost, authenticated with the token the host wrote,
 // reading the same session index the sidebar reads.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -207,6 +208,76 @@ describe("wsp verbs over the host", () => {
     const threads = await threadRows(await dialHost(statePath));
     expect(threads.map(t => [t.workspaceName, t.harness, t.startedBy])).toEqual([["mac", "claude", "cli"]]);
     expect(opened.io.lines).toEqual([expect.stringMatching(/^thread /), "re: say pong"]);
+  });
+
+  it("the STATE cell reads the machine and the daemon beside the phase: a machine the provider paused says Paused and one whose daemon has gone dark says Unreachable, both while the record still reads running", async () => {
+    await run("new", "napped");
+    await run("new", "dark");
+    // Every cloud machine has an edge route, and a prompt 502 on it is the edge dialling the guest and finding
+    // nothing on the daemon's port.
+    const edge = createHttpServer((_req, res) => {
+      res.writeHead(502).end();
+    });
+    await new Promise<void>(r => edge.listen(0, "127.0.0.1", r));
+    try {
+      const port = (edge.address() as AddressInfo).port;
+      const route = async (): Promise<{ url: string; token: string; expiresAt: number }> => ({ url: `http://127.0.0.1:${port}/`, token: "stub", expiresAt: Date.now() + 3_600_000 });
+      const [napped, dark] = backend.machines;
+      napped!.previewUrl = route;
+      dark!.previewUrl = route;
+      // A pause the provider made, not one wsp asked for: nothing wrote the record, so its phase still reads running.
+      napped!.paused = true;
+
+      const listed = await run("workspaces");
+      expect(listed.code).toBe(0);
+      expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([
+        ["napped", "running"],
+        ["dark", "running"],
+      ]);
+      const [, ...rows] = listed.io.lines[0]!.split("\n");
+      expect(rows.map(r => r.split(/ {2,}/).slice(0, 2).concat(r.split(/ {2,}/)[3]!))).toEqual([
+        ["napped", expect.stringMatching(/^ws_/), "Paused"],
+        ["dark", expect.stringMatching(/^ws_/), "Unreachable"],
+      ]);
+
+      // The same two words reach an agent reading the table over the tool, off the machine state and reach the row read.
+      const raw = await run("workspaces", "--json");
+      const statuses = (json(raw.io)[0] as { workspaces: { name: string; machineState: string; reach: { state: string } }[] }).workspaces;
+      expect(statuses.map(w => [w.name, w.machineState, w.reach.state])).toEqual([
+        ["napped", "paused", "no-daemon"],
+        ["dark", "running", "no-daemon"],
+      ]);
+    } finally {
+      await new Promise<void>(r => edge.close(() => r()));
+    }
+  });
+
+  it("neither door hands over the route the reach carries: the table and the tool answer the state alone, with no url and no provider token", async () => {
+    await run("new", "alpha");
+    const edge = createHttpServer((_req, res) => {
+      res.writeHead(426).end();
+    });
+    await new Promise<void>(r => edge.listen(0, "127.0.0.1", r));
+    try {
+      const port = (edge.address() as AddressInfo).port;
+      // What the provider mints: the route with its own bearer in the query and an hour on it.
+      backend.machines[0]!.previewUrl = async () => ({ url: `http://127.0.0.1:${port}/?pt_token=stub-bearer`, token: "stub-bearer", expiresAt: Date.now() + 3_600_000 });
+
+      const raw = await run("workspaces", "--json");
+      expect(raw.code).toBe(0);
+      const [line] = raw.io.lines;
+      expect(line).not.toContain("pt_token");
+      expect(line).not.toContain("stub-bearer");
+      const rows = (JSON.parse(line!) as { workspaces: { name: string; machineState: string; reach: Record<string, unknown> }[] }).workspaces;
+      // The state the row turns on is there; the route it was read over is not.
+      expect(rows.map(w => [w.name, w.machineState, w.reach])).toEqual([["alpha", "running", { state: "reachable" }]]);
+
+      const listed = await run("workspaces");
+      expect(listed.io.lines[0]).not.toContain("pt_token");
+      expect(listed.io.lines[0]!.split("\n")[1]!.split(/ {2,}/)[3]).toBe("Running");
+    } finally {
+      await new Promise<void>(r => edge.close(() => r()));
+    }
   });
 
   it("new refuses in one line when there is no golden", async () => {

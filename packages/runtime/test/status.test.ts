@@ -887,6 +887,34 @@ describe("status zombie at rest", () => {
     }
   });
 
+  it("a listing that will not wait spends no exec probe on a machine dark past the window: it reads the word the poller settled, and the poller still flags it", async () => {
+    const { rt, backend } = testRuntime(opts);
+    await rt.workspaces.create({ golden: "snap_g", name: "dark" });
+    await slowMachine(backend);
+    // A probe that never returns: had the listing started one it would have cost the whole zombie timeout.
+    backend.execImpl = (_m, cmd) => (cmd === "echo ok" ? new Promise<never>(() => {}) : { exitCode: 0, stdout: "", stderr: "" });
+    const list = async (): Promise<WorkspaceStatus> => (await rt.status.list({ ...opts, reconcile: "on-failure", zombieProbe: false }))[0]!;
+
+    expect((await list()).reach.state).toBe("slow");
+    await new Promise(r => setTimeout(r, opts.zombieWindowMs + 20));
+    const past = await list();
+    expect(past.reach.state).toBe("slow");
+    expect(past.machineState).toBe("running");
+    expect(probes(backend)).toBe(0);
+
+    // The verdict is the poller's, and it still reaches it on the same machine.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const seen = statuses(rt);
+    const stop = rt.status.watch();
+    try {
+      await until(() => seen.some(s => s.reach.state === "zombie"), 5_000);
+      expect(probes(backend)).toBe(1);
+    } finally {
+      stop();
+      warn.mockRestore();
+    }
+  });
+
   it("a machine the provider says is paused gets no probe: the divergence already explains the slow reach", async () => {
     const { rt, backend } = testRuntime(opts);
     await rt.workspaces.create({ golden: "snap_g", name: "behind-our-back" });
