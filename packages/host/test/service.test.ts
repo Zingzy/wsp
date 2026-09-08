@@ -34,6 +34,20 @@ function quietIO(lines: string[] = [], errors: string[] = []): CliIO {
 
 const KEY = "slr_live_fake_service_key";
 
+/** This computer as wsp init's local road records it: kind local, no golden, running while a host is up. */
+const LOCAL_RECORD = {
+  id: "ws_1",
+  name: "mybox",
+  kind: "local",
+  machineId: "local",
+  phase: "running",
+  golden: "",
+  createdAt: "2026-09-08T00:00:00.000Z",
+  spec: {},
+  size: { cpu: 2, memMb: 4032 },
+  firstLife: false,
+};
+
 function planFor(at: ServiceAddress, over: Partial<ServicePlan> = {}): ServicePlan {
   return {
     ...at,
@@ -338,7 +352,10 @@ describe("wsp up --service, wsp down and wsp status", () => {
     writeFileSync(statePath, JSON.stringify({ goldens: { default: SEALED_GOLDEN } }));
     vi.stubEnv("HOME", home);
     vi.stubEnv("WSP_HOME", join(home, ".wsp"));
+    // Both keys are pinned off the computer running the suite: one exported in that shell is one of these tests'
+    // own layers, and the notes and refusals here are all about which layer holds a key.
     vi.stubEnv("SOLARI_API_KEY", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -384,6 +401,19 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(fake.ran).toEqual([]);
     expect(keyOnlyInThisShell({ env: { SOLARI_API_KEY: KEY }, cwd: home, home: join(home, ".wsp") })).toBeDefined();
     keyInFile();
+    expect(keyOnlyInThisShell({ env: {}, cwd: home, home: join(home, ".wsp") })).toBeUndefined();
+  });
+
+  it("keeps a keyless host up: nothing asks for a key, and no line says one went missing", async () => {
+    // What wsp init's local road leaves behind: no golden was sealed and this computer is the workspace.
+    writeFileSync(statePath, JSON.stringify({ workspaces: { ws_1: LOCAL_RECORD } }));
+    const fake = svc();
+    const lines: string[] = [];
+    const errors: string[] = [];
+    expect(await upServiceCommand(quietIO(lines, errors), opts, fake.deps)).toBe(0);
+    expect(errors).toEqual([]);
+    expect(lines[0]).toBe(`fake service fake.${serviceTag(statePath)} is loaded; it serves again at every login`);
+    // A key no shell holds is not a key a service loses: there is none, and this computer is what it serves.
     expect(keyOnlyInThisShell({ env: {}, cwd: home, home: join(home, ".wsp") })).toBeUndefined();
   });
 
