@@ -27,7 +27,7 @@ vi.mock("../src/components/ui/popover.js", () => ({
 
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
 import { ContextMenuHost } from "../src/actions/ContextMenuHost.js";
-import { FILE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { WorkspaceTerminalDrawer } from "../src/components/WorkspaceTerminalDrawer.js";
 import { useDiffRevealStore } from "../src/diffs/reveal.js";
@@ -279,6 +279,24 @@ describe("a workspace row's menu", () => {
     expect(sent.find(i => i.id === "open-terminal")?.accelerator).toBe("CommandOrControl+J");
     expect(menu()).toBeNull();
     await waitFor(() => expect(api.nap).toHaveBeenCalledWith("ws_a"));
+  });
+});
+
+describe("the Workspaces section's menu", () => {
+  it("holds the sidebar's body toggle alone, and choosing it turns the body into one workspace under its header", async () => {
+    await mountSidebar(fakeApi([API, OLD], [statusOf(API), statusOf(OLD)]), "api");
+    expect(document.querySelector("[data-space-header]")).toBeNull();
+    rightClick(screen.getByRole("button", { name: "Workspaces" }));
+    await screen.findByRole("menu");
+    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.spaces.title]);
+    fireEvent.click(item(SIDEBAR_MODE_WORDS.spaces.title));
+    await waitFor(() => expect(menu()).toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
+    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(0);
+    // The menu then names the way back, from the one registry entry: nothing spells the two words twice.
+    rightClick(screen.getByRole("button", { name: "Workspaces" }));
+    await screen.findByRole("menu");
+    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.list.title]);
   });
 });
 

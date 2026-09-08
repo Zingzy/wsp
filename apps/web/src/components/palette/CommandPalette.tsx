@@ -13,6 +13,7 @@ import { useSelectedWorkspaceId, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { requestNewWorkspace } from "../../shell/shellRequests.js";
+import { useSidebarMode } from "../../sidebar/sidebarMode.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
 import { useSidebar } from "../ui/sidebar.js";
 import {
@@ -41,6 +42,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const select = useStore(s => s.select);
   const selectedId = useSelectedWorkspaceId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
+  const [sidebarMode, setSidebarMode] = useSidebarMode();
   const verbs = useWorkspaceVerbs();
 
   useEffect(
@@ -67,12 +69,13 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       toggleRightPanel,
       nextWorkspace: () => goToAdjacentWorkspace(1),
       previousWorkspace: () => goToAdjacentWorkspace(-1),
+      setSidebarMode,
     }),
-    [select, toggleRightPanel, toggleSidebar],
+    [select, setSidebarMode, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, handlers, verbs }),
-    [api, handlers, projects, query, selectedId, verbs],
+    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, sidebarMode, handlers, verbs }),
+    [api, handlers, projects, query, selectedId, sidebarMode, verbs],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {

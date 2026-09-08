@@ -3,7 +3,7 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import { isBilling, outOfMemoryRowLine, workspaceState, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { MACHINE_OS_WORD, fmtSize, isBilling, outOfMemoryRowLine, workspaceState, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -13,10 +13,13 @@ import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.log
 export const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
 export const NEW_THREAD_TITLE = NEW_THREAD_SHORTCUT ? `New thread (${NEW_THREAD_SHORTCUT})` : "New thread";
 
+/** What the countdown reads while the runtime has no nap scheduled for a billing machine. */
+export const NO_NAP_SCHEDULED = "active";
+
 /** Countdown to the runtime's auto-nap while the machine bills; "active" when nothing is scheduled. */
 export function idleCountdownLabel(status: WorkspaceStatus | null, nowMs: number): string | null {
   if (!status || !isBilling(workspaceState({ phase: status.phase, machineState: status.machineState, reach: status.reach.state }))) return null;
-  if (status.idleAt === undefined) return "active";
+  if (status.idleAt === undefined) return NO_NAP_SCHEDULED;
   const remaining = status.idleAt - nowMs;
   if (remaining < 60_000) return "naps soon";
   return `naps in ${formatWorkingDurationLabel(remaining)}`;
@@ -60,7 +63,23 @@ export function accruedTodayLabel(accruedUsd: number | null): string | null {
   return accruedUsd === null ? null : `$${accruedUsd.toFixed(2)} today`;
 }
 
-const rateLabel = (rateUsdPerHour: number | null): string | null => (rateUsdPerHour === null ? null : `$${rateUsdPerHour.toFixed(3)}/hr`);
+/** The awake rate as every sidebar surface prints it, to the tenth of a cent; null before the meter's first tick. */
+export const rateLabel = (rateUsdPerHour: number | null): string | null => (rateUsdPerHour === null ? null : `$${rateUsdPerHour.toFixed(3)}/hr`);
+
+/** The Spaces header's lines under the name, in the ticket's order: what the machine is, what it costs, when it
+ * naps. The machine line names the size the status carries and the OS word; the cost line leads with the same
+ * honest zero the row's line does and adds the rate only while the machine bills; the nap line is there only when
+ * the runtime scheduled one, so a header never says "active" at a person. */
+export function spaceHeaderLines({ project, cost, nowMs }: Omit<WorkspaceMetaInput, "outOfMemory">): string[] {
+  const nap = idleCountdownLabel(project.status, nowMs);
+  return [
+    [project.status === null ? null : fmtSize(project.status.size), MACHINE_OS_WORD].filter((part): part is string => part !== null).join(" · "),
+    [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]
+      .filter((part): part is string => part !== null)
+      .join(" · "),
+    ...(nap === null || nap === NO_NAP_SCHEDULED ? [] : [nap]),
+  ];
+}
 
 /** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. */
 export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "indicator">): string {

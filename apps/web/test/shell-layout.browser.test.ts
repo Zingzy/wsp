@@ -18,7 +18,8 @@
 // workspace and thread rows keep one grammar: one height per row kind, the
 // state word in its slot at the right edge only off running, the meta line
 // in one order cut from the right, no import or export glyph, the thread
-// title up to a fixed time column. Vite serves test/shell to Playwright's
+// title up to a fixed time column, and the Spaces body draws one workspace
+// under its header with a dot per workspace at the sidebar's bottom. Vite serves test/shell to Playwright's
 // browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -564,6 +565,84 @@ describe.skipIf(skipped !== undefined)("the shell's chrome laid out in Chromium"
         const path = join(SHOTS_DIR, `sidebar-rows-${width ?? "default"}-${theme}.png`);
         await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
         console.info(`sidebar rows screenshot: ${path}`);
+      }
+    }
+  }, 120_000);
+
+  it("the Spaces body is one workspace under its header with a dot per workspace at the bottom, at three widths in both themes", async () => {
+    const readSpaces = () =>
+      page!.evaluate(() => {
+        const header = document.querySelector<HTMLElement>("[data-space-header]")!;
+        const name = header.querySelector<HTMLElement>("[data-space-name]")!;
+        const row = document.querySelector<HTMLElement>("[data-space-dots]")!;
+        const sidebar = document.querySelector<HTMLElement>("[data-slot=sidebar]")!.getBoundingClientRect();
+        const thread = document.querySelector<HTMLElement>("[data-row-id^='thread:']")!.getBoundingClientRect();
+        return {
+          workspaceRows: document.querySelectorAll("[data-row-id^='ws:']").length,
+          threads: Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='thread:']")).map(r => r.getAttribute("data-row-id")),
+          name: name.textContent ?? "",
+          nameX: name.getBoundingClientRect().x,
+          state: header.querySelector<HTMLElement>("[data-space-state]")!.textContent ?? "",
+          lines: Array.from(header.querySelectorAll<HTMLElement>("[data-space-meta]")).map(line => {
+            const b = line.getBoundingClientRect();
+            const style = getComputedStyle(line);
+            return { text: line.textContent ?? "", mono: /mono/i.test(style.fontFamily), size: style.fontSize, right: b.right, overflow: line.scrollWidth > line.clientWidth };
+          }),
+          headerBottom: header.getBoundingClientRect().bottom,
+          threadTop: thread.top,
+          dots: Array.from(row.querySelectorAll<HTMLElement>("[data-space-dot]")).map(dot => {
+            const b = dot.getBoundingClientRect();
+            return { label: dot.getAttribute("aria-label") ?? "", current: dot.hasAttribute("data-space-dot-current"), text: dot.textContent ?? "", x: b.x, right: b.right, y: b.y, width: b.width, height: b.height };
+          }),
+          rowBox: { y: row.getBoundingClientRect().y, bottom: row.getBoundingClientRect().bottom, right: row.getBoundingClientRect().right, height: row.getBoundingClientRect().height },
+          sidebar: { x: sidebar.x, right: sidebar.right, bottom: sidebar.bottom },
+        };
+      });
+    for (const width of [240, 300, 360]) {
+      for (const theme of ["dark", "light"] as const) {
+        await page!.goto(`${base}?theme=${theme}&spaces=1&sidebar=${width}`);
+        await page!.waitForSelector("[data-space-header]");
+        await page!.waitForFunction(w => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - w) < 1, width);
+        const read = await readSpaces();
+        console.info(`spaces at ${width} ${theme}: ${JSON.stringify(read)}`);
+        // One workspace on screen: no workspace row anywhere, and only that workspace's threads under the header.
+        expect(read.workspaceRows).toBe(0);
+        expect(read.threads).toEqual(["thread:s1", "thread:s2"]);
+        expect(read.name).toBe("api");
+        expect(read.state).toBe("");
+        expect(read.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB · Linux", "$0.29 today · $0.110/hr", "naps in 15m"]);
+        // The meta lines are the rows' own muted mono, and every one of them stays inside the sidebar at every width.
+        for (const line of read.lines) {
+          expect(line.mono).toBe(true);
+          expect(line.size).toBe("11px");
+          expect(line.right).toBeLessThanOrEqual(read.sidebar.right);
+          expect(line.overflow).toBe(false);
+        }
+        expect(read.headerBottom).toBeLessThanOrEqual(read.threadTop);
+        // One dot per workspace, on one line at the sidebar's bottom, inside its width.
+        expect(read.dots.map(dot => dot.label)).toEqual(["api", "web", "old"]);
+        expect(read.dots.map(dot => dot.current)).toEqual([true, false, false]);
+        expect(read.dots.map(dot => dot.text)).toEqual(["api", "", ""]);
+        expect(new Set(read.dots.map(dot => Math.round(dot.y))).size).toBe(1);
+        expect(new Set(read.dots.map(dot => Math.round(dot.height))).size).toBe(1);
+        const [current, ...rest] = read.dots as [(typeof read.dots)[number], ...(typeof read.dots)[number][]];
+        for (const dot of rest) expect(current.width).toBeGreaterThan(dot.width);
+        expect(read.rowBox.right).toBeLessThanOrEqual(read.sidebar.right);
+        expect(read.rowBox.bottom).toBeLessThanOrEqual(read.sidebar.bottom);
+        expect(read.rowBox.y).toBeGreaterThan(read.headerBottom);
+        expect(read.dots.at(-1)!.right).toBeLessThanOrEqual(read.sidebar.right);
+        // A click on another workspace's dot moves the body to it and the name onto that dot.
+        await page!.locator("[data-space-dot][aria-label=web]").click();
+        await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "web");
+        const moved = await readSpaces();
+        expect(moved.dots.map(dot => dot.text)).toEqual(["", "web", ""]);
+        expect(moved.state).toBe("Paused");
+        expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today"]);
+        await page!.locator("[data-space-dot][aria-label=api]").click();
+        await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "api");
+        const path = join(SHOTS_DIR, `sidebar-spaces-${width}-${theme}.png`);
+        await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+        console.info(`sidebar spaces screenshot: ${path}`);
       }
     }
   }, 120_000);
