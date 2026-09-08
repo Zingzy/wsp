@@ -2,6 +2,8 @@
 
 Your setup, on cloud machines, for coding agents.
 
+The site is [wspx.vercel.app](https://wspx.vercel.app). The docs are [wsp.apidocumentation.com](https://wsp.apidocumentation.com).
+
 wsp reads your computer once, builds a machine that has what it has (your agents, your tools, your sign-ins), and forks workspaces from it in about twenty seconds. Coding agents work inside those workspaces as threads. You read and answer them from the app, the command line, or another agent over MCP.
 
 ![The wsp app: workspaces and their threads on the left, a thread and its composer in the center, a terminal and a browser tab on the machine to the right](docs/screenshots/app.png)

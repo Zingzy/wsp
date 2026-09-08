@@ -1,0 +1,55 @@
+# Troubleshooting
+
+Every refusal in wsp is one line on stderr that says what happened and, where there is one, what to run. This page collects the lines people meet most and what each one means.
+
+## Starting
+
+| line | meaning | do |
+| --- | --- | --- |
+| `no wsp host is serving <path>; run wsp up first` | nothing is serving the state file | `wsp up`, or the desktop app |
+| `no golden yet; run wsp init` | the key is there and the image is not | `wsp init` |
+| `Solari API key: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.` | no key, and no terminal to ask on | write `SOLARI_API_KEY=<key>` into `~/.wsp/.env` |
+| `EADDRINUSE` naming 4400 or 4410 | something else holds a port | `wsp up --port 4401 --ws-port 4411`, and use the URL it prints |
+| `another wsp host (pid <n>) is already serving <path> on port <port>` | one of yours is up already | use that one; `wsp status` shows it |
+| a refusal naming a host of another version | the host and the command line are different versions | `wsp down`, then `wsp up` |
+
+`wsp status` prints whether a host is serving this state file, its ports, its token file and what keeps it there, with a non-zero exit code when none does.
+
+## Machines
+
+| line | meaning | do |
+| --- | --- | --- |
+| a refusal naming the account's machine cap | two machines are already up; the builder stays up ten minutes after a seal and counts as one | `wsp pause <workspace>` on one you are not using |
+| a refusal listing sizes and rates | `--size` named one the provider does not offer | pick one from the list, `2x4` or `2x8` |
+| a pause or a wake that does not return | the provider side is stuck | wait, then try once more; do not retry in a loop |
+| `snapshot` refused | the machine is not a running first-life machine with a project imported | snapshot a fresh workspace after an import, not a woken one |
+| `import` refused, workspace paused | the machine is napping | `wsp wake <workspace>` first |
+| `forget` refused | the machine still exists at the provider | `wsp delete` deletes it; `forget` is for a machine the provider already lost |
+
+## Threads
+
+| line | meaning | do |
+| --- | --- | --- |
+| `thread <id> replied, still working; wait for its turn to finish before sending` | the reply is in but the agent process has not exited | wait and send again; do not loop |
+| `previous turn was cut; resuming` at the top of a reply | the last turn ended on a deadline, a host restart or a nap | restate what matters; the agent may be missing its last steps |
+| a reply that reads failed with `ended with 1 background task running` | the agent left a command running in the background | brief agents to run every command in the foreground and wait for it |
+| a turn that ends after ten quiet minutes | nothing printed for 10 minutes | long steps must print; a build that is silent for ten minutes ends the turn |
+| a turn that ends at six hours | the hard cap | split the work |
+| `thread <id> not running` on `stop` | the turn had already ended | nothing; it is not an error |
+| a relative `--cwd` refused | paths on the machine are absolute | give the absolute path on the machine |
+
+## The machine itself
+
+- The machine runs as root with home `/root` and no login shell, so `bash -c`, never `bash -lc`.
+- A 2 vCPU, 4 GB machine runs one build or one agent at a time. Two starve the daemon and the app reads the machine as not answering.
+- The root disk is 20 GB; wsp keeps 2 GB free and skips tool installs that would go under it.
+- Docker does not run on the current provider's guests. Services install natively.
+
+## Sign-ins
+
+- A sign-in page that does not open on your computer: the tool on the machine reached neither the browser shim nor the port forward. The retry offers the tool's no-browser variant, a device code or a paste code.
+- `gh auth status` failing on the machine means the golden did not sign in to GitHub during init. Export instead of pushing, or rebuild the golden with the sign-in.
+
+## Asking for help
+
+File it at [github.com/Zingzy/wsp/issues](https://github.com/Zingzy/wsp/issues). Say what you ran, what you saw, and the output of `wsp --version`. Never paste a key.

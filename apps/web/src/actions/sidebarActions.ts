@@ -35,6 +35,7 @@ export const sidebarActions: ReadonlyArray<ActionEntry<SidebarTarget, SidebarVer
   {
     id: SIDEBAR_MODE_ACTION,
     group: "view",
+    labs: true,
     icon: target => MODE_ICON[otherMode(target.mode)],
     searchTerms: ["spaces", "sidebar mode", "one workspace at a time", "workspace list"],
     title: target => SIDEBAR_MODE_WORDS[otherMode(target.mode)].title,

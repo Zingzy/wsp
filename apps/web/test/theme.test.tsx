@@ -11,7 +11,7 @@ import { SYSTEM_DARK_QUERY, applyTheme, useThemeEffect } from "../src/settings/t
 const isDark = () => document.documentElement.classList.contains("dark");
 
 beforeEach(() => {
-  useStore.setState({ preferences: DEFAULT_PREFERENCES });
+  useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } });
   document.documentElement.classList.add("dark");
 });
 
@@ -49,26 +49,26 @@ describe("the theme", () => {
       for (const fn of listeners) fn();
     });
     expect(isDark()).toBe(true);
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "light" } }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, theme: "light" } }));
     expect(isDark()).toBe(false);
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "dark" } }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, theme: "dark" } }));
     expect(isDark()).toBe(true);
   });
 
   it("a load paints the theme this browser last applied before the host answers, and the record wins the moment it arrives", async () => {
     // A fresh boot: the store and the theme rule read again with the cache in place, the html on the stylesheet's dark default.
-    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "light" }));
+    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "light", labs: true }));
     vi.resetModules();
     const { useStore: bootStore } = await import("../src/protocol/store.js");
     const { useThemeEffect: bootEffect } = await import("../src/settings/theme.js");
-    expect(bootStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, theme: "light" });
+    expect(bootStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, labs: true, theme: "light" });
     expect(isDark()).toBe(true);
     renderHook(() => bootEffect());
     expect(isDark()).toBe(false);
     // The host's record says dark: it paints and the cache follows it, never the other way round.
-    act(() => bootStore.getState().applyEvent({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, theme: "dark" } }));
+    act(() => bootStore.getState().applyEvent({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, labs: true, theme: "dark" } }));
     expect(isDark()).toBe(true);
-    expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "dark", sidebarMode: "list" });
+    expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "dark", sidebarMode: "list", labs: true });
     window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "sepia" }));
     vi.resetModules();
     const { useStore: cleanStore } = await import("../src/protocol/store.js");
@@ -80,7 +80,7 @@ describe("the theme", () => {
     window.wsp = { setTheme };
     renderHook(() => useThemeEffect());
     expect(setTheme).toHaveBeenLastCalledWith("system");
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "light" } }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, theme: "light" } }));
     expect(setTheme).toHaveBeenLastCalledWith("light");
     expect(setTheme).toHaveBeenCalledTimes(2);
   });

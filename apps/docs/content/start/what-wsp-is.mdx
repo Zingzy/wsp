@@ -1,0 +1,34 @@
+import { Image } from 'scalar-mdx-components'
+
+# What wsp is
+
+wsp puts your setup on cloud machines, for coding agents.
+
+It reads your computer once, builds a machine image that has what your computer has, your agents, the tools they run, your sign-ins, and forks workspaces from that image in about twenty seconds. Coding agents work inside those workspaces as threads. You read and answer them from the app, the command line, or from another agent over MCP.
+
+<Image src="/app.png" alt="The wsp app: workspaces and their threads on the left, a thread and its composer in the center, a terminal and a browser tab on the machine to the right" caption="Two workspaces and their threads on the left. A thread in the middle. The machine's shell and a port it serves, opened as a tab, on the right." />
+
+## In one paragraph
+
+Run `wsp init` once. It shows six screens, each already ticked from what this computer runs, and seals a golden image on the machine provider. From then on `wsp new` or `wsp fork` gives you a machine with your setup on it, `wsp thread new` opens a Claude Code or Codex thread on that machine with a task, and `wsp send` continues it. The host runs on your computer and talks to the provider with your key. There is no hosted service in between, no account with anyone but the provider, and nothing of yours on a server that is not yours or the provider's.
+
+## What it does
+
+- **One image of your machine.** The agents you use, the tools they run, your logins, sealed once. Rebuild it when your setup changes.
+- **Forks in seconds.** Every workspace is a fork of that image with your setup already there.
+- **Agents as threads.** Claude Code and Codex run headless on the machine. Start a thread with a task, read its reply, send the next message, stop it. Threads get real titles, and renaming one renames it in the agent's own session list too.
+- **Agents starting agents.** An agent on your computer drives wsp over MCP: it forks a workspace, opens a thread there, starts a second thread beside it, reads both back. Everything it does shows in your sidebar.
+- **The machine, in the app.** A terminal that uses your Ghostty config, the ports it listens on as browser tabs, its processes, its files, its cost and state.
+- **Sign in on the machine, from your own browser.** When a tool on the machine asks for a browser, wsp opens the page on your computer and tunnels the callback back to the machine.
+- **Naps and wakes.** An idle workspace naps with its RAM intact and wakes on the next message. A machine the provider loses is rebuilt from the image with your files back.
+- **Your keys never leave your computer.** wsp runs on your computer and talks to the provider with your key.
+
+## Where to go next
+
+- [Install](/start/install). One command, then the app or the command line.
+- [Your first workspace](/start/first-workspace). Build the image, open a thread, read the reply.
+- [The model](/start/the-model). Goldens, workspaces, threads and forks, and what each one costs.
+
+## What it is not
+
+wsp is not a hosted agent service and has no server of its own. It is not an editor; the agent runs headless and you read threads. It is not a container platform; each workspace is a full machine with a root disk. It runs on macOS and Linux with Node 22 or newer, and today the machines come from one provider, Solari, on your own account.

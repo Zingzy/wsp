@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_VERSION } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -135,6 +135,7 @@ beforeEach(() => {
   provideDaemonHello("ws_a", null);
   document.documentElement.classList.add("dark");
   useStore.setState({
+    preferences: { ...DEFAULT_PREFERENCES, labs: true },
     api: null,
     capabilities: null,
     workspaces: [],

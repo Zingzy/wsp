@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, titleLine } from "./format.js";
+import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTint } from "./workspace-look.js";
 
@@ -24,10 +25,15 @@ export const HTTP_URL_MAX = 8192;
 export const EXEC_BODY_MAX = 16 * 1024;
 /** How much of a detached command's output one poll exec reads; a full read is followed by another at once. */
 export const EXEC_CHUNK_BYTES = 262_144;
-/** How long a turn's stream may go without a byte before the runtime cuts it. A turn that is working writes a delta,
- * a tool event or a log line well inside this, so it is the one rule that ends a turn the harness left hanging: a
- * fixed wall clock cut a build that was still working at 15 minutes on 2026-09-06. */
+/** How long a turn may do nothing at all before the runtime cuts it: no byte on its stream, no message from the
+ * person, and no work in the process tree it started. It is the one rule that ends a turn the harness left hanging:
+ * a fixed wall clock cut a build that was still working at 15 minutes on 2026-09-06. */
 export const TURN_IDLE_MS = 10 * 60_000;
+/** How hard the process tree a turn started has to be working for the turn to count as alive while it prints
+ * nothing: ticks per second, where a tick is 10 ms of CPU or a megabyte of I/O anything the turn started moved. Five
+ * percent of one core clears it, which a vitest batch or a packager does many times over; a harness process waking
+ * on its own timers stays under it, so a turn nothing is working on is still cut at TURN_IDLE_MS. */
+export const TURN_WORK_TICKS_PER_S = 5;
 /** How long a permission prompt relayed into the chat waits for an answer before the runtime denies it in the
  * person's place. Well inside TURN_IDLE_MS: a waiting prompt writes no byte, so a wait past the idle cut would take
  * the turn with it and the thread would read as hung rather than as unanswered. */
@@ -38,6 +44,14 @@ export const PERMISSION_WAIT_MS = 5 * 60_000;
 export const THREAD_ARCHIVE_MS = 24 * 60 * 60_000;
 /** The longest one turn may run however much it prints, a safety cap only; a per-workspace setting is a follow-up. */
 export const TURN_WALL_MS = 6 * 60 * 60_000;
+/** How long a harness gets to exit on its own after the result its turn ended on, before the runtime ends it and its
+ * tree. Long enough for the harness to flush its own session store and go, short enough that a machine running turns
+ * all day never carries more than the one it is on: seven finished turns' processes were found alive on one guest,
+ * the oldest fourteen hours past its reply, and the box read load 25 while idle (2026-09-08). */
+export const RUN_EXIT_MS = 10_000;
+/** How long a turn's process gets to go on the graceful signal before its group is killed, on either road: what the
+ * guest's reap waits between its TERM and its KILL, and what a host gives the turns on this computer as it stops. */
+export const RUN_STOP_MS = 2_000;
 /** The close code a host sends the clients on its own socket as it stops: the socket did not break under them, the
  * host let it go, so a command waiting on a turn says the host is restarting rather than that the turn failed. */
 export const HOST_STOPPING_CLOSE = 4001;
@@ -1013,18 +1027,26 @@ export const Preferences = z.object({
   sidebarWidth: z.number().int().positive().optional(),
   terminalSize: TerminalSizeSource,
   terminalZoom: z.record(z.string(), z.number().int()),
+  /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
+   * every read, so no client sets it and nothing a state file holds can turn it on. */
+  labs: z.boolean(),
 });
 export type Preferences = z.infer<typeof Preferences>;
 
-/** What preferences.set takes: any of the record's fields; a null sidebarWidth clears it back to the default, and
- * terminalZoom names only the workspaces it moves, a null entry dropping that workspace's zoom. */
-export const PreferencesPatch = Preferences.partial().extend({
+/** The one road that turns labs on: this variable in the host's environment, read once when the runtime starts. */
+export const LABS_ENV = "WSP_LABS";
+export const labsFromEnv = (env: Record<string, string | undefined>): boolean => env[LABS_ENV] === "1";
+
+/** What preferences.set takes: any of the record's fields but labs, which is the host's to say; a null sidebarWidth
+ * clears it back to the default, and terminalZoom names only the workspaces it moves, a null entry dropping that
+ * workspace's zoom. */
+export const PreferencesPatch = Preferences.omit({ labs: true }).partial().extend({
   sidebarWidth: z.number().int().positive().nullable().optional(),
   terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
 });
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {} };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1046,6 +1068,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     sidebarMode: patch.sidebarMode ?? current.sidebarMode,
     terminalSize: patch.terminalSize ?? current.terminalSize,
     terminalZoom,
+    labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
   };
 }
@@ -1749,8 +1772,9 @@ export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
 
 /** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it
- * when a project lands, the daemon reads it on every files and diff op and browses those folders beside its home. */
-export const DAEMON_ROOTS_PATH = "/root/.wsp/roots";
+ * when a project lands, the daemon reads it on every files and diff op and browses those folders beside its home.
+ * The guest's home is /root, so this is rootsPathIn answered there; the value is hashed into DAEMON_CONTENT_SHA. */
+export const DAEMON_ROOTS_PATH = rootsPathIn("/root");
 
 /** The version a hello announces, 1 when it carries none. */
 export function daemonVersionOf(hello: { version?: number }): number {
@@ -2205,9 +2229,9 @@ export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { LOOK_PARTS, WORKSPACE_GLYPHS, WORKSPACE_TINTS, WorkspaceGlyph, WorkspaceLook, WorkspaceTint, type LookPart } from "./workspace-look.js";
-export { underProject } from "./project-path.js";
+export { rootsPathIn, underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
-export { catalogRefused, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
+export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

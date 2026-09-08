@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
+import { rootsPathIn } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { connectDaemonLink, type DaemonLink } from "../src/terminal/daemon-link.js";
 import { DaemonOpError, fsList, fsRead, gitDiff, gitStatus } from "../src/terminal/daemon-fs.js";
@@ -114,7 +115,8 @@ describe("daemon-fs over a real daemon link", () => {
     git("commit", "-q", "-m", "init");
     writeFileSync(join(repo, "a.txt"), "two\n");
 
-    daemon = await startDaemon({ port: 0, token: TOKEN, root, portsSource: async () => [] });
+    // Its roots file goes beside its own root: the option's default names the guest's /root, another user's folder here.
+    daemon = await startDaemon({ port: 0, token: TOKEN, root, rootsPath: rootsPathIn(root), portsSource: async () => [] });
     const statuses: string[] = [];
     link = connectDaemonLink({
       reach: async () => ({ url: `http://127.0.0.1:${daemon!.port}/`, daemonToken: TOKEN }),

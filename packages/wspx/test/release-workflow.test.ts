@@ -17,11 +17,16 @@ describe("the release workflow", () => {
     expect(workflow).not.toContain("schedule:");
   });
 
-  it("leaves npm to the person who holds the one time password", () => {
-    expect(workflow).not.toContain("npm publish");
-    expect(workflow).not.toContain("pnpm release");
+  it("publishes the command line package from the runner through trusted publishing, and holds no npm token", () => {
+    expect(workflow).toContain("npm publish --provenance --access public");
+    expect(workflow).toContain("id-token: write");
     expect(workflow).not.toContain("NPM_TOKEN");
+    // setup-node with a registry-url writes an .npmrc that reads NODE_AUTH_TOKEN, so that name is the other road a
+    // credential could arrive by and neither is allowed to appear.
+    expect(workflow).not.toContain("NODE_AUTH_TOKEN");
+    expect(workflow).not.toContain("pnpm release");
     expect(workflow).toContain("--draft");
+    expect(workflow).toContain("--draft=false");
   });
 
   it("asks the scripts in the repo for the version and the notes", () => {
@@ -32,7 +37,11 @@ describe("the release workflow", () => {
   });
 
   it("builds each platform through the script apps/desktop owns", () => {
-    for (const step of ["run build:mac", "run build:linux", "smoke"]) expect(workflow).toContain(`pnpm --filter @wsp/desktop ${step}`);
+    for (const step of ["run build:mac", "run build:linux"]) expect(workflow).toContain(`pnpm --filter @wsp/desktop ${step}`);
+    // The screen smoke measures a real Mac's window and fails on a hosted runner's display; the packaged trees are
+    // checked there instead, and the smoke stays in the merge gate on a Mac.
+    expect(workflow).not.toContain("pnpm --filter @wsp/desktop smoke");
+    expect(workflow).toContain("test/pty-native.test.ts");
     expect(desktopScripts["build:mac"]).toContain("--mac --arm64 --x64");
     expect(desktopScripts["build:linux"]).toContain("--linux");
     // node-pty's native module only exists for the machine that installed it, so the plain build packages the machine

@@ -1,0 +1,57 @@
+import { Callout } from 'scalar-mdx-components'
+
+# The model
+
+Eight words carry the whole of wsp. This page defines them the way the code does, so the rest of the docs can use them without stopping.
+
+## Golden
+
+The golden is one sealed disk image plus a manifest of versions, v1, v2 and so on. Its head is what `wsp new` forks. It is built once by `wsp init` from what your computer runs, and rebuilt or updated when your setup changes. There is one golden per setup and its name is always `default`.
+
+A version records what is on the image and what is not: the tools that were skipped or failed and why, the rows a later recipe retired, the shell noise the login shell prints, the base tool versions, and the smoke command with its exit code. A fork boots from the version's template when one is recorded, else from its snapshot. The template is the durable form; a snapshot alone is marked volatile, because the provider can lose its snapshot store.
+
+## Builder and seal
+
+The builder is the live machine the golden is built on. Between boot and seal a person can sit on its screen for as long as they like, as long as nobody pauses it, because a machine that was ever resumed cannot be snapshotted cleanly on the current provider. That is the first-life rule, and it is why a builder that goes idle is killed rather than paused: killing loses the same work but fails loud and free.
+
+The seal takes the snapshot, kills the builder, promotes the snapshot to a template, boots a fork from that template and runs a smoke command on it, checks that the browser shim is present, kills the fork, and appends the version. A sealed version is proven by the fork, not assumed from the snapshot. After a seal on a run that goes on to serve, the builder is kept up for ten minutes for one more change.
+
+## Workspace
+
+A workspace is a machine forked from the golden, with your agents, tools and sign-ins already on it, plus the record wsp keeps about it on your computer. `wsp new` forks the golden's head. `wsp fork` forks a sibling from another workspace's golden version, a new machine and not a copy of its live disk. A workspace has a name, unique on your computer, and a machine id at the provider.
+
+A workspace has a phase: running, pausing, paused, waking, unreachable or gone. It naps on its own after twenty minutes with nobody, no thread and no command touching it, and wakes on the next thread, send or exec.
+
+## Project golden
+
+A project golden is a snapshot of a running workspace with a project imported, taken with `wsp snapshot`. `wsp new <name> --from <project golden>` starts a machine with the project and its installed dependencies already there, so nothing installs the same dependencies twice. It can only be taken from a first-life machine, so take it on a fresh workspace after the import, not on one that has napped.
+
+## Thread
+
+A thread is a conversation with one agent on one machine. It has an opening turn with a task, and every later turn is a message sent into it. A thread keeps the agent's own session, so a send resumes where the agent left off. It has a title, first the opening words, then the name the agent gives it a few seconds in, or the name a person gave it, which is never replaced.
+
+Two agents run threads today, Claude Code and Codex. A thread is opened from the app, the command line or an MCP tool, and every one of them shows in the sidebar marked with who opened it: you, cli or agent.
+
+## Turn
+
+A turn is one run of the agent process. It starts with a message and ends when the process exits.
+
+<Callout type="warning">
+  A turn ends when the agent process exits, not at its reply. The thread reads running until then. An agent that leaves a command running after it replied is still working, and a send into it is refused until it finishes.
+</Callout>
+
+A thread runs one turn at a time, because two processes on one agent session corrupt its transcript. A message into a running turn either joins it, when the agent can take input mid-turn, as Claude Code can, or waits behind it, as with Codex. A turn is cut after ten minutes with no output and at six hours in all.
+
+## Host
+
+The host is the process on your computer that owns everything: the machines, the keys, the app it serves at `http://127.0.0.1:4400`, and the runtime behind it. `wsp up` starts it, `wsp up --service` keeps it up across logins, and the desktop app is the same host in a window. The command line and the MCP server are thin clients of the host, which is why what an agent does through them shows in your sidebar.
+
+The host talks to the provider with your key and never through a server of wsp's. There is no account with wsp and no control plane.
+
+## Daemon
+
+Every workspace runs a small helper the host deploys, listening on port 7070 inside the machine. It is the only way anything outside reaches in: terminals, files, processes, the sign-in relay, the port forwards. A browser reaches it through a signed preview URL from the provider, and the daemon checks its own token on top, sent in the first frame of the connection and never in a URL. The app never calls it a daemon, since you did not install it and cannot run it; it says "the helper".
+
+## Provider
+
+The provider rents the machines. Today that is Solari, on your own account with your own key. wsp talks to a provider through one interface and reads a list of capability flags rather than assuming what it can do, so the app and the command line degrade on what a provider lacks instead of pretending. See [Providers and capabilities](/reference/providers).

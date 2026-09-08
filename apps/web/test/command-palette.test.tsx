@@ -133,7 +133,7 @@ configure({ asyncUtilTimeout: 10_000 });
 beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
 });
@@ -213,6 +213,7 @@ describe("command palette", () => {
   });
 
   it("the Settings row and its chord open the settings page, whose row names the chord; a workspace row closes it again", async () => {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } });
     await mountShell();
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
@@ -535,7 +536,7 @@ describe("default shortcuts", () => {
       spaceArrow("ArrowLeft");
       spaceArrowUp();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
-      act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } }));
+      act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } }));
       spaceArrow("ArrowRight");
       spaceArrowUp();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
@@ -549,7 +550,7 @@ describe("default shortcuts", () => {
   });
 
   it("in Spaces the Tab pair walks the threads of the workspace on screen, wrapping, and lands the caret", async () => {
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } }));
     await mountShell([
       session("s1", "ws_a", "fix the port list", { threadId: "thr_1", status: "running" }),
       session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" }),
@@ -593,7 +594,7 @@ describe("default shortcuts", () => {
   });
 
   it("a space with one thread the walk can land on has nowhere to go, and the palette's rows say so", async () => {
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } }));
     await mountShell([session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "no id on this row")]);
     const restore = asDesktopShell();
     try {
@@ -622,7 +623,7 @@ describe("default shortcuts", () => {
       expect(chordOn("Next workspace")).toBe("⌃Tab");
       mod("k");
       await waitFor(() => expect(palette()).toBeNull());
-      act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } }));
+      act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } }));
       mod("k");
       await waitFor(() => expect(palette()).not.toBeNull());
       expect(chordOn("Next thread")).toBe("⌃Tab");
@@ -736,5 +737,15 @@ describe("typing contexts", () => {
       box.remove();
       restore();
     }
+  });
+
+  it("with labs off the palette offers no Settings row and no Spaces row", async () => {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+    await mountShell();
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    const titles = Array.from(palette()!.querySelectorAll("[data-slot=command-item] span")).map(el => el.textContent ?? "");
+    expect(titles.some(t => t === "Settings" || /Spaces/.test(t))).toBe(false);
+    expect(titles.length).toBeGreaterThan(0);
   });
 });

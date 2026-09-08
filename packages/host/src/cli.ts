@@ -14,6 +14,7 @@ import {
   HARNESS_ADAPTERS,
   SolariBackend,
   createRuntime,
+  endLocalRuns,
   goldenHead,
   hostIdentity,
   jsonFileStore,
@@ -32,7 +33,7 @@ import { claudeEnvs, deployDaemon, doctor } from "./doctor.js";
 import { keychainReader } from "./init-import.js";
 import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
-import { runInit, type InitIO } from "./init.js";
+import { exitCodeOf, runInit, type InitIO } from "./init.js";
 import { FIRST_WORKSPACE } from "./init-first.js";
 import { recipePath } from "./init-recipe.js";
 import { historyCache } from "./recipe-file.js";
@@ -416,6 +417,9 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
       shutting = true;
       const started = daemon;
       daemon = undefined;
+      // A turn here leads a process group of its own, so it no longer goes with the terminal's Ctrl-C: this host is
+      // the only thing that knows where its turns are, and nothing can re-open one once it is gone.
+      await endLocalRuns();
       await started?.then(d => d.close(), () => {});
     },
   };
@@ -470,21 +474,40 @@ function collectThisComputer(onRung: (rung: Rung, rows: number) => void): Promis
   return collect(nodeHost(), { onRung });
 }
 
-/** Ctrl-C and a service stop both end with the lock removed. `once` leaves a
- * second signal to node's default exit, so a close that hangs cannot trap the terminal. */
-function stopOnSignals(handle: HostHandle, io: CliIO): void {
+/** The signals a serving host stops on. It is the only owner of them: nothing under it registers a handler of its
+ * own, so no other listener can end this process while a close runs. */
+const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+/** What a stop needs of the process it is ending: where signals arrive and how it exits. The default is this
+ * process; a test hands in its own, since a real signal would take the test runner with it. */
+export interface StopProcess {
+  on(signal: (typeof STOP_SIGNALS)[number], listener: () => void): unknown;
+  exit(code: number): void;
+}
+
+/** Every way a host is told to go ends the same: the lock removed and this computer's turns ended. A turn leads a
+ * process group of its own, so no signal arriving here reaches it and the close is what ends it, through the one
+ * ender the wiring's own close calls. A hangup is one of these signals for that reason, and none of them is left to
+ * node's default exit, which runs no close at all: a second signal, with a close still in flight, ends the turns
+ * itself without their stop grace and exits at once, so a close that hangs can neither trap the terminal nor leave
+ * a harness running on this computer. */
+export function stopOnSignals(handle: HostHandle, io: CliIO, self: StopProcess = process): void {
   let stopping: Promise<void> | undefined;
-  const stop = (): void => {
-    stopping ??= handle.close().then(
-      () => process.exit(0),
+  const stop = (sig: (typeof STOP_SIGNALS)[number]): void => {
+    if (stopping !== undefined) {
+      void endLocalRuns(0).then(() => self.exit(exitCodeOf(sig)));
+      return;
+    }
+    stopping = handle.close().then(
+      () => self.exit(0),
       (e: unknown) => {
         io.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`);
-        process.exit(1);
+        // A close that failed may not have reached the turns; where it did, the set is empty and this ends nothing.
+        void endLocalRuns(0).then(() => self.exit(1));
       },
     );
   };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
+  for (const sig of STOP_SIGNALS) self.on(sig, () => stop(sig));
 }
 
 /** A folder a `~/`-relative answer or a flag named: where it is, and whether there is one there. The one place both

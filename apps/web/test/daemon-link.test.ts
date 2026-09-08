@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
-import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
+import { rootsPathIn, type DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { connectDaemonLink, daemonSocketUrl, DaemonRequestError, type DaemonLink } from "../src/terminal/daemon-link.js";
 import { startTcpProxy, type TcpProxy } from "../../../packages/runtime/test/tcp-proxy.js";
@@ -28,7 +28,9 @@ let inboxDir: string | undefined;
 
 async function startTestDaemon(): Promise<DaemonHandle> {
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-link-inbox-"));
-  return startDaemon({ port: 0, token: TOKEN, inboxDir, portsSource: async () => [], portsIntervalMs: 1000 });
+  // Its roots file goes in a folder this test owns: the option's default names the guest's /root, another user's folder here.
+  const rootsPath = rootsPathIn(inboxDir);
+  return startDaemon({ port: 0, token: TOKEN, inboxDir, rootsPath, portsSource: async () => [], portsIntervalMs: 1000 });
 }
 
 afterEach(async () => {

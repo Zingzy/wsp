@@ -4,23 +4,14 @@
 // text column is centred. Vite serves test/creation to Playwright's browser, so
 // like the glyph test it runs only when asked for (WSP_RENDER=1) and skips
 // without Playwright's Chromium on the machine.
-import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type Browser, type Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startVite, stopRender, type ViteChild } from "./vite-child";
+import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const browserPath = ((): string | undefined => {
-  try {
-    return chromium.executablePath();
-  } catch {
-    return undefined;
-  }
-})();
-const hasBrowser = browserPath !== undefined && existsSync(browserPath);
-const skipped = process.env["WSP_RENDER"] !== "1" ? "WSP_RENDER is not 1" : !hasBrowser ? "Playwright's Chromium is not installed" : undefined;
 
 interface Box {
   x: number;
@@ -29,9 +20,9 @@ interface Box {
   height: number;
 }
 
-if (skipped !== undefined) console.info(`creation layout render test skipped: ${skipped}`);
+if (renderSkipped !== undefined) console.info(`creation layout render test skipped: ${renderSkipped}`);
 
-describe.skipIf(skipped !== undefined)("the creation screen laid out in Chromium", () => {
+describe.skipIf(renderSkipped !== undefined)("the creation screen laid out in Chromium", () => {
   let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
@@ -40,7 +31,7 @@ describe.skipIf(skipped !== undefined)("the creation screen laid out in Chromium
   beforeAll(async () => {
     vite = await startVite(WEB_DIR, "/test/creation/index.html");
     base = `${vite.base}/test/creation/index.html`;
-    browser = await chromium.launch();
+    browser = await launchRender();
     page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
   }, 60_000);
 

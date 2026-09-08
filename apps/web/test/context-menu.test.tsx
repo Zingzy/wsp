@@ -154,7 +154,7 @@ beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
   useDiffRevealStore.setState({ pendingByWorkspaceId: {} });
@@ -185,7 +185,7 @@ describe("the space header's menu", () => {
 
     // The name reads twice in Spaces, on the header and on its own dot, so the shared mount's one-name wait
     // cannot be used; the header arriving is what says the body is up.
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
     useStore.getState().bind(fakeApi([API], [statusOf(API)]));
     render(
       <SidebarProvider defaultOpen>
@@ -640,7 +640,7 @@ describe("a workspace row's name box", () => {
   /** The Spaces body draws no workspace row, and the current name reads twice (header and dot), so the shared
    * mount's one-name wait cannot be used: the header arriving is what says the body is up. */
   const mountSpaces = async (api: FakeApi): Promise<void> => {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
     useStore.getState().bind(api);
     render(
       <SidebarProvider defaultOpen>
@@ -880,4 +880,14 @@ describe("the terminal surface's menu", () => {
     expect(screen.getByLabelText(/^New Terminal/)).toBeDefined();
     expect(screen.getByLabelText(/^Split Terminal Horizontally/)).toBeDefined();
   }, 20_000);
+
+  it("with labs off the row's menu offers no Colour and no Icon, and the Workspaces section's menu offers no body toggle", async () => {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+    await mountSidebar(fakeApi([API], [statusOf(API)]), "api");
+    fireEvent.contextMenu(screen.getByText("api"));
+    const menu = await screen.findByRole("menu");
+    const words = within(menu).getAllByRole("menuitem").map(item => item.textContent ?? "");
+    expect(words.some(w => /colour|icon/i.test(w))).toBe(false);
+    expect(words.length).toBeGreaterThan(0);
+  });
 });

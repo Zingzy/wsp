@@ -1,0 +1,154 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* The landing page's type and colors, on Scalar's variables. Redaction (MCKL, OFL) and Schibsted Grotesk (OFL) ship in assets/fonts. */
+@font-face {
+  font-family: "Schibsted Grotesk";
+  src: url(/fonts/schibsted-grotesk-latin-wght-normal.woff2) format("woff2");
+  font-weight: 400 900;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  src: url(/fonts/schibsted-grotesk-latin-ext-wght-normal.woff2) format("woff2");
+  font-weight: 400 900;
+  font-display: swap;
+  unicode-range: U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Redaction 35";
+  src: url(/fonts/Redaction_35-Bold.woff2) format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Redaction 20";
+  src: url(/fonts/Redaction_20-Bold.woff2) format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  --scalar-sidebar-padding: 20px;
+  --scalar-font: "Schibsted Grotesk", system-ui, sans-serif;
+  --scalar-font-code: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+.dark-mode {
+  --scalar-button-1: #f5f6f8;
+  --scalar-button-1-color: #0b0c10;
+  --hljs-color: rgba(255, 255, 255, 0.92);
+  --hljs-comment-quote: rgba(255, 255, 255, 0.44);
+  --hljs-keyword-formula: #c9a7f5;
+  --hljs-section-name-deletion-subst: #f59a9a;
+  --hljs-literal: #e8c46a;
+  --hljs-string-regexp-meta: #8fc9f5;
+  --hljs-attr-variable-type-selector: #e8c46a;
+  --hljs-bullet-link-title: #8fc9f5;
+  --hljs-built: #62d99a;
+  --wsp-hl-cmd: #8fc9f5;
+  --wsp-hl-flag: #c9a7f5;
+  --wsp-hl-ph: #e8c46a;
+  --scalar-color-1: rgba(255, 255, 255, 0.92);
+  --scalar-color-2: rgba(255, 255, 255, 0.66);
+  --scalar-color-3: rgba(255, 255, 255, 0.44);
+  --scalar-color-accent: #8fc9f5;
+  --scalar-background-1: #0b0c10;
+  --scalar-background-2: #111318;
+  --scalar-background-3: #181b21;
+  --scalar-background-accent: rgba(143, 201, 245, 0.1);
+  --scalar-border-color: rgba(255, 255, 255, 0.1);
+}
+.light-mode {
+  --scalar-button-1: #121417;
+  --scalar-button-1-color: #ffffff;
+  --hljs-color: #121417;
+  --hljs-comment-quote: rgba(18, 20, 23, 0.5);
+  --hljs-keyword-formula: #7c3fbf;
+  --hljs-section-name-deletion-subst: #b3261e;
+  --hljs-literal: #8a5a00;
+  --hljs-string-regexp-meta: #1a73b8;
+  --hljs-attr-variable-type-selector: #8a5a00;
+  --hljs-bullet-link-title: #1a73b8;
+  --hljs-built: #1d7a4a;
+  --wsp-hl-cmd: #1a73b8;
+  --wsp-hl-flag: #7c3fbf;
+  --wsp-hl-ph: #8a5a00;
+  --scalar-color-1: #121417;
+  --scalar-color-2: rgba(18, 20, 23, 0.68);
+  --scalar-color-3: rgba(18, 20, 23, 0.46);
+  --scalar-color-accent: #1a73b8;
+  --scalar-background-1: #ffffff;
+  --scalar-background-2: #f5f6f8;
+  --scalar-background-3: #eceef2;
+  --scalar-background-accent: rgba(26, 115, 184, 0.08);
+  --scalar-border-color: rgba(0, 0, 0, 0.09);
+}
+
+/* Pixel faces are bitmaps; smoothing turns their stairs to mud. */
+h1,
+h2 {
+  font-family: "Redaction 35", "Redaction 20", Georgia, serif;
+  font-weight: 700;
+  -webkit-font-smoothing: none;
+  letter-spacing: 0;
+}
+h3 {
+  font-family: "Redaction 20", Georgia, serif;
+  font-weight: 700;
+  -webkit-font-smoothing: none;
+}
+h1 {
+  font-size: 2.6rem;
+  line-height: 1.05;
+}
+h2 {
+  font-size: 1.75rem;
+  line-height: 1.1;
+}
+h3 {
+  font-size: 1.25rem;
+}
+.scalar-app .header.t-header {
+  padding: 0 20px;
+}
+.scalar-app .search-row {
+  padding-left: 20px;
+  padding-right: 20px;
+}
+/* Scalar marks the header button active on every page under the section it links to, and its active style
+   turns the button into a full-height tab in the page text color, white on white. The button stays a button. */
+.scalar-app .header.t-header a.link__button.text-c-header-cta,
+.scalar-app .header.t-header a.link__button.text-c-header-cta:hover {
+  color: var(--scalar-button-1-color);
+  height: auto;
+  padding: 8px 12px;
+  border-radius: var(--scalar-radius);
+  border-bottom: 0;
+}
+/* Shell blocks are mostly wsp commands, which no grammar colors; the line reads at full strength and only comments step back. */
+.hljs.language-bash .t-code__line,
+.hljs.language-sh .t-code__line,
+.hljs.language-shell .t-code__line {
+  color: var(--scalar-color-1);
+}
+/* Spans from assets/highlight-shell.js: the command word, its flags, and <placeholders>. */
+.wsp-hl-cmd {
+  color: var(--wsp-hl-cmd);
+}
+.wsp-hl-flag {
+  color: var(--wsp-hl-flag);
+}
+.wsp-hl-ph,
+.wsp-hl-var {
+  color: var(--wsp-hl-ph);
+}
+/* Section glyphs, set as data-wsp-glyph by assets/highlight-shell.js from the section title. */
+.scalar-app [data-wsp-glyph]::before {
+  content: attr(data-wsp-glyph);
+  display: inline-block;
+  width: 2ch;
+  margin-right: 8px;
+  font-family: var(--scalar-font-code);
+  font-weight: 700;
+  color: var(--scalar-color-accent);
+}

@@ -165,7 +165,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   });
 
   it("the window's theme source follows the page: the record's system once the page has read it, light after a Light pick on the settings page, and light again on a reload from a dark pin", async () => {
-    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
+    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI, WSP_LABS: "1" }, seedGolden);
     const win = await windowAt(launched.app, APP_URL);
     await bootOf(win);
     const source = () => launched!.app.evaluate(({ nativeTheme }) => nativeTheme.themeSource);

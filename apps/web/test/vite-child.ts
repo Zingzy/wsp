@@ -56,15 +56,3 @@ export async function stopVite(child: ChildProcess | undefined): Promise<void> {
   await exited;
   clearTimeout(timer);
 }
-
-// Chromium under memory pressure can throw on close or never finish it; vite
-// is stopped on every one of those paths.
-export async function stopRender(browser: { close(): Promise<void> } | undefined, vite: ChildProcess | undefined, closeGraceMs = 5_000): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    if (browser !== undefined) await Promise.race([browser.close(), new Promise<void>(r => (timer = setTimeout(r, closeGraceMs)))]);
-  } finally {
-    clearTimeout(timer);
-    await stopVite(vite);
-  }
-}

@@ -1,0 +1,56 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Providers and capabilities
+
+wsp talks to a machine provider through one interface and reads a list of capability flags rather than assuming what it can do. Provider details stay in the engine; the app and the command line read the flags and degrade on what a provider lacks instead of pretending. Solari is the first provider, on your own account.
+
+## The interface
+
+A backend gives wsp `create`, `get`, `list`, `deleteSnapshot`, a `capabilities` descriptor and a `pricing` rule. A machine gives `exec` for one short command, `run` for anything longer, `snapshot`, `pause`, `resume`, `kill`, `state`, signed download and upload URLs, and, where the flags allow, a preview URL for a port. Optional calls, listing snapshots and the four template calls, exist only behind their flags. Adding a provider is one module and a registry entry; nothing outside the engine switches on a provider's name, and a test fails any source file outside the Solari module that writes a machine size literal.
+
+## The flags, and what Solari reports
+
+| flag | meaning | Solari |
+| --- | --- | --- |
+| `liveCloneForks` | a fork boots from an existing image in seconds | yes |
+| `ramPreservingPause` | a pause keeps memory | yes |
+| `resize` | a machine can change size | no, the Starter plan clamps every machine to 2 vCPU |
+| `previewUrls` | a port reaches a browser through a signed URL; without it there is no browser reach and no framed ports | yes |
+| `signedUrls` | files travel by signed download and upload URLs; without it there is no import or export road | yes |
+| `containers` | the guest runs containers; without it services install natively | no, the guest kernel has no overlayfs or netfilter, so Docker does not run |
+| `callbackRelay` | sign-in pages open on your computer and the callback port tunnels back; without it you finish sign-ins by copy and paste | yes |
+| `snapshotListing` | snapshots can be listed with sizes, so storage is counted and priced | yes |
+| `templates` | a snapshot can be promoted to a template that survives the provider's restarts; without it every version stays on its snapshot, which the provider may lose | yes |
+| `sizes` | every size a create may ask for, each with its awake rate | 2 vCPU with 4 GB at $0.11 an hour, 2 vCPU with 8 GB at $0.15 |
+
+## Solari specifics
+
+The facts below are measured against the live provider and dated in the code. A canary test asserts each of them and fails loudly when the provider changes, which is the signal to adjust a workaround on purpose.
+
+**Reading a machine keeps it awake.** Every read of a machine's state resets the provider's idle timer. So wsp owns the nap policy itself, reads the listing rather than one machine at a time when sweeping, and asks the provider about a machine only after a failed reach, at most once every five minutes.
+
+**Created-at is not a birth time.** The provider's timestamp drifts forward on a running machine nobody touched and resets on every resume. Every age wsp shows comes from a label wsp stamps itself before the create call.
+
+**A kill is a request.** The provider acknowledges a kill before the machine is dead; a live run once reported its seal done with the builder still running twenty-five minutes later. wsp kills twice and polls for thirty seconds, and reports a machine that survives as still billing.
+
+**Snapshots need a fresh machine.** A machine that was ever resumed cannot be snapshotted; the provider returns a 502. So goldens and project goldens come only from first-life machines, a builder that goes idle is killed rather than paused, and the seal is proven by booting a fork from the template rather than trusting the snapshot.
+
+**One command has about 29 seconds.** The provider's exec cuts anything longer with a 502 whatever timeout it was given, and refuses a body over 16 KiB. wsp keeps inline commands under 20 seconds and runs everything else as a detached script polled through its log, which is also what lets a turn survive a nap.
+
+**The root disk is 20 GB.** The default is 4 GB and it filled during a build once, so every builder asks for the cap. The field is `diskGb`; a misspelling boots the default silently, so the granted size is read back.
+
+**Preview URLs live an hour.** The token expires sixty minutes from mint. Reminting returns the same hostname with a new token, so wsp swaps tokens under about fifty minutes and no URL a client holds ever changes. The URL goes dark while a machine is paused and routes again about a second after wake.
+
+**The machine cap is a 429.** Two machines at once on the Starter plan; a refusal is mapped to a concurrency error and never retried, since retrying would not free a slot. `wsp init` waits thirty seconds between attempts at the cap instead, up to twenty times.
+
+**Retries.** Gateway errors, 502 to 504, are retried up to three times with backoff. A call that never left this computer, a DNS or routing failure, is retried three times about three seconds apart, because a resolver was measured dropping one name for stretches while every other name answered. Creates carry an idempotency key so a retried create replays the machine the first try booted rather than booting a second.
+
+**Guests.** Debian bookworm, kernel 6.6.30, root with home `/root`, no login shell in the exec environment, so commands run as `bash -c` and never `bash -lc`.
+
+## Pricing
+
+The rate is Solari's published Starter pricing, 3.5 cents per vCPU hour plus 1 cent per GB hour, computed locally. Snapshot storage is free to 10 GB per organization, then $0.05 per GB-month pro-rated daily from 1 October 2026. The plans behind these are on [Solari's pricing page](https://www.getsolari.com/pricing). What wsp does with the numbers is on [Costs, naps and limits](/work/costs).
+
+<Callout type="info">
+  Your own computer as a workspace is the next provider planned, so agents can start each other locally as well as in the cloud.
+</Callout>

@@ -61,7 +61,7 @@ const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: DEFAULT_PREFERENCES, settingsOpen: false });
+  useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
 });
 
 afterEach(() => {
@@ -70,9 +70,9 @@ afterEach(() => {
 
 describe("the preferences record in the store", () => {
   it("is the defaults until the host answers, then the host's record, read again when the socket comes back live, and follows preferences.changed", async () => {
-    const record: Preferences = { ...DEFAULT_PREFERENCES, theme: "light", sidebarWidth: 300 };
+    const record: Preferences = { ...DEFAULT_PREFERENCES, labs: true, theme: "light", sidebarWidth: 300 };
     const { api, emit, reads } = fakeApi(record);
-    expect(useStore.getState().preferences).toEqual(DEFAULT_PREFERENCES);
+    expect(useStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, labs: true });
     useStore.getState().bind(api);
     await flush();
     expect(useStore.getState().preferences).toEqual(record);
@@ -85,30 +85,30 @@ describe("the preferences record in the store", () => {
   });
 
   it("a set paints at once, goes to the host as the patch, and the host's answer settles the record", async () => {
-    const { api, sets } = fakeApi(DEFAULT_PREFERENCES);
+    const { api, sets } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     useStore.getState().bind(api);
     await flush();
     const done = useStore.getState().setPreferences({ theme: "dark" });
     expect(useStore.getState().preferences.theme).toBe("dark");
     await done;
     expect(sets).toEqual([{ theme: "dark" }]);
-    expect(useStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, theme: "dark" });
+    expect(useStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, labs: true, theme: "dark" });
     expect(useStore.getState().toast).toBeNull();
   });
 
   it("while a set is on its way, an earlier record from the host does not paint over the person's pick", async () => {
-    const { api, emit } = fakeApi(DEFAULT_PREFERENCES);
+    const { api, emit } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     useStore.getState().bind(api);
     await flush();
     const done = useStore.getState().setPreferences({ terminalZoom: { ws_a: 2 } });
-    emit({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, terminalZoom: { ws_a: 1 } } });
+    emit({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, labs: true, terminalZoom: { ws_a: 1 } } });
     expect(useStore.getState().preferences.terminalZoom).toEqual({ ws_a: 2 });
     await done;
     expect(useStore.getState().preferences.terminalZoom).toEqual({ ws_a: 2 });
   });
 
   it("a refusal is a toast and the host's record is read again; a dropped socket is neither", async () => {
-    const { api, reads } = fakeApi({ ...DEFAULT_PREFERENCES, theme: "light" }, () => new RequestError("state file unreadable"));
+    const { api, reads } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true, theme: "light" }, () => new RequestError("state file unreadable"));
     useStore.getState().bind(api);
     await flush();
     await useStore.getState().setPreferences({ theme: "dark" });
@@ -117,14 +117,14 @@ describe("the preferences record in the store", () => {
     expect(reads.count).toBe(2);
     expect(useStore.getState().preferences.theme).toBe("light");
 
-    const dropped = fakeApi(DEFAULT_PREFERENCES, () => new DisconnectedError("lost"));
+    const dropped = fakeApi({ ...DEFAULT_PREFERENCES, labs: true }, () => new DisconnectedError("lost"));
     useStore.setState({ api: dropped.api, toast: null });
     await useStore.getState().setPreferences({ theme: "dark" });
     expect(useStore.getState().toast).toBeNull();
   });
 
   it("without the verb on the client the pick still paints and nothing is sent", async () => {
-    const { api } = fakeApi(DEFAULT_PREFERENCES);
+    const { api } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     const { preferences: _p, setPreferences: _s, ...bare } = api;
     useStore.getState().bind(bare);
     await flush();
@@ -138,7 +138,7 @@ describe("the preferences record in the store", () => {
     window.localStorage.setItem("wsp:terminal-font-size:ws_a", "16");
     window.localStorage.setItem("wsp:terminal-font-size:ws_b", "12");
     window.localStorage.setItem("wsp:terminal-font", "Hack");
-    const { api, sets, reads } = fakeApi(DEFAULT_PREFERENCES);
+    const { api, sets, reads } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     useStore.getState().bind(api);
     await flush();
     await flush();
@@ -159,7 +159,7 @@ describe("the preferences record in the store", () => {
   it("a browser with none of the old keys, or one holding nonsense under them, sends nothing; nonsense under one key does not stop the rest", async () => {
     window.localStorage.setItem("wsp:sidebar-width", "wide");
     window.localStorage.setItem("wsp:sidebar-mode", "grid");
-    const { api, sets } = fakeApi(DEFAULT_PREFERENCES);
+    const { api, sets } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     useStore.getState().bind(api);
     await flush();
     await flush();
@@ -172,6 +172,7 @@ describe("the preferences record in the store", () => {
   });
 
   it("the settings page opens on its own state, toggles shut, closes on its own, and closes when a workspace or a thread is picked", () => {
+    useStore.setState(s => ({ preferences: { ...s.preferences, labs: true } }));
     expect(useStore.getState().settingsOpen).toBe(false);
     useStore.getState().openSettings();
     expect(useStore.getState().settingsOpen).toBe(true);
@@ -186,6 +187,14 @@ describe("the preferences record in the store", () => {
     expect(useStore.getState().settingsOpen).toBe(false);
     useStore.getState().openSettings();
     useStore.getState().closeSettings();
+    expect(useStore.getState().settingsOpen).toBe(false);
+  });
+
+  it("with labs off the settings page never opens: the chord toggles nothing and the palette road is shut", () => {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+    useStore.getState().toggleSettings();
+    expect(useStore.getState().settingsOpen).toBe(false);
+    useStore.getState().openSettings();
     expect(useStore.getState().settingsOpen).toBe(false);
   });
 });
