@@ -20,6 +20,15 @@
 // answered (this computer's DNS gone, a reset connection, a gateway error the
 // backend gave up on) is posted again at the engine's backoff for its reach
 // window before the turn fails; the claim makes one that did land a no-op.
+// The run outlives the process that launched it, so the factory also attaches
+// to one by the handle its stream reported: the log on the guest is the whole
+// turn, and a reader that comes later reads it from its first byte. The claim
+// directory is what says the run is still there; the reap takes it with the
+// rest, so an attach to a swept run answers gone instead of hanging. That
+// question travels the launch road's reach window, and only the machine's own
+// answer that the claim is gone may end a run: a probe nothing answered says
+// nothing about the run it was sent to find, and killing that process group
+// would end the very turn the attach exists to save.
 
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, MachineUnreached, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
@@ -44,6 +53,9 @@ export interface MachineExecOptions {
 }
 
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** What a launch mints a run's name from, so a handle read back off the sessions index is checked against the shape
+ * this code writes before it reaches shell text: a value that has been to a file on disk is no longer this code's. */
+const RUN_ID = /^[0-9a-f]{12}$/;
 
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
@@ -54,28 +66,23 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? realRetryClock.sleep;
 
-  return (command, { env, input }) => {
-    const id = randomBytes(6).toString("hex");
-    const base = `${runDir}/${id}`;
-    const sentinel = `__WSP_EOF_${id}__`;
+  /** The one path that says a run is on the machine: the launch makes it, the reap takes it with the rest of the
+   * run's files, and every road that asks whether a run is still there asks about this one. */
+  const claim = (base: string): string => `${base}.d`;
+  /** A handle this factory could have minted: the run directory it launches into and a name of its own shape. */
+  const minted = (run: string): boolean => run.startsWith(`${runDir}/`) && RUN_ID.test(run.slice(runDir.length + 1));
 
-    const exports = Object.entries(env)
-      .filter(([k]) => ENV_KEY.test(k))
-      .map(([k, v]) => `export ${k}=${shellQuote(v)}`)
-      .join("\n");
-    // The tail starts in a subshell so bash's job notice for its kill never lands in the log; the command's exit code
-    // is written before the tail is killed, so a poll that sees it reads a finished log.
-    const run =
-      input === undefined
-        ? `${command}\necho $? > ${base}.exit\n`
-        : `( tail -n +1 -f ${base}.in > ${base}.fifo & echo $! > ${base}.tail )\n{ ${command}\n} < ${base}.fifo\necho $? > ${base}.exit\nkill $(cat ${base}.tail) 2>/dev/null\n`;
-    // The turn's processes are what the kernel takes first when memory runs out: the work outgrew the machine, and
-    // the daemon and the guest agent are how anyone hears of it.
-    const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${workScoreLine()}\n${exports}\n${run}` }];
-    if (input !== undefined) files.push({ path: `${base}.in`, text: input.map(line => `${line}\n`).join("") });
+  /** The one reader both roads share: a launch that has just posted its script, and an attach to a run an earlier
+   * host process left behind. `opened` settles once the run is known to be on the machine and rejects with the words
+   * the turn fails on when it is not. The log is read from its first byte either way, so a run that printed while no
+   * host was listening is replayed to whoever attaches. */
+  const open = (base: string, hasInput: boolean, opened: Promise<void>): ExecStream => {
+    const sentinel = `__WSP_EOF_${randomBytes(6).toString("hex")}__`;
 
     let killed = false;
     let inputClosed = false;
+    // Both limits run from this reader's first second: nothing on the machine records when the run's last byte
+    // landed, so an attach cannot inherit an idle clock and starts the turn's cap again.
     const startedAt = now();
     let lastByteAt = startedAt;
     let finishCode: number | null | undefined;
@@ -90,20 +97,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       }
     };
 
-    // Spawn eagerly, like a local child process would.
-    const launched: Promise<ExecResult> = untilReached(
-      () =>
-        putFiles(machine, files, {
-          // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
-          before: [`mkdir ${base}.d 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
-          after: [...(input === undefined ? [] : [`mkfifo ${base}.fifo`]), `setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`],
-          timeoutMs: execTimeoutMs,
-        }),
-      { now, sleep },
-    );
-
     const signal = (sig: "TERM" | "KILL"): void => {
-      void launched
+      void opened
         .catch(() => undefined)
         .then(() =>
           machine.exec(`P=$(cat ${base}.pid 2>/dev/null); [ -n "$P" ] && kill -${sig} -- -$P 2>/dev/null; true`, {
@@ -141,13 +136,12 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       const drainPending = (): string | undefined =>
         pending.length > 0 ? pending.toString("utf8") : undefined;
 
-      const launch = await launched.catch((e: unknown) => e as Error);
-      if (launch instanceof Error || launch.exitCode !== 0 || !launch.stdout.includes("WSP_LAUNCHED")) {
+      try {
+        await opened;
+      } catch (e) {
         await reap();
         finish(null);
-        if (launch instanceof MachineUnreached) throw launch;
-        const detail = launch instanceof Error ? launch.message : `exit ${launch.exitCode}: ${launch.stderr}`;
-        throw new Error(`remote launch failed on ${machine.id}: ${detail}`);
+        throw e;
       }
 
       while (true) {
@@ -215,19 +209,20 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
     const stream: ExecStream = {
       lines: lines(),
+      run: base,
       teardown: () => signal("TERM"),
       kill: () => {
         killed = true;
         signal("KILL");
       },
       write: async line => {
-        if (input === undefined) throw new Error("this stream has no input channel");
+        if (!hasInput) throw new Error("this stream has no input channel");
         if (finishCode !== undefined) throw new Error("the stream has ended");
-        await launched;
+        await opened;
         // The guest knows the command ended the moment its exit file exists, up to a poll before this side does,
         // and a reap in flight has taken the claim with the rest of the run.
         const res = await putFiles(machine, [{ path: `${base}.in`, text: `${line}\n`, append: true }], {
-          before: [`{ [ -e ${base}.exit ] || [ ! -d ${base}.d ]; } && { echo WSP_GONE; exit 0; }`],
+          before: [`{ [ -e ${base}.exit ] || [ ! -d ${claim(base)} ]; } && { echo WSP_GONE; exit 0; }`],
           after: ["echo WSP_OK"],
           timeoutMs: execTimeoutMs,
         });
@@ -238,9 +233,9 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         return "written";
       },
       closeInput: () => {
-        if (input === undefined || inputClosed || finishCode !== undefined) return;
+        if (!hasInput || inputClosed || finishCode !== undefined) return;
         inputClosed = true;
-        void launched
+        void opened
           .catch(() => undefined)
           .then(() => machine.exec(`P=$(cat ${base}.tail 2>/dev/null); [ -n "$P" ] && kill -TERM "$P" 2>/dev/null; true`, { timeoutMs: execTimeoutMs }))
           .catch(() => undefined);
@@ -249,4 +244,58 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     };
     return stream;
   };
+
+  const factory: ExecStreamFactory = (command, { env, input }) => {
+    const base = `${runDir}/${randomBytes(6).toString("hex")}`;
+
+    const exports = Object.entries(env)
+      .filter(([k]) => ENV_KEY.test(k))
+      .map(([k, v]) => `export ${k}=${shellQuote(v)}`)
+      .join("\n");
+    // The tail starts in a subshell so bash's job notice for its kill never lands in the log; the command's exit code
+    // is written before the tail is killed, so a poll that sees it reads a finished log.
+    const run =
+      input === undefined
+        ? `${command}\necho $? > ${base}.exit\n`
+        : `( tail -n +1 -f ${base}.in > ${base}.fifo & echo $! > ${base}.tail )\n{ ${command}\n} < ${base}.fifo\necho $? > ${base}.exit\nkill $(cat ${base}.tail) 2>/dev/null\n`;
+    // The turn's processes are what the kernel takes first when memory runs out: the work outgrew the machine, and
+    // the daemon and the guest agent are how anyone hears of it.
+    const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${workScoreLine()}\n${exports}\n${run}` }];
+    if (input !== undefined) files.push({ path: `${base}.in`, text: input.map(line => `${line}\n`).join("") });
+
+    // Spawn eagerly, like a local child process would.
+    const posted: Promise<ExecResult> = untilReached(
+      () =>
+        putFiles(machine, files, {
+          // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
+          before: [`mkdir ${claim(base)} 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
+          after: [...(input === undefined ? [] : [`mkfifo ${base}.fifo`]), `setsid bash ${base}.sh > ${base}.log 2>&1 & echo $! > ${base}.pid; echo WSP_LAUNCHED`],
+          timeoutMs: execTimeoutMs,
+        }),
+      { now, sleep },
+    );
+    const opened = posted.then(
+      res => {
+        if (res.exitCode !== 0 || !res.stdout.includes("WSP_LAUNCHED")) throw new Error(`remote launch failed on ${machine.id}: exit ${res.exitCode}: ${res.stderr}`);
+      },
+      (e: unknown) => {
+        if (e instanceof MachineUnreached) throw e;
+        throw new Error(`remote launch failed on ${machine.id}: ${e instanceof Error ? e.message : String(e)}`);
+      },
+    );
+    return open(base, input !== undefined, opened);
+  };
+
+  factory.attach = async (run, { input }) => {
+    if (!minted(run)) throw new Error(`${run} is not a run this host could have launched`);
+    const res = await untilReached(() => machine.exec(`[ -d ${claim(run)} ] && echo WSP_RUN || echo WSP_GONE`, { timeoutMs: execTimeoutMs }), { now, sleep });
+    // Only these two answers say anything about the run. Anything else is the machine failing to answer the
+    // question, which is the unreached road, not a run to end: the reader is built and the run swept on WSP_GONE
+    // alone, so nothing here can take a live turn's process group with it.
+    if (res.stdout.includes("WSP_RUN")) return open(run, input, Promise.resolve());
+    if (res.stdout.includes("WSP_GONE")) return "gone";
+    throw new Error(`the machine did not answer whether it still holds ${run}: exit ${res.exitCode}: ${res.stderr}`);
+  };
+
+  return factory;
 }

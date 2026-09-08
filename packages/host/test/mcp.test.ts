@@ -12,7 +12,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, EXIT_CODES, ProjectGolden, Recipe, ThreadView, WorkspaceView, type ExitClass } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ProjectGolden, Recipe, ThreadView, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
@@ -778,7 +778,7 @@ describe("the MCP server over the host", () => {
     expect(await running).toEqual(failedWith("machine deleted while the agent was working"));
   });
 
-  it("a dead host is a tool error, not a hang: no host serving, then the host going away mid-turn, then a host that came back", async () => {
+  it("a dead host is a tool error, not a hang: no host serving, then the host stopping mid-turn, then a host that came back", async () => {
     await call("new", { name: "alpha" });
     await handle!.close();
     handle = undefined;
@@ -791,7 +791,7 @@ describe("the MCP server over the host", () => {
     await new Promise(r => setTimeout(r, 300));
     await handle!.close();
     handle = undefined;
-    expect(await turn).toEqual(failedWith("the host closed the connection"));
+    expect(await turn).toEqual(failedWith(HOST_STOPPING_LINE));
 
     await restartHost({ claude: claude.adapter });
     const back = await call("threads");

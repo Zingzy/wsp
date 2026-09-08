@@ -21,6 +21,8 @@ import {
   AFTER_CUT_LINE,
   EMPTY_TASK_LINE,
   EXIT_CODES,
+  HOST_STOPPING_CLOSE,
+  HOST_STOPPING_LINE,
   HostFolderListing,
   LOGIN_CHOICES,
   NOTIFY_ME,
@@ -113,6 +115,9 @@ export interface HostClient {
   onFrame(fn: (frame: Frame) => void): () => void;
   /** Settles when the socket is gone, however it went. */
   readonly closed: Promise<void>;
+  /** Why the socket is gone, in the words the person reads: a host that let it go as it stopped says the turn goes
+   * on, since the run is the machine's; anything else is a host that went. */
+  closeWords(): string;
   close(): void;
 }
 
@@ -165,8 +170,9 @@ export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise
     }
     for (const fn of listeners) fn(frame);
   });
+  const closeWords = (): string => (closeCode === HOST_STOPPING_CLOSE ? HOST_STOPPING_LINE : "the host closed the connection");
   ws.on("close", () => {
-    for (const w of pending.values()) w.fail(new Error("the host closed the connection"));
+    for (const w of pending.values()) w.fail(new Error(closeWords()));
     pending.clear();
   });
   ws.on("error", () => {});
@@ -209,6 +215,7 @@ export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise
       return () => listeners.delete(fn);
     },
     closed,
+    closeWords,
     close: () => ws.close(),
   };
 }
@@ -218,7 +225,7 @@ function untilSettled<T>(client: HostClient, work: Promise<T>): Promise<T> {
   return Promise.race([
     work,
     client.closed.then((): never => {
-      throw new Error("the host closed the connection");
+      throw new Error(client.closeWords());
     }),
   ]);
 }

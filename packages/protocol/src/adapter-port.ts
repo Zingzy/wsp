@@ -36,8 +36,23 @@ export type AdapterEvent =
   | { type: "turn.done"; sessionId: string; result: TurnResult }
   | { type: "session.end"; sessionId: string; exitCode: number | null; sawResult: boolean };
 
+/** What re-opening a turn a harness is still running on the machine takes: the run its stream reported, the session
+ * the row already knows it by, and what that row records about the turn. The CLI announces its session, its model
+ * and its folder once, and those lines may be behind whoever attaches, so the row is where they come from. */
+export interface AdapterAttachOptions {
+  run: string;
+  sessionId: string;
+  startedAt: number;
+  model?: string;
+  cwd?: string;
+  onEvent: (event: AdapterEvent) => void;
+}
+
 export interface ExecStream {
   readonly lines: AsyncIterable<string>;
+  /** What a later host process attaches to this run by, on a factory whose runs outlive the process that launched
+   * them; absent where they do not, and a turn on such a factory dies with its host. */
+  readonly run?: string;
   /** Graceful stop: SIGTERM. */
   teardown(): void;
   /** SIGKILL. */
@@ -50,14 +65,22 @@ export interface ExecStream {
   readonly exited: Promise<number | null>;
 }
 
-export type ExecStreamFactory = (
-  command: string,
-  options: {
-    env: Record<string, string>;
-    /** Present, the process's stdin is a line channel seeded with these lines; absent, the process gets no channel. */
-    input?: readonly string[];
-  },
-) => ExecStream;
+export interface ExecStreamFactory {
+  (
+    command: string,
+    options: {
+      env: Record<string, string>;
+      /** Present, the process's stdin is a line channel seeded with these lines; absent, the process gets no channel. */
+      input?: readonly string[];
+    },
+  ): ExecStream;
+  /** Asks the machine whether it still holds a run this factory launched in an earlier process, and reads it from
+   * its first byte when it does: what the run printed while no host was listening is on the machine, so the reader
+   * is where the replay happens. `gone` is the machine's own answer that the run is not there, the one answer that
+   * may take what is left of it. A machine that answers nothing rejects, since silence says nothing about the run
+   * and must leave it running. Absent on a factory whose runs die with the process that launched them. */
+  attach?(run: string, options: { input: boolean }): Promise<ExecStream | "gone">;
+}
 
 /** One model as an adapter reads it off its binary: the values the CLI takes, without the words the runtime's table
  * lends them. contextWindows carries both windows where the CLI offers the model at two, else none. */

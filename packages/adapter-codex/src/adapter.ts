@@ -5,7 +5,7 @@
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
 import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterEvent, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnResult } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
@@ -27,7 +27,10 @@ export interface CodexSession {
   readonly localId: string;
   /** The id thread.started announced, equal to localId until it does. */
   readonly threadId: string;
-  readonly command: string;
+  /** The line the launch ran; absent on a session attached to a run some earlier process launched. */
+  readonly command?: string;
+  /** What a later host process attaches to this turn by; absent when its run dies with this process. */
+  readonly run?: string;
   readonly finished: Promise<TurnResult>;
   interrupt(): Promise<void>;
 }
@@ -46,6 +49,10 @@ export interface CodexAdapterDeps {
 
 export interface CodexAdapter {
   start(options: CodexStartOptions): CodexSession;
+  /** Re-opens a turn this CLI is still running on the machine, by the run handle the launch reported; `gone` is the
+   * machine's own answer that it no longer holds the run, and nothing is emitted for one. A machine that answers
+   * nothing rejects. Absent when the exec factory's runs die with the process that launched them. */
+  attach?(options: AdapterAttachOptions): Promise<CodexSession | "gone">;
   readonly sessions: ReadonlyMap<string, CodexSession>;
   /** `codex exec` reads its prompt and closes stdin; nothing reaches a running turn. */
   readonly steers: false;
@@ -161,19 +168,11 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
   const sessions = new Map<string, CodexSession>();
   const env = buildEnv({ base: deps.baseEnv, home: deps.home });
 
-  const start = (options: CodexStartOptions): CodexSession => {
-    if (options.contextWindow !== undefined) throw new Error("codex takes no context window");
-    const localId = options.resume ?? randomUUID();
-    const command = buildCommand({
-      prompt: options.prompt,
-      resume: options.resume,
-      cwd: options.cwd,
-      model: options.model,
-      effort: options.effort,
-      permissionMode: options.permissionMode,
-    });
-    const stream = deps.exec(command, { env: { ...env } });
-    const startedAt = Date.now();
+  /** Everything a turn is once its stream exists. The launch and the attach differ only in where the stream came
+   * from and in what is already known: an attached turn's thread, model and folder come off the row that outlived
+   * the host, since the CLI announces each of them once and that line may already be behind the reader. */
+  const follow = (o: { stream: ExecStream; localId: string; startedAt: number; command?: string; model?: string; cwd?: string; onEvent: (event: AdapterEvent) => void }): CodexSession => {
+    const { stream, localId, startedAt } = o;
 
     let threadId = localId;
     let sawResult = false;
@@ -188,7 +187,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     let stalledAt: number | undefined;
     const stderrTail: string[] = [];
 
-    const emit = (event: AdapterEvent): void => options.onEvent(event);
+    const emit = (event: AdapterEvent): void => o.onEvent(event);
 
     /** SIGTERM, then SIGKILL once the grace window passes without an exit. */
     const escalate = async (): Promise<void> => {
@@ -235,7 +234,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           switch (type) {
             case "thread.started": {
               threadId = str(event.thread_id) ?? threadId;
-              emit({ type: "session.start", sessionId: threadId, ...(options.model !== undefined ? { model: options.model } : {}), ...(options.cwd !== undefined ? { cwd: options.cwd } : {}) });
+              emit({ type: "session.start", sessionId: threadId, ...(o.model !== undefined ? { model: o.model } : {}), ...(o.cwd !== undefined ? { cwd: o.cwd } : {}) });
               break;
             }
             case "item.started":
@@ -297,7 +296,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       get threadId() {
         return threadId;
       },
-      command,
+      ...(o.command !== undefined ? { command: o.command } : {}),
+      ...(stream.run !== undefined ? { run: stream.run } : {}),
       finished,
       interrupt: async () => {
         interruptRequested = true;
@@ -308,11 +308,52 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     return session;
   };
 
+  const start = (options: CodexStartOptions): CodexSession => {
+    if (options.contextWindow !== undefined) throw new Error("codex takes no context window");
+    const localId = options.resume ?? randomUUID();
+    const command = buildCommand({
+      prompt: options.prompt,
+      resume: options.resume,
+      cwd: options.cwd,
+      model: options.model,
+      effort: options.effort,
+      permissionMode: options.permissionMode,
+    });
+    return follow({
+      stream: deps.exec(command, { env: { ...env } }),
+      localId,
+      startedAt: Date.now(),
+      command,
+      ...(options.model !== undefined ? { model: options.model } : {}),
+      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+      onEvent: options.onEvent,
+    });
+  };
+
+  const attach = deps.exec.attach?.bind(deps.exec);
+
   const probeCatalog = (exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer> =>
     exec(catalogProbeCommand({ home: deps.home, baseEnv: deps.baseEnv })).then(stdout => parseCatalogProbe(stdout, deps.login));
 
   return {
     start,
+    ...(attach !== undefined
+      ? {
+          attach: async (options: AdapterAttachOptions) => {
+            const stream = await attach(options.run, { input: false });
+            return stream === "gone"
+              ? "gone"
+              : follow({
+                  stream,
+                  localId: options.sessionId,
+                  startedAt: options.startedAt,
+                  ...(options.model !== undefined ? { model: options.model } : {}),
+                  ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+                  onEvent: options.onEvent,
+                });
+          },
+        }
+      : {}),
     sessions,
     steers: false,
     probeCatalog,
