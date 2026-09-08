@@ -28,7 +28,10 @@
 // question travels the launch road's reach window, and only the machine's own
 // answer that the claim is gone may end a run: a probe nothing answered says
 // nothing about the run it was sent to find, and killing that process group
-// would end the very turn the attach exists to save.
+// would end the very turn the attach exists to save. The same fact cuts the
+// other way once a host has finished connecting: a run no row of that host
+// holds is a harness process nobody will ever read again, so the sweep ends
+// every claim on the machine that the caller did not name.
 
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, MachineUnreached, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
@@ -83,6 +86,15 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
   /** The one path that says a run is on the machine: the launch makes it, the reap takes it with the rest of the
    * run's files, and every road that asks whether a run is still there asks about this one. */
   const claim = (base: string): string => `${base}.d`;
+  /** What ending one run comes to on the guest, in the shell both the reader's own reap and the connect sweep run:
+   * the recorded process group gets TERM then, two seconds on, KILL, and the run's files go. `$B` is the run, so the
+   * sweep can run it over a name its loop read off the machine. */
+  const reapScript = (b: string): string =>
+    `P=$(cat ${b}.pid 2>/dev/null); ` +
+    `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
+    `for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 -- -$P 2>/dev/null || break; sleep 0.2; done; ` +
+    `kill -KILL -- -$P 2>/dev/null; fi; ` +
+    `rm -rf ${b}.*`;
   /** A handle this factory could have minted: the run directory it launches into and a name of its own shape. */
   const minted = (run: string): boolean => run.startsWith(`${runDir}/`) && RUN_ID.test(run.slice(runDir.length + 1));
 
@@ -124,16 +136,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
     // Runs after the last poll read the log, so the group's stragglers cannot cost the turn a line.
     const reap = (): Promise<void> =>
-      machine
-        .exec(
-          `P=$(cat ${base}.pid 2>/dev/null); ` +
-            `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
-            `for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 -- -$P 2>/dev/null || break; sleep 0.2; done; ` +
-            `kill -KILL -- -$P 2>/dev/null; fi; ` +
-            `rm -rf ${base}.*; true`,
-          { timeoutMs: execTimeoutMs },
-        )
-        .then(() => undefined, () => undefined);
+      machine.exec(`${reapScript(base)}; true`, { timeoutMs: execTimeoutMs }).then(() => undefined, () => undefined);
 
     // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
     const pollCmd = (offset: number): string =>
@@ -308,6 +311,25 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     if (res.stdout.includes("WSP_RUN")) return open(run, input, Promise.resolve());
     if (res.stdout.includes("WSP_GONE")) return "gone";
     throw new Error(`the machine did not answer whether it still holds ${run}: exit ${res.exitCode}: ${res.stderr}`);
+  };
+
+  factory.sweep = async keep => {
+    // The claims are what the machine holds, so the machine is asked what is there rather than told; the shape a
+    // handle must have to be one of this factory's is read here, by the same predicate the attach road reads, so
+    // nothing the guest wrote into the run directory reaches shell text on the strength of being there.
+    const listed = await machine.exec(`for d in ${runDir}/*.d; do [ -d "$d" ] && printf '%s\\n' "$d"; done`, { timeoutMs: execTimeoutMs });
+    const kept = new Set(keep);
+    const stale = listed.stdout
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.endsWith(".d"))
+      .map(line => line.slice(0, -".d".length))
+      .filter(base => minted(base) && !kept.has(base));
+    if (stale.length === 0) return [];
+    // Each run's group is ended beside the others, not after them: every reap waits out its own two seconds of
+    // grace, and a machine holding a day of them would spend that many times over in one connect.
+    await machine.exec(`${stale.map(base => `{ ${reapScript(base)}; } &`).join(" ")} wait; true`, { timeoutMs: execTimeoutMs });
+    return stale;
   };
 
   return factory;

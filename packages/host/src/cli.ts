@@ -17,6 +17,7 @@ import {
   goldenHead,
   hostIdentity,
   jsonFileStore,
+  endLocalRuns,
   localExecStream,
   type GoldenRecipe,
   type GoldenVersion,
@@ -403,6 +404,9 @@ export function localWiring(root = homedir(), env: Readonly<Record<string, strin
       shutting = true;
       const started = daemon;
       daemon = undefined;
+      // A turn here leads a process group of its own, so it no longer goes with the terminal's Ctrl-C: this host is
+      // the only thing that knows where its turns are, and nothing can re-open one once it is gone.
+      await endLocalRuns();
       await started?.then(d => d.close(), () => {});
     },
   };

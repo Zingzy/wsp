@@ -3,7 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { backgroundTasksLine, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
+import { RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult, TurnStatus } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
@@ -50,6 +50,9 @@ export interface AdapterDeps {
   baseEnv?: Readonly<Record<string, string | undefined>>;
   apiKey?: string;
   interruptGraceMs?: number;
+  /** How long the CLI gets to exit on the EOF its result closed the channel with, before its process and its tree
+   * are ended for it. */
+  resultExitMs?: number;
 }
 
 export interface ClaudeAdapter {
@@ -326,8 +329,10 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             }
             if (normalized.type === "turn.done") {
               sawResult = true;
-              // The CLI waits for more input after its result; EOF is what lets it exit.
+              // The CLI waits for more input after its result; EOF is what lets it exit, and a CLI that does not go
+              // on its own is ended with its tree once the wait passes rather than left for the idle cut.
               stream.closeInput();
+              void endAfterResult(stream, deps.resultExitMs ?? RUN_EXIT_MS, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
               normalized.result = endedEarly(normalized.result, backgroundTasks);
               // Held until the process exits, since the CLI writes its reason to stderr after the result.
               if (answeredNothing(normalized.result)) {
@@ -377,20 +382,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         return wrote === "written" && running() ? "accepted" : "not-running";
       },
       interrupt: async () => {
-        // t3code landmine: a graceful interrupt can be acknowledged while
-        // background tasks keep the CLI alive. Teardown, then SIGKILL.
         interruptRequested = true;
-        stream.teardown();
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const timedOut = await Promise.race([
-          stream.exited.then(() => false),
-          new Promise<boolean>((resolve) => {
-            timer = setTimeout(() => resolve(true), deps.interruptGraceMs ?? INTERRUPT_GRACE_MS);
-          }),
-        ]);
-        if (timer !== undefined) clearTimeout(timer);
-        if (timedOut) stream.kill();
-        await stream.exited;
+        await endRun(stream, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS);
       },
     };
     sessions.set(localId, session);

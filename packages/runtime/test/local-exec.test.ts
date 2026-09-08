@@ -2,9 +2,9 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { turnCutLine } from "@wsp/protocol";
-import { localExecStream } from "../src/local-exec.js";
+import { endLocalRuns, localExecStream } from "../src/local-exec.js";
 
 async function collect(lines: AsyncIterable<string>): Promise<string[]> {
   const out: string[] = [];
@@ -82,4 +82,80 @@ describe("local exec stream", () => {
     stream.kill();
     expect(await stream.exited).not.toBe(0);
   });
+});
+
+describe("a real turn's process group", () => {
+  let root: string;
+  /** Every pid a test read out of the turn, so a red run leaves no sleep behind on this computer. */
+  const started: number[] = [];
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "wsp-localexec-group-"));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    for (const pid of started.splice(0)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        continue;
+      }
+    }
+  });
+
+  /** The pid the command wrote for what it left running, once it has. */
+  const leftRunning = async (): Promise<number> => {
+    const file = join(root, "child");
+    await vi.waitFor(() => expect(readFileSync(file, "utf8").trim()).not.toBe(""), { timeout: 5_000 });
+    const pid = Number(readFileSync(file, "utf8").trim());
+    expect(pid).toBeGreaterThan(0);
+    started.push(pid);
+    return pid;
+  };
+  const gone = (pid: number): Promise<void> => vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 5_000 });
+
+  it("a child the command left running is gone when the turn ends, and the stream ends although that child held its stdout", async () => {
+    const factory = localExecStream({ root });
+    const stream = factory(`sleep 300 & echo $! > ${join(root, "child")}; echo hi`, { env: {} });
+    expect(await collect(stream.lines)).toEqual(["hi"]);
+    expect(await stream.exited).toBe(0);
+    await gone(await leftRunning());
+  }, 15_000);
+
+  it("a turn the idle limit cut takes its whole group with it, and still ends on the cut's words", async () => {
+    const factory = localExecStream({ root, idleMs: 120, deadlineMs: 60_000, pollMs: 10 });
+    const stream = factory(`sleep 300 & echo $! > ${join(root, "child")}; sleep 300`, { env: {} });
+    const pid = await leftRunning();
+    await expect(collect(stream.lines)).rejects.toThrow(/with no output for 0m$/);
+    expect(await stream.exited).toBeNull();
+    await gone(pid);
+  }, 15_000);
+
+  it("a host that stops ends every turn on this computer and what those turns started", async () => {
+    const factory = localExecStream({ root });
+    const stream = factory(`sleep 300 & echo $! > ${join(root, "child")}; sleep 300`, { env: {} });
+    const pid = await leftRunning();
+
+    await endLocalRuns(20);
+
+    expect(await stream.exited).not.toBe(0);
+    await gone(pid);
+  }, 15_000);
+
+  it("a turn that already ended is not signalled again by a host stopping", async () => {
+    const factory = localExecStream({ root });
+    const stream = factory("echo hi", { env: {} });
+    expect(await collect(stream.lines)).toEqual(["hi"]);
+    expect(await stream.exited).toBe(0);
+    // Nothing is left to signal, so no group of a pid this computer has since given to something else is.
+    await expect(endLocalRuns(20)).resolves.toBeUndefined();
+  });
+
+  it("teardown reaches what the turn started, not the shell alone", async () => {
+    const factory = localExecStream({ root });
+    const stream = factory(`sleep 300 & echo $! > ${join(root, "child")}; sleep 300`, { env: {} });
+    const pid = await leftRunning();
+    stream.teardown();
+    expect(await stream.exited).not.toBe(0);
+    await gone(pid);
+  }, 15_000);
 });

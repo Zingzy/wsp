@@ -33,6 +33,11 @@ export const TURN_IDLE_MS = 10 * 60_000;
 export const THREAD_ARCHIVE_MS = 24 * 60 * 60_000;
 /** The longest one turn may run however much it prints, a safety cap only; a per-workspace setting is a follow-up. */
 export const TURN_WALL_MS = 6 * 60 * 60_000;
+/** How long a harness gets to exit on its own after the result its turn ended on, before the runtime ends it and its
+ * tree. Long enough for the harness to flush its own session store and go, short enough that a machine running turns
+ * all day never carries more than the one it is on: seven finished turns' processes were found alive on one guest,
+ * the oldest fourteen hours past its reply, and the box read load 25 while idle (2026-09-08). */
+export const RUN_EXIT_MS = 10_000;
 /** The close code a host sends the clients on its own socket as it stops: the socket did not break under them, the
  * host let it go, so a command waiting on a turn says the host is restarting rather than that the turn failed. */
 export const HOST_STOPPING_CLOSE = 4001;
@@ -2061,5 +2066,5 @@ export { underProject } from "./project-path.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
-export { catalogRefused } from "./adapter-port.js";
+export { catalogRefused, endAfterResult, endRun } from "./adapter-port.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

@@ -1399,7 +1399,8 @@ describe("a turn the host comes back to", () => {
         return null;
       },
       start: o => {
-        const handle = `/tmp/wsp-run/${++minted}`;
+        // The shape a handle the guest's run directory reports has to have to be one of this host's.
+        const handle = `/tmp/wsp-run/${(++minted).toString(16).padStart(12, "0")}`;
         // The CLI keys the session by its own id, not by the one the launch minted, so the row and the harness
         // session are two different ids across the restart.
         const run: Run = { log: [], sessionId: `sess-${minted}`, localId: `local-${minted}` };
@@ -1466,6 +1467,50 @@ describe("a turn the host comes back to", () => {
     // its own asked-set is empty and the row is still on its seed, and the start row is what stands in for both.
     expect(h.asked()).toEqual(["build it"]);
     expect((await rt2.sessions.list(workspaceId))[0]!.harnessTitle).toBeUndefined();
+    await rt2.close();
+  });
+
+  /** What the machine answers when a connecting host asks which runs it holds, and what it was told to end. */
+  const guestRuns = (backend: StubBackend, claims: readonly string[]) => {
+    const reaps: string[] = [];
+    backend.execImpl = (_m, cmd) => {
+      if (cmd.includes("printf '%s\\n' \"$d\"")) return { exitCode: 0, stdout: `${claims.map(base => `${base}.d`).join("\n")}\n`, stderr: "" };
+      if (cmd.includes("kill -TERM")) reaps.push(cmd);
+      return { exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" };
+    };
+    return { reaps };
+  };
+
+  it("a host that connects ends the runs on the machine that no thread of its own holds, and leaves the one it re-opened", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    const orphan = "/tmp/wsp-run/aabbccddeeff";
+    const guest = guestRuns(backend, [run, orphan]);
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+
+    expect(guest.reaps).toHaveLength(1);
+    expect(guest.reaps[0]).toContain(`rm -rf ${orphan}.*`);
+    expect(guest.reaps[0]).not.toContain(run);
+    await rt2.close();
+  });
+
+  it("a run whose row this host could not re-open is ended on the machine, not left holding it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    const guest = guestRuns(backend, [run]);
+
+    // No adapter for the row's harness: the turn reads as one the restart cut, and nothing here reads its run again.
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "failed");
+
+    expect(guest.reaps).toHaveLength(1);
+    expect(guest.reaps[0]).toContain(`rm -rf ${run}.*`);
     await rt2.close();
   });
 
