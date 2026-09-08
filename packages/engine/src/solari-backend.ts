@@ -1,7 +1,7 @@
-import { providerRoadRetryLine, shellLine, type Capabilities } from "@wsp/protocol";
+import { providerRoadRetryLine, type Capabilities } from "@wsp/protocol";
 import { ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
-import { GUEST_USER_ENV } from "./golden-import.js";
+import { EXEC_ENV } from "./golden-import.js";
 import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { previewTokenExpiry } from "./preview.js";
 
@@ -51,9 +51,6 @@ const STATE_MAP: Record<SandboxView["state"], MachineState> = {
 
 /** Solari changelog 2026-09-04: snapshot storage is billed from 2026-10-01, 10 GB free per organization, then $0.05 per GB-month pro-rated daily. */
 export const SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" };
-
-/** Prefixed to every exec: the exec API hands the guest no environment beyond PATH. */
-export const EXEC_ENV = `export ${shellLine(Object.entries(GUEST_USER_ENV).map(([name, value]) => `${name}=${value}`))}`;
 
 /** Measured 2026-09-07: Solari's replies carry no request id header, so requestId stays unset; the common name is read should one appear. */
 export const REQUEST_ID_HEADER = "x-request-id";

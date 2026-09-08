@@ -162,7 +162,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -865,6 +865,11 @@ export interface GoldenUpgradeResult {
 /** How long a builder built from a recipe stays running after its seal, so one more change re-snapshots it (about
  * 11 s, measured) instead of forking. Our clock on the record, since every read of the machine resets the provider's. */
 export const GRACE_MS = 10 * 60_000;
+
+/** How long after one attempt to put a daemon back on a machine before another. A deploy that failed fails the
+ * same way fifteen seconds later and the row has already said so, so the retry is slow enough to be worth
+ * watching and quick enough that a machine whose npm registry blinked is not left dark for an hour. */
+export const DAEMON_REVIVE_AGAIN_MS = 5 * 60_000;
 
 /** A machine of this setup's the sweep found with no record and recorded again, under the id and name its fork stamped. */
 export interface AdoptedMachine {
@@ -1847,8 +1852,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * would reset its idle timer for a fact the runtime already knows. The nap
    * countdown rides along as the poller sends it: a client replaces the whole
    * status, so leaving it out would blank the row until the next poll. */
-  /** The reach a status pushed for a running machine claims: the daemon answers wherever this kind has a road to it. */
-  const reachOf = (entry: LiveWorkspace): ReachState => (moduleOf(entry.record.kind).hasDaemon(entry) ? "reachable" : "unsupported");
+  /** The reach the poll last measured for a workspace's running machine; a machine that is not running, or one
+   * replaced since, leaves nothing here. Held because a status pushed between polls has to say something about the
+   * reach and the runtime has no probe of its own. */
+  const polledReach = new Map<string, { machineId: string; reach: ReachState }>();
+
+  /** The reach a status pushed for a running machine carries: what the poll last measured, and where it has
+   * measured nothing, the claim this kind's road makes. A measurement outranks the claim because the pushes that
+   * carry a line about the daemon happen exactly when the daemon is dead: claiming reachable there paints the row
+   * as answering, and leaves the poll's own no-daemon looking like a repeat of the claim, which the bus drops. */
+  const reachOf = (entry: LiveWorkspace): ReachState => {
+    const seen = polledReach.get(entry.record.id);
+    if (seen !== undefined && seen.machineId === entry.machine.id) return seen.reach;
+    return moduleOf(entry.record.kind).hasDaemon(entry) ? "reachable" : "unsupported";
+  };
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
     const size = entry.record.size;
     const idleAt = entry.record.phase === "running" ? idle.idleAt(entry.record.id) : undefined;
@@ -1975,6 +1992,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     });
   };
 
+  /** Whether this runtime has a road to put a daemon on a machine: the host must have wired the bundle, and the
+   * deploy uploads it, so a backend that mints no upload URL has none. Both roads into updateDaemon read this, so
+   * neither offers to deploy where the other would not. */
+  const canDeployDaemon = (record: WorkspaceRecord): boolean =>
+    opts.goldenRecipe?.deployDaemon !== undefined && backendFor(record.kind).capabilities.signedUrls === true;
+
   /** Everything the runtime settles with a machine's daemon the moment it can reach it, and the only place that
    * does: the folders the record says it may browse, then a daemon older than this wsp replaced with this one's,
    * waiting out any running turn first. Nobody asks for it, and nothing about it is a person's to know: the panes
@@ -1990,7 +2013,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await writeDaemonRoots(entry);
       const version = await helloVersion(entry);
       if (version === null || version >= DAEMON_VERSION) return;
-      if (opts.goldenRecipe?.deployDaemon === undefined) return;
+      if (!canDeployDaemon(entry.record)) return;
       await whenNoTurnRuns(entry.record.id);
       if (entry.record.phase !== "running") return;
       await noteDaemon(entry, DAEMON_UPDATING);
@@ -2015,6 +2038,50 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (daemonSyncs.get(key) === work) daemonSyncs.delete(key);
     });
     return work;
+  };
+
+  /** Every attempt to put a daemon back on a workspace's current machine, and when the last one was: a machine
+   * replaced under the record leaves nothing behind, since the entry is keyed by the workspace and holds the
+   * machine it was about. */
+  const revivedAt = new Map<string, { machineId: string; at: number }>();
+  const daemonRevivals = new Map<string, Promise<void>>();
+
+  /** A running machine whose daemon port answers nothing gets this runtime's daemon put back on it, on the same
+   * road the doctor and the golden build use and with the workspace's own token. The kernel's memory killer took
+   * a daemon once and the machine sat with none for five hours while its turns, which go over the provider's
+   * exec, kept running, so only the reach probe noticed (2026-09-08). Every poll that
+   * measures the machine calls this, not every status the bus carries: a machine parked at no-daemon builds the
+   * same status each time and the bus rightly drops the repeats, so a road listening there would try once and
+   * never again. The probe window is behind the word already, since reachShown gives a row no-daemon only on the
+   * second unanswered probe in a row. Unlike an update this waits out no turn: a daemon that answers nothing holds
+   * no ptys to lose. One run per machine at a time. */
+  const reviveDaemon = (entry: LiveWorkspace, reach: ReachState): void => {
+    if (reach !== "no-daemon" || entry.record.phase !== "running") return;
+    if (!canDeployDaemon(entry.record)) return;
+    const key = entry.machine.id;
+    if (daemonRevivals.has(key)) return;
+    const last = revivedAt.get(entry.record.id);
+    if (last !== undefined && last.machineId === key && clock.now() - last.at < DAEMON_REVIVE_AGAIN_MS) return;
+    revivedAt.set(entry.record.id, { machineId: key, at: clock.now() });
+    const work = (async () => {
+      await noteDaemon(entry, DAEMON_RESTARTING);
+      try {
+        await workspaces.updateDaemon(entry.record.id);
+        await writeDaemonRoots(entry);
+        await noteDaemon(entry, undefined);
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        await noteDaemon(entry, undefined);
+        // A machine that napped or went while the daemon was going back on did not fail a restart.
+        if (entry.record.phase !== "running") return;
+        console.warn(`daemon on ${entry.machine.id} (workspace ${entry.record.id}) not restarted: ${reason}`);
+        await flashDaemon(entry, DAEMON_RESTART_FAILED);
+      }
+    })();
+    daemonRevivals.set(key, work);
+    void work.catch(() => {}).then(() => {
+      if (daemonRevivals.get(key) === work) daemonRevivals.delete(key);
+    });
   };
 
   /** Size is always explicit: a create that names none gets the provider's own
@@ -2257,6 +2324,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const drop = async (id: string): Promise<void> => {
     live.get(id)?.lateRead?.();
     live.delete(id);
+    revivedAt.delete(id);
+    polledReach.delete(id);
     transcripts.delete(id);
     daemonNotes.delete(id);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
@@ -4963,6 +5032,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     emit: e => bus.emit(e),
     on: (type, l) => bus.on(type, l),
+    // Every tick, not every change: this is where the runtime learns what its machines' reach actually is, and a
+    // machine parked in one state is the case both readers of it exist for.
+    onPolled: statuses => {
+      for (const s of statuses) {
+        const entry = live.get(s.id);
+        if (entry === undefined || s.machineId !== entry.machine.id) continue;
+        if (s.phase === "running") polledReach.set(s.id, { machineId: s.machineId, reach: s.reach.state });
+        else polledReach.delete(s.id);
+        reviveDaemon(entry, s.reach.state);
+      }
+    },
     ...(opts.status !== undefined ? { defaults: opts.status } : {}),
     clock,
   });
