@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and how-to
+    url: https://wsp.apidocumentation.com
+    about: The docs cover setup, the command line, the app and the MCP tools. Read there first.

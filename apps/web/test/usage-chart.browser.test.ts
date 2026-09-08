@@ -3,29 +3,21 @@
 // whole life by default, the hour and day ranges on their toggles, the empty
 // state holding the same height, photographed in both themes. Runs only when
 // asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type Browser, type Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast } from "./contrast";
-import { startVite, stopRender, type ViteChild } from "./vite-child";
+import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS = join(WEB_DIR, "artifacts", "render");
-const browserPath = ((): string | undefined => {
-  try {
-    return chromium.executablePath();
-  } catch {
-    return undefined;
-  }
-})();
-const hasBrowser = browserPath !== undefined && existsSync(browserPath);
-const skipped = process.env["WSP_RENDER"] !== "1" ? "WSP_RENDER is not 1" : !hasBrowser ? "Playwright's Chromium is not installed" : undefined;
 
-if (skipped !== undefined) console.info(`usage chart render test skipped: ${skipped}`);
+if (renderSkipped !== undefined) console.info(`usage chart render test skipped: ${renderSkipped}`);
 
-describe.skipIf(skipped !== undefined)("the usage chart laid out in Chromium", () => {
+describe.skipIf(renderSkipped !== undefined)("the usage chart laid out in Chromium", () => {
   let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
@@ -34,7 +26,7 @@ describe.skipIf(skipped !== undefined)("the usage chart laid out in Chromium", (
   beforeAll(async () => {
     vite = await startVite(WEB_DIR, "/test/usage-chart/index.html");
     base = `${vite.base}/test/usage-chart/index.html`;
-    browser = await chromium.launch();
+    browser = await launchRender();
     page = await browser.newPage({ viewport: { width: 1200, height: 960 } });
     mkdirSync(SHOTS, { recursive: true });
   }, 60_000);

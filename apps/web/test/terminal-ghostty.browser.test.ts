@@ -6,35 +6,27 @@
 // screenshot per scheme shows the page behind the terminal. Vite serves
 // test/terminal-theme to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type Browser, type Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appTerminalFontSize } from "../src/terminal/ghostty/surface";
 import { wcagContrast } from "./contrast";
 import type { PaletteProbe, Probe } from "./terminal-theme/main";
-import { startVite, stopRender, type ViteChild } from "./vite-child";
+import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS_DIR = join(tmpdir(), "wsp-render");
-const browserPath = ((): string | undefined => {
-  try {
-    return chromium.executablePath();
-  } catch {
-    return undefined;
-  }
-})();
-const hasBrowser = browserPath !== undefined && existsSync(browserPath);
-const skipped = process.env["WSP_RENDER"] !== "1" ? "WSP_RENDER is not 1" : !hasBrowser ? "Playwright's Chromium is not installed" : undefined;
 
-if (skipped !== undefined) console.info(`terminal theme render test skipped: ${skipped}`);
+if (renderSkipped !== undefined) console.info(`terminal theme render test skipped: ${renderSkipped}`);
 
 /** The theme backgrounds the page's two configs set, as the canvas must hold them at 0.85 alpha. */
 const BACKGROUNDS = { dark: [30, 30, 46], light: [239, 241, 245] } as const;
 
-describe.skipIf(skipped !== undefined)("a translucent Ghostty theme on the surface in Chromium", () => {
+describe.skipIf(renderSkipped !== undefined)("a translucent Ghostty theme on the surface in Chromium", () => {
   let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
@@ -43,7 +35,7 @@ describe.skipIf(skipped !== undefined)("a translucent Ghostty theme on the surfa
   beforeAll(async () => {
     vite = await startVite(WEB_DIR, "/test/terminal-theme/index.html");
     base = `${vite.base}/test/terminal-theme/index.html`;
-    browser = await chromium.launch();
+    browser = await launchRender();
     page = await browser.newPage({ viewport: { width: 720, height: 360 } });
     mkdirSync(SHOTS_DIR, { recursive: true });
   }, 60_000);
