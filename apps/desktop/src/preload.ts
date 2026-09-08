@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { ContextMenuItem, DesktopBridge, LocalFontFace, ShellChord } from "@wsp/protocol";
+import type { ContextMenuItem, DesktopBridge, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer } from "electron";
 import { htmlClassFrom } from "./html-class.js";
 
@@ -22,6 +22,7 @@ const bridge: DesktopBridge & { retry(): Promise<Retry> } = {
     ipcRenderer.on("shell:chord", listen);
     return () => ipcRenderer.off("shell:chord", listen);
   },
+  setTheme: (theme: ThemePreference): void => ipcRenderer.send("theme:set", theme),
 };
 
 contextBridge.exposeInMainWorld("wsp", bridge);

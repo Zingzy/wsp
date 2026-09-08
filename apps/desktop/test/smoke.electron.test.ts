@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
+import { THEME_WORDS } from "../../web/src/settings/format.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
@@ -81,7 +82,9 @@ async function launch(env: Record<string, string | undefined>, prepare: (home: s
   const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_PORT: "0", WSP_WS_PORT: "0", ...env };
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(merged)) if (v !== undefined) clean[k] = v;
-  const app = await electron.launch({ executablePath: builtApp(), cwd, env: clean });
+  // Playwright emulates a light prefers-color-scheme in the renderer unless told not to; the page's system theme has to
+  // read the Mac's own appearance, the one the window's glass is drawn from, or the two sides split in the shot.
+  const app = await electron.launch({ executablePath: builtApp(), cwd, env: clean, colorScheme: null });
   return { app, home };
 }
 
@@ -91,7 +94,7 @@ async function bootOf(page: Page): Promise<{ wsPort: number; token: string }> {
 }
 
 interface DesktopWindow {
-  wsp: { capturePreview(workspaceId: string): Promise<void>; workspacePreview(workspaceId: string): Promise<string | undefined> };
+  wsp: { capturePreview(workspaceId: string): Promise<void>; workspacePreview(workspaceId: string): Promise<string | undefined>; setTheme(theme: string): void };
 }
 
 function readPreview(page: Page, workspaceId: string): Promise<string | undefined> {
@@ -136,6 +139,29 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(launched.app.windows()).toHaveLength(1);
     await launched.app.close();
     expect(await refused(url)).toBe(true);
+  });
+
+  it("the window's theme source follows the page: the record's system once the page has read it, light after a Light pick on the settings page, and light again on a reload from a dark pin", async () => {
+    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
+    const win = await launched.app.firstWindow();
+    await bootOf(win);
+    const source = () => launched!.app.evaluate(({ nativeTheme }) => nativeTheme.themeSource);
+    // The page's first word is the record's default; the pin before it is not a fact the page can be asked about.
+    await vi.waitFor(async () => expect(await source()).toBe("system"));
+    // The chord reaches the shell once the store is ready, which the sidebar's empty state says; the page is on screen
+    // before the pick, so the click waits on a fact and not on a guess about React's timing.
+    await win.waitForSelector("text=No workspaces yet");
+    await win.keyboard.press("Meta+,");
+    await win.waitForSelector("[data-settings-page]");
+    await win.getByRole("radio", { name: THEME_WORDS.light.title }).click();
+    await vi.waitFor(async () => expect(await source()).toBe("light"));
+    expect(await win.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(false);
+    // Pinned dark again by hand, a reload has to say light on its own: the record on the host, and the page's cache before it.
+    await launched.app.evaluate(({ nativeTheme }) => {
+      nativeTheme.themeSource = "dark";
+    });
+    await win.reload();
+    await vi.waitFor(async () => expect(await source()).toBe("light"));
   });
 
   it("photographs its own page for a workspace and hands the picture back to the page", async () => {

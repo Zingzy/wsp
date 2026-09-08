@@ -20,6 +20,11 @@ export function fmtBytes(n: number): string {
 /** Memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
 const memGb = (memMb: number): number => Number((memMb / 1024).toFixed(1));
 
+/** A size in css pixels, as the settings page states the text and sidebar sizes. */
+export function fmtPx(px: number): string {
+  return `${px} px`;
+}
+
 /** A machine size's memory with its unit. */
 export function fmtMemGb(memMb: number): string {
   return `${memGb(memMb)} GB`;
