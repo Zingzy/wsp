@@ -11,6 +11,7 @@ import { useStore } from "../src/protocol/store.js";
 import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
+import { SEND_LABEL, WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { requestComposerFocus, requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
@@ -76,7 +77,7 @@ async function setup(api: Api, conn: ConnStatus = "live") {
 }
 
 const draft = () => useComposerDraftStore.getState().drafts[WS]?.prompt ?? "";
-const sendButton = () => screen.getByRole("button", { name: /Send message|Turn in flight|wsp|Workspace|Loading|Connecting/ }) as HTMLButtonElement;
+const sendButton = () => screen.getByRole("button", { name: /Send message|Wake and send|Turn in flight|wsp|Workspace|Loading|Connecting/ }) as HTMLButtonElement;
 const menuItem = (name: string) => document.querySelector<HTMLElement>(`[data-composer-item-id="provider-slash-command:claude:${name}"]`);
 const menuDrawer = () => document.querySelector<HTMLElement>("[data-composer-command-drawer]");
 
@@ -258,13 +259,53 @@ function expectPlainLine(words: string): void {
 }
 
 describe("composer while the workspace is not live", () => {
-  it("disables the editor while the workspace naps, the reason one muted mono line in the reserved slot", async () => {
+  it("a paused workspace takes words: no line above the box, the placeholder as always, and the send button reads Wake and send", async () => {
     const { api } = fixtureApi([{ ...workspace, phase: "napping" }]);
     await setup(api);
-    expect(isEditable(composerEditor())).toBe(false);
-    expectPlainLine(sendRefusal("paused")!);
-    expect(sendButton().getAttribute("aria-label")).toBe("Workspace is paused; wake it to send");
+    expect(isEditable(composerEditor())).toBe(true);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(slot()!.textContent).toBe("");
+    expect(composerEditor().closest("[data-chat-composer]")!.textContent).not.toContain("paused");
+    expect(sendButton().getAttribute("aria-label")).toBe(WAKE_AND_SEND_LABEL);
+    expect(sendButton().getAttribute("title")).toBe(WAKE_AND_SEND_LABEL);
+    // Empty, so nothing to send yet; the words make it live, as on a running workspace.
     expect(sendButton().disabled).toBe(true);
+    await typeInto(composerEditor(), "hello");
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it("a running workspace's button reads plain Send", async () => {
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
+    expect(sendButton().getAttribute("aria-label")).toBe(SEND_LABEL);
+    expect(sendButton().getAttribute("title")).toBeNull();
+  });
+
+  it("sending on a paused workspace wakes it first and then starts the turn, in that order", async () => {
+    const { api, started } = fixtureApi([{ ...workspace, phase: "napping" }]);
+    const calls: string[] = [];
+    let release!: () => void;
+    api.wake = async id => {
+      calls.push(`wake ${id}`);
+      await new Promise<void>(resolve => (release = resolve));
+      return { ...workspace, phase: "running" };
+    };
+    const start = api.startSession;
+    api.startSession = async opts => {
+      calls.push("start");
+      return start(opts);
+    };
+    await setup(api);
+    await typeInto(composerEditor(), "hello");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(calls).toEqual([`wake ${WS}`]));
+    // While the machine wakes the box reads the waking state's own line; the start waits for the wake to settle.
+    expect(useStore.getState().workspaces[0]!.phase).toBe("waking");
+    expect(started).toHaveLength(0);
+    release();
+    await waitFor(() => expect(calls).toEqual([`wake ${WS}`, "start"]));
+    expect(started[0]!.prompt).toBe("hello");
   });
 
   it("a gone machine reads the same way: the gone sentence, one line, no panel", async () => {
@@ -287,9 +328,9 @@ describe("composer while the workspace is not live", () => {
     // The slot is the live region, present before any words land, so a screen reader hears the line when it does.
     expect(empty!.getAttribute("aria-live")).toBe("polite");
     expect(screen.queryByRole("status")).toBeNull();
-    emit({ type: "workspace.status", status: { ...workspace, phase: "napping", machineState: "paused", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
+    emit({ type: "workspace.status", status: { ...workspace, phase: "waking", machineState: "starting", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
-    expectPlainLine(sendRefusal("paused")!);
+    expectPlainLine(sendRefusal("waking")!);
     expect(slot()!.className).toBe(empty!.className);
   });
 

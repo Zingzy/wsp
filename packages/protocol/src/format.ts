@@ -35,8 +35,12 @@ export function fmtSize(size: WorkspaceSize): string {
   return `${size.cpu} vCPU · ${fmtMemGb(size.memMb)}`;
 }
 
-/** Every machine wsp forks is a cloud Linux box; the word has one home until a machine's kind can vary it. */
-export const MACHINE_OS_WORD = "Linux";
+/** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
+export const FREE_WORD = "free";
+
+/** What a Machine tab row reads on a kind of machine that has no road to that reading yet, in place of a pending
+ * that would never settle. */
+export const NOT_ON_THIS_KIND = "not on this kind";
 
 /** A size as the --size flag and the fork tools spell it: vCPUs, an x, memory in GB ("2x4", "2x0.5"). */
 export function sizeWord(size: WorkspaceSize): string {
@@ -109,6 +113,16 @@ export function fmtDuration(ms: number, style: DurationStyle = "short"): string 
   const seconds = total % 60;
   if (style === "short") return seconds === 0 ? `${hours * 60 + minutes}m` : `${hours * 60 + minutes}m ${seconds}s`;
   return hours === 0 ? `${minutes}m ${pad2(seconds)}s` : `${hours}h ${pad2(minutes)}m ${pad2(seconds)}s`;
+}
+
+/** How long a machine has been up, as the Machine tab reads it: minutes under an hour, hours and minutes under a
+ * day, then days and hours. Coarser than a turn's duration on purpose: the figure is read once, not watched. */
+export function fmtUptime(ms: number): string {
+  const minutes = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 60_000) : 0;
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
 /** A running clock on a row redrawn every tick: whole seconds, then the short style's minutes and seconds; tenths

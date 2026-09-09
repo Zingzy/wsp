@@ -1,4 +1,4 @@
-import type { Capabilities } from "@wsp/protocol";
+import type { Capabilities, MachineFacts } from "@wsp/protocol";
 
 export type MachineKind = "sandbox" | "desktop";
 export type MachineState = "starting" | "running" | "paused" | "gone";
@@ -83,6 +83,8 @@ export interface Machine {
   previewUrl?(port: number): Promise<PreviewReach>;
   /** Optional: backends that expose size and creation time per machine. */
   describe?(): Promise<MachineShape>;
+  /** Optional: a machine that already existed before wsp says what it is; the status poll carries the answer. */
+  facts?(): Promise<MachineFacts>;
   /** Optional: backends whose host reports live usage per machine. Answers when the host still knows the VM; a
    * missing answer while state() still says running is the host having lost it, ahead of the gateway's own record.
    * The numbers themselves are read nowhere yet, so none are typed. */

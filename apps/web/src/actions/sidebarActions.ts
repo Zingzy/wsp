@@ -26,7 +26,7 @@ export interface SidebarVerbs {
 }
 
 const MODE_ICON = { spaces: GalleryHorizontalEndIcon, list: ListIcon } as const;
-const LOCAL_ICON = workspaceKindGlyph("local")!;
+const LOCAL_ICON = workspaceKindGlyph("local");
 
 export const SIDEBAR_MODE_ACTION = "sidebar-mode";
 export const NEW_LOCAL_ACTION = "new-local-workspace";

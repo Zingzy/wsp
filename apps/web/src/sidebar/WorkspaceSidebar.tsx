@@ -39,7 +39,7 @@ import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, TWO_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
@@ -600,7 +600,7 @@ function CreationRow({ creation, active, onSelect }: { creation: Creation; activ
         aria-busy={failed ? undefined : "true"}
         data-sidebar-row
         data-row-id={creation.key}
-        className={cn(TWO_LINE_ROW_CLASS, "h-auto min-h-11")}
+        className={cn(THREE_LINE_ROW_CLASS, "h-auto min-h-15")}
         onClick={onSelect}
       >
         <span aria-hidden className={ROW_LEAD_CLASS}>
