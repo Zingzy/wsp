@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, RUN_GONE_LINE, SessionEvent, foldThreads, stillWorkingRefusal, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -145,8 +145,14 @@ describe("runtime", () => {
     expect(result.status).toBe("completed");
     // The adapter is handed the machine's login environment: who the guest runs as and the golden's PATH, so a launch served by a bare-PATH exec still finds the binary.
     // Every context, not the first alone: a turn is not the only road that asks a harness something on the machine.
+    // A turn's own launch carries one thing over that login, the token naming its thread; no other road carries it.
     expect(contexts.length).toBeGreaterThan(0);
-    for (const ctx of contexts) expect(ctx.env).toEqual(GUEST_LOGIN_ENV);
+    for (const ctx of contexts) {
+      const { [TURN_TOKEN_ENV]: token, ...login } = ctx.env;
+      expect(login).toEqual(GUEST_LOGIN_ENV);
+      if (token !== undefined) expect(token).toMatch(/^[0-9a-f]{32}$/);
+    }
+    expect(contexts.filter(c => c.env[TURN_TOKEN_ENV] !== undefined)).toHaveLength(1);
     const types = events.map(e => e.type);
     expect(types).toContain("session.start");
     expect(types).toContain("session.delta");
@@ -228,6 +234,7 @@ describe("runtime session history", () => {
     const sessionId = "33333333-3333-4333-8333-333333333333";
     let onEvent: ((e: AdapterEvent) => void) | undefined;
     let lastStart: HarnessStartOptions | undefined;
+    const starts: string[] = [];
     let finish!: (r: TurnResult) => void;
     const finished = new Promise<TurnResult>(r => (finish = r));
     const adapter: HarnessAdapterFactory = () => ({
@@ -236,11 +243,13 @@ describe("runtime session history", () => {
       start: o => {
         onEvent = o.onEvent;
         lastStart = o;
+        starts.push(o.prompt);
         return { localId: sessionId, finished, interrupt: async () => {} };
       },
     });
     return {
       adapter,
+      starts,
       lastStart: () => lastStart,
       start: (cwd?: string) => onEvent!({ type: "session.start", sessionId, model: "claude-sonnet-4-5", ...(cwd !== undefined ? { cwd } : {}) }),
       tool: (command: string, cwd?: string) =>
@@ -557,14 +566,17 @@ describe("runtime session history", () => {
     expect((await rt.sessions.list(ws.id))[0]!.status).toBe("running");
     expect((await rt.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done"]);
     const sid = (await rt.sessions.list(ws.id))[0]!.claudeSessionId!;
-    // A send while the process lives is refused in words naming the thread, never run as a second agent.
-    await expect(rt.sessions.start(ws.id, { prompt: "again", resume: sid })).rejects.toThrow(stillWorkingRefusal(handle.view().threadId!));
+    // A send while the process lives is never refused and never a second agent in the same folder: it waits for
+    // that process to exit and runs as the thread's next turn.
+    const again = rt.sessions.start(ws.id, { prompt: "again", resume: sid });
+    await settle();
+    expect(m.starts).toEqual(["go"]);
 
     m.end();
+    const queued = await again;
+    expect(queued.outcome).toBe("queued");
+    expect(m.starts).toEqual(["go", "again"]);
     await handle.finished;
-    // The process exited: the row completes and no longer refuses a send.
-    expect((await rt.sessions.list(ws.id))[0]!.status).toBe("completed");
-    await expect(rt.sessions.start(ws.id, { prompt: "again", resume: sid })).resolves.toBeDefined();
     await rt.close();
   });
 
@@ -1392,7 +1404,9 @@ describe("a turn the host comes back to", () => {
       return { localId, run: handle, finished, interrupt: async () => {} };
     };
     const asked: string[] = [];
-    const adapter: HarnessAdapterFactory = () => ({
+    /** The launch environment of each turn this fixture started, in order; an attach after a restart adds none. */
+    const envs: Readonly<Record<string, string>>[] = [];
+    const adapter: HarnessAdapterFactory = ctx => ({
       steers: false,
       // Answering nothing leaves the row on its seed, so the only thing that can stop a second question after the
       // restart is the start row the turn already wrote.
@@ -1401,6 +1415,7 @@ describe("a turn the host comes back to", () => {
         return null;
       },
       start: o => {
+        envs.push({ ...ctx.env });
         // The shape a handle the guest's run directory reports has to have to be one of this host's.
         const handle = `/tmp/wsp-run/${(++minted).toString(16).padStart(12, "0")}`;
         // The CLI keys the session by its own id, not by the one the launch minted, so the row and the harness
@@ -1427,6 +1442,7 @@ describe("a turn the host comes back to", () => {
     return {
       adapter,
       emit,
+      envs,
       handles: () => [...runs.keys()],
       sweep: (handle: string) => runs.delete(handle),
       unreach: (e: Error) => (unreachable = e),
@@ -1559,7 +1575,7 @@ describe("a turn the host comes back to", () => {
     const h = machineRuns();
     const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
     const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
-    await rt1.sessions.start(ws.id, { prompt: "build it", notify: "me" });
+    await rt1.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
     const run = h.handles()[0]!;
     h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
@@ -1603,6 +1619,34 @@ describe("a turn the host comes back to", () => {
     await rt2.close();
   });
 
+  it("a turn the host restart did not end keeps its token: the coordinator thread still names itself with me after the restart", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const turn = await rt1.sessions.start(ws.id, { prompt: "coordinate the builders" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const threadId = turn.view().threadId!;
+    const token = h.envs[0]![TURN_TOKEN_ENV]!;
+    // The row the next host reads carries it beside the run, since the process it is in outlives this host.
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { status: string; turnToken?: string }[] };
+    expect(stored.sessions.map(s => [s.status, s.turnToken])).toEqual([["running", token]]);
+    await rt1.close();
+
+    // The host came back and re-opened the run, so that turn is still working with the same variable in its process.
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    const kid = await rt2.sessions.start(ws.id, { prompt: "build it", notify: ["me"], turnToken: token, startedBy: "agent" });
+    expect(kid.view().threadId).not.toBe(threadId);
+    const kidRun = h.handles()[1]!;
+    h.emit(kidRun, { type: "turn.done", sessionId: "sess-2", result: { status: "completed", text: "done" } });
+    h.emit(kidRun, { type: "session.end", sessionId: "sess-2", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.history(ws.id)).some(e => e.type === "session.notify"));
+    expect((await rt2.sessions.history(ws.id)).find(e => e.type === "session.notify")).toMatchObject({ threadId: kid.view().threadId, notify: threadId });
+    await rt2.close();
+  });
+
   it("a host with no adapter for the harness cannot re-open the run, so the turn reads as one the restart cut", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -1621,7 +1665,7 @@ describe("a turn the host comes back to", () => {
     const h = machineRuns();
     const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
     const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
-    await rt1.sessions.start(ws.id, { prompt: "build it", notify: "me" });
+    await rt1.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
     const run = h.handles()[0]!;
     // the reply landed and the harness process had not exited when the host went down
@@ -5389,15 +5433,18 @@ describe("runtime session steer", () => {
 });
 
 /** A harness whose every turn runs until the test ends it; a resumed start keeps the session id, as the real one
- * does, and steers when told to. `end` completes a turn with the text, and whatever else of the result is given. */
+ * does, and steers when told to. `end` completes a turn with the text, and whatever else of the result is given.
+ * `envs` is the launch environment of each turn, in the order they were launched. */
 const held = (steers: boolean) => {
   const starts: HarnessStartOptions[] = [];
+  const envs: Readonly<Record<string, string>>[] = [];
   const steered: string[] = [];
   const turns: { sessionId: string; onEvent: (e: AdapterEvent) => void; finish: (r: TurnResult) => void }[] = [];
-  const adapter: HarnessAdapterFactory = () => ({
+  const adapter: HarnessAdapterFactory = ctx => ({
     steers,
     start: o => {
       starts.push(o);
+      envs.push({ ...ctx.env });
       const sessionId = o.resume ?? randomUUID();
       let finish!: (r: TurnResult) => void;
       const finished = new Promise<TurnResult>(r => (finish = r));
@@ -5435,7 +5482,7 @@ const held = (steers: boolean) => {
     reply(turn, text, more);
     exit(turn);
   };
-  return { adapter, starts, steered, reply, exit, end };
+  return { adapter, starts, envs, steered, reply, exit, end };
 };
 const settle = () => new Promise<void>(r => setTimeout(r, 20));
 
@@ -5527,6 +5574,50 @@ describe("a start on a thread whose turn is running", () => {
     await rt.close();
   });
 
+  it("a send that meets the reply tail queues instead of being refused, and two of them keep their order", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const first = await rt.sessions.start(ws.id, { prompt: "one" });
+    const threadId = first.view().threadId!;
+    // The turn has answered and its process has not exited: the row still reads running.
+    h.reply(0, "answered");
+    expect(first.view().status).toBe("running");
+    const outcomes: string[] = [];
+    const two = rt.sessions.start(ws.id, { prompt: "two", thread: threadId }).then(t => outcomes.push(`two:${t.outcome}`));
+    const three = rt.sessions.start(ws.id, { prompt: "three", thread: threadId }).then(t => outcomes.push(`three:${t.outcome}`));
+    await settle();
+    // Neither was refused, and neither opened a second agent on the thread while the first process lived.
+    expect(h.starts.map(s => s.prompt)).toEqual(["one"]);
+    h.exit(0);
+    await two;
+    h.end(1, "two done");
+    await three;
+    expect(h.starts.map(s => s.prompt)).toEqual(["one", "two", "three"]);
+    expect(outcomes).toEqual(["two:queued", "three:queued"]);
+    h.end(2, "three done");
+    await rt.close();
+  });
+
+  it("a harness that takes a message mid-turn takes none once its turn has answered: that send queues for the next turn too", async () => {
+    const h = held(true);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const first = await rt.sessions.start(ws.id, { prompt: "one" });
+    const threadId = first.view().threadId!;
+    h.reply(0, "answered");
+    const later = rt.sessions.start(ws.id, { prompt: "two", thread: threadId });
+    await settle();
+    // Steering it would put the words behind a reply the caller has already read.
+    expect(h.steered).toEqual([]);
+    expect(h.starts.map(s => s.prompt)).toEqual(["one"]);
+    h.exit(0);
+    expect((await later).outcome).toBe("queued");
+    expect(h.starts.map(s => s.prompt)).toEqual(["one", "two"]);
+    h.end(1, "two done");
+    await rt.close();
+  });
+
   it("a start on another thread of the same workspace is not held back by the running turn", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
@@ -5540,17 +5631,17 @@ describe("a start on a thread whose turn is running", () => {
 });
 
 describe("a thread whose start named who to tell", () => {
-  it("a running parent that steers is told by one steer: the line, with the outcome, duration, cost and the reply's last line, and the child's transcript holds a session.notify naming the parent", async () => {
+  it("a running parent that steers is told by one steer: the line, with the outcome, duration, cost and the reply whole, and the child's transcript holds a session.notify naming the parent", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
-    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: parentThread, startedBy: "agent" });
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread], startedBy: "agent" });
     const kidThread = kid.view().threadId!;
     expect(kidThread).not.toBe(parentThread);
     h.end(1, "Ran the gate.\n\nAll 12 tests green.\n", { durationMs: 492_000, costUsd: 1.94 });
-    const line = `thread ${kidThread.slice(0, 8)} finished (completed, 8m 12s, $1.94): All 12 tests green.`;
+    const line = `thread ${kidThread.slice(0, 8)} finished (completed, 8m 12s, $1.94): Ran the gate.\n\nAll 12 tests green.`;
     await vi.waitFor(() => expect(h.steered).toEqual([line]));
     expect(h.starts.map(s => s.prompt)).toEqual(["orchestrate", "build it"]);
     const history = await rt.sessions.history(ws.id);
@@ -5571,7 +5662,7 @@ describe("a thread whose start named who to tell", () => {
     const parentSid = parent.view().claudeSessionId!;
     h.end(0, "waiting for the builder");
     await parent.finished;
-    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: parentThread });
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread] });
     const kidThread = kid.view().threadId!;
     h.end(1, "done", { durationMs: 1_500, costUsd: 0.0042 });
     await vi.waitFor(() => expect(h.starts).toHaveLength(3));
@@ -5598,14 +5689,14 @@ describe("a thread whose start named who to tell", () => {
     const parentSid = parent.view().claudeSessionId!;
     h.reply(0, "waiting for the builder");
     expect(parent.view().status).toBe("running");
-    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: parentThread });
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread] });
     h.end(1, "done", { durationMs: 1_500, costUsd: 0.0042 });
     const line = `thread ${kid.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): done`;
     await settle();
-    // The parent's turn has replied, so it takes no steer and is not queued behind; the line waits for its exit.
+    // The parent's turn has replied, so it takes no steer; the line queues behind that process, as any send does.
     expect(h.steered).toEqual([]);
     expect(h.starts).toHaveLength(2);
-    expect(events.filter(e => e.type === "session.queued")).toEqual([]);
+    expect(events.filter(e => e.type === "session.queued")).toMatchObject([{ threadId: parentThread, prompt: line }]);
     expect((await rt.sessions.history(ws.id)).find(e => e.type === "session.notify")).toMatchObject({ notify: parentThread, text: line });
 
     h.exit(0);
@@ -5625,7 +5716,7 @@ describe("a thread whose start named who to tell", () => {
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-    const turn = await rt.sessions.start(ws.id, { prompt: "orchestrate", notify: "me" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "orchestrate", notify: ["me"] });
     h.reply(0, "the reply", { durationMs: 1_500, costUsd: 0.0042 });
     const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): the reply`;
     await rt.workspaces.nap(ws.id);
@@ -5643,7 +5734,7 @@ describe("a thread whose start named who to tell", () => {
     const h1 = held(false);
     const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
     const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
-    const turn = await rt1.sessions.start(ws.id, { prompt: "orchestrate", notify: "me" });
+    const turn = await rt1.sessions.start(ws.id, { prompt: "orchestrate", notify: ["me"] });
     h1.reply(0, "the reply", { durationMs: 1_500, costUsd: 0.0042 });
     const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): the reply`;
     await rt1.close();
@@ -5668,7 +5759,7 @@ describe("a thread whose start named who to tell", () => {
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
-    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: parentThread });
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread] });
     h.end(1, "done", { durationMs: 60_000, costUsd: 0.5 });
     const line = `thread ${kid.view().threadId!.slice(0, 8)} finished (completed, 1m, $0.50): done`;
     await vi.waitFor(() => expect(events.filter(e => e.type === "session.queued")).toMatchObject([{ threadId: parentThread, prompt: line }]));
@@ -5687,9 +5778,9 @@ describe("a thread whose start named who to tell", () => {
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-    const failing = await rt.sessions.start(ws.id, { prompt: "die", notify: "me" });
+    const failing = await rt.sessions.start(ws.id, { prompt: "die", notify: ["me"] });
     h.end(0, "", { status: "failed", error: "the harness died", durationMs: 3_000 });
-    const stopped = await rt.sessions.start(ws.id, { prompt: "run", notify: "me" });
+    const stopped = await rt.sessions.start(ws.id, { prompt: "run", notify: ["me"] });
     h.end(1, "Stopped mid-way.", { status: "interrupted", durationMs: 12_000, costUsd: 0.03 });
     await Promise.all([failing.finished, stopped.finished]);
     const told = events.filter(e => e.type === "session.notify");
@@ -5709,7 +5800,7 @@ describe("a thread whose start named who to tell", () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-    await expect(rt.sessions.start(ws.id, { prompt: "build it", notify: "thread_nobody" })).rejects.toThrow("no thread thread_nobody to notify");
+    await expect(rt.sessions.start(ws.id, { prompt: "build it", notify: ["thread_nobody"]})).rejects.toThrow("no thread thread_nobody to notify");
     expect(h.starts).toEqual([]);
     expect(await rt.sessions.list(ws.id)).toEqual([]);
     await rt.close();
@@ -5723,7 +5814,7 @@ describe("a thread whose start named who to tell", () => {
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
-    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: parentThread });
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread] });
     const kidSid = kid.view().claudeSessionId!;
     h.end(1, "first");
     await vi.waitFor(() => expect(h.steered).toHaveLength(1));
@@ -5755,7 +5846,7 @@ describe("a thread whose start named who to tell", () => {
     const sid = own.view().claudeSessionId!;
     h.end(0, "ready");
     await own.finished;
-    await expect(rt.sessions.start(ws.id, { prompt: "again", resume: sid, notify: own.view().threadId! })).rejects.toThrow("a thread cannot notify itself");
+    await expect(rt.sessions.start(ws.id, { prompt: "again", resume: sid, notify: [own.view().threadId!]})).rejects.toThrow("a thread cannot notify itself");
     expect(h.starts).toHaveLength(1);
     expect((await rt.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done", "session.end"]);
     await rt.close();
@@ -5766,8 +5857,8 @@ describe("a thread whose start named who to tell", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const a = await rt.sessions.start(ws.id, { prompt: "a" });
-    const b = await rt.sessions.start(ws.id, { prompt: "b", notify: a.view().threadId! });
-    const c = await rt.sessions.start(ws.id, { prompt: "c", notify: b.view().threadId! });
+    const b = await rt.sessions.start(ws.id, { prompt: "b", notify: [a.view().threadId!] });
+    const c = await rt.sessions.start(ws.id, { prompt: "c", notify: [b.view().threadId!] });
     // Ended child first, so each end steers its line into a parent still running instead of opening a turn on it.
     h.end(2, "idle");
     await vi.waitFor(() => expect(h.steered).toHaveLength(1));
@@ -5775,11 +5866,11 @@ describe("a thread whose start named who to tell", () => {
     await vi.waitFor(() => expect(h.steered).toHaveLength(2));
     h.end(0, "idle");
     await a.finished;
-    await expect(rt.sessions.start(ws.id, { prompt: "a again", resume: a.view().claudeSessionId!, notify: b.view().threadId! })).rejects.toThrow(`thread ${b.view().threadId!.slice(0, 8)} already notifies this thread; a cycle would run forever`);
-    await expect(rt.sessions.start(ws.id, { prompt: "a again", resume: a.view().claudeSessionId!, notify: c.view().threadId! })).rejects.toThrow(`thread ${c.view().threadId!.slice(0, 8)} already notifies this thread; a cycle would run forever`);
+    await expect(rt.sessions.start(ws.id, { prompt: "a again", resume: a.view().claudeSessionId!, notify: [b.view().threadId!]})).rejects.toThrow(`thread ${b.view().threadId!.slice(0, 8)} already notifies this thread; a cycle would run forever`);
+    await expect(rt.sessions.start(ws.id, { prompt: "a again", resume: a.view().claudeSessionId!, notify: [c.view().threadId!]})).rejects.toThrow(`thread ${c.view().threadId!.slice(0, 8)} already notifies this thread; a cycle would run forever`);
     expect(h.starts).toHaveLength(3);
     // A chain that does not come back is fine: a fresh thread may name c, and c's own chain ends at a.
-    const d = await rt.sessions.start(ws.id, { prompt: "d", notify: c.view().threadId! });
+    const d = await rt.sessions.start(ws.id, { prompt: "d", notify: [c.view().threadId!] });
     expect(d.outcome).toBe("started");
     await rt.close();
   });
@@ -5793,7 +5884,7 @@ describe("a thread whose start named who to tell", () => {
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     h.end(0, "waiting");
     await parent.finished;
-    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: parent.view().threadId! });
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parent.view().threadId!] });
     await rt.workspaces.nap(ws.id);
     const line = `thread ${kid.view().threadId!.slice(0, 8)} finished (failed): machine paused while the agent was working`;
     expect(events.find(e => e.type === "session.notify")).toMatchObject({ notify: parent.view().threadId, text: line });
@@ -5812,7 +5903,7 @@ describe("a thread whose start named who to tell", () => {
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: "me" });
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
     await rt.workspaces.nap(ws.id);
     const kinds = events.filter(e => "turnId" in e && e.turnId === kid.turnId).map(e => e.type);
     expect(kinds).toEqual(["session.start", "session.notify", "session.end"]);
@@ -5833,7 +5924,7 @@ describe("a thread whose start named who to tell", () => {
     const parentWs = await rt1.workspaces.create({ golden: "snap_g", name: "lead" });
     const parent = await rt1.sessions.start(parentWs.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
-    const kid = await rt1.sessions.start(kidWs.id, { prompt: "build it", notify: parentThread, startedBy: "agent" });
+    const kid = await rt1.sessions.start(kidWs.id, { prompt: "build it", notify: [parentThread], startedBy: "agent" });
     const kidThread = kid.view().threadId!;
     await rt1.close();
 
@@ -5866,7 +5957,7 @@ describe("a thread whose start named who to tell", () => {
     const h1 = held(true);
     const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
     const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
-    const kid = await rt1.sessions.start(ws.id, { prompt: "build it", notify: "me" });
+    const kid = await rt1.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
     await rt1.close();
 
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -5883,6 +5974,152 @@ describe("a thread whose start named who to tell", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("me is the thread the request came out of: two turns on one machine launch under a token each, and each token resolves me to its own thread", async () => {
+    const h = held(true);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const one = await rt.sessions.start(ws.id, { prompt: "coordinate one" });
+    const two = await rt.sessions.start(ws.id, { prompt: "coordinate two" });
+    const tokens = h.envs.map(e => e[TURN_TOKEN_ENV]!);
+    expect(tokens.filter(t => /^[0-9a-f]{32}$/.test(t ?? ""))).toHaveLength(2);
+    expect(new Set(tokens).size).toBe(2);
+    // Neither turn's token is anything the machine's own login carries: it is this launch's alone.
+    expect(GUEST_LOGIN_ENV[TURN_TOKEN_ENV]).toBeUndefined();
+    const kidOne = await rt.sessions.start(ws.id, { prompt: "build for one", notify: ["me"], turnToken: tokens[0], startedBy: "agent" });
+    const kidTwo = await rt.sessions.start(ws.id, { prompt: "build for two", notify: ["me"], turnToken: tokens[1], startedBy: "agent" });
+    h.end(2, "one done");
+    h.end(3, "two done");
+    await vi.waitFor(async () => expect((await rt.sessions.history(ws.id)).filter(e => e.type === "session.notify")).toHaveLength(2));
+    const told = (await rt.sessions.history(ws.id)).filter(e => e.type === "session.notify");
+    expect(told.map(e => [e.threadId, e.notify])).toEqual([
+      [kidOne.view().threadId, one.view().threadId],
+      [kidTwo.view().threadId, two.view().threadId],
+    ]);
+    h.end(0, "read it");
+    h.end(1, "read it");
+    await rt.close();
+  });
+
+  it("a turn the runtime ended rather than its own process leaves its token naming nobody", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "coordinate" });
+    const token = h.envs[0]![TURN_TOKEN_ENV]!;
+    // A nap ends the turn from this side: its harness process never exits, so nothing on that road clears the row.
+    await rt.workspaces.nap(ws.id);
+    expect(turn.view().status).toBe("failed");
+    await rt.workspaces.wake(ws.id);
+    await expect(rt.sessions.start(ws.id, { prompt: "build it", notify: ["me"], turnToken: token })).rejects.toThrow(NO_SUCH_TURN);
+    await rt.close();
+  });
+
+  it("a token no turn on this host carries is refused, and nothing starts", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await expect(rt.sessions.start(ws.id, { prompt: "build it", notify: ["me"], turnToken: "f".repeat(32) })).rejects.toThrow(NO_SUCH_TURN);
+    expect(h.starts).toEqual([]);
+    expect(await rt.sessions.list(ws.id)).toEqual([]);
+    await rt.close();
+  });
+
+  it("the token dies with the turn that carried it, and a start with no token still reaches the person", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "coordinate" });
+    const token = h.envs[0]![TURN_TOKEN_ENV]!;
+    h.end(0, "handed off");
+    await turn.finished;
+    await settle();
+    await expect(rt.sessions.start(ws.id, { prompt: "build it", notify: ["me"], turnToken: token })).rejects.toThrow(NO_SUCH_TURN);
+    // No token at all is every road that is not a turn: the app, a person's shell, an agent nobody launched here.
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
+    h.end(1, "done");
+    await vi.waitFor(async () => expect((await rt.sessions.history(ws.id)).some(e => e.type === "session.notify")).toBe(true));
+    expect((await rt.sessions.history(ws.id)).find(e => e.type === "session.notify")).toMatchObject({ threadId: kid.view().threadId, notify: "me" });
+    await rt.close();
+  });
+
+  it("notify takes several targets: a builder's end reaches its orchestrator and a reviewer, each once, with the same line", async () => {
+    const h = held(true);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const lead = await rt.workspaces.create({ golden: "snap_g", name: "lead" });
+    const box = await rt.workspaces.create({ golden: "snap_g", name: "box" });
+    const orchestrator = await rt.sessions.start(lead.id, { prompt: "orchestrate" });
+    const reviewer = await rt.sessions.start(lead.id, { prompt: "review what lands" });
+    const builder = await rt.sessions.start(box.id, { prompt: "build it", notify: [orchestrator.view().threadId!, reviewer.view().threadId!], startedBy: "agent" });
+    h.end(2, "Ran the gate.\nAll 12 tests green.");
+    const line = notifyLine(builder.view().threadId!, { status: "completed", text: "Ran the gate.\nAll 12 tests green." }, "whole");
+    await vi.waitFor(() => expect(h.steered).toEqual([line, line]));
+    const told = (await rt.sessions.history(box.id)).filter(e => e.type === "session.notify");
+    expect(told.map(e => e.notify)).toEqual([orchestrator.view().threadId, reviewer.view().threadId]);
+    expect(told.map(e => e.text)).toEqual([line, line]);
+    h.end(0, "read it");
+    h.end(1, "read it");
+    await rt.close();
+  });
+
+  it("a target whose thread is gone when the child ends falls back to the person, and the person is told once however many fell away", async () => {
+    const h = held(true);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const lead = await rt.workspaces.create({ golden: "snap_g", name: "lead" });
+    const box = await rt.workspaces.create({ golden: "snap_g", name: "box" });
+    const orchestrator = await rt.sessions.start(lead.id, { prompt: "orchestrate" });
+    const builder = await rt.sessions.start(box.id, { prompt: "build it", notify: [orchestrator.view().threadId!, "me"], startedBy: "agent" });
+    // The orchestrator's workspace is deleted while the builder works, so the thread the report was addressed to is
+    // not there to take it.
+    await rt.workspaces.delete(lead.id);
+    h.end(1, "done");
+    await vi.waitFor(async () => expect((await rt.sessions.history(box.id)).some(e => e.type === "session.notify")).toBe(true));
+    const told = (await rt.sessions.history(box.id)).filter(e => e.type === "session.notify");
+    expect(told.map(e => e.notify)).toEqual(["me"]);
+    expect(told[0]!.text).toBe(notifyLine(builder.view().threadId!, { status: "completed", text: "done" }));
+    expect(h.steered).toEqual([]);
+    await rt.close();
+  });
+
+  it("a target list never holds the sender: its own thread by id or through me is refused, and a target named twice is one target", async () => {
+    const h = held(true);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const one = await rt.sessions.start(ws.id, { prompt: "one" });
+    const oneThread = one.view().threadId!;
+    const token = h.envs[0]![TURN_TOKEN_ENV]!;
+    await expect(rt.sessions.start(ws.id, { prompt: "again", thread: oneThread, notify: [oneThread] })).rejects.toThrow("a thread cannot notify itself");
+    await expect(rt.sessions.start(ws.id, { prompt: "again", thread: oneThread, notify: ["me"], turnToken: token })).rejects.toThrow("a thread cannot notify itself");
+    expect(h.starts).toHaveLength(1);
+    // Named twice is told once: a list is a set of targets, not a count of them.
+    const two = await rt.sessions.start(ws.id, { prompt: "two", notify: [oneThread, oneThread], startedBy: "agent" });
+    h.end(1, "done");
+    const line = notifyLine(two.view().threadId!, { status: "completed", text: "done" }, "whole");
+    await vi.waitFor(() => expect(h.steered).toEqual([line]));
+    expect((await rt.sessions.history(ws.id)).filter(e => e.type === "session.notify")).toHaveLength(1);
+    h.end(0, "read it");
+    await rt.close();
+  });
+
+  it("the line into a thread carries the final message whole; the person's stays its last line", async () => {
+    const h = held(true);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parent.view().threadId!], startedBy: "agent" });
+    const mine = await rt.sessions.start(ws.id, { prompt: "build mine", notify: ["me"] });
+    const report: TurnResult = { status: "completed", text: "Ran the gate.\n\nAll 12 tests green.\n", durationMs: 492_000, costUsd: 1.94 };
+    h.end(1, report.text!, { durationMs: report.durationMs, costUsd: report.costUsd });
+    h.end(2, report.text!, { durationMs: report.durationMs, costUsd: report.costUsd });
+    const whole = notifyLine(kid.view().threadId!, report, "whole");
+    expect(whole).toContain("Ran the gate.\n\nAll 12 tests green.");
+    await vi.waitFor(() => expect(h.steered).toEqual([whole]));
+    const told = (await rt.sessions.history(ws.id)).filter(e => e.type === "session.notify");
+    expect(told.find(e => e.notify === parent.view().threadId)!.text).toBe(whole);
+    expect(told.find(e => e.notify === "me")!.text).toBe(notifyLine(mine.view().threadId!, report));
+    h.end(0, "read it");
+    await rt.close();
   });
 });
 

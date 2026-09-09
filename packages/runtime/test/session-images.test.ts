@@ -6,7 +6,7 @@
 // road can be read byte for byte.
 import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { imagePathIn, noImagesLine, stillWorkingRefusal, threadImagesDir, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
+import { imagePathIn, noImagesLine, sendRefusal, threadImagesDir, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -289,7 +289,7 @@ describe("two sends with images on one thread", () => {
 
 describe("a send that landed its images and is then refused", () => {
   /** An adapter whose turn replies and then lingers: turn.done lands, so the row reads replied, but the process has
-   * not exited and finished is still pending, which is the state a send into that thread is refused in. */
+   * not exited and finished is still pending, which is the state a send into that thread queues behind. */
   function lingering(road: AttachmentRoad, steers = false): { factory: HarnessAdapterFactory; starts: HarnessStartOptions[]; steered: string[]; reply: () => void; exit: () => void } {
     const starts: HarnessStartOptions[] = [];
     const steered: string[] = [];
@@ -336,7 +336,7 @@ describe("a send that landed its images and is then refused", () => {
     return { backend, arm: () => (armed = true), release: () => release!() };
   }
 
-  it("takes its folder off the machine before the refusal leaves, since no turn will ever do it", async () => {
+  it("takes its folder off the machine when the workspace naps under it, since no turn will ever do it", async () => {
     const codex = lingering("file");
     const { backend, arm, release } = heldLanding();
     const { rt, ws } = await workspaceOn({ codex: codex.factory }, backend);
@@ -350,15 +350,16 @@ describe("a send that landed its images and is then refused", () => {
     codex.exit();
     await first.finished;
     await until(() => backend.machines[0]!.execLog.some(cmd => cmd.includes("tar xzf")));
-    // A turn opens on the thread and replies while its process lingers: the state a send is refused in.
-    const third = await rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "C" });
-    codex.reply();
+    // A turn opens on the thread while B's bytes are still going up, so B queues behind that one instead.
+    await rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "C" });
     release();
-    await expect(second).rejects.toThrow(stillWorkingRefusal(threadId));
+    // The workspace naps, which ends C's turn and leaves nothing on this machine for B to run as: B is refused
+    // once C's process is gone, after its own images landed.
+    await rt.workspaces.nap(ws.id);
+    codex.exit();
+    await expect(second).rejects.toThrow(sendRefusal("paused")!);
     // B's images were on the machine before the refusal was known, and B has no turn to take them off, so B does.
     await until(() => backend.machines[0]!.execLog.includes(`rm -rf ${quoted(dirOf("req_b"))}`));
-    codex.exit();
-    await third.finished;
   });
 
   it("a refused send that carried no image asks the machine for nothing", async () => {
@@ -366,11 +367,11 @@ describe("a send that landed its images and is then refused", () => {
     const { rt, ws, since } = await workspaceOn({ codex: codex.factory });
     const first = await rt.sessions.start(ws.id, { harness: "codex", prompt: "A" });
     const threadId = first.view().threadId!;
-    codex.reply();
-    await expect(rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "B" })).rejects.toThrow(stillWorkingRefusal(threadId));
-    expect(since().execs.filter(cmd => cmd.startsWith("rm -rf "))).toEqual([]);
+    const second = rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "B" });
+    await rt.workspaces.nap(ws.id);
     codex.exit();
-    await first.finished;
+    await expect(second).rejects.toThrow(sendRefusal("paused")!);
+    expect(since().execs.filter(cmd => cmd.startsWith("rm -rf "))).toEqual([]);
   });
 
   it("a send whose message a turn steers takes its folder too: the words went into that turn and the images nowhere", async () => {

@@ -137,20 +137,31 @@ export function fmtCost(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
-/** What the notify line ends with, and what a wait answers as the reply: the last non-empty line of the reply, or the
+/** How much of the reply a finished line carries: `tail`, its last line, which is what a person reads in a sidebar
+ * row and what a wait answers with; `whole`, the final message entire, which is what a thread woken by the line acts
+ * on without reading the transcript again. */
+export type NotifyLength = "tail" | "whole";
+
+/** What the notify line ends with, and what a wait answers as the reply: the reply at the length asked for, or the
  * error when there is no reply. A turn that did not complete says its error first, since that is what whoever waits
- * needs. */
-export function notifyTail(result: TurnResult): string | undefined {
-  const reply = lastLine(result.text ?? "");
+ * needs. One rule for both lengths, so a tail can never say something the whole message does not. */
+export function notifyBody(result: TurnResult, length: NotifyLength = "tail"): string | undefined {
+  const text = result.text ?? "";
+  const reply = length === "tail" ? lastLine(text) : text.trim() === "" ? undefined : text.trim();
   return result.status === "completed" ? reply ?? result.error : result.error ?? reply;
 }
 
+/** The tail alone: the length a person's sidebar row and a wait's reply field read. */
+export function notifyTail(result: TurnResult): string | undefined {
+  return notifyBody(result, "tail");
+}
+
 /** The one line a thread's end sends to whoever its start named, and the one a wait on it prints: the thread's first
- * eight characters, the outcome word with the duration and cost the harness reported, then the tail. */
-export function notifyLine(threadId: string, result: TurnResult): string {
+ * eight characters, the outcome word with the duration and cost the harness reported, then the reply at `length`. */
+export function notifyLine(threadId: string, result: TurnResult, length: NotifyLength = "tail"): string {
   const facts = [result.status, ...(result.durationMs !== undefined ? [fmtDuration(result.durationMs)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
-  const tail = notifyTail(result);
-  return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${tail !== undefined ? `: ${tail}` : ""}`;
+  const body = notifyBody(result, length);
+  return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${body !== undefined ? `: ${body}` : ""}`;
 }
 
 /** The line a wait prints when its deadline passed with every named thread still running: one thread by its first
@@ -601,11 +612,24 @@ export const TURN_END_WORDS = "A turn ends when the agent process exits, not at 
 /** When the notify line goes, quoted the same way: with the reply, once, never again at the exit. */
 export const NOTIFY_WORDS = "The notify line goes once, at the reply";
 
+/** Which road a caller takes to its children's ends, in the two sentences every door quotes whole: the skill's rules,
+ * the tool descriptions and the command line. Which one holds is decided by whether the caller is a thread, which its
+ * launch environment says; nothing else decides it, and a blocking wait is neither road. */
+export const NOTIFY_CALLER = "A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report";
+export const COORDINATOR_HANDOFF =
+  "A caller that is not a wsp thread cannot be woken at all, so it takes the reply of one turn as the call returns, and hands work of more than one turn to a single coordinator thread on the local workspace";
+
+/** The refusal of a start whose turn token no turn on this host carries: the host minted every token it knows into a
+ * turn's own launch, so one it does not know is a caller naming a turn it is not, and reading it as the person would
+ * put a builder's report in front of nobody. */
+export const NO_SUCH_TURN = "no turn on this host carries that token; only wsp running inside a turn has one, and a turn that ended has none";
+
 /** What a send meets when its thread's last turn has replied but its agent process is still running (a child it did
- * not wait for, a lingering task): the row still reads running and is not free for a new turn, so the caller is told
- * in words, by thread, instead of starting a second agent in the same worktree. */
-export function stillWorkingRefusal(threadId: string): string {
-  return `thread ${threadId.slice(0, 8)} replied, still working; wait for its turn to finish before sending`;
+ * not wait for, a lingering task): the row still reads running and is not free for a new turn, so the message waits
+ * for that process rather than starting a second agent in the same worktree. Not a refusal: it says where the
+ * message went, and every door shows it in these words. */
+export function stillWorkingLine(threadId: string): string {
+  return `thread ${threadId.slice(0, 8)} replied, still working; the message runs as its next turn once that process exits`;
 }
 
 /** The send key's label while the thread's turn runs: Enter queues, nothing sends. */
