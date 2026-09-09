@@ -1036,6 +1036,65 @@ describe("the reach word a row shows", () => {
     expect(daemon.hits()).toBe(6);
   });
 
+  it("the table keeps its own run of probes: its reads never spend the silence the sidebar's row is granted, and are dampened by the read before them", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle });
+    await rt.workspaces.create({ golden: "snap_g", name: "steady" });
+    await rt.workspaces.create({ golden: "snap_g", name: "dark" });
+    const daemon = await switchable();
+    const dead = await closedPort();
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${daemon.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    backend.machines[1]!.previewUrl = async port => ({ url: `http://127.0.0.1:${dead}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    const row = (all: WorkspaceStatus[], name: string): WorkspaceStatus => all.find(w => w.name === name)!;
+    const poll = async (): Promise<WorkspaceStatus[]> => {
+      fc.advance(POLL_INTERVAL_MS);
+      return rt.status.list({ ...opts, reconcile: "on-failure" });
+    };
+    const table = async (): Promise<WorkspaceStatus[]> => rt.status.list({ ...opts, reconcile: "on-failure", reader: "table" });
+
+    expect(wordOf(row(await poll(), "steady"))).toBe("Running");
+    expect(wordOf(row(await table(), "steady"))).toBe("Running");
+    daemon.mode.answer = false;
+    // One blip is not a machine gone dark on this door either: the table's own last read answered, so this one waits.
+    expect(wordOf(row(await table(), "steady"))).toBe("Running");
+    // The table's second silence in a row turns the table's word, and only the table's.
+    expect(wordOf(row(await table(), "steady"))).toBe("Unreachable");
+    // A machine no read of this door ever found answering is unreachable at once: what is dampened is a run of
+    // probes, not a word a row is owed.
+    expect(wordOf(row(await table(), "dark"))).toBe("Unreachable");
+    // The poller's own next probe is still the first silence after an answer, however many table reads went by.
+    expect(wordOf(row(await poll(), "steady"))).toBe("Running");
+    expect(wordOf(row(await poll(), "steady"))).toBe("Unreachable");
+    // And back the other way: the poller's answer is not the table's, so the table waits out its own silence again.
+    daemon.mode.answer = true;
+    expect(wordOf(row(await poll(), "steady"))).toBe("Running");
+    expect(wordOf(row(await table(), "steady"))).toBe("Running");
+  });
+
+  it("with no app open nothing else probes, and the table is dampened by its own last read: one blip keeps the word", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle });
+    await rt.workspaces.create({ golden: "snap_g", name: "steady" });
+    const daemon = await switchable();
+    backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${daemon.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    // No watcher and no poll anywhere in this test: every probe of this machine is a table read's own.
+    const table = async (): Promise<WorkspaceStatus> => {
+      fc.advance(POLL_INTERVAL_MS);
+      return (await rt.status.list({ ...opts, reconcile: "on-failure", reader: "table" }))[0]!;
+    };
+
+    expect(wordOf(await table())).toBe("Running");
+    daemon.mode.answer = false;
+    expect(wordOf(await table())).toBe("Running");
+    daemon.mode.answer = true;
+    expect(wordOf(await table())).toBe("Running");
+    daemon.mode.answer = false;
+    expect(wordOf(await table())).toBe("Running");
+    expect(wordOf(await table())).toBe("Unreachable");
+  });
+
   it("a dead daemon port waits out the same window: one 502 keeps Running, the second reads Unreachable", async () => {
     const backend = stubBackend();
     const fc = fakeClock();

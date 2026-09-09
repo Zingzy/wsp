@@ -259,10 +259,24 @@ export const WorkspaceStatus = WorkspaceView.extend({
 });
 export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 
-/** A workspace as the command line and the MCP tool list it: the status without the route the reach carries, since a
- * table needs the state word and nothing that opens a machine. A relayed caller drives every cloud record, so this
- * door reaches a transcript that leaves the computer. Parsing a status through it is what drops the route. */
-export const WorkspaceListing = WorkspaceStatus.extend({ reach: ReachView });
+/** Every field of a workspace's view that a door outside the app's own status socket hands over: the record's own
+ * facts, and nothing the provider minted. Picked rather than omitted, so a route added to the view later is not
+ * handed over by having been forgotten, which is how the display stream rode these doors until now. */
+const WORKSPACE_OUT = {
+  id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true,
+  claudeSessionId: true, gone: true, tint: true, glyph: true, daemonNote: true,
+} as const;
+
+/** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
+ * is the provider's own route with its own bearer on it. A relayed caller drives every cloud record and an agent's
+ * transcript leaves the computer, so no door but the app's status socket hands one over. */
+export const WorkspaceOut = WorkspaceView.pick(WORKSPACE_OUT);
+export type WorkspaceOut = z.infer<typeof WorkspaceOut>;
+
+/** A workspace as the command line and the MCP tool list it: the same fields with what the rail reads live beside
+ * them, and the reach without the route it carries, since a table needs the state word and nothing that opens a
+ * machine. Parsing a status through it is what drops the routes; the app's own socket still gets both. */
+export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true }).extend({ reach: ReachView });
 export type WorkspaceListing = z.infer<typeof WorkspaceListing>;
 
 export const SessionStatus = z.enum(["running", "completed", "interrupted", "failed"]);

@@ -232,6 +232,62 @@ describe("the MCP server over the host", () => {
     expect(JSON.parse(listed.text)).toEqual(listed.structured);
   });
 
+  /** Every field name in a JSON Schema, deep, that reads as a route: what an agent is promised, not what one run answered. */
+  const routeFields = (schema: unknown, at: string): string[] => {
+    if (typeof schema !== "object" || schema === null) return [];
+    const node = schema as Record<string, unknown>;
+    const found: string[] = [];
+    for (const [name, sub] of Object.entries((node["properties"] as Record<string, unknown> | undefined) ?? {})) {
+      if (/url$/i.test(name)) found.push(`${at}.${name}`);
+      found.push(...routeFields(sub, `${at}.${name}`));
+    }
+    if (node["items"] !== undefined) found.push(...routeFields(node["items"], `${at}[]`));
+    for (const of of ["anyOf", "oneOf", "allOf"]) for (const sub of (node[of] as unknown[] | undefined) ?? []) found.push(...routeFields(sub, at));
+    return found;
+  };
+  /** The same over an answer, so a field the schema never promised is caught too. */
+  const routeValues = (value: unknown, at: string): string[] =>
+    typeof value === "object" && value !== null
+      ? Object.entries(value).flatMap(([k, v]) => [...(/url$/i.test(k) ? [`${at}.${k}`] : []), ...routeValues(v, `${at}.${k}`)])
+      : [];
+
+  it("no tool promises or answers with a route the provider minted: no field ends in Url and nothing carries a provider token", async () => {
+    // A version sealed from a desktop builder forks desktop machines, and only a desktop machine streams a display.
+    const head = SEALED_GOLDEN.versions[0]!;
+    await store.put("goldens", "default", { ...SEALED_GOLDEN, versions: [{ ...head, kind: "desktop" as const }] });
+    const c = await connect();
+    for (const t of (await c.listTools()).tools) expect(routeFields(t.outputSchema, t.name), t.name).toEqual([]);
+
+    const opened = await call("new", { name: "alpha" });
+    const [ws] = await rt.workspaces.list();
+    backend.machines[0]!.previewUrl = async () => ({ url: "http://127.0.0.1:1/?pt_token=stub-bearer", token: "stub-bearer", expiresAt: Date.now() + 3_600_000 });
+    // The runtime dialled the provider and holds both routes; the app's own status socket is still handed them.
+    const inside = (await rt.status.list()).find(s => s.id === ws!.id)!;
+    expect(inside.screen).toEqual({ streamUrl: `wss://stub/stream/${ws!.machineId}` });
+    expect(inside.reach.url).toBe("http://127.0.0.1:1/?pt_token=stub-bearer");
+
+    const doors: [string, Record<string, unknown>][] = [
+      ["workspaces", {}],
+      ["rename", { workspace: "alpha", name: "beta" }],
+      ["fork", { workspace: "beta", name: "gamma" }],
+      ["pause", { workspace: "gamma" }],
+      ["wake", { workspace: "gamma" }],
+    ];
+    const answers: [string, Called][] = [["new", opened]];
+    for (const [name, args] of doors) answers.push([name, await call(name, args)]);
+    for (const [name, answered] of answers) {
+      expect(answered.isError, name).toBe(false);
+      expect(routeValues(answered.structured, name), name).toEqual([]);
+      expect(answered.text, name).not.toContain("wss://");
+      expect(answered.text, name).not.toContain("pt_token");
+    }
+    // The words the table turns on are all still there, on the machine whose route the test minted.
+    const { workspaces } = (await call("workspaces")).structured as { workspaces: { name: string; machineState: string; reach: Record<string, unknown> }[] };
+    expect(workspaces.map(w => w.name)).toEqual(["beta", "gamma"]);
+    const listed = workspaces.find(w => w.name === "beta")!;
+    expect([listed.machineState, listed.reach["state"]]).toEqual(["running", "unreachable"]);
+  });
+
   it("new with local makes this computer, workspaces lists it beside a fork with kind local and no image, and thread_new takes it by name like any workspace", async () => {
     await call("new", { name: "alpha" });
     const made = await call("new", { local: true, name: "mac" });

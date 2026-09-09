@@ -8,7 +8,7 @@ import { randomBytes } from "node:crypto";
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { HOST_STOPPING_CLOSE, RELAY_TICKET_REFUSAL, RuntimeRequest, TICKET_ORIGIN, WorkspaceListing, type ExecEvent, type ForwardEvent, type PortForward, type WorkspaceOrigin } from "@wsp/protocol";
+import { HOST_STOPPING_CLOSE, RELAY_TICKET_REFUSAL, RuntimeRequest, TICKET_ORIGIN, WorkspaceListing, WorkspaceOut, type ExecEvent, type ForwardEvent, type PortForward, type WorkspaceOrigin, type WorkspaceView } from "@wsp/protocol";
 import type { HostFolders, HostTerminalConfig, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -91,6 +91,11 @@ function terminalConfigFrom(opts: ServeOptions): () => HostTerminalConfig {
     return opts.terminalConfig;
   };
 }
+
+/** Every workspace a verb answers with goes through here on its way out. The record's view holds the display stream
+ * the provider minted for a desktop machine, and this door answers a relayed machine and an agent's transcript as
+ * well as the app; the app reads that stream off the status its own socket subscribes to, which is untouched. */
+const handed = (workspace: WorkspaceView): WorkspaceOut => WorkspaceOut.parse(workspace);
 
 export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<RuntimeServer> {
   const bundler = bundlerFrom(opts);
@@ -199,8 +204,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "status.list": {
               // The provider is asked only where a reach failed: a bare list asks it for every machine, and every
               // such ask resets the provider's idle timer, so a caller listing in a loop would keep them all awake.
-              // No exec probe either, so the wait is one reach probe; the poller keeps the zombie verdict.
-              const statuses = await rt.status.list({ reconcile: "on-failure", zombieProbe: false }, origin);
+              // No exec probe either, so the wait is one reach probe; the poller keeps the zombie verdict. The run
+              // of probes this read joins is the listing doors' own, so an agent listing in a loop cannot spend the
+              // silence the person's sidebar row is waiting out.
+              const statuses = await rt.status.list({ reconcile: "on-failure", zombieProbe: false, reader: "table" }, origin);
               // Through the schema, so the route the reach carries is dropped rather than remembered about: it is
               // the provider's minted bearer, and this door answers a person's terminal and an agent's transcript.
               send({ id: msg.id, ok: true, statuses: statuses.map(s => WorkspaceListing.parse(s)) });
@@ -210,47 +217,47 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               const { id, op, origin: _sent, ...rest } = msg;
               void op;
               const { notice, ...workspace } = await rt.workspaces.create(rest, origin);
-              send({ id, ok: true, workspace, ...(notice !== undefined ? { notice } : {}) });
+              send({ id, ok: true, workspace: handed(workspace), ...(notice !== undefined ? { notice } : {}) });
               return;
             }
             case "workspaces.createLocal":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.createLocal(msg.name, origin) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.createLocal(msg.name, origin)) });
               return;
             case "workspaces.createSsh": {
               const { id, op, address, origin: _sent, ...rest } = msg;
               void op;
               const { notice, ...workspace } = await rt.workspaces.createSsh(address, rest, origin);
-              send({ id, ok: true, workspace, ...(notice !== undefined ? { notice } : {}) });
+              send({ id, ok: true, workspace: handed(workspace), ...(notice !== undefined ? { notice } : {}) });
               return;
             }
             case "workspaces.list":
-              send({ id: msg.id, ok: true, workspaces: await rt.workspaces.list(origin) });
+              send({ id: msg.id, ok: true, workspaces: (await rt.workspaces.list(origin)).map(handed) });
               return;
             case "workspaces.get":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.get(msg.workspaceId, origin) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.get(msg.workspaceId, origin)) });
               return;
             case "workspaces.nap":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.nap(msg.workspaceId, origin) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.nap(msg.workspaceId, origin)) });
               return;
             case "workspaces.wake":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.wake(msg.workspaceId, origin) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.wake(msg.workspaceId, origin)) });
               return;
             case "workspaces.upgrade": {
               const spec = {
                 ...(msg.cpu !== undefined ? { cpu: msg.cpu } : {}),
                 ...(msg.memMb !== undefined ? { memMb: msg.memMb } : {}),
               };
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.upgrade(msg.workspaceId, spec, origin) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.upgrade(msg.workspaceId, spec, origin)) });
               return;
             }
             case "workspaces.updateImage":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.updateImage(msg.workspaceId, origin) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.updateImage(msg.workspaceId, origin)) });
               return;
             case "workspaces.rename":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.rename(msg.workspaceId, msg.name, origin) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.rename(msg.workspaceId, msg.name, origin)) });
               return;
             case "workspaces.look":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.look(msg.workspaceId, { ...(msg.tint !== undefined ? { tint: msg.tint } : {}), ...(msg.glyph !== undefined ? { glyph: msg.glyph } : {}) }, origin) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.look(msg.workspaceId, { ...(msg.tint !== undefined ? { tint: msg.tint } : {}), ...(msg.glyph !== undefined ? { glyph: msg.glyph } : {}) }, origin)) });
               return;
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId, origin);
@@ -367,7 +374,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, probe: await rt.workspaces.portProbe(msg.workspaceId, msg.port, origin) });
               return;
             case "workspaces.rebuild":
-              send({ id: msg.id, ok: true, workspace: await rt.workspaces.rebuild(msg.workspaceId, origin) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.rebuild(msg.workspaceId, origin)) });
               return;
             case "forwards.list": {
               const shown: PortForward[] = [];

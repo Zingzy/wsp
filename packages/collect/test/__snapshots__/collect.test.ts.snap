@@ -25,6 +25,7 @@ exports[`collect > matches the fixture laptop snapshot 1`] = `
     {
       "bytes": 1200,
       "default": "bring",
+      "detail": "copied with IgnoreUnknown at the top, since ssh on the machine does not know every option yours does, and one unknown option would stop it reading the file",
       "id": "identity/ssh-config",
       "label": "~/.ssh/config",
       "paths": [

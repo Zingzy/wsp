@@ -9,7 +9,7 @@ import { gunzipSync } from "node:zlib";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GUARD_BEGIN, GUARD_END, type ManifestEntry } from "@wsp/collect";
+import { GUARD_BEGIN, GUARD_END, type ManifestEntry, withIgnoreUnknown } from "@wsp/collect";
 import { NODE_RELEASES, planFiles } from "@wsp/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_SERVERS_JSON } from "@wsp/catalog";
@@ -108,7 +108,8 @@ describe("packPlan", () => {
     );
     const packed = await packPlan(plan, { secrets: new Map(), home });
     expect(packed.bytes).toBe(packed.tar.length);
-    expect(packed.unpacked).toBe("[user]\n\tname = Me\n".length + "Host work\n".length + "echo x\n".length);
+    // The staged ssh config carries the IgnoreUnknown preface, so the unpacked size counts it.
+    expect(packed.unpacked).toBe("[user]\n\tname = Me\n".length + withIgnoreUnknown("Host work\n").length + "echo x\n".length);
     expect(packed.skipped).toEqual([]);
     const entries = listTar(packed.tar);
     const modeOf = (p: string) => entries.find(e => e.path === p || e.path === `${p}/`)?.mode;
@@ -117,6 +118,20 @@ describe("packPlan", () => {
     expect(modeOf(".ssh/config")).toMatch(/^-rw-------/);
     expect(modeOf(".oh-my-zsh/custom/plugins/x/x.zsh")).toMatch(/^-rwxr-xr-x/);
     expect(entries.some(e => e.path.includes("id_ed25519"))).toBe(false);
+  });
+
+  it("prefaces the copied ssh config with IgnoreUnknown, keeps every other byte, and keeps the file's mode", async () => {
+    const home = laptop();
+    const written = ["# written on the Mac", "Include ~/.ssh/conf.d/*.conf", "", "Host *", "  AddKeysToAgent yes", "  UseKeychain yes", "  IdentityFile ~/.ssh/id_ed25519", "", "Host github.com", "  User git", "  AppleMultipathServiceType=handover", ""].join("\n");
+    writeFileSync(join(home, ".ssh", "config"), written);
+    chmodSync(join(home, ".ssh", "config"), 0o400);
+    const plan = planFiles([row({ rung: "identity", id: "identity/ssh-config", paths: ["~/.ssh/config"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const landed = readFileSync(join(extract(packed.tar), ".ssh", "config"), "utf8");
+    expect(landed).toBe(`# wsp: ssh on the machine does not know every option yours does, and one unknown option would stop it reading the file.\nIgnoreUnknown *\n${written}`);
+    // Nothing came out of the copy, so the pack has nothing to report as left behind.
+    expect(packed.skipped).toEqual([]);
+    expect(listTar(packed.tar).find(e => e.path === ".ssh/config")?.mode).toMatch(/^-r--------/);
   });
 
   it("ships a linked dotfile as the target's bytes at the link's path, and leaves out links inside a copied directory that leave home, hit a refused path, or dangle", async () => {

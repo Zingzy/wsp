@@ -9,8 +9,8 @@
 // started runs as that thread's first turn, so the pin stays where it is.
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { turnSettledParts, workspaceState } from "@wsp/protocol";
-import { useStatus, useStore, useWorkspace } from "../../protocol/store";
+import { turnSettledParts } from "@wsp/protocol";
+import { useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
@@ -36,7 +36,6 @@ export function ChatView({
   children?: ((thread: ChatThreadHandle) => ReactNode) | undefined;
 }) {
   const workspace = useWorkspace(workspaceId);
-  const status = useStatus(workspaceId);
   const wake = useStore(s => s.wake);
   const select = useStore(s => s.select);
   const thread = useChatThread(workspaceId, threadId);
@@ -56,15 +55,13 @@ export function ChatView({
     [api],
   );
   // A Working thread on a machine that is not running is a contradiction: the row says what it waits for instead.
-  const phase = status?.phase ?? workspace?.phase ?? null;
-  const machineState = status?.machineState ?? null;
-  const reach = status?.reach.state ?? null;
+  const state = useWorkspaceState(workspaceId);
   const machineWait = useMemo<MachineWait | null>(() => {
-    if (phase === null || !view.running) return null;
-    const wait = turnWait(workspaceState({ phase, machineState, reach }));
+    if (state === null || !view.running) return null;
+    const wait = turnWait(state);
     if (wait === null) return null;
     return { label: wait.label, onWake: wait.wake ? () => void wake(workspaceId) : null };
-  }, [phase, machineState, reach, view.running, wake, workspaceId]);
+  }, [state, view.running, wake, workspaceId]);
   const { startNewThread, hydrated } = thread;
   useEffect(() => {
     // The latest view takes the request once its transcript is in, so it knows which thread it leaves behind.
