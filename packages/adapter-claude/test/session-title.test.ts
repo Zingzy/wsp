@@ -93,7 +93,7 @@ describe("the title Claude Code makes for a thread", () => {
     const { stdout } = await run("bash", ["-c", command], { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}` } });
     expect(parseTitleFor(stdout)).toBe("Seed thread titles here");
     const [argv, ...rest] = readFileSync(seen, "utf8").split("\n");
-    expect(argv).toBe("-p --bare --output-format json --allowed-tools  --model claude-sonnet-5");
+    expect(argv).toBe("-p --safe-mode --output-format json --allowed-tools  --model claude-sonnet-5");
     expect(rest.join("\n")).toBe(prompt);
   });
 
@@ -103,6 +103,14 @@ describe("the title Claude Code makes for a thread", () => {
     expect(command).toContain("unset ${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL");
     expect(command).not.toContain("CLAUDE_CODE_ENTRYPOINT=");
     expect(command).toContain("printf '%s' 'name it'");
+  });
+
+  it("asks with the person's customizations off and their sign-in still read, never in the mode that reads a key alone", () => {
+    // --bare's auth is ANTHROPIC_API_KEY or nothing, so this question is the one call on a workspace that must not
+    // take it: a person who signed in and exported no key would have every thread of theirs named by an error.
+    const command = titleForCommand({ configDir: "/root/.claude-cfg", prompt: "name it" });
+    expect(command).toContain("claude -p --safe-mode ");
+    expect(command).not.toContain("--bare");
   });
 
   it("leaves the model to the CLI when the catalog named none", () => {

@@ -60,16 +60,21 @@ export function parseSessionTitle(stdout: string): string | null {
 /**
  * One shell line for the guest that asks the CLI itself to name a thread: a print-mode turn on the question, with
  * the prompt on stdin rather than in the argv (a brief's excerpt would hit the kernel's per-argument cap) and the
- * whole answer as one JSON object. --bare skips hooks, plugins and CLAUDE.md, as the catalog probe does, so a
- * person's SessionStart hooks do not run on a question; no tool is allowed, since the answer is one line of words
- * and a tool call would cost a turn of its own. The same config dir and the same stripped environment as a session,
- * so the question runs as the person's sign-in and never as a nested Claude Code.
+ * whole answer as one JSON object. --safe-mode leaves the person's own customizations out of a question, their
+ * SessionStart hooks, CLAUDE.md, skills, plugins and MCP servers, and leaves auth alone; no tool is allowed either,
+ * since the answer is one line of words and a tool call would cost a turn of its own. Never --bare, whatever else
+ * it skips: its auth is strictly ANTHROPIC_API_KEY, with OAuth and the keychain never read (measured on 2.1.263:
+ * with no key in the environment, a --bare question against a signed-in store answers "Failed to authenticate"
+ * where a --safe-mode question against that same store answers the title), so on a computer whose person signed in
+ * rather than exported a key every title question came back an error while their own turns ran. The same config dir
+ * and the same stripped environment as a session, so the question reads the sign-in a turn there reads and never
+ * runs as a nested Claude Code.
  */
 export function titleForCommand(options: { configDir: string; prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
   const env = buildEnv({ base: options.baseEnv, configDir: options.configDir });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
-  const claude = ["claude -p", "--bare", "--output-format json", "--allowed-tools ''", ...(options.model === undefined ? [] : [`--model ${shellQuote(options.model)}`])].join(" ");
+  const claude = ["claude -p", "--safe-mode", "--output-format json", "--allowed-tools ''", ...(options.model === undefined ? [] : [`--model ${shellQuote(options.model)}`])].join(" ");
   return `cd ~ && ${clean}; printf '%s' ${shellQuote(options.prompt)} | ${claude}`;
 }
 
