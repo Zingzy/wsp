@@ -354,13 +354,12 @@ export function recipeChanges(from: RecipeDigest, to: RecipeDigest, manifest: Ma
  * the builder's seal smokes the ones that installed. Nothing ticked means a
  * bare machine that still has to fork and boot to seal. The envs are every
  * guest's plus what each ticked agent's entry asks for: its state home
- * variable, and a loaded key under the variable its sign-in reads. */
+ * variable, and a loaded key under the variable its sign-in reads, out of the keys given by variable. */
 export function goldenRecipeFor(
   bring: readonly ManifestEntry[],
-  keys: Pick<Keys, "anthropic">,
+  loaded: Readonly<Record<string, string>>,
   hooks: { deployDaemon?: (machine: Machine) => Promise<void | string>; import?: GoldenImport } = {},
 ): GoldenRecipe {
-  const loaded: Record<string, string> = keys.anthropic !== undefined ? { ANTHROPIC_API_KEY: keys.anthropic } : {};
   const envs: Record<string, string> = { ...GUEST_ENVS };
   for (const e of bring) {
     const agent = e.rung === "agents" ? catalogEntry(agentName(e)) : undefined;

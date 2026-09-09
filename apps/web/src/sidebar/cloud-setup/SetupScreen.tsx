@@ -1,101 +1,121 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One of the five screens of wsp init, drawn from the data the host hands
-// over: the rows the terminal's list draws, grouped where the terminal groups
-// them, a tick or an answer word on each, the footer lines under them. The
-// ticks and answers live here until Continue sends them; Back keeps them.
-import { useState } from "react";
-import { CLOUD_SETUP_WORDS, type InitFooterLine, type InitScreen, type InitScreenItem } from "@wsp/protocol";
-import { Checkbox } from "../../components/ui/checkbox.js";
+// The one layout every step of the cloud setup is drawn in, the first launch's
+// grammar at the first launch's numbers, in three bands: the head (a caps mono
+// label, the title, one sentence when the step has one), a middle that scrolls
+// inside itself, and a footer pinned inside the window with the primary and a
+// text link. The column is 560 px, 96 px under the window's top edge; on a
+// short window that margin gives way first, down to 48 px, then the middle
+// shrinks and scrolls. The window itself never scrolls. No step pads itself.
+import { useEffect, useRef, type ReactNode } from "react";
+import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
-import { CARD, GroupLabel, ROW, ROW_LINE, STATE_WORD, SetupFrame } from "./grammar.js";
 
-export interface ScreenAnswer {
-  ticks: string[];
-  answers: Record<string, string>;
+export const MICRO_LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground";
+/** The column's top margin, and the least it gives way to on a short window. */
+export const TOP_MARGIN = 96;
+export const TOP_MARGIN_MIN = 48;
+
+export interface ScreenAction {
+  word: string;
+  onPress: () => void;
+  disabled?: boolean;
+  /** The keycap takes focus as its screen appears, so Enter advances, unless the screen has a field to type in first. */
+  focus?: boolean;
+  /** The one quiet destructive link a step may carry. */
+  destructive?: boolean;
+  /** Why the action is disabled, as its tooltip. */
+  title?: string;
 }
 
-/** The footer's tones: the disk line's weight in the app's own colours, the middle tier orange, the top tier red. */
-const TONE: Record<NonNullable<InitFooterLine["tone"]>, string> = { yellow: "text-warning-foreground", yellowBright: "text-warning-foreground", red: "text-destructive-foreground" };
-
-export function SetupScreen({ screen, last, onContinue, onBack, refusal }: { screen: InitScreen; last: boolean; onContinue: (answer: ScreenAnswer) => void; onBack: () => void; refusal: string | null }) {
-  const [ticks, setTicks] = useState<Set<string>>(() => new Set(screen.ticks));
-  const [answers, setAnswers] = useState<Record<string, string>>(() => ({ ...screen.answers }));
-  const groups = [...new Set(screen.items.map(i => i.group ?? ""))];
-  const grouped = groups.some(g => g !== "");
-  const tick = (id: string, on: boolean): void =>
-    setTicks(prev => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  const cycle = (item: InitScreenItem): void => {
-    const choices = item.choices ?? [];
-    const at = choices.findIndex(c => c.value === answers[item.id]);
-    const next = choices[(at + 1) % choices.length];
-    if (next !== undefined) setAnswers(prev => ({ ...prev, [item.id]: next.value }));
-  };
-  const rows = (items: readonly InitScreenItem[]) =>
-    items.map(item => (
-      <li key={item.id} data-k="row" data-row={item.id} className={cn(ROW, ROW_LINE)} title={item.detail.join("\n")}>
-        {item.choices !== undefined ? (
-          <span aria-hidden className="size-4 shrink-0" />
-        ) : item.lock === "on" ? (
-          <span aria-hidden className="flex size-4 shrink-0 items-center justify-center">
-            <span className="size-1.5 rounded-full bg-foreground/70" />
-          </span>
-        ) : (
-          <Checkbox tone="neutral" aria-label={item.label} checked={ticks.has(item.id)} disabled={item.lock === "off"} onCheckedChange={on => tick(item.id, on === true)} />
-        )}
-        <span className="max-w-[55%] shrink-0 truncate text-sm text-foreground">{item.label}</span>
-        {item.why !== undefined ? <span className={cn(STATE_WORD, "hidden min-w-0 flex-1 truncate text-right sm:inline")}>{item.why}</span> : <span className="flex-1" />}
-        {item.hint !== undefined ? (
-          <span data-k="hint" className={STATE_WORD}>
-            {item.hint}
-          </span>
-        ) : null}
-        {item.choices !== undefined ? (
-          <button type="button" data-k="answer" data-row={item.id} onClick={() => cycle(item)} className={cn(STATE_WORD, "cursor-pointer rounded-sm border border-input px-1.5 py-0.5 text-foreground hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring outline-none")}>
-            {item.choices.find(c => c.value === answers[item.id])?.label ?? answers[item.id]}
-          </button>
-        ) : null}
-      </li>
-    ));
+export function SetupScreen({
+  k,
+  label,
+  counter,
+  headline,
+  top,
+  children,
+  primary,
+  secondary,
+  note,
+  refusal = null,
+}: {
+  k: string;
+  label: string;
+  counter?: string;
+  headline: string;
+  /** The sentence under the title; a step with none has no slot for it and its content follows the title. */
+  top?: string;
+  children?: ReactNode;
+  primary?: ScreenAction;
+  secondary?: ScreenAction;
+  /** One muted sentence above the footer, where a step has something the footer alone does not say. */
+  note?: string;
+  /** The host's word for what it refused, under the footer, so a press that did nothing says why. */
+  refusal?: string | null;
+}) {
+  // The keycap takes focus without scrolling to it: a long step opens on its title, not on its button.
+  const keycap = useRef<HTMLButtonElement>(null);
+  const focus = primary !== undefined && primary.focus !== false;
+  useEffect(() => {
+    if (focus) keycap.current?.focus({ preventScroll: true });
+  }, [focus]);
   return (
-    <SetupFrame
-      k={`screen-${screen.id}`}
-      label={screen.title}
-      counter={screen.counter}
-      headline={screen.top}
-      refusal={refusal}
-      primary={{ word: last ? CLOUD_SETUP_WORDS.screen.build : CLOUD_SETUP_WORDS.screen.keycap, onPress: () => onContinue({ ticks: [...ticks], answers }) }}
-      secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}
-    >
-      {screen.items.length === 0 ? (
-        <p data-k="empty" className={cn(STATE_WORD, "text-center")}>
-          {screen.empty}
-        </p>
-      ) : (
-        <ul className={cn(CARD, "max-h-[50vh] overflow-y-auto")} aria-label={screen.title}>
-          {grouped
-            ? groups.map(group => (
-                <li key={group} className={ROW_LINE}>
-                  {group !== "" ? <GroupLabel>{group}</GroupLabel> : null}
-                  <ul>{rows(screen.items.filter(i => (i.group ?? "") === group))}</ul>
-                </li>
-              ))
-            : rows(screen.items)}
-        </ul>
-      )}
-      {screen.footer.length > 0 ? (
-        <div data-k="footer" className="flex flex-col gap-0.5 px-1 pt-3">
-          {screen.footer.map((line, i) => (
-            <p key={i} className={cn("font-mono text-[11px] tabular-nums", line.tone !== undefined ? TONE[line.tone] : "text-muted-foreground")}>
-              {line.text}
-            </p>
-          ))}
+    <div data-k={k} className="mx-auto flex h-full w-[560px] max-w-full flex-col items-center">
+      {/* The top margin as a flex item that shrinks a thousand times more readily than the middle, so it gives way first. */}
+      <div data-k="top" aria-hidden className="w-full grow-0" style={{ flexBasis: TOP_MARGIN, flexShrink: 1000, minHeight: TOP_MARGIN_MIN }} />
+      <div data-k="head" className="flex w-full shrink-0 flex-col items-center">
+        <div className="mb-[14px] flex items-center gap-3">
+          <p data-k="label" className={MICRO_LABEL}>
+            {label}
+          </p>
+          {counter !== undefined ? (
+            <span data-k="counter" className={MICRO_LABEL}>
+              {counter}
+            </span>
+          ) : null}
         </div>
-      ) : null}
-    </SetupFrame>
+        <h2 data-k="title" className="mb-3 w-full text-center text-[34px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground">
+          {headline}
+        </h2>
+        {top !== undefined && top !== "" ? (
+          <p data-k="sentence" className="mb-8 max-w-[440px] text-center text-[15px] leading-[1.5] text-muted-foreground">
+            {top}
+          </p>
+        ) : null}
+      </div>
+      {/* The middle's basis is its content, so a shortage lands on the top margin first and only then shrinks and scrolls it. */}
+      <div data-k="middle" className="flex min-h-0 w-full flex-[1_1_auto] flex-col overflow-y-auto">
+        <div data-k="content" className="flex w-full shrink-0 flex-col">
+          {children}
+        </div>
+      </div>
+      <div data-k="foot" className="flex w-full shrink-0 flex-col items-center pt-7 pb-10">
+        {note !== undefined ? (
+          <p data-k="note" className="mb-4 max-w-[440px] text-center text-[13px] leading-[1.5] text-muted-foreground">
+            {note}
+          </p>
+        ) : null}
+        {primary !== undefined || secondary !== undefined ? (
+          <div data-k="footer" className="flex flex-col items-center">
+            {primary !== undefined ? (
+              <Button data-k="primary" ref={keycap} onClick={primary.onPress} disabled={primary.disabled === true} className="h-10 rounded-[10px] px-[22px] text-[15px] sm:h-10 sm:text-[15px]">
+                {primary.word}
+                <span aria-hidden>→</span>
+              </Button>
+            ) : null}
+            {secondary !== undefined ? (
+              <Button data-k="secondary" variant="link" onClick={secondary.onPress} disabled={secondary.disabled === true} title={secondary.title} className={cn("h-auto p-0 text-[15px] sm:text-[15px]", primary !== undefined ? "mt-3" : "", secondary.destructive === true ? "text-destructive-foreground" : "text-muted-foreground hover:text-foreground")}>
+                {secondary.word}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {refusal !== null ? (
+          <p data-k="refusal" className="mt-4 max-w-[440px] break-words text-center font-mono text-xs text-warning-foreground">
+            {refusal}
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }

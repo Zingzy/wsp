@@ -13,23 +13,27 @@ import { recipeAnswer, recipeScan, type RecipeAnswer, type RecipeScan } from "./
 import { candidatesLine } from "./init-table.js";
 import type { ScanRow } from "./scan.js";
 
-/** One line per agent: what its history here said. */
-export function historyLine(h: RecipeHistory): string {
-  const name = agentName(h.agent);
+/** What an agent's history here came to, the words a spinner's line and the app's reading row both carry. */
+export function historyWord(h: RecipeHistory): string {
   switch (h.state) {
     case "read":
-      return `${name}: ${plural(h.sessions, "session")}, ${plural(h.calls, "tool call")}`;
+      return `${plural(h.sessions, "session")}, ${plural(h.calls, "tool call")}`;
     case "empty":
-      return `${name}: no history here`;
+      return "no history here";
     case "unreadable":
-      return `${name}: history is here but could not be read`;
+      return "history is here but could not be read";
     case "no-reader":
-      return `${name}: no reader for its history yet`;
+      return "no reader for its history yet";
     default: {
       const _exhaustive: never = h.state;
       return _exhaustive;
     }
   }
+}
+
+/** One line per agent: what its history here said. */
+export function historyLine(h: RecipeHistory): string {
+  return `${agentName(h.agent)}: ${historyWord(h)}`;
 }
 
 /** One line while an agent's store is read: how far through its own session files the read is, so a first run on a

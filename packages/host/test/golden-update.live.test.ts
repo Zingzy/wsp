@@ -78,7 +78,7 @@ describe.runIf(LIVE)("golden update (live: v1, v2 by fork, v3 on the kept builde
       backend,
       store: jsonFileStore(statePath),
       adapters: {},
-      goldenRecipe: goldenRecipeFor(rows, { anthropic: env.ANTHROPIC_API_KEY }, { import: imp, deployDaemon: async m => `node ${(await deployDaemon(m)).node}` }),
+      goldenRecipe: goldenRecipeFor(rows, { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY }, { import: imp, deployDaemon: async m => `node ${(await deployDaemon(m)).node}` }),
       hostId: "golden-update-live",
     });
     rt.events.on("golden.stage", e => {

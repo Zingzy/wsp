@@ -92,6 +92,35 @@ function DialogPopup({
   );
 }
 
+/** The popup as a sheet over the whole window: the shell blurred behind it, the close 20 px from the top right, and
+ * nothing scrolling but what the content scrolls itself. The glass makes the popup the containing block of anything
+ * fixed in it, so what is pinned to a corner (the close, `aside`) sits beside the content, not in it. */
+function DialogSheet({ className, children, aside, ...props }: DialogPrimitive.Popup.Props & { aside?: React.ReactNode }) {
+  return (
+    <DialogPortal>
+      <DialogBackdrop />
+      <DialogViewport className="grid-rows-[1fr] p-0">
+        <DialogPrimitive.Popup
+          className={cn(
+            "dialog-glass relative h-full w-full overflow-hidden rounded-none border-0 text-foreground outline-none transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
+            className,
+          )}
+          data-slot="dialog-sheet"
+          {...props}
+        >
+          <div data-slot="dialog-sheet-body" className="h-full w-full overflow-hidden">
+            {children}
+          </div>
+          {aside}
+          <DialogPrimitive.Close aria-label="Close" className="fixed top-5 right-5" render={<Button size="icon" variant="ghost" />}>
+            <XIcon />
+          </DialogPrimitive.Close>
+        </DialogPrimitive.Popup>
+      </DialogViewport>
+    </DialogPortal>
+  );
+}
+
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -175,6 +204,7 @@ export {
   DialogBackdrop as DialogOverlay,
   DialogPopup,
   DialogPopup as DialogContent,
+  DialogSheet,
   DialogHeader,
   DialogFooter,
   DialogTitle,

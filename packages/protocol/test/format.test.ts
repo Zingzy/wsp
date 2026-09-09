@@ -151,9 +151,9 @@ describe("the package's index", () => {
 // One describe per helper family, in format.ts order, so two tickets' tests land in different hunks.
 
 describe("fmtBytes and fmtMemGb", () => {
-  it("reads whole bytes under a kilobyte, then one decimal in binary units up to GB", () => {
-    expect([0, 12, 1023, 1024, 2_048, 3 * 1024 * 1024, 38.2 * 1024 * 1024, 2.3 * 1024 ** 3, 32_000_000_000].map(fmtBytes)).toEqual([
-      "0 B", "12 B", "1023 B", "1.0 KB", "2.0 KB", "3.0 MB", "38.2 MB", "2.3 GB", "29.8 GB",
+  it("reads whole units under a gigabyte, then GB with one decimal unless whole", () => {
+    expect([0, 12, 1023, 1024, 2_048, 1536, 3 * 1024 * 1024, 38.2 * 1024 * 1024, 38.6 * 1024 * 1024, 2.3 * 1024 ** 3, 20 * 1024 ** 3, 32_000_000_000].map(fmtBytes)).toEqual([
+      "0 B", "12 B", "1023 B", "1 KB", "2 KB", "2 KB", "3 MB", "38 MB", "39 MB", "2.3 GB", "20 GB", "29.8 GB",
     ]);
   });
 
@@ -161,10 +161,11 @@ describe("fmtBytes and fmtMemGb", () => {
     expect([1536, 2048, 3000, 4096, 32768].map(fmtMemGb)).toEqual(["1.5 GB", "2 GB", "2.9 GB", "4 GB", "32 GB"]);
   });
 
-  it("has a GB tier and a decimal at MB, where the engine's old rule rounded whole megabytes and stopped at MB", () => {
+  it("has a GB tier with a decimal, and whole megabytes under it: a tenth of a megabyte is noise at that scale", () => {
     expect(fmtBytes(3000 * 1024 * 1024)).toBe("2.9 GB");
-    expect(fmtBytes(2048 * 1024 * 1024)).toBe("2.0 GB");
-    expect(fmtBytes(250 * 1024 * 1024)).toBe("250.0 MB");
+    expect(fmtBytes(2048 * 1024 * 1024)).toBe("2 GB");
+    expect(fmtBytes(250 * 1024 * 1024)).toBe("250 MB");
+    expect(fmtBytes(250.4 * 1024 * 1024)).toBe("250 MB");
   });
 });
 
@@ -192,15 +193,15 @@ describe("a machine that stopped answering with its memory near full", () => {
 
   it("the row form says the unit once when both sides share it, so the sidebar's second line holds it whole", () => {
     expect(outOfMemoryRowLine({ used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.42 })).toBe("out of memory, 3.6 of 3.9 GB");
-    expect(outOfMemoryRowLine({ used: 900 * 1024 ** 2, total: 3.94 * GiB, load1: 1 })).toBe("out of memory, 900.0 MB of 3.9 GB");
+    expect(outOfMemoryRowLine({ used: 900 * 1024 ** 2, total: 3.94 * GiB, load1: 1 })).toBe("out of memory, 900 MB of 3.9 GB");
   });
 
   it("the size line names the smallest offer with more memory and its rate, or that there is none", () => {
-    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one");
-    expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A workspace on 4 vCPU · 16 GB ($0.30/hr) fits more; pick it when you make the next one");
+    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one");
+    expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A workspace on 4 vCPU · 16 GB ($0.30/hr) fits more; pick it when you make the next one");
     expect(biggerSizeLine({ cpu: 4, memMb: 16384 }, offers)).toBe("No size with more memory is offered; run less on the machine at once");
     // Order in the table does not pick the offer; memory does.
-    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, [...offers].reverse())).toContain("2 vCPU · 8 GB");
+    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, [...offers].reverse())).toContain("2 vCPU · 8 GB");
   });
 });
 
@@ -245,7 +246,7 @@ describe("one copy of the image caps", () => {
   const HOME = join("packages", "protocol", "src", "attachments.ts");
   // The caps as a person reads them and as the code counts them: what a message may carry, and what one image may
   // weigh. A second spelling anywhere drifts from the constant the code enforces, which is how "10 MB each" came to
-  // sit beside a rule that says 10.0 MB. attachments.ts exports IMAGES_MAX, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS and
+  // sit beside a rule that says 10 MB. attachments.ts exports IMAGES_MAX, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS and
   // IMAGE_TYPE_WORDS for every sentence to read.
   const RULE = /\b10(\.0)? ?MB\b|10 \* 1024 \* 1024|\b(five|5) images\b|PNG, JPEG, GIF or WebP|image\/png,\s*image\/jpeg/;
 
@@ -707,10 +708,10 @@ describe("machine size words", () => {
   ];
 
   it("fmtSize is the one line for a size in the app: the cpus in the kind's word, a dot, the GB", () => {
-    expect([{ cpu: 2, memMb: 4096 }, { cpu: 4, memMb: 1536 }].map(size => fmtSize(size))).toEqual(["2 vCPU · 4 GB", "4 vCPU · 1.5 GB"]);
+    expect([{ cpu: 2, memMb: 4096 }, { cpu: 4, memMb: 1536 }].map(size => fmtSize(size))).toEqual(["2 vCPU · 4 GB", "4 vCPU · 1.5 GB"]);
     // A provider's cpus are virtual and this computer's are not: the same line, the kind's own word for them.
-    expect(fmtSize({ cpu: 10, memMb: 16384 }, kindWords("local").cpu)).toBe("10 cores · 16 GB");
-    expect(fmtSize({ cpu: 2, memMb: 4096 }, kindWords("cloud").cpu)).toBe("2 vCPU · 4 GB");
+    expect(fmtSize({ cpu: 10, memMb: 16384 }, kindWords("local").cpu)).toBe("10 cores · 16 GB");
+    expect(fmtSize({ cpu: 2, memMb: 4096 }, kindWords("cloud").cpu)).toBe("2 vCPU · 4 GB");
   });
 
   it("sizeWord spells vCPUs, an x and the GB the size table names, and sizeFromWord reads the same word back", () => {
@@ -876,12 +877,12 @@ describe("DAEMON_UPDATING and DAEMON_UPDATE_FAILED", () => {
 
 describe("the nap's words when its vault was not stored", () => {
   it("vaultOverCapLine reads the export and the cap in the one byte rule", () => {
-    expect(vaultOverCapLine(797_760_137, 209_715_200)).toBe("the export was 760.8 MB, over the 200.0 MB cap");
-    expect(vaultOverCapLine(6_000, 5_000)).toBe("the export was 5.9 KB, over the 4.9 KB cap");
+    expect(vaultOverCapLine(797_760_137, 209_715_200)).toBe("the export was 761 MB, over the 200 MB cap");
+    expect(vaultOverCapLine(6_000, 5_000)).toBe("the export was 6 KB, over the 5 KB cap");
   });
 
   it("vaultKeptLine says the previous vault stands and why, whatever stopped the export", () => {
-    expect(vaultKeptLine(vaultOverCapLine(797_760_137, 209_715_200))).toBe("nap kept the previous vault; the export was 760.8 MB, over the 200.0 MB cap");
+    expect(vaultKeptLine(vaultOverCapLine(797_760_137, 209_715_200))).toBe("nap kept the previous vault; the export was 761 MB, over the 200 MB cap");
     expect(vaultKeptLine("fetch failed")).toBe("nap kept the previous vault; fetch failed");
   });
 
@@ -1117,18 +1118,18 @@ describe("the import dialog's words", () => {
   const dest = "/Users/me/code/proj";
   /** The events one import with travelling sessions makes, in the runtime's order: the project upload lands, then the sessions tar uploads and lands. */
   const TRIP = [
-    ev({ stage: "planned", message: "1204 files, 38.2 MB and the repository; 3 secret-shaped files; 4 caches left behind." }),
+    ev({ stage: "planned", message: "1204 files, 38 MB and the repository; 3 secret-shaped files; 4 caches left behind." }),
     ev({ stage: "consented", message: "Rewriting .git/config to https://github.com/o/r; cut .env. Sessions travel for Claude Code (46 sessions)." }),
     ev({ stage: "packing", message: "Packing 1857 files." }),
-    ev({ stage: "uploading", message: "Uploading 31.9 MB.", bytes: 0, total: 33_449_574 }),
-    ev({ stage: "uploading", message: "Part 1 of 2, 16.0 MB of 31.9 MB.", bytes: 16_724_787, total: 33_449_574 }),
-    ev({ stage: "uploading", message: "Part 2 of 2, 31.9 MB of 31.9 MB.", bytes: 33_449_574, total: 33_449_574 }),
+    ev({ stage: "uploading", message: "Uploading 32 MB.", bytes: 0, total: 33_449_574 }),
+    ev({ stage: "uploading", message: "Part 1 of 2, 16 MB of 32 MB.", bytes: 16_724_787, total: 33_449_574 }),
+    ev({ stage: "uploading", message: "Part 2 of 2, 32 MB of 32 MB.", bytes: 33_449_574, total: 33_449_574 }),
     ev({ stage: "landing", message: `Landing at ${dest}.` }),
-    ev({ stage: "uploading", message: "Uploading 3 session files and the rows to merge, 1.2 MB.", bytes: 0, total: 1_258_291 }),
-    ev({ stage: "uploading", message: "Part 1 of 1, 1.2 MB of 1.2 MB.", bytes: 1_258_291, total: 1_258_291 }),
+    ev({ stage: "uploading", message: "Uploading 3 session files and the rows to merge, 1 MB.", bytes: 0, total: 1_258_291 }),
+    ev({ stage: "uploading", message: "Part 1 of 1, 1 MB of 1 MB.", bytes: 1_258_291, total: 1_258_291 }),
     ev({ stage: "landing", message: "Merging rows into Codex." }),
     ev({ stage: "landing", message: "Landing sessions: Claude Code moved, Codex transcripts landed." }),
-    ev({ stage: "done", message: `1855 files, 38.0 MB, landed at ${dest}; sessions: Claude Code moved.` }),
+    ev({ stage: "done", message: `1855 files, 38 MB, landed at ${dest}; sessions: Claude Code moved.` }),
   ];
 
   it("reads the trip's current step in plain words and holds the bar: starting, the runtime's packing count, the upload by its total, the landing by the workspace, the sessions pass named, done", () => {
@@ -1138,12 +1139,12 @@ describe("the import dialog's words", () => {
       "Starting",
       "Starting",
       "Packing 1857 files",
-      "Uploading 31.9 MB",
-      "Uploading 31.9 MB",
-      "Uploading 31.9 MB",
+      "Uploading 32 MB",
+      "Uploading 32 MB",
+      "Uploading 32 MB",
       "Landing on dev2",
-      "Uploading sessions, 1.2 MB",
-      "Uploading sessions, 1.2 MB",
+      "Uploading sessions, 1 MB",
+      "Uploading sessions, 1 MB",
       "Landing on dev2",
       "Landing on dev2",
       "Done",
@@ -1173,14 +1174,14 @@ describe("the export dialog's words", () => {
   /** The events one export with agent state makes, in the runtime's order: the folder packs and downloads, then the agents' state does, then one landing. */
   const TRIP = [
     ev({ stage: "packing", message: "Packing /root/spoo on the machine." }),
-    ev({ stage: "downloading", message: "The folder: 0 B of 31.0 MB.", bytes: 0, total: 32_505_856 }),
-    ev({ stage: "downloading", message: "The folder: 15.5 MB of 31.0 MB.", bytes: 16_252_928, total: 32_505_856 }),
-    ev({ stage: "downloading", message: "The folder: 31.0 MB of 31.0 MB.", bytes: 32_505_856, total: 32_505_856 }),
+    ev({ stage: "downloading", message: "The folder: 0 B of 31 MB.", bytes: 0, total: 32_505_856 }),
+    ev({ stage: "downloading", message: "The folder: 16 MB of 31 MB.", bytes: 16_252_928, total: 32_505_856 }),
+    ev({ stage: "downloading", message: "The folder: 31 MB of 31 MB.", bytes: 32_505_856, total: 32_505_856 }),
     ev({ stage: "packing", message: "Packing the agents' state for it on the machine." }),
-    ev({ stage: "downloading", message: "Agent state: 0 B of 1.2 MB.", bytes: 0, total: 1_292_000 }),
-    ev({ stage: "downloading", message: "Agent state: 1.2 MB of 1.2 MB.", bytes: 1_292_000, total: 1_292_000 }),
+    ev({ stage: "downloading", message: "Agent state: 0 B of 1 MB.", bytes: 0, total: 1_292_000 }),
+    ev({ stage: "downloading", message: "Agent state: 1 MB of 1 MB.", bytes: 1_292_000, total: 1_292_000 }),
     ev({ stage: "landing", message: "Landing at /Users/me/code/spoo." }),
-    ev({ stage: "done", message: "1202 files, 38.0 MB, landed at /Users/me/code/spoo; 4 caches left behind; sessions: Claude Code (6 sessions) moved." }),
+    ev({ stage: "done", message: "1202 files, 38 MB, landed at /Users/me/code/spoo; 4 caches left behind; sessions: Claude Code (6 sessions) moved." }),
   ];
 
   it("reads the trip's current step in plain words and holds the bar: the folder packs and downloads by its total, the sessions are their own named pass, the landing, done", () => {
@@ -1188,12 +1189,12 @@ describe("the export dialog's words", () => {
     const seen = TRIP.map((_, i) => exportProgress(TRIP.slice(0, i + 1)));
     expect(seen.map(p => p?.line)).toEqual([
       "Packing the folder",
-      "Downloading the folder, 31.0 MB",
-      "Downloading the folder, 31.0 MB",
-      "Downloading the folder, 31.0 MB",
+      "Downloading the folder, 31 MB",
+      "Downloading the folder, 31 MB",
+      "Downloading the folder, 31 MB",
       "Packing sessions",
-      "Downloading sessions, 1.2 MB",
-      "Downloading sessions, 1.2 MB",
+      "Downloading sessions, 1 MB",
+      "Downloading sessions, 1 MB",
       "Landing on this Mac",
       "Done",
     ]);

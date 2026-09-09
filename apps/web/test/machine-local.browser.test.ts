@@ -40,7 +40,7 @@ describe.skipIf(renderSkipped !== undefined)("the machine tab of this computer l
   it.each(["dark", "light"] as const)("in the %s theme the tab reads this computer's shape and what is true of it, with no spend, no nap, no image and no helper sentence", async theme => {
     await page!.goto(`${base}?theme=${theme}`);
     await page!.waitForSelector("[data-k=folder]");
-    expect(await page!.locator("[data-k=size]").textContent()).toBe("10 cores · 16 GB");
+    expect(await page!.locator("[data-k=size]").textContent()).toBe("10 cores · 16 GB");
     expect(await page!.locator("[data-k=state]").textContent()).toBe("Running");
     expect(await page!.locator("[data-k=reach]").textContent()).toBe("reachable");
     expect(await page!.locator("[data-k=cost]").textContent()).toBe(FREE_WORD);
@@ -70,7 +70,7 @@ describe.skipIf(renderSkipped !== undefined)("the machine tab of this computer l
     expect(await page!.locator("footer").count()).toBe(0);
     // The Live rows read this computer's own modules, so the figures sit in the slot the kind's word used to hold,
     // in the same ink.
-    const figures = ["33%", "6.0 GB of 16.0 GB", "200.0 GB of 500.0 GB"];
+    const figures = ["33%", "6 GB of 16 GB", "200 GB of 500 GB"];
     for (const [i, k] of ["cpu", "mem", "disk"].entries()) {
       const slot = page!.locator(`[data-k=${k}]`);
       expect(await slot.textContent()).toBe(figures[i]);

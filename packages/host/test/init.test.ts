@@ -177,7 +177,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     collect: async () => FIXTURE,
     recipe: async () => RECIPE,
     scanProject: async folder => ({ dir: folder, rows: [], candidates: [] }),
-    keys: { solari: SOLARI },
+    agentKeys: {},
     pricing: PRICING,
     statePath: join(dir, "state.json"),
     home,
@@ -406,8 +406,8 @@ describe("wsp init, interactive", () => {
     const screen = f.text().slice(f.text().lastIndexOf("◆  Also on this Mac"));
     // The third of the six screens, its own sentence over it, and every row starts off with its manager's count and weight.
     expect(screen).toMatch(/Also on this Mac\s+3\/6/);
-    expect(screen).toContain("We found these installed on this Mac. Tick the ones you or your agents need");
-    expect(screen).toMatch(/▾ Homebrew formulae\s+0 of 1\s+0 B\n┃\s+○ llvm\s+2\.0 GB\n/);
+    expect(screen).toContain("What else this Mac brings");
+    expect(screen).toMatch(/▾ Homebrew formulae\s+0 of 1\s+0 B\n┃\s+○ llvm\s+2 GB\n/);
     expect(screen).toMatch(/▾ npm globals\s+0 of 1\s+0 B\n┃\s+○ turbo\s+size unknown\n/);
     // The screen that spends disk shows the Disk line, as Tools does, and it follows the ticks.
     const disk = (text: string): string => text.slice(text.lastIndexOf("Disk: ")).split("\n")[0]!;
@@ -539,7 +539,7 @@ describe("wsp init, interactive", () => {
     await throughScreens(f, ["Agents", "Tools"]);
     await f.until("Also on this Mac  3/6");
     const screen = f.text().slice(f.text().lastIndexOf("◆  Also on this Mac"));
-    expect(screen).toContain("What this Mac has installed that a package manager could put on the image");
+    expect(screen).toContain("What else this Mac could bring");
     expect(screen).toContain("nothing found here yet");
     await f.press(KEY.enter);
     await throughScreens(f, ["Sign-ins", "wsp for your agents on this Mac"]);
@@ -827,7 +827,7 @@ describe("wsp init, interactive", () => {
     await f.until("Tools  2/6");
     // Nothing here and nothing ticked: the base rows still come, and every other row is on the screen at its size.
     // Sixteen base rows fold behind the visible two, and the why column is cut to the screen's width.
-    expect(f.text()).toMatch(/• fd\s+base\s+always on th[^\n]*?\s+2\.9 MB\n/);
+    expect(f.text()).toMatch(/• fd\s+base\s+always on th[^\n]*?\s+3 MB\n/);
     expect(f.text()).toContain("On: 16 tools, 1.5 GB");
     await f.press(KEY.enter);
     await f.until("Also on this Mac");
@@ -866,8 +866,8 @@ describe("wsp init, the project the run is for", () => {
     await f.press(KEY.enter);
     await f.until("Tools  2/6");
     // Go is off in the catalog and never used here; the folder's own go.mod put it on the machine, in its own group.
-    expect(f.text()).toMatch(/▾ Your project needs\s+1 of 1\s+239\.1 MB/);
-    expect(f.text()).toMatch(/● +Go +project +go\.mod needs[^\n]*? +239\.1 MB/);
+    expect(f.text()).toMatch(/▾ Your project needs\s+1 of 1\s+239 MB/);
+    expect(f.text()).toMatch(/● +Go +project +go\.mod needs[^\n]*? +239 MB/);
     await f.press(KEY.enter);
     await throughScreens(f, ["Also on this Mac", "Sign-ins", "wsp for your agents"]);
     await f.until(BOOT);
@@ -963,12 +963,12 @@ describe("wsp init, the summary-first screens", () => {
     expect(one).toContain("21 found on this computer. Nothing has left this computer.");
     expect(one).not.toContain("not in this build");
     // The catalog's six in its order, a size beside each, the three on this Mac ticked.
-    expect(one).toMatch(/◆  Agents  1\/6\n┃ {2}Which coding agents go on your machine image\.\n┃ {2}You can change this later\.\n┃ {2}search/);
+    expect(one).toMatch(/◆  Agents  1\/6\n┃ {2}Which agents go on the image\n┃ {2}You can change this later\.\n┃ {2}search/);
     expect(one).toContain("On: 3 agents, 1.1 GB");
-    expect(one).toMatch(/● Hermes Agent\s+installed\s+installed here, never used\s+484\.0 MB\n┃\s+● Claude Code\s+installed\s+installed here, never used\s+208\.0 MB\n┃\s+● Codex\s+catalog\s+not installed here\s+455\.0 MB\n/);
+    expect(one).toMatch(/● Hermes Agent\s+installed\s+installed here, never used\s+484 MB\n┃\s+● Claude Code\s+installed\s+installed here, never used\s+208 MB\n┃\s+● Codex\s+catalog\s+not installed here\s+455 MB\n/);
     // Down onto Gemini CLI: the detail says wsp cannot drive it yet and what installs; space ticks it for the machine.
     await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
-    await f.until("about 189.0 MB installed on the machine (measured 2026-09-05)");
+    await f.until("about 189 MB installed on the machine (measured 2026-09-05)");
     expect(f.text()).toContain("installs, but wsp cannot run its threads yet");
     expect(f.text()).toContain("not on this Mac; try it on the machine, nothing here changes");
     await f.press(KEY.space);
@@ -979,11 +979,11 @@ describe("wsp init, the summary-first screens", () => {
     const two = f.text().slice(f.text().lastIndexOf("◆  Tools"));
     // Screen two is the list itself: the base as bullets under the title, then a group per why, every row with its
     // count and its size, the totals and the Disk line under them. Nothing is hidden behind a key.
-    expect(two).toMatch(/^◆  Tools  2\/6\n┃ {2}What installs on the image, from what you use\.\n┃ {2}You can change this later\.\n┃ {2}search/);
-    expect(two).toMatch(/▾ Always on the image\s+16\s+1\.5 GB\n┃\s+• Docker engine and compose\s+base\s+always on the image\s+516\.7 MB\n/);
-    expect(two).toMatch(/▾ You use these\s+1 of 2\s+239\.4 MB\n┃\s+○ Go\s+used\s+below the floor, 2 commands in 1[^\n]*?239\.1 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+239\.4 MB\n/);
+    expect(two).toMatch(/^◆  Tools  2\/6\n┃ {2}Tools from your usage\n┃ {2}You can change this later\.\n┃ {2}search/);
+    expect(two).toMatch(/▾ Always on the image\s+16\s+1\.5 GB\n┃\s+• Docker engine and compose\s+base\s+always on the image\s+517 MB\n/);
+    expect(two).toMatch(/▾ You use these\s+1 of 2\s+239 MB\n┃\s+○ Go\s+used\s+below the floor, 2 commands in 1[^\n]*?239 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+239 MB\n/);
     // This Mac's npm global the catalog does not carry is no row here: the catalog is the Tools screen, the third screen is its.
-    expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+53\.8 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40\.2 MB\n┃\s+● yq\s+installed\s+installed here, never used\s+13\.5 MB\n/);
+    expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+54 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40 MB\n┃\s+● yq\s+installed\s+installed here, never used\s+14 MB\n/);
     expect(two).not.toContain("tsx");
     expect(two).toMatch(/On: 19 tools, 1\.8 GB\n┃ {2}on when used in 2 sessions and 5 commands; heavy rows 3 and 20\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
     expect(two).not.toContain("adjust");
@@ -1032,7 +1032,7 @@ describe("wsp init, the summary-first screens", () => {
     // The four agents and both MCP servers, the one with a token by the copy it was given on the screen.
     // Gemini's row is the catalog's, added after what the collector found, so it installs last.
     expect(summary).toMatch(/Agents\s+6 of 8/);
-    expect(summary).toMatch(/Sign-ins\s+1 copy, 5 sign in\s+24\.4 KB\n/);
+    expect(summary).toMatch(/Sign-ins\s+1 copy, 5 sign in\s+24 KB\n/);
     expect(summary).toMatch(/Hermes Agent API keys\s+copy\n/);
     expect(summary).toMatch(/kubectl config\s+skip\n/);
     expect(summary).toMatch(/github\s+copy\n/);
@@ -1326,6 +1326,8 @@ describe("wsp init, the sign-in stage", () => {
     // The default flow first: the shim would open the page; here the printed URL is offered with o.
     await f.until(/Codex login\s+codex login\n/);
     await f.until("Press Enter to open https://github.com/login/device");
+    // The terminal's stage answers Ctrl-C itself: the run puts no stop handler on the signals here, as it does on the hand-off road.
+    expect(f.signals.listenerCount("SIGINT") + f.signals.listenerCount("SIGTERM")).toBe(0);
     const builderId = f.backends[0]!.machines[0]!.id;
     expect(f.hooks[0]!.autoOpen(builderId, DEVICE_URL)).toBe(false);
     // While the pty is on screen the shim's line says what to press here; outside it the relay keeps its own words.
@@ -1714,8 +1716,12 @@ describe("wsp init, flags and no terminal", () => {
     expect(stages.map(r => r["stage"])).toEqual(expect.arrayContaining(["creating", "installing-tools", "ready", "snapshotting", "sealed"]));
     expect(stages.some(r => r["stage"] === "installing-tools" && typeof (r["step"] as { command?: unknown } | undefined)?.command === "string")).toBe(true);
     expect(f.records.filter(r => r["event"] !== "stage")).toEqual([
+      // Each sign-in is an object as its command starts, then again with its page and the road that page names, then
+      // its outcome.
+      { event: "sign-in", tool: "gh", label: "GitHub CLI login" },
       { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE_URL, finish: "none", nextCommand: `open '${DEVICE_URL}'`, waitSeconds: 960 },
       { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: "gh auth login exited 0" },
+      { event: "sign-in", tool: "claude", label: "Claude Code login" },
       // claude's row is declared callback, and the page it printed here redirects to the hosted paste-code page, not
       // to a port on the machine, so the row takes a code.
       { event: "sign-in", tool: "claude", label: "Claude Code login", browserUrl: CLAUDE_URL, finish: "code", nextCommand: `open '${CLAUDE_URL}'`, waitSeconds: 900 },
@@ -1959,7 +1965,7 @@ describe("wsp init, flags and no terminal", () => {
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     expect(f.hosts).toBe(0);
-    expect(f.text()).toMatch(/Uploading your files failed/);
+    expect(f.text()).toMatch(/Copying your files failed/);
     expect(f.text()).toContain("not in gzip format");
   });
 
@@ -2254,7 +2260,7 @@ describe("wsp init, flags and no terminal", () => {
     await bootedOnly(f);
     const out = f.text();
     expect(out).toContain("Attaching to your earlier builder: default (m1)");
-    expect(out).toMatch(/Files uploaded\s+~\/\.claude\.json re-imported/);
+    expect(out).toMatch(/Files copied\s+~\/\.claude\.json re-imported/);
     expect(out).not.toContain("gone");
     expect(out).not.toContain("still running on the account");
     expect(shared.machines).toHaveLength(1);
@@ -2289,7 +2295,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toContain("Attaching to your earlier builder: default (m1)");
     // The fake home has no hosts.yml, so the login file is rendered from the Keychain value alone.
     // Off a terminal the detail is cut at 80 columns; the path and the start of the word survive.
-    expect(out).toMatch(/Files uploaded\s+Keychain: gh:github\.com re-imp/);
+    expect(out).toMatch(/Files copied\s+Keychain: gh:github\.com re-imp/);
     expect(uploads()).toBe(2);
     expect(await keychainOf()).toMatchObject({ digest: sha("gho_new"), volatile: true });
     expect(shared.machines).toHaveLength(1);
@@ -2580,7 +2586,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).not.toContain("Creating the machine");
     // The GitHub login is copied from the Keychain, so its rendered file goes up again on every attach; the rest is skipped.
     expect(out.match(/(Setup applied|Tools installed|Agents installed)\s+already applied/g)).toHaveLength(3);
-    expect(out).toMatch(/Files uploaded\s+Keychain: gh:github\.com re-imp/);
+    expect(out).toMatch(/Files copied\s+Keychain: gh:github\.com re-imp/);
     // The two stages an attach never runs say so as well, and no skipped stage carries a duration: the reach
     // check that follows the last one is nobody's stage.
     expect(out).toMatch(/Machine created\s+already applied$/m);
@@ -2906,10 +2912,10 @@ describe("summaryNote", () => {
     ]);
     const lines = summaryNote(FIXTURE, ticks, new Map(), 200, 300 * 1024 * 1024, brew);
     // 300 MB files + 1024 toolchain + 53 tools + 663 agents + 50 assumed for tsx = 2090 MiB.
-    expect(lines).toContain("Disk      2.0 GB of 15.2 GB on the 20 GB builder (files 300.0 MB, Homebrew's toolchain 1.0 GB, tools 53.0 MB, agents 663.0 MB; 1 unmeasured, ~50.0 MB)");
+    expect(lines).toContain("Disk      2 GB of 15.2 GB on the 20 GB builder (files 300 MB, Homebrew's toolchain 1 GB, tools 53 MB, agents 663 MB; 1 unmeasured, ~50 MB)");
     const huge = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 30 * 1024 * 1024 * 1024, macosOnly: false }]]);
     const over = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0, huge).find(l => l.startsWith("Disk"));
-    expect(over).toBe("Disk      31.0 GB, 15.8 GB over the 15.2 GB the 20 GB builder leaves (Homebrew's toolchain 1.0 GB, tools 30.0 GB)");
+    expect(over).toBe("Disk      31 GB, 15.8 GB over the 15.2 GB the 20 GB builder leaves (Homebrew's toolchain 1 GB, tools 30 GB)");
     // With colour on, the Disk line takes its tier's colour, every wrapped line of it; a total under 50 percent stays plain.
     const was = process.env["FORCE_COLOR"];
     process.env["FORCE_COLOR"] = "3";
@@ -2935,7 +2941,7 @@ describe("summaryNote", () => {
     // They are the person's tools too: the Installs line counts them, the Disk line carries the measured one's
     // 4 MB and counts the other beside the gh formula the Mac's Homebrew never sized.
     expect(lines.find(l => l.startsWith("Installs"))).toContain("3 tools");
-    expect(lines.find(l => l.startsWith("Disk"))).toContain("tools 4.0 MB; 2 unmeasured");
+    expect(lines.find(l => l.startsWith("Disk"))).toContain("tools 4 MB; 2 unmeasured");
     expect(summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0).some(l => l.startsWith("Added"))).toBe(false);
   });
 
@@ -2996,7 +3002,7 @@ describe("stage stream", () => {
     ]);
     expect(view.steps.map(s => [s.start, s.end])).toEqual([
       ["Creating the machine", "Machine created"],
-      ["Installing the base (tools and daemon)", "Base installed"],
+      ["Installing the base tools", "Base installed"],
       ["Installing agents", "Agents installed"],
     ]);
     expect(view.steps[0]).toMatchObject({ tail: ["sandbox from default"] });
@@ -3051,7 +3057,7 @@ describe("stage stream", () => {
     const skipped = ["creating", "deploying-daemon", "applying-setup", "uploading-files", "installing-tools", "installing-harness", "installing-mcp"].map(stage => ev(stage, ALREADY_APPLIED));
     const view = reduceStages([...skipped, ev("failed", "the builder answered exit 1 to a no-op; it is not serving")]);
     expect(view.steps.map(s => s.state)).toEqual([...Array<string>(7).fill("done"), "failed"]);
-    expect(view.steps[7]!.fail).toBe("The machine never became ready");
+    expect(view.steps[7]!.fail).toBe("The machine never answered");
     expect(view.failure).toBe("the builder answered exit 1 to a no-op; it is not serving");
     // A failure while a stage runs still lands on that stage.
     const running = reduceStages([ev("creating"), ev("uploading-files", "4 MB"), ev("failed", "HTTP 413")]);
@@ -3087,7 +3093,7 @@ describe("pack size before the boot", () => {
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     const out = f.text();
-    expect(out).toMatch(/Upload\s+9\.0 GB, over the 8\.5 GB the machine's disk allows/);
+    expect(out).toMatch(/Upload\s+9 GB, over the 8\.5 GB the machine's disk allows/);
     expect(out).not.toContain("This recipe needs about");
     expect(out).toContain("Recipe saved to");
     expect(out).toContain("Nothing was booted.");
@@ -4006,8 +4012,8 @@ describe("wsp init, the first workspace and its project", () => {
     expect(f.imports).toEqual([{ workspaceId: workspaces[0]!.id, source: folder, dest: folder, carry: [], rewrite: [".git/config"], agents: ["claude"] }]);
     const out = f.text();
     expect(out).toMatch(/Workspace proj \(ws_[0-9a-f]+\) forked from golden v1\./);
-    expect(out).toContain("12 files, 3.0 KB; the repository whole; 46 sessions from Claude Code; 2 secret-shaped files read for what may travel.");
-    expect(out).toContain(`${folder} on proj: 12 files, 3.0 KB; 1 file rewritten without their credentials; 1 secret-shaped file cut.`);
+    expect(out).toContain("12 files, 3 KB; the repository whole; 46 sessions from Claude Code; 2 secret-shaped files read for what may travel.");
+    expect(out).toContain(`${folder} on proj: 12 files, 3 KB; 1 file rewritten without their credentials; 1 secret-shaped file cut.`);
     // Off a terminal no app is served: the run ends naming what serves it.
     expect(out).toContain("Done. Golden v1 is sealed; wsp up starts the app.");
     expect(out).not.toMatch(URL_RE);

@@ -20,9 +20,9 @@ import { withCustom, withoutCustom } from "./recipe-custom.js";
 import { customFromScan, type ScanRow } from "./scan.js";
 
 export const ALSO_TITLE = "Also on this Mac";
-export const ALSO_TOP = "We found these installed on this Mac. Tick the ones you or your agents need on the image.";
+export const ALSO_TOP = "What else this Mac brings";
 /** What the screen says when no manager here offered a row: it keeps its place in the six either way. */
-export const ALSO_EMPTY_TOP = "What this Mac has installed that a package manager could put on the image too.";
+export const ALSO_EMPTY_TOP = "What else this Mac could bring";
 export const ALSO_EMPTY = "nothing found here yet";
 
 /** What the build does with a scanned package that has a row of its own: the road in its words with the line the

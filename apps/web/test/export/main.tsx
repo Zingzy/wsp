@@ -76,21 +76,21 @@ const api: Api = {
     }
     emit({ stage: "packing", message: `Packing ${SOURCE} on the machine.`, elapsedMs: 120 });
     await beat(150);
-    emit({ stage: "downloading", message: "The folder: 0 B of 31.0 MB.", elapsedMs: 2_400, bytes: 0, total: 32_505_856 });
+    emit({ stage: "downloading", message: "The folder: 0 B of 31 MB.", elapsedMs: 2_400, bytes: 0, total: 32_505_856 });
     await beat(150);
-    emit({ stage: "downloading", message: "The folder: 15.5 MB of 31.0 MB.", elapsedMs: 4_600, bytes: 16_252_928, total: 32_505_856 });
+    emit({ stage: "downloading", message: "The folder: 16 MB of 31 MB.", elapsedMs: 4_600, bytes: 16_252_928, total: 32_505_856 });
     await beat(150);
-    emit({ stage: "downloading", message: "The folder: 31.0 MB of 31.0 MB.", elapsedMs: 6_900, bytes: 32_505_856, total: 32_505_856 });
+    emit({ stage: "downloading", message: "The folder: 31 MB of 31 MB.", elapsedMs: 6_900, bytes: 32_505_856, total: 32_505_856 });
     await beat(150);
     emit({ stage: "packing", message: "Packing the agents' state for it on the machine.", elapsedMs: 7_000 });
     await beat(150);
-    emit({ stage: "downloading", message: "Agent state: 0 B of 1.2 MB.", elapsedMs: 7_100, bytes: 0, total: 1_292_000 });
+    emit({ stage: "downloading", message: "Agent state: 0 B of 1 MB.", elapsedMs: 7_100, bytes: 0, total: 1_292_000 });
     await beat(150);
-    emit({ stage: "downloading", message: "Agent state: 1.2 MB of 1.2 MB.", elapsedMs: 7_400, bytes: 1_292_000, total: 1_292_000 });
+    emit({ stage: "downloading", message: "Agent state: 1 MB of 1 MB.", elapsedMs: 7_400, bytes: 1_292_000, total: 1_292_000 });
     await beat(150);
     emit({ stage: "landing", message: `Landing at ${o.dest}.`, elapsedMs: 7_500 });
     await beat(150);
-    emit({ stage: "done", message: `1202 files, 38.0 MB, landed at ${o.dest}; 4 caches left behind; sessions: Claude Code (6 sessions) moved, Codex (2 sessions) transcripts landed but not yet in its session list here, 1 indexed rollout not under sessions/ skipped, Gemini CLI had nothing to bring.`, elapsedMs: 9_800 });
+    emit({ stage: "done", message: `1202 files, 38 MB, landed at ${o.dest}; 4 caches left behind; sessions: Claude Code (6 sessions) moved, Codex (2 sessions) transcripts landed but not yet in its session list here, 1 indexed rollout not under sessions/ skipped, Gemini CLI had nothing to bring.`, elapsedMs: 9_800 });
     return { ...landed, dest: o.dest };
   },
   subscribe: fn => {

@@ -133,7 +133,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
       collect: async () => MANIFEST,
       recipe: async () => ({ version: 1, at: new Date().toISOString(), histories: [], rows: [] }),
       scanProject: async folder => ({ dir: folder, rows: [], candidates: [] }),
-      keys: { solari: env.SOLARI_API_KEY },
+      agentKeys: {},
       pricing,
       statePath,
       home,

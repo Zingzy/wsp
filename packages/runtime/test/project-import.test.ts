@@ -116,13 +116,13 @@ describe("project.import on a workspace", () => {
     expect(result).toEqual({ dest: "/root/work/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [], agents: [] });
     const stages = imports(events);
     expect(stages.map(e => e.stage)).toEqual(["planned", "consented", "packing", "uploading", "uploading", "landing", "done"]);
-    expect(stages[0]!.message).toBe("6 files, 4.2 KB and the repository; 3 secret-shaped files; 2 caches left behind.");
+    expect(stages[0]!.message).toBe("6 files, 4 KB and the repository; 3 secret-shaped files; 2 caches left behind.");
     expect(stages[1]!.message).toBe("Carrying .env; cut config/secrets.json, keys/id_ed25519.");
     expect(stages[2]!.message).toBe("Packing 4 files.");
     expect(stages[3]).toMatchObject({ bytes: 0, total: expect.any(Number) });
     expect(stages[4]).toMatchObject({ bytes: stages[3]!.total, total: stages[3]!.total });
     expect(stages[5]!.message).toBe("Landing at /root/work/proj.");
-    expect(stages[6]!.message).toBe("4 files, 3.9 KB, landed at /root/work/proj.");
+    expect(stages[6]!.message).toBe("4 files, 4 KB, landed at /root/work/proj.");
     for (const e of stages) expect(e).toMatchObject({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", elapsedMs: expect.any(Number) });
     expect(backend.puts).toHaveLength(before + 1);
     const body = backend.puts[before]!.body;
@@ -171,7 +171,7 @@ describe("project.import on a workspace", () => {
     expect(bundler.calls).toEqual(["plan", "pack .env rewrite .git/config"]);
     expect(result).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [".git/config"], agents: [] });
     const stages = imports(events);
-    expect(stages[0]!.message).toBe("6 files, 4.2 KB and the repository; 4 secret-shaped files; 2 caches left behind.");
+    expect(stages[0]!.message).toBe("6 files, 4 KB and the repository; 4 secret-shaped files; 2 caches left behind.");
     expect(stages[1]!.message).toBe("Carrying .env; rewriting .git/config to https://github.com/example/proj.git; cut config/secrets.json, keys/id_ed25519.");
     events.length = 0;
     await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/other", rewrite: [".git/config"], bundler: fakeBundler([AUTH_CONFIG]) });
@@ -233,7 +233,7 @@ describe("project.import on a workspace", () => {
     expect(stages[8]!.message).toBe("Merging rows into Codex.");
     const said = "Claude Code moved, Pi carried unchanged since it is not on the machine, Codex moved, 3 rows merged";
     expect(stages[9]!.message).toBe(`Landing sessions: ${said}.`);
-    expect(stages[10]!.message).toBe(`4 files, 3.9 KB, landed at /root/work/proj; sessions: ${said}.`);
+    expect(stages[10]!.message).toBe(`4 files, 4 KB, landed at /root/work/proj; sessions: ${said}.`);
     expect(backend.puts).toHaveLength(before + 2);
     const out = extract(backend.puts[before + 1]!.body);
     expect(readFileSync(join(out, "root/.claude-cfg/sessions/claude.jsonl"), "utf8")).toBe("claude at /root/work/proj\n");
@@ -275,7 +275,7 @@ describe("project.import on a workspace", () => {
     const log = backend.machines[0]!.execLog;
     for (const agent of ["codex", "hermes"]) expect(log[log.indexOf(mergeCommand(agent)) + 1], agent).toBe(removeCommand(agent));
     const said = "Codex failed: the merge on the machine failed (exit 124): no output, Hermes Agent moved, 1 row merged (the machine already lists /root/work/proj as proj)";
-    expect(imports(events).at(-1)!.message).toBe(`3 files, 3.9 KB, landed at /root/work/proj; sessions: ${said}.`);
+    expect(imports(events).at(-1)!.message).toBe(`3 files, 4 KB, landed at /root/work/proj; sessions: ${said}.`);
   });
 
   it("a merge the machine cannot take yet leaves the rows waiting with the reason, one that fails says why, and rows alone still travel", async () => {
@@ -298,7 +298,7 @@ describe("project.import on a workspace", () => {
       { agent: "hermes", files: 0, bytes: 0, outcome: "failed", error: "the merge on the machine failed (exit 127): bash: line 1: python3: command not found" },
     ]);
     const said = "Codex transcripts landed but not yet in its session list (no /root/.codex/state_5.sqlite on the machine), Hermes Agent failed: the merge on the machine failed (exit 127): bash: line 1: python3: command not found";
-    expect(imports(events).at(-1)!.message).toBe(`3 files, 3.9 KB, landed at /root/work/proj; sessions: ${said}.`);
+    expect(imports(events).at(-1)!.message).toBe(`3 files, 4 KB, landed at /root/work/proj; sessions: ${said}.`);
     expect(backend.machines[0]!.runLog.filter(s => s.startsWith("python3 "))).toEqual([mergeCommand("codex"), mergeCommand("hermes")]);
     events.length = 0;
     backend.execImpl = (m, cmd) => (cmd.startsWith("python3 ") ? { exitCode: 0, stdout: '{"merged": 0, "kept": 1}\n', stderr: "" } : base(m, cmd));
@@ -308,7 +308,7 @@ describe("project.import on a workspace", () => {
     const stages = imports(events);
     expect(stages.map(e => e.stage)).toEqual(["planned", "consented", "packing", "uploading", "uploading", "landing", "uploading", "uploading", "landing", "landing", "done"]);
     expect(stages[6]!.message).toMatch(/^Uploading the rows to merge, /);
-    expect(stages[10]!.message).toBe("3 files, 3.9 KB, landed at /root/work/other; sessions: Hermes Agent moved, its rows already there.");
+    expect(stages[10]!.message).toBe("3 files, 4 KB, landed at /root/work/other; sessions: Hermes Agent moved, its rows already there.");
   });
 
   it("an agent the plan could not read never travels, even when named, and the consented line says why", async () => {

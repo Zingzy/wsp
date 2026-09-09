@@ -539,14 +539,14 @@ describe("panes on a workspace that is not running", () => {
     expect(overlay()!.textContent).toMatch(/Reconnecting to the machine\s*for \d+s/);
     expect(hints()).toEqual([
       "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the machine last answered; the work on it took the memory, not a fault of the machine",
-      "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
+      "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
     ]);
     act(() => setPane("running", { reach: { state: "zombie" }, reason: "silent for 3 min; exec probe failed" }));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("not-answering"));
     expect(overlay()!.textContent).not.toContain("The machine is not answering");
     expect(overlay()!.textContent).toContain("Out of memory (3.6 GB of 3.9 GB used, load 6.4)");
     expect(hints()).toEqual([
-      "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
+      "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
       "Rebuild it from the Machine panel",
     ]);
     act(() => {

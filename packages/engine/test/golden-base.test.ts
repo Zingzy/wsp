@@ -196,7 +196,7 @@ describe("the versions read", () => {
       { id: "base/curl", label: "curl", outcome: "installed", bytes: 0 },
       { id: "base/docker", label: "Docker engine and compose", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" },
     ]);
-    expect(line).toBe("node 22.23.2 (250.0 MB), npm 10.9.4, pnpm 11.9.0 (30.0 MB), uv 0.12.9 (42.0 MB), python3 3.12.13 (70.0 MB), git 2.43.0, jq 1.7.1 (2.0 MB), rg 14.1.0 (6.0 MB), curl 8.5.0; Docker engine and compose failed (E: Unable to locate package docker-compose-v2)");
+    expect(line).toBe("node 22.23.2 (250 MB), npm 10.9.4, pnpm 11.9.0 (30 MB), uv 0.12.9 (42 MB), python3 3.12.13 (70 MB), git 2.43.0, jq 1.7.1 (2 MB), rg 14.1.0 (6 MB), curl 8.5.0; Docker engine and compose failed (E: Unable to locate package docker-compose-v2)");
     expect(versionsLine([], [])).toBe("");
   });
 });
@@ -243,7 +243,7 @@ describe("installBase", () => {
       ["base/xz", "installed", 0],
       ["base/rsync", "installed", 0],
     ]);
-    expect(out.line).toBe("node 22.23.2 (250.0 MB), npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13, git 2.43.0, jq 1.7.1, rg 14.1.0, curl 8.5.0, docker 27.5.1 (400.0 MB), docker compose 2.29.2");
+    expect(out.line).toBe("node 22.23.2 (250 MB), npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13, git 2.43.0, jq 1.7.1, rg 14.1.0, curl 8.5.0, docker 27.5.1 (400 MB), docker compose 2.29.2");
     expect(g.cmds.filter(c => c.includes("VERSION node:"))).toHaveLength(1);
     expect(g.ran).toHaveLength(19);
   });
@@ -263,7 +263,7 @@ describe("installBase", () => {
     }, () => mb(free));
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
-    expect(stages[0]).toBe("deploying-daemon:1.8 GB free, under the 2.0 GB floor; cleaning up before skipping");
+    expect(stages[0]).toBe("deploying-daemon:1.8 GB free, under the 2 GB floor; cleaning up before skipping");
     expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
       ["base/login-path", "installed", 0],
       ["base/node", "installed", 250 * 1024 * 1024],

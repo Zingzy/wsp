@@ -36,15 +36,15 @@ describe("what an image weighs, from the base64 the wire carries", () => {
 describe("the caps, in the person's words", () => {
   it("a 12 MB image is refused with its weight and the cap in the sentence", () => {
     const refusal = imagesRefusal([imageRecord(png(12 * 1024 * 1024))]);
-    expect(refusal).toBe("image 1 is 12.0 MB, over the 10.0 MB an image may be");
+    expect(refusal).toBe("image 1 is 12 MB, over the 10 MB an image may be");
     // The cap itself is the one in the sentence, so the words cannot drift from the rule.
-    expect(refusal).toContain("10.0 MB");
+    expect(refusal).toContain("10 MB");
     expect(IMAGE_MAX_BYTES).toBe(10 * 1024 * 1024);
   });
 
   it("a file the person named is refused by its own name, not by its place in the message", () => {
     expect(imagesRefusal([imageRecord({ ...png(12 * 1024 * 1024), name: "screenshot.png" })])).toBe(
-      "screenshot.png is 12.0 MB, over the 10.0 MB an image may be",
+      "screenshot.png is 12 MB, over the 10 MB an image may be",
     );
   });
 
@@ -88,7 +88,7 @@ describe("an agent that reads no image is named before the machine is asked", ()
   });
 
   it("the caps come first, so a person fixes the image rather than the agent", () => {
-    expect(imagesBlocked([imageRecord(png(12 * 1024 * 1024))], undefined, "gemini")).toContain("over the 10.0 MB");
+    expect(imagesBlocked([imageRecord(png(12 * 1024 * 1024))], undefined, "gemini")).toContain("over the 10 MB");
   });
 
   it("an agent on either road takes them", () => {
@@ -99,13 +99,13 @@ describe("an agent that reads no image is named before the machine is asked", ()
 
 describe("what a transcript prints in place of an image", () => {
   it("is the weight and the type in one bracket", () => {
-    expect(imageLine({ mediaType: "image/png", bytes: 1_258_291 })).toBe("[image 1.2 MB png]");
-    expect(imageLine({ mediaType: "image/jpeg", bytes: 4096 })).toBe("[image 4.0 KB jpeg]");
+    expect(imageLine({ mediaType: "image/png", bytes: 1_258_291 })).toBe("[image 1 MB png]");
+    expect(imageLine({ mediaType: "image/jpeg", bytes: 4096 })).toBe("[image 4 KB jpeg]");
     expect(imageLine({ mediaType: "image/webp", bytes: 900 })).toBe("[image 900 B webp]");
   });
 
   it("a type outside the table still prints, by its own words", () => {
-    expect(imageLine({ mediaType: "image/avif", bytes: 1024 })).toBe("[image 1.0 KB image/avif]");
+    expect(imageLine({ mediaType: "image/avif", bytes: 1024 })).toBe("[image 1 KB image/avif]");
   });
 });
 
@@ -169,7 +169,7 @@ describe("the words every road reads rather than spelling again", () => {
     expect(IMAGE_TYPE_WORDS).toBe("PNG, JPEG, GIF or WebP");
     expect(IMAGE_ACCEPT).toBe("image/png,image/jpeg,image/gif,image/webp");
     expect(IMAGE_ACCEPT.split(",")).toEqual(Object.keys(IMAGE_TYPES));
-    expect(IMAGE_MAX_WORDS).toBe("10.0 MB");
+    expect(IMAGE_MAX_WORDS).toBe("10 MB");
     expect(notAnImageLine("a.pdf")).toContain(IMAGE_TYPE_WORDS);
     expect(imagesRefusal([imageRecord({ mediaType: "image/png", bytes: b64(12 * 1024 * 1024) })])).toContain(IMAGE_MAX_WORDS);
   });

@@ -143,7 +143,7 @@ describe("project.export on a workspace", () => {
     expect(stages[3]!.message).toBe("Packing the agents' state for it on the machine.");
     expect(stages[4]!.message).toMatch(/^Agent state: 0 B of /);
     expect(stages[6]!.message).toBe(`Landing at ${DEST}.`);
-    expect(stages[7]!.message).toBe(`3 files, 3.9 KB, landed at ${DEST}; 2 caches left behind; sessions: Claude Code (2 sessions) moved, Codex (2 sessions) transcripts landed but not yet in its session list here, 1 indexed rollout not under sessions/ skipped, Hermes Agent (1 session) had nothing to bring.`);
+    expect(stages[7]!.message).toBe(`3 files, 4 KB, landed at ${DEST}; 2 caches left behind; sessions: Claude Code (2 sessions) moved, Codex (2 sessions) transcripts landed but not yet in its session list here, 1 indexed rollout not under sessions/ skipped, Hermes Agent (1 session) had nothing to bring.`);
     for (const e of stages) expect(e).toMatchObject({ workspaceId: ws.id, source: SOURCE, dest: DEST, elapsedMs: expect.any(Number) });
     const machine = backend.machines[0]!;
     expect(machine.execLog.some(c => c === `test -d '${SOURCE}' && echo yes || echo no`)).toBe(true);
@@ -203,7 +203,7 @@ describe("project.export on a workspace", () => {
     expect(lander.landings[0]!.state).toBeUndefined();
     expect(result.agents).toEqual([]);
     expect(exports(events).map(e => e.stage)).toEqual(["packing", "downloading", "downloading", "landing", "done"]);
-    expect(exports(events).at(-1)!.message).toBe(`3 files, 3.9 KB, landed at ${DEST}; 2 caches left behind; no agent sessions for it on the machine.`);
+    expect(exports(events).at(-1)!.message).toBe(`3 files, 4 KB, landed at ${DEST}; 2 caches left behind; no agent sessions for it on the machine.`);
     // A listing that named nothing still leaves the machine without the scratch root it was given.
     expect(removed(backend.machines[0]!.execLog)).toMatch(/^\/tmp\/wsp-state-/);
   });

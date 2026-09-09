@@ -83,7 +83,7 @@ describe("wsp recipe", () => {
     const flipped = await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
     expect(allRows(flipped).find(r => r.id === "java")).toMatchObject({ on: true });
     expect(flipped.heavy.map(r => r.id)).toContain("java");
-    expect(recipePrintout(flipped).find(l => l.includes("Java 21"))).toMatch(/^● {2}Java 21\s+installed\s+installed here, never used\s+584\.9 MB$/);
+    expect(recipePrintout(flipped).find(l => l.includes("Java 21"))).toMatch(/^● {2}Java 21\s+installed\s+installed here, never used\s+585 MB$/);
     // The flip is in the file, so a later --set adds to it instead of starting over.
     const second = await runRecipe(laptop(), { out, set: ["go=on"] }, quiet, at);
     expect(allRows(second).filter(r => r.on).map(r => r.id)).toEqual(expect.arrayContaining(["java", "go", "gh"]));
@@ -380,7 +380,7 @@ describe("wsp recipe", () => {
     expect(io.logs[0]).toBe("Agents");
     expect(io.logs).toContain("Tools");
     expect(io.logs.filter(l => l.startsWith("On: "))).toHaveLength(2);
-    expect(io.logs.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+584\.9 MB$/);
+    expect(io.logs.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+585 MB$/);
     expect(table.heavy.every(r => r.on && r.heavy)).toBe(true);
   });
 });

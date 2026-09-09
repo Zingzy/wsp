@@ -802,8 +802,8 @@ describe("serveRuntime workspaces.exec", () => {
 });
 
 describe("serveRuntime init door (the host's init job, read and driven from the app)", () => {
-  const JOB: InitJob = { id: "init_1", road: "manual", phase: "answering", keys: { solari: true, anthropic: false }, screens: [], rows: [], progress: { done: 0, total: 0 }, log: [] };
-  const SETUP = { keys: { solari: true, anthropic: false }, agents: [{ id: "claude", name: "Claude Code", configured: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
+  const JOB: InitJob = { id: "init_1", road: "manual", phase: "answering", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows: [], progress: { done: 0, total: 0 }, log: [] };
+  const SETUP = { keys: { solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
   function fakeDoor() {
     const calls: unknown[] = [];
     const listeners = new Set<(e: { type: "init.job"; job: typeof JOB }) => void>();
@@ -811,7 +811,15 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
       get: async () => SETUP,
       keys: async k => {
         calls.push(["keys", k]);
-        return { ...SETUP, keys: { solari: true, anthropic: k.anthropic !== undefined } };
+        return { ...SETUP, keys: { solari: true } };
+      },
+      step: async o => {
+        calls.push(["step", o]);
+        return { ...JOB, step: o.at };
+      },
+      retry: async o => {
+        calls.push(["retry", o]);
+        return JOB;
       },
       start: async o => {
         calls.push(["start", o]);
@@ -846,18 +854,22 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
     srv = await serveRuntime(rt(), { port: 0, authToken: "secret", init: door });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     expect((await c.request("init.get"))["setup"]).toEqual(SETUP);
-    const saved = await c.request("init.keys", { solari: "slr_live_fake", anthropic: "sk-ant-x" });
-    expect(saved["setup"]).toEqual({ ...SETUP, keys: { solari: true, anthropic: true } });
-    expect(JSON.stringify(saved)).not.toContain("slr_live_fake");
+    const saved = await c.request("init.keys", { solari: "slr_live_fake", rows: { "logins/claude": "sk-ant-x" } });
+    expect(saved["setup"]).toEqual({ ...SETUP, keys: { solari: true } });
+    expect(JSON.stringify(saved)).not.toMatch(/slr_live_fake|sk-ant-x/);
     expect((await c.request("init.start", { road: "agent", harness: "claude" }))["job"]).toMatchObject({ road: "agent", phase: "reading" });
     expect((await c.request("init.answer", { screen: "tools", ticks: ["gh"], answers: { "logins/gh": "machine" } }))["job"]).toEqual(JOB);
+    expect((await c.request("init.step", { at: 2 }))["job"]).toMatchObject({ step: 2 });
+    expect((await c.request("init.retry", { tool: "gh" }))["job"]).toEqual(JOB);
     expect((await c.request("init.build", { firstWorkspace: "first" }))["job"]).toMatchObject({ phase: "building" });
     expect((await c.request("init.signInCode", { tool: "gcloud", code: "4/0Afake" }))["job"]).toMatchObject({ phase: "signing-in" });
     expect((await c.request("init.cancel"))["job"]).toMatchObject({ phase: "cancelled" });
     expect(calls).toEqual([
-      ["keys", { solari: "slr_live_fake", anthropic: "sk-ant-x" }],
+      ["keys", { solari: "slr_live_fake", rows: { "logins/claude": "sk-ant-x" } }],
       ["start", { road: "agent", harness: "claude" }],
       ["answer", { screen: "tools", ticks: ["gh"], answers: { "logins/gh": "machine" } }],
+      ["step", { at: 2 }],
+      ["retry", { tool: "gh" }],
       ["build", { firstWorkspace: "first" }],
       ["signInCode", { tool: "gcloud", code: "4/0Afake" }],
       ["cancel"],

@@ -46,7 +46,7 @@ describe.runIf(LIVE)("golden import (live: apply a trimmed recipe, seal, fork, p
       backend,
       store: memoryStore(),
       adapters: {},
-      goldenRecipe: goldenRecipeFor(BRING, { anthropic: env.ANTHROPIC_API_KEY }, {
+      goldenRecipe: goldenRecipeFor(BRING, { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY }, {
         import: imp,
         deployDaemon: async m => `node ${(await deployDaemon(m)).node}`,
       }),

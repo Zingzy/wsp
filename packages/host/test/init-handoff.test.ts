@@ -121,6 +121,8 @@ describe("the sign-in hand-off", () => {
     const [r] = await st.run;
     expect(r).toMatchObject({ id: "logins/gh", state: "signed-in", command: "gh auth login", note: "gh auth status says signed in" });
     expect(st.json).toEqual([
+      // The row stands as the command starts, before the tool has printed its page and before any road is known.
+      { event: "sign-in", tool: "gh", label: "GitHub CLI login" },
       { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE, code: CODE, finish: "none", nextCommand: `open '${DEVICE}'`, waitSeconds: 2 },
       { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: "gh auth status says signed in" },
     ]);
@@ -138,7 +140,7 @@ describe("the sign-in hand-off", () => {
   it("on the platform's own opener: linux hands over xdg-open", async () => {
     const st = stage(ghLink({ after: 0, hold: true }), { platform: "linux" });
     await st.run;
-    expect(st.json[0]).toMatchObject({ nextCommand: `xdg-open '${DEVICE}'` });
+    expect(st.json[1]).toMatchObject({ nextCommand: `xdg-open '${DEVICE}'` });
   });
 
   it("a status that says signed in gives the command a moment to end on its own before its pty is killed", async () => {
@@ -204,7 +206,11 @@ describe("the sign-in hand-off", () => {
       { id: "logins/kube", label: "kubeconfig", state: "skipped", note: "kubectl has no sign-in; copy the kubeconfig instead" },
     ]);
     expect(link.ptys).toEqual([]);
-    expect(st.json).toEqual([{ event: "sign-in-result", tool: "kube", label: "kubeconfig", state: "skipped", note: "kubectl has no sign-in; copy the kubeconfig instead" }]);
+    // The copied login is a row of its own on the wire, settled before any page; the skipped one says why.
+    expect(st.json).toEqual([
+      { event: "sign-in-result", tool: "claude", label: "Claude Code login", state: "copied" },
+      { event: "sign-in-result", tool: "kube", label: "kubeconfig", state: "skipped", note: "kubectl has no sign-in; copy the kubeconfig instead" },
+    ]);
     expect(st.text()).toContain("Claude Code login: copied");
   });
 
@@ -233,7 +239,7 @@ describe("the sign-in hand-off", () => {
     link.data(pty!, `If nothing happens, open ${DEVICE}?fallback=1 yourself\r\n`);
     const [r] = await st.run;
     expect(r).toMatchObject({ state: "not-signed-in" });
-    expect(st.json.filter(j => j["event"] === "sign-in").map(j => j["browserUrl"])).toEqual([BANNER, DEVICE, PAGE]);
+    expect(st.json.filter(j => j["event"] === "sign-in" && j["browserUrl"] !== undefined).map(j => j["browserUrl"])).toEqual([BANNER, DEVICE, PAGE]);
     expect(st.json.filter(j => j["event"] === "sign-in").at(-1)).toMatchObject({ code: CODE, nextCommand: `open '${PAGE}'` });
     // The relay's own line for that page reached this stage's output instead of the host's plain log.
     expect(st.text()).toContain("default (builder): its sign-in page is the one handed to you above");
@@ -254,7 +260,7 @@ describe("the sign-in hand-off", () => {
     const st = stage(link, { flow, deadlineMs: 60, pollMs: 10 });
     const [r] = await st.run;
     expect(r).toMatchObject({ state: "not-signed-in", note: "no sign-in within 60ms; no page to open was ever printed or asked for; gh auth status says not signed in" });
-    expect(st.json.some(j => j["event"] === "sign-in")).toBe(false);
+    expect(st.json.some(j => j["event"] === "sign-in" && j["browserUrl"] !== undefined)).toBe(false);
     expect(flow).toEqual({ armed: false });
   });
 
@@ -299,8 +305,9 @@ describe("the sign-in hand-off", () => {
     const [r] = await st.run;
     expect(r).toMatchObject({ state: "signed-in" });
     const announced = st.json.filter(j => j["event"] === "sign-in");
-    // The whole sequence, not its end: the row never asks for a code while its callback forward is on its way.
-    expect(announced.map(j => j["finish"])).toEqual(["callback"]);
+    // The whole sequence, not its end: the row stands with no road before any page, and never asks for a code while
+    // its callback forward is on its way.
+    expect(announced.map(j => j["finish"])).toEqual([undefined, "callback"]);
     expect(announced.at(-1)).toMatchObject({ browserUrl: GCLOUD_PAGE });
     expect(announced.every(j => j["code"] === undefined)).toBe(true);
   });
@@ -326,7 +333,7 @@ describe("the sign-in hand-off", () => {
     const st = stage(link, { logins: [GCLOUD], codes, deadlineMs: 2_000, pollMs: 20 });
     for (let i = 0; i < 200 && pty === undefined; i++) await new Promise(r => setTimeout(r, 5));
     const asked = st.json.filter(j => j["event"] === "sign-in");
-    expect(asked.map(j => j["finish"])).toEqual(["code"]);
+    expect(asked.map(j => j["finish"])).toEqual([undefined, "code"]);
     expect(asked.at(-1)).toMatchObject({ browserUrl: GCLOUD_PASTE });
     await codes.submit("gcloud", PASTED);
     expect(link.typed(pty!, `${PASTED}\r`)).toBe(true);

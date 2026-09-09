@@ -196,7 +196,7 @@ describe("what the composer refuses, in words, before anything leaves", () => {
     const { api } = fixtureApi();
     await setup(api);
     act(() => void paste([pngFile("huge.png", 12 * 1024 * 1024)]));
-    await waitFor(() => expect(refusalLine()).toBe("huge.png is 12.0 MB, over the 10.0 MB an image may be"));
+    await waitFor(() => expect(refusalLine()).toBe("huge.png is 12 MB, over the 10 MB an image may be"));
     expect(thumbs()).toHaveLength(0);
     // The bytes go to an object URL only once the caps have passed, so no url means the file was never read whole.
     expect(urls).toEqual([]);

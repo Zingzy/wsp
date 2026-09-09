@@ -148,7 +148,7 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
     expect(out2).toContain(`Attaching to your earlier builder: default (${builderId})`);
     expect(out2).not.toMatch(/Boot a \d+ vCPU/);
     expect(out2).not.toContain("Creating the machine");
-    expect(out2.match(/(Setup applied|Files uploaded|Tools installed|Agents installed)\s+already applied/g)).toHaveLength(4);
+    expect(out2.match(/(Setup applied|Files copied|Tools installed|Agents installed)\s+already applied/g)).toHaveLength(4);
     expect(out2).toContain("Ready");
 
     const afterSecond = readState();

@@ -59,7 +59,7 @@ describe("wsp recipe scan", () => {
     const scan = RecipeScan.parse(await runScan(host, {}, quiet, at));
     const agent = (id: string) => scan.agents.find(r => r.id === id)!;
     expect(agent("claude")).toMatchObject({ on: true, recommended: { value: "on", why: "used here, 1 session" } });
-    expect(agent("codex")).toMatchObject({ on: true, recommended: { value: "on", why: "used here, 1 session; 455.0 MB on the machine, worth a question" } });
+    expect(agent("codex")).toMatchObject({ on: true, recommended: { value: "on", why: "used here, 1 session; 455 MB on the machine, worth a question" } });
     expect(agent("opencode")).toMatchObject({ on: false, recommended: { value: "off", why: "installed here, never used" } });
   });
 
@@ -75,7 +75,7 @@ describe("wsp recipe scan", () => {
   it("says a heavy row is worth a question in the same line, and nothing else is", () => {
     const row: TableRow = { id: "opencode", name: "OpenCode", kind: "agent", base: false, group: USED_GROUP, why: "used here, 2 sessions", size: 673 * MB, heavy: true, on: true };
     const heavy = tickAdvice({ ...row, on: true });
-    expect(heavy).toEqual({ value: "on", why: "used here, 2 sessions; 673.0 MB on the machine, worth a question" });
+    expect(heavy).toEqual({ value: "on", why: "used here, 2 sessions; 673 MB on the machine, worth a question" });
     // Off, so nothing is being added and there is nothing to ask about.
     expect(tickAdvice({ ...row, on: false }).why).toBe("used here, 2 sessions");
     // An agent used here that wsp cannot run threads on says so beside its why, since the why alone argues for on.
@@ -107,7 +107,7 @@ describe("wsp recipe scan", () => {
       },
     });
     const past = await runScan(over, {}, quiet, at);
-    expect(tool(past, "java")).toMatchObject({ on: true, why: "30 commands in 4 sessions", recommended: { value: "on", why: "30 commands in 4 sessions; 584.9 MB on the machine, worth a question" } });
+    expect(tool(past, "java")).toMatchObject({ on: true, why: "30 commands in 4 sessions", recommended: { value: "on", why: "30 commands in 4 sessions; 585 MB on the machine, worth a question" } });
     expect(tool(past, "wrangler")).toMatchObject({ on: true, why: "6 commands in 2 sessions", recommended: { value: "on", why: "6 commands in 2 sessions" } });
     // The footer names the floor once, right under the Tools table's totals.
     const lines = scanPrintout(scan);
@@ -127,20 +127,20 @@ describe("wsp recipe scan", () => {
     expect(alsoHereLines({ scanned: true, managers: [] })).toEqual([ALSO_HERE_TITLE, "  none"]);
     const lines = alsoHereLines({ scanned: true, managers: [{ manager: "brew", rows: [{ id: "jj", install: "brew install jj", size: 40 * MB }] }] });
     expect(lines[1]).toBe("  brew");
-    expect(lines[2]).toBe("    jj  brew install jj  40.0 MB");
+    expect(lines[2]).toBe("    jj  brew install jj  40 MB");
   });
 
   it("prints every section in order, the do column beside each row", async () => {
     const lines = scanPrintout(await runScan(laptop(), {}, quiet, at));
     expect(lines[0]).toBe("Agents");
     // The shared renderer's own line, with the one column the scan adds.
-    expect(lines.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+584\.9 MB {2}off$/);
+    expect(lines.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+585 MB {2}off$/);
     expect(lines).toContain("Tools");
     expect(lines).toContain(ALSO_HERE_TITLE);
     expect(lines).toContain(`  ${NOT_SCANNED}`);
     expect(lines).toContain(COMMANDS_TITLE);
     expect(lines).toContain(SIGN_INS_TITLE);
-    expect(lines.find(l => l.includes("Claude Code"))).toMatch(/^● {2}Claude Code\s+used\s+used here, 4 sessions\s+208\.0 MB {2}on$/);
+    expect(lines.find(l => l.includes("Claude Code"))).toMatch(/^● {2}Claude Code\s+used\s+used here, 4 sessions\s+208 MB {2}on$/);
     // The shared renderer's totals line, one under each table.
     expect(lines.filter(l => l.startsWith("On: "))).toHaveLength(2);
   });

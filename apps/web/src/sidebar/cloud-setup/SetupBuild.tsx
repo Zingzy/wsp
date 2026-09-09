@@ -1,132 +1,113 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The build as rows: the image's stages, the sign-ins with the page each one
-// waits on, the company's mark and, for a sign-in whose page hands a code
-// back, the field that takes it, the first workspace and its project. Each
-// group folds under its caps label; the one line above them reads the phase
-// and the count over a thin bar. Nothing here blocks: Hide shuts the modal and
-// the sidebar's row carries the same line.
+// The build as rows, in the order the job runs them: the agents here given the
+// tools, each stage of the image with the machine's latest lines under the one
+// running (a done stage folds to its row and opens on a click), each sign-in
+// where it happens with the keycap that opens its page and, where its page
+// hands a code back, the field that takes it, the first workspace and its
+// project. The bar at the top moves to the count. Closing the screen hides it
+// and the build goes on; the one link stops the job after asking once.
 import { ChevronDownIcon } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, LOGIN_STATE_WORDS, initJobBuilding, initJobOver, initProgressLine, initProgressState, initRowOver, type InitJob, type InitRow } from "@wsp/protocol";
+import { useState } from "react";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, initJobBuilding, initJobOver, initProgressState, initRowOver, type InitJob, type InitRow } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
-import { CARD, MICRO_LABEL, ROW, ROW_LINE, STATE_WORD, SetupFrame } from "./grammar.js";
+import { CARD, META, NAME, ROW, ROW_LINE, RowState, Slot } from "./rows.js";
 import { SignInCode } from "./SignInCode.js";
-import { SignInMark } from "./SignInMark.js";
+import { RowMark } from "./SignInMark.js";
+import { SetupScreen, type ScreenAction } from "./SetupScreen.js";
 
-export function SetupBuild({ job, onHide, onCancel, onOpenWorkspace, onAgain, onCode, refusal }: { job: InitJob; onHide: () => void; onCancel: () => void; onOpenWorkspace: () => void; onAgain: () => void; onCode: (o: { tool: string; code: string }) => void; refusal: string | null }) {
+export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, onAgain, refusal }: { job: InitJob; onCancel: () => void; onRetry: (tool: string) => void; onCode: (o: { tool: string; code: string }) => void; onOpenWorkspace: () => void; onAgain: () => void; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.build;
-  const stages = job.rows.filter(r => r.kind === "stage");
-  const signIns = job.rows.filter(r => r.kind === "sign-in");
-  const agents = job.rows.filter(r => r.kind === "agent");
-  const rest = job.rows.filter(r => r.kind === "workspace" || r.kind === "project");
+  const [asking, setAsking] = useState(false);
   const over = initJobOver(job.phase);
+  const building = initJobBuilding(job.phase);
   const headline = job.phase === "done" ? words.done : over ? words.failed : words.headline;
   const { fraction } = initProgressState(job);
+  const primary: ScreenAction | undefined = job.phase === "done" && job.workspace !== undefined ? { word: words.keycap, onPress: onOpenWorkspace } : job.phase === "failed" || job.phase === "cancelled" ? { word: words.again, onPress: onAgain } : undefined;
+  const secondary: ScreenAction | undefined = building
+    ? asking
+      ? { word: words.cancelSure, onPress: onCancel, destructive: true }
+      : { word: words.cancel, onPress: () => setAsking(true), destructive: true, disabled: !job.stoppable, ...(job.stoppable ? {} : { title: words.cannotStop }) }
+    : undefined;
   return (
-    <SetupFrame
-      k="build"
-      label={words.label}
-      headline={headline}
-      {...(job.phase === "done" && job.workspace !== undefined ? { primary: { word: words.keycap, onPress: onOpenWorkspace } } : {})}
-      {...(job.phase === "failed" || job.phase === "cancelled" ? { primary: { word: words.again, onPress: onAgain } } : {})}
-      secondary={{ word: words.hide, onPress: onHide }}
-      refusal={refusal}
-    >
-      <div data-k="progress" className="flex flex-col gap-1.5 px-1 pb-3">
-        <p role="status" data-k="progress-line" className={STATE_WORD}>
-          {initProgressLine(job)}
-        </p>
-        <span role="progressbar" aria-label={initProgressLine(job)} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fraction * 100)} className="block h-1 w-full overflow-hidden rounded-full bg-border">
-          <span className="block h-full rounded-full bg-foreground/70 transition-[width] duration-300" style={{ width: `${Math.round(fraction * 100)}%` }} />
-        </span>
-        {job.error !== undefined ? (
-          <p data-k="error" className="break-words font-mono text-[11px] text-destructive-foreground">
-            {job.error}
-          </p>
-        ) : null}
-      </div>
-      <div className={CARD}>
-        <Section k="image" label={words.image} rows={stages} open={!over && signIns.every(r => r.state !== INIT_ROW_STATES.open)} />
-        {signIns.length > 0 ? <Section k="sign-ins" label={words.signIns} rows={signIns} open onCode={onCode} /> : null}
-        {agents.length > 0 ? <Section k="computer" label={words.computer} rows={agents} open /> : null}
-        {rest.length > 0 ? <Section k="workspace" label={words.workspace} rows={rest} open /> : null}
-      </div>
-      {initJobBuilding(job.phase) ? (
-        <div className="flex justify-center pt-3">
-          <Button data-k="cancel" variant="link" size="sm" className="text-muted-foreground" onClick={onCancel}>
-            {words.cancel}
+    <SetupScreen k="build" label={words.label} headline={headline} top={job.error ?? words.top} refusal={refusal} {...(primary !== undefined ? { primary } : {})} {...(secondary !== undefined ? { secondary } : {})} {...(building ? { note: asking ? words.cancelWhy : words.keeps } : {})}>
+      <span role="progressbar" aria-label={headline} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fraction * 100)} data-k="progress" className="mb-3 block h-1 w-full overflow-hidden rounded-full bg-border">
+        <span className="block h-full rounded-full bg-foreground/70 transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none" style={{ width: `${Math.round(fraction * 100)}%` }} />
+      </span>
+      <ul className={CARD} aria-label={words.headline}>
+        {job.rows.map(row => (
+          <BuildRow
+            key={row.id}
+            row={row}
+            onRetry={building && row.kind === "sign-in" && row.state === INIT_SIGN_IN_WORDS["not-signed-in"] ? () => onRetry(row.tool ?? row.id) : undefined}
+            onCode={row.finish === "code" ? (code: string) => onCode({ tool: row.tool ?? row.id, code }) : undefined}
+          />
+        ))}
+      </ul>
+      {asking && building ? (
+        <div className="mt-3 flex justify-center">
+          <Button data-k="keep" variant="link" className="h-auto p-0 text-[13px] text-muted-foreground hover:text-foreground sm:text-[13px]" onClick={() => setAsking(false)}>
+            {words.cancelKeep}
           </Button>
         </div>
       ) : null}
-    </SetupFrame>
+    </SetupScreen>
   );
 }
 
-/** A group of rows under its caps label, folded or open. The fold follows the job as it moves (the image folds
- * when a sign-in's page arrives) and a click moves it until the job moves again. */
-function Section({ k, label, rows, open: follow, onCode }: { k: string; label: string; rows: readonly InitRow[]; open: boolean; onCode?: (o: { tool: string; code: string }) => void }) {
-  const [open, setOpen] = useState(follow);
-  useEffect(() => setOpen(follow), [follow]);
-  const done = rows.filter(r => initRowOver(r.state)).length;
+/** A stage's lines open under the running row on their own; a done row's open on a click and fold on the next, and a
+ * sign-in whose page hands a code back takes it on the line under its own row. */
+function BuildRow({ row, onRetry, onCode }: { row: InitRow; onRetry?: () => void; onCode?: (code: string) => void }) {
+  const [opened, setOpened] = useState<boolean | undefined>(undefined);
+  const running = row.state === INIT_ROW_STATES.running;
+  const lines = row.lines ?? [];
+  const canOpen = row.kind === "stage" && lines.length > 0 && !running;
+  const open = running ? lines.length > 0 : canOpen && opened === true;
+  const waiting = row.kind === "sign-in" && row.state === INIT_ROW_STATES.open;
   return (
-    <section data-k={k} data-open={open} className={ROW_LINE}>
-      <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)} className={cn(ROW, "h-8 w-full cursor-pointer text-left hover:bg-accent/30")}>
-        <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-150", !open && "-rotate-90")} />
-        <span className={cn(MICRO_LABEL, "flex-1")}>{label}</span>
-        <span className={STATE_WORD}>
-          {done}/{rows.length}
+    <li data-k="row" data-row={row.id} data-state={row.state} data-open={open} className={ROW_LINE}>
+      <div className={cn(ROW, canOpen && "cursor-pointer hover:bg-accent/30")} title={row.detail} onClick={canOpen ? () => setOpened(o => !(o === true)) : undefined} role={canOpen ? "button" : undefined} aria-expanded={canOpen ? open : undefined}>
+        <span aria-hidden className="flex size-[18px] shrink-0 items-center justify-center text-foreground">
+          {row.tool !== undefined ? <RowMark id={row.tool} label={row.label} /> : <StageGlyph state={row.state} />}
         </span>
-      </button>
+        <span className={cn(NAME, row.state === INIT_ROW_STATES.waiting && "text-muted-foreground")}>{row.label}</span>
+        {waiting && row.code !== undefined ? (
+          <span data-k="code" className={cn(META, "text-foreground")}>
+            {row.code}
+          </span>
+        ) : null}
+        <Slot>
+          {waiting && row.page !== undefined ? (
+            <Button data-k="open" size="sm" variant="outline" className="h-7 font-mono text-xs sm:h-7 sm:text-xs" render={<a href={row.page} target="_blank" rel="noopener noreferrer" />}>
+              {CLOUD_SETUP_WORDS.build.open}
+              <span aria-hidden>↗</span>
+            </Button>
+          ) : null}
+          {onRetry !== undefined ? (
+            <Button data-k="retry" size="sm" variant="outline" className="h-7 font-mono text-xs sm:h-7 sm:text-xs" onClick={onRetry}>
+              {CLOUD_SETUP_WORDS.build.retry}
+            </Button>
+          ) : null}
+          <RowState state={row.state} />
+          {canOpen ? <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-150", !open && "-rotate-90")} /> : null}
+        </Slot>
+      </div>
       {open ? (
-        <ul>
-          {rows.flatMap(row => {
-            const tool = row.tool;
-            const takesCode = waitingOn(row) && row.finish === "code" && tool !== undefined && onCode !== undefined;
-            return [<BuildRow key={row.id} row={row} />, ...(takesCode ? [<SignInCode key={`${row.id}:code`} label={row.label} onCode={code => onCode({ tool, code })} />] : [])];
-          })}
-        </ul>
+        <pre data-k="lines" className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words border-t border-border bg-background/40 py-2 pl-[46px] pr-[10px] font-mono text-[11px] leading-[1.6] text-muted-foreground">
+          {lines.join("\n")}
+        </pre>
       ) : null}
-    </section>
-  );
-}
-
-/** A sign-in still waiting on the person: its page is open and its state has not turned. */
-const waitingOn = (row: InitRow): boolean => row.kind === "sign-in" && row.state === INIT_ROW_STATES.open;
-
-function BuildRow({ row }: { row: InitRow }) {
-  const open = waitingOn(row);
-  return (
-    <li data-k="row" data-row={row.id} data-state={row.state} className={cn(ROW, "border-t border-border/40")} title={row.detail}>
-      <span aria-hidden className="flex size-4 shrink-0 items-center justify-center text-foreground">
-        {row.tool !== undefined ? <SignInMark tool={row.tool} label={row.label} /> : <StateGlyph state={row.state} />}
-      </span>
-      <span className={cn("min-w-0 flex-1 truncate text-sm", row.state === INIT_ROW_STATES.waiting ? "text-muted-foreground" : "text-foreground")}>{row.label}</span>
-      {open && row.code !== undefined ? (
-        <span data-k="code" className={cn(STATE_WORD, "text-foreground")}>
-          {row.code}
-        </span>
-      ) : null}
-      {open && row.page !== undefined ? (
-        <Button data-k="open" size="xs" variant="outline" render={<a href={row.page} target="_blank" rel="noopener noreferrer" />}>
-          {CLOUD_SETUP_WORDS.build.open}
-          <span aria-hidden>↗</span>
-        </Button>
-      ) : (
-        <span data-k="state" className={cn(STATE_WORD, row.state === INIT_ROW_STATES.failed && "text-destructive-foreground")}>
-          {row.state}
-        </span>
-      )}
+      {waiting && onCode !== undefined ? <SignInCode label={row.label} onCode={onCode} /> : null}
     </li>
   );
 }
 
-/** A stage's or a workspace row's glyph: a hollow ring while it waits, a filled dot while it runs, a tick once it
- * ended well, a cross when it failed. */
-function StateGlyph({ state }: { state: string }): ReactNode {
-  if (state === INIT_ROW_STATES.failed || state === LOGIN_STATE_WORDS["not-signed-in"]) {
+/** A stage's or a workspace row's glyph: a hollow ring while it waits, nothing while it runs (the slot's spinner says
+ * so), a check once it ended well, a cross when it failed. */
+function StageGlyph({ state }: { state: string }) {
+  if (state === INIT_ROW_STATES.failed) {
     return (
-      <svg viewBox="0 0 16 16" className="size-3.5 fill-none stroke-destructive" strokeWidth={1.75} strokeLinecap="round">
+      <svg viewBox="0 0 16 16" className="size-3.5 fill-none stroke-destructive-foreground" strokeWidth={1.75} strokeLinecap="round">
         <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
       </svg>
     );
@@ -138,6 +119,6 @@ function StateGlyph({ state }: { state: string }): ReactNode {
       </svg>
     );
   }
-  if (state === INIT_ROW_STATES.waiting) return <span className="size-2 rounded-full border border-muted-foreground/60" />;
-  return <span className="size-2 rounded-full bg-foreground" />;
+  if (state === INIT_ROW_STATES.running) return <span className="size-2 rounded-full bg-foreground" />;
+  return <span className="size-2 rounded-full border border-muted-foreground/60" />;
 }

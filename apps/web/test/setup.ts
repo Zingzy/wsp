@@ -47,6 +47,18 @@ if (typeof Element !== "undefined" && typeof Element.prototype.getAnimations !==
   (globalThis as { BASE_UI_ANIMATIONS_DISABLED?: boolean }).BASE_UI_ANIMATIONS_DISABLED = true;
 }
 
+// jsdom has no top layer, so no element is ever :modal or :popover-open. Its selector engine, nwsapi, answers :modal
+// by falling back to a :fullscreen check that re-enters the engine for the same node, so one :modal match on a large
+// document costs millions of :fullscreen matches (measured: 104 million for one menu opening inside a 1,100-element
+// dialog, 14 s idle and past the 20 s budget under load). Floating UI asks :modal of every ancestor on every position
+// computation, so the two top-layer pseudo-classes answer false here without touching the engine.
+if (typeof Element !== "undefined") {
+  const matches = Element.prototype.matches;
+  Element.prototype.matches = function (this: Element, selectors: string): boolean {
+    return selectors === ":modal" || selectors === ":popover-open" ? false : matches.call(this, selectors);
+  };
+}
+
 if (typeof ResizeObserver === "undefined") {
   class InertResizeObserver {
     observe(): void {}

@@ -58,7 +58,7 @@ describe.skipIf(renderSkipped !== undefined)("the new-workspace dialog laid out 
     const [detail] = await styles("[aria-label='Start from'] label span span:nth-child(2)");
     expect(rows[0]!.color).toBe(detail!.color);
     expect(await page!.locator(`${SIZE_ROWS} [role=radio]`).evaluateAll(els => els.map(el => el.getAttribute("aria-checked")))).toEqual(["true", "false"]);
-    expect(await page!.locator(SIZE_ROWS).allTextContents()).toEqual(["2 vCPU · 4 GB$0.11/hr", "2 vCPU · 8 GB$0.15/hr"]);
+    expect(await page!.locator(SIZE_ROWS).allTextContents()).toEqual(["2 vCPU · 4 GB$0.11/hr", "2 vCPU · 8 GB$0.15/hr"]);
     const ratios = await textContrast(page!, `${SIZE_ROWS} > span`);
     console.info(`${theme}: size rows read at ${ratios.map(r => r.toFixed(2)).join(", ")} to 1`);
     for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);

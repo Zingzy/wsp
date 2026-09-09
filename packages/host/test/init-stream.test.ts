@@ -181,7 +181,7 @@ describe("seal and upgrade steps", () => {
     for (const steps of [SEAL_STEPS, UPGRADE_STEPS]) {
       const stages = steps.map(s => s.stage);
       expect(stages.slice(stages.indexOf("snapshotting"))).toEqual(["snapshotting", "promoting", "smoke-forking", "sealed"]);
-      expect(steps.find(s => s.stage === "promoting")).toEqual({ stage: "promoting", start: "Saving it as a durable template", end: "Saved as a durable template", fail: "Saving the template failed" });
+      expect(steps.find(s => s.stage === "promoting")).toEqual({ stage: "promoting", start: "Saving the image", end: "Image saved", fail: "Saving the image failed" });
     }
   });
 });
@@ -205,7 +205,7 @@ describe("stage stream on a terminal", () => {
       expect(count(lines, "Machine created")).toBe(1);
       expect(count(lines, "Base installed")).toBe(1);
       expect(count(lines, "Setup applied")).toBe(1);
-      expect(count(lines, "Uploading your files failed")).toBe(1);
+      expect(count(lines, "Copying your files failed")).toBe(1);
       expect(lines.every(l => l.length < 60)).toBe(true);
       expect(lines.some(l => l.includes("HTTP 413") && l.endsWith("…"))).toBe(true);
       expect(lines.join("\n")).not.toMatch(SPINNERS);
@@ -246,7 +246,7 @@ describe("stage stream on a terminal", () => {
         lines = screen.lines();
         expect(lines).toHaveLength(5);
         expect(lines[2]).toMatch(/^◇  Setup applied\s+zsh: Created symlink \/etc\/sys.*\s+4\.0s$/);
-        expect(lines[3]).toMatch(/^◇  Files uploaded\s+38 MB\s+1\.0s$/);
+        expect(lines[3]).toMatch(/^◇  Files copied\s+38 MB\s+1\.0s$/);
         expect(lines[4]).toMatch(/^[◒◐◓◑]  Installing agents\s+Claude Code: \u2714 Claude Code/);
         expect(written.join("")).not.toMatch(/\x07|\x1b\[2K|\x1b\[0m/);
         expect(count(lines, "Machine created")).toBe(1);
@@ -343,7 +343,7 @@ describe("stage stream on a terminal", () => {
       expect(lines[0]).toBe("│  heartbeat for builder b1 not written: ETIMEDOUT");
       expect(lines[1]).toBe("│  hostname first on m1 failed: no route");
       expect(lines[2]).toMatch(/^◇  Machine created\s+sandbox from default\s+1\.0s$/);
-      expect(lines[3]).toMatch(/^[◒◐◓◑]  Installing the base \(tools and daemon\)$/);
+      expect(lines[3]).toMatch(/^[◒◐◓◑]  Installing the base tools$/);
       expect(lines).toHaveLength(4);
       expect(sunk).toEqual(["heartbeat for builder b1 not written: ETIMEDOUT", "hostname first on m1 failed: no route"]);
       stream.stop();
@@ -479,7 +479,7 @@ describe("stage stream on a terminal", () => {
         expect(count(lines, "Setup applied")).toBe(1);
         expect(lines[0]).toMatch(/^│  \(node:72935\) MaxListenersExceededWarning: Possible EventTarget memory leak/);
         expect(lines.findIndex(l => l.startsWith("◇  Machine created"))).toBeGreaterThan(1);
-        expect(count(lines, "Files uploaded")).toBe(1);
+        expect(count(lines, "Files copied")).toBe(1);
         expect(lines.filter(l => SPINNERS.test(l))).toHaveLength(1);
         expect(lines.every(l => l.length < cols)).toBe(true);
         expect(screen.scrolled).toBe(0);
@@ -517,7 +517,7 @@ describe("stage stream on a terminal", () => {
       lines = screen.lines();
       expect(lines).toHaveLength(5);
       expect(count(lines, "Machine created")).toBe(1);
-      expect(count(lines, "Files uploaded")).toBe(1);
+      expect(count(lines, "Files copied")).toBe(1);
       expect(lines.filter(l => SPINNERS.test(l))).toHaveLength(1);
       expect(screen.scrolled).toBe(0);
       stream.stop();
@@ -557,7 +557,7 @@ describe("stage stream on a terminal", () => {
       expect(stream.finished).toBe(true);
       stream.stop();
       lines = screen.lines();
-      expect(lines.map(l => l.slice(3, 20).trim())).toEqual(["Machine created", "Base installed", "Setup applied", "Files uploaded", "Agents installed", "Tools installed", "Ready"]);
+      expect(lines.map(l => l.slice(3, 20).trim())).toEqual(["Machine created", "Base installed", "Setup applied", "Files copied", "Agents installed", "Tools installed", "Ready"]);
       expect(lines.join("\n")).not.toMatch(SPINNERS);
     } finally {
       vi.useRealTimers();
@@ -583,7 +583,7 @@ describe("stage stream on a terminal", () => {
     ]);
     const lines = screen.lines();
     expect(count(lines, "already applied")).toBe(7);
-    expect(lines.at(-2)).toContain("The machine never became ready");
+    expect(lines.at(-2)).toContain("The machine never answered");
     expect(lines.at(-1)).toContain("the builder answered exit 1");
   });
 

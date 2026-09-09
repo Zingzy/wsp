@@ -19,7 +19,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, BUILDER_DISK_GB, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, notHereLine, packageOf, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked } from "@wsp/protocol";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, notHereLine, packageOf, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -120,7 +120,13 @@ export interface InitOptions {
    * for, so the flag path shows the same card the wizard's own question leaves, and onProgress how far through one
    * agent's session files the read is, since a first read of a busy computer takes a while. */
   recipe(onHistory: (h: RecipeHistory) => void, onProject: (scan: ProjectScan) => void, onProgress: (p: HistoryProgress) => void): Promise<Recipe>;
-  keys: Keys;
+  /** The agents' API keys that ride onto the image, each under the variable its agent's sign-in declares. */
+  agentKeys: Readonly<Record<string, string>>;
+  /** Told, on the hand-off road, what the sign-in stage runs with: the relay's flow, the builder's link and the stop
+   * signal, so a sign-in can be run again the same way while the run goes on. */
+  signIns?(ctx: SignInContext): void;
+  /** How often a sign-in's status is asked on the machine; the hand-off's own cadence otherwise. */
+  pollMs?: number;
   /** Prices the builder the confirm names. */
   pricing: BackendPricing;
   statePath: string;
@@ -246,22 +252,22 @@ export const toFrame = (e: GoldenStageEvent): StageFrame => ({ type: "golden.sta
  * order the stages run in; this list only settles which one a failure with no
  * stage running is charged to. */
 export const PREPARE_STEPS: readonly StageWords[] = [
-  { stage: "creating", start: "Creating the machine", end: "Machine created", fail: "Creating the machine failed" },
-  { stage: "deploying-daemon", start: "Installing the base (tools and daemon)", end: "Base installed", fail: "Installing the base failed" },
-  { stage: "applying-setup", start: "Applying your setup", end: "Setup applied", fail: "Applying your setup failed" },
-  { stage: "uploading-files", start: "Uploading your files", end: "Files uploaded", fail: "Uploading your files failed" },
-  { stage: "installing-harness", start: "Installing agents", end: "Agents installed", fail: "Installing agents failed" },
-  { stage: "installing-tools", start: "Installing tools", end: "Tools installed", fail: "Installing tools failed" },
-  { stage: "installing-mcp", start: "Installing MCP servers", end: "MCP servers installed", fail: "Installing MCP servers failed" },
-  { stage: "ready", start: "Waiting for the machine", end: "Ready", fail: "The machine never became ready" },
+  { stage: "creating", start: GOLDEN_STAGE_WORDS.creating, end: "Machine created", fail: "Creating the machine failed" },
+  { stage: "deploying-daemon", start: GOLDEN_STAGE_WORDS["deploying-daemon"], end: "Base installed", fail: "Installing the base failed" },
+  { stage: "applying-setup", start: GOLDEN_STAGE_WORDS["applying-setup"], end: "Setup applied", fail: "Applying your setup failed" },
+  { stage: "uploading-files", start: GOLDEN_STAGE_WORDS["uploading-files"], end: "Files copied", fail: "Copying your files failed" },
+  { stage: "installing-harness", start: GOLDEN_STAGE_WORDS["installing-harness"], end: "Agents installed", fail: "Installing agents failed" },
+  { stage: "installing-tools", start: GOLDEN_STAGE_WORDS["installing-tools"], end: "Tools installed", fail: "Installing tools failed" },
+  { stage: "installing-mcp", start: GOLDEN_STAGE_WORDS["installing-mcp"], end: "MCP servers installed", fail: "Installing MCP servers failed" },
+  { stage: "ready", start: GOLDEN_STAGE_WORDS.ready, end: "Ready", fail: "The machine never answered" },
 ];
 
 /** The seal, run from this terminal once the person says so. */
 export const SEAL_STEPS: readonly StageWords[] = [
-  { stage: "snapshotting", start: "Taking the snapshot", end: "Snapshot taken", fail: "Snapshot failed" },
-  { stage: "promoting", start: "Saving it as a durable template", end: "Saved as a durable template", fail: "Saving the template failed" },
-  { stage: "smoke-forking", start: "Booting a fork to prove it", end: "Fork booted and checked", fail: "The fork failed its check" },
-  { stage: "sealed", start: "Sealing", end: "Sealed", fail: "Seal failed" },
+  { stage: "snapshotting", start: GOLDEN_STAGE_WORDS.snapshotting, end: "Snapshot taken", fail: "Snapshot failed" },
+  { stage: "promoting", start: GOLDEN_STAGE_WORDS.promoting, end: "Image saved", fail: "Saving the image failed" },
+  { stage: "smoke-forking", start: GOLDEN_STAGE_WORDS["smoke-forking"], end: "Fork booted and checked", fail: "The fork failed its check" },
+  { stage: "sealed", start: GOLDEN_STAGE_WORDS.sealed, end: "Sealed", fail: "Seal failed" },
 ];
 
 const LAST_STAGE = new Set<string>(["ready", "sealed"]);
@@ -873,6 +879,14 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
   return { manifest, catalogRecipe, brew, scanned, ...(projectScan !== undefined ? { projectScan } : {}), notes, source };
 }
 
+/** What the sign-in stage runs with, for a sign-in run again later: the same relay flow, link and stop. */
+export interface SignInContext {
+  flow: SignInFlow;
+  dial(): Promise<BuilderLink>;
+  signal: AbortSignal;
+  pollMs?: number;
+}
+
 export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult> {
   const out = { output: io.output };
   // Off a terminal, and under --non-interactive on one, there is nobody to ask: it runs as if --yes were given.
@@ -1033,7 +1047,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     cancel(`Nothing was booted. The rows and their sizes are listed in ${path}; shrink or remove the largest on this computer and run wsp init again. The recipe is kept.`, out);
     return { code: 1 };
   }
-  let recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
+  let recipe = goldenRecipeFor(bring, opts.agentKeys, { import: imp });
   const runLog = openRunLog(runLogPath(opts.statePath));
   runLog.note(`recipe ${imp.recipeHash} from ${path}`);
   // Every frame the golden reports, the build's and the seal's, lands in the log for the process's life.
@@ -1045,7 +1059,12 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   };
   let rt = logged(opts.runtime({ ...recipe, onExec: runLog.exec }));
   // A clean exit frees the builders this process holds at once; every road out that hands the runtime to no host takes it.
-  const closeRuntime = (): Promise<void> => rt.close().catch((e: unknown) => log.error(`runtime close failed: ${e instanceof Error ? e.message : String(e)}`, out));
+  // The callback relay lives as long as the run: a sign-in retried during the seal still returns through it.
+  let closeRelay = async (): Promise<void> => {};
+  const closeRuntime = async (): Promise<void> => {
+    await closeRelay();
+    await rt.close().catch((e: unknown) => log.error(`runtime close failed: ${e instanceof Error ? e.message : String(e)}`, out));
+  };
   const logLine = (): string => dim(runLog.failed === undefined ? `The run log is ${runLog.path}` : `The run log ${runLog.path} could not be written (${runLog.failed})`);
   const describeBuilder = (b: GoldenBuilderView): string => {
     const ageMs = Math.max(0, Date.now() - Date.parse(b.createdAt));
@@ -1125,7 +1144,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     // so the next wsp init on the same answers attaches to it.
     bring = bringing();
     imp = importOf(bring);
-    recipe = goldenRecipeFor(bring, opts.keys, { import: imp });
+    recipe = goldenRecipeFor(bring, opts.agentKeys, { import: imp });
     await rt.close();
     rt = logged(opts.runtime({ ...recipe, onExec: runLog.exec }));
     earlier = await earlierBuilder();
@@ -1282,13 +1301,36 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 
   const flow: SignInFlow = { armed: false };
   const relay = await opts.relay(rt, builder, flowHooks(flow, builder));
+  closeRelay = async () => {
+    closeRelay = async () => {};
+    await relay.close().catch((e: unknown) => log.error(`relay close failed: ${e instanceof Error ? e.message : String(e)}`, out));
+  };
   const dial = (): Promise<BuilderLink> => (opts.daemon ?? builderLink)(rt, builder);
+  // On the hand-off road a stop while the sign-ins run ends the one in flight, skips the rest, and the machine goes
+  // with it: nothing is sealed and nothing bills. The terminal's own sign-in stage keeps Ctrl-C as it was, so the
+  // handlers go on for the hand-off alone; the seal cannot be stopped, so they come off before it.
+  const stopLogins = new AbortController();
+  let stoppedBy: "SIGINT" | "SIGTERM" | undefined;
+  const onStopLogins = (sig: "SIGINT" | "SIGTERM") => (): void => {
+    stoppedBy ??= sig;
+    stopLogins.abort();
+  };
+  const onIntLogins = onStopLogins("SIGINT");
+  const onTermLogins = onStopLogins("SIGTERM");
+  if (handoff) {
+    io.signals.on("SIGINT", onIntLogins);
+    io.signals.on("SIGTERM", onTermLogins);
+    opts.signIns?.({ flow, dial, signal: stopLogins.signal, ...(opts.pollMs !== undefined ? { pollMs: opts.pollMs } : {}) });
+  }
   // Secrets first: a key cut from an rc file is on the machine before any status check looks for it.
   // Nobody is here to type: the flag that said so when there was a terminal, else the terminal that is missing.
   const nobodyAsks = !io.isTTY ? "no terminal to paste into" : opts.yes ? "--yes asks nothing" : "--non-interactive asks nothing";
   const skipSecretsWhy = interactive ? undefined : `${nobodyAsks}; set them from the app's terminal`;
+  // A key the wsp home already holds rides onto the image as its variable, so its row is set and nothing is asked.
+  const keys = keyAsks(offered, choices);
+  for (const k of keys) if (opts.agentKeys[k.name] !== undefined) io.json?.({ event: "key-set", tool: k.tool, label: k.label });
   const secretOutcomes = await secretsStage({
-    asks: [...(landed?.files?.cut ?? []).flatMap(c => c.names.map(name => ({ name, from: `cut from ${c.path}` }))), ...keyAsks(offered, choices)],
+    asks: [...(landed?.files?.cut ?? []).flatMap(c => c.names.map(name => ({ name, from: `cut from ${c.path}` }))), ...keys.filter(k => opts.agentKeys[k.name] === undefined)],
     dial,
     input: io.input,
     output: io.output,
@@ -1313,6 +1355,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         output: io.output,
         platform: opts.platform,
         flow,
+        signal: stopLogins.signal,
+        ...(opts.pollMs !== undefined ? { pollMs: opts.pollMs } : {}),
         ...(opts.codes !== undefined ? { codes: opts.codes } : {}),
         ...(io.json !== undefined ? { json: io.json } : {}),
       })
@@ -1327,7 +1371,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       });
   if (noteOutcomes(resultsPath, { logins: outcomes, secrets: secretOutcomes }).replaced) log.warn(`${resultsPath} could not be read; it was rewritten with the logins and secrets alone.`, out);
   // The relay's work ends with the sign-ins; the host that serves the app after the seal links to the workspaces itself.
-  await relay.close().catch((e: unknown) => log.error(`relay close failed: ${e instanceof Error ? e.message : String(e)}`, out));
+  if (handoff) {
+    io.signals.off("SIGINT", onIntLogins);
+    io.signals.off("SIGTERM", onTermLogins);
+  }
+  if (stoppedBy !== undefined) {
+    let left: string | undefined;
+    await rt.golden.kill(builder.id).catch((e: unknown) => (left = e instanceof Error ? e.message : String(e)));
+    cancel(left === undefined ? `Stopped while signing in. Builder ${builder.id} is gone; nothing is billing.` : `Stopped while signing in. Builder ${builder.id} did not stop (${left}); ${SWEEP}`, out);
+    await closeRuntime();
+    const code = exitCodeOf(stoppedBy);
+    io.exit(code);
+    return { code, logins: outcomes, secrets: secretOutcomes };
+  }
 
   const next = ((await rt.golden.get())?.head ?? 0) + 1;
   card(`Ready to seal golden v${next}`, sealSummary(landed, outcomes, secretOutcomes, widthOf(io.output)), io.output);
@@ -1443,6 +1499,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   runLog.note(`app ${url}`);
   await openApp(url, handle, io, interactive, logLine());
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
+  await closeRelay();
   return { ...result, handle };
 }
 

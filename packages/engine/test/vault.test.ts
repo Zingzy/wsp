@@ -107,7 +107,7 @@ describe("vault size cap", () => {
     await expect(exportPaths(sized, ["/root/big"], { fetch: fetchStub, maxBytes: 200_000_000 })).rejects.toMatchObject({
       kind: "vaultTooLarge",
       bytes: 300_000_000,
-      message: "the export was 286.1 MB, over the 190.7 MB cap",
+      message: "the export was 286 MB, over the 191 MB cap",
     });
     expect(fetchStub).not.toHaveBeenCalled();
     expect(execCmds.some(c => c.startsWith("rm -f"))).toBe(true);

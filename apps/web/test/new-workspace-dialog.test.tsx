@@ -70,7 +70,7 @@ describe("new workspace dialog", () => {
     const dialog = await screen.findByRole("dialog");
     const group = within(dialog).getByRole("radiogroup", { name: "Size" });
     const radios = within(group).getAllByRole("radio");
-    expect(radios.map(r => r.closest("label")!.textContent)).toEqual(["2 vCPU · 4 GB$0.11/hr", "2 vCPU · 8 GB$0.15/hr"]);
+    expect(radios.map(r => r.closest("label")!.textContent)).toEqual(["2 vCPU · 4 GB$0.11/hr", "2 vCPU · 8 GB$0.15/hr"]);
     expect(radios.map(r => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
     for (const r of radios) expect(r.closest("label")!.className.split(" ")).toEqual(expect.arrayContaining(["font-mono", "text-muted-foreground"]));
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
@@ -84,7 +84,7 @@ describe("new workspace dialog", () => {
     const dialog = await screen.findByRole("dialog");
     const group = within(dialog).getByRole("radiogroup", { name: "Size" });
     expect(within(group).getAllByRole("radio").map(r => r.getAttribute("aria-checked"))).toEqual(["false", "false"]);
-    fireEvent.click(within(group).getByRole("radio", { name: /8 GB/ }));
+    fireEvent.click(within(group).getByRole("radio", { name: /8\u00a0GB/ }));
     expect(within(group).getAllByRole("radio").map(r => r.getAttribute("aria-checked"))).toEqual(["false", "true"]);
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
     expect(onCreate).toHaveBeenCalledWith("workspace-1", "fresh", { cpu: 2, memMb: 8192 });

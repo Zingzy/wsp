@@ -435,9 +435,11 @@ export interface HostTerminalConfig {
  * serves its ops and relays its events beside its own, as it does the host's forwards. */
 export interface InitDoor {
   get(): Promise<InitSetup>;
-  keys(keys: { solari?: string; anthropic?: string }): Promise<InitSetup>;
+  keys(keys: { solari?: string; rows?: Record<string, string> }): Promise<InitSetup>;
   start(o: { road: InitRoad; harness?: string }): Promise<InitJob>;
   answer(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
+  step(o: { at: number }): Promise<InitJob>;
+  retry(o: { tool: string }): Promise<InitJob>;
   build(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob>;
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine; refused when none is. */
   signInCode(o: { tool: string; code: string }): Promise<InitJob>;

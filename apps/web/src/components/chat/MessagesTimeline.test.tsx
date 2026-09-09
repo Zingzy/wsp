@@ -1136,7 +1136,7 @@ describe("MessagesTimeline", () => {
         timelineEntries={[buildUserTimelineEntryWithImages("what does this show?", [{ mediaType: "image/png", bytes: 1_258_291, name: "shot.png" }])]}
       />,
     );
-    expect(markup).toContain("[image 1.2 MB png]");
+    expect(markup).toContain("[image 1 MB png]");
     expect(markup).toContain("what does this show?");
     // No pixels to draw: the runtime keeps the records and never the bytes.
     expect(markup).not.toContain("<img");

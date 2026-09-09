@@ -51,6 +51,8 @@ export interface HandoffOptions {
    * while its command runs. Without it no row takes a code, which is what a run with no client to submit one is. */
   codes?: SignInCodes;
   now?: () => number;
+  /** A stop from the person: the sign-in running is settled as not signed in and the rest are not started. */
+  signal?: AbortSignal;
 }
 
 const POLL_MS = 5_000;
@@ -65,6 +67,8 @@ const STATUS_MS = 60_000;
  * minutes must not be held in memory. */
 const TEXT_CAP = 16 * 1024;
 const dim = (s: string): string => styleText("dim", s);
+/** The note on a sign-in the person stopped before it was through. */
+export const STOPPED_NOTE = "stopped before the sign-in was through";
 
 /** The code the page will ask for, in the shape the catalog row says this flow prints it: read outside the URLs the
  * tool printed, so a page's own query string is never mistaken for a code. A row with no shape shows no code. */
@@ -124,6 +128,10 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
   const graceMs = o.graceMs ?? GRACE_MS;
   if (o.logins.length === 0) return [];
   const { outcomes, machine } = copiedOutcomes(o.logins, o.left, o.output);
+  // A copied credential is a row of the build too: it settles here, before any page, and is never announced otherwise.
+  for (const [entry, r] of o.logins.map((e, i): [ManifestEntry, LoginOutcome] => [e, outcomes[i]!])) {
+    if (r.state === "copied") o.json?.({ event: "sign-in-result", tool: agentName(entry), label: r.label, state: r.state });
+  }
   if (machine.length === 0) return outcomes;
   log.step("Signing in on the machine. Each page below is yours to open on this computer; the run waits for you.", out);
 
@@ -180,9 +188,13 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
     const status = s.status;
     const capMs = o.deadlineMs ?? signInCapMs(s, SIGN_IN_CAP_MS);
     r.command = command;
+    // The row stands from the moment the command starts: a tool prints its banner before its page, and a status that
+    // already says signed in never prints one, so a reader waiting for the page alone would show nothing while this runs.
+    o.json?.({ event: "sign-in", tool, label: r.label });
     const daemon = await o.dial();
     let settle: (() => void) | undefined;
     const stop = new Promise<void>(resolve => (settle = resolve));
+    o.signal?.addEventListener("abort", () => settle?.(), { once: true });
     let seen = "";
     /** The last page handed over, and whether it was one that returns through a forwarded port. */
     let told: string | undefined;
@@ -307,12 +319,23 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
     }
   };
 
+  const stoppedNow = (): boolean => o.signal?.aborted ?? false;
   for (const [entry, r] of machine) {
+    if (stoppedNow()) {
+      r.state = "not-signed-in";
+      r.note = STOPPED_NOTE;
+      o.json?.({ event: "sign-in-result", tool: agentName(entry), label: r.label, state: r.state, note: r.note });
+      continue;
+    }
     try {
       await sign(entry, r);
     } catch (e) {
       r.state = "not-signed-in";
       r.note = e instanceof Error ? e.message : String(e);
+    }
+    if (stoppedNow() && r.state !== "signed-in") {
+      r.state = "not-signed-in";
+      r.note = STOPPED_NOTE;
     }
     o.json?.({ event: "sign-in-result", tool: agentName(entry), label: r.label, state: r.state, ...(r.note !== undefined ? { note: r.note } : {}) });
     log.message(stateLine(r), { output: o.output, symbol: dim(S_BAR) });
