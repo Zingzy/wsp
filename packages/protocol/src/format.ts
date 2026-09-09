@@ -38,8 +38,9 @@ export function fmtSize(size: WorkspaceSize): string {
 /** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
 export const FREE_WORD = "free";
 
-/** What a Machine tab row reads on a kind of machine that has no road to that reading yet, in place of a pending
- * that would never settle. */
+/** What a pane prints in the slot a reading would fill on a kind whose machines serve that reading on no road: the
+ * Machine tab's Live rows and the Processes table both read it, in place of a pending that would never settle. The
+ * kind table says which kinds serve which reading, so a pane says this within one probe window. */
 export const NOT_ON_THIS_KIND = "not on this kind";
 
 /** A size as the --size flag and the fork tools spell it: vCPUs, an x, memory in GB ("2x4", "2x0.5"). */
@@ -855,6 +856,7 @@ export const THIS_COMPUTER = "this computer";
 /** What an ssh workspace's machine is, in every sentence and every row that names it: a machine of the person's own
  * that wsp reaches and never runs. */
 export const OVER_SSH = "a machine over ssh";
+
 
 /** The one sentence a local workspace refuses a request relayed from a machine with. A local workspace is this
  * computer; it answers only its own person, so a request that reached the host from a machine wsp runs cannot drive

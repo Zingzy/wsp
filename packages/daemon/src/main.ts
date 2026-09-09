@@ -5,7 +5,7 @@ import type { IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
 import { homedir, platform } from "node:os";
 import { resolve } from "node:path";
-import { DAEMON_ROOTS_PATH, DAEMON_VERSION, DaemonAuthRequest, type DaemonEvent } from "@wsp/protocol";
+import { DAEMON_ROOTS_PATH, DAEMON_VERSION, DaemonAuthRequest, type DaemonEvent, type WorkspaceKind } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
 import { listDir, readFileBounded, type FsReadEncoding } from "./fs-ops.js";
 import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
@@ -13,9 +13,10 @@ import { InboxWatcher } from "./inbox.js";
 import { ProcessManifest, type ManifestOptions } from "./manifest.js";
 import { linuxModeProbe, ModeWatcher, type ModeProbe } from "./mode.js";
 import { PortWatcher, portSourceFor, type PortOpenEvent, type PortSnapshotSource } from "./ports.js";
-import { killProcess, ProcSampler } from "./proc.js";
+import { killProcess, ProcSampler, type ProcSource } from "./proc.js";
+import { readingsFor, type ReadingsOptions } from "./readings.js";
 import { PtyManager } from "./pty-manager.js";
-import { procSysSource, SysSampler, type SysSource } from "./sys.js";
+import { SysSampler, type SysSource } from "./sys.js";
 import { localhostPortOf, settledLocalPorts } from "./local-urls.js";
 import { CallbackSpotter, TerminalUrlScanner, callbackPortOf, listenOpenSocket, type OpenSocket } from "./relay.js";
 import { OpError, resolveInside } from "./workspace-paths.js";
@@ -37,6 +38,12 @@ export interface DaemonOptions {
   authDeadlineMs?: number;
   portsSource?: PortSnapshotSource;
   portsIntervalMs?: number;
+  /** Which kind of machine this daemon serves, which picks the modules its Live rows and Processes tab read: a
+   * guest wsp forked by default, the host itself where this computer's own workspace runs it in process. */
+  kind?: WorkspaceKind;
+  /** The folder turns write in, whose volume this computer's disk row reads; the daemon's own root by default,
+   * which for a guest is the workspace folder and for this computer is the person's home. */
+  workFolder?: string;
   inboxDir?: string;
   inboxQuietMs?: number;
   inboxPollMs?: number;
@@ -45,6 +52,8 @@ export interface DaemonOptions {
   modeIntervalMs?: number;
   sysSource?: SysSource;
   sysIntervalMs?: number;
+  /** Stands in for the kind's own processes module, as sysSource does for its metrics one. */
+  procSource?: ProcSource;
   /** A directory laid out like /proc, for tests on darwin; the real one otherwise. */
   procRoot?: string;
   procPasswdPath?: string;
@@ -109,6 +118,9 @@ interface ConnState {
   port?: number;
   /** This socket's proc.watch, so proc.unwatch can end it before the socket does. */
   unwatchProcs?: () => void;
+  /** Set when the socket went, so an op that awaited something takes nothing on for a client that has left: the
+   * close drains what this socket holds once, and a subscription made after that drain is one nothing removes. */
+  closed?: boolean;
 }
 
 /** Laptop connections one socket may hold open through the forward at once. */
@@ -138,9 +150,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   let sysSampler: SysSampler | null = null;
   let procSampler: ProcSampler | null = null;
 
+  const portsSource = opts.portsSource ?? portSourceFor(platform());
   const getPortWatcher = () => {
     if (!portWatcher) {
-      portWatcher = new PortWatcher(opts.portsSource ?? portSourceFor(platform()), {
+      portWatcher = new PortWatcher(portsSource, {
         intervalMs: opts.portsIntervalMs ?? 1000,
       });
       portWatcher.on("port.open", (e: PortOpenEvent) => spotter.noteOpen(e.port, e.loopback === true));
@@ -173,18 +186,26 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     const extra = named.split("\n").map(line => line.trim()).filter(line => line.startsWith("/"));
     return [...new Set([root, ...extra])];
   };
+  /** Which kind of machine this daemon answers for; a guest wsp forked unless the host that started it says otherwise. */
+  const kind = opts.kind ?? "cloud";
+  /** What this machine's own two modules are built from; the kind picks which modules those are. */
+  const readingsOptions = (): ReadingsOptions => ({
+    root,
+    workFolder: opts.workFolder ?? root,
+    ports: portsSource,
+    ...(opts.procRoot !== undefined ? { procRoot: opts.procRoot } : {}),
+    ...(opts.procPasswdPath !== undefined ? { passwdPath: opts.procPasswdPath } : {}),
+  });
   const getSysSampler = () => {
-    sysSampler ??= new SysSampler(opts.sysSource ?? procSysSource(root), {
+    sysSampler ??= new SysSampler(opts.sysSource ?? readingsFor(kind).metrics(readingsOptions()), {
       ...(opts.sysIntervalMs !== undefined ? { intervalMs: opts.sysIntervalMs } : {}),
     });
     return sysSampler;
   };
   const getProcSampler = () => {
-    procSampler ??= new ProcSampler({
+    procSampler ??= new ProcSampler(opts.procSource ?? readingsFor(kind).processes(readingsOptions()), {
       // An exited pty's pid can be reused by a stranger; only live shells carry the label.
       ptys: () => ptys.list().filter(p => !p.exited),
-      ...(opts.procRoot !== undefined ? { procRoot: opts.procRoot } : {}),
-      ...(opts.procPasswdPath !== undefined ? { passwdPath: opts.procPasswdPath } : {}),
       ...(opts.procIntervalMs !== undefined ? { intervalMs: opts.procIntervalMs } : {}),
     });
     return procSampler;
@@ -287,6 +308,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     const state: ConnState = { detaches: [], tunnels: new Map(), ...(port !== undefined ? { port } : {}) };
     ws.on("close", () => {
       // Client is gone; ptys keep running. Only this socket's subscriptions and tunnels die.
+      state.closed = true;
       authed.delete(ws);
       for (const un of state.detaches) un();
       state.detaches = [];
@@ -519,13 +541,24 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       return;
     }
     case "sys.watch": {
-      state.detaches.push(ctx.getSysSampler().subscribe(s => push(ws, s)));
+      // One read before the watch is taken: a machine whose module cannot read it refuses here, where the pane can
+      // say so, rather than accepting a stream it will never send and leaving the rows at pending. The read is
+      // awaited, so the socket may go while it runs, and a subscription made after the close drained this socket is
+      // one nothing ever removes: the sampler would then read the machine every two seconds for the life of the
+      // daemon, once per socket lost that way.
+      const sampler = ctx.getSysSampler();
+      await sampler.probe();
+      if (state.closed) return;
+      state.detaches.push(sampler.subscribe(s => push(ws, s)));
       reply(ws, msg.id, {});
       return;
     }
     case "proc.watch": {
+      const procs = ctx.getProcSampler();
+      await procs.probe();
+      if (state.closed) return;
       if (state.unwatchProcs === undefined) {
-        const un = ctx.getProcSampler().subscribe(e => push(ws, e));
+        const un = procs.subscribe(e => push(ws, e));
         state.unwatchProcs = un;
         state.detaches.push(un);
       }

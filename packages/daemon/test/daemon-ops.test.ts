@@ -284,6 +284,113 @@ describe("daemon ops: ports, manifest, inbox", () => {
   });
 });
 
+describe("nothing a pane asks for stays pending", () => {
+  /** One daemon of its own per case, since each stands for a machine of a different kind. */
+  async function withDaemon(opts: Parameters<typeof startDaemon>[0], fn: (c: Awaited<ReturnType<typeof connect>>) => Promise<void>): Promise<void> {
+    const d = await startDaemon({ port: 0, token: TOKEN, ...opts });
+    const c = await connect(d.port);
+    try {
+      await fn(c);
+    } finally {
+      c.close();
+      await d.close();
+    }
+  }
+
+  it("a kind with no modules refuses both watches in the words the pane prints, rather than accepting a stream it never sends", async () => {
+    await withDaemon({ kind: "ssh" }, async c => {
+      for (const op of ["sys.watch", "proc.watch"]) {
+        const res = await c.request(op);
+        expect(res).toMatchObject({ ok: false, code: "unsupported" });
+        expect(String(res["error"])).toMatch(/^not on this kind/);
+      }
+    });
+  });
+
+  it("a metrics module that cannot read this machine refuses the watch with its own words, so no row sits at pending", async () => {
+    await withDaemon({
+      sysSource: async () => {
+        throw new Error("/proc/stat: ENOENT");
+      },
+    }, async c => {
+      expect(await c.request("sys.watch")).toMatchObject({ ok: false, error: "/proc/stat: ENOENT" });
+    });
+  });
+
+  it("a processes module that cannot read this machine refuses the watch the same way", async () => {
+    await withDaemon({ procRoot: join(tmp, "no-such-proc") }, async c => {
+      const res = await c.request("proc.watch");
+      expect(res.ok).toBe(false);
+      expect(String(res["error"])).toContain("no-such-proc");
+    });
+  });
+
+  it("a socket that goes while the probe is still reading takes no stream on, so nothing is left polling for it", async () => {
+    let sysReadsHere = 0;
+    let procScansHere = 0;
+    const slow = async <T>(value: T): Promise<T> => {
+      await new Promise(r => setTimeout(r, 300));
+      return value;
+    };
+    await withDaemon(
+      {
+        // A read slower than the close that lands in the middle of it, and an interval short enough that a sampler
+        // left running is obvious within a second.
+        sysSource: async () => {
+          sysReadsHere++;
+          return slow({ cpu: { idle: sysReadsHere * 30, total: sysReadsHere * 40 }, load1: 0, mem: { used: 1, total: 2 }, disk: { used: 1, total: 2 } });
+        },
+        sysIntervalMs: 30,
+        procSource: {
+          scan: async () => {
+            procScansHere++;
+            return slow({ total: 0, procs: [] });
+          },
+          inspect: async () => ({ pid: 1, cwd: null, ports: [], children: [] }),
+        },
+        procIntervalMs: 30,
+      },
+      async c => {
+        void c.request("sys.watch");
+        void c.request("proc.watch");
+        await new Promise(r => setTimeout(r, 50));
+        c.close();
+        // Past the read that was in flight when the socket went, and well past several of the sampler's intervals.
+        await new Promise(r => setTimeout(r, 600));
+        const [sysAfter, procAfter] = [sysReadsHere, procScansHere];
+        await new Promise(r => setTimeout(r, 600));
+        expect([sysReadsHere, procScansHere]).toEqual([sysAfter, procAfter]);
+        expect(sysReadsHere).toBeLessThan(4);
+        expect(procScansHere).toBeLessThan(4);
+      },
+    );
+  }, 20_000);
+
+  it("this computer's own kind answers both watches off its own host, with no /proc anywhere", async () => {
+    // The /proc named here does not exist, which is what a Mac has: a daemon serving this computer must answer
+    // without it, so a reading that arrives proves the host's own modules read it and not the guest's.
+    await withDaemon({ kind: "local", workFolder: tmp, procRoot: join(tmp, "no-such-proc"), sysIntervalMs: 20, procIntervalMs: 20 }, async c => {
+      expect((await c.request("sys.watch")).ok).toBe(true);
+      expect((await c.request("proc.watch")).ok).toBe(true);
+      const sample = await vi.waitFor(() => {
+        const s = c.events.find(e => e.type === "sys.sample");
+        expect(s).toBeDefined();
+        return s!;
+      }, { timeout: 10_000, interval: 20 });
+      expect(sample["load1"]).toBeTypeOf("number");
+      expect((sample["mem"] as { total: number }).total).toBeGreaterThan(0);
+      expect((sample["disk"] as { total: number }).total).toBeGreaterThan(0);
+      const snap = await vi.waitFor(() => {
+        const e = c.events.find(f => f.type === "proc.snapshot");
+        expect(e).toBeDefined();
+        return e!;
+      }, { timeout: 10_000, interval: 20 });
+      expect((snap["procs"] as { pid: number }[]).some(p => p.pid === process.pid)).toBe(true);
+      expect(snap["daemon"]).toBe(process.pid);
+    });
+  });
+});
+
 describe("wire", () => {
   it("every event the daemon pushed in this file is one the protocol parses", () => {
     expect(wire.length).toBeGreaterThan(0);

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The machine tab of a local workspace in a real Chromium: this computer's CPU
 // and memory read where a fork's size does, its cost reads free, the system it
-// runs, its uptime and its folder read as fact rows in mono, the Live rows say
-// the stream is not on this kind, the header wears the kind's glyph, nothing
+// runs, its uptime and its folder read as fact rows in mono, the Live rows
+// carry the figures its own modules read, the header wears the kind's glyph, nothing
 // about spend, naps, containers or an image is on the tab, and the tab ends at
 // its facts, in both themes, with the tab photographed for review. Like the
 // other render tests it runs only when asked for (WSP_RENDER=1) and skips
@@ -12,7 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { FREE_WORD, NOT_ON_THIS_KIND } from "@wsp/protocol";
+import { FREE_WORD } from "@wsp/protocol";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 
@@ -68,11 +68,14 @@ describe.skipIf(renderSkipped !== undefined)("the machine tab of this computer l
     for (const word of ["Usage", "Lineage", "forks from no image", "containers", "idle window", "cannot resize"]) expect(await page!.locator(`text=${word}`).count()).toBe(0);
     expect(await page!.locator("[data-slot=badge]").count()).toBe(0);
     expect(await page!.locator("footer").count()).toBe(0);
-    // The Live rows say the stream is not on this kind, in the figure's own slot and ink.
-    for (const k of ["cpu", "mem", "disk"]) {
+    // The Live rows read this computer's own modules, so the figures sit in the slot the kind's word used to hold,
+    // in the same ink.
+    const figures = ["33%", "6.0 GB of 16.0 GB", "200.0 GB of 500.0 GB"];
+    for (const [i, k] of ["cpu", "mem", "disk"].entries()) {
       const slot = page!.locator(`[data-k=${k}]`);
-      expect(await slot.textContent()).toBe(NOT_ON_THIS_KIND);
+      expect(await slot.textContent()).toBe(figures[i]);
       expect(await slot.evaluate(el => /mono/i.test(getComputedStyle(el).fontFamily))).toBe(true);
+      expect(await page!.locator(`[data-live-row=${k}][data-kind-word]`).count()).toBe(0);
     }
     // The panel ends where its content ends: the last section's bottom edge is the tab's last painted line.
     const tab = await page!.locator("[data-testid=machine-tab]").boundingBox();

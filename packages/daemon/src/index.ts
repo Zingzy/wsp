@@ -76,7 +76,11 @@ export {
   type GitDiffScope,
 } from "./git-ops.js";
 export { localhostPortOf, localhostPortsIn, settledLocalPorts } from "./local-urls.js";
-export { ProcSampler, killProcess, parseProcPidStat, type ProcSamplerOptions, type ProcStat } from "./proc.js";
+export { CMDLINE_BYTES, killProcess, parseProcPidStat, PROC_CAP, ProcFsSource, ProcSampler, type ProcFsOptions, type ProcSamplerOptions, type ProcScan, type ProcScanInput, type ProcSource, type ProcStat } from "./proc.js";
+export { LocalProcSource, parsePs, parsePsNames, type LocalProcOptions, type PsRow } from "./proc-local.js";
+export { cLocale } from "./host-command.js";
+export { availableFromVmStat, cpuTimesOf, hostSysSource, memorySourceFor, parseDf, type MemorySource } from "./sys-local.js";
+export { KIND_READINGS, readingsFor, type KindReadings, type ReadingsOptions } from "./readings.js";
 export {
   SysSampler,
   procSysSource,
