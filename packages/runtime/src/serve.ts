@@ -280,6 +280,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.resume !== undefined ? { resume: msg.resume } : {}),
                 ...(msg.thread !== undefined ? { thread: msg.thread } : {}),
                 ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}),
+                ...(msg.project !== undefined ? { project: msg.project } : {}),
                 ...(msg.model !== undefined ? { model: msg.model } : {}),
                 ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),

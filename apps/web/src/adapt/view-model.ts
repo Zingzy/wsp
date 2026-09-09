@@ -262,6 +262,8 @@ export interface SidebarThreadSnapshot {
   readonly harness: string;
   /** Who opened the thread, as the protocol's fold answers it. */
   readonly startedBy: SessionOrigin;
+  /** The name of the workspace's project the thread's folder sits in; null outside every project or before a turn named one. */
+  readonly project: string | null;
 }
 
 /** One wsp workspace (a machine) as a sidebar project; its sessions are the threads. */

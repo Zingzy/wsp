@@ -17,7 +17,7 @@ import { agentName } from "@wsp/catalog";
 import { EXPORT_SESSIONS_NOTE, NO_THREADS_NOTE, NOT_LANDED_WORD, exportFromLine, fmtBytes, type ProjectAgentResult, type ProjectExportEvent, type ProjectExportResult, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
-import { useThreadFolder } from "../files/root.js";
+import { useWorkingFolder } from "../files/root.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
@@ -35,7 +35,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
   const api = useStore(s => s.api);
   const sessions = useStore(s => s.sessions[workspace.id]);
   const rows = useMemo(() => agentRows(sessions), [sessions]);
-  const folder = useThreadFolder(workspace.id);
+  const folder = useWorkingFolder(workspace.id);
   const bridge = desktopBridge()?.pickFolder;
   const lastFolder = useLastFolderParent();
   const [source, setSource] = useState(folder ?? "");

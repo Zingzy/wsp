@@ -60,17 +60,17 @@ async function loaded(rt: Runtime, advance: (ms: number) => void, name = "task")
   return ws;
 }
 
-const PROJECT = { name: "proj", dest: DEST, importedAt: "2026-09-06T10:01:00.000Z" };
+const PROJECT = { name: "proj", dest: DEST, importedAt: "2026-09-06T10:01:00.000Z", size: 20 };
 
 describe("a project golden", () => {
   it("an import records the project on the workspace, named by the folder's last segment, and the record outlives the process", async () => {
     const { rt, advance, store, backend } = await setup();
     const ws = await loaded(rt, advance);
-    expect(ws).not.toHaveProperty("project");
-    expect(await rt.workspaces.get(ws.id)).toMatchObject({ project: PROJECT });
-    expect((await rt.workspaces.list())[0]).toMatchObject({ project: PROJECT });
+    expect(ws).not.toHaveProperty("projects");
+    expect(await rt.workspaces.get(ws.id)).toMatchObject({ projects: [PROJECT] });
+    expect((await rt.workspaces.list())[0]).toMatchObject({ projects: [PROJECT] });
     const again = createRuntime({ backend, store, adapters: {}, hostId: HOST });
-    expect(await again.workspaces.get(ws.id)).toMatchObject({ project: PROJECT });
+    expect(await again.workspaces.get(ws.id)).toMatchObject({ projects: [PROJECT] });
   });
 
   it("snapshot takes the disk under the project's name, keeps the record with the golden version, the project and the workspace, and leaves the machine first-life", async () => {
@@ -119,12 +119,12 @@ describe("a project golden", () => {
     const ws = await loaded(rt, advance);
     const golden = await rt.workspaces.snapshot(ws.id);
     const fork = await rt.workspaces.create({ golden: golden.snapshotId, name: "task-a" });
-    expect(fork).toMatchObject({ golden: golden.snapshotId, project: PROJECT });
+    expect(fork).toMatchObject({ golden: golden.snapshotId, projects: [PROJECT] });
     const machine = backend.machines.find(m => m.id === fork.machineId)!;
     expect(machine.spec).toMatchObject({ fromSnapshot: golden.snapshotId, kind: "desktop", cpu: 4, memMb: 8192 });
     expect(backend.puts.filter(p => p.machine === machine.id).some(p => gunzipSync(p.body).toString("utf8").includes("Golden: v12"))).toBe(true);
     const sibling = await rt.workspaces.create({ golden: fork.golden, name: "task-b" });
-    expect(sibling).toMatchObject({ golden: golden.snapshotId, project: PROJECT });
+    expect(sibling).toMatchObject({ golden: golden.snapshotId, projects: [PROJECT] });
     advance(60_000);
     const again = await rt.workspaces.snapshot(fork.id);
     expect(again).toMatchObject({ golden: "snap_golden-v12", version: 12, project: PROJECT, workspaceId: fork.id, workspaceName: "task-a" });

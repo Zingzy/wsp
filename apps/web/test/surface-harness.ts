@@ -26,7 +26,7 @@ export const view: WorkspaceView = {
 /** Where an imported project lands on the machine: its path on this computer, outside the daemon's home. */
 export const PROJECT_DEST = "/Users/dev/wsp";
 /** The same workspace after one import. */
-export const imported: WorkspaceView = { ...view, project: { name: "wsp", dest: PROJECT_DEST, importedAt: "2026-09-06T10:00:00Z" } };
+export const imported: WorkspaceView = { ...view, projects: [{ name: "wsp", dest: PROJECT_DEST, importedAt: "2026-09-06T10:00:00Z" }] };
 
 /** A canned body, or a function of the params returning one; a returned Error rejects the call with it. */
 export type Reply = Record<string, unknown> | ((params: Record<string, unknown>) => Record<string, unknown> | Error);

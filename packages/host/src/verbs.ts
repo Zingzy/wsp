@@ -115,7 +115,12 @@ import {
   type TurnResult,
   type WorkspaceCreateResult,
   type WorkspaceCreatingEvent,
+  WorkspaceProject,
   type WorkspaceSize,
+  noProjectLine,
+  projectCountCell,
+  shellQuote,
+  workspaceProjects,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { hostTokenPath, servingHost } from "./host-lock.js";
@@ -624,13 +629,31 @@ function threadLine(t: ThreadRow): string[] {
   return [t.id, t.workspaceName, t.harness, t.status, t.startedBy, t.cwd !== undefined ? shortenedFront(t.cwd, FOLDER_WIDTH) : "", shortenedEnd(t.title, TITLE_WIDTH)];
 }
 
-/** A workspace row: what its machine is, and its state where the kind has one. The kind's own words for the machine
- * stand in for the provider's id, and a kind wsp does not drive has no state of its own to name, so that cell stays
- * empty; both facts come off the one kind table. The state cell reads the status the sidebar reads, through the one
- * predicate, so a machine the provider has paused or one whose daemon is dark says here what it says there. */
+/** A workspace row: what its machine is, its state where the kind has one, and how many projects it holds. The
+ * kind's own words for the machine stand in for the provider's id, and a kind wsp does not drive has no state of its
+ * own to name, so that cell stays empty; both facts come off the one kind table. The state cell reads the status the
+ * sidebar reads, through the one predicate, so a machine the provider has paused or one whose daemon is dark says
+ * here what it says there. The projects themselves are wsp projects' table. */
 function workspaceLine(w: WorkspaceListing): string[] {
   const kind = kindWords(workspaceKind(w));
-  return [w.name, w.id, kind.machine ?? w.machineId, kind.driven ? workspaceWord(workspaceStateOf(w, w)) : "", w.project !== undefined ? shortenedFront(w.project.dest, FOLDER_WIDTH) : ""];
+  return [w.name, w.id, kind.machine ?? w.machineId, kind.driven ? workspaceWord(workspaceStateOf(w, w)) : "", projectCountCell(workspaceProjects(w))];
+}
+
+/** One project's row: its name, the folder it landed at, its size where the import measured one, and the day it landed. */
+function projectLine(p: WorkspaceProject): string[] {
+  return [p.name, shortenedFront(p.dest, FOLDER_WIDTH), p.size === undefined ? "" : fmtBytes(p.size), p.importedAt.slice(0, 10)];
+}
+
+/** What wsp projects prints for a workspace holding none, with the road that lands one. */
+const noProjectsLine = (workspace: string): string => `${workspace} has no projects; wsp import <folder> --to ${shellQuote(workspace)} lands one`;
+
+/** The project a caller named, checked against the workspace before its machine is woken for it: the host holds the
+ * record, so a name it lacks is refused here in the runtime's own words rather than after a wake nobody wanted. */
+function projectNamed(workspace: WorkspaceView, name: string | undefined): string | undefined {
+  if (name === undefined) return undefined;
+  const projects = workspaceProjects(workspace);
+  if (!projects.some(p => p.name === name)) throw usageRefusal(noProjectLine(name, projects));
+  return name;
 }
 
 /** What the host's provider offers, read from the host rather than from a key: the one place a verb learns what this
@@ -794,14 +817,6 @@ export function absoluteFolder(cwd: string | undefined): string | undefined {
   return cwd === undefined ? undefined : absolutePath("--cwd is a path on the machine", cwd);
 }
 
-/** The folder a new thread works in and a command runs in: the one named, else the workspace's imported project
- * folder, else none, which leaves the host to fill in the folder that workspace's kind names. A thread's folder
- * decides which project state its agent loads; a command's decides what its git or its tests see, so both read the
- * one rule, and neither says which folder it came to: the host answers that. */
-export function workFolder(workspace: WorkspaceView, cwd?: string): string | undefined {
-  return absoluteFolder(cwd) ?? workspace.project?.dest;
-}
-
 /** The model, effort and access mode a start names, as the composer's pickers name them; the runtime checks each
  * against the harness's catalog and refuses with the list. access is the wire's permissionMode. */
 export type Picks = Partial<Record<(typeof PICK_FLAGS)[number], string>>;
@@ -866,16 +881,19 @@ export async function checkedStart(client: HostClient, task: string, harness: st
   }
 }
 
-/** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the named
- * folder or the workspace's own; cwd is the field the app's composer sends. notify is the thread its every turn's end
- * is told to, or NOTIFY_ME. */
-export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: string; title?: string; images?: readonly string[] } = {}): Record<string, unknown> {
-  const cwd = workFolder(workspace, opts.cwd);
+/** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the folder
+ * or the project named; both go to the host as given, since the folder a thread starts in when neither is named is
+ * the runtime's one rule, the same one the app's composer reads. notify is the thread its every turn's end is told
+ * to, or NOTIFY_ME. */
+export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; project?: string; notify?: string; title?: string; images?: readonly string[] } = {}): Record<string, unknown> {
+  const cwd = absoluteFolder(opts.cwd);
+  const project = projectNamed(workspace, opts.project);
   const attachments = imagesFrom(opts.images ?? []);
   return {
     workspaceId: workspace.id,
     prompt,
     ...(cwd !== undefined ? { cwd } : {}),
+    ...(project !== undefined ? { project } : {}),
     ...(opts.harness !== undefined ? { harness: opts.harness } : {}),
     ...(opts.notify !== undefined ? { notify: opts.notify } : {}),
     ...(opts.title !== undefined ? { title: opts.title } : {}),
@@ -1384,7 +1402,8 @@ const PLAN_ONLY_TOOL = "nothing imported; call import again with yes true to tak
 const WorkspaceIn = z.string().describe("the workspace's name, or its id when two share a name");
 const AgentIn = z.string().optional().describe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
 const NotifyIn = z.string().optional().describe("a thread (by id, or a prefix of it) told in one line each time a turn of the new thread ends, as a message into it; or me, for the person's app");
-const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute; absent means the workspace's project folder, else the workspace's own folder, which on a fork is the machine's home folder");
+const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute; it wins over project. Absent means the project named, else the project the last thread on that workspace used, else its only project, else the workspace's own folder, which on a fork is the machine's home folder");
+const ProjectIn = z.string().optional().describe("one of the workspace's projects by name (projects lists them), the folder the thread starts in when cwd names none; refused in one line when the workspace has no project of that name");
 const DetachIn = z.boolean().optional().describe("true answers with the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end; for a turn that runs for minutes or an hour, so this call does not block for it");
 const TitleIn = z.string().optional().describe("the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it");
 const ImagesIn = z.array(z.string()).optional().describe(`paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each. The host reads each file and sends its bytes, so the machine never reaches back for this computer\u2019s files; a message to an agent that reads no image is refused naming that agent.`);
@@ -1451,20 +1470,41 @@ export const VERBS: readonly Verb[] = [
   {
     name: "workspaces",
     usage: "wsp workspaces",
-    about: "every workspace this host runs: what its machine is, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one, and its project folder",
+    about: "every workspace this host runs: what its machine is, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one, and how many projects it holds",
     options: {},
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp workspaces takes no positional arguments");
       const rows = await workspaceStatuses(await ctx.client());
-      ctx.out.emit({ workspaces: rows }, table([["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECT"], ...rows.map(workspaceLine)]).join("\n"));
+      ctx.out.emit({ workspaces: rows }, table([["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS"], ...rows.map(workspaceLine)]).join("\n"));
       return 0;
     },
     tool: tool({
       description:
-        "Every workspace this host runs, as the app lists them: id, name, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one, the golden it forked from and its project folder. A workspace is a machine wsp forked at the provider, or this computer itself, which forks from no golden and runs while the host does; kind says which, and the name is what thread_new and every other verb take.",
+        "Every workspace this host runs, as the app lists them: id, name, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one, the golden it forked from and its projects (projects lists them with their sizes). A workspace is a machine wsp forked at the provider, or this computer itself, which forks from no golden and runs while the host does; kind says which, and the name is what thread_new and every other verb take.",
       input: {},
       output: { workspaces: z.array(WorkspaceListing) },
       call: async (_args, deps) => asJson({ workspaces: await workspaceStatuses(await deps.client()) }),
+    }),
+  },
+  {
+    name: "projects",
+    usage: "wsp projects <workspace>",
+    about: "the projects on the workspace, oldest import first: name, folder on the machine, size and when it landed; the name is what thread new --project takes",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp projects takes one workspace");
+      const workspace = await workspaceOf(await ctx.client(), ref);
+      const projects = workspaceProjects(workspace);
+      ctx.out.emit({ projects }, projects.length === 0 ? noProjectsLine(workspace.name) : table([["PROJECT", "FOLDER", "SIZE", "IMPORTED"], ...projects.map(projectLine)]).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "The projects on the workspace's machine, oldest import first: each one's name, the folder it landed at, its size where the import measured it, and when it landed. The name is what thread_new takes as project. A thread opened with neither project nor cwd starts in the project the last thread on that workspace used, else the workspace's only project, else the workspace's own folder, so name the project rather than its path.",
+      input: { workspace: WorkspaceIn },
+      output: { projects: z.array(WorkspaceProject) },
+      call: async ({ workspace: ref }, deps) => asJson({ projects: workspaceProjects(await workspaceOf(await deps.client(), ref)) }),
     }),
   },
   {
@@ -1896,9 +1936,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "thread new",
-    usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <path>, --detach] "<task>"',
-    about: "opens a thread with the agent, model, effort and access the app offers; follows its first turn, or with --detach prints the id and returns",
-    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" }, title: { type: "string" }, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
+    usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"',
+    about: "opens a thread with the agent, model, effort and access the app offers, in the project named or the one the app's pick would take; follows its first turn, or with --detach prints the id and returns",
+    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, project: { type: "string" }, cwd: { type: "string" }, notify: { type: "string" }, title: { type: "string" }, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       const [task] = ctx.args;
       const within = flag(ctx.flags, "in");
@@ -1909,22 +1949,24 @@ export const VERBS: readonly Verb[] = [
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
       await checkedStart(client, task, harness, picks, found.id);
+      const project = projectNamed(found, flag(ctx.flags, "project"));
       const workspace = await awake(client, found, "send", line => ctx.io.error(line));
-      const opening = openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
+      const opening = openingOf(workspace, task, { harness, ...picks, project, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
       if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening);
       else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true)));
       return 0;
     },
     tool: tool({
-      description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll. ${NOTIFY_WORDS}.`,
-      input: { workspace: WorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, title: TitleIn, images: ImagesIn, detach: DetachIn },
+      description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names, else the project named, else the project the last thread there used, else the workspace's only project, else the workspace's own folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll. ${NOTIFY_WORDS}.`,
+      input: { workspace: WorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, project: ProjectIn, cwd: CwdIn, notify: NotifyIn, title: TitleIn, images: ImagesIn, detach: DetachIn },
       output: TurnOut.shape,
-      call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, images, detach, ...input }, deps) => {
+      call: async ({ workspace: ref, task, agent: harness, project: named, cwd: folder, notify: tell, title, images, detach, ...input }, deps) => {
         const client = await deps.client();
         const found = await workspaceOf(client, ref);
         await checkedStart(client, task, harness, input, found.id);
+        const project = projectNamed(found, named);
         const target = await awake(client, found, "send", QUIET_LINE);
-        const opening = openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell), title, images });
+        const opening = openingOf(target, task, { harness, ...input, project, cwd: folder, notify: await notifyOf(client, tell), title, images });
         if (detach === true) return detachedOut(await startDetached(client, opening, "agent"));
         const out = turnOut(await follow(client, opening, "agent", QUIET_TURN));
         return asText(turnText(out), out);
@@ -2018,14 +2060,14 @@ export const VERBS: readonly Verb[] = [
   {
     name: "exec",
     usage: "wsp exec <workspace> [--cwd <dir>] -- <command...>",
-    about: "runs the command on the machine, each word as given, in --cwd or the project folder",
+    about: "runs the command on the machine, each word as given, in --cwd or the folder a thread would start in",
     options: { cwd: { type: "string" } },
     run: async ctx => {
       const [ref, ...words] = ctx.args;
       if (ref === undefined || words.length === 0) throw usageRefusal("wsp exec takes a workspace, then -- and the command");
       const client = await ctx.client();
       const workspace = await awake(client, await workspaceOf(client, ref), "exec", line => ctx.io.error(line));
-      const folder = workFolder(workspace, flag(ctx.flags, "cwd"));
+      const folder = absoluteFolder(flag(ctx.flags, "cwd"));
       const { exit, ranIn } = await execOn(client, workspace.id, words, folder, e => {
         if (e.type === "exec.output") ctx.out.emit(e, e.text);
       });
@@ -2035,15 +2077,14 @@ export const VERBS: readonly Verb[] = [
       return exit.exitCode ?? EXIT_CODES.provider;
     },
     tool: tool({
-      description: "Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the workspace's project folder, and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the machine going away is an error.",
+      description: "Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the one a thread would start in (the workspace's last used or only project, else its own folder), and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the machine going away is an error.",
       input: { workspace: WorkspaceIn, argv: Argv, cwd: CwdIn },
       output: { exitCode: z.number().int().nullable(), output: z.array(z.string()), cwd: z.string().optional().describe("the folder the command ran in, as the host resolved it; absent only on a machine whose kind names no folder, where its own home is where the command ran") },
       stream: ["output"],
       call: async ({ workspace: ref, argv, cwd: folder }, deps) => {
-        absoluteFolder(folder);
+        const asked = absoluteFolder(folder);
         const client = await deps.client();
         const target = await awake(client, await workspaceOf(client, ref), "exec", QUIET_LINE);
-        const asked = workFolder(target, folder);
         const output: string[] = [];
         const { exit, ranIn } = await execOn(client, target.id, argv, asked, e => {
           if (e.type === "exec.output") output.push(e.text);
