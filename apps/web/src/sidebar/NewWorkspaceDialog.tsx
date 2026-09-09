@@ -5,7 +5,7 @@
 // cancels. The parent keys this component per opening so the initial name
 // resets; a refusal shows on the creation view, not here.
 import { useState } from "react";
-import { fmtRate, fmtSize, offeredSize, sizeWord, type MachineSizeOffer, type WorkspaceSize } from "@wsp/protocol";
+import { fmtRate, fmtSize, forksNoMachines, offeredSize, sizeWord, type MachineSizeOffer, type WorkspaceSize } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import {
   Dialog,
@@ -104,7 +104,7 @@ export function NewWorkspaceDialog({
                 </label>
               ))}
             </RadioGroup>
-            {sizes.length > 0 && (
+            {!forksNoMachines({ sizes }) && (
               <div className="flex flex-col gap-2">
                 <Label id="new-workspace-size">Size</Label>
                 <RadioGroup

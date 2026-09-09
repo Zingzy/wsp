@@ -123,6 +123,13 @@ export const Capabilities = z.object({
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 
+/** Whether this host forks no machine at all: the provider module a keyless host wires offers no size, so the roads
+ * that would fork one answer NO_PROVIDER_LINE instead of sending the person back to an init that seals nothing. The
+ * one place that reading is made, so nothing above the provider module asks whether there is a key. */
+export function forksNoMachines(capabilities: { sizes: readonly MachineSizeOffer[] }): boolean {
+  return capabilities.sizes.length === 0;
+}
+
 // --- views -----------------------------------------------------------------
 
 /** pausing: the runtime is stashing the vault and asking the provider to pause; a send is refused from here on.
