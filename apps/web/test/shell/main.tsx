@@ -43,7 +43,9 @@
 // opens the import dialog on ws_a already reading a folder, as a drop on its
 // tile leaves it; ?panel=machine opens the right panel on the Machine tab of
 // the workspace ?ws names, so its PROJECTS section can be measured with two
-// projects (ws_a under ?projects=1) and with none.
+// projects (ws_a under ?projects=1) and with none;
+// ?init=building puts the init job mid-build so the cloud row's progress line
+// can be measured.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, keptAccess, THIS_COMPUTER, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -391,6 +393,27 @@ function ThemeRule() {
   return null;
 }
 useStore.getState().bind(api);
+// ?init=building puts the init job mid-build on the store, as its events would, so the collapsed cloud row's progress
+// line can be measured and photographed; the fixture's golden is none, so the row is there.
+if (params.get("init") === "building") {
+  useStore.setState({
+    initJob: {
+      id: "init_1",
+      road: "manual",
+      phase: "building",
+      keys: { solari: true, anthropic: false },
+      screens: [],
+      rows: [
+        { id: "stage/creating", kind: "stage", label: "Machine created", state: "done", ms: 14_000 },
+        { id: "stage/deploying-daemon", kind: "stage", label: "Installing the base (tools and daemon)", state: "running", detail: "node v22" },
+        { id: "stage/applying-setup", kind: "stage", label: "Applying your setup", state: "waiting" },
+        { id: "stage/ready", kind: "stage", label: "Waiting for the machine", state: "waiting" },
+      ],
+      progress: { done: 1, total: 4 },
+      log: [],
+    },
+  });
+}
 // The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
 useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
 // ?panel=preview opens the right panel inline with nothing in it, the narrowest the centre column gets at a width.

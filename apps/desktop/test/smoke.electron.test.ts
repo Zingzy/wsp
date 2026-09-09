@@ -405,7 +405,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await row.click();
     const dialog = win.getByRole("dialog");
     await dialog.waitFor();
-    expect(await dialog.textContent()).toContain(CLOUD_SETUP_WORDS.noGolden);
+    expect(await dialog.textContent()).toContain(CLOUD_SETUP_WORDS.choice.headline);
+    expect(await dialog.textContent()).not.toMatch(/wsp init|terminal/i);
     shots.push(await photographWindow(app, win, join(SHOTS, "app-cloud-dialog-dark.png"), "#101010"));
     await win.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached" });

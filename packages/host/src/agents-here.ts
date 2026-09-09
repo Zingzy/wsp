@@ -42,11 +42,12 @@ async function versionOf(host: Host, bin: string): Promise<string | undefined> {
   return /\d+\.\d+(?:\.\d+)?/.exec(firstLine(await host.exec.run(bin, ["--version"])) ?? "")?.[0];
 }
 
-export async function agentsHere(host: Host = nodeHost()): Promise<AgentHere[]> {
+/** `versions` off skips the `--version` runs, for a reader that only needs to know what is here. */
+export async function agentsHere(host: Host = nodeHost(), opts: { versions?: boolean } = {}): Promise<AgentHere[]> {
   const found = new Set((await detectAgents(host)).map(r => r.id));
   return Promise.all(
     CATALOG_AGENTS.map(async a => {
-      const version = await versionOf(host, a.bin);
+      const version = opts.versions === false ? undefined : await versionOf(host, a.bin);
       return { id: a.id, name: a.name, found: found.has(agentRowId(a.id)), configured: await configured(host, a.id), ...(version !== undefined ? { version } : {}) };
     }),
   );

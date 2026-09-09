@@ -25,6 +25,8 @@ import {
   HOST_STOPPING_CLOSE,
   HOST_STOPPING_LINE,
   HostFolderListing,
+  InitSetup,
+  initSetupLines,
   IMAGES_MAX,
   IMAGE_MAX_WORDS,
   IMAGE_TYPE_WORDS,
@@ -1565,6 +1567,12 @@ async function hostFolders(client: HostClient, dir: string | undefined, hidden: 
   return listing;
 }
 
+/** The cloud setup as the host serves it to the app, parsed and not trusted. */
+async function initSetup(client: HostClient): Promise<InitSetup> {
+  const { setup } = await client.request<{ setup: unknown }>("init.get", {});
+  return InitSetup.parse(setup);
+}
+
 /** The level as a table, then the level in words with the folders that are browsable at all beside them, since a path
  * outside those is refused. The app's own browser draws the roots as crumbs instead. */
 function folderLines(listing: HostFolderListing): string[] {
@@ -2345,6 +2353,25 @@ export const VERBS: readonly Verb[] = [
         });
         return asText(`${said}${done}`, { plan, imported });
       },
+    }),
+  },
+  {
+    name: "setup",
+    usage: "wsp setup",
+    about: "the cloud setup on this host as the app's Set up cloud machines modal reads it: which keys are held (never their values), the agents here, what a machine costs, and the init job's phase, rows and progress when one runs or ran",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length !== 0) throw usageRefusal("wsp setup takes no positional arguments");
+      const setup = await initSetup(await ctx.client());
+      ctx.out.emit({ setup }, initSetupLines(setup).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "The cloud setup on this host, as the app's Set up cloud machines modal reads it: which keys the host holds (their presence, never a value), the agents on this computer and whether each carries the wsp tools, what a machine costs, and the init job when one runs or ran: its road, phase, screens, rows and progress. The rows are the image's stages, each sign-in with the page the person opens on this computer and the code it asks for while it waits, then its state, and the first workspace once forked. Read it to tell the person where the build is and which sign-in waits for them; the build is started from the app's sidebar row, and wsp init --recipe from a shell is the same run.",
+      input: {},
+      output: { setup: InitSetup },
+      call: async (_args, deps) => asJson({ setup: await initSetup(await deps.client()) }),
     }),
   },
   {

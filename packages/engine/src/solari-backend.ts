@@ -2,7 +2,7 @@ import { providerRoadRetryLine, type Capabilities } from "@wsp/protocol";
 import { ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
-import type { ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
+import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { previewTokenExpiry } from "./preview.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -65,6 +65,14 @@ const SIZES: readonly { cpu: number; memMb: number }[] = [
   { cpu: 2, memMb: 8192 },
 ];
 
+/** The price table, readable with no key: the Starter clamp doubles as the assumed shape for specs that never named a
+ * size, and the setup screen says what a machine costs before any key is typed. */
+export const SOLARI_PRICING: BackendPricing = {
+  rateUsdPerHour,
+  defaultSize: SIZES[0]!,
+  snapshotStorage: SNAPSHOT_STORAGE,
+};
+
 function fail(e: WspError): never {
   throw Object.assign(new Error(e.message || `${e.kind} (${e.status})`), e);
 }
@@ -84,12 +92,7 @@ export class SolariBackend implements MachineBackend {
     sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: rateUsdPerHour(size) })),
   };
 
-  // The Starter clamp doubles as the assumed shape for specs that never named a size.
-  readonly pricing = {
-    rateUsdPerHour,
-    defaultSize: SIZES[0]!,
-    snapshotStorage: SNAPSHOT_STORAGE,
-  };
+  readonly pricing = SOLARI_PRICING;
 
   private readonly apiKey: string;
   private readonly baseUrl: string;
