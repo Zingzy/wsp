@@ -4,7 +4,8 @@
 // daemon runs here bound to loopback and is reached by the same link
 // (connectDaemon), so every caller that dials a workspace's daemon dials this
 // one unchanged. It serves the ptys, port watch, inbox, process manifest and
-// files a cloud daemon does, rooted at the workspace's folder. The host owns
+// files a cloud daemon does, rooted at the workspace's folder, and it reads
+// this computer's own load and processes rather than a guest's /proc. The host owns
 // it, since the runtime never imports the daemon package (that runs in guests).
 
 import { randomBytes } from "node:crypto";
@@ -26,6 +27,8 @@ const NEVER = Number.MAX_SAFE_INTEGER;
 export interface LocalDaemonOptions {
   /** The folder the daemon's files and git ops resolve inside, and its ptys start in: the workspace's folder. */
   root: string;
+  /** The folder turns write in, whose volume the Machine tab's disk row reads. */
+  workFolder: string;
 }
 
 /** The in-process daemon for this computer's workspace: it starts on loopback with a fresh token and hands out the
@@ -45,7 +48,9 @@ export class LocalDaemon {
     // This daemon's root is the person's home, so rootsPathIn names its roots file; the option's default names the
     // guest's, /root, which on a Linux computer is another user's folder and answers EACCES on every op.
     const rootsPath = rootsPathIn(opts.root);
-    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, root: opts.root, inboxDir, rootsPath, portsSource: portSourceFor(platform()) });
+    // The kind is what picks the modules the Live rows and the Processes tab read: this computer answers for itself,
+    // with os, df and ps, where a guest daemon reads the /proc a Mac does not have.
+    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, kind: "local", root: opts.root, workFolder: opts.workFolder, inboxDir, rootsPath, portsSource: portSourceFor(platform()) });
     return new LocalDaemon(handle, token, opts.root);
   }
 

@@ -322,23 +322,25 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
 
 type Stale = "napping" | "unreachable" | null;
 
-/** cpu, memory and disk from the guest, one sparkline each. A napping workspace, or a running one whose link is
+/** cpu, memory and disk from the machine, one sparkline each. A napping workspace, or a running one whose link is
  * down, keeps the last values dim under the word for it; the daemon says nothing about a machine it is not on. A
  * daemon that refused the stream puts the word unavailable in the slots, and the runtime replaces a daemon too old
- * to serve them without anyone here asking: the machine's row says so while it does. A kind of machine with no road
- * to the stream yet says so in the slots rather than pending forever. */
+ * to serve them without anyone here asking: the machine's row says so while it does. A kind whose machines read no
+ * metrics at all says so in the slots instead, rather than pending forever: no slot waits on a stream that will
+ * never come. */
 function Live({ workspace, kind }: { workspace: WorkspaceView; kind: WorkspaceKindWords }) {
   const live = useWorkspaceLive(workspace.id);
   const last = live.samples[live.samples.length - 1];
   const stale: Stale = workspace.phase === "napping" || workspace.phase === "pausing" ? "napping" : live.reach === "live" ? null : "unreachable";
-  const kindWord = kind.live ? null : NOT_ON_THIS_KIND;
+  const kindWord = kind.metrics ? null : NOT_ON_THIS_KIND;
   const share = (m: { used: number; total: number }): number => (m.total > 0 ? (m.used / m.total) * 100 : 0);
+  const row = { kindWord, stale, unavailable: live.unavailable, samples: live.samples };
   return (
-    <Section label="Live" aside={last !== undefined && stale === null ? `load ${last.load1.toFixed(2)}` : undefined}>
+    <Section label="Live" aside={kindWord === null && last !== undefined && stale === null ? `load ${last.load1.toFixed(2)}` : undefined}>
       <div className="mt-1 divide-y divide-border/40">
-        <LiveRow label="cpu" k="cpu" samples={live.samples} y={s => s.cpu} text={s => percentLabel(s.cpu)} stale={stale} unavailable={live.unavailable} kindWord={kindWord} />
-        <LiveRow label="memory" k="mem" samples={live.samples} y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} stale={stale} unavailable={live.unavailable} kindWord={kindWord} />
-        <LiveRow label="disk" k="disk" samples={live.samples} y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} stale={stale} unavailable={live.unavailable} kindWord={kindWord} />
+        <LiveRow {...row} label="cpu" k="cpu" y={s => s.cpu} text={s => percentLabel(s.cpu)} />
+        <LiveRow {...row} label="memory" k="mem" y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} />
+        <LiveRow {...row} label="disk" k="disk" y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} />
       </div>
     </Section>
   );
@@ -375,7 +377,8 @@ interface LiveRowProps {
   stale: Stale;
   /** The daemon's refusal of the stream; the slot reads unavailable and carries it as the title. */
   unavailable: string | null;
-  /** The kind table's word for a kind with no stream at all, read into the slot as it is; null on a kind with one. */
+  /** The kind table's word for a kind that reads none of this, put in the slot as it is; null on a kind that reads
+   * it, where the slot is a value's or a fault's to fill. */
   kindWord: string | null;
 }
 
@@ -400,8 +403,8 @@ function LiveRow({ label, k, samples, y, text, tier, stale, unavailable, kindWor
     <div
       className="grid h-7 grid-cols-[3.25rem_minmax(0,1fr)_10rem] items-center gap-2 text-xs"
       data-live-row={k}
-      {...(stale !== null ? { "data-stale": stale } : {})}
-      {...(unavailable !== null ? { "data-unavailable": unavailable } : {})}
+      {...(kindWord === null && stale !== null ? { "data-stale": stale } : {})}
+      {...(kindWord === null && unavailable !== null ? { "data-unavailable": unavailable } : {})}
       {...(kindWord !== null ? { "data-kind-word": kindWord } : {})}
     >
       <span className="text-muted-foreground">{label}</span>

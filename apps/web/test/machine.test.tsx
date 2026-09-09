@@ -1097,6 +1097,35 @@ describe("live", () => {
     expect(liveRow("cpu").querySelector("[data-live-line]")).not.toBeNull();
   });
 
+  it("a kind whose machines read no metrics says so in every slot, from the first paint and after any status", async () => {
+    await mount([{ ...view("ws_a", "box"), kind: "ssh" }]);
+    for (const k of ["cpu", "mem", "disk"]) {
+      expect(fact(k)).toBe("not on this kind");
+      expect(liveRow(k).hasAttribute("data-stale")).toBe(false);
+      expect(liveRow(k).className).toMatch(/\bh-7\b/);
+      expect(valueSlot(k).className).toMatch(/muted-foreground/);
+    }
+    expect(screen.queryByText(/^load /)).toBeNull();
+    // Nothing a link does puts the word back to pending: there is no stream to wait for on this kind.
+    feed("ws_a", []);
+    await waitFor(() => expect(fact("cpu")).toBe("not on this kind"));
+    expect(["cpu", "mem", "disk"].map(fact)).not.toContain("pending");
+    // A refusal recorded against such a kind is not this row's business either: the words stand, and the row
+    // carries no reason for a stream nobody asked for.
+    act(() => getLive("ws_a").feedUnavailable("unknown op: sys.watch"));
+    await waitFor(() => expect(fact("cpu")).toBe("not on this kind"));
+    for (const k of ["cpu", "mem", "disk"]) expect(liveRow(k).hasAttribute("data-unavailable")).toBe(false);
+  });
+
+  it("this computer reads its own metrics: pending only until the first sample lands, then the figures", async () => {
+    await mount([{ ...view("ws_a", "mac"), kind: "local" }]);
+    feed("ws_a", []);
+    await waitFor(() => expect(fact("cpu")).toBe("pending"));
+    feed("ws_a", [sysSample(0)]);
+    await waitFor(() => expect(fact("cpu")).toBe("33%"));
+    expect(fact("disk")).toBe("20.0 GB of 100.0 GB");
+  });
+
   it("the disk number takes the tier colour at 50, 65 and 75 percent; cpu and memory stay neutral", async () => {
     await mount([view("ws_a", "api")]);
     const tone = (k: string): string => valueSlot(k).className;
@@ -1223,8 +1252,18 @@ describe("this computer as a workspace", () => {
     expect(fact("folder")).toBe("pending");
   });
 
-  it("the Live rows say the stream is not on this kind, in the slot a figure takes, rather than pending forever", async () => {
+  it("this computer's Live rows read its own machine, where a kind that reads none says so in the slot a figure takes", async () => {
+    // This computer has modules of its own for both readings, so its rows wait for the first sample and then fill.
     await mountLocal();
+    feed(MAC.id, []);
+    await waitFor(() => expect(fact("cpu")).toBe("pending"));
+    feed(MAC.id, [sysSample(0)]);
+    await waitFor(() => expect(fact("cpu")).toBe("33%"));
+    for (const k of ["cpu", "mem", "disk"]) expect(liveRow(k).hasAttribute("data-kind-word")).toBe(false);
+
+    // A machine over ssh reads neither, and says so where the figure would be rather than pending forever.
+    cleanup();
+    await mount([{ ...view("ws_a", "box"), kind: "ssh" }]);
     for (const k of ["cpu", "mem", "disk"]) {
       const el = document.querySelector(`[data-k="${k}"]`)!;
       expect(el.textContent).toBe(NOT_ON_THIS_KIND);

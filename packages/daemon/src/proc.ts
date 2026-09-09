@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Every process on the guest as proc.snapshot events, read straight from
-// /proc: one stat file per pid per tick, cmdline only when a pid is new or
-// exec'd, the uid from the pid directory's owner. One sampler per daemon; the
-// first subscriber starts it and the last one leaving stops it. Inspecting
-// one pid is the only path that touches /proc/net.
+// Every process on the machine as proc.snapshot events. The sampler holds the
+// clock, the subscribers and the last scan; what a machine of one kind is read
+// with is its own module behind ProcSource, registered in readings.ts. The
+// module here is the guest's: straight from /proc, one stat file per pid per
+// tick, cmdline only when a pid is new or exec'd, the uid from the pid
+// directory's owner. One sampler per daemon; the first subscriber starts it
+// and the last one leaving stops it. Inspecting one pid is the only path that
+// touches /proc/net.
 import { EventEmitter } from "node:events";
 import { open, readdir, readFile, readlink, stat } from "node:fs/promises";
 import type { ProcEntry, ProcInspectReply, ProcSignal, ProcSnapshot } from "@wsp/protocol";
@@ -12,8 +15,10 @@ import { OpError } from "./workspace-paths.js";
 
 /** /proc reports times in USER_HZ ticks, 100 a second on every Linux. */
 const USER_HZ = 100;
-const CMDLINE_BYTES = 200;
-const DEFAULT_CAP = 1000;
+/** The first bytes of a command line, whichever module read it: the whole of one can run to ARG_MAX and every row carries it. */
+export const CMDLINE_BYTES = 200;
+/** Rows one snapshot carries at most, whichever module read them; total counts what the machine had. */
+export const PROC_CAP = 1000;
 const AT_PAGESZ = 6;
 /** Concurrent /proc reads per tick; the fs pool is four threads, so more only queues. */
 const BATCH = 32;
@@ -79,15 +84,42 @@ export function parsePasswdUsers(text: string): Map<number, string> {
   return users;
 }
 
-export interface ProcSamplerOptions {
+/** What one scan read: every process the module shows, and how many there are before the cap. */
+export interface ProcScan {
+  total: number;
+  procs: ProcEntry[];
+}
+
+export interface ProcScanInput {
+  /** The clock this scan is stamped with. */
+  at: number;
+  /** Wall milliseconds since the last scan, 0 on the first, where a cpu delta has nothing to run from. */
+  elapsedMs: number;
+  /** The daemon pty a pid's shell belongs to, for the rows that carry one. */
+  pty: (pid: number) => string | undefined;
+}
+
+/** One kind's road to the processes on its machine, and to one of them in depth. A machine wsp forks reads its own
+ * /proc (ProcFsSource); this computer reads its own host with ps. Adding a kind is its module and the row in
+ * readings.ts, nothing here. */
+export interface ProcSource {
+  scan(input: ProcScanInput): Promise<ProcScan>;
+  /** One process in depth. `procs` is the newest scan, which is where the children column comes from. */
+  inspect(pid: number, procs: readonly ProcEntry[]): Promise<ProcInspectReply>;
+}
+
+export interface ProcFsOptions {
   procRoot?: string;
   passwdPath?: string;
+  cap?: number;
+}
+
+export interface ProcSamplerOptions {
   /** The daemon's own pid, named in every snapshot. */
   selfPid?: number;
   /** The daemon's ptys, so their shells carry the pty id. */
   ptys?: () => { id: string; pid: number }[];
   intervalMs?: number;
-  cap?: number;
   now?: () => number;
 }
 
@@ -99,100 +131,33 @@ interface Known {
   user: string;
 }
 
-export class ProcSampler extends EventEmitter {
+/** The guest's own processes, read straight from /proc: the module every machine wsp forks is served by. */
+export class ProcFsSource implements ProcSource {
   private readonly procRoot: string;
   private readonly passwdPath: string;
-  private readonly selfPid: number;
-  private readonly ptys: () => { id: string; pid: number }[];
-  private readonly intervalMs: number;
   private readonly cap: number;
-  private readonly now: () => number;
-  private timer: NodeJS.Timeout | null = null;
-  private subscribers = 0;
-  private inflight: Promise<void> | undefined;
-  /** Per pid across ticks: the ticks the cpu delta runs from, and what is only re-read after an exec. */
+  /** Per pid across scans: the ticks the cpu delta runs from, and what is only re-read after an exec. */
   private known = new Map<number, Known>();
-  private lastAt: number | undefined;
-  private lastProcs: ProcEntry[] = [];
   private btime: number | undefined;
   private pageSize = 4096;
   private users = new Map<number, string>();
 
-  constructor(opts: ProcSamplerOptions = {}) {
-    super();
+  constructor(opts: ProcFsOptions = {}) {
     this.procRoot = opts.procRoot ?? "/proc";
     this.passwdPath = opts.passwdPath ?? "/etc/passwd";
-    this.selfPid = opts.selfPid ?? process.pid;
-    this.ptys = opts.ptys ?? (() => []);
-    this.intervalMs = opts.intervalMs ?? 2000;
-    this.cap = opts.cap ?? DEFAULT_CAP;
-    this.now = opts.now ?? Date.now;
-  }
-
-  get running(): boolean {
-    return this.timer !== null;
-  }
-
-  subscribe(fn: (e: ProcSnapshot) => void): () => void {
-    this.on("proc.snapshot", fn);
-    this.subscribers++;
-    if (this.subscribers === 1) this.start();
-    let detached = false;
-    return () => {
-      if (detached) return;
-      detached = true;
-      this.off("proc.snapshot", fn);
-      this.subscribers--;
-      if (this.subscribers === 0) this.stop();
-    };
-  }
-
-  start(): void {
-    if (this.timer) return;
-    this.known.clear();
-    this.lastAt = undefined;
-    this.timer = setInterval(() => void this.poll(), this.intervalMs);
-    this.timer.unref();
-    void this.poll();
-  }
-
-  stop(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
-    this.known.clear();
-    this.lastAt = undefined;
-  }
-
-  /** The first poll after a start is the cpu baseline and emits nothing; a failed read of one pid drops that pid for the tick. */
-  poll(): Promise<void> {
-    return (this.inflight ??= this.tick()
-      .catch(() => {})
-      .finally(() => {
-        this.inflight = undefined;
-      }));
-  }
-
-  private async tick(): Promise<void> {
-    const scan = await this.scan();
-    const first = this.lastAt === undefined;
-    this.lastAt = scan.at;
-    this.lastProcs = scan.procs;
-    if (first) return;
-    this.emit("proc.snapshot", scan);
+    this.cap = opts.cap ?? PROC_CAP;
   }
 
   /** Reads every pid once; cpu is the tick delta against the last scan over the wall time between them. */
-  private async scan(): Promise<ProcSnapshot> {
+  async scan({ at, elapsedMs, pty }: ProcScanInput): Promise<ProcScan> {
     if (this.btime === undefined) await this.prime();
-    const at = this.now();
-    const elapsedTicks = this.lastAt === undefined ? 0 : ((at - this.lastAt) / 1000) * USER_HZ;
+    const elapsedTicks = (elapsedMs / 1000) * USER_HZ;
     const pids = (await readdir(this.procRoot)).filter(d => /^\d+$/.test(d)).map(Number).sort((a, b) => a - b);
-    const ptyOf = new Map(this.ptys().map(p => [p.pid, p.id] as const));
     const procs: ProcEntry[] = [];
     const seen = new Set<number>();
     for (let i = 0; i < Math.min(pids.length, this.cap); i += BATCH) {
       const batch = pids.slice(i, Math.min(i + BATCH, this.cap));
-      const read = await Promise.all(batch.map(pid => this.readOne(pid, elapsedTicks, ptyOf.get(pid))));
+      const read = await Promise.all(batch.map(pid => this.readOne(pid, elapsedTicks, pty(pid))));
       for (const p of read) {
         if (p === undefined) continue;
         seen.add(p.pid);
@@ -200,7 +165,7 @@ export class ProcSampler extends EventEmitter {
       }
     }
     for (const pid of this.known.keys()) if (!seen.has(pid)) this.known.delete(pid);
-    return { type: "proc.snapshot", at, daemon: this.selfPid, total: pids.length, procs };
+    return { total: pids.length, procs };
   }
 
   private async prime(): Promise<void> {
@@ -266,7 +231,7 @@ export class ProcSampler extends EventEmitter {
     }
   }
 
-  async inspect(pid: number): Promise<ProcInspectReply> {
+  async inspect(pid: number, procs: readonly ProcEntry[]): Promise<ProcInspectReply> {
     const dir = `${this.procRoot}/${pid}`;
     let st: ProcStat;
     try {
@@ -285,9 +250,116 @@ export class ProcSampler extends EventEmitter {
       const text = await readFile(`${this.procRoot}/net/${file}`, "latin1").catch(() => "");
       for (const row of parseProcNetTcp(text)) if (row.inode !== undefined && inodes.has(row.inode)) ports.add(row.port);
     }
-    const procs = this.lastAt === undefined ? (await this.scan()).procs : this.lastProcs;
     const children = procs.filter(p => p.ppid === pid).map(p => p.pid);
     return { pid, cwd, ports: [...ports].sort((a, b) => a - b), threads: st.threads, children };
+  }
+}
+
+export class ProcSampler extends EventEmitter {
+  private readonly source: ProcSource;
+  private readonly selfPid: number;
+  private readonly ptys: () => { id: string; pid: number }[];
+  private readonly intervalMs: number;
+  private readonly now: () => number;
+  private timer: NodeJS.Timeout | null = null;
+  private subscribers = 0;
+  private inflight: Promise<void> | undefined;
+  private lastAt: number | undefined;
+  private lastProcs: ProcEntry[] = [];
+  /** What the last tick said, so a watch that arrives mid-stream inherits it; undefined until one has finished. */
+  private last: { error?: unknown } | undefined;
+
+  constructor(source: ProcSource, opts: ProcSamplerOptions = {}) {
+    super();
+    this.source = source;
+    this.selfPid = opts.selfPid ?? process.pid;
+    this.ptys = opts.ptys ?? (() => []);
+    this.intervalMs = opts.intervalMs ?? 2000;
+    this.now = opts.now ?? Date.now;
+  }
+
+  get running(): boolean {
+    return this.timer !== null;
+  }
+
+  subscribe(fn: (e: ProcSnapshot) => void): () => void {
+    this.on("proc.snapshot", fn);
+    this.subscribers++;
+    if (this.subscribers === 1) this.start();
+    let detached = false;
+    return () => {
+      if (detached) return;
+      detached = true;
+      this.off("proc.snapshot", fn);
+      this.subscribers--;
+      if (this.subscribers === 0) this.stop();
+    };
+  }
+
+  /** One scan before a watch is taken, so a module that cannot read this machine refuses the op instead of leaving
+   * the pane at pending for a stream that never comes. Its reading is thrown away: cpu is a delta, so the first
+   * snapshot still lands one interval after the reply. A sampler already polling scans every interval anyway, so a
+   * second watcher inherits what the last tick said rather than paying for a scan of its own, which would also run
+   * beside that tick and leave the module's per pid state read from two clocks. */
+  async probe(): Promise<void> {
+    const last = this.last;
+    if (this.timer !== null && last !== undefined) {
+      if (last.error !== undefined) throw last.error;
+      return;
+    }
+    await this.scan(0);
+  }
+
+  start(): void {
+    if (this.timer) return;
+    this.lastAt = undefined;
+    this.timer = setInterval(() => void this.poll(), this.intervalMs);
+    this.timer.unref();
+    void this.poll();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.lastAt = undefined;
+    this.last = undefined;
+  }
+
+  /** The first poll after a start is the cpu baseline and emits nothing; a failed read of one pid drops that pid for the tick. */
+  poll(): Promise<void> {
+    return (this.inflight ??= this.tick()
+      .then(
+        () => {
+          this.last = {};
+        },
+        (e: unknown) => {
+          this.last = { error: e };
+        },
+      )
+      .finally(() => {
+        this.inflight = undefined;
+      }));
+  }
+
+  private async tick(): Promise<void> {
+    const at = this.now();
+    const scan = await this.scan(this.lastAt === undefined ? 0 : at - this.lastAt, at);
+    const first = this.lastAt === undefined;
+    this.lastAt = at;
+    this.lastProcs = scan.procs;
+    if (first) return;
+    this.emit("proc.snapshot", { type: "proc.snapshot", at, daemon: this.selfPid, total: scan.total, procs: scan.procs } satisfies ProcSnapshot);
+  }
+
+  private scan(elapsedMs: number, at = this.now()): Promise<ProcScan> {
+    // An exited pty's pid can be reused by a stranger; the map is rebuilt per scan from the shells live then.
+    const ptyOf = new Map(this.ptys().map(p => [p.pid, p.id] as const));
+    return this.source.scan({ at, elapsedMs, pty: pid => ptyOf.get(pid) });
+  }
+
+  async inspect(pid: number): Promise<ProcInspectReply> {
+    const procs = this.lastAt === undefined ? (await this.scan(0)).procs : this.lastProcs;
+    return this.source.inspect(pid, procs);
   }
 }
 

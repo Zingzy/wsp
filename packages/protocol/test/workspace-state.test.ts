@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, computerOffline, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, OVER_SSH, reachShown, type ReachState, relayedRefusal, type SendBlock, sendRefusal, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, type WorkspaceState, workspaceStateOf, workspaceWord } from "../src/index.js";
+import { actionRefusal, computerOffline, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, reachShown, relayedRefusal, sendRefusal, servesReading, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -159,12 +159,24 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and says what it is", () => {
-    expect(kindWords("cloud")).toEqual({ machine: null, driven: true, daemon: true, live: true });
-    // This computer serves a daemon but streams no utilisation to the Machine tab yet, so its Live rows say so.
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, driven: false, daemon: true, live: false });
+    expect(kindWords("cloud")).toEqual({ machine: null, driven: true, daemon: true, metrics: true, processes: true });
+    // This computer serves a daemon and reads both its own load and its own processes off its host.
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true });
     // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it, and
     // it serves no daemon at all, so a row for one says what the machine is rather than that its daemon is missing.
-    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, driven: false, daemon: false, live: false });
+    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, driven: false, daemon: false, metrics: false, processes: false });
+  });
+
+  it("the two readings a pane waits on are the table's to answer, so nothing sits at pending for a stream that never comes", () => {
+    // This computer reads its own load and its own processes, where a machine over ssh reads neither yet: the panes
+    // print the words instead of waiting.
+    expect(servesReading("local", "metrics")).toBe(true);
+    expect(servesReading("local", "processes")).toBe(true);
+    expect(servesReading("cloud", "metrics")).toBe(true);
+    expect(servesReading("cloud", "processes")).toBe(true);
+    expect(servesReading("ssh", "metrics")).toBe(false);
+    expect(servesReading("ssh", "processes")).toBe(false);
+    expect(NOT_ON_THIS_KIND).toBe("not on this kind");
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {

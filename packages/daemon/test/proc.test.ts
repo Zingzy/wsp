@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProcSnapshot } from "@wsp/protocol";
 import { OpError } from "../src/workspace-paths.js";
-import { killProcess, parseAuxvPageSize, parseBtime, parsePasswdUsers, parseProcPidStat, ProcSampler } from "../src/proc.js";
+import { killProcess, parseAuxvPageSize, parseBtime, parsePasswdUsers, parseProcPidStat, ProcFsSource, ProcSampler } from "../src/proc.js";
 import { auxv, BTIME, fakePasswd, fakeProcTree, writeProc, type FakeProc } from "./fake-proc.js";
 import { rejectedEvents } from "./wire-events.js";
 
@@ -21,14 +21,11 @@ function sampler(procs: FakeProc[], opts: { ptys?: { id: string; pid: number }[]
   const root = fakeProcTree(procs, opts.pageSize);
   roots.push(root);
   const clock = opts.clock ?? { now: 1_000_000 };
-  const s = new ProcSampler({
-    procRoot: root,
-    passwdPath: fakePasswd(),
+  const s = new ProcSampler(new ProcFsSource({ procRoot: root, passwdPath: fakePasswd(), ...(opts.cap !== undefined ? { cap: opts.cap } : {}) }), {
     selfPid: 4242,
     ptys: () => opts.ptys ?? [],
     now: () => clock.now,
     intervalMs: 60_000,
-    ...(opts.cap !== undefined ? { cap: opts.cap } : {}),
   });
   const got: ProcSnapshot[] = [];
   s.on("proc.snapshot", (e: ProcSnapshot) => {
@@ -57,6 +54,38 @@ describe("proc parsing", () => {
 });
 
 describe("ProcSampler", () => {
+  it("a probe scans once for the first watcher and rides the running stream for the next, refusal and all", async () => {
+    let scans = 0;
+    let broken = false;
+    const source = {
+      scan: async () => {
+        scans++;
+        if (broken) throw new Error("this machine cannot be read");
+        return { total: 0, procs: [] };
+      },
+      inspect: async () => ({ pid: 1, cwd: null, ports: [], children: [] }),
+    };
+    const s = new ProcSampler(source, { intervalMs: 60_000 });
+    await s.probe();
+    expect(scans).toBe(1);
+    const off = s.subscribe(() => {});
+    await new Promise(r => setTimeout(r, 0));
+    expect(scans).toBe(2);
+    // Already polling, so the next watcher inherits that tick rather than scanning beside it: both modules keep per
+    // pid state that a scan moves, and two scans in one window read the next delta low.
+    await s.probe();
+    expect(scans).toBe(2);
+    broken = true;
+    await s.poll();
+    await expect(s.probe()).rejects.toThrow("cannot be read");
+    expect(scans).toBe(3);
+    off();
+    broken = false;
+    await s.probe();
+    expect(scans).toBe(4);
+  });
+
+
   it("emits nothing on the first poll and a snapshot of every process with cpu over the interval on the next", async () => {
     const { s, got, root, clock } = sampler(
       [
