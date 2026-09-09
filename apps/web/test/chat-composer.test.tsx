@@ -397,7 +397,7 @@ describe("a new thread while another thread of the workspace works", () => {
     await typeInto(editor, "second thread");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "second thread", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "second thread" });
     expect(screen.getByText("second thread")).toBeDefined();
     // The first thread runs on: its next words are its own and never reach the new thread.
     emit({ type: "session.delta", ...a, kind: "text", text: " Still on it." });

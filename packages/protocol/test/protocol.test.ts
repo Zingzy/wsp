@@ -1116,15 +1116,6 @@ describe("the project export", () => {
 });
 
 describe("project goldens", () => {
-  it("a workspace view may carry the project it holds: the folder's name, where it landed and when the bundle landed", () => {
-    const project = { name: "proj", dest: "/root/work/proj", importedAt: "2026-09-06T10:00:00.000Z" };
-    const view = { id: "ws_1", name: "task", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-06T09:00:00.000Z", project };
-    expect(WorkspaceView.parse(view)).toEqual(view);
-    const { project: _p, ...bare } = view;
-    expect(WorkspaceView.parse(bare)).toEqual(bare);
-    expect(WorkspaceView.safeParse({ ...view, project: { name: "proj" } }).success).toBe(false);
-  });
-
   it("a project golden names its snapshot, the project, the golden version it stands on and the workspace it was taken from", () => {
     const golden = {
       snapshotId: "snap_project-proj",

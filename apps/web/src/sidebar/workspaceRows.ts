@@ -146,9 +146,10 @@ export function openerWord(startedBy: SessionOrigin): string {
   return OPENER_WORD[startedBy];
 }
 
-/** The agent inside the thread and who opened it, as the row's hover text reads it. */
-export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness" | "startedBy">): string {
-  return `${agentName(thread.harness)} · ${openerWord(thread.startedBy)}`;
+/** The agent inside the thread, the project it works in where it sits in one, and who opened it, as the row's hover
+ * text reads it and in the order the row draws them. */
+export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness" | "startedBy" | "project">): string {
+  return [agentName(thread.harness), ...(thread.project !== null ? [thread.project] : []), openerWord(thread.startedBy)].join(" · ");
 }
 
 /** The pill keys on the session's status and wears the adapter's word: a running thread and one that did not settle carry one, the resting states none. */

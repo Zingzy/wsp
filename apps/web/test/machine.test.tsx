@@ -684,7 +684,7 @@ describe("a workspace behind the golden's head", () => {
 
     cleanup();
     // The runtime looks at the image it forked from, not at what was imported into it afterwards; so does this.
-    await mount([{ ...onV11(), project: PROJECT }], CAPS, twoVersions);
+    await mount([{ ...onV11(), projects: [PROJECT] }], CAPS, twoVersions);
     await waitFor(() => expect(marks("v11")).toEqual(["this fork", "volatile"]));
     expect(screen.getByRole("button", { name: "update api to v12" })).toHaveProperty("disabled", false);
   });
@@ -733,7 +733,7 @@ describe("project goldens in the lineage", () => {
   const rowsUnder = (version: string): string[] => [...document.querySelectorAll(`[data-k='${version}']`)[0]!.closest("li")!.querySelectorAll("[data-k^='pg-']")].map(el => el.getAttribute("data-k")!);
 
   it("lists each project golden under the version it stands on, newest first, marks the one this workspace forks from, and a fork creates a workspace from its snapshot", async () => {
-    const api = await mount([{ ...view("ws_a", "api"), golden: "snap_p2", project: PROJECT }], CAPS, twoVersions, undefined, goldens);
+    const api = await mount([{ ...view("ws_a", "api"), golden: "snap_p2", projects: [PROJECT] }], CAPS, twoVersions, undefined, goldens);
     await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_p2", "pg-snap_p1"]));
     expect(rowsUnder("v11")).toEqual(["pg-snap_p3"]);
     expect(marks("v12")).toEqual(["head", "volatile"]);
@@ -754,7 +754,7 @@ describe("project goldens in the lineage", () => {
   });
 
   it("snapshot sits on the live disk row once a project is loaded: it calls the api, lists the new golden and says what it is for; a refusal shows the runtime's sentence", async () => {
-    const api = await mount([{ ...onV12(), project: PROJECT }], CAPS, twoVersions);
+    const api = await mount([{ ...onV12(), projects: [PROJECT] }], CAPS, twoVersions);
     await waitFor(() => expect(marks("v12")).toEqual(["head", "this fork", "volatile"]));
     expect(api.listProjectGoldens).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "snapshot api as a project golden" }));

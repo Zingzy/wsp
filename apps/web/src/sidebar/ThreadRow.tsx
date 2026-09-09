@@ -2,7 +2,8 @@
 // One thread's row under its workspace, in the workspace row's grammar. Every
 // row in the list is a thread, so no glyph leads it: the title takes the line
 // from the row's inset up to a fixed mono time column at the right edge; under
-// it the status pill, the agent's mark and who opened the thread. Renaming turns
+// it the status pill, the agent's mark, the project the thread works in where
+// it sits in one of the workspace's, and who opened the thread. Renaming turns
 // that title into the sidebar's one name box in the same slot, opened from
 // the menu or by a double-click on the title, so the row keeps its height and
 // its grammar while a name is typed.
@@ -84,6 +85,13 @@ export function ThreadRow({
             <Tooltip>
               <TooltipTrigger render={<span data-thread-provenance aria-label={provenanceLabel(thread)} className="inline-flex min-w-0 items-center gap-1 text-sidebar-foreground" />}>
                 <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-[13px]" />
+                {thread.project !== null ? (
+                  <>
+                    <span aria-hidden className="text-[var(--top-row-meta)]">·</span>
+                    <span data-thread-project className="truncate text-[var(--top-row-meta)]">{thread.project}</span>
+                    <span aria-hidden className="text-[var(--top-row-meta)]">·</span>
+                  </>
+                ) : null}
                 <span className="truncate text-[var(--top-row-meta)]">{openerWord(thread.startedBy)}</span>
               </TooltipTrigger>
               <TooltipPopup side="top">{provenanceLabel(thread)}</TooltipPopup>
