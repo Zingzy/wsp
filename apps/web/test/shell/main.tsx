@@ -424,6 +424,27 @@ if (params.get("init") === "building") {
     },
   });
 }
+// ?init=waiting puts the job at a sign-in whose page waits for the person, two of four stages over, so the button's
+// paused spinner and its words can be measured.
+if (params.get("init") === "waiting") {
+  useStore.setState({
+    initJob: {
+      id: "init_1",
+      road: "manual",
+      phase: "signing-in",
+      keys: { solari: true, anthropic: false },
+      screens: [],
+      rows: [
+        { id: "stage/creating", kind: "stage", label: "Machine created", state: "done", ms: 14_000 },
+        { id: "stage/deploying-daemon", kind: "stage", label: "Installing the base (tools and daemon)", state: "done", ms: 40_000 },
+        { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: "open", page: "https://github.com/login/device", code: "8F4A-C21B" },
+        { id: "stage/ready", kind: "stage", label: "Waiting for the machine", state: "waiting" },
+      ],
+      progress: { done: 2, total: 4 },
+      log: [],
+    },
+  });
+}
 // The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
 useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
 // ?panel=preview opens the right panel inline with nothing in it, the narrowest the centre column gets at a width.

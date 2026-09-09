@@ -573,7 +573,7 @@ export function WorkspaceSidebar() {
           </SidebarGroup>
           <ForwardsList />
         </SidebarContent>
-        <SidebarChromeFooter items={[]}>
+        <SidebarChromeFooter>
           {toast ? (
             <div
               role="status"

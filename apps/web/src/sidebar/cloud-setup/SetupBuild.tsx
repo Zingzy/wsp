@@ -6,7 +6,7 @@
 // the sidebar's row carries the same line.
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, LOGIN_STATE_WORDS, initJobBuilding, initJobOver, initProgressLine, initRowOver, type InitJob, type InitRow } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, LOGIN_STATE_WORDS, initJobBuilding, initJobOver, initProgressLine, initProgressState, initRowOver, type InitJob, type InitRow } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { CARD, MICRO_LABEL, ROW, ROW_LINE, STATE_WORD, SetupFrame } from "./grammar.js";
@@ -20,7 +20,7 @@ export function SetupBuild({ job, onHide, onCancel, onOpenWorkspace, onAgain, re
   const rest = job.rows.filter(r => r.kind === "workspace" || r.kind === "project");
   const over = initJobOver(job.phase);
   const headline = job.phase === "done" ? words.done : over ? words.failed : words.headline;
-  const fraction = job.progress.total > 0 ? job.progress.done / job.progress.total : 0;
+  const { fraction } = initProgressState(job);
   return (
     <SetupFrame
       k="build"

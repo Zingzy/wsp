@@ -993,6 +993,9 @@ export const LOGIN_STATE_WORDS: Record<LoginState, string> = {
   skipped: "skipped",
 };
 
+/** The word for a job that waits on the person rather than the machine: the answers, or a sign-in's page. */
+const WAITING_FOR_YOU = "waiting for you";
+
 /** The job's phase as the muted mono word a row or a footer prints. */
 export function initPhaseWord(phase: InitPhase): string {
   switch (phase) {
@@ -1001,7 +1004,7 @@ export function initPhaseWord(phase: InitPhase): string {
     case "reading":
       return "reading this computer";
     case "answering":
-      return "waiting for you";
+      return WAITING_FOR_YOU;
     case "building":
       return "building";
     case "signing-in":
@@ -1064,6 +1067,20 @@ export function initProgressLine(job: Pick<InitJob, "phase" | "rows" | "progress
   if (open !== undefined) return `sign in to ${open.label}`;
   const word = initPhaseWord(job.phase);
   return initJobBuilding(job.phase) && job.progress.total > 0 ? `${word} · ${job.progress.done}/${job.progress.total}` : word;
+}
+
+/** The facts the sidebar's button and the build screen's bar draw: the rows over as a fraction of the total (0 before
+ * the build has rows), and whether the job waits on the person (the answers, or a sign-in's open page) rather than on
+ * the machine. */
+export function initProgressState(job: Pick<InitJob, "phase" | "rows" | "progress">): { fraction: number; waitingOnYou: boolean } {
+  const open = job.rows.some(r => r.kind === "sign-in" && r.state === SIGN_IN_OPEN_STATE);
+  return { fraction: job.progress.total > 0 ? job.progress.done / job.progress.total : 0, waitingOnYou: open || job.phase === "answering" };
+}
+
+/** The sidebar button's words for a running job: `waiting for you` while the person is waited on, the progress line
+ * otherwise. */
+export function initButtonLine(job: Pick<InitJob, "phase" | "rows" | "progress">): string {
+  return initProgressState(job).waitingOnYou ? WAITING_FOR_YOU : initProgressLine(job);
 }
 
 /** What the machine the build boots costs, said once on the key screen from the backend's own rate. */
