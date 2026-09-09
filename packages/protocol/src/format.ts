@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceTint } from "./index.js";
+import type { GoldenMissingTool, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceTint } from "./index.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
 const KIB = 1024;
@@ -885,13 +885,182 @@ export const NOTHING_TO_SERVE_LINE = "nothing to serve yet; wsp new --local make
  * The provider module a keyless host wires says it, and so does the command line before it asks for anything. */
 export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; set SOLARI_API_KEY and run wsp init again to seal a golden";
 
-/** The quiet row at the sidebar's bottom while no golden is sealed, and what it opens: the way to cloud machines.
- * For now that is wsp init in a terminal, said in the one line the window before a golden used to be. */
+/** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
+export const SOLARI_CONSOLE = "console.getsolari.com";
+
+/** The quiet row at the sidebar's bottom while no golden is sealed, and every word of the modal it opens: the init
+ * job drawn in the app. Micro-labels are the caps mono words over a screen, headlines the one sentence under them,
+ * keycaps the one primary button each screen has. Nothing here asks the person to run a command. */
 export const CLOUD_SETUP_WORDS = {
   row: "Set up cloud machines",
   title: "Cloud machines",
-  noGolden: "No golden image yet. Run wsp init in a terminal; it opens this app when the machine is ready.",
+  choice: {
+    label: "CLOUD MACHINES",
+    headline: "Set up cloud machines",
+    manual: "Choose what goes on the image",
+    agent: "Let an agent choose from your usage",
+    agentWith: "with",
+    keycap: "Continue",
+  },
+  keys: {
+    label: "PROVIDER KEY",
+    headline: "Your Solari key",
+    solari: "Solari API key",
+    anthropic: "Anthropic API key",
+    optional: "optional",
+    where: `Get one at ${SOLARI_CONSOLE}`,
+    saved: "saved",
+    unset: "not set",
+    keycap: "Save",
+  },
+  screen: {
+    keycap: "Continue",
+    back: "Back",
+    build: "Build",
+  },
+  build: {
+    label: "BUILD",
+    headline: "Building your image",
+    image: "IMAGE",
+    signIns: "SIGN-INS",
+    computer: "THIS COMPUTER",
+    workspace: "WORKSPACE",
+    open: "Open",
+    hide: "Hide",
+    cancel: "Cancel",
+    done: "Cloud machines are ready",
+    failed: "The build stopped",
+    keycap: "Open workspace",
+    again: "Start over",
+  },
+  agent: {
+    label: "AGENT",
+    headline: "Reading what your agents used",
+    title: "Set up cloud machines",
+  },
+  reading: {
+    label: "THIS COMPUTER",
+    headline: "Reading this computer",
+  },
 } as const;
+
+/** The state of a sign-in as a word, the one spelling the terminal's rows and the modal's rows print. */
+export const LOGIN_STATE_WORDS: Record<LoginState, string> = {
+  "signed-in": "signed in",
+  "not-signed-in": "not signed in",
+  copied: "copied",
+  "not-verified": "not verified",
+  skipped: "skipped",
+};
+
+/** The job's phase as the muted mono word a row or a footer prints. */
+export function initPhaseWord(phase: InitPhase): string {
+  switch (phase) {
+    case "agent":
+      return "agent writing the recipe";
+    case "reading":
+      return "reading this computer";
+    case "answering":
+      return "waiting for you";
+    case "building":
+      return "building";
+    case "signing-in":
+      return "signing in";
+    case "sealing":
+      return "sealing";
+    case "finishing":
+      return "finishing";
+    case "done":
+      return "done";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    default: {
+      const _exhaustive: never = phase;
+      return _exhaustive;
+    }
+  }
+}
+
+/** The words a build row's state is written in, one table for the host that sets them and the client that reads them;
+ * a sign-in row's other words are LOGIN_STATE_WORDS. */
+export const INIT_ROW_STATES = {
+  waiting: "waiting",
+  running: "running",
+  done: "done",
+  failed: "failed",
+  forking: "forking",
+  forked: "forked",
+  importing: "importing",
+  imported: "imported",
+  /** A sign-in whose page waits for the person. */
+  open: "open",
+  /** An agent on this computer whose config carries the wsp tools. */
+  mcpAdded: "MCP added",
+} as const;
+
+/** The state word of a sign-in row while its page waits for the person. */
+export const SIGN_IN_OPEN_STATE = INIT_ROW_STATES.open;
+
+/** The state word of an agent on this computer whose config carries the wsp tools. */
+export const MCP_ADDED_WORD = INIT_ROW_STATES.mcpAdded;
+
+const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.mcpAdded, ...Object.values(LOGIN_STATE_WORDS)]);
+
+/** Whether a row's state word is one it ends on: what the progress count and a section's count read. */
+export const initRowOver = (state: string): boolean => ROW_OVER.has(state);
+
+/** Whether the job's phase is one it ends on. */
+export const initJobOver = (phase: InitPhase): boolean => phase === "done" || phase === "failed" || phase === "cancelled";
+
+/** Whether the job is on the build: from the machine booting to the first workspace, the stretch the count is over. */
+export const initJobBuilding = (phase: InitPhase): boolean => phase === "building" || phase === "signing-in" || phase === "sealing" || phase === "finishing";
+
+/** The one line the collapsed sidebar row shows for a running job: the sign-in waited on while one is open, the phase
+ * with the count of rows over while it builds, the phase word alone otherwise. */
+export function initProgressLine(job: Pick<InitJob, "phase" | "rows" | "progress">): string {
+  const open = job.rows.find(r => r.kind === "sign-in" && r.state === SIGN_IN_OPEN_STATE);
+  if (open !== undefined) return `sign in to ${open.label}`;
+  const word = initPhaseWord(job.phase);
+  return initJobBuilding(job.phase) && job.progress.total > 0 ? `${word} · ${job.progress.done}/${job.progress.total}` : word;
+}
+
+/** What the machine the build boots costs, said once on the key screen from the backend's own rate. */
+export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): string {
+  return `A ${fmtSize(size)} machine costs about ${fmtRate(rateUsdPerHour)} while it runs; it naps when idle.`;
+}
+
+/** The cloud setup as wsp setup prints it: which keys are held, the agents here with their tools, the price, and the
+ * job's phase with each of its rows when one runs or ran. */
+export function initSetupLines(setup: InitSetup): string[] {
+  const held = (yes: boolean): string => (yes ? CLOUD_SETUP_WORDS.keys.saved : CLOUD_SETUP_WORDS.keys.unset);
+  const agents = setup.agents.length === 0 ? "none found" : setup.agents.map(a => (a.configured ? `${a.name} (${MCP_ADDED_WORD})` : a.name)).join(", ");
+  const lines = [`Solari key: ${held(setup.keys.solari)}; Anthropic key: ${held(setup.keys.anthropic)}`, `Agents here: ${agents}`];
+  if (setup.pricing !== null) lines.push(initCostLine(setup.pricing.size, setup.pricing.rateUsdPerHour));
+  const job = setup.job;
+  if (job === null) {
+    lines.push("No setup is running; the app's sidebar row starts one.");
+    return lines;
+  }
+  lines.push(`Setup on the ${job.road} road: ${initProgressLine(job)}${job.error !== undefined ? ` (${job.error})` : ""}`);
+  for (const r of job.rows) lines.push(`  ${r.label}: ${r.state}${r.page !== undefined ? ` ${r.page}` : ""}${r.code !== undefined ? ` code ${r.code}` : ""}${r.detail !== undefined ? ` (${r.detail})` : ""}`);
+  if (job.workspace !== undefined) lines.push(`Workspace ${job.workspace.name} (${job.workspace.id}) is up.`);
+  return lines;
+}
+
+/** The first message of the thread the agent road opens on this computer: read this computer with recipe_scan, write
+ * the recipe with recipe to the path the job reads it from, and ask the person nothing, since they review every row
+ * on the screens that follow. */
+export function initAgentPrompt(recipePath: string): string {
+  return [
+    "Write the recipe for this person's wsp machine image from what their agents actually used on this computer.",
+    "Call recipe_scan first and read every row's recommended value and its reason.",
+    `Then call recipe once, with tick set to used, set for every row whose reason says it is worth changing, signin for every sign-in row at its recommended choice, and out set to ${recipePath}.`,
+    "Ask them nothing and run nothing else: they review every row in the app once the file is written.",
+    "Reply with one line saying the recipe is written.",
+  ].join(" ");
+}
 
 /** What a local workspace's machine is, in every sentence and every row that names it: the refusals below, the
  * sidebar row's second line and the Machine tab's lineage all read this one phrase. */

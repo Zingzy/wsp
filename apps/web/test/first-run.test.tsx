@@ -84,13 +84,14 @@ describe("the window before a golden exists", () => {
     expect(screen.queryByText(/No golden image yet/)).toBeNull();
   });
 
-  it("the row opens the init instructions in a dialog, and closing it leaves the shell as it was", async () => {
+  it("the row opens the cloud setup modal on its first choice, never on a command to run, and closing it leaves the shell as it was", async () => {
     await mount({ workspaces: [local] });
     const row = await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
     fireEvent.click(row);
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain(CLOUD_SETUP_WORDS.title);
-    expect(dialog.textContent).toContain(CLOUD_SETUP_WORDS.noGolden);
+    expect(dialog.textContent).toContain(CLOUD_SETUP_WORDS.choice.headline);
+    expect(dialog.textContent).not.toMatch(/wsp init|terminal/i);
     expect(dialog.textContent).not.toMatch(/sk-ant|slr_live/);
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, recordRestoredLine, type BootPayload, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
@@ -44,6 +44,8 @@ export interface HostOptions {
   recipePath?: string;
   /** The state file this host serves, named in the boot object so the page scopes its memory to it. */
   statePath?: string;
+  /** The init job on this computer, served to the app as the init.* ops and the init.job events; absent, they are refused. */
+  init?: InitDoor;
 }
 
 /** The roads to a workspace and its project that the app's routes and wsp init share, so a workspace made without a
@@ -255,7 +257,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   });
   let rtServer: RuntimeServer;
   try {
-    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? DEFAULT_WS_PORT, host: LOOPBACK, authToken, forwards: relay, projects: bundlerFor, landing: projectLander(homes), folders: hostFolders(() => rt.workspaces.list()), terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) } });
+    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? DEFAULT_WS_PORT, host: LOOPBACK, authToken, forwards: relay, projects: bundlerFor, landing: projectLander(homes), folders: hostFolders(() => rt.workspaces.list()), terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) }, ...(opts.init !== undefined ? { init: opts.init } : {}) });
   } catch (e) {
     await relay.close();
     throw e;

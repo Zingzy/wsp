@@ -122,6 +122,8 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
       runtime,
       // When a sign-in page opens without a click, it goes to the default browser, not into this window.
       openUrl: url => shell.openExternal(url).then(() => true, () => false),
+      // The wsp tools the cloud setup writes into an agent's config run the shim, as the first launch's install does.
+      running: { ...runningWsp(), shim: shimPath(wspHome()) },
     });
   } else {
     session = located.session;

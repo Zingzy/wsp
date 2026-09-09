@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
-import { HOST_STOPPING_CLOSE, type AdapterEvent, type ForwardEvent, type PortForward, type TurnResult } from "@wsp/protocol";
+import { HOST_STOPPING_CLOSE, type AdapterEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
-import { createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
+import { createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor } from "../src/runtime.js";
 import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient } from "./ws-client.js";
@@ -798,5 +798,89 @@ describe("serveRuntime workspaces.exec", () => {
       { type: "exec.exit", execId, exitCode: null, error: "machine paused while the agent was working" },
     ]);
     c.close();
+  });
+});
+
+describe("serveRuntime init door (the host's init job, read and driven from the app)", () => {
+  const JOB: InitJob = { id: "init_1", road: "manual", phase: "answering", keys: { solari: true, anthropic: false }, screens: [], rows: [], progress: { done: 0, total: 0 }, log: [] };
+  const SETUP = { keys: { solari: true, anthropic: false }, agents: [{ id: "claude", name: "Claude Code", configured: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
+  function fakeDoor() {
+    const calls: unknown[] = [];
+    const listeners = new Set<(e: { type: "init.job"; job: typeof JOB }) => void>();
+    const door: InitDoor = {
+      get: async () => SETUP,
+      keys: async k => {
+        calls.push(["keys", k]);
+        return { ...SETUP, keys: { solari: true, anthropic: k.anthropic !== undefined } };
+      },
+      start: async o => {
+        calls.push(["start", o]);
+        return { ...JOB, road: o.road, phase: "reading" as const };
+      },
+      answer: async o => {
+        calls.push(["answer", o]);
+        return JOB;
+      },
+      build: async o => {
+        calls.push(["build", o]);
+        return { ...JOB, phase: "building" as const };
+      },
+      cancel: async () => {
+        calls.push(["cancel"]);
+        return { ...JOB, phase: "cancelled" as const };
+      },
+      on: fn => {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+    };
+    return { door, calls, emit: (job: typeof JOB) => listeners.forEach(fn => fn({ type: "init.job", job })), listeners };
+  }
+
+  it("every init op reaches the door with its fields and answers with its view; a key never comes back", async () => {
+    const { door, calls } = fakeDoor();
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret", init: door });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    expect((await c.request("init.get"))["setup"]).toEqual(SETUP);
+    const saved = await c.request("init.keys", { solari: "slr_live_fake", anthropic: "sk-ant-x" });
+    expect(saved["setup"]).toEqual({ ...SETUP, keys: { solari: true, anthropic: true } });
+    expect(JSON.stringify(saved)).not.toContain("slr_live_fake");
+    expect((await c.request("init.start", { road: "agent", harness: "claude" }))["job"]).toMatchObject({ road: "agent", phase: "reading" });
+    expect((await c.request("init.answer", { screen: "tools", ticks: ["gh"], answers: { "logins/gh": "machine" } }))["job"]).toEqual(JOB);
+    expect((await c.request("init.build", { firstWorkspace: "first" }))["job"]).toMatchObject({ phase: "building" });
+    expect((await c.request("init.cancel"))["job"]).toMatchObject({ phase: "cancelled" });
+    expect(calls).toEqual([
+      ["keys", { solari: "slr_live_fake", anthropic: "sk-ant-x" }],
+      ["start", { road: "agent", harness: "claude" }],
+      ["answer", { screen: "tools", ticks: ["gh"], answers: { "logins/gh": "machine" } }],
+      ["build", { firstWorkspace: "first" }],
+      ["cancel"],
+    ]);
+    c.close();
+  });
+
+  it("without a door every init op is refused in one line, and the events channel still serves", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const refused = await c.request("init.get");
+    expect(refused.ok).toBe(false);
+    expect(refused["error"]).toBe("this runtime has no init job; the host that serves the app wires one");
+    expect((await c.request("events.subscribe")).ok).toBe(true);
+    c.close();
+  });
+
+  it("init.job events reach subscribed sockets and the subscription dies with the socket", async () => {
+    const { door, emit, listeners } = fakeDoor();
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret", init: door });
+    const sub = await WsClient.connect(srv.port, { token: "secret" });
+    const quiet = await WsClient.connect(srv.port, { token: "secret" });
+    await sub.request("events.subscribe");
+    emit({ ...JOB, phase: "building" });
+    await until(() => sub.events.length === 1);
+    expect(sub.events).toEqual([{ type: "init.job", job: { ...JOB, phase: "building" } }]);
+    expect(quiet.events).toEqual([]);
+    sub.close();
+    await until(() => listeners.size === 0);
+    quiet.close();
   });
 });

@@ -367,9 +367,11 @@ export interface Picked {
   wspTools: Set<string>;
 }
 
-type Screen = "agents" | "tools" | "also" | "logins" | "wsp";
+export type Screen = "agents" | "tools" | "also" | "logins" | "wsp";
 /** Where each screen sits in the six a run has; the build is the sixth. */
-const SCREEN_AT: Record<Screen, number> = { agents: 1, tools: 2, also: 3, logins: 4, wsp: 5 };
+export const SCREEN_AT: Record<Screen, number> = { agents: 1, tools: 2, also: 3, logins: 4, wsp: 5 };
+/** The counter every screen shows after its title ("2/6"). */
+export const screenCounter = (screen: Screen): string => `${SCREEN_AT[screen]}/${SCREENS}`;
 
 /** The recipe with the answered folder's needs ticked and a card naming them; an empty answer leaves it as it was,
  * and a folder that is not there is said so rather than read as a project that needs nothing. */
@@ -403,7 +405,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
   let i = 0;
   while (i < screens.length) {
     const screen = screens[i]!;
-    const counter = `${SCREEN_AT[screen]}/${SCREENS}`;
+    const counter = screenCounter(screen);
     const step = (r: RungSelectResult): void => {
       i += r.kind === "next" ? 1 : -1;
     };
