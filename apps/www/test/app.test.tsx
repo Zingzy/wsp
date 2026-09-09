@@ -36,7 +36,8 @@ describe("the landing page", () => {
   it("prints what the host costs beside the line about keys, as one measured fact", () => {
     render(<App />);
     const [line] = screen.getAllByText(/never touch your RAM/);
-    expect(line?.textContent).toContain("40 MB");
+    // The budget itself has one home, packages/host/test/memory.test.ts, which is what holds the page to the number.
+    expect(line?.textContent).toMatch(/holds more than \d+ MB/);
     expect(line?.textContent).toContain("wsp up");
     expect(line?.className).toContain("font-mono");
   });

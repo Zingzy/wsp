@@ -15,3 +15,11 @@ export function describeWithBin(name: string, suite: SuiteFactory): void {
   if (existsSync(BIN)) describe(name, suite);
   else describe(name, () => it.skip(`${BIN} is missing: run pnpm build first`, () => {}));
 }
+
+/** A suite whose own child imports built packages: it skips on the ones that are missing rather than dying on a
+ * module it cannot resolve, so a tree with only some packages built says which build is absent. */
+export function describeWithDists(name: string, pkgs: readonly string[], suite: SuiteFactory): void {
+  const missing = pkgs.filter(pkg => !existsSync(fileURLToPath(distOf(pkg))));
+  if (missing.length === 0) describe(name, suite);
+  else describe(name, () => it.skip(`${missing.join(", ")} not built: run pnpm build first`, () => {}));
+}

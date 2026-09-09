@@ -12,11 +12,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ROOT } from "../../protocol/test/source-files.js";
-import { DIST, describeWithBin, distOf } from "./built-bin.js";
+import { DIST, describeWithDists, distOf } from "./built-bin.js";
 
 /** What the host may still hold after a day of agents has gone through it. The landing page prints this number and
  * nothing else names it: lower it here and the page goes red until it says the same thing. */
-export const HOST_MEMORY_BUDGET_MB = 40;
+const HOST_MEMORY_BUDGET_MB = 40;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
@@ -87,11 +87,13 @@ for (let t = 0; t < ${THREADS}; t++) threads.push(await turn(undefined));
 for (let n = 1; n < ${TURNS_PER_THREAD}; n++) for (const thread of threads) await turn(thread);
 
 // The host writes its index and its transcripts behind a queue. What it holds is only known once it has been left
-// alone the way an idle minute leaves it, so this reads until two collections agree.
+// alone the way an idle minute leaves it, so this reads until two collections agree. external covers the buffers a
+// socket frame and a queued write live in, arrayBuffers among them, which the heap alone does not count.
 const held = () => {
   global.gc();
   global.gc();
-  return process.memoryUsage().heapUsed / 1048576;
+  const m = process.memoryUsage();
+  return (m.heapUsed + m.external) / 1048576;
 };
 let before = Infinity;
 let after = held();
@@ -131,20 +133,20 @@ function ran(script: string, home: string): Promise<{ out: string; code: number 
   });
 }
 
-const reading = (out: string): Reading => {
+const reading = (out: string, who: string): Reading => {
   const line = out.split("\n").find(l => l.startsWith("measured "));
-  if (line === undefined) throw new Error(`the host printed no measurement:\n${out}`);
+  if (line === undefined) throw new Error(`${who} printed no measurement:\n${out}`);
   return JSON.parse(line.slice("measured ".length)) as Reading;
 };
 
 describe("the page prints the budget the test guards", () => {
   it("names the same number the host is held to", () => {
     const page = readFileSync(join(ROOT, PAGE), "utf8");
-    expect(page, `${PAGE} must quote ${HOST_MEMORY_BUDGET_MB} MB, the budget this file guards`).toContain(`${HOST_MEMORY_BUDGET_MB} MB`);
+    expect(page, `${PAGE} must quote ${HOST_MEMORY_BUDGET_MB} MB, the budget this file guards`).toMatch(new RegExp(`\\b${HOST_MEMORY_BUDGET_MB} MB\\b`));
   });
 });
 
-describeWithBin("what the host holds after a day of agents", () => {
+describeWithDists("what the host holds after a day of agents", ["host", "runtime", "engine"], () => {
   let home: string;
 
   beforeEach(() => {
@@ -155,13 +157,15 @@ describeWithBin("what the host holds after a day of agents", () => {
   });
 
   it(`stays under ${HOST_MEMORY_BUDGET_MB} MB with ${THREADS * TURNS_PER_THREAD} turns through it`, async () => {
-    const floor = await ran('global.gc(); console.log(`measured ${JSON.stringify({ heldMb: 0, rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: 0 })}`)', home);
+    const empty = await ran('global.gc(); console.log(`measured ${JSON.stringify({ heldMb: 0, rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: 0 })}`)', home);
+    expect(empty.code, `an empty node on this runner said: ${empty.out}`).toBe(0);
+    const floor = reading(empty.out, "an empty node");
     const run = await ran(hostScript(home), home);
     expect(run.code, run.out).toBe(0);
-    const held = reading(run.out);
+    const held = reading(run.out, "the host");
     expect(
       held.heldMb,
-      `the host held ${held.heldMb} MB after ${held.turns} turns (resident ${held.rssMb} MB, an empty node on this runner ${reading(floor.out).rssMb} MB)`,
+      `the host held ${held.heldMb} MB after ${held.turns} turns (resident ${held.rssMb} MB, an empty node on this runner ${floor.rssMb} MB)`,
     ).toBeLessThanOrEqual(HOST_MEMORY_BUDGET_MB);
   }, 300_000);
 });
