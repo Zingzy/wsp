@@ -4,7 +4,7 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { sendRefusal, stillWorkingRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { sendRefusal, stillWorkingLine, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -375,7 +375,7 @@ describe("a new thread while another thread of the workspace works", () => {
     await screen.findByText("On it.");
     expect(screen.queryByRole("status")).toBeNull();
     emit({ type: "session.done", ...a, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
-    expectPlainLine(stillWorkingRefusal("thr_a"));
+    expectPlainLine(stillWorkingLine("thr_a"));
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
     // A new thread asked for now owes that turn nothing.
     act(() => requestNewThread({ workspaceId: WS }));

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, computerOffline, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, OVER_SSH, reachShown, type ReachState, relayedRefusal, type SendBlock, sendRefusal, stillWorkingRefusal, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, type WorkspaceState, workspaceStateOf, workspaceWord } from "../src/index.js";
+import { actionRefusal, computerOffline, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, OVER_SSH, reachShown, type ReachState, relayedRefusal, type SendBlock, sendRefusal, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, type WorkspaceState, workspaceStateOf, workspaceWord } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -65,7 +65,7 @@ describe("workspaceState", () => {
       loading: "Loading transcript",
     };
     for (const [kind, words] of Object.entries(blocks)) expect(sendRefusal(kind as SendBlock)).toBe(words);
-    expect(stillWorkingRefusal("thr_0001")).toBe("thread thr_0001 replied, still working; wait for its turn to finish before sending");
+    expect(stillWorkingLine("thr_0001")).toBe("thread thr_0001 replied, still working; the message runs as its next turn once that process exits");
   });
 
   it("actionRefusal is the same sentence for any verb that needs the machine, and a send's is it with send", () => {

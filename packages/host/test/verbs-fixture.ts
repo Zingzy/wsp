@@ -139,7 +139,8 @@ export function doneOnlyAgent(reply: (prompt: string) => string) {
 }
 
 /** A harness whose every turn runs until the test releases it with the reply text, or ends interrupted when told to
- * stop, as the real one does; a resumed start keeps the session id, and with steers the turn takes a message mid-way. */
+ * stop, as the real one does; a resumed start keeps the session id, and with steers the turn takes a message mid-way.
+ * `envs` is each turn's launch environment, in the order they were launched. */
 export function heldAgent(steers: boolean) {
   const starts: HarnessStartOptions[] = [];
   const steered: string[] = [];
@@ -150,10 +151,12 @@ export function heldAgent(steers: boolean) {
     t.onEvent({ type: "session.end", sessionId: t.sessionId, exitCode: 0, sawResult: true });
     t.finish(result);
   };
-  const adapter: HarnessAdapterFactory = () => ({
+  const envs: Readonly<Record<string, string>>[] = [];
+  const adapter: HarnessAdapterFactory = ctx => ({
     steers,
     start: o => {
       starts.push(o);
+      envs.push({ ...ctx.env });
       const sessionId = o.resume ?? randomUUID();
       let finish!: (r: TurnResult) => void;
       const finished = new Promise<TurnResult>(r => (finish = r));
@@ -183,7 +186,7 @@ export function heldAgent(steers: boolean) {
     t.onEvent({ type: "turn.delta", sessionId: t.sessionId, kind: "text", text });
     end(t, { status: "completed", text });
   };
-  return { adapter, starts, steered, interrupted, release };
+  return { adapter, starts, envs, steered, interrupted, release };
 }
 
 /** One scripted tool call: the name and input the harness reports for it, and what it answered when it answered

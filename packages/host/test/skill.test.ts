@@ -6,8 +6,8 @@ import { NOTHING_TO_SERVE_LINE } from "@wsp/protocol";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { SessionStartOutcome, backgroundTasksLine, notifyLine } from "@wsp/protocol";
-import { INSTRUCTIONS, RULES_HEADING, SETUP_HEADING, SKILL_NAME, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
+import { COORDINATOR_HANDOFF, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
+import { INSTRUCTIONS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
 import { CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 
 describe("the wsp skill", () => {
@@ -43,22 +43,64 @@ describe("the wsp skill", () => {
     for (const outcome of SessionStartOutcome.options) expect(WSP_SKILL, outcome).toContain(`(outcome \`${outcome}\`)`);
   });
 
-  it("tells an orchestrating agent to start threads detached and wait with threads wait, one finished thread per call, and never to poll threads", () => {
-    expect(WSP_SKILL).toContain("| `wsp threads wait <thread>... [--timeout <s>]` | `threads_wait` (threads, timeout) |");
+  it("tells an orchestrating agent to start its builders with notify me and end its turn, and hands the blocking wait to a shell script", () => {
+    // The verb that blocks is out of the table an agent reads and in the section for a script, with its row intact.
+    const agentRows = WSP_SKILL.slice(WSP_SKILL.indexOf(VERBS_HEADING), WSP_SKILL.indexOf(SHELL_HEADING));
+    expect(agentRows).not.toContain("`wsp threads wait");
+    const shell = WSP_SKILL.slice(WSP_SKILL.indexOf(SHELL_HEADING), WSP_SKILL.indexOf(RULES_HEADING));
+    expect(shell).toContain("| `wsp threads wait <thread>... [--timeout <s>]` | `threads_wait` (threads, timeout) |");
     const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### threads wait"), WSP_SKILL.indexOf("### stop"));
-    expect(section).toContain("wsp thread new --in dev --detach");
+    expect(section).toContain("wsp thread new --in dev --detach --notify me");
     expect(section).toContain("wsp threads wait 1a2b3c4d 5e6f7a8b --timeout 600");
     expect(section).toContain("One thread per call");
     expect(section).toContain("`thread 1a2b3c4d still running after 10m`");
+    expect(section).toContain("This is a shell script's verb");
+    expect(section).toContain("Do not call it in your own conversation");
     expect(section).toContain("Never poll `threads`");
     const loop = WSP_SKILL.slice(WSP_SKILL.indexOf("## The loop for building with wsp"), WSP_SKILL.indexOf("## Where the person steps in"));
     expect(loop).toContain("--detach");
-    expect(loop).toContain("`threads_wait`");
-    expect(loop).toContain("never poll `threads`");
+    expect(loop).toContain("--notify me");
+    expect(loop).toContain("end your turn");
+    expect(loop).not.toContain("threads wait");
     expect(loop).not.toContain("nohup wsp thread new");
-    // The MCP instructions carry the road too, since an agent holding only the tools reads nothing else.
-    expect(INSTRUCTIONS).toContain("`detach`");
-    expect(INSTRUCTIONS).toContain("`threads_wait`");
+    // The MCP instructions carry both roads, since an agent holding only the tools reads nothing else.
+    for (const words of [NOTIFY_CALLER, COORDINATOR_HANDOFF]) expect(INSTRUCTIONS, words.slice(0, 40)).toContain(words);
+  });
+
+  it("says a send is never refused for meeting a turn, and names the steer, the queue and the reply tail in the runtime's own words", () => {
+    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### send"), WSP_SKILL.indexOf("### threads wait"));
+    expect(section).toContain("A send is never refused for meeting a turn");
+    expect(section).toContain("(outcome `steered`)");
+    expect(section).toContain("(outcome `queued`)");
+    expect(section).toContain(`\`${stillWorkingLine("1a2b3c4d")}\``);
+    expect(section).toContain("Two sends keep the order they arrived in");
+    // The opening paragraph, which the MCP instructions carry, cannot say the old rule either.
+    expect(INSTRUCTIONS).toContain("a send is never refused for meeting a turn");
+  });
+
+  it("no section of the skill still teaches the wait or the refusal, whichever section an agent opens first", () => {
+    // Read whole, not by section: the two rules this ticket removed slipped in through a paragraph no test read.
+    for (const words of ["the send is refused", "a `send` before then is refused"]) expect(WSP_SKILL, words).not.toContain(words);
+    // Three sections may name the wait: the one whose table holds its row, its own section under the contract, and
+    // the rules learned the hard way, which is a log every line of which restates a rule from the body. No other
+    // paragraph may send a reader to it, which is how the thread new paragraph kept teaching it.
+    const owns =
+      WSP_SKILL.slice(WSP_SKILL.indexOf(SHELL_HEADING), WSP_SKILL.indexOf(RULES_HEADING)) +
+      WSP_SKILL.slice(WSP_SKILL.indexOf("### threads wait"), WSP_SKILL.indexOf("### stop")) +
+      WSP_SKILL.slice(WSP_SKILL.indexOf("## Rules learned the hard way"));
+    const elsewhere = WSP_SKILL.split("\n").filter(line => /threads.wait/.test(line) && !owns.includes(line));
+    expect(elsewhere).toEqual([]);
+  });
+
+  it("tells an agent it can talk to another thread: the verb, where the id comes from, and how the answer comes back", () => {
+    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### send"), WSP_SKILL.indexOf("### threads wait"));
+    expect(section).toContain("Threads talk to each other");
+    expect(section).toContain("`wsp send <thread> \"<message>\"` (the `send` tool)");
+    expect(section).toContain("`wsp threads` (the `threads` tool) is where you find that id");
+    expect(section).toContain("comes back as its own next message");
+    expect(section).toContain("`--notify me`");
+    // The instructions carry it too, since an agent holding only the tools reads nothing else.
+    expect(INSTRUCTIONS).toContain("how one thread talks to another");
   });
 
   it("quotes the failure a reply with a background command gets, as the adapter words it", () => {
@@ -188,12 +230,15 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).not.toContain("## ");
   });
 
-  it("the rules for running work on a machine are eight lines stated as facts about machines, and the instructions carry the same lines", () => {
+  it("the rules for running work on a machine are ten lines stated as facts about machines, and the instructions carry the same lines", () => {
     const from = WSP_SKILL.indexOf(`\n${RULES_HEADING}\n`);
     expect(from, RULES_HEADING).toBeGreaterThan(-1);
     const section = WSP_SKILL.slice(from, WSP_SKILL.indexOf("\n## ", from + 1));
     const rules = section.split("\n").filter(line => line.startsWith("- "));
-    expect(rules).toHaveLength(8);
+    expect(rules).toHaveLength(10);
+    // The two roads to a child's end open the section: which one holds is the first thing a caller has to decide.
+    expect(rules[0]).toContain(NOTIFY_CALLER);
+    expect(rules[1]).toContain(COORDINATOR_HANDOFF);
     // The one home: the instructions end on the same lines, so neither door can state a rule the other does not.
     expect(INSTRUCTIONS.split("\n").slice(1)).toEqual(rules);
     // Whole sentences a reader with no history can act on: no ticket number, no date, nothing that happened once.
@@ -201,8 +246,8 @@ describe("the wsp skill", () => {
       expect(rule, rule.slice(0, 40)).toMatch(/\.$/);
       expect(rule, rule.slice(0, 40)).not.toMatch(/#\d|\bticket\b|\b20\d\d\b/);
     }
-    // The eight, each by the fact it turns on: which kind of workspace the work goes on, the golden, the count, the
-    // worktree, the send, the restart, the pause, the person reading along.
+    // The ten, each by the fact it turns on: the two roads to a child's end, which kind of workspace the work goes
+    // on, the golden, the count, the worktree, the send, the restart, the pause, the person reading along.
     expect(section).toContain("the one `wsp new --local` makes");
     expect(section).toContain("a quick subtask or a second harness");
     expect(section).toContain("Fork a cloud workspace for builds that run beside each other");

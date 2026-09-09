@@ -911,11 +911,17 @@ describe("thread provenance", () => {
     expect(() => RuntimeRequest.parse({ id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "go", startedBy: "app" })).toThrow();
   });
 
-  it("sessions.start may name who its thread's ends are told: a thread id or me; session.notify carries the line in the ending thread's transcript", () => {
-    const req = { id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "build it", notify: "thread_parent_0001" };
+  it("sessions.start may name who its thread's ends are told, one target or several, each a thread id or me; session.notify carries the line to one of them in the ending thread's transcript", () => {
+    const req = { id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "build it", notify: ["thread_parent_0001"] };
     expect(RuntimeRequest.parse(req)).toEqual(req);
-    expect(RuntimeRequest.parse({ ...req, notify: NOTIFY_ME })).toEqual({ ...req, notify: "me" });
+    expect(RuntimeRequest.parse({ ...req, notify: [NOTIFY_ME, "thread_reviewer_0001"] })).toEqual({ ...req, notify: ["me", "thread_reviewer_0001"] });
+    // One target is a list of one, never a bare string, and a list of none names nobody rather than the person.
+    expect(() => RuntimeRequest.parse({ ...req, notify: "thread_parent_0001" })).toThrow();
+    expect(() => RuntimeRequest.parse({ ...req, notify: [] })).toThrow();
     expect(() => RuntimeRequest.parse({ ...req, notify: 7 })).toThrow();
+    // The token a turn's launch carries, which is what me is read against.
+    expect(RuntimeRequest.parse({ ...req, turnToken: "a".repeat(32) })).toEqual({ ...req, turnToken: "a".repeat(32) });
+    expect(() => RuntimeRequest.parse({ ...req, turnToken: 7 })).toThrow();
     const told = { type: "session.notify", workspaceId: "ws_1", sessionId: "s1", turnId: "turn_0002", threadId: "thread_child_0001", at: 1756687889412, notify: "thread_parent_0001", text: "thread thread_c finished (completed, 8m 12s, $1.94): all green" };
     expect(SessionEvent.parse(told)).toEqual(told);
     expect(EventUnion.parse(JSON.parse(JSON.stringify(told)))).toEqual(told);

@@ -10,11 +10,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_WORDS, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingRefusal } from "@wsp/protocol";
+import { COORDINATOR_HANDOFF, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
 import { COMMAND_LINES, HELP, JSON_COMMANDS, PROSE_COMMANDS, type CommandLine } from "../src/cli.js";
 import { mcpServer } from "../src/mcp.js";
-import { INSTRUCTIONS, WSP_SKILL } from "../src/skill.js";
+import { INSTRUCTIONS, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, WSP_SKILL } from "../src/skill.js";
 import { CLI_VERBS, COMMON, VERBS, toolName } from "../src/verbs.js";
 
 interface Tool {
@@ -22,6 +22,9 @@ interface Tool {
   description?: string;
   inputs: string[];
   outputs: string[];
+  /** Every line of prose the tool serves: its own description and the description on each input and output field.
+   * Absent on a tool read off the skill's table, which carries no prose. */
+  prose?: string[];
 }
 
 async function listTools(): Promise<Tool[]> {
@@ -32,8 +35,16 @@ async function listTools(): Promise<Tool[]> {
   await client.connect(toClient);
   try {
     const { tools } = await client.listTools();
-    const keys = (schema: unknown): string[] => Object.keys((schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}).sort();
-    return tools.map(t => ({ name: t.name, description: t.description, inputs: keys(t.inputSchema), outputs: keys(t.outputSchema) }));
+    const fields = (schema: unknown): Record<string, { description?: string }> => (schema as { properties?: Record<string, { description?: string }> } | undefined)?.properties ?? {};
+    const keys = (schema: unknown): string[] => Object.keys(fields(schema)).sort();
+    const described = (schema: unknown): string[] => Object.values(fields(schema)).map(field => field.description ?? "");
+    return tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      inputs: keys(t.inputSchema),
+      outputs: keys(t.outputSchema),
+      prose: [t.description ?? "", ...described(t.inputSchema), ...described(t.outputSchema)],
+    }));
   } finally {
     await client.close();
     await server.close();
@@ -324,8 +335,37 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### send"), WSP_SKILL.indexOf("### stop"));
     for (const text of [tool, section]) {
       for (const outcome of SessionStartOutcome.options) expect(text, outcome).toContain(`(outcome \`${outcome}\`)`);
-      expect(text).toContain(`\`${stillWorkingRefusal("1a2b3c4d-0000")}\``);
+      expect(text).toContain(`\`${stillWorkingLine("1a2b3c4d-0000")}\``);
     }
+  });
+
+  it("the verb that blocks is a shell script's on every door: its row sits under the shell heading and not in the agent rows, and both roads to a child's end are named in the skill's rules, the instructions and the wait tool", async () => {
+    const rows = (from: string, to: string): SkillRow[] => skillRows(WSP_SKILL.slice(WSP_SKILL.indexOf(from), WSP_SKILL.indexOf(to)));
+    const named = (list: readonly SkillRow[]): string[] => list.flatMap(r => r.tools.map(t => t.name));
+    // The table an agent reads names every tool but the one that blocks; the shell section names that one.
+    expect(named(rows(VERBS_HEADING, SHELL_HEADING))).not.toContain("threads_wait");
+    expect(named(rows(SHELL_HEADING, RULES_HEADING))).toEqual(["threads_wait"]);
+    // One home for each of the two sentences: the rules an agent holding only the tools reads, and the tool itself.
+    const wait = (await listTools()).find(t => t.name === "threads_wait")!.description!;
+    for (const words of [NOTIFY_CALLER, COORDINATOR_HANDOFF]) {
+      expect(WSP_SKILL, words.slice(0, 40)).toContain(words);
+      expect(INSTRUCTIONS, words.slice(0, 40)).toContain(words);
+      expect(wait, words.slice(0, 40)).toContain(words);
+    }
+    // The tool says whose verb it is, so an agent reading the tool alone does not take the blocking road.
+    expect(wait).toContain("it is for a shell script and not for your own conversation");
+  });
+
+  it("no tool sends an agent to the blocking wait or says a send is refused, in its description or on any of its fields", async () => {
+    const tools = await listTools();
+    for (const tool of tools) {
+      if (tool.name === "threads_wait") continue;
+      const text = tool.prose!.join(" ");
+      expect(text, `${tool.name} names the wait`).not.toMatch(/threads.wait/);
+      expect(text, `${tool.name} says a send is refused`).not.toMatch(/send is refused|refused with `?thread/);
+    }
+    // The verb that owns the wait still says what it is: the fact has one home rather than none.
+    expect(tools.find(t => t.name === "threads_wait")!.description).toContain("it is for a shell script and not for your own conversation");
   });
 
   it("when a turn ends and when the notify line goes are the runtime's words in every door: the skill, the thread_new tool and the help; the wait tool says the wait is the notify line's", async () => {

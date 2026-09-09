@@ -8,7 +8,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ThreadView, WorkspaceView, effortsFor, markedDefault, notifyLine, unknownAgentLine, workspaceKind, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, TURN_TOKEN_ENV, ThreadView, WorkspaceView, effortsFor, markedDefault, notifyLine, unknownAgentLine, workspaceKind, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -1172,6 +1172,82 @@ describe("wsp verbs over the host", () => {
     const missing = await run("thread", "new", "--in", "alpha", "--notify", "nope", "x");
     expect(missing.io.errors).toEqual(["wsp thread new: no thread nope"]);
     expect(held.starts).toHaveLength(2);
+  });
+
+  it("--notify me run inside a turn names that turn's thread: the command line reads the token off its own environment, and the parent is steered the child's report whole", async () => {
+    const held = heldAgent(true);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const parent = run("thread", "new", "--in", "alpha", "orchestrate the builders");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [parentRow] = await rt.sessions.list();
+    // The environment the host launched that turn under is the one a wsp inside it would run with.
+    const token = held.envs[0]![TURN_TOKEN_ENV]!;
+    expect(token).toMatch(/^[0-9a-f]{32}$/);
+    vi.stubEnv(TURN_TOKEN_ENV, token);
+    const kid = run("thread", "new", "--in", "alpha", "--notify", "me", "build it");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(2));
+    const kidRow = (await rt.sessions.list()).find(r => r.threadId !== parentRow!.threadId)!;
+    held.release(1, "Ran the gate.\nAll 12 tests green.");
+    const line = `thread ${kidRow.threadId!.slice(0, 8)} finished (completed): Ran the gate.\nAll 12 tests green.`;
+    await vi.waitFor(() => expect(held.steered).toEqual([line]));
+    const built = await kid;
+    expect(built.code).toBe(0);
+    // The child's own command prints no notice: the line went to the thread that asked for it, not to the person.
+    expect(built.io.errors).toEqual([]);
+    const [alpha] = await rt.workspaces.list();
+    expect((await rt.sessions.history(alpha!.id)).find(e => e.type === "session.notify")).toMatchObject({ threadId: kidRow.threadId, notify: parentRow!.threadId, text: line });
+    held.release(0, "read the report");
+    await parent;
+  });
+
+  it("--notify repeats: a builder's end reaches the orchestrator that started it and a reviewer thread, each once", async () => {
+    const held = heldAgent(true);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const orchestrator = run("thread", "new", "--in", "alpha", "orchestrate the builders");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const reviewer = run("thread", "new", "--in", "alpha", "review what lands");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(2));
+    const rows = await rt.sessions.list();
+    const [leadRow, reviewRow] = rows;
+    vi.stubEnv(TURN_TOKEN_ENV, held.envs[0]![TURN_TOKEN_ENV]!);
+    const kid = run("thread", "new", "--in", "alpha", "--notify", "me", "--notify", reviewRow!.threadId!.slice(0, 8), "build it");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(3));
+    const kidRow = (await rt.sessions.list()).find(r => r.threadId !== leadRow!.threadId && r.threadId !== reviewRow!.threadId)!;
+    held.release(2, "all green");
+    const line = `thread ${kidRow.threadId!.slice(0, 8)} finished (completed): all green`;
+    await vi.waitFor(() => expect(held.steered).toEqual([line, line]));
+    expect((await kid).code).toBe(0);
+    const [alpha] = await rt.workspaces.list();
+    const told = (await rt.sessions.history(alpha!.id)).filter(e => e.type === "session.notify");
+    expect(told.map(e => e.notify)).toEqual([leadRow!.threadId, reviewRow!.threadId]);
+    expect(told.map(e => e.text)).toEqual([line, line]);
+    held.release(0, "read the report");
+    held.release(1, "reviewed");
+    await orchestrator;
+    await reviewer;
+  });
+
+  it("--notify me with no token in the environment is still the person's, so a person's own shell and the app are unchanged", async () => {
+    await run("new", "alpha");
+    expect(process.env[TURN_TOKEN_ENV]).toBeUndefined();
+    const { code, io } = await run("thread", "new", "--in", "alpha", "--notify", "me", "build it");
+    expect(code).toBe(0);
+    const [row] = await rt.sessions.list();
+    expect(io.errors).toEqual([`thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it`]);
+    const [alpha] = await rt.workspaces.list();
+    expect((await rt.sessions.history(alpha!.id)).find(e => e.type === "session.notify")).toMatchObject({ notify: "me" });
+  });
+
+  it("a token no turn on this host carries is refused, and nothing starts", async () => {
+    await run("new", "alpha");
+    vi.stubEnv(TURN_TOKEN_ENV, "f".repeat(32));
+    const { code, io } = await run("thread", "new", "--in", "alpha", "--notify", "me", "build it");
+    expect(code).toBe(EXIT_CODES.provider);
+    expect(io.errors).toEqual([`wsp thread new: ${NO_SUCH_TURN}`]);
+    expect(io.lines).toEqual([]);
+    expect(await rt.sessions.list()).toEqual([]);
   });
 
   it("fork --send --notify me prints the first turn's end on stderr as thread new does; a bad --notify fails before any machine is minted", async () => {

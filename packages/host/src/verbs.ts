@@ -19,6 +19,7 @@ import { CATALOG_AGENTS, THREAD_AGENTS, agentName } from "@wsp/catalog";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import {
   AFTER_CUT_LINE,
+  COORDINATOR_HANDOFF,
   EMPTY_TASK_LINE,
   EXIT_CODES,
   HOST_STOPPING_CLOSE,
@@ -28,6 +29,7 @@ import {
   IMAGE_MAX_WORDS,
   IMAGE_TYPE_WORDS,
   LOGIN_CHOICES,
+  NOTIFY_CALLER,
   NOTIFY_ME,
   NOTIFY_WORDS,
   NO_REBUILD_NEEDED,
@@ -88,11 +90,12 @@ import {
   sizeFromWord,
   sizeRefusal,
   startPicks,
-  stillWorkingRefusal,
+  stillWorkingLine,
   terminalConfigLines,
   toolActivityLine,
   toolResultLine,
   turnSettledLine,
+  turnTokenOf,
   unknownAgentLine,
   usageRefusal,
   verbFailure,
@@ -867,28 +870,40 @@ export async function checkedStart(client: HostClient, task: string, harness: st
 }
 
 /** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the named
- * folder or the workspace's own; cwd is the field the app's composer sends. notify is the thread its every turn's end
- * is told to, or NOTIFY_ME. */
-export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: string; title?: string; images?: readonly string[] } = {}): Record<string, unknown> {
+ * folder or the workspace's own; cwd is the field the app's composer sends. notify names who every turn's end on it
+ * is told, each a thread or NOTIFY_ME. The one place both doors, the command line and the MCP server, put the token of the turn
+ * they are running inside on a start: it is what the host reads NOTIFY_ME against, and there is none when the caller
+ * is not a turn. */
+export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; images?: readonly string[] } = {}): Record<string, unknown> {
   const cwd = workFolder(workspace, opts.cwd);
   const attachments = imagesFrom(opts.images ?? []);
+  const turnToken = turnTokenOf(process.env);
   return {
     workspaceId: workspace.id,
     prompt,
     ...(cwd !== undefined ? { cwd } : {}),
     ...(opts.harness !== undefined ? { harness: opts.harness } : {}),
     ...(opts.notify !== undefined ? { notify: opts.notify } : {}),
+    ...(turnToken !== undefined ? { turnToken } : {}),
     ...(opts.title !== undefined ? { title: opts.title } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...picksOf(opts),
   };
 }
 
-/** What a --notify names for the runtime: NOTIFY_ME as given, else the thread the reference picks, by its full id. */
-export async function notifyOf(client: HostClient, ref: string | undefined): Promise<string | undefined> {
-  if (ref === undefined || ref === NOTIFY_ME) return ref;
-  const thread = await threadOf(client, ref);
-  return thread.threadId ?? thread.id;
+/** What the --notify flags name for the runtime: NOTIFY_ME as given, and every other reference as the thread it
+ * picks, by its full id. Nothing when the caller named none, so the thread keeps whatever it already had. */
+export async function notifyOf(client: HostClient, refs: readonly string[]): Promise<string[] | undefined> {
+  if (refs.length === 0) return undefined;
+  const named: string[] = [];
+  for (const ref of refs) {
+    if (ref === NOTIFY_ME) named.push(NOTIFY_ME);
+    else {
+      const thread = await threadOf(client, ref);
+      named.push(thread.threadId ?? thread.id);
+    }
+  }
+  return named;
 }
 
 /** The start a message to an existing thread makes: the thread named to the runtime, which resumes its latest turn
@@ -1115,7 +1130,8 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
 }
 
 /** The verbs' way through a detached start: the queued and joined lines on stderr as a follow prints them, then the
- * thread's id on stdout the moment the runtime names it, and nothing of the reply, which threads wait carries. */
+ * thread's id on stdout the moment the runtime names it, and nothing of the reply, which the thread's finished line
+ * carries to whoever its start named. */
 async function detachVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, picks: Picks = {}): Promise<void> {
   const turn = await startDetached(client, start, "cli", () => ctx.io.error(WAITING));
   if (turn.outcome !== "started") ctx.io.error(JOINED[turn.outcome](picks));
@@ -1294,9 +1310,9 @@ const QUIET_TURN = { event: () => {} };
 const Created = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 
 /** What a send meets on its thread, in the runtime's own words: the outcome it answers with on a free or a running
- * turn, and the line it refuses with when the last turn replied but its agent process has not exited. */
+ * turn, and the line it says when the last turn replied but its agent process has not exited. */
 const { started, steered, queued } = SessionStartOutcome.enum;
-const SEND_MEETS = `On a thread whose turn is not running the message starts a new turn (outcome \`${started}\`); when the turn is still running the message joins it (outcome \`${steered}\`) or waits for it and then runs (outcome \`${queued}\`), and the reply is that turn's. When the thread's turn has replied but its agent process is still running, nothing starts and the send is refused with \`${stillWorkingRefusal("1a2b3c4d")}\`; wait for the thread to leave running, then send again.`;
+const SEND_MEETS = `On a thread whose turn is not running the message starts a new turn (outcome \`${started}\`); when the turn is still running the message joins it (outcome \`${steered}\`) or waits for it and then runs (outcome \`${queued}\`), and the reply is that turn's. When the thread's turn has replied but its agent process is still running, the message waits for that process and runs as the thread's next turn (outcome \`${queued}\`), which the runtime says as \`${stillWorkingLine("1a2b3c4d")}\`. A send is never refused for meeting a turn, and two sends keep the order they arrived in.`;
 
 /** outcome says how the message landed: its own turn, steered into the thread's running one, or queued behind it;
  * afterCut is set when the thread's previous turn ended without a result, so the reply may be missing context. */
@@ -1304,7 +1320,7 @@ const TurnOut = z.object({
   threadId: z.string(),
   workspaceId: z.string(),
   harness: z.string(),
-  text: z.string().optional().describe("the reply, complete; absent under detach, where the turn is still running and threads_wait carries its end"),
+  text: z.string().optional().describe("the reply, complete; absent under detach, where the turn is still running and its end reaches whoever the start's notify named"),
   outcome: SessionStartOutcome,
   afterCut: z.literal(true).optional(),
 });
@@ -1383,9 +1399,15 @@ const PLAN_ONLY_TOOL = "nothing imported; call import again with yes true to tak
 
 const WorkspaceIn = z.string().describe("the workspace's name, or its id when two share a name");
 const AgentIn = z.string().optional().describe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
-const NotifyIn = z.string().optional().describe("a thread (by id, or a prefix of it) told in one line each time a turn of the new thread ends, as a message into it; or me, for the person's app");
+const NotifyIn = z
+  .array(z.string())
+  .min(1)
+  .optional()
+  .describe(
+    `who is told each time a turn of the new thread ends, each one a thread (by id, or a prefix of it) the line goes into as a message carrying that turn's whole reply, or me, which is the thread this call came out of when it came out of one and otherwise the person's app, where the line is its last reply line alone. Several targets each get the line once, which is how a builder's end reaches its orchestrator and a reviewer together; a target whose thread is gone by then falls back to the person, and the new thread's own id is refused. ${NOTIFY_CALLER}.`,
+  );
 const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute; absent means the workspace's project folder, else the workspace's own folder, which on a fork is the machine's home folder");
-const DetachIn = z.boolean().optional().describe("true answers with the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end; for a turn that runs for minutes or an hour, so this call does not block for it");
+const DetachIn = z.boolean().optional().describe(`true answers with the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever notify named; for a turn that runs for minutes or an hour, so this call does not block for it. ${NOTIFY_CALLER}.`);
 const TitleIn = z.string().optional().describe("the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it");
 const ImagesIn = z.array(z.string()).optional().describe(`paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each. The host reads each file and sends its bytes, so the machine never reaches back for this computer\u2019s files; a message to an agent that reads no image is refused naming that agent.`);
 const ConfirmIn = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");
@@ -1503,7 +1525,7 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Blocks until one of the named threads leaves running and answers with that thread's end: its id, status (completed, interrupted or failed), how long it worked, what it cost and the last line of its reply, the text being the one line a notify sends. One thread per call: a caller that started three builders calls this three times, dropping each returned id from the list, since a thread already over comes back at once and would come back again. With timeout, the seconds to wait before answering with nothing and timedOut true, so other work fits between calls; keep it under your own tool call limit and call again. Start the threads with thread_new or send with detach true, and never poll threads for a state change.`,
+      description: `Blocks until one of the named threads leaves running and answers with that thread's end: its id, status (completed, interrupted or failed), how long it worked, what it cost and the last line of its reply, the text being the one line a notify sends. One thread per call: a caller that started three builders calls this three times, dropping each returned id from the list, since a thread already over comes back at once and would come back again. With timeout, the seconds to wait before answering with nothing and timedOut true, so other work fits between calls; keep it under your own tool call limit and call again. This blocks, so it is for a shell script and not for your own conversation. ${NOTIFY_CALLER}. ${COORDINATOR_HANDOFF}. Never poll threads for a state change.`,
       input: {
         threads: z.array(z.string()).min(1).describe("thread ids, or prefixes that each pick one"),
         timeout: z.number().positive().optional().describe("seconds to wait; absent waits until one of the threads finishes"),
@@ -1721,7 +1743,7 @@ export const VERBS: readonly Verb[] = [
     name: "fork",
     usage: 'wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>" [thread new\'s flags]]',
     about: "a new machine from the source's golden version, not a copy of its live disk; --size as new's",
-    options: { name: { type: "string" }, size: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" } },
+    options: { name: { type: "string" }, size: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string", multiple: true } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp fork takes one workspace");
@@ -1732,7 +1754,7 @@ export const VERBS: readonly Verb[] = [
       if (workspaceState({ phase: source.phase }) === "gone") throw new Error(goneRefusal("fork", source.gone));
       // Resolved and checked before the machine is minted, so a bad reference or pick costs nothing. The picks are
       // checked against the source's machine, since the fork's own comes from the golden that machine runs.
-      const notify = await notifyOf(client, flag(ctx.flags, "notify"));
+      const notify = await notifyOf(client, flagList(ctx.flags, "notify"));
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
       if (task !== undefined) await checkedStart(client, task, harness, picks, source.id);
@@ -1755,7 +1777,7 @@ export const VERBS: readonly Verb[] = [
         if (task === undefined) return asJson(created);
         let failure: string;
         try {
-          const turn = await follow(client, openingOf(created.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell) }), "agent", QUIET_TURN);
+          const turn = await follow(client, openingOf(created.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []) }), "agent", QUIET_TURN);
           const ended = turnFailure(turn);
           if (ended === undefined) return asJson({ ...created, turn: turnView(turn) });
           failure = ended;
@@ -1898,7 +1920,7 @@ export const VERBS: readonly Verb[] = [
     name: "thread new",
     usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <path>, --detach] "<task>"',
     about: "opens a thread with the agent, model, effort and access the app offers; follows its first turn, or with --detach prints the id and returns",
-    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string" }, title: { type: "string" }, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
+    options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string", multiple: true }, title: { type: "string" }, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       const [task] = ctx.args;
       const within = flag(ctx.flags, "in");
@@ -1910,13 +1932,13 @@ export const VERBS: readonly Verb[] = [
       const picks = pickFlags(ctx.flags);
       await checkedStart(client, task, harness, picks, found.id);
       const workspace = await awake(client, found, "send", line => ctx.io.error(line));
-      const opening = openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flag(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
+      const opening = openingOf(workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
       if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening);
       else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true)));
       return 0;
     },
     tool: tool({
-      description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, last line of the reply) into the named thread, so a caller need not wait here or poll. ${NOTIFY_WORDS}.`,
+      description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names or the workspace's project folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. ${NOTIFY_WORDS}. ${NOTIFY_CALLER}.`,
       input: { workspace: WorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, title: TitleIn, images: ImagesIn, detach: DetachIn },
       output: TurnOut.shape,
       call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, images, detach, ...input }, deps) => {
@@ -1924,7 +1946,7 @@ export const VERBS: readonly Verb[] = [
         const found = await workspaceOf(client, ref);
         await checkedStart(client, task, harness, input, found.id);
         const target = await awake(client, found, "send", QUIET_LINE);
-        const opening = openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell), title, images });
+        const opening = openingOf(target, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []), title, images });
         if (detach === true) return detachedOut(await startDetached(client, opening, "agent"));
         const out = turnOut(await follow(client, opening, "agent", QUIET_TURN));
         return asText(turnText(out), out);
@@ -1979,7 +2001,7 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and threads_wait carries the turn's end. A model, effort or access named here is the turn's; a turn that joins a running one keeps that one's. ${SEND_MEETS}`,
+      description: `Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever the thread's start named. A model, effort or access named here is the turn's; a turn that joins a running one keeps that one's. ${SEND_MEETS}`,
       input: { thread: z.string(), message: z.string(), ...PICK_INPUTS, images: ImagesIn, detach: DetachIn },
       output: TurnOut.shape,
       call: async ({ thread: ref, message, images, detach, ...input }, deps) => {

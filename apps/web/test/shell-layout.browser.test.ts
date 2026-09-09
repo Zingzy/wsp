@@ -40,7 +40,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, ConsoleMessage, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { accessFromNextMessage, PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTER } from "@wsp/protocol";
+import { accessFromNextMessage, PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingLine, THIS_COMPUTER } from "@wsp/protocol";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
 import { textContrast } from "./contrast";
@@ -1387,7 +1387,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const working = await composerAt("ws=ws_a&linger=1", theme, "working");
       expect(paused.text).toBe(sendRefusal("paused"));
       expect(gone.text).toBe(sendRefusal("gone"));
-      expect(working.text).toBe(stillWorkingRefusal("thr_linger"));
+      expect(working.text).toBe(stillWorkingLine("thr_linger"));
       for (const state of [paused, gone, working]) {
         // The words in mono, painted on nothing: no fill, no border, no icon, no panel anywhere in the composer.
         expect(state.line).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0 });
