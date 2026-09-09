@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { THIS_COMPUTER } from "@wsp/protocol";
-import { SIDEBAR_MAX_WIDTH } from "../src/shell/AppShell";
+import { SIDEBAR_MAX_WIDTH } from "../src/shell/sidebarWidth";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 

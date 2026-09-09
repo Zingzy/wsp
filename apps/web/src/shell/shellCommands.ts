@@ -7,8 +7,10 @@
 // itself opens only from its own tab strip. Every pty comes from the link.
 // The workspace switch walks the sidebar's own order and lands in the new
 // workspace's composer; the chord's walk stays inside the switcher overlay
-// until the hold is let go. In Spaces the same walk one level down, over the
-// threads of the workspace on screen, lands on a thread the same way.
+// until the hold is let go. In Spaces the same chord walks one level down,
+// over the last five threads opened in the workspace on screen: the hold
+// shows them, letting go lands on the highlighted one, and a tap is the
+// thread before this one.
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
 import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, type WorkspaceSelectSlot } from "../keybindingTypes.js";
@@ -21,7 +23,8 @@ import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
 import { requestComposerFocus, requestNewThread } from "./shellRequests.js";
-import { highlightedWorkspaceId, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
+import { recentThreads, useThreadHistory } from "./threadHistory.js";
+import { highlightedTarget, stepSwitcherAt, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
 
 export interface ShellCommandTarget {
   readonly workspaceId: string | null;
@@ -159,15 +162,31 @@ export function cycleWorkspaceSwitcher(step: 1 | -1, hold: ReadonlyArray<string>
   const selectedId = useStore.getState().selectedId;
   const next = stepInOrder(ids, selectedId, step);
   if (next === null) return;
-  switcher.openAt(ids, ids.indexOf(next), selectedId, hold);
+  switcher.openAt(ids.map(workspaceId => ({ workspaceId, threadId: null })), ids.indexOf(next), selectedId, hold);
 }
 
-/** The hold let go: the highlighted workspace becomes the open one. */
+/** The switch chord's step in Spaces: the overlay over the last five threads opened in the space on screen, the
+ * open one first, so a tap lands on the thread before this one and a hold walks the rest. Nothing opens where
+ * there is no second thread to land on, as the palette's disabled row says. */
+export function cycleThreadSwitcher(step: 1 | -1, hold: ReadonlyArray<string>): void {
+  const switcher = useWorkspaceSwitcher.getState();
+  if (switcher.open) {
+    switcher.step(step);
+    return;
+  }
+  const { selectedId, selectedThreadId } = useStore.getState();
+  const threads = recentThreads(threadWalk(sidebarProjects(), selectedId), useThreadHistory.getState().recent, selectedThreadId);
+  if (threads.length < 2) return;
+  const targets = threads.map(thread => ({ workspaceId: thread.workspaceId, threadId: thread.threadId }));
+  switcher.openAt(targets, stepSwitcherAt(targets.length, 0, step), selectedId, hold);
+}
+
+/** The hold let go: the highlighted workspace, or thread, becomes the open one. */
 export function commitWorkspaceSwitch(): void {
   const state = useWorkspaceSwitcher.getState();
-  const target = highlightedWorkspaceId(state);
+  const target = highlightedTarget(state);
   state.close();
-  if (target !== null) goToWorkspace(target);
+  if (target !== null) goToWorkspace(target.workspaceId, target.threadId);
 }
 
 /** Escape, or the window losing focus mid-walk: the overlay leaves and the person stays where they were. */
@@ -234,10 +253,10 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       cycleWorkspaceSwitcher(-1, hold);
       return;
     case "thread.next":
-      cycleThreadInSpace(1);
+      cycleThreadSwitcher(1, hold);
       return;
     case "thread.previous":
-      cycleThreadInSpace(-1);
+      cycleThreadSwitcher(-1, hold);
       return;
     default: {
       const _exhaustive: never = command;

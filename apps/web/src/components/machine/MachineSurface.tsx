@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The machine surface of the right panel: facts, the workspace's own colour
-// and icon, the projects on the machine with the import and the snapshot that
-// images them, live utilisation, spend, lineage with rollback, pause, wake,
-// upgrade, rebuild and forget for one workspace's machine. Pause, wake,
+// The machine surface of the right panel: facts, the projects on the machine
+// with the import and the snapshot that images them, live utilisation, spend,
+// lineage with rollback, pause, wake, upgrade, rebuild and forget for one
+// workspace's machine. Pause, wake,
 // rebuild, forget, import and copy id read the workspace registry; the tab
 // keeps its own confirmations for the two that ask. A button is offered only
 // where its verb can run and its capability is there; the panel ends where its
@@ -14,12 +14,12 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, LINEAGE_MARKS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
-import { useCapabilities, useCost, useLabs, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
+import { useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -32,7 +32,6 @@ import {
 import { Button, WARN_BUTTON } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
-import { LOOK_WORDS, WorkspaceLookPicker } from "../workspaceLook.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import {
   bytesOfLabel,
@@ -75,14 +74,12 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
   // A machine wsp neither forks nor pays for has no spend to chart, nothing to nap and no image behind it; its rows
   // say what it is instead.
   const kind = kindWords(workspaceKind(workspace));
-  const labs = useLabs();
   const goldens = useProjectGoldens(kind.machine === null);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
         <Facts workspace={workspace} status={status} awakeMs={last ? last.awakeMs : null} pendingSize={pendingSize} kind={kind} />
-        {labs ? <Look workspace={workspace} /> : null}
         <Projects workspace={workspace} status={status} kind={kind} onTaken={goldens.add} />
         <Live workspace={workspace} kind={kind} />
         {kind.driven && <Usage workspace={workspace} status={status} series={series} />}
@@ -324,22 +321,6 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
         {busy ? "Taking the snapshot…" : note}
       </p>
     </Section>
-  );
-}
-
-/** The workspace's own hue and glyph, the same rows the row's menu opens in a dialog, each under the tab's own
- * section heading rather than a label style of its own. */
-function Look({ workspace }: { workspace: WorkspaceView }) {
-  return (
-    <>
-      {LOOK_PARTS.map(part => (
-        <Section key={part} label={LOOK_WORDS[part]}>
-          <div className="mt-2">
-            <WorkspaceLookPicker workspace={workspace} part={part} />
-          </div>
-        </Section>
-      ))}
-    </>
   );
 }
 

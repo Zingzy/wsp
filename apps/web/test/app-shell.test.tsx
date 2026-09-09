@@ -2,6 +2,7 @@
 // The shell's three regions, the right panel's toggle, resize and picker,
 // and the banner that follows the runtime socket.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { SIDEBAR_DEFAULT_WIDTH } from "../src/shell/sidebarWidth.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type WorkspaceView } from "@wsp/protocol";
 import { App } from "../src/App.js";
@@ -141,7 +142,7 @@ describe("app shell", () => {
     expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
     await act(async () => answer!({ ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "list" }));
     await waitFor(() => expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(2));
-    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("16rem");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(`${SIDEBAR_DEFAULT_WIDTH}px`);
     expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "system", sidebarMode: "list", labs: true });
   });
 
@@ -156,7 +157,7 @@ describe("app shell", () => {
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarWidth: 900 } }));
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("480px");
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } }));
-    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("16rem");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(`${SIDEBAR_DEFAULT_WIDTH}px`);
   });
 
   it("opens the machine surface from the picker", async () => {

@@ -66,27 +66,27 @@ describe("workspace actions", () => {
       WORKSPACE_WORDS.importProject,
       WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
-      WORKSPACE_WORDS.colour,
       WORKSPACE_WORDS.icon,
+      WORKSPACE_WORDS.theme,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
       WORKSPACE_WORDS.forget,
     ]);
-    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "import-project", "export-project", "rename", "colour", "icon", "copy-id"]);
+    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "import-project", "export-project", "rename", "icon", "theme", "copy-id"]);
     expect(actionById(actions, "rename").refusal).toBeNull();
     // A workspace name is this computer's own record, so the box opens whatever the machine is doing.
     expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "rename").refusal).toBeNull();
     // A client with no rename verb says so rather than opening a box nothing would take.
     expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ rename: undefined })), "rename").refusal).toBe("This client cannot rename workspaces");
-    // The colour and the icon are the same record, so they open on a gone machine too; a client without the verb says so.
-    for (const id of ["colour", "icon"]) {
+    // The theme and the icon are the same record, so they open on a gone machine too; a client without the verb says so.
+    for (const id of ["theme", "icon"]) {
       expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), id).refusal).toBeNull();
-      expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ pickLook: undefined })), id).refusal).toBe("This client cannot set a workspace's colour or icon");
+      expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ pickLook: undefined })), id).refusal).toBe("This client cannot set a workspace's theme or icon");
     }
     actionById(actions, "icon").run();
     expect(verbs.pickLook).toHaveBeenCalledWith("ws_a", "glyph");
-    actionById(actions, "colour").run();
-    expect(verbs.pickLook).toHaveBeenCalledWith("ws_a", "tint");
+    actionById(actions, "theme").run();
+    expect(verbs.pickLook).toHaveBeenCalledWith("ws_a", "theme");
     expect(actionById(actions, "fork").refusal).toBe("Forking a workspace is not in the runtime yet; take a project snapshot in the Machine tab and start a workspace from it");
     expect(actionById(actions, "rebuild").refusal).toBe("Rebuild replaces a gone or zombie machine; this one answers");
     expect(actionById(actions, "forget").refusal).toBe("Only a workspace whose machine is gone can be forgotten; this one is running");
@@ -118,7 +118,7 @@ describe("workspace actions", () => {
   it("a gone workspace offers rebuild and forget and refuses the machine actions; a zombie offers rebuild alone; a client without the verbs says so", () => {
     const verbs = workspaceVerbs();
     const gone = resolveActions(workspaceActions, workspace("gone"), verbs);
-    expect(enabled(gone)).toEqual(["rebuild", "open-machine", "rename", "colour", "icon", "copy-id", "forget"]);
+    expect(enabled(gone)).toEqual(["rebuild", "open-machine", "rename", "icon", "theme", "copy-id", "forget"]);
     expect(actionById(gone, "new-thread").refusal).toBe("New threads wait for the rebuild");
     expect(actionById(gone, "open-terminal").refusal).toBe(goneRefusal("open a terminal"));
     expect(actionById(gone, "open-browser").refusal).toBe(goneRefusal("preview"));
@@ -357,8 +357,8 @@ describe("menu items from actions", () => {
       ["import-project", WORKSPACE_WORDS.importProject, "project", true],
       ["export-project", WORKSPACE_WORDS.exportProject, "project", true],
       ["rename", WORKSPACE_WORDS.rename, "edit", true],
-      ["colour", WORKSPACE_WORDS.colour, "edit", true],
       ["icon", WORKSPACE_WORDS.icon, "edit", true],
+      ["theme", WORKSPACE_WORDS.theme, "edit", true],
       ["fork", WORKSPACE_WORDS.fork, "edit", false],
       ["copy-id", WORKSPACE_WORDS.copyId, "copy", true],
       ["forget", WORKSPACE_WORDS.forget, "remove", false],

@@ -2,14 +2,14 @@
 // The three regions: a resizable sidebar on the left, the selected
 // workspace's panes in the center, the surface panel on the right. State
 // drives every switch here; there is no router.
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { ContextMenuHost } from "../actions/ContextMenuHost.js";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
 import { WorkspaceSwitcher } from "../components/switcher/WorkspaceSwitcher.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, type SidebarWidthStore } from "../components/ui/sidebar.js";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
-import { tintAttr } from "../components/workspaceLook.js";
+import { themeAttrs } from "../components/workspaceLook.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -17,8 +17,11 @@ import { isDesktopMac } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
 import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout.js";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./sidebarWidth.js";
+import { trackThreadHistory } from "./threadHistory.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
-import { useSpaceTint } from "../sidebar/sidebarMode.js";
+import { useAppDark } from "../settings/theme.js";
+import { useSpaceTheme } from "../sidebar/sidebarMode.js";
 import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { DisconnectedBanner } from "./DisconnectedBanner.js";
@@ -27,8 +30,6 @@ import { RightPanel } from "./RightPanel.js";
 import { SignInBanner } from "./SignInBanner.js";
 import { ThreadBreadcrumb } from "./ThreadBreadcrumb.js";
 
-const SIDEBAR_MIN_WIDTH = 220;
-export const SIDEBAR_MAX_WIDTH = 480;
 /** The dragged width goes onto the host's preferences record, so a browser tab on the same host opens at it and
  * the settings page's reset reaches this window. */
 const sidebarWidthStore: SidebarWidthStore = {
@@ -51,9 +52,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const terminalOpen = useTerminalDrawerStore(s => selectTerminalUiState(s.byWorkspaceId, workspaceId).terminalOpen);
   const toggleTerminal = useTerminalDrawerStore(s => s.toggle);
   const useSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
-  // The current space's hue rides the sidebar element, so the glass recipe and the macOS material both take it.
-  const spaceTint = useSpaceTint();
+  // The current space's theme rides the sidebar element, so the glass recipe and the macOS material both take it.
+  const spaceTheme = useSpaceTheme();
+  const appDark = useAppDark();
   const rightPanelOpen = workspaceId !== null && panel.isOpen;
+  // The switch chord in Spaces walks the threads last opened, so every selection is remembered from here on.
+  useEffect(() => trackThreadHistory(), []);
 
   const layoutControls = (
     <PanelLayoutControls
@@ -84,7 +88,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         side="left"
         collapsible="offcanvas"
         data-app-sidebar=""
-        {...tintAttr(spaceTint)}
+        {...themeAttrs(spaceTheme, appDark)}
         className={cn(isDesktopMac() ? "sidebar-vibrancy" : "sidebar-glass", "border-r border-sidebar-border text-sidebar-foreground")}
         resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: SIDEBAR_MAX_WIDTH, width: sidebarWidthStore }}
       >

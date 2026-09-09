@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The settings page: its two sections and their rows, each control reading the
-// host's record and writing a patch to it, the facts beside the terminal size
-// rows from the app's token and the host's Ghostty file, the sidebar width
-// reset, and the page in the shell's centre with its name in the breadcrumb
-// until a workspace is picked.
+// host's record and writing a patch to it, the theme, the sidebar body and the
+// terminal text size as segmented controls, the sidebar width as a mono number
+// field with a stepper and a reset offered only off the default, the resolved
+// size in mono beside the text size pick, no sentence under any pick, and the
+// page in the shell's centre with its name in the breadcrumb until a workspace
+// is picked.
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type Preferences, type PreferencesPatch, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, applyPreferencesPatch, type Preferences, type PreferencesPatch, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { Shell } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { SettingsPage } from "../src/settings/SettingsPage.js";
+import { SIDEBAR_DEFAULT_WIDTH } from "../src/shell/sidebarWidth.js";
 import { appTerminalFontSize } from "../src/terminal/ghostty/surface.js";
 
 const FILE: TerminalConfig = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], fontSize: 16, palette: Array<null>(16).fill(null) };
@@ -45,7 +48,7 @@ function fakeApi(record: Preferences, file: TerminalConfig | null = FILE) {
     preferences: async () => held,
     setPreferences: async patch => {
       sets.push(patch);
-      held = { ...held, ...(patch as Partial<Preferences>) };
+      held = applyPreferencesPatch(held, patch);
       return held;
     },
     ...(file === null ? {} : { hostTerminalConfig: async () => file }),
@@ -54,8 +57,10 @@ function fakeApi(record: Preferences, file: TerminalConfig | null = FILE) {
 }
 
 const flush = () => new Promise(r => setTimeout(r, 0));
-const checked = (group: HTMLElement): string[] => within(group).getAllByRole("radio").map(r => r.getAttribute("aria-checked") ?? "");
 const group = (name: string): HTMLElement => screen.getByRole("radiogroup", { name });
+const checked = (name: string): string[] => within(group(name)).getAllByRole("radio").map(r => r.getAttribute("aria-checked") ?? "");
+const segments = (name: string): string[] => within(group(name)).getAllByRole("radio").map(r => r.textContent ?? "");
+const widthField = (): HTMLInputElement => document.querySelector<HTMLInputElement>("[data-k=sidebar-width]")!;
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -70,67 +75,81 @@ afterEach(() => {
 });
 
 describe("the settings page", () => {
-  it("has Appearance and Terminal, a label over each pick, and the record's values checked", async () => {
+  it("has Appearance and Terminal, one hairline row per pick with its label left and its control right, segments for the picks, and the record's values checked", async () => {
     const { api } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true, theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "file", terminalZoom: {} });
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
-    const sections = screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"));
-    expect(sections).toEqual(["settings-appearance", "settings-terminal"]);
+    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual(["settings-appearance", "settings-terminal"]);
     expect(screen.getByText("Appearance").tagName).toBe("H2");
     expect(screen.getByText("Terminal").tagName).toBe("H2");
-    expect(within(group("Theme")).getAllByRole("radio").map(r => r.closest("label")!.textContent)).toEqual(["SystemFollows this computer", "Light", "Dark"]);
-    expect(checked(group("Theme"))).toEqual(["false", "true", "false"]);
-    expect(within(group("Sidebar")).getAllByRole("radio").map(r => r.closest("label")!.textContent)).toEqual(["ListEvery workspace and its threads", "SpacesOne workspace at a time, with a dot per workspace at the bottom"]);
-    expect(checked(group("Sidebar"))).toEqual(["false", "true"]);
-    expect(screen.getByText("Sidebar width")).toBeTruthy();
-    expect(document.querySelector("[data-k=sidebar-width]")!.textContent).toBe("312 px");
-    expect(checked(group("Text size"))).toEqual(["false", "true"]);
-    // Every choice row is one height, and the facts and the width read in the mono voice.
-    const rows = Array.from(document.querySelectorAll("[data-settings-row]"));
-    expect(rows).toHaveLength(8);
-    for (const row of rows) expect(row.className).toContain("min-h-9");
-    // A detail sentence is whole, never cut: nothing truncates it.
-    expect(rows.some(row => row.querySelector(".truncate") !== null)).toBe(false);
-    expect(document.querySelector("[data-k=sidebar-width]")!.className).toContain("font-mono");
+    expect(segments("Theme")).toEqual(["System", "Light", "Dark"]);
+    expect(checked("Theme")).toEqual(["false", "true", "false"]);
+    expect(segments("Sidebar")).toEqual(["List", "Spaces"]);
+    expect(checked("Sidebar")).toEqual(["false", "true"]);
+    expect(segments("Text size")).toEqual(["From the app", "From the Ghostty file"]);
+    expect(checked("Text size")).toEqual(["false", "true"]);
+    expect(widthField().value).toBe("312");
+    expect(widthField().className).toContain("font-mono");
+    // Four rows, each one hairline under it, the label at the left and nothing else in the label's slot: no
+    // sentence under any pick, no radio, no chip.
+    const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-settings-row]"));
+    expect(rows.map(row => row.firstElementChild?.textContent)).toEqual(["Theme", "Sidebar", "Sidebar width", "Text size"]);
+    for (const row of rows) {
+      expect(row.className).toContain("border-b");
+      expect(row.querySelector("[data-slot=badge], .truncate + span span")).toBeNull();
+    }
+    expect(document.querySelectorAll("[data-settings-page] [data-slot=radio]")).toHaveLength(0);
+    expect(screen.queryByText("Follows this computer")).toBeNull();
+    expect(screen.queryByText(/One workspace at a time/)).toBeNull();
   });
 
-  it("the terminal size rows say the app's size and the file's, and a file naming no size says so beside the app's", async () => {
+  it("the resolved size sits in mono beside the text size pick: the app's own, the file's, and the app's again for a file naming none", async () => {
     const { api } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
-    const labels = () => within(group("Text size")).getAllByRole("radio").map(r => r.closest("label")!.textContent);
-    await waitFor(() => expect(labels()).toEqual([`From the app${appTerminalFontSize()} px`, "From the Ghostty file16 px"]));
+    const fact = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=terminal-size]")!;
+    expect(fact().textContent).toBe(`${appTerminalFontSize()} px`);
+    expect(fact().className).toContain("font-mono");
+    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
+    fireEvent.click(within(group("Text size")).getByRole("radio", { name: "From the Ghostty file" }));
+    await waitFor(() => expect(fact().textContent).toBe("16 px"));
     document.body.innerHTML = "";
-    const bare = fakeApi({ ...DEFAULT_PREFERENCES, labs: true }, { ...FILE, fontSize: undefined });
+    const bare = fakeApi({ ...DEFAULT_PREFERENCES, labs: true, terminalSize: "file" }, { ...FILE, fontSize: undefined });
     useStore.getState().bind(bare.api);
     await flush();
     render(<SettingsPage />);
-    await waitFor(() => expect(labels()).toEqual([`From the app${appTerminalFontSize()} px`, `From the Ghostty file${appTerminalFontSize()} px, the file names no size`]));
+    await waitFor(() => expect(fact().textContent).toBe(`${appTerminalFontSize()} px`));
   });
 
-  it("each pick paints at once and goes to the host as one patch; the width reset is offered only off the default", async () => {
+  it("each pick paints at once and goes to the host as one patch; the width steps and types, and its reset shows only off the default", async () => {
     // Base UI's radio re-dispatches a click as a PointerEvent, which jsdom does not have.
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
-    const { api, sets } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true, sidebarWidth: 300 });
+    const { api, sets } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
+    expect(widthField().value).toBe(String(SIDEBAR_DEFAULT_WIDTH));
+    expect(screen.queryByRole("button", { name: "Reset" })).toBeNull();
     fireEvent.click(within(group("Theme")).getByRole("radio", { name: "Light" }));
     expect(useStore.getState().preferences.theme).toBe("light");
-    fireEvent.click(within(group("Sidebar")).getByRole("radio", { name: /Spaces/ }));
+    fireEvent.click(within(group("Sidebar")).getByRole("radio", { name: "Spaces" }));
     expect(useStore.getState().preferences.sidebarMode).toBe("spaces");
-    fireEvent.click(within(group("Text size")).getByRole("radio", { name: /Ghostty file/ }));
+    fireEvent.click(within(group("Text size")).getByRole("radio", { name: "From the Ghostty file" }));
     expect(useStore.getState().preferences.terminalSize).toBe("file");
-    const reset = screen.getByRole("button", { name: "Reset" });
-    expect((reset as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(reset);
-    expect(useStore.getState().preferences.sidebarWidth).toBeUndefined();
-    expect(document.querySelector("[data-k=sidebar-width]")!.textContent).toBe("default");
-    expect((screen.getByRole("button", { name: "Reset" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Wider" }));
+    await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH + 8));
+    expect(screen.getByRole("button", { name: "Reset" })).toBeDefined();
+    fireEvent.change(widthField(), { target: { value: "300" } });
+    fireEvent.blur(widthField());
+    await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(300));
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBeUndefined());
+    expect(widthField().value).toBe(String(SIDEBAR_DEFAULT_WIDTH));
+    expect(screen.queryByRole("button", { name: "Reset" })).toBeNull();
     await flush();
-    expect(sets).toEqual([{ theme: "light" }, { sidebarMode: "spaces" }, { terminalSize: "file" }, { sidebarWidth: null }]);
+    expect(sets).toEqual([{ theme: "light" }, { sidebarMode: "spaces" }, { terminalSize: "file" }, { sidebarWidth: SIDEBAR_DEFAULT_WIDTH + 8 }, { sidebarWidth: 300 }, { sidebarWidth: null }]);
   });
 
   it("in the shell's centre, the page takes the thread's place and the breadcrumb its name until a workspace is picked", async () => {

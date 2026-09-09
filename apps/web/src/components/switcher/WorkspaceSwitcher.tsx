@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The overlay the switch chord holds up: one card per workspace in sidebar
-// order, the highlight walking them while the chord's modifier is down. It
+// order, or in Spaces one per thread of the space on screen in the order they
+// were last opened, the highlight walking them while the chord's modifier is
+// down. It
 // takes no focus and traps none, since the person is mid-chord and the
 // dispatcher owns the keys. Every card is the same box whatever it holds, so
 // the highlight moving changes colour and nothing else. The paint waits out
@@ -13,13 +15,16 @@ import { desktopBridge } from "../../lib/desktopShell.js";
 import { useStore } from "../../protocol/store.js";
 import { ROW_META_CLASS } from "../../sidebar/rowGrammar.js";
 import { capturePagePreview, loadPagePreviews, useWorkspacePreviews } from "../../shell/workspacePreviews.js";
-import { highlightedWorkspaceId, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../../shell/workspaceSwitcher.js";
+import { highlightedTarget, SWITCHER_PAINT_DELAY_MS, targetKey, useWorkspaceSwitcher } from "../../shell/workspaceSwitcher.js";
 import { buildSwitcherCards, type SwitcherCard } from "./switcherCards.js";
 
 export function WorkspaceSwitcher() {
   const open = useWorkspaceSwitcher(s => s.open);
-  const ids = useWorkspaceSwitcher(s => s.ids);
-  const highlighted = useWorkspaceSwitcher(highlightedWorkspaceId);
+  const targets = useWorkspaceSwitcher(s => s.targets);
+  const highlighted = useWorkspaceSwitcher(s => {
+    const target = highlightedTarget(s);
+    return target === null ? null : targetKey(target);
+  });
   const from = useWorkspaceSwitcher(s => s.from);
   const workspaces = useStore(s => s.workspaces);
   const statuses = useStore(s => s.statuses);
@@ -43,8 +48,8 @@ export function WorkspaceSwitcher() {
   );
 
   useEffect(() => {
-    if (open) void loadPagePreviews(ids);
-  }, [open, ids]);
+    if (open) void loadPagePreviews([...new Set(targets.map(target => target.workspaceId))]);
+  }, [open, targets]);
 
   // The hold, not the step, is what asks for the overlay: a chord let go inside the delay paints nothing. Stepping
   // again does not restart it, so the wait is from the first press however many workspaces a person walks.
@@ -61,12 +66,12 @@ export function WorkspaceSwitcher() {
     if (!open || !painted) return [];
     return buildSwitcherCards({
       projects: deriveSidebarProjects({ workspaces, statuses, sessions }),
-      ids,
+      targets,
       images,
       currentId: from,
       pinnedThreadId: selectedThreadId,
     });
-  }, [from, ids, images, open, painted, selectedThreadId, sessions, statuses, workspaces]);
+  }, [from, targets, images, open, painted, selectedThreadId, sessions, statuses, workspaces]);
 
   if (!open || !painted) return null;
   return (
@@ -78,7 +83,7 @@ export function WorkspaceSwitcher() {
         role="listbox"
       >
         {cards.map(card => (
-          <SwitcherCardView card={card} highlighted={card.workspaceId === highlighted} key={card.workspaceId} />
+          <SwitcherCardView card={card} highlighted={(card.threadId ?? card.workspaceId) === highlighted} key={card.threadId ?? card.workspaceId} />
         ))}
       </div>
     </div>
@@ -95,10 +100,11 @@ function SwitcherCardView({ card, highlighted }: { card: SwitcherCard; highlight
       aria-selected={highlighted}
       className={cn("flex w-56 flex-col gap-1 rounded-md p-2 text-left transition-colors duration-150", highlighted && "bg-foreground/[0.09]")}
       data-workspace-card={card.workspaceId}
+      data-thread-card={card.threadId ?? undefined}
       ref={ref}
       role="option"
     >
-      {desktopBridge()?.workspacePreview !== undefined ? <CardPreview card={card} /> : null}
+      {card.threadId === null && desktopBridge()?.workspacePreview !== undefined ? <CardPreview card={card} /> : null}
       <span className="truncate text-foreground text-sm" data-card-name>
         {card.name}
       </span>

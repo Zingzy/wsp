@@ -4,7 +4,7 @@
 // it to the computer. One rule per value says which side it draws, and the
 // desktop shell is told the value so its frame and glass draw the same side.
 import type { ThemePreference } from "@wsp/protocol";
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useSyncExternalStore } from "react";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { useStore } from "../protocol/store.js";
@@ -39,4 +39,17 @@ export function useThemeEffect(): void {
     applyTheme(theme, systemDark);
     desktopBridge()?.setTheme?.(theme);
   }, [theme, systemDark]);
+}
+
+const subscribeToHtmlClass = (onChange: () => void): (() => void) => {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
+};
+const readDark = (): boolean => document.documentElement.classList.contains("dark");
+
+/** Which side the page is drawing right now, read off the html element the rule above flips: what a workspace theme
+ * following the app needs to know to pick its ink. */
+export function useAppDark(): boolean {
+  return useSyncExternalStore(subscribeToHtmlClass, readDark, () => false);
 }

@@ -302,18 +302,15 @@ describe("machine facts", () => {
   });
 });
 
-describe("the workspace's colour and icon", () => {
-  it("the tab carries the same picker the row's menu opens, and a pick goes to the runtime from here too", async () => {
-    const api = { ...fakeApi([view("ws_a", "api")]), setWorkspaceLook: vi.fn(async (_id: string, _look: WorkspaceLook) => ({ ...view("ws_a", "api"), tint: "cyan" as const })) };
+describe("the workspace's look", () => {
+  it("the tab carries no colour or icon section: those belong to the workspace's own menu", async () => {
+    const api = { ...fakeApi([view("ws_a", "api")]), setWorkspaceLook: vi.fn(async (_id: string, _look: WorkspaceLook) => view("ws_a", "api")) };
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } });
     useStore.getState().bind(api);
     render(<MachineSurface workspaceId="ws_a" />);
-    await waitFor(() => expect(document.querySelector("[data-workspace-look]")).not.toBeNull());
-    // Both facts on the tab, since it has the room the menu's dialog gives one at a time.
-    expect(screen.getByRole("group", { name: "Colour" })).toBeDefined();
-    expect(screen.getByRole("group", { name: "Icon" })).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Colour: Cyan" }));
-    await waitFor(() => expect(api.setWorkspaceLook).toHaveBeenCalledWith("ws_a", { tint: "cyan" }));
-    await waitFor(() => expect(useStore.getState().workspaces[0]!.tint).toBe("cyan"));
+    await waitFor(() => expect(screen.getByText("api")).toBeDefined());
+    expect(document.querySelector("[data-workspace-look], [data-theme-picker], [data-icon-picker]")).toBeNull();
+    expect(screen.queryByRole("group", { name: /Colour|Icon|theme/ })).toBeNull();
   });
 });
 

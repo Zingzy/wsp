@@ -432,7 +432,7 @@ export const useStore = create<State>((set, get) => {
         const workspace = await api.setWorkspaceLook(workspaceId, look);
         // The record answers with the whole look, and a cleared fact is absent from it, so the row takes it the way
         // the event does rather than through a merge, which cannot unset a key.
-        get().applyEvent({ type: "workspace.look", workspaceId, tint: workspace.tint ?? null, glyph: workspace.glyph ?? null });
+        get().applyEvent({ type: "workspace.look", workspaceId, theme: workspace.theme ?? null, glyph: workspace.glyph ?? null });
         return true;
       } catch (e: unknown) {
         if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
@@ -488,8 +488,8 @@ export const useStore = create<State>((set, get) => {
         case "workspace.look": {
           // Both facts travel whole, so a cleared one leaves the record rather than lingering under a merge.
           const put = <T extends WorkspaceView>(w: T): T => {
-            const { tint: _tint, glyph: _glyph, ...rest } = w;
-            return { ...rest, ...(e.tint !== null ? { tint: e.tint } : {}), ...(e.glyph !== null ? { glyph: e.glyph } : {}) } as T;
+            const { theme: _theme, glyph: _glyph, ...rest } = w;
+            return { ...rest, ...(e.theme !== null ? { theme: e.theme } : {}), ...(e.glyph !== null ? { glyph: e.glyph } : {}) } as T;
           };
           set(s => ({
             workspaces: s.workspaces.map(w => (w.id === e.workspaceId ? put(w) : w)),
