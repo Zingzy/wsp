@@ -140,6 +140,15 @@ describe("local workspace", () => {
     expect(handed.at(-1)).toEqual({ idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY });
   });
 
+  it("the view names the workspace's own folder, the one a thread starts in when no project does, so the app's line under the box says what the runtime will do", async () => {
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    expect(ws.folder).toBe(root);
+    expect((await rt.workspaces.get(ws.id)).folder).toBe(root);
+    expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(root);
+    await rt.close();
+  });
+
   it("a turn over the wire starts in the workspace's own folder, never the person's home, and the thread's row names it", async () => {
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: pwdAdapter }, local: localWiring });
     const ws = await rt.workspaces.createLocal("mac");

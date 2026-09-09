@@ -254,6 +254,38 @@ describe("rows from the fixture wire", () => {
     expect(line.className).toContain("text-[var(--top-row-meta)]");
   });
 
+  it("a thread row's second line carries the project its folder sits in beside the agent's mark, in the meta line's muted mono, and a row without one keeps the same height and grammar", async () => {
+    const projects = [{ name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" }, { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" }];
+    await mount(
+      fakeApi(
+        [{ ...API, projects }],
+        [status({ ...API, projects })],
+        [
+          session("s1", "ws_a", { prompt: "fix the port list", startedBy: "cli", cwd: "/root/spoo" }),
+          session("s2", "ws_a", { prompt: "upgrade node", harness: "codex", startedBy: "person", cwd: "/root/wsp/packages/host" }),
+          session("s3", "ws_a", { prompt: "no project", cwd: "/root" }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
+    const provenance = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-provenance]")!;
+    const word = (title: string): HTMLElement | null => rowOf(title).querySelector<HTMLElement>("[data-thread-project]");
+    expect(word("fix the port list")!.textContent).toBe("spoo");
+    expect(word("upgrade node")!.textContent).toBe("wsp");
+    expect(word("no project")).toBeNull();
+    // Mark, then the project, then who opened it: `✳ · spoo · cli`, the dots drawn as text and not as chips.
+    expect(provenance("fix the port list").textContent).toBe("·spoo·cli");
+    expect(provenance("fix the port list").getAttribute("aria-label")).toBe("Claude Code · spoo · cli");
+    expect(provenance("no project").textContent).toBe("you");
+    expect(provenance("no project").getAttribute("aria-label")).toBe("Claude Code · you");
+    const line = word("fix the port list")!.closest<HTMLElement>("[data-thread-meta]")!;
+    expect(line.className).toContain("font-mono");
+    expect(word("fix the port list")!.className).toContain("truncate");
+    expect(provenance("fix the port list").querySelectorAll("[data-slot=badge], .rounded-full, .border")).toHaveLength(0);
+    expect(rowOf("fix the port list").className).toBe(rowOf("no project").className);
+  });
+
   it("a long title shares its line with the age only; state, agent and opener sit under it, and every row is one height", async () => {
     const LONG = "Now reply with exactly the word pong.";
     const SHORT = "Reply with exactly the word hi.";

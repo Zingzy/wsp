@@ -382,7 +382,10 @@ export interface StartSessionOptions {
   /** The thread the message goes to, by its runtime id, when the view has no session to resume: the runtime resumes
    * the thread's latest session or, after a launch that failed, runs the message as the thread's first turn. */
   thread?: string;
+  /** The folder the thread starts in; it wins over project and the runtime's default folder rule. */
   cwd?: string;
+  /** One of the workspace's projects by name, where the thread starts when cwd names none. */
+  project?: string;
   /** Values from the harness catalog; absent leaves the CLI's own default for that flag. */
   model?: string;
   effort?: string;

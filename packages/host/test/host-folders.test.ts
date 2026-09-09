@@ -130,7 +130,7 @@ describe("this computer's folder listing", () => {
 
   it("reads the project folders off the records, each once, and answers a listing over them", async () => {
     const { project } = tree();
-    const records = [workspace({ project: { name: "api", dest: project, importedAt: "2026-09-06T10:00:00Z" } }), workspace({ id: "ws_b", project: { name: "api", dest: project, importedAt: "2026-09-06T11:00:00Z" } }), workspace({ id: "ws_c" })];
+    const records = [workspace({ projects: [{ name: "api", dest: project, importedAt: "2026-09-06T10:00:00Z" }] }), workspace({ id: "ws_b", projects: [{ name: "api", dest: project, importedAt: "2026-09-06T11:00:00Z" }] }), workspace({ id: "ws_c" })];
     expect(importedProjectFolders(records)).toEqual([project]);
     expect(importedProjectFolders([])).toEqual([]);
     const folders = hostFolders(async () => records);

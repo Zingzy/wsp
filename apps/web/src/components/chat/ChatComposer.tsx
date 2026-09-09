@@ -40,11 +40,11 @@ import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYP
 import type { ConnStatus } from "../../protocol/client";
 import { useStore, useWorkspaceState } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
-import { useThreadFolder } from "../../files/root";
+import { useThreadStart } from "../../files/root";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { catalogFromHarness } from "./adapt";
-import { ComposerCheckoutRow } from "./ComposerCheckoutRow";
+import { canPickFolder, ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatImageThumb } from "./ChatImages";
@@ -105,7 +105,15 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const { threadKey, named } = thread;
   const queue = useComposerQueue(threadKey);
   const held = useComposerQueueHeld(threadKey);
-  const cwd = useThreadFolder(workspaceId);
+  const nextStart = useThreadStart(workspaceId);
+  // A view locked to a turn resumes in that turn's folder, as its row says; only a view about to open a thread reads the pick.
+  const viewCwd = thread.view.cwd;
+  const pickable = canPickFolder(thread);
+  const folderStart = useMemo(() => (pickable ? nextStart : viewCwd !== null ? { cwd: viewCwd } : {}), [nextStart, pickable, viewCwd]);
+  // The folder picker under the box is up: opened from its own trigger, from new thread here, or from the project
+  // menu's other folder row in the footer; it goes with the pick once the view is locked to a turn.
+  const [folderPicker, setFolderPicker] = useState(false);
+  const openFolderPicker = useCallback(() => setFolderPicker(true), []);
   const { harness: harnessId, startOptions, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const enqueue = useComposerDraftStore(s => s.enqueue);
@@ -268,7 +276,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
           requestId,
           ...(resume ? { resume } : {}),
           ...(into !== undefined ? { thread: into } : {}),
-          ...(cwd !== null ? { cwd } : {}),
+          ...folderStart,
           ...(attachments.length > 0 ? { attachments } : {}),
           ...startOptions,
         })
@@ -279,7 +287,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, cwd, hold, images, into, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, workspaceId],
+    [api, appendLocalError, appendUserTurn, folderStart, hold, images, into, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, workspaceId],
   );
 
   const send = useCallback(() => {
@@ -521,7 +529,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                           event.target.value = "";
                         }}
                       />
-                      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} />
+                      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} onOtherFolder={openFolderPicker} />
                     </div>
                     <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
                       <ComposerPrimaryActions
@@ -548,7 +556,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
             </div>
           </form>
         </ComposerSurface.Host>
-        <ComposerCheckoutRow workspaceId={workspaceId} thread={thread} />
+        <ComposerCheckoutRow workspaceId={workspaceId} thread={thread} pickerOpen={folderPicker && pickable} onPickerOpenChange={setFolderPicker} />
       </ComposerSurface.Shell>
     </div>
   );

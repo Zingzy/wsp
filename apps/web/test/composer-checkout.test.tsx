@@ -107,12 +107,12 @@ const workspace: WorkspaceView = {
   claudeSessionId: "sess_0001",
 };
 /** The same workspace after one import: the picker browses home and the project folder. */
-const withProject: WorkspaceView = { ...workspace, project: imported.project };
+const withProject: WorkspaceView = { ...workspace, projects: imported.projects };
 const STATUS = { branch: { oid: "abc", head: "feature/panes", ahead: 0, behind: 0 }, entries: [], root: "/root/app" };
 
 function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = [], ws: WorkspaceView = workspace) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
-  const started: Array<{ workspaceId: string; prompt: string; resume?: string; cwd?: string }> = [];
+  const started: Array<{ workspaceId: string; prompt: string; resume?: string; cwd?: string; project?: string }> = [];
   const api: Api = {
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
@@ -305,26 +305,45 @@ describe("composer checkout row", () => {
     expect(started[0]).toMatchObject({ prompt: "work in the project", cwd: `${PROJECT_DEST}/packages` });
   });
 
-  it("starts an unpicked thread on a workspace with a project in the project folder, which is what wsp init's first import leaves", async () => {
+  it("starts an unpicked thread on a workspace with one project by naming that project, the folder under the box saying where that lands; the runtime's rule does the rest", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) }));
     const { api, started } = fixtureApi([], [], withProject);
     await setup(api);
+    expect(folder()).toBe(PROJECT_DEST);
     const editor = composerEditor();
     await typeInto(editor, "hello");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]?.cwd).toBe(PROJECT_DEST);
+    expect(started[0]).toMatchObject({ project: "wsp" });
+    expect(started[0]?.cwd).toBeUndefined();
   });
 
-  it("starts an unpicked thread in the daemon root", async () => {
+  it("on this computer the line names the workspace's own folder, the one the runtime publishes, not the home the daemon browses from, and the start still names nothing", async () => {
+    const WORK = "/Users/dev/wsp-work";
+    provideDaemonHello(WS, { ...DAEMON_HELLO, root: "/Users/dev" });
+    provideDaemonWire(WS, fakeWire({ "fs.list": () => ({ entries: [], truncated: false, total: 0 }), "git.status": () => Object.assign(new Error("not a git repository"), { code: "not-a-git-repo" }) }));
+    const { api, started } = fixtureApi([], [], { ...workspace, kind: "local", machineId: "local", golden: "", folder: WORK });
+    await setup(api);
+    expect(folder()).toBe(WORK);
+    const editor = composerEditor();
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.cwd).toBeUndefined();
+    expect(started[0]?.project).toBeUndefined();
+  });
+
+  it("starts an unpicked thread on a workspace without projects naming no folder, so the runtime's rule lands it in the machine's own, the one the line under the box shows", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
     const { api, started } = fixtureApi();
     await setup(api);
+    expect(folder()).toBe("/root");
     const editor = composerEditor();
     await typeInto(editor, "hello");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]?.cwd).toBe("/root");
+    expect(started[0]?.cwd).toBeUndefined();
+    expect(started[0]?.project).toBeUndefined();
   });
 
   it("offers no picker and sends no cwd before the daemon named its root", async () => {

@@ -4,7 +4,7 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import { foldThreads, workspaceStateOf, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, projectAt, workspaceProjects, workspaceStateOf, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
@@ -38,7 +38,7 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
         reach: status?.reach.state ?? null,
         state,
         indicator: indicatorFor(state),
-        threads: threads.map(deriveThread),
+        threads: threads.map(thread => deriveThread(thread, workspace)),
       };
       return { rank: LIST_RANK[state], activityMs: lastActivityMs(workspace, threads), project };
     })
@@ -103,7 +103,7 @@ export function turnWait(state: WorkspaceState): { readonly label: string; reado
   }
 }
 
-function deriveThread(thread: ThreadView): SidebarThreadSnapshot {
+function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projects">): SidebarThreadSnapshot {
   return {
     id: thread.id,
     threadId: thread.threadId ?? null,
@@ -116,6 +116,7 @@ function deriveThread(thread: ThreadView): SidebarThreadSnapshot {
     indicator: threadIndicator(thread),
     harness: thread.harness,
     startedBy: thread.startedBy,
+    project: projectAt(workspaceProjects(workspace), thread.cwd)?.name ?? null,
   };
 }
 
