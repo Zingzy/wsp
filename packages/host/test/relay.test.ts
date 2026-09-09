@@ -126,12 +126,28 @@ function relayRuntime(guestUrl: string, goldenRecipe?: GoldenRecipe): { rt: Runt
   return { rt: createRuntime({ backend, store, adapters: {}, wake: { pingTimeoutMs: 100 }, daemonToken: TOKEN, ...(goldenRecipe !== undefined ? { goldenRecipe } : {}) }), backend };
 }
 
+/** Ports this file has handed out, none of them twice: the kernel hands an ephemeral port back out while it is free
+ * (a repeat in 3 of 100 draws of 17 ports), and the relay folds a second event for a port it already forwards into
+ * that one forward, so a test whose ports collide waits for a row that never comes. */
+const handedOut = new Set<number>();
+
 async function freePort(): Promise<number> {
-  const s = createServer();
-  await new Promise<void>(r => s.listen(0, "127.0.0.1", r));
-  const port = (s.address() as { port: number }).port;
-  await new Promise<void>(r => s.close(() => r()));
-  return port;
+  // Each candidate stays bound until a fresh one comes, so the kernel cannot answer with one it just offered.
+  const holding: Server[] = [];
+  try {
+    for (;;) {
+      const s = createServer();
+      holding.push(s);
+      await new Promise<void>(r => s.listen(0, "127.0.0.1", r));
+      const port = (s.address() as { port: number }).port;
+      if (!handedOut.has(port)) {
+        handedOut.add(port);
+        return port;
+      }
+    }
+  } finally {
+    for (const s of holding) await new Promise<void>(r => s.close(() => r()));
+  }
 }
 
 /** A port this test holds on ::1 alone and saw free on 127.0.0.1, so the relay's bind on that family is its own to release. */
@@ -148,10 +164,10 @@ async function heldOnOneFamily(): Promise<{ server: Server; port: number }> {
   throw new Error("no port free on both 127.0.0.1 and ::1 in 20 tries");
 }
 
-async function until(cond: () => boolean, ms = 3000): Promise<void> {
+async function until(cond: () => boolean, ms = 3000, what = "condition"): Promise<void> {
   const deadline = Date.now() + ms;
   while (!cond()) {
-    if (Date.now() > deadline) throw new Error("condition not met in time");
+    if (Date.now() > deadline) throw new Error(`${what} not met in time`);
     await new Promise(r => setTimeout(r, 10));
   }
 }
@@ -1370,15 +1386,16 @@ describe("localhost forwards over a fake daemon link", () => {
 
   it("a callback bind in flight does not count toward the url cap", async () => {
     const { link } = await setup();
+    const forwarded = (): Set<number> => new Set(relay!.forwards().map(f => f.port));
     const ports: number[] = [];
     for (let i = 0; i < FORWARD_MAX_PER_TARGET - 1; i++) ports.push(await freePort());
     for (const port of ports) link.emit({ type: "localhost.url", port });
-    await until(() => relay!.forwards().length === FORWARD_MAX_PER_TARGET - 1);
+    await until(() => ports.every(p => forwarded().has(p)), 3000, "every url port forwarded");
     const x = await freePort();
     const y = await freePort();
     link.emit({ type: "callback.port", port: x });
     link.emit({ type: "localhost.url", port: y });
-    await until(() => relay!.forwards().length === FORWARD_MAX_PER_TARGET + 1);
+    await until(() => forwarded().has(x) && forwarded().has(y), 3000, "the callback port and the last url port forwarded");
     expect(relay!.forwards().filter(f => f.kind === "url")).toHaveLength(FORWARD_MAX_PER_TARGET);
     expect(relay!.forwards().find(f => f.port === x)?.kind).toBe("callback");
   });
