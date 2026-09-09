@@ -2,10 +2,12 @@
 // Drives the packaged app (pnpm --filter @wsp/desktop build first). Gated on
 // WSP_DESKTOP_SMOKE=1 so the unit suite stays free of a 200 MB binary.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { serve, startHost, workspaceAsset, type CliIO, type HostHandle } from "@wsp/host";
+import { CATALOG_AGENTS } from "@wsp/catalog";
+import { serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
+import { CLOUD_SETUP_WORDS } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +15,7 @@ import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
 import { THEME_WORDS } from "../../web/src/settings/format.js";
+import { VERSION } from "../../../packages/host/src/version.js";
 import { executableIn, treeHere } from "./packaged.js";
 import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
 
@@ -46,7 +49,9 @@ interface Launched {
 }
 
 const APP_URL = /^http:\/\/127\.0\.0\.1:\d+\/$/;
-const SETUP_URL = /setup\.html/;
+const ONBOARDING_URL = /onboarding\.html/;
+/** Where the photographed states go, beside the render tests' own. */
+const SHOTS = join(tmpdir(), "wsp-render");
 const DEVTOOLS_URL = /^devtools:\/\//;
 
 /** The windows the app opened: a devtools window is Chromium's own, enumerated alongside them and able to come first. */
@@ -122,6 +127,69 @@ interface DesktopWindow {
 
 function readPreview(page: Page, workspaceId: string): Promise<string | undefined> {
   return page.evaluate(id => (window as unknown as DesktopWindow).wsp.workspacePreview(id), workspaceId);
+}
+
+/** A page in both themes: the shell's theme source is flipped, since the onboarding page follows the system's. */
+async function photograph(app: ElectronApplication, page: Page, name: string): Promise<string[]> {
+  mkdirSync(SHOTS, { recursive: true });
+  const files: string[] = [];
+  for (const theme of ["dark", "light"] as const) {
+    await app.evaluate(({ nativeTheme }, t) => {
+      nativeTheme.themeSource = t;
+    }, theme);
+    await page.waitForFunction(t => window.matchMedia("(prefers-color-scheme: dark)").matches === (t === "dark") && document.documentElement.classList.contains("dark") === (t === "dark"), theme);
+    // The page holds transitions off for one frame across the flip, as the app does; the shot waits past that frame and
+    // any hover fade, and shows the screen at rest, without the focus ring of the button Enter would press.
+    await page.waitForTimeout(400);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    const file = join(SHOTS, `${name}-${theme}.png`);
+    await page.screenshot({ path: file });
+    files.push(file);
+  }
+  await app.evaluate(({ nativeTheme }) => {
+    nativeTheme.themeSource = "system";
+  });
+  return files;
+}
+
+/** The app window as the screen shows it, over a backdrop of one colour: its sidebar is the window's glass, which a
+ * page capture paints white, so the file has to come from the screen. Off macOS the page capture stands in. */
+async function photographWindow(app: ElectronApplication, win: Page, file: string, backdrop: string): Promise<string> {
+  mkdirSync(SHOTS, { recursive: true });
+  if (process.platform !== "darwin") {
+    await win.screenshot({ path: file });
+    return file;
+  }
+  const ids = await app.evaluate(({ BrowserWindow, app: electronApp, screen }, color) => {
+    const target = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith("http://127.0.0.1"))!;
+    const behind = new BrowserWindow({ ...screen.getPrimaryDisplay().bounds, frame: false, show: false, focusable: false, backgroundColor: color });
+    behind.showInactive();
+    // The app under test takes activation so the window is key; the backdrop floats over every other window and the
+    // app one step above it, so nothing else sits between them.
+    electronApp.focus({ steal: true });
+    behind.setAlwaysOnTop(true, "floating", 0);
+    target.setAlwaysOnTop(true, "floating", 1);
+    target.focus();
+    return { target: target.id, behind: behind.id, bounds: target.getBounds() };
+  }, backdrop);
+  // The glass repaints over the new backdrop a few frames later.
+  await win.waitForTimeout(800);
+  const b = ids.bounds;
+  expect(spawnSync("screencapture", ["-R", `${b.x},${b.y},${b.width},${b.height}`, "-x", file]).status).toBe(0);
+  await app.evaluate(({ BrowserWindow }, ids) => {
+    BrowserWindow.fromId(ids.behind)!.close();
+    BrowserWindow.fromId(ids.target)!.setAlwaysOnTop(false);
+  }, ids);
+  return file;
+}
+
+/** The onboarding page's two-agent fixture: Claude Code and Codex by their config alone and a PATH with none, so what
+ * the screen finds is what was put here. */
+function twoAgents(home: string): void {
+  mkdirSync(join(home, ".claude"));
+  writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
+  mkdirSync(join(home, ".codex"));
+  writeFileSync(join(home, ".codex", "config.toml"), "");
 }
 
 async function refused(url: string): Promise<boolean> {
@@ -235,33 +303,153 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await win.keyboard.up("Control");
   });
 
-  it("shows the setup screen without a key or golden, and opens the app once retry finds both", async () => {
-    launched = await launch({});
-    const app = launched.app;
-    const setup = await windowAt(app, SETUP_URL);
-    await setup.waitForLoadState("domcontentloaded");
-    expect(setup.url()).toContain("?");
-    expect(await setup.title()).toBe("wsp");
-    expect(await setup.innerText("main")).toContain("run wsp init in a terminal");
-    expect(await setup.innerText("main")).toContain(`Looked for keys and a golden in ${launched.home}.`);
-    expect(await setup.isHidden("#stale")).toBe(true);
-    expect(await setup.textContent("#command")).toBe("wsp init");
-    await setup.click("#retry");
-    await setup.waitForFunction(() => document.getElementById("status")?.textContent === "not set up yet");
-    // The window count is a fact that settles, not one that holds the moment the page's status line changed.
-    await vi.waitFor(() => expect(appWindows(app)).toHaveLength(1), { timeout: 10_000, interval: 50 });
-    expect(existsSync(join(launched.home, ".env"))).toBe(false);
+  it("first launch with no key: the welcome, the agents found here with an install, Esc to the recap, the recap's own install, then the app on this computer with the cloud row, and the shim runs", async () => {
+    // Labs on, since the settings page that picks the light side for the photograph is a labs surface.
+    launched = await launch({ PATH: "/usr/bin:/bin", WSP_LABS: "1" }, twoAgents);
+    const { app, home } = launched;
+    const shim = shimPath(home);
+    // The command is installed before any window, so an agent configured on the next screen has something to run.
+    expect(existsSync(shim)).toBe(true);
+    const page = await windowAt(app, ONBOARDING_URL);
+    await page.waitForLoadState("domcontentloaded");
+    expect(await page.title()).toBe("wsp");
+    // Nothing scrolls, on any screen.
+    const fits = (): Promise<boolean> => page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight);
+    // The page draws with the app's stylesheet: its tokens resolve here, and the dark class is the app's own switch.
+    const tokens = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      return { background: style.getPropertyValue("--background").trim(), mono: style.getPropertyValue("--font-mono").trim(), primary: style.getPropertyValue("--primary").trim() };
+    });
+    expect(tokens.background).not.toBe("");
+    expect(tokens.primary).not.toBe("");
+    expect(tokens.mono).toContain("ui-monospace");
+    // The app's stylesheet clears html and body under the desktop class for the glass; this page paints its own ground.
+    expect(await page.$eval(".ground", el => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
+    expect(await page.textContent("#welcome h1")).toBe("Welcome to wsp");
+    expect(await page.textContent("#start")).toContain("Get started");
+    if (process.platform === "darwin") expect(await page.textContent("#computer")).toMatch(/^[^.]+ · macOS \d+$/);
+    expect(await page.isHidden("#agents")).toBe(true);
+    expect(await fits()).toBe(true);
+    console.info(`welcome: ${(await photograph(app, page, "onboarding-welcome")).join(" ")}`);
 
-    writeFileSync(join(launched.home, ".env"), `SOLARI_API_KEY=${FAKE_SOLARI}\n`, { mode: 0o600 });
-    seedGolden(launched.home);
-    // An event asked for after it has fired never arrives, and the retry closes this window while the click is in flight.
-    const closed = setup.waitForEvent("close");
-    await setup.click("#retry");
+    // Enter advances.
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#agents:not([hidden])");
+    expect(await page.isHidden("#welcome")).toBe(true);
+    expect(await page.textContent("#agents h1")).toBe("Let your agents drive wsp");
+    // Every catalog agent is a row, in catalog order: the two found with a keycap, the rest with the state word.
+    const rows = await page.$$eval("#rows li", rows => rows.map(r => [r.getAttribute("data-agent"), r.querySelector(".name")?.textContent, r.querySelector(".slot")?.textContent]));
+    expect(rows).toEqual(CATALOG_AGENTS.map(a => [a.id, a.name, a.id === "claude" || a.id === "codex" ? "Install" : "not found"]));
+    // The marks are the web app's vendored svgs, masked in the current colour; an agent without one gets its initial.
+    expect(await page.$eval("#rows li[data-agent=claude] .glyph", el => (el as HTMLElement).style.getPropertyValue("--mark"))).toContain("agents/claude.svg");
+    expect(await page.$eval("#rows li[data-agent=hermes] .initial", el => el.textContent)).toBe("H");
+    // The session counts land after the rows, read off the stores, which here are empty.
+    await page.waitForFunction(() => /sessions$/.test(document.querySelector("#rows li[data-agent=claude] .meta")?.textContent ?? ""), undefined, { timeout: 30_000 });
+    expect(await page.textContent("#rows li[data-agent=claude] .meta")).toBe("0 sessions");
+    expect(await page.textContent("#skip")).toBe("Skip");
+    expect(await page.isEnabled("#all")).toBe(true);
+    // Every row one height, whatever its slot holds.
+    const heights = await page.$$eval("#rows li", rows => rows.map(r => r.getBoundingClientRect().height));
+    expect(new Set(heights).size).toBe(1);
+    expect(await fits()).toBe(true);
+    console.info(`agents: ${(await photograph(app, page, "onboarding-agents")).join(" ")}`);
+
+    await page.click("#rows li[data-agent=claude] button");
+    await page.waitForFunction(() => document.querySelector("#rows li[data-agent=claude] .state")?.textContent === "MCP added");
+    expect(await page.$$eval("#rows li", rows => rows.map(r => r.getBoundingClientRect().height))).toEqual(heights);
+    expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: shim, args: ["mcp", "--state", join(home, "state.json")] } } });
+    expect(existsSync(join(home, ".claude", "skills", "wsp", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(home, ".codex", "skills"))).toBe(false);
+
+    // Esc is Skip: the recap, with the install that was skipped still offered on its row.
+    await page.keyboard.press("Escape");
+    await page.waitForSelector("#recap:not([hidden])");
+    expect(await page.textContent("#recap h1")).toBe("This computer is your first workspace");
+    expect(await page.textContent("#open")).toContain("Open wsp");
+    if (process.platform === "darwin") expect(await page.textContent("#thread-key")).toBe("⌘N");
+    expect(await page.textContent("#recap-agents button")).toBe("Install");
+    expect(await page.textContent("#next li:nth-child(3) .state")).toBe("in the sidebar");
+    expect(await fits()).toBe(true);
+    console.info(`recap: ${(await photograph(app, page, "onboarding-recap")).join(" ")}`);
+    await page.click("#recap-agents button");
+    await page.waitForFunction(() => document.querySelector("#recap-agents .state")?.textContent === "MCP added");
+    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]");
+    expect(existsSync(join(home, ".codex", "skills", "wsp", "SKILL.md"))).toBe(true);
+
+    // Enter opens the app. An event asked for after it has fired never arrives, and the finish closes this window while the key is in flight.
+    const closed = page.waitForEvent("close");
+    await page.keyboard.press("Enter");
     const win = await windowAt(app, APP_URL);
     const boot = await bootOf(win);
     expect(boot.token).toMatch(TOKEN);
     await closed;
     await vi.waitFor(() => expect(appWindows(app)).toHaveLength(1), { timeout: 10_000, interval: 50 });
+    const state = JSON.parse(readFileSync(join(home, "state.json"), "utf8")) as { workspaces?: Record<string, { kind?: string }> };
+    expect(Object.values(state.workspaces ?? {}).filter(w => w.kind === "local")).toHaveLength(1);
+    expect(existsSync(join(home, ".env"))).toBe(false);
+
+    // The app opens on this computer, and the cloud row waits at the sidebar's bottom.
+    const row = win.locator("[data-cloud-setup-row]");
+    await row.waitFor();
+    expect(await row.textContent()).toBe(CLOUD_SETUP_WORDS.row);
+    const shots: string[] = [];
+    // The shots show the shell at rest: no focus ring from the click that just happened, and the theme painted.
+    const rest = async (): Promise<void> => {
+      await win.evaluate(() => {
+        (document.activeElement as HTMLElement | null)?.blur();
+        return new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+      });
+    };
+    await rest();
+    shots.push(await photographWindow(app, win, join(SHOTS, "app-cloud-row-dark.png"), "#101010"));
+    await row.click();
+    const dialog = win.getByRole("dialog");
+    await dialog.waitFor();
+    expect(await dialog.textContent()).toContain(CLOUD_SETUP_WORDS.noGolden);
+    shots.push(await photographWindow(app, win, join(SHOTS, "app-cloud-dialog-dark.png"), "#101010"));
+    await win.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+    // The page follows the record's theme and tells the shell, so the light side is picked where the record is written:
+    // the settings page. The main's colour changing is the paint; the class alone is not.
+    const insetColour = (): Promise<string> => win.evaluate(() => getComputedStyle(document.querySelector("[data-slot=sidebar-inset]")!).backgroundColor);
+    const darkInset = await insetColour();
+    await win.keyboard.press("Meta+,");
+    await win.waitForSelector("[data-settings-page]");
+    await win.getByRole("radio", { name: THEME_WORDS.light.title }).click();
+    await win.waitForFunction(() => !document.documentElement.classList.contains("dark"));
+    await vi.waitFor(async () => expect(await insetColour()).not.toBe(darkInset));
+    await win.keyboard.press("Meta+,");
+    await win.waitForSelector("[data-settings-page]", { state: "detached" });
+    await win.waitForTimeout(500);
+    await rest();
+    shots.push(await photographWindow(app, win, join(SHOTS, "app-cloud-row-light.png"), "#ffffff"));
+    console.info(`cloud row: ${shots.join(" ")}`);
+
+    // The shim is the wsp command: it runs the bundled host as node, and an install through it writes the shim too.
+    const env = { ...process.env, HOME: home, WSP_HOME: home };
+    const version = spawnSync(shim, ["--version"], { encoding: "utf8", env });
+    expect(version.stderr).toBe("");
+    expect(version.stdout).toBe(`wsp ${VERSION}\n`);
+    const installed = spawnSync(shim, ["mcp", "install", "--agent", "codex", "--json", "--state", join(home, "state.json")], { encoding: "utf8", env, cwd: join(home, "cwd") });
+    expect(installed.status).toBe(0);
+    const report = JSON.parse(installed.stdout) as InstallReport;
+    expect(report.server).toEqual({ command: shim, args: ["mcp", "--state", join(home, "state.json")] });
+    expect(report.installed.map(p => p.id)).toEqual(["codex"]);
+  });
+
+  it("Enter on the agents screen installs every agent found here and advances to the recap", async () => {
+    launched = await launch({ PATH: "/usr/bin:/bin" }, twoAgents);
+    const { app, home } = launched;
+    const page = await windowAt(app, ONBOARDING_URL);
+    await page.waitForLoadState("domcontentloaded");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#agents:not([hidden])");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#recap:not([hidden])");
+    expect(await page.$$eval("#rows li .state", els => els.map(e => e.textContent))).toEqual(CATALOG_AGENTS.map(a => (a.id === "claude" || a.id === "codex" ? "MCP added" : "not found")));
+    expect(await page.textContent("#recap-agents .state")).toBe("MCP added");
+    expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")).mcpServers.wsp.command).toBe(shimPath(home));
+    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]");
   });
 
   it("attaches to a host already on the port with an empty ~/.wsp and no key, skipping the gate, and leaves it running after quit", async () => {
@@ -271,7 +459,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const boot = await bootOf(win);
     expect(win.url()).toBe(`http://127.0.0.1:${existing.port}/`);
     expect(boot.token).toBe(existing.authToken);
-    expect(existsSync(join(launched.home, ".wsp"))).toBe(false);
+    // Nothing of a host's lands in ~/.wsp; the wsp command the app installs on every launch is all that is there.
+    expect(readdirSync(join(launched.home, ".wsp"))).toEqual(["bin"]);
     await launched.app.close();
     expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
   });
@@ -333,7 +522,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await win.locator("[data-context-menu]").count()).toBe(0);
   });
 
-  it("shows the setup screen naming ~/.wsp and the pointer whose host is gone", async () => {
+  it("a pointer whose host is gone is not followed: the first launch runs on ~/.wsp", async () => {
     launched = await launch({ WSP_HOME: undefined }, home => {
       const custom = join(home, "old-home");
       mkdirSync(custom);
@@ -341,11 +530,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       mkdirSync(join(home, ".wsp"));
       writeFileSync(join(home, ".wsp", "current-home"), `${custom}\n`);
     });
-    const setup = await windowAt(launched.app, SETUP_URL);
-    await setup.waitForLoadState("domcontentloaded");
-    const text = await setup.innerText("main");
-    expect(text).toContain(`Looked for keys and a golden in ${join(launched.home, ".wsp")}.`);
-    expect(text).toContain(`~/.wsp/current-home names ${join(launched.home, "old-home")}, but no host is serving it.`);
+    const page = await windowAt(launched.app, ONBOARDING_URL);
+    await page.waitForLoadState("domcontentloaded");
+    expect(await page.textContent("#welcome h1")).toBe("Welcome to wsp");
+    expect(existsSync(shimPath(join(launched.home, ".wsp")))).toBe(true);
+    expect(existsSync(join(launched.home, "old-home", "bin"))).toBe(false);
   });
 
   it.runIf(process.platform === "darwin")(
@@ -592,9 +781,9 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         console.info(`over a ${desktop} desktop the glass is rgb(${shot.glass.join(", ")}) and the search row rgb(${shot.searchRow.join(", ")}): ${Object.entries(ratios).map(([k, v]) => `${k} ${v.toFixed(2)}:1`).join(", ")}`);
         expectOneGap(openGaps);
         expect(Math.abs(wordmarkDrop)).toBeLessThanOrEqual(CENTRED);
-        // The search row's tint: darker than the bare glass beside it in every channel, and the word Search still AA on it.
-        expect(shot.searchRow.every((v, i) => v <= shot.glass[i]!)).toBe(true);
-        expect(shot.searchRow.some((v, i) => v < shot.glass[i]!)).toBe(true);
+        // The search row sits on the selected row's surface, so it reads apart from the bare glass beside it, and the word
+        // Search is still AA on it.
+        expect(shot.searchRow).not.toEqual(shot.glass);
         for (const ratio of Object.values(ratios)) expect(ratio).toBeGreaterThanOrEqual(4.5);
 
         // Collapsed, the page header is the frame row: the toggle lands where the sidebar's was, the breadcrumb after it, the row still drags.

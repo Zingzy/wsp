@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Lays out build/app, the directory electron-builder packages: the bundled
-// main and preload, the built web app, a copy of @wsp/daemon's package
-// (package.json plus dist) that the host's require.resolve finds when it
-// stages the guest bundle, and node-pty, the one package the bundle leaves
-// external. An unpackaged run finds both under build/app/node_modules; a
-// packaged app carries the daemon as an extra resource one directory above the
-// app, on the same parent walk, and node-pty from scripts/after-pack.mjs,
-// which alone knows which target each packaged tree runs.
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+// main, command and preload, the onboarding page with the agents' marks, every shipped asset in the
+// host's own packed layout (build/app/assets, one folder up from the bundles,
+// where the host's asset table reads them back from for the window and for
+// the wsp command alike), and node-pty, the one package the bundles leave
+// external. An unpackaged run finds node-pty under build/app/node_modules; a
+// packaged app gets it from scripts/after-pack.mjs, which alone knows which
+// target each packaged tree runs.
+import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ptyPackage, stagePty } from "./pty.mjs";
 
 // The table of shipped assets lives in @wsp/host's build output, and build:app
 // runs on its own from `start`, so a tree that has not built it is named here
 // instead of in a resolver stack trace.
-const { workspaceAsset } = await import("@wsp/host").catch(e => {
+const { ASSETS_DIR, ASSET_KINDS, stageAsset, workspaceAsset } = await import("@wsp/host").catch(e => {
   if (e.code !== "ERR_MODULE_NOT_FOUND") throw e;
   throw new Error("@wsp/host is not built: run pnpm --filter @wsp/desktop build:deps first");
 });
@@ -24,27 +24,25 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const app = join(root, "build", "app");
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 
-const webDir = workspaceAsset("web");
-const daemonDir = workspaceAsset("daemon");
-for (const [what, path] of [
-  ["main bundle", join(app, "main", "main.mjs")],
-  ["web app", join(webDir, "index.html")],
-  ["daemon dist", join(daemonDir, "dist", "index.js")],
-]) {
-  if (!existsSync(path)) throw new Error(`${what} not built: ${path} is missing`);
-}
+if (!existsSync(join(app, "main", "main.mjs"))) throw new Error(`main bundle not built: ${join(app, "main", "main.mjs")} is missing`);
+if (!existsSync(join(app, "main", "cli.mjs"))) throw new Error(`command bundle not built: ${join(app, "main", "cli.mjs")} is missing`);
 
-cpSync(join(root, "src", "setup.html"), join(app, "main", "setup.html"));
+rmSync(join(app, ASSETS_DIR), { recursive: true, force: true });
+for (const kind of ASSET_KINDS) stageAsset(workspaceAsset(kind), app, kind);
 
-rmSync(join(app, "web"), { recursive: true, force: true });
-cpSync(webDir, join(app, "web"), { recursive: true });
+// The onboarding page draws with the web app's own stylesheet, whose built name carries a hash, so the page is
+// written with that name; the agents' marks it draws are the web app's vendored svgs, copied beside it.
+const webAssets = join(app, ASSETS_DIR, "web", "assets");
+const webCss = readdirSync(webAssets).find(f => /^index-.*\.css$/.test(f));
+if (webCss === undefined) throw new Error(`web stylesheet not found under ${webAssets}`);
+const page = readFileSync(join(root, "src", "onboarding.html"), "utf8");
+if (!page.includes("__WEB_CSS__")) throw new Error("onboarding.html has no __WEB_CSS__ to write the stylesheet into");
+writeFileSync(join(app, "main", "onboarding.html"), page.replace("__WEB_CSS__", `../${ASSETS_DIR}/web/assets/${webCss}`));
+const marks = join(dirname(workspaceAsset("web")), "src", "assets", "agents");
+rmSync(join(app, "main", "agents"), { recursive: true, force: true });
+cpSync(marks, join(app, "main", "agents"), { recursive: true, filter: p => p === marks || p.endsWith(".svg") });
 
-const daemonOut = join(app, "node_modules", "@wsp", "daemon");
 rmSync(join(app, "node_modules"), { recursive: true, force: true });
-mkdirSync(daemonOut, { recursive: true });
-cpSync(join(daemonDir, "package.json"), join(daemonOut, "package.json"));
-cpSync(join(daemonDir, "dist"), join(daemonOut, "dist"), { recursive: true });
-
 // This machine's own build, for an unpackaged run: a packaged tree gets the build for the target it runs, from the
 // afterPack hook, since one build stages once and packages several targets.
 stagePty(ptyPackage(), app);

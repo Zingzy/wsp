@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineConfig } from "tsup";
 
-// One self-contained main bundle: every workspace package and its deps ride
-// inside, so the packaged app carries no pnpm node_modules tree (they are all
-// devDependencies, which tsup bundles and electron-builder ignores). Electron
-// itself and ws's optional native accelerators stay external.
+// Two self-contained bundles, the window's main and the wsp command the shim
+// runs: every workspace package and its deps ride inside, so the packaged app
+// carries no pnpm node_modules tree (they are all devDependencies, which tsup
+// bundles and electron-builder ignores). Electron itself and ws's optional
+// native accelerators stay external.
 //
 // node-pty is external as well, and is the one package that rides beside the
 // bundle: it loads pty.node by a require of a path relative to its own lib, so
@@ -13,7 +14,7 @@ import { defineConfig } from "tsup";
 // scripts/stage.mjs lays the package out where the bundle's resolver walks to.
 export default defineConfig([
   {
-    entry: { main: "src/main.ts" },
+    entry: { main: "src/main.ts", cli: "src/cli.ts" },
     format: ["esm"],
     outDir: "build/app/main",
     platform: "node",

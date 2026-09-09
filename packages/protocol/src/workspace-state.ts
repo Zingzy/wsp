@@ -31,9 +31,10 @@ export interface WorkspaceKindWords {
    * says the reach word `unsupported` is this kind's steady state rather than something missing from one machine,
    * so a row says what the machine is instead of that its daemon is not there. */
   daemon: boolean;
-  /** Whether a machine of this kind reads its own load, memory and disk for the Machine tab's Live rows. */
+  /** Whether a machine of this kind reads its own load, memory and disk for the Machine tab's Live rows. False says
+   * those rows read that the reading is not on this kind, rather than waiting on a sample that never comes. */
   metrics: boolean;
-  /** Whether a machine of this kind lists its processes for the Processes tab. */
+  /** Whether a machine of this kind lists its processes for the Processes tab, which the same rule holds for. */
   processes: boolean;
 }
 

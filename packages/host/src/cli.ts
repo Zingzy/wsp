@@ -66,7 +66,7 @@ import {
 } from "./service.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
-import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp } from "./mcp-install.js";
+import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
 import { CLI_VERBS, COMMON, failed, findVerb, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
@@ -1119,7 +1119,7 @@ function commandUsage(word: string): string | undefined {
  * once per `--agent` given, and answers with the lines or, with `--json`, the report as one line. Its flags are
  * parsed here rather than in the table every command shares, so a command that has no JSON to print refuses
  * `--json` instead of taking it and printing prose. */
-async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string): Promise<number> {
+async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp): Promise<number> {
   const usage = mcpUsage();
   let values: { agent?: string[]; json?: boolean; remove?: boolean; state?: string; help?: boolean };
   let words: string[];
@@ -1139,7 +1139,6 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   }
   const json = values.json === true;
   if (words[0] !== "install" || words.length !== 1) return failed(io, json, usageRefusal(`unknown command: ${MCP_COMMAND} ${words.join(" ")}\n\n${usage}`));
-  const run = runningWsp();
   // Nobody named an agent: at a terminal that is a line half typed, but an agent running this has no terminal to be
   // asked at, so every agent whose own command is on this computer's PATH takes it.
   const agents = values.agent ?? (io.isTTY === true ? [] : agentsOnPath(run.PATH));
@@ -1203,11 +1202,13 @@ export const COMMAND_LINES: readonly CommandLine[] = [
   ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: command.json ? SHARED_OPTIONS : without(SHARED_OPTIONS, ["json"]), cliOnly: command.cliOnly })),
 ];
 
-export async function cli(argv: string[], io: CliIO = terminalIO()): Promise<number> {
+/** `run` is how this process was started, which the MCP install writes into an agent's config as the way to start it
+ * again; the desktop's bundled command hands in its shim, the npm command the default reading. */
+export async function cli(argv: string[], io: CliIO = terminalIO(), run: RunningWsp = runningWsp()): Promise<number> {
   const verb = findVerb(argv);
   // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
   if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, runtime: async statePath => makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath) });
-  if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom);
+  if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom, run);
   let values: SharedFlags;
   let positionals: string[];
   try {

@@ -35,8 +35,13 @@ export function fmtSize(size: WorkspaceSize): string {
   return `${size.cpu} vCPU · ${fmtMemGb(size.memMb)}`;
 }
 
-/** Every machine wsp forks is a cloud Linux box; the word has one home until a machine's kind can vary it. */
-export const MACHINE_OS_WORD = "Linux";
+/** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
+export const FREE_WORD = "free";
+
+/** What a pane prints in the slot a reading would fill on a kind whose machines serve that reading on no road: the
+ * Machine tab's Live rows and the Processes table both read it, in place of a pending that would never settle. The
+ * kind table says which kinds serve which reading, so a pane says this within one probe window. */
+export const NOT_ON_THIS_KIND = "not on this kind";
 
 /** A size as the --size flag and the fork tools spell it: vCPUs, an x, memory in GB ("2x4", "2x0.5"). */
 export function sizeWord(size: WorkspaceSize): string {
@@ -109,6 +114,16 @@ export function fmtDuration(ms: number, style: DurationStyle = "short"): string 
   const seconds = total % 60;
   if (style === "short") return seconds === 0 ? `${hours * 60 + minutes}m` : `${hours * 60 + minutes}m ${seconds}s`;
   return hours === 0 ? `${minutes}m ${pad2(seconds)}s` : `${hours}h ${pad2(minutes)}m ${pad2(seconds)}s`;
+}
+
+/** How long a machine has been up, as the Machine tab reads it: minutes under an hour, hours and minutes under a
+ * day, then days and hours. Coarser than a turn's duration on purpose: the figure is read once, not watched. */
+export function fmtUptime(ms: number): string {
+  const minutes = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 60_000) : 0;
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
 /** A running clock on a row redrawn every tick: whole seconds, then the short style's minutes and seconds; tenths
@@ -802,6 +817,14 @@ export const NOTHING_TO_SERVE_LINE = "nothing to serve yet; wsp new --local make
  * The provider module a keyless host wires says it, and so does the command line before it asks for anything. */
 export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; set SOLARI_API_KEY and run wsp init again to seal a golden";
 
+/** The quiet row at the sidebar's bottom while no golden is sealed, and what it opens: the way to cloud machines.
+ * For now that is wsp init in a terminal, said in the one line the window before a golden used to be. */
+export const CLOUD_SETUP_WORDS = {
+  row: "Set up cloud machines",
+  title: "Cloud machines",
+  noGolden: "No golden image yet. Run wsp init in a terminal; it opens this app when the machine is ready.",
+} as const;
+
 /** What a local workspace's machine is, in every sentence and every row that names it: the refusals below, the
  * sidebar row's second line and the Machine tab's lineage all read this one phrase. */
 export const THIS_COMPUTER = "this computer";
@@ -810,10 +833,6 @@ export const THIS_COMPUTER = "this computer";
  * that wsp reaches and never runs. */
 export const OVER_SSH = "a machine over ssh";
 
-/** What a pane prints in the slot a reading would fill on a kind whose machines serve that reading on no road: the
- * Machine tab's Live rows and the Processes table both read it. The kind table says which kinds serve which
- * reading, so a pane says this within one probe window instead of waiting on a stream that never comes. */
-export const NOT_ON_THIS_KIND = "not on this kind";
 
 /** The one sentence a local workspace refuses a request relayed from a machine with. A local workspace is this
  * computer; it answers only its own person, so a request that reached the host from a machine wsp runs cannot drive

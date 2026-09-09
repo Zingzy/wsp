@@ -5059,6 +5059,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
         providerState: () => e.machine.state(),
         ...(e.machine.metrics !== undefined ? { metrics: e.machine.metrics.bind(e.machine) } : {}),
+        ...(e.machine.facts !== undefined ? { facts: e.machine.facts.bind(e.machine) } : {}),
         exec: (cmd, o) => e.machine.exec(cmd, o),
       }));
     },

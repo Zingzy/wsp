@@ -10,7 +10,7 @@
 // awake and billing forever.
 
 import { isMissing, roadFailed, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
-import { appendCostPoint, goneWords, reachShown, type EventUnion, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { appendCostPoint, goneWords, reachShown, type EventUnion, type MachineFacts, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import type { Store } from "./store.js";
 
@@ -154,6 +154,8 @@ export interface StatusRecord extends WorkspaceView {
   providerState: () => Promise<MachineState>;
   /** The host's own word on the machine; absent on backends without one. */
   metrics?: () => Promise<void>;
+  /** What a machine that already existed says about itself; absent on a fork wsp made. */
+  facts?: () => Promise<MachineFacts>;
   exec: (cmd: string, opts?: { timeoutMs?: number }) => Promise<ExecResult>;
 }
 
@@ -483,12 +485,14 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
 
     return Promise.all(
       records.map(async (r): Promise<WorkspaceStatus> => {
-        const { size, idleAt, daemonReach, providerState, metrics, exec, generation, ...view } = r;
+        const { size, idleAt, daemonReach, providerState, metrics, facts, exec, generation, ...view } = r;
         void providerState;
         void metrics;
         void exec;
         void generation;
-        const base = { ...view, size, rateUsdPerHour: r.rateUsdPerHour, ...(idleAt !== undefined ? { idleAt } : {}) };
+        // A machine that cannot say what it is this tick keeps its row; the facts are the one part left off it.
+        const said = facts === undefined ? undefined : await facts().catch(() => undefined);
+        const base = { ...view, size, rateUsdPerHour: r.rateUsdPerHour, ...(idleAt !== undefined ? { idleAt } : {}), ...(said !== undefined ? { facts: said } : {}) };
         const gone = (reason: string | undefined): WorkspaceStatus => ({ ...base, machineState: "gone", reach: { state: "gone" }, ...(reason !== undefined ? { reason } : {}) });
         const done = (state: MachineState, reach: WorkspaceStatus["reach"]): WorkspaceStatus =>
           state === "gone" ? gone(goneReasons.get(r.id) ?? goneWords(r.machineId)) : { ...base, machineState: state, reach };

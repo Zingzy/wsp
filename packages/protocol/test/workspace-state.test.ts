@@ -160,6 +160,7 @@ describe("what a workspace's kind changes about its words", () => {
 
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and says what it is", () => {
     expect(kindWords("cloud")).toEqual({ machine: null, driven: true, daemon: true, metrics: true, processes: true });
+    // This computer serves a daemon and reads both its own load and its own processes off its host.
     expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true });
     // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it, and
     // it serves no daemon at all, so a row for one says what the machine is rather than that its daemon is missing.
@@ -172,6 +173,7 @@ describe("what a workspace's kind changes about its words", () => {
     expect(servesReading("local", "metrics")).toBe(true);
     expect(servesReading("local", "processes")).toBe(true);
     expect(servesReading("cloud", "metrics")).toBe(true);
+    expect(servesReading("cloud", "processes")).toBe(true);
     expect(servesReading("ssh", "metrics")).toBe(false);
     expect(servesReading("ssh", "processes")).toBe(false);
     expect(NOT_ON_THIS_KIND).toBe("not on this kind");

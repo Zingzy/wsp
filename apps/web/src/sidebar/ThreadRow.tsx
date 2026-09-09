@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One thread's row under its workspace, in the workspace row's grammar: the
-// same leading slot, so the title starts where the name starts; the title
-// takes the line up to a fixed mono time column at the right edge; under it
-// the status pill, the agent's mark, the project the thread works in where it
-// sits in one of the workspace's, and who opened the thread. Renaming turns
+// One thread's row under its workspace, in the workspace row's grammar. Every
+// row in the list is a thread, so no glyph leads it: the title takes the line
+// from the row's inset up to a fixed mono time column at the right edge; under
+// it the status pill, the agent's mark, the project the thread works in where
+// it sits in one of the workspace's, and who opened the thread. Renaming turns
 // that title into the sidebar's one name box in the same slot, opened from
 // the menu or by a double-click on the title, so the row keeps its height and
 // its grammar while a name is typed.
-import { MessageSquareIcon } from "lucide-react";
 import type { MouseEvent } from "react";
 import { agentName } from "@wsp/catalog";
 import { THREAD_WORDS } from "../actions/format.js";
@@ -16,9 +15,8 @@ import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { SidebarMenuSubButton, SidebarMenuSubItem } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
-import { ProjectFavicon } from "./ProjectFavicon.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, TWO_LINE_ROW_CLASS, threadRowId } from "./rowGrammar.js";
+import { ROW_META_CLASS, TWO_LINE_ROW_CLASS, threadRowId } from "./rowGrammar.js";
 import { isThreadWorking } from "./Sidebar.logic.js";
 import { ThreadRowLeadingStatus } from "./ThreadStatusIndicators.js";
 import { openerWord, provenanceLabel, threadPill } from "./workspaceRows.js";
@@ -63,9 +61,6 @@ export function ThreadRow({
         {...(renaming ? {} : { onClick: onSelect, onContextMenu })}
         className={cn(TWO_LINE_ROW_CLASS, "w-full")}
       >
-        <span aria-hidden className={ROW_LEAD_CLASS}>
-          <ProjectFavicon src={null} className="size-3.5 opacity-60" fallbackIcon={MessageSquareIcon} />
-        </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
           <span className="flex items-center gap-2">
             {renaming ? (

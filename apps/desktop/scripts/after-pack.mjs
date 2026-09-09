@@ -3,8 +3,8 @@
 // that knows which platform and arch that tree runs. One build makes several
 // of them from one staged directory, so node-pty's native module cannot be
 // staged with the rest: build:mac and build:linux on one machine would give
-// every tree the building machine's build. The daemon travels as an extra
-// resource because it is the same on every target; this one is not.
+// every tree the building machine's build. Every other asset is the same on
+// every target and is staged once by scripts/stage.mjs; this one is not.
 import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
