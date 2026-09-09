@@ -56,6 +56,7 @@ Each tool's inputs are in parentheses. A flag on the command line is the input o
 | `delete` | workspace, confirm | deletes the machine at the provider and drops the record; deletes only with `confirm` true |
 | `thread_new` | workspace, task, agent, model, effort, access, cwd, notify, title, detach | opens a thread and follows its first turn to the reply, or with `detach` returns the id at once |
 | `thread_rename` | thread, title | names the thread in the agent's own store on the machine |
+| `thread_read` | thread, last | the thread's messages as the app lists them: who each one is, when the runtime recorded it, the text, and every tool call folded to one line; with `last`, the final reply alone, whole, and a row under it when the thread has started another turn since |
 | `send` | thread, message, model, effort, access, detach | a message into an existing thread |
 | `stop` | thread | ends the thread's running turn; the machine stays up |
 | `exec` | workspace, argv, cwd | runs a command on the machine, each word as given; output lines, the exit code and the folder |
