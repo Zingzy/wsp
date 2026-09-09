@@ -235,7 +235,7 @@ describe("chat tab hydration", () => {
     await typeInto(editor, "start over");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over" });
   });
 
   it("live events keep landing after hydration and the send button follows the replayed state", async () => {
@@ -264,7 +264,7 @@ describe("chat tab composer", () => {
     expect(editor.textContent).toBe("fix the flaky test");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "fix the flaky test", resume: CLAUDE_SID, cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "fix the flaky test", resume: CLAUDE_SID });
 
     // Local echo of the user turn; the draft is gone and the send button says why it waits.
     expect(screen.getByText("fix the flaky test")).toBeDefined();
@@ -281,7 +281,7 @@ describe("chat tab composer", () => {
     emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", resume: "sess_0001", cwd: "/root" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", resume: "sess_0001" });
     expect(screen.queryByRole("textbox", { name: "Queued message" })).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
   });
@@ -354,7 +354,7 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "hello");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "hello", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "hello" });
 
     for (const e of DEATH) emit(e);
     expect(screen.getByText(/exited before init/)).toBeDefined();
@@ -363,7 +363,7 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "again");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_dead", cwd: "/root" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_dead" });
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
     expect(screen.getByText(/exited before init/)).toBeDefined();
 
@@ -384,7 +384,7 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "again");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_dead", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_dead" });
   });
 
   it("pinned from the sidebar, a dead thread's next send names it with no resume; the retry lands under the pin, which stays, its queued row released there, and a reload keeps both", async () => {
@@ -402,7 +402,7 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "again");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_dead", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_dead" });
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
     await typeInto(editor, "and then this");
     await press(editor, "Enter");
@@ -428,7 +428,7 @@ describe("chat tab send after a harness died before its init", () => {
 
     for (const e of RETRY.slice(2)) record(e);
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry", cwd: "/root" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry" });
   });
 
   it("on the latest view of a dead thread, another client's start with the same text during the send is kept out; the send's start under the dead thread takes the queued row from the workspace id", async () => {
@@ -466,7 +466,7 @@ describe("chat tab send after a harness died before its init", () => {
 
     for (const e of RETRY.slice(2)) emit(e);
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry", cwd: "/root" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry" });
   });
 
   it("pinned to a dead thread, another client's start with the same text during the send moves neither the pin nor the queued row; the send's start under the pin keeps both there and releases the row", async () => {
@@ -509,7 +509,7 @@ describe("chat tab send after a harness died before its init", () => {
 
     for (const e of RETRY.slice(2)) record(e);
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry", cwd: "/root" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry" });
   });
 
   it("pinned to a dead thread and left mid-send for another thread, the retry's start under the dead thread releases the queued row there, past another client's same-text start; the pin stays where the person went, and the row goes when they come back", async () => {
@@ -551,7 +551,7 @@ describe("chat tab send after a harness died before its init", () => {
     act(() => useStore.getState().select(WS, "thr_dead"));
     await screen.findByText("Second time lucky.");
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry", cwd: "/root" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry" });
   });
   it("on a fresh thread, another client's start with the same text during the send stays out; the start carrying the send's request id opens the thread and takes the queued row", async () => {
     const { api, started, emit } = fixtureApi([workspace], { [WS]: STARTED });
@@ -564,7 +564,7 @@ describe("chat tab send after a harness died before its init", () => {
     await typeInto(editor, "start over");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over" });
     await typeInto(editor, "and then this");
     await press(editor, "Enter");
     expect(queueOf(WS)).toEqual(["and then this"]);
@@ -590,7 +590,7 @@ describe("chat tab send after a harness died before its init", () => {
     emit({ type: "session.done", ...fresh, result: { status: "completed", durationMs: 1000, costUsd: 0.001 } });
     emit({ type: "session.end", ...fresh, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_0002", cwd: "/root" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_0002" });
   });
 });
 
@@ -607,7 +607,7 @@ describe("chat tab pinned thread whose session.start fell off the transcript cap
     await typeInto(editor, "more");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "more", resume: "sess_0001", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "more", resume: "sess_0001" });
   });
 });
 
@@ -630,7 +630,7 @@ describe("chat tab new thread", () => {
     await typeInto(editor, "start over");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over" });
     expect(screen.getByText("start over")).toBeDefined();
 
     // The fresh session's events land in the cleared thread; the store remembers its id and the next send resumes it.
@@ -643,7 +643,7 @@ describe("chat tab new thread", () => {
     await typeInto(editor, "and then");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then", resume: "sess_0002", cwd: "/root" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then", resume: "sess_0002" });
   });
 });
 
@@ -670,7 +670,7 @@ describe("chat tab new thread mid-turn", () => {
     await typeInto(editor, "start over");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over" });
   });
 
   it("a second request on a fresh view changes nothing: still empty, still open", async () => {
@@ -710,7 +710,7 @@ describe("chat tab new thread mid-turn", () => {
     await typeInto(editor, "start over");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over", cwd: "/root" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over" });
     emit({ type: "session.done", ...first, at: T0 + 900, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     emit({ type: "session.end", ...first, at: T0 + 950, exitCode: 0, sawResult: true });
     expect(screen.getByText("start over")).toBeDefined();
@@ -771,7 +771,7 @@ describe("chat tab threads", () => {
     await typeInto(composerEditor(), "second");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "second", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "second" });
     for (const e of SECOND) emit(e);
     expect(screen.getByText("two.")).toBeDefined();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
@@ -854,7 +854,7 @@ describe("chat tab threads", () => {
     await typeInto(composerEditor(), "start over");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over" });
   });
 
   it("fresh thread, send, drop, gap, reload: the person's turn shows and the composer opens once it ended", async () => {
@@ -866,7 +866,7 @@ describe("chat tab threads", () => {
     await typeInto(composerEditor(), "start over");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over", cwd: "/root" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over" });
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
     expect(status()).toBeNull();
 

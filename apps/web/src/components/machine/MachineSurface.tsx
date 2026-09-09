@@ -11,7 +11,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, servesReading, sizeWord, workspaceKind, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, kindWords, LINEAGE_MARKS, LOOK_PARTS, missingToolRow, needsRebuild, NOT_ON_THIS_KIND, outOfMemoryLine, plural, servesReading, sizeWord, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -515,6 +515,7 @@ function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
     ),
   );
 
+  const projectsHeld = workspaceProjects(workspace);
   const rollback = async (version: number): Promise<void> => {
     if (!api) return;
     setArmed(null);
@@ -531,13 +532,12 @@ function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
   };
 
   const snapshot = async (): Promise<void> => {
-    const project = workspace.project;
-    if (!api?.snapshotWorkspace || project === undefined) return;
+    if (!api?.snapshotWorkspace || projectsHeld.length === 0) return;
     setBusy("snapshot");
     try {
-      await api.snapshotWorkspace(workspace.id);
+      const taken = await api.snapshotWorkspace(workspace.id);
       load();
-      setNote(`Project golden of ${project.name} taken. New forks of it start with the project.`);
+      setNote(`Project golden of ${taken.project.name} taken. New forks of it start with the project.`);
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -564,7 +564,8 @@ function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
 
   const under = (snapshotId: string): ReactNode => <ProjectGoldens goldens={projects.filter(p => p.golden === snapshotId)} forkOf={workspace.golden} busy={busy !== null} onFork={fork} />;
   const versions = lineage ? [...lineage.versions].sort((a, b) => b.version - a.version) : [];
-  const project = workspace.project;
+  // What the lineage row says of the projects on this disk: the one project as imported, or how many there are.
+  const projectsWord = projectsHeld.length === 1 ? `${projectsHeld[0]!.name} imported ${projectsHeld[0]!.importedAt.slice(0, 10)}` : projectsHeld.length > 1 ? plural(projectsHeld.length, "project") : null;
   // The head version, when this workspace is forked from an older one: what the offer moves it to.
   const onVersion = versions.find(v => v.snapshotId === workspace.golden);
   const behind = onVersion !== undefined && lineage?.head !== null && lineage?.head !== undefined && onVersion.version !== lineage.head ? lineage.head : null;
@@ -581,10 +582,10 @@ function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
         <LineageRow
           dot={workspace.phase === "running" ? "bg-success" : "border border-muted-foreground/60"}
           title={<span className="font-medium">Live disk</span>}
-          detail={`forked ${workspace.createdAt.slice(0, 10)}${project !== undefined ? ` · ${project.name} imported ${project.importedAt.slice(0, 10)}` : ""}`}
+          detail={`forked ${workspace.createdAt.slice(0, 10)}${projectsWord !== null ? ` · ${projectsWord}` : ""}`}
           marks={["now"]}
           aside={
-            project !== undefined &&
+            projectsHeld.length > 0 &&
             api?.snapshotWorkspace !== undefined && (
               <Button size="xs" variant="outline" disabled={busy !== null || workspace.phase !== "running"} aria-label={`snapshot ${workspace.name} as a project golden`} onClick={() => void snapshot()}>
                 Snapshot

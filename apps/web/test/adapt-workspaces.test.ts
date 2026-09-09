@@ -76,9 +76,25 @@ describe("deriveSidebarProjects", () => {
     ]);
     expect(projects[1]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable", state: "running" });
     expect(projects[1]?.threads).toEqual([
-      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person" },
-      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person" },
+      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: null },
+      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: null },
     ]);
+  });
+
+  it("a thread carries the name of the project its folder sits in, the folder itself or one under it, and none outside every project", () => {
+    const projects = [{ name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" }, { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" }];
+    const [p] = deriveSidebarProjects({
+      workspaces: [{ ...LIVE_WORKSPACE_1, projects }],
+      sessions: {
+        [LIVE_WS]: [
+          { id: "s1", workspaceId: LIVE_WS, harness: "claude", status: "completed", prompt: "in spoo", cwd: "/root/spoo", startedAt: 1_000 },
+          { id: "s2", workspaceId: LIVE_WS, harness: "claude", status: "completed", prompt: "deep in wsp", cwd: "/root/wsp/packages/host", startedAt: 2_000 },
+          { id: "s3", workspaceId: LIVE_WS, harness: "claude", status: "completed", prompt: "elsewhere", cwd: "/root/spoo-fork", startedAt: 3_000 },
+          { id: "s4", workspaceId: LIVE_WS, harness: "claude", status: "completed", prompt: "nowhere yet", startedAt: 4_000 },
+        ],
+      },
+    });
+    expect(p!.threads.map(t => [t.title, t.project])).toEqual([["in spoo", "spoo"], ["deep in wsp", "wsp"], ["elsewhere", null], ["nowhere yet", null]]);
   });
 
   it("turns sharing a threadId fold into one thread titled by the opening prompt, in the state of the latest turn", () => {

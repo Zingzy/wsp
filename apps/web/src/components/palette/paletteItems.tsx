@@ -233,9 +233,9 @@ function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapsh
 
 export function buildPaletteItems(input: PaletteItemsInput): PaletteItems {
   const threads = input.projects
-    .flatMap(project => project.threads.map(thread => ({ ...thread, project })))
+    .flatMap(project => project.threads.map(thread => ({ ...thread, workspace: project })))
     .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
-  const item = (thread: (typeof threads)[number]) => threadItem(thread, thread.project, input.handlers);
+  const item = (thread: (typeof threads)[number]) => threadItem(thread, thread.workspace, input.handlers);
   return {
     actionItems: actionItems(input),
     workspaceItems: workspaceItems(input),

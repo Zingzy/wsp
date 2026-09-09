@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Where the panes are rooted: the thread's folder as it moves, unless pinned.
 import { beforeEach, describe, expect, it } from "vitest";
-import { folderCrumbs, parentWithin, rootOf, rootsOf, selectRoot, useRootStore } from "../src/files/root.js";
+import { folderCrumbs, parentWithin, rootOf, rootsOf, selectRoot, threadStart, useRootStore } from "../src/files/root.js";
 
 const WS = "ws_root";
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, ["/root"]);
@@ -68,13 +68,27 @@ describe("the agent's shell folder", () => {
   });
 });
 
+describe("the folder chosen for the next thread", () => {
+  it("is held per workspace until a project pick clears it, and moves the panes with it; a chosen folder is what the start names as cwd", () => {
+    expect((useRootStore.getState().byWorkspaceId[WS] ?? { chosen: null }).chosen).toBeNull();
+    useRootStore.getState().choose(WS, "/root/app");
+    expect(useRootStore.getState().byWorkspaceId[WS]!.chosen).toBe("/root/app");
+    expect(root()).toBe("/root/app");
+    expect(threadStart("/root/app", null)).toEqual({ cwd: "/root/app" });
+    useRootStore.getState().unchoose(WS);
+    expect(useRootStore.getState().byWorkspaceId[WS]!.chosen).toBeNull();
+    expect(threadStart(null, { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" })).toEqual({ project: "spoo" });
+    expect(threadStart(null, null)).toEqual({});
+  });
+});
+
 describe("the browsable roots", () => {
-  it("are the daemon's home and the imported project folder, home first, and nothing before the hello", () => {
-    expect(rootsOf(null, "/Users/dev/wsp")).toEqual([]);
-    expect(rootsOf("/root", undefined)).toEqual(["/root"]);
-    expect(rootsOf("/root", "/Users/dev/wsp")).toEqual(["/root", "/Users/dev/wsp"]);
-    expect(rootsOf("/root", "/root")).toEqual(["/root"]);
-    expect(rootsOf("/root", "/root/work/proj")).toEqual(["/root", "/root/work/proj"]);
+  it("are the daemon's home and every project folder, home first and each once, and nothing before the hello", () => {
+    expect(rootsOf(null, ["/Users/dev/wsp"])).toEqual([]);
+    expect(rootsOf("/root", [])).toEqual(["/root"]);
+    expect(rootsOf("/root", ["/Users/dev/wsp"])).toEqual(["/root", "/Users/dev/wsp"]);
+    expect(rootsOf("/root", ["/root"])).toEqual(["/root"]);
+    expect(rootsOf("/root", ["/root/work/proj", "/Users/dev/wsp", "/root/work/proj"])).toEqual(["/root", "/root/work/proj", "/Users/dev/wsp"]);
   });
 
   it("name the root a path sits in, the nearest when they nest, and none outside every root", () => {

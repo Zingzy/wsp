@@ -13,7 +13,7 @@ import "../../src/index.css";
 document.documentElement.classList.toggle("dark", new URLSearchParams(window.location.search).get("theme") !== "light");
 
 const project = { name: "spoo", dest: "/root/work/spoo", importedAt: "2026-09-06T10:01:00.000Z" };
-const workspace: WorkspaceView = { id: "ws_api", name: "spoo-fork", machineId: "m_api_0123456789abcdef", phase: "running", golden: "snap_project-spoo-2", createdAt: "2026-09-06T12:00:00Z", project };
+const workspace: WorkspaceView = { id: "ws_api", name: "spoo-fork", machineId: "m_api_0123456789abcdef", phase: "running", golden: "snap_project-spoo-2", createdAt: "2026-09-06T12:00:00Z", projects: [project] };
 const status: WorkspaceStatus = { ...workspace, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
 const version = (n: number) => ({ version: n, snapshotId: `snap_golden-v${n}`, baseTemplate: "base", setupSha: `sha${n}`, createdAt: `2026-08-${10 + n}T00:00:00.000Z`, smoke: { cmd: "true", exitCode: 0 } });
 const lineage: SnapshotLineage = { name: "default", head: 12, versions: [version(11), version(12)] };

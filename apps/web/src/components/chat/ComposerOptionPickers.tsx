@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The model, effort and access pickers inside the composer box. Each lists
+// The model, effort, access and project pickers inside the composer box. Each lists
 // what the runtime's catalog says the harness's CLI takes, asked of the
 // binary on the workspace's machine once it runs; a picker whose list is
 // empty does not exist. The effort button reads "<effort> · <context>", the
@@ -11,13 +11,21 @@
 // the exception: it is remembered on the host's own record, so the next thread
 // here starts at it whichever client or CLI opens it, and where the harness
 // takes a mode change mid-turn it reaches the turn in front of the person too.
-import { BrainIcon, ChevronDownIcon, CircleSlashIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
+// The project pick exists only on a workspace holding projects and only while
+// the thread is still to be opened: it reads the runtime's default folder rule
+// off the record, its menu is the workspace's projects and other folder, which
+// opens the folder picker under the box, and a pick lands on the host's record
+// as the workspace's last project, where the runtime reads it for every road.
+import { BrainIcon, ChevronDownIcon, CircleSlashIcon, FolderIcon, FolderOpenIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { accessFromNextMessage, contextWindowsFor, effortsFor, type HarnessCatalog, type HarnessModel, type HarnessOption } from "@wsp/protocol";
+import { accessFromNextMessage, contextWindowsFor, effortsFor, type HarnessCatalog, type HarnessModel, type HarnessOption, type WorkspaceProject } from "@wsp/protocol";
+import { baseName } from "../../files/entries";
+import { useChosenFolder, useDefaultProject, useProjects, useRootStore } from "../../files/root";
 import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useStore, useWorkspace } from "../../protocol/store";
 import { Button } from "../ui/button";
-import { Menu, MenuGroup, MenuGroupLabel, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { canPickFolder } from "./ComposerCheckoutRow";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey } from "./composerOptionsStore";
 import { effectivePicks, resolveModel, runningPicks, startOptionsFrom, type ComposerStart, type ResolvedPicks } from "./composerPicks";
@@ -217,10 +225,80 @@ function AccessPicker({ modes, value, onPick }: { modes: ReadonlyArray<HarnessOp
   );
 }
 
-export function ComposerOptionPickers({ workspaceId, thread, onPickAccess }: { workspaceId: string; thread: ChatThreadHandle; onPickAccess: (mode: string, label: string) => void }) {
+/** The word other folder wears in the project menu and, once one is chosen, the folder's own name on the trigger. */
+export const OTHER_FOLDER = "other folder";
+
+/** The project pick: the default project's name, or the chosen folder's last segment, or the word Project while two
+ * or more projects wait for a pick. A project pick lands on the host's record and clears any chosen folder, so the
+ * rule's answer is the folder shown; other folder hands the pick to the folder picker under the box. */
+function ProjectPicker({ workspaceId, projects, onOtherFolder }: { workspaceId: string; projects: readonly WorkspaceProject[]; onOtherFolder: () => void }) {
+  const project = useDefaultProject(workspaceId);
+  const chosen = useChosenFolder(workspaceId);
+  const setPreferences = useStore(s => s.setPreferences);
+  const unchoose = useRootStore(s => s.unchoose);
+  const follow = useRootStore(s => s.follow);
+  const value = chosen === null ? project?.name ?? null : null;
+  const label = chosen !== null ? baseName(chosen) : project?.name ?? "Project";
+  const Icon = chosen !== null ? FolderOpenIcon : FolderIcon;
+  return (
+    <Menu>
+      <MenuTrigger
+        render={<Button type="button" variant="ghost" size="xs" />}
+        className={triggerClass}
+        aria-label={`Project: ${label}`}
+        data-composer-picker="project"
+        data-value={value ?? undefined}
+      >
+        <Icon className="size-3.5 shrink-0" aria-hidden />
+        <span data-composer-project-name className="truncate font-mono">{label}</span>
+        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+      </MenuTrigger>
+      <MenuPopup align="start" side="top" className="w-72">
+        <MenuRadioGroup
+          value={value}
+          onValueChange={next => {
+            const picked = projects.find(p => p.name === next);
+            if (picked === undefined) return;
+            unchoose(workspaceId);
+            follow(workspaceId, picked.dest);
+            void setPreferences({ project: { [workspaceId]: picked.name } });
+          }}
+        >
+          {projects.map(p => (
+            <MenuRadioItem key={p.name} value={p.name} data-composer-project={p.name} title={p.dest}>
+              <span className="flex min-w-0 items-center gap-2">
+                <FolderIcon className="mx-0! size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="truncate font-mono">{p.name}</span>
+              </span>
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
+        <MenuSeparator />
+        <MenuItem onClick={onOtherFolder} data-composer-project-other>
+          <FolderOpenIcon />
+          <span className="truncate">{OTHER_FOLDER}</span>
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+export function ComposerOptionPickers({
+  workspaceId,
+  thread,
+  onPickAccess,
+  onOtherFolder,
+}: {
+  workspaceId: string;
+  thread: ChatThreadHandle;
+  onPickAccess: (mode: string, label: string) => void;
+  /** Opens the folder picker under the box, where the project menu's other folder row sends the pick. */
+  onOtherFolder: () => void;
+}) {
   useMachineCatalogs(workspaceId);
   const pick = useComposerOptionsStore(s => s.pick);
   const catalogs = useHarnessCatalogs(workspaceId);
+  const projects = useProjects(workspaceId);
   const { catalog, model, picks, pinned } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null) return null;
   const efforts = effortsFor(catalog, model);
@@ -240,6 +318,7 @@ export function ComposerOptionPickers({ workspaceId, thread, onPickAccess }: { w
       />
       {efforts.length > 0 || contextWindows.length > 0 ? <EffortPicker workspaceId={workspaceId} efforts={efforts} contextWindows={contextWindows} picks={picks} /> : null}
       {catalog.permissionModes.length > 0 ? <AccessPicker modes={catalog.permissionModes} value={picks.permissionMode} onPick={onPickAccess} /> : null}
+      {projects.length > 0 && canPickFolder(thread) ? <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} /> : null}
     </>
   );
 }
