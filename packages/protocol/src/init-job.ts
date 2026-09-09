@@ -24,18 +24,24 @@ export type InitScreenId = z.infer<typeof InitScreenId>;
 export const InitChoice = z.object({ value: z.string(), label: z.string() });
 export type InitChoice = z.infer<typeof InitChoice>;
 
-/** One row of a screen, as the terminal's list draws it: a label, a dim second column (a size, a state word), a why
- * between them, the group it sits under, the lines shown while it is highlighted, whether its tick is locked, and the
- * words it cycles through instead of a tick when it takes an answer. */
+/** One row of a screen, as the terminal's list draws it: a label, its size in bytes (null on a sized row nothing
+ * measured, absent on a row with no size), a why between them, the group it sits under, the lines shown while it is
+ * highlighted, whether its tick is locked, the words it cycles through instead of a tick when it takes an answer, and
+ * on a sign-in row whose agent takes an API key, the variable the agent reads it from and whether the home holds one. */
 export const InitScreenItem = z.object({
   id: z.string(),
   label: z.string(),
-  hint: z.string().optional(),
+  size: z.number().nonnegative().nullable().optional(),
   why: z.string().optional(),
   group: z.string().optional(),
   detail: z.array(z.string()),
   lock: z.enum(["on", "off"]).optional(),
   choices: z.array(InitChoice).optional(),
+  key: z.object({ name: z.string(), saved: z.boolean() }).optional(),
+  /** A row's state as a word where its answer is fixed: a sign-in whose tool is off the image. */
+  state: z.string().optional(),
+  /** The catalog id whose mark leads the row where it is not the row's own id: a sign-in row's tool. */
+  mark: z.string().optional(),
 });
 export type InitScreenItem = z.infer<typeof InitScreenItem>;
 
@@ -57,12 +63,15 @@ export const InitScreen = z.object({
   footer: z.array(InitFooterLine),
   /** What the screen says with no rows at all. */
   empty: z.string().optional(),
+  /** The noun the line under the card counts the ticked rows in ("agents", "tools"); absent on a screen with no tally. */
+  tally: z.string().optional(),
 });
 export type InitScreen = z.infer<typeof InitScreen>;
 
-/** What a row of the build is: a stage of the image, a sign-in the person finishes in their browser, a secret set on
- * the machine, an agent here given the wsp tools, the first workspace, the project landed on it. */
-export const InitRowKind = z.enum(["stage", "sign-in", "secret", "agent", "workspace", "project"]);
+/** What a row of the job is: a fact read off this computer while it is read, a stage of the image, a sign-in the
+ * person finishes in their browser, a secret set on the machine, an agent here given the wsp tools, the first
+ * workspace, the project landed on it. */
+export const InitRowKind = z.enum(["fact", "stage", "sign-in", "secret", "agent", "workspace", "project"]);
 export type InitRowKind = z.infer<typeof InitRowKind>;
 
 export const InitRow = z.object({
@@ -80,11 +89,14 @@ export const InitRow = z.object({
   code: z.string().optional(),
   /** How long the row ran, once it is over. */
   ms: z.number().optional(),
+  /** A stage's latest lines, what the machine said while it ran, for the block under its row. */
+  lines: z.array(z.string()).optional(),
 });
 export type InitRow = z.infer<typeof InitRow>;
 
-/** Which keys the host holds, never their values: the modal prefills a field as saved and asks for nothing it has. */
-export const InitKeys = z.object({ solari: z.boolean(), anthropic: z.boolean() });
+/** Whether the host holds the provider key, never its value: the modal asks for nothing it has. The agents' keys sit
+ * on the sign-ins screen's rows instead, each beside the agent that reads it. */
+export const InitKeys = z.object({ solari: z.boolean() });
 export type InitKeys = z.infer<typeof InitKeys>;
 
 export const InitJob = z.object({
@@ -92,6 +104,14 @@ export const InitJob = z.object({
   road: InitRoad,
   phase: InitPhase,
   keys: InitKeys,
+  /** The screen the person is on, an index into screens; one past the last is the build's own question. Kept here so
+   * a setup shut mid-step reopens where it was. */
+  step: z.number().int().nonnegative(),
+  /** Whether a cancel would stop the job now: not once the seal runs, since the snapshot and the save go to their end. */
+  stoppable: z.boolean(),
+  /** What the image's disk holds before any tick (the base and the files that travel) and the disk the build asks
+   * the provider for, in bytes; absent when the provider reports no disk. */
+  disk: z.object({ fixed: z.number().nonnegative(), total: z.number().positive() }).optional(),
   /** The five screens, filled once this computer is read; empty before. */
   screens: z.array(InitScreen),
   rows: z.array(InitRow),

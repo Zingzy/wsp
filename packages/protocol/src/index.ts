@@ -101,6 +101,8 @@ export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
  * or over. */
 export const InitSetup = z.object({
   keys: InitKeys,
+  /** This computer's home directory, so a field can show a real path of the person's as its example. */
+  home: z.string(),
   agents: z.array(InitAgent),
   pricing: z.object({ size: WorkspaceSize, rateUsdPerHour: z.number() }).nullable(),
   job: InitJob.nullable(),
@@ -2237,14 +2239,20 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs. */
   z.object({ id: reqId, op: z.literal("init.get") }),
-  /** Saves the keys given into the wsp home's .env on the computer running the host and wires the provider they name;
-   * replies with { setup: InitSetup }, which says the keys are held and never says what they are. */
-  z.object({ id: reqId, op: z.literal("init.keys"), solari: z.string().optional(), anthropic: z.string().optional() }),
+  /** Saves keys into the wsp home's .env on the computer running the host: the provider key, which wires the
+   * provider it names, and an agent's API key by the sign-in row it answers, saved under the variable that agent's
+   * sign-in declares. Replies with { setup: InitSetup }, which says a key is held and never says what it is. */
+  z.object({ id: reqId, op: z.literal("init.keys"), solari: z.string().optional(), rows: z.record(z.string()).optional() }),
   /** Starts the init job on the road named, an agent's harness on the agent road; replies with { job: InitJob } and
    * every change after rides init.job events. One job runs at a time; a second start while one runs is refused. */
   z.object({ id: reqId, op: z.literal("init.start"), road: InitRoad, harness: z.string().optional() }),
-  /** Answers one screen: the rows ticked, the answers chosen; replies with { job: InitJob }, its screens recomputed. */
+  /** Answers one screen: the rows ticked, the answers chosen; replies with { job: InitJob }, its screens recomputed
+   * and its step moved to the next. */
   z.object({ id: reqId, op: z.literal("init.answer"), screen: InitScreenId, ticks: z.array(z.string()).optional(), answers: z.record(z.string()).optional() }),
+  /** Moves the job to a screen the person went back to, so a setup shut there reopens there; replies with { job: InitJob }. */
+  z.object({ id: reqId, op: z.literal("init.step"), at: z.number().int().nonnegative() }),
+  /** Runs a sign-in that ran out or failed again on the machine while the build goes on; replies with { job: InitJob }. */
+  z.object({ id: reqId, op: z.literal("init.retry"), tool: z.string() }),
   /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on. */
   z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional() }),
   /** Stops the job where it is: a thread interrupted, a builder killed; replies with { job: InitJob }. */

@@ -849,9 +849,9 @@ describe("golden import stages", () => {
     const big = importOf({ files: { ...importOf().files!, pack: async () => ({ tar: Buffer.alloc(33 * 1024 * 1024), bytes: 33 * 1024 * 1024, unpacked: 4096, skipped: [], cut: [], silenced: [] }) } });
     await prepareBuilder({ backend, setup: "true", fetch, onStage: (s, d) => void stages.push(`${s}:${d ?? ""}`), import: big });
     expect(puts).toHaveLength(3);
-    expect(stages).toContainEqual("uploading-files:part 1 of 2, 32.0 MB of 33.0 MB");
-    expect(stages).toContainEqual("uploading-files:part 2 of 2, 33.0 MB of 33.0 MB");
-    expect(stages).toContainEqual(expect.stringMatching(/^uploading-files:33.0 MB in 2 parts in \d+(\.\d)?s; 2.9 GB free$/));
+    expect(stages).toContainEqual("uploading-files:part 1 of 2, 32 MB of 33 MB");
+    expect(stages).toContainEqual("uploading-files:part 2 of 2, 33 MB of 33 MB");
+    expect(stages).toContainEqual(expect.stringMatching(/^uploading-files:33 MB in 2 parts in \d+(\.\d)?s; 2.9 GB free$/));
   });
 
   it("runs setup, upload, agents and then tools in order after the daemon, with a detail on every frame, and checks the machine still answers", async () => {
@@ -866,9 +866,9 @@ describe("golden import stages", () => {
       "creating:sandbox from base",
       "deploying-daemon", "deploying-daemon:node v22; 2.9 GB free",
       "applying-setup:3 files: identity 1, shell 2",
-      "applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer)",
-      "uploading-files:1.2 KB",
-      expect.stringMatching(/^uploading-files:1\.2 KB in \d+(\.\d)?s; 2.9 GB free$/),
+      "applying-setup:1 KB packed; skipped ~/.bashrc (no longer on this computer)",
+      "uploading-files:1 KB",
+      expect.stringMatching(/^uploading-files:1 KB in \d+(\.\d)?s; 2.9 GB free$/),
       "installing-harness",
       "installing-harness:Claude Code (1/2)", "installing-harness:Codex (2/2)",
       "installing-harness:Claude Code, Codex installed; caches swept; 2.9 GB free",
@@ -992,11 +992,11 @@ describe("golden import stages", () => {
     const untar = cmds.find(c => c.includes("tar xzf"))!;
     expect(cmds.indexOf(step)).toBeLessThan(cmds.indexOf(untar));
     expect(cmds.indexOf(step)).toBeLessThan(cmds.indexOf(cmds.find(c => c.includes("claude-install"))!));
-    expect(stages.slice(stages.indexOf("applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer)"), stages.indexOf("uploading-files:1.2 KB") + 1)).toEqual([
-      "applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer)",
+    expect(stages.slice(stages.indexOf("applying-setup:1 KB packed; skipped ~/.bashrc (no longer on this computer)"), stages.indexOf("uploading-files:1 KB") + 1)).toEqual([
+      "applying-setup:1 KB packed; skipped ~/.bashrc (no longer on this computer)",
       "applying-setup:zsh: installing, with shell/oh-my-zsh, shell/antidote",
       "applying-setup:zsh installed as the login shell; shell/oh-my-zsh, shell/antidote reinstalled; 2.9 GB free",
-      "uploading-files:1.2 KB",
+      "uploading-files:1 KB",
     ]);
   });
 
@@ -1415,14 +1415,14 @@ describe("golden import stages", () => {
     const { backend, cmds, killed, fetch } = backendFor([["claude-install", () => ((agentsStarted = true), ok)]], () => mb(agentsStarted ? 500 : 3000));
     const results: ImportResult[] = [];
     const { stages, onStage } = stageRecorder();
-    await expect(prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) })).rejects.toThrow("an agent did not install, so nothing is sealed:\nCodex: 500.0 MB free, keeping 800.0 MB free");
+    await expect(prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) })).rejects.toThrow("an agent did not install, so nothing is sealed:\nCodex: 500 MB free, keeping 800 MB free");
     expect(results[0]!.agents.map(a => [a.id, a.outcome, a.note])).toEqual([
       ["agents/claude", "installed", undefined],
-      ["agents/codex", "failed", "500.0 MB free, keeping 800.0 MB free"],
+      ["agents/codex", "failed", "500 MB free, keeping 800 MB free"],
     ]);
     expect(cmds.some(c => c.includes("codex-install"))).toBe(false);
     expect(killed).toEqual(["m1"]);
-    expect(stages.at(-1)).toBe("failed:an agent did not install, so nothing is sealed:\nCodex: 500.0 MB free, keeping 800.0 MB free");
+    expect(stages.at(-1)).toBe("failed:an agent did not install, so nothing is sealed:\nCodex: 500 MB free, keeping 800 MB free");
   });
 
   it("when Homebrew itself fails, every brew formula is skipped rather than tried", async () => {
@@ -1558,7 +1558,7 @@ describe("golden import stages", () => {
     expect(at("bun@1.4.0")).toBeLessThan(at("brew autoremove"));
     expect(at("brew autoremove")).toBeLessThan(at("brew cleanup -s --prune=all"));
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(cmds.indexOf("echo ok"));
-    expect(stages).toContain("installing-tools:3 installed; Homebrew cleanup freed 1000.0 MB; caches swept; 3.9 GB free");
+    expect(stages).toContain("installing-tools:3 installed; Homebrew cleanup freed 1000 MB; caches swept; 3.9 GB free");
     const sweep = cmds.lastIndexOf("rm -f /tmp/wsp-vault-*.tgz");
     expect(sweep).toBeGreaterThan(at("tar xzf"));
     expect(sweep).toBeLessThan(at("brew-bootstrap"));
@@ -1595,9 +1595,9 @@ describe("golden import stages", () => {
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(sweepsAt[2]!);
     expect(sweepsAt[2]).toBeLessThan(cmds.indexOf("echo ok"));
     // Each closing line carries what the sweep gave back and the df reading the stage left.
-    expect(stages).toContain("deploying-daemon:18 installed; caches swept, 700.0 MB back; 3.6 GB free");
-    expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700.0 MB back; 4.3 GB free");
-    expect(stages).toContain("installing-tools:3 installed; caches swept, 700.0 MB back; 5.0 GB free");
+    expect(stages).toContain("deploying-daemon:18 installed; caches swept, 700 MB back; 3.6 GB free");
+    expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700 MB back; 4.3 GB free");
+    expect(stages).toContain("installing-tools:3 installed; caches swept, 700 MB back; 5 GB free");
     // A sweep that fails is named, and the build goes on to the next stage.
     const failing = backendFor([["rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build /root/.cache/node-gyp", { exitCode: 1, stdout: "", stderr: "rm: cannot remove '/root/.npm': Device or resource busy" }]]);
     const rec = stageRecorder();
@@ -1621,13 +1621,13 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
     const at = (needle: string) => cmds.findIndex(c => c.includes(needle));
     expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
-    expect(stages).toContain("installing-tools:1.8 GB free, under the 2.0 GB floor; cleaning up before skipping");
-    expect(stages).toContain("installing-tools:Homebrew cleanup freed 100.0 MB; caches swept, 50.0 MB back; 1.9 GB free");
-    expect(stages).toContain("installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1.9 GB free after cleanup, keeping 2.0 GB free); caches swept; 1.9 GB free");
+    expect(stages).toContain("installing-tools:1.8 GB free, under the 2 GB floor; cleaning up before skipping");
+    expect(stages).toContain("installing-tools:Homebrew cleanup freed 100 MB; caches swept, 50 MB back; 1.9 GB free");
+    expect(stages).toContain("installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1.9 GB free after cleanup, keeping 2 GB free); caches swept; 1.9 GB free");
     expect(results[0]!.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
       ["tools/homebrew", "installed", undefined],
-      ["tools/brew/gh", "skipped", "1.9 GB free after cleanup, keeping 2.0 GB free"],
-      ["tools/npm/bun", "skipped", "1.9 GB free after cleanup, keeping 2.0 GB free"],
+      ["tools/brew/gh", "skipped", "1.9 GB free after cleanup, keeping 2 GB free"],
+      ["tools/npm/bun", "skipped", "1.9 GB free after cleanup, keeping 2 GB free"],
     ]);
     // The cleanup at the floor is guarded, autoremove first, the sweep after Homebrew, and runs once in the loop; the housekeeping after the loop still runs.
     expect(cmds[at("brew cleanup -s --prune=all")]!).toMatch(/^tree\(\) \{\n/);
@@ -1656,10 +1656,10 @@ describe("golden import stages", () => {
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(at("brew install gh"));
     expect(stages.filter(s => s.startsWith("installing-tools"))).toEqual([
       "installing-tools:Homebrew (1/3)",
-      "installing-tools:1.8 GB free, under the 2.0 GB floor; cleaning up before skipping",
+      "installing-tools:1.8 GB free, under the 2 GB floor; cleaning up before skipping",
       "installing-tools:Homebrew cleanup freed 2.3 GB; caches swept; 4.1 GB free",
       "installing-tools:gh (2/3)",
-      "installing-tools:2 installed, 1 skipped: bun@1.4.0 (500.0 MB free, keeping 2.0 GB free); caches swept; 500.0 MB free",
+      "installing-tools:2 installed, 1 skipped: bun@1.4.0 (500 MB free, keeping 2 GB free); caches swept; 500 MB free",
     ]);
     expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/homebrew", "installed"], ["tools/brew/gh", "installed"], ["tools/npm/bun", "skipped"]]);
     // One rescue in the loop, one housekeeping after it; the base, the agents, the rescue and the tools each sweep.
@@ -1681,8 +1681,8 @@ describe("golden import stages", () => {
     expect(cmds.some(c => c.includes("brew cleanup -s --prune=all"))).toBe(false);
     expect(stages.filter(s => s.startsWith("installing-tools"))).toEqual([
       "installing-tools:Homebrew (1/3)",
-      "installing-tools:1.8 GB free, under the 2.0 GB floor; cleaning up before skipping",
-      "installing-tools:caches swept, 700.0 MB back; 2.4 GB free",
+      "installing-tools:1.8 GB free, under the 2 GB floor; cleaning up before skipping",
+      "installing-tools:caches swept, 700 MB back; 2.4 GB free",
       "installing-tools:bun@1.4.0 (3/3)",
       "installing-tools:1 installed, 1 failed: Homebrew (Error: bootstrap failed), 1 skipped: gh (Homebrew did not install); caches swept; 2.4 GB free",
     ]);
@@ -1706,14 +1706,14 @@ describe("golden import stages", () => {
     expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
     expect(stages.filter(s => s.startsWith("installing-tools"))).toEqual([
       "installing-tools:Homebrew (1/3)",
-      "installing-tools:1.8 GB free, under the 2.0 GB floor; cleaning up before skipping",
+      "installing-tools:1.8 GB free, under the 2 GB floor; cleaning up before skipping",
       "installing-tools:caches swept; df failed: df: /root: Input/output error",
-      "installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1.8 GB free before cleanup, df failed after, keeping 2.0 GB free); caches swept",
+      "installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1.8 GB free before cleanup, df failed after, keeping 2 GB free); caches swept",
     ]);
     expect(results[0]!.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
       ["tools/homebrew", "installed", undefined],
-      ["tools/brew/gh", "skipped", "1.8 GB free before cleanup, df failed after, keeping 2.0 GB free"],
-      ["tools/npm/bun", "skipped", "1.8 GB free before cleanup, df failed after, keeping 2.0 GB free"],
+      ["tools/brew/gh", "skipped", "1.8 GB free before cleanup, df failed after, keeping 2 GB free"],
+      ["tools/npm/bun", "skipped", "1.8 GB free before cleanup, df failed after, keeping 2 GB free"],
     ]);
   });
 
@@ -1730,9 +1730,9 @@ describe("golden import stages", () => {
     expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
     expect(stages.filter(s => s.startsWith("installing-tools"))).toEqual([
       "installing-tools:Homebrew (1/3)",
-      "installing-tools:1.8 GB free, under the 2.0 GB floor; cleaning up before skipping",
+      "installing-tools:1.8 GB free, under the 2 GB floor; cleaning up before skipping",
       "installing-tools:Homebrew cleanup failed (Error: Permission denied @ apply2files); caches swept; 1.8 GB free",
-      "installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1.8 GB free after cleanup, keeping 2.0 GB free); Homebrew cleanup failed (Error: Permission denied @ apply2files); caches swept; 1.8 GB free",
+      "installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1.8 GB free after cleanup, keeping 2 GB free); Homebrew cleanup failed (Error: Permission denied @ apply2files); caches swept; 1.8 GB free",
     ]);
     expect(results[0]!.tools.map(t => [t.id, t.outcome])).toEqual([["tools/homebrew", "installed"], ["tools/brew/gh", "skipped"], ["tools/npm/bun", "skipped"]]);
   });
@@ -1740,10 +1740,10 @@ describe("golden import stages", () => {
   it("refuses to upload when the archive and its contents would not fit, kills the builder, and says why", async () => {
     const { backend, killed, puts, fetch } = backendFor([], mb(100));
     const { stages, onStage } = stageRecorder();
-    await expect(prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() })).rejects.toThrow(/1\.2 KB packed and 4\.0 KB unpacked.*256\.0 MB.*100\.0 MB free/);
+    await expect(prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() })).rejects.toThrow(/1 KB packed and 4 KB unpacked.*256 MB.*100 MB free/);
     expect(puts).toEqual([]);
     expect(killed).toEqual(["m1"]);
-    expect(stages.at(-1)).toMatch(/^failed:your files need 1\.2 KB packed and 4\.0 KB unpacked, plus 256\.0 MB of headroom, but the machine has 100\.0 MB free/);
+    expect(stages.at(-1)).toMatch(/^failed:your files need 1 KB packed and 4 KB unpacked, plus 256 MB of headroom, but the machine has 100 MB free/);
     // The check reads the archive, not the recipe's estimate: a small tar of a large estimate still fits.
     const roomy = backendFor([], mb(3000));
     await expect(prepareBuilder({ backend: roomy.backend, setup: "true", fetch: roomy.fetch, import: importOf({ files: { ...importOf().files!, bytes: 10 * 1024 * 1024 * 1024 } }) })).resolves.toBeDefined();
@@ -1753,8 +1753,8 @@ describe("golden import stages", () => {
     const { backend, cmds, puts, fetch } = backendFor([[FREE_KB_CMD, { exitCode: 1, stdout: "", stderr: "df: /root: No such file or directory" }]]);
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf() });
-    expect(stages).toContain("uploading-files:free disk unknown (df failed: df: /root: No such file or directory); uploading 1.2 KB anyway");
-    expect(stages.filter(s => s.startsWith("installing-tools:free disk unknown"))).toEqual(["installing-tools:free disk unknown (df failed: df: /root: No such file or directory); installing without the 2.0 GB floor"]);
+    expect(stages).toContain("uploading-files:free disk unknown (df failed: df: /root: No such file or directory); uploading 1 KB anyway");
+    expect(stages.filter(s => s.startsWith("installing-tools:free disk unknown"))).toEqual(["installing-tools:free disk unknown (df failed: df: /root: No such file or directory); installing without the 2 GB floor"]);
     expect(puts).toHaveLength(2);
     expect(cmds.filter(c => c.includes("brew install gh") || c.includes("brew-bootstrap") || c.includes("bun@1.4.0"))).toHaveLength(3);
     expect(builder.import?.applied).toContain("installing-harness");
@@ -1904,7 +1904,7 @@ describe("golden import stages", () => {
     expect(stages).toEqual([
       "applying-setup:already applied",
       "uploading-files:1 volatile file, 300 B",
-      expect.stringMatching(/^uploading-files:~\/\.claude\.json not re-imported: your files need 300 B packed and 2\.0 KB unpacked, plus 256\.0 MB of headroom, but the machine has 200\.0 MB free$/),
+      expect.stringMatching(/^uploading-files:~\/\.claude\.json not re-imported: your files need 300 B packed and 2 KB unpacked, plus 256 MB of headroom, but the machine has 200 MB free$/),
       "installing-harness:already applied",
       "installing-tools:already applied",
       "installing-mcp:already applied",
@@ -1953,7 +1953,7 @@ describe("golden import stages", () => {
     const pack = async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [], silenced: ["starship", "eza", "diskbloom"] });
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ files: { ...importOf().files!, pack } }) });
     expect(builder.import?.silenced).toEqual(["starship", "eza", "diskbloom"]);
-    expect(stages).toContain("applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer); silenced in the shell: starship, eza, diskbloom");
+    expect(stages).toContain("applying-setup:1 KB packed; skipped ~/.bashrc (no longer on this computer); silenced in the shell: starship, eza, diskbloom");
     expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.silenced).toEqual(["starship", "eza", "diskbloom"]);
     const again = await applyGoldenImport(builder.machine, { import: importOf(), setup: "true", ledger: builder.import, fetch });
     expect(again.ledger.silenced).toEqual(["starship", "eza", "diskbloom"]);
@@ -2076,9 +2076,9 @@ describe("golden import stages", () => {
       expect(stages.slice(0, 1)).toEqual(["applying-setup:4 rows left on the image, retired: ~/.zshrc, bun, Gemini CLI, Claude Code"]);
       expect(stages.slice(1)).toEqual([
         "applying-setup:3 files: identity 1, shell 2",
-        "applying-setup:1.2 KB packed; skipped ~/.bashrc (no longer on this computer)",
-        "uploading-files:1.2 KB",
-        expect.stringMatching(/^uploading-files:1\.2 KB in /),
+        "applying-setup:1 KB packed; skipped ~/.bashrc (no longer on this computer)",
+        "uploading-files:1 KB",
+        expect.stringMatching(/^uploading-files:1 KB in /),
         "installing-harness",
         "installing-harness:Codex (1/1)",
         "installing-harness:Codex installed; caches swept; 2.9 GB free",

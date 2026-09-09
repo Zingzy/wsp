@@ -354,12 +354,18 @@ export function noteOutcomes(path: string, outcomes: Record<string, unknown>): {
 
 /** The API keys the sign-ins screen chose instead of a login: the variable the tool reads there, and the row it
  * belongs to, for the secrets step to ask once the machine is up. */
-export function keyAsks(manifest: { entries: readonly ManifestEntry[] }, choices: ReadonlyMap<string, string>): SecretAsk[] {
-  return manifest.entries.flatMap((e): SecretAsk[] => {
+export interface KeyAsk extends SecretAsk {
+  /** The sign-in row's tool and label, for the row the job draws when the key is already held. */
+  tool: string;
+  label: string;
+}
+
+export function keyAsks(manifest: { entries: readonly ManifestEntry[] }, choices: ReadonlyMap<string, string>): KeyAsk[] {
+  return manifest.entries.flatMap((e): KeyAsk[] => {
     if (e.rung !== "logins" || choices.get(e.id) !== "key") return [];
     const s = signInFor(agentName(e));
     const name = hasLogin(s) ? s.keyEnv : undefined;
-    return name === undefined ? [] : [{ name, from: `the key ${catalogEntry(loginEntryId(e))?.name ?? e.label} reads on the machine` }];
+    return name === undefined ? [] : [{ name, from: `the key ${catalogEntry(loginEntryId(e))?.name ?? e.label} reads on the machine`, tool: agentName(e), label: e.label }];
   });
 }
 

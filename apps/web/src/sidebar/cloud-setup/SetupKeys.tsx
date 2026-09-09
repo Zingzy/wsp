@@ -1,77 +1,48 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The provider key screen the terminal's init asks first: the Solari key,
-// the Anthropic key beside it, each field's state a muted word (saved when
-// the wsp home's .env already holds one, and then nothing is asked again),
-// and the two lines of the guide: where a key comes from, and what a running
-// machine costs. What is typed goes to the host once and never comes back.
+// The provider key step, asked once when the host holds none: one row of the
+// card with the label above a full-width field and the state word at the right
+// of the label line; under the card the link to where a key comes from, with
+// the external-link glyph, and what a running machine costs. What is typed goes
+// to the host once and never comes back. The agents' keys are not asked here:
+// they sit on the sign-ins step, each beside the agent that reads it.
+import { ExternalLinkIcon } from "lucide-react";
 import { useState } from "react";
 import { CLOUD_SETUP_WORDS, SOLARI_CONSOLE, initCostLine, type InitSetup } from "@wsp/protocol";
 import { Input } from "../../components/ui/input.js";
 import { cn } from "../../lib/utils.js";
-import { CARD, ROW, ROW_LINE, STATE_WORD, SetupFrame } from "./grammar.js";
+import { CARD, FIELD, FIELD_LABEL, FIELD_ROW, STATE_WORD } from "./rows.js";
+import { SetupScreen } from "./SetupScreen.js";
 
-const GUIDE = "font-mono text-[11px] text-muted-foreground";
+const GUIDE = "font-mono text-xs text-muted-foreground";
 const CONSOLE_URL = `https://${SOLARI_CONSOLE}`;
 
-export function SetupKeys({ setup, counter, onSave, onBack, refusal }: { setup: InitSetup; counter?: string; onSave: (keys: { solari?: string; anthropic?: string }) => void; onBack: () => void; refusal: string | null }) {
+export function SetupKeys({ setup, onSave, onBack, refusal }: { setup: InitSetup; onSave: (keys: { solari: string }) => void; onBack: () => void; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.keys;
   const [solari, setSolari] = useState("");
-  const [anthropic, setAnthropic] = useState("");
-  const typed = solari.trim() !== "" || anthropic.trim() !== "";
-  const ready = setup.keys.solari || solari.trim() !== "";
-  const save = (): void => onSave({ ...(solari.trim() !== "" ? { solari: solari.trim() } : {}), ...(anthropic.trim() !== "" ? { anthropic: anthropic.trim() } : {}) });
+  const ready = solari.trim() !== "";
+  const save = (): void => onSave({ solari: solari.trim() });
   return (
-    <SetupFrame
-      k="keys"
-      label={words.label}
-      {...(counter !== undefined ? { counter } : {})}
-      headline={words.headline}
-      refusal={refusal}
-      primary={{ word: typed ? words.keycap : CLOUD_SETUP_WORDS.screen.keycap, onPress: save, disabled: !ready, focus: false }}
-      secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}
-    >
-      <ul className={CARD}>
-        <KeyRow k="solari" label={words.solari} saved={setup.keys.solari} value={solari} onChange={setSolari} onEnter={ready ? save : undefined} autoFocus={!setup.keys.solari} />
-        <KeyRow k="anthropic" label={words.anthropic} optional={words.optional} saved={setup.keys.anthropic} value={anthropic} onChange={setAnthropic} onEnter={ready ? save : undefined} />
-      </ul>
-      <div className="flex flex-col gap-1 px-1 pt-3">
-        <p className={GUIDE}>
-          <a href={CONSOLE_URL} target="_blank" rel="noopener noreferrer" className="underline-offset-4 hover:text-foreground hover:underline">
-            {words.where}
-          </a>
-        </p>
+    <SetupScreen k="keys" label={words.label} headline={words.headline} top={words.top} refusal={refusal} primary={{ word: words.keycap, onPress: save, disabled: !ready, focus: false }} secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}>
+      <div className={CARD}>
+        <div className={FIELD_ROW}>
+          <div className="flex items-center justify-between">
+            <label htmlFor="setup-key-solari" className={FIELD_LABEL}>
+              {words.solari}
+            </label>
+            <span data-k="solari-state" className={STATE_WORD}>
+              {setup.keys.solari ? words.saved : words.unset}
+            </span>
+          </div>
+          <Input id="setup-key-solari" type="password" size="compact" autoComplete="off" spellCheck={false} autoFocus value={solari} placeholder={setup.keys.solari ? "••••••••" : ""} onChange={e => setSolari(e.target.value)} onKeyDown={e => (e.key === "Enter" && ready ? save() : undefined)} className={cn(FIELD, "min-w-0")} />
+        </div>
+      </div>
+      <div className="mt-3 flex flex-col gap-1">
+        <a data-k="where" href={CONSOLE_URL} target="_blank" rel="noopener noreferrer" className={cn(GUIDE, "inline-flex w-fit items-center gap-1 underline-offset-4 hover:text-foreground hover:underline")}>
+          {words.where}
+          <ExternalLinkIcon aria-hidden className="size-3" />
+        </a>
         {setup.pricing !== null ? <p className={GUIDE}>{initCostLine(setup.pricing.size, setup.pricing.rateUsdPerHour)}</p> : null}
       </div>
-    </SetupFrame>
-  );
-}
-
-function KeyRow({ k, label, optional, saved, value, onChange, onEnter, autoFocus }: { k: string; label: string; optional?: string; saved: boolean; value: string; onChange: (v: string) => void; onEnter?: () => void; autoFocus?: boolean }) {
-  const id = `setup-key-${k}`;
-  return (
-    <li className={cn(ROW, ROW_LINE)}>
-      <label htmlFor={id} className="w-48 shrink-0 truncate text-sm text-foreground">
-        {label}
-        {optional !== undefined ? <span className={cn(STATE_WORD, "ml-2")}>{optional}</span> : null}
-      </label>
-      <Input
-        id={id}
-        type="password"
-        size="sm"
-        autoComplete="off"
-        spellCheck={false}
-        autoFocus={autoFocus === true}
-        value={value}
-        placeholder={saved ? "••••••••" : ""}
-        onChange={e => onChange(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === "Enter" && onEnter !== undefined) onEnter();
-        }}
-        className="min-w-0 flex-1 rounded-sm border border-input bg-transparent font-mono text-xs"
-      />
-      <span data-k={`${k}-state`} className={STATE_WORD}>
-        {saved ? CLOUD_SETUP_WORDS.keys.saved : CLOUD_SETUP_WORDS.keys.unset}
-      </span>
-    </li>
+    </SetupScreen>
   );
 }

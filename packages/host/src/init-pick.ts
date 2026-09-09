@@ -10,7 +10,7 @@ import type { Readable, Writable } from "node:stream";
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type Size, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
 import { withProject, type LoginChoice, type Manifest, type ManifestEntry, type ProjectScan, floorApplies } from "@wsp/collect";
 import { estimateDisk, isMcpRow, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { customRows, fmtBytes, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
+import { customRows, fmtBytes, wspToolsRowId, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, card, colourDepth, isTTY, table, textPrompt } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
@@ -26,13 +26,13 @@ import type { ScanRow } from "./scan.js";
 /** The six screens of a run, in order, with the one sentence each opens with. Screen 3 is the manager scan's, and
  * screen 6 is the build itself. */
 export const AGENTS_TITLE = "Agents";
-export const AGENTS_TOP = "Which coding agents go on your machine image.";
+export const AGENTS_TOP = "Which agents go on the image";
 export const TOOLS_TITLE = "Tools";
-export const TOOLS_TOP = "What installs on the image, from what you use.";
+export const TOOLS_TOP = "Tools from your usage";
 export const SIGN_INS_TITLE = "Sign-ins";
-export const SIGN_INS_TOP = "Each row is something the machine needs to be signed in to. Choose how.";
+export const SIGN_INS_TOP = "How sign-ins reach the machine";
 export const WSP_TITLE = "wsp for your agents on this Mac";
-export const WSP_TOP = "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces.";
+export const WSP_TOP = "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces";
 /** How many screens a run has, the build counted; the counter on every screen reads against it. */
 export const SCREENS = 6;
 /** The first screen's own question when no folder was named on the command line; nothing has to answer it. */
@@ -152,7 +152,7 @@ export interface SignInScreen {
 }
 
 /** The agents an MCP row belongs to: a server's own; for the mcp-remote row, every agent with a server here. */
-function mcpAgents(e: ManifestEntry, manifest: Manifest): string[] {
+export function mcpAgents(e: ManifestEntry, manifest: Manifest): string[] {
   const own = parseMcpId(e.id)?.agent;
   if (own !== undefined) return [own];
   return [...new Set(manifest.entries.flatMap(s => parseMcpId(s.id)?.agent ?? []))];
@@ -251,7 +251,7 @@ export function signInItems(manifest: Manifest, brew: BrewTable): SignInScreen {
   return { items, initial };
 }
 
-const WSP_TOOLS = "wsp-tools/";
+const WSP_TOOLS = wspToolsRowId("");
 /** The agent a wsp tools row is for; nothing for any other row on the screen. */
 export const wspToolsAgent = (id: string): string | undefined => (id.startsWith(WSP_TOOLS) ? id.slice(WSP_TOOLS.length) : undefined);
 
@@ -260,11 +260,11 @@ export const wspToolsAgent = (id: string): string | undefined => (id.startsWith(
  * with starts on, since it is the one that would use the server. */
 export function wspToolsItems(recipe: Recipe, home: string): { items: SelectItem[]; initial: Set<string> } {
   const items = MCP_AGENTS.filter(a => onThisMac(recipe, a.id)).map((a): SelectItem => ({
-    id: `${WSP_TOOLS}${a.id}`,
+    id: wspToolsRowId(a.id),
     label: a.name,
     detail: [`writes ${mcpConfigFile(a, home).tilde}`],
   }));
-  const used = new Set(recipe.histories.filter(h => h.sessions > 0).map(h => `${WSP_TOOLS}${h.agent}`));
+  const used = new Set(recipe.histories.filter(h => h.sessions > 0).map(h => wspToolsRowId(h.agent)));
   return { items, initial: new Set(items.filter(i => used.has(i.id)).map(i => i.id)) };
 }
 

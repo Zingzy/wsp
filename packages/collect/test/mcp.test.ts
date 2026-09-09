@@ -53,7 +53,7 @@ describe("mcp servers", () => {
     // The file a secret-named env value points at travels on the row; the path itself is rewritten on the machine.
     expect(rows[2]).toEqual({
       rung: "agents", id: "agents/mcp/claude/gsc", label: "gsc", group: "Claude Code MCP servers", paths: ["~/.config/gsc/creds.json"], bytes: 2100, default: "bring", consent: true,
-      detail: "stdio: uvx mcp-search-console; needs uv, installed on the machine when missing; carries a secret: the file GSC_CREDENTIALS_PATH points at (2.1 KB)",
+      detail: "stdio: uvx mcp-search-console; needs uv, installed on the machine when missing; carries a secret: the file GSC_CREDENTIALS_PATH points at (2 KB)",
     });
     expect(rows[3]).toEqual({
       rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "skip",
@@ -62,14 +62,14 @@ describe("mcp servers", () => {
     });
     expect(rows[4]).toEqual({
       rung: "agents", id: "agents/mcp/claude/home/zomato", label: "zomato", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring",
-      detail: "local to ~; stdio: npx mcp-remote (mcp.zomato.com/mcp); runs via npx; its saved sign-in (1.4 KB) travels on the mcp-remote sign-ins row",
+      detail: "local to ~; stdio: npx mcp-remote (mcp.zomato.com/mcp); runs via npx; its saved sign-in (1 KB) travels on the mcp-remote sign-ins row",
     });
     // The whole store is claimed; only what the current bridge reads travels.
     expect(rows[5]).toEqual({
       rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote sign-ins", group: "MCP sign-ins", paths: ["~/.mcp-auth"],
       excludes: ["~/.mcp-auth/mcp-remote-0.1.37", `~/.mcp-auth/mcp-remote-v1/${hash("https://mcp.zomato.com/mcp")}_lock.json`],
       bytes: 1800, default: "bring", consent: true,
-      detail: "browser sign-ins saved by mcp-remote for remote servers: 1 token (1.4 KB), for zomato; older bridge versions' folders stay here",
+      detail: "browser sign-ins saved by mcp-remote for remote servers: 1 token (1 KB), for zomato; older bridge versions' folders stay here",
     });
     // The config itself is never listed here; it travels with the agent's row. No token file is read.
     expect(host.calls.filter(c => c.startsWith("read "))).toEqual([`read ${HOME}/.claude.json`]);

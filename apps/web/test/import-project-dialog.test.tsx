@@ -71,7 +71,7 @@ const event = (over: Partial<ProjectImportEvent>): EventUnion => ({
   source: "/private/var/proj",
   dest: "/private/var/proj",
   stage: "planned",
-  message: "12 files, 3.0 KB and the repository; 2 secret-shaped files; 2 caches left behind.",
+  message: "12 files, 3 KB and the repository; 2 secret-shaped files; 2 caches left behind.",
   elapsedMs: 10,
   ...over,
 });
@@ -292,7 +292,7 @@ describe("import project dialog", () => {
     expect((within(root).getByLabelText("Folder on this Mac") as HTMLInputElement).value).toBe("/var/proj");
     expect(value(root, "repository")).toBe("Git repository, history travels");
     expect(root.querySelector<HTMLElement>("[data-k=repository]")!.className).not.toContain("font-mono");
-    expect(value(root, "files")).toBe("12 files · 3.0 KB");
+    expect(value(root, "files")).toBe("12 files · 3 KB");
     expect(root.querySelector<HTMLElement>("[data-k=files]")!.className).toContain("font-mono");
     expect(value(root, "caches")).toBe("2 folders");
     expect(root.querySelector("[data-k=cache-list]")).toBeNull();
@@ -458,14 +458,14 @@ describe("import project dialog", () => {
     expect(progress(root)).toEqual({ line: "Starting", percent: "0" });
     emit(event({ stage: "packing", message: "Packing 11 files.", elapsedMs: 30 }));
     expect(progress(root)).toEqual({ line: "Packing 11 files", percent: "0" });
-    emit(event({ stage: "uploading", message: "Part 1 of 2, 1.4 KB of 2.8 KB.", elapsedMs: 50, bytes: 1_400, total: 2_800 }));
-    expect(progress(root)).toEqual({ line: "Uploading 2.7 KB", percent: "50" });
+    emit(event({ stage: "uploading", message: "Part 1 of 2, 1 KB of 3 KB.", elapsedMs: 50, bytes: 1_400, total: 2_800 }));
+    expect(progress(root)).toEqual({ line: "Uploading 3 KB", percent: "50" });
     emit(event({ source: "/var/other", stage: "landing", message: "Landing at /var/other.", elapsedMs: 60 }));
-    expect(progress(root)).toEqual({ line: "Uploading 2.7 KB", percent: "50" });
+    expect(progress(root)).toEqual({ line: "Uploading 3 KB", percent: "50" });
 
     emit(event({ stage: "landing", message: "Landing at /private/var/proj.", elapsedMs: 70 }));
     expect(progress(root)).toEqual({ line: "Landing on api", percent: "100" });
-    emit(event({ stage: "done", message: "11 files, 2.8 KB, landed at /private/var/proj.", elapsedMs: 80 }));
+    emit(event({ stage: "done", message: "11 files, 3 KB, landed at /private/var/proj.", elapsedMs: 80 }));
     expect(progress(root)).toEqual({ line: "Done", percent: "100" });
     await act(async () => finish());
     // At done the slot says one thing, the landed line, over the full bar; the Done key is the only other word.
@@ -542,7 +542,7 @@ describe("import project dialog", () => {
     useStore.getState().bind(api);
     render(<ImportProjectDialog workspace={workspace} initialSource="/var/proj" onClose={() => {}} />);
     const root = await dialog();
-    await waitFor(() => expect(value(root, "files")).toBe("12 files · 3.0 KB"));
+    await waitFor(() => expect(value(root, "files")).toBe("12 files · 3 KB"));
     expect(api.planProject).toHaveBeenCalledWith("/var/proj");
   });
 });

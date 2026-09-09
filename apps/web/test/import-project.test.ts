@@ -13,7 +13,7 @@ const ev = (over: Partial<ProjectImportEvent>): ProjectImportEvent => ({
   source: "/Users/me/code/proj",
   dest: "/Users/me/code/proj",
   stage: "planned",
-  message: "12 files, 3.0 KB and the repository; 2 secret-shaped files; 1 cache left behind.",
+  message: "12 files, 3 KB and the repository; 2 secret-shaped files; 1 cache left behind.",
   elapsedMs: 10,
   ...over,
 });

@@ -557,8 +557,8 @@ describe("rows from the fixture wire", () => {
     for (const name of ["zingzy-mac", "web", "old"]) expect(glyphBox(rowOf(name))).toEqual(glyphBox(rowOf("api")));
     const machineOf = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-machine]")!;
     // This computer's second line is its cores and memory, in the grammar a fork's row reads its size in.
-    expect(machineOf(rowOf("zingzy-mac")).textContent).toBe("10 cores · 16 GB");
-    expect(machineOf(rowOf("api")).textContent).toBe("2 vCPU · 4 GB");
+    expect(machineOf(rowOf("zingzy-mac")).textContent).toBe("10 cores · 16 GB");
+    expect(machineOf(rowOf("api")).textContent).toBe("2 vCPU · 4 GB");
     expect(metaOf(rowOf("zingzy-mac")).textContent).toBe(FREE_WORD);
     expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
     // The cloud rows beside it: the spend, the countdown and the paused word all read in their own slots.
@@ -980,7 +980,7 @@ describe("new workspace dialog", () => {
     const group = within(dialog).getByRole("radiogroup", { name: "Size" });
     await waitFor(() => expect(within(group).getAllByRole("radio").map(r => r.getAttribute("aria-checked"))).toEqual(["true", "false"]));
     fireEvent.change(input, { target: { value: "beta" } });
-    fireEvent.click(within(group).getByRole("radio", { name: /8 GB/ }));
+    fireEvent.click(within(group).getByRole("radio", { name: /8\u00a0GB/ }));
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", { cpu: 2, memMb: 8192 }));
 
@@ -1379,7 +1379,7 @@ describe("Spaces mode", () => {
 
   it("the header's lines are the machine, what it cost today with its rate, and the nap countdown only when one is set", async () => {
     await mountSpaces(fakeApi(THREE, statuses()));
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr", "naps in 15m"]));
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
     );
@@ -1394,14 +1394,14 @@ describe("Spaces mode", () => {
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
     // With no nap scheduled the line is gone rather than reading "active"; a paused machine bills nothing, so no rate.
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr"]));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr"]));
   });
 
   it("a paused workspace's header drops the rate, and its state word takes the name's line", async () => {
     useStore.setState({ selectedId: "ws_b" });
     await mountSpaces(fakeApi(THREE, statuses()));
     await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
-    expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today"]);
+    expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today"]);
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("Paused");
   });
 
@@ -1420,18 +1420,18 @@ describe("Spaces mode", () => {
     await mountSpaces(fakeApi([API, MAC], [status(API), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]));
     await waitFor(() => expect(within(spaceHeader()!).getByText("zingzy-mac")).toBeDefined());
     // The machine words and the word free: nothing wsp pays for, so no figure and no rate under them.
-    expect(headerLines()).toEqual(["10 cores · 16 GB", FREE_WORD]);
+    expect(headerLines()).toEqual(["10 cores · 16 GB", FREE_WORD]);
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
     // A tick on this computer's meter changes nothing there either.
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_m", phase: "running", rateUsdPerHour: 0, awakeMs: 120_000, accruedUsd: 0, at: new Date(NOW).toISOString() }),
     );
-    await waitFor(() => expect(headerLines()).toEqual(["10 cores · 16 GB", FREE_WORD]));
+    await waitFor(() => expect(headerLines()).toEqual(["10 cores · 16 GB", FREE_WORD]));
     // The fork beside it keeps every line it had: the size, then the spend with its rate. Both bodies carry a
     // header while one travels out, so the lines are read once the body asked for is there alone.
     fireEvent.click(icons()[0]!);
     await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr"]));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr"]));
   });
 
   it("a space asked for while the body is still travelling turns it around and never draws one workspace twice", async () => {
@@ -1528,11 +1528,11 @@ describe("Spaces mode", () => {
 
   it("the two lines the row gives a whole line to lead the header's, and the rest stay under them", async () => {
     await mountSpaces(fakeApi(THREE, statuses()));
-    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(15.5 * 60_000) }), daemonNote: DAEMON_UPDATING } }));
-    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB", "$0.00 today · $0.110/hr", "naps in 15m"]));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { idleAt: iso(15.5 * 60_000) }) }));
-    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
   });
 
   it("a machine that stopped answering with memory near full says so at the top of its header", async () => {
@@ -1545,9 +1545,9 @@ describe("Spaces mode", () => {
       getLive("ws_a").feedStatus("connecting");
     });
     await waitFor(() => expect(headerLines()[0]).toBe("out of memory, 3.6 of 3.9 GB"));
-    expect(headerLines()).toContain("2 vCPU · 4 GB");
+    expect(headerLines()).toContain("2 vCPU · 4 GB");
     act(() => getLive("ws_a").feedStatus("live"));
-    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
   });
 
   it("the header is a stop in the arrow walk, and the walk carries on into the space's threads", async () => {

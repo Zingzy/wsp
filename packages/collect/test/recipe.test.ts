@@ -30,11 +30,11 @@ const laptop = () =>
   });
 
 describe("computeRecipe", () => {
-  it("ticks what is installed here first, then what the agents used, and falls back to the catalog's own default", async () => {
+  it("ticks what the agents used over the floor, leaves what is installed here and never used off, and falls back to the catalog's own default", async () => {
     const recipe = await computeRecipe(laptop(), { ...CLAUDE_THREADS, now: () => new Date("2026-09-06T03:00:00Z") });
     const row = (id: string) => recipe.rows.find(r => r.id === id)!;
     expect(row("claude")).toEqual({ id: "claude", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.claude/settings.json", "~/.claude/skills"], bin: true }, size: 208 * 1024 * 1024 });
-    expect(row("gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true }, size: 42188962 });
+    expect(row("gh")).toEqual({ id: "gh", kind: "tool", on: false, source: { kind: "installed", paths: [], bin: true }, size: 42188962 });
     expect(row("agent-browser")).toEqual({ id: "agent-browser", kind: "tool", on: true, source: { kind: "used", sessions: 2, calls: 5 }, size: 81702912 });
     // One session's use is recorded but does not tick a row the catalog leaves off; the floor does (agent-browser above).
     expect(row("go")).toMatchObject({ on: false, source: { kind: "used", sessions: 1, calls: 1 } });
@@ -85,15 +85,15 @@ describe("computeRecipe", () => {
     const row = (id: string) => recipe.rows.find(r => r.id === id)!;
     // go was one session's use and off; the project's go.mod ticks it and says which file asked.
     expect(row("go")).toMatchObject({ on: true, source: { kind: "project", why: "go.mod needs Go" } });
-    // gh is installed here and stays on, with the source this computer gave it: the project never named it.
-    expect(row("gh")).toMatchObject({ on: true, source: { kind: "installed", paths: [], bin: true } });
+    // gh is installed here and never used, so it stays off with the source this computer gave it: the project never named it.
+    expect(row("gh")).toMatchObject({ on: false, source: { kind: "installed", paths: [], bin: true } });
     // node is installed here too, and the project's own file outranks that.
     expect(row("node")).toMatchObject({ on: true, source: { kind: "project", why: "engines.node >=22" } });
     expect(scans).toEqual(["node engines.node >=22", "go go.mod needs Go", "ruby Gemfile needs Ruby"]);
     expect(Recipe.parse(JSON.parse(JSON.stringify(recipe)))).toEqual(recipe);
   });
 
-  it("a tool both installed here and used by the agents records what they ran, and being here still ticks it", async () => {
+  it("a tool both installed here and used by the agents records what they ran, and the use alone decides its tick", async () => {
     const host = fakeHost({
       which: ["claude", "gh", "node", "git"],
       files: {
@@ -102,9 +102,24 @@ describe("computeRecipe", () => {
       },
     });
     const recipe = await computeRecipe(host, CLAUDE_THREADS);
-    // The counts are the row's source, so a screen can say "installed here, never used" and mean it.
-    expect(recipe.rows.find(r => r.id === "gh")).toEqual({ id: "gh", kind: "tool", on: true, source: { kind: "used", sessions: 1, calls: 1 }, size: 42188962 });
-    expect(recipe.rows.find(r => r.id === "git")).toMatchObject({ on: true, source: { kind: "installed" } });
+    // The counts are the row's source, so a screen can say "installed here, never used" and mean it; one look is under the floor.
+    expect(recipe.rows.find(r => r.id === "gh")).toEqual({ id: "gh", kind: "tool", on: false, source: { kind: "used", sessions: 1, calls: 1 }, size: 42188962 });
+    expect(recipe.rows.find(r => r.id === "git")).toMatchObject({ on: false, source: { kind: "installed" } });
+  });
+
+  it("installed here and never used is off whatever the size: a 3.3 GB Swift and a 4 MB Yarn both stay off while a used row is on", async () => {
+    const host = fakeHost({
+      which: ["swift", "yarn", "agent-browser"],
+      files: {
+        "~/.claude/projects/-Users-dev-proj/s1.jsonl": [claudeLine("s1", "agent-browser open https://x"), claudeLine("s1", "agent-browser click a; agent-browser click b; agent-browser fill c")].join("\n"),
+        "~/.claude/projects/-Users-dev-proj/s2.jsonl": claudeLine("s2", "agent-browser snapshot"),
+      },
+    });
+    const recipe = await computeRecipe(host, CLAUDE_THREADS);
+    const row = (id: string) => recipe.rows.find(r => r.id === id)!;
+    expect(row("swift")).toMatchObject({ on: false, source: { kind: "installed", bin: true }, size: 3562135552 });
+    expect(row("yarn")).toMatchObject({ on: false, source: { kind: "installed", bin: true } });
+    expect(row("agent-browser")).toMatchObject({ on: true, source: { kind: "used", sessions: 2, calls: 5 } });
   });
 
   it("a use below the threshold is the blended rule's answer and vetoes the catalog's own default", async () => {

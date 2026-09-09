@@ -95,29 +95,29 @@ const api: Api = {
     const cut = plan.secrets.filter(s => !(o.carry ?? []).includes(s.path) && !(o.rewrite ?? []).includes(s.path)).map(s => s.path);
     const travelling = plan.agents.filter(a => a.error === undefined && (o.agents ?? []).includes(a.agent));
     const sessions = plan.agents.length === 0 ? "" : travelling.length === 0 ? " No agent sessions travel." : ` Sessions travel for ${travelling.map(a => `${a.name} (${a.sessions} sessions)`).join(", ")}.`;
-    emit({ stage: "planned", message: "1204 files, 38.2 MB and the repository; 3 secret-shaped files; 4 caches left behind.", elapsedMs: 180 });
+    emit({ stage: "planned", message: "1204 files, 38 MB and the repository; 3 secret-shaped files; 4 caches left behind.", elapsedMs: 180 });
     await beat();
     emit({ stage: "consented", message: `Rewriting .git/config to https://github.com/zingzy/spoo.git without http.extraheader; cut ${cut.join(", ")}.${sessions}`, elapsedMs: 190 });
     await beat();
     emit({ stage: "packing", message: "Packing 1202 files.", elapsedMs: 210 });
     await beat();
-    emit({ stage: "uploading", message: "Uploading 31.0 MB.", elapsedMs: 2_400, bytes: 0, total: 32_505_856 });
+    emit({ stage: "uploading", message: "Uploading 31 MB.", elapsedMs: 2_400, bytes: 0, total: 32_505_856 });
     await beat();
-    emit({ stage: "uploading", message: "Part 1 of 2, 15.5 MB of 31.0 MB.", elapsedMs: 4_600, bytes: 16_252_928, total: 32_505_856 });
+    emit({ stage: "uploading", message: "Part 1 of 2, 16 MB of 31 MB.", elapsedMs: 4_600, bytes: 16_252_928, total: 32_505_856 });
     await beat();
-    emit({ stage: "uploading", message: "Part 2 of 2, 31.0 MB of 31.0 MB.", elapsedMs: 6_900, bytes: 32_505_856, total: 32_505_856 });
+    emit({ stage: "uploading", message: "Part 2 of 2, 31 MB of 31 MB.", elapsedMs: 6_900, bytes: 32_505_856, total: 32_505_856 });
     await beat();
     emit({ stage: "landing", message: `Landing at ${SOURCE}.`, elapsedMs: 7_100 });
     await beat();
     if (travelling.length > 0) {
-      emit({ stage: "uploading", message: "Uploading 48 session files and the rows to merge, 1.2 MB.", elapsedMs: 7_300, bytes: 0, total: 1_258_291 });
+      emit({ stage: "uploading", message: "Uploading 48 session files and the rows to merge, 1 MB.", elapsedMs: 7_300, bytes: 0, total: 1_258_291 });
       await beat();
-      emit({ stage: "uploading", message: "Part 1 of 1, 1.2 MB of 1.2 MB.", elapsedMs: 7_900, bytes: 1_258_291, total: 1_258_291 });
+      emit({ stage: "uploading", message: "Part 1 of 1, 1 MB of 1 MB.", elapsedMs: 7_900, bytes: 1_258_291, total: 1_258_291 });
       await beat();
       emit({ stage: "landing", message: `Landing sessions: ${travelling.map(a => `${a.name} moved`).join(", ")}.`, elapsedMs: 8_400 });
       await beat();
     }
-    emit({ stage: "done", message: `1202 files, 38.0 MB, landed at ${SOURCE}.`, elapsedMs: 9_800 });
+    emit({ stage: "done", message: `1202 files, 38 MB, landed at ${SOURCE}.`, elapsedMs: 9_800 });
     return { dest: SOURCE, files: 1_202, bytes: 38.0 * 1024 * 1024, parts: 1, cut, rewritten: [".git/config"], agents };
   },
   subscribe: fn => {

@@ -260,7 +260,7 @@ describe("goldenRecipeFor", () => {
   });
 
   it("a ticked Claude Code sets its config dir and the key only when loaded", () => {
-    const withKey = goldenRecipeFor(bring("agents/claude", "shell/zshrc"), { anthropic: ANTHROPIC });
+    const withKey = goldenRecipeFor(bring("agents/claude", "shell/zshrc"), { ANTHROPIC_API_KEY: ANTHROPIC });
     expect(withKey.envs).toMatchObject({ ANTHROPIC_API_KEY: ANTHROPIC, CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
 
     const noKey = goldenRecipeFor(bring("agents/claude"), {});
@@ -268,15 +268,18 @@ describe("goldenRecipeFor", () => {
     expect(noKey.envs).toHaveProperty("CLAUDE_CONFIG_DIR");
   });
 
-  it("a ticked agent whose entry names no state home variable and no key variable adds nothing, even with a key loaded", () => {
-    const codex = goldenRecipeFor(bring("agents/codex", "shell/zshrc"), { anthropic: ANTHROPIC });
+  it("a ticked agent takes the key under the variable its own sign-in declares and no other agent's, even with that one loaded", () => {
+    const codex = goldenRecipeFor(bring("agents/codex", "shell/zshrc"), { ANTHROPIC_API_KEY: ANTHROPIC });
     expect(codex.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
     expect(codex.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(codex.envs).toEqual(goldenRecipeFor(bring("shell/zshrc"), {}).envs);
+    const withOwn = goldenRecipeFor(bring("agents/codex"), { ANTHROPIC_API_KEY: ANTHROPIC, OPENAI_API_KEY: "sk-x-fake-openai" });
+    expect(withOwn.envs).toMatchObject({ OPENAI_API_KEY: "sk-x-fake-openai" });
+    expect(withOwn.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
   });
 
   it("names no size, so the wizard's builder is minted at the size the backend calls default", () => {
-    const recipe = goldenRecipeFor(bring("agents/claude", "shell/zshrc"), { anthropic: ANTHROPIC });
+    const recipe = goldenRecipeFor(bring("agents/claude", "shell/zshrc"), { ANTHROPIC_API_KEY: ANTHROPIC });
     expect([recipe.cpu, recipe.memMb]).toEqual([undefined, undefined]);
   });
 

@@ -13,14 +13,17 @@ import { PassThrough, Writable } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import type { BackendPricing } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, LOGIN_STATE_WORDS, THIS_COMPUTER, initAgentPrompt, initJobOver, initRowOver, isLocalWorkspace, type GoldenStep, type InitJob, type InitJobEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState } from "@wsp/protocol";
+import { RUNGS } from "@wsp/collect";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, THIS_COMPUTER, initAgentPrompt, initJobOver, initRowOver, isLocalWorkspace, plural, type GoldenStep, type InitJob, type InitJobEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
-import type { Keys } from "./cli.js";
+import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
 import { wspToolsAgent, wspToolsItems } from "./init-pick.js";
-import { recipeWithAnswers } from "./init-recipe.js";
-import { answerScreen, screensOf, type ScreenAnswers } from "./init-screens.js";
-import { GOLDEN_NAME, PREPARE_STEPS, SEAL_STEPS, readThisComputer, reduceStages, runInit, type InitIO, type InitOptions, type Reading, type StageFrame, type StageWords } from "./init.js";
+import { RUNG_TITLE, agentName, recipeWithAnswers } from "./init-recipe.js";
+import { answerScreen, diskOf, keyNameFor, screensOf, type ScreenAnswers } from "./init-screens.js";
+import { handoffStage } from "./init-handoff.js";
+import { historyWord } from "./recipe-command.js";
+import { GOLDEN_NAME, PREPARE_STEPS, SEAL_STEPS, readThisComputer, reduceStages, runInit, type InitIO, type InitOptions, type Reading, type SignInContext, type StageFrame, type StageWords } from "./init.js";
 import type { InstallReport } from "./mcp-install.js";
 import { saveSmallRecipe, smallRecipePath } from "./recipe-file.js";
 import type { WorkspaceRoads } from "./server.js";
@@ -31,8 +34,9 @@ export interface InitJobDeps {
   statePath: string;
   home: string;
   platform: "darwin" | "linux";
-  /** The keys as read now, off the environment and the wsp home's .env. */
-  keys(): Keys;
+  /** The wsp home's .env as it stands, read at each ask: the one place the setup reads a key from, so a key in the
+   * process environment or a checkout's .env never reads as saved on a screen. */
+  saved(): Readonly<Record<string, string>>;
   /** Writes the keys given into the wsp home's .env, the one writer every road uses. */
   saveKeys(set: Record<string, string>): void;
   /** Wires the provider module the keys name into the runtime, so a host that started with none forks after the seal. */
@@ -51,11 +55,16 @@ export interface InitJobDeps {
     recipe(recipe: GoldenRecipe): GoldenRecipe;
   };
   retry?: InitOptions["retry"];
+  pollMs?: InitOptions["pollMs"];
   now?(): number;
 }
 
 /** How many lines of the run's prose the view keeps. */
 const LOG_TAIL = 60;
+/** How many of a stage's lines ride under its row. */
+const STAGE_LINES = 12;
+/** What a sign-in row says when the run ended without reaching it. */
+export const SIGN_IN_NEVER_REACHED = "the build never reached this sign-in";
 /** The stage rows in the order the build runs them: the prepare's, then the seal's. */
 const STAGE_WORDS: readonly StageWords[] = [...PREPARE_STEPS, ...SEAL_STEPS];
 const SEAL_STAGES = new Set<string>(SEAL_STEPS.map(w => w.stage));
@@ -70,6 +79,12 @@ interface State {
   reading?: Reading;
   answers?: ScreenAnswers;
   screens: InitScreen[];
+  /** The screen the person is on; one past the last is the build's own question. */
+  step: number;
+  /** What the image's disk holds before any tick and the disk the build asks for, once this computer is read. */
+  disk?: { fixed: number; total: number };
+  /** What the read of this computer found so far, one row per fact, drawn while it reads. */
+  facts: InitRow[];
   /** The rows outside the stages, in the order they appeared: the agents given the tools, each sign-in, the first
    * workspace, its project. */
   rows: InitRow[];
@@ -87,6 +102,8 @@ interface State {
   cancelled: boolean;
   /** Which keys the host held when the job started or a key was last saved; the view reads this, not the files. */
   keys: InitJob["keys"];
+  /** What the run's sign-in stage runs with, once it has started: a retry runs the same way, through the same relay. */
+  signIns?: SignInContext;
 }
 
 /** A writable that keeps the lines written to it, stripped of colour, for the view's log. */
@@ -149,21 +166,23 @@ export class InitJobs implements InitDoor {
     return this.running;
   }
 
-  /** Which keys the host holds, as two booleans; read off the files once per ask, never on a view. */
+  /** Whether the host holds the provider key; read off the home's file once per ask, never on a view. */
   private held(): InitJob["keys"] {
-    const keys = this.deps.keys();
-    return { solari: keys.solari !== undefined, anthropic: keys.anthropic !== undefined };
+    return { solari: keysOf(this.deps.saved()).solari !== undefined };
   }
 
   view(): InitJob | null {
     const s = this.state;
     if (s === undefined) return null;
-    const rows = this.rowsOf(s);
+    const rows = s.phase === "reading" || s.phase === "agent" ? s.facts.map(r => ({ ...r })) : this.rowsOf(s);
     return {
       id: s.id,
       road: s.road,
       phase: s.phase,
       keys: s.keys,
+      step: s.step,
+      stoppable: !initJobOver(s.phase) && (s.phase === "agent" || !s.building || s.signals.listenerCount("SIGINT") > 0),
+      ...(s.disk !== undefined ? { disk: s.disk } : {}),
       screens: s.screens,
       rows,
       progress: { done: rows.filter(r => initRowOver(r.state)).length, total: rows.length },
@@ -180,23 +199,33 @@ export class InitJobs implements InitDoor {
     const agents = (await this.deps.agents()).filter(a => a.found).map(a => ({ id: a.id, name: a.name, configured: a.configured }));
     return {
       keys: this.held(),
+      home: this.deps.home,
       agents,
       pricing: { size: pricing.defaultSize, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) },
       job: this.view(),
     };
   }
 
-  async keys(k: { solari?: string; anthropic?: string }): Promise<InitSetup> {
+  /** Saves the provider key, and an agent's API key by the sign-in row that took it, under the variable the agent's
+   * sign-in declares; a row that takes no key is refused, so nothing a client names lands in the file. */
+  async keys(k: { solari?: string; rows?: Record<string, string> }): Promise<InitSetup> {
     const set: Record<string, string> = {};
     const solari = k.solari?.trim();
-    const anthropic = k.anthropic?.trim();
-    if (solari !== undefined && solari !== "") set["SOLARI_API_KEY"] = solari;
-    if (anthropic !== undefined && anthropic !== "") set["ANTHROPIC_API_KEY"] = anthropic;
+    if (solari !== undefined && solari !== "") set[SOLARI_KEY] = solari;
+    for (const [row, value] of Object.entries(k.rows ?? {})) {
+      const typed = value.trim();
+      if (typed === "") continue;
+      const name = keyNameFor(this.answering().reading!.manifest, row);
+      if (name === undefined) throw new Error(`the sign-in row ${row} takes no API key`);
+      set[name] = typed;
+    }
     if (Object.keys(set).length > 0) {
       this.deps.saveKeys(set);
-      this.deps.provider(this.deps.keys());
-      if (this.state !== undefined) {
-        this.state.keys = this.held();
+      this.deps.provider(keysOf(this.deps.saved()));
+      const s = this.state;
+      if (s !== undefined) {
+        s.keys = this.held();
+        if (s.phase === "answering") s.screens = screensOf(s.reading!, s.answers!, this.deps);
         this.emit();
       }
     }
@@ -206,7 +235,7 @@ export class InitJobs implements InitDoor {
   async start(o: { road: InitRoad; harness?: string }): Promise<InitJob> {
     if (this.starting || (this.state !== undefined && !initJobOver(this.state.phase))) throw new Error("an init job is already running; cancel it or let it finish first");
     this.count += 1;
-    const state: State = { id: `init_${this.count}`, road: o.road, phase: o.road === "agent" ? "agent" : "reading", screens: [], rows: [], frames: [], building: false, log: [], signals: new EventEmitter(), cancelled: false, keys: this.held() };
+    const state: State = { id: `init_${this.count}`, road: o.road, phase: o.road === "agent" ? "agent" : "reading", screens: [], step: 0, facts: [], rows: [], frames: [], building: false, log: [], signals: new EventEmitter(), cancelled: false, keys: this.held() };
     if (o.road === "agent") {
       // The thread is started here, so a harness the runtime cannot run refuses the start rather than failing a job.
       this.starting = true;
@@ -235,13 +264,58 @@ export class InitJobs implements InitDoor {
     const s = this.answering();
     s.answers = answerScreen(s.reading!, s.answers!, o.screen, o);
     s.screens = screensOf(s.reading!, s.answers, this.deps);
+    s.disk = diskOf(s.reading!, s.answers.recipe, this.deps.statePath);
+    s.step = Math.min(s.screens.findIndex(x => x.id === o.screen) + 1, s.screens.length);
+    this.emit();
+    return this.view()!;
+  }
+
+  /** A sign-in that ran out or failed, run again on the builder while the build goes on: the row turns back to
+   * running, the page and the outcome land as the first time did, and the build waits on none of it. */
+  async retry(o: { tool: string }): Promise<InitJob> {
+    const s = this.state;
+    if (s === undefined || !s.building || initJobOver(s.phase)) throw new Error("no build is running to sign in on");
+    const row = s.rows.find(r => r.kind === "sign-in" && r.tool === o.tool);
+    if (row === undefined || !initRowOver(row.state) || row.state === INIT_SIGN_IN_WORDS["signed-in"]) throw new Error(`no failed sign-in for ${o.tool} to retry`);
+    const entry = s.reading?.manifest.entries.find(e => e.rung === "logins" && agentName(e) === o.tool);
+    if (entry === undefined) throw new Error(`no sign-in row for ${o.tool}`);
+    const ctx = s.signIns;
+    if (ctx === undefined) throw new Error("the machine is not up to sign in on");
+    row.state = STATE.running;
+    delete row.detail;
+    this.emit();
+    const io = this.io(s);
+    void handoffStage({
+      logins: [{ ...entry, choice: "machine" }],
+      left: new Map(),
+      dial: ctx.dial,
+      flow: ctx.flow,
+      signal: ctx.signal,
+      ...(ctx.pollMs !== undefined ? { pollMs: ctx.pollMs } : {}),
+      output: io.output,
+      platform: this.deps.platform,
+      json: record => this.take(s, record),
+    }).catch((e: unknown) => {
+      row.state = INIT_SIGN_IN_WORDS["not-signed-in"];
+      row.detail = e instanceof Error ? e.message : String(e);
+      this.emit();
+    });
+    return this.view()!;
+  }
+
+  /** Where the person went back to, kept on the job so a setup shut there reopens there. */
+  async step(o: { at: number }): Promise<InitJob> {
+    const s = this.answering();
+    if (!Number.isInteger(o.at) || o.at < 0 || o.at > s.screens.length) throw new Error(`the init job has no step ${o.at}`);
+    s.step = o.at;
     this.emit();
     return this.view()!;
   }
 
   async build(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob> {
     const s = this.answering();
-    const keys = this.deps.keys();
+    const saved = this.deps.saved();
+    const keys = keysOf(saved);
     if (keys.solari === undefined) throw new Error("no Solari API key is saved; the key screen takes one before the build");
     const reading = s.reading!;
     const answers = s.answers!;
@@ -254,6 +328,9 @@ export class InitJobs implements InitDoor {
     if (agents.size > 0) this.tools(s, this.deps.installTools(agents));
     s.building = true;
     s.phase = "building";
+    // Every sign-in the screens chose is a row from the first frame, waiting for its turn: the handoff's own events
+    // fill in the page and the outcome when they reach it, and a row the run never reaches ends as skipped, said so.
+    for (const row of this.chosenSignIns(s)) s.rows.push(row);
     if (o.firstWorkspace !== undefined) s.rows.push({ id: `workspace/${o.firstWorkspace}`, kind: "workspace", label: o.firstWorkspace, state: STATE.waiting });
     if (o.importFolder !== undefined) s.rows.push({ id: `project/${o.importFolder}`, kind: "project", label: basename(o.importFolder), state: STATE.waiting });
     this.emit();
@@ -268,7 +345,10 @@ export class InitJobs implements InitDoor {
       ...(o.firstWorkspace !== undefined ? { firstWorkspace: o.firstWorkspace } : {}),
       ...(o.importFolder !== undefined ? { importFolder: o.importFolder } : {}),
       ...this.deps.read,
-      keys,
+      agentKeys: agentKeysIn(saved),
+      signIns: ctx => {
+        s.signIns = ctx;
+      },
       pricing: this.deps.pricing(),
       statePath: this.deps.statePath,
       home: this.deps.home,
@@ -283,6 +363,7 @@ export class InitJobs implements InitDoor {
       host: () => Promise.reject(new Error("the init job serves nothing; the host it runs on already does")),
       ...(this.deps.build.daemon !== undefined ? { daemon: this.deps.build.daemon } : {}),
       ...(this.deps.retry !== undefined ? { retry: this.deps.retry } : {}),
+      ...(this.deps.pollMs !== undefined ? { pollMs: this.deps.pollMs } : {}),
     };
     this.run(s, async () => {
       try {
@@ -294,6 +375,12 @@ export class InitJobs implements InitDoor {
         }
       } finally {
         for (const off of offs) off();
+        for (const row of s.rows) {
+          if (row.kind === "sign-in" && (row.state === STATE.waiting || row.state === STATE.running)) {
+            row.state = INIT_SIGN_IN_WORDS.skipped;
+            row.detail = SIGN_IN_NEVER_REACHED;
+          }
+        }
       }
     });
     return this.view()!;
@@ -313,7 +400,7 @@ export class InitJobs implements InitDoor {
       s.signals.emit("SIGINT");
     } else {
       s.cancelled = false;
-      throw new Error("the build cannot be stopped once the machine is up; it seals and stops on its own");
+      throw new Error(CLOUD_SETUP_WORDS.build.cannotStop);
     }
     this.emit();
     return this.view()!;
@@ -366,18 +453,95 @@ export class InitJobs implements InitDoor {
     s.thread = { id: handle.id, workspaceId: local.id };
   }
 
-  /** Reads this computer for the screens, from the recipe file when the agent wrote one. */
+  /** Reads this computer for the screens, from the recipe file when the agent wrote one. Each reader is wrapped so
+   * the facts land on the view as rows while it runs: a rung of the collector as it finishes (they run in ladder
+   * order, so the next is the one running), Homebrew's sizes, each agent's history as it is read, the package
+   * managers' scan. */
   private async read(s: State, recipeFile: string | undefined): Promise<void> {
     s.phase = "reading";
     this.emit();
     const io = this.io(s);
-    const reading = await readThisComputer({ ...this.deps.read, statePath: this.deps.statePath, home: this.deps.home, ...(recipeFile !== undefined ? { recipeFile } : {}) }, io, true);
+    const fact = (id: string, label: string): InitRow => {
+      const had = s.facts.find(r => r.id === `fact/${id}`);
+      if (had !== undefined) return had;
+      const row: InitRow = { id: `fact/${id}`, kind: "fact", label, state: STATE.running };
+      s.facts.push(row);
+      this.emit();
+      return row;
+    };
+    const settle = (row: InitRow, word: string): void => {
+      row.state = word;
+      delete row.detail;
+      this.emit();
+    };
+    const read = this.deps.read;
+    const wrapped: typeof read = {
+      collect: onRung => {
+        fact(RUNGS[0], RUNG_TITLE[RUNGS[0]]);
+        return read.collect((rung, rows) => {
+          settle(fact(rung, RUNG_TITLE[rung]), `${rows} found`);
+          const next = RUNGS[RUNGS.indexOf(rung) + 1];
+          if (next !== undefined) fact(next, RUNG_TITLE[next]);
+          onRung(rung, rows);
+        });
+      },
+      recipe: (onHistory, onProject, onProgress) =>
+        read.recipe(
+          h => {
+            settle(fact(`history/${h.agent}`, catalogEntry(h.agent)?.name ?? h.agent), historyWord(h));
+            onHistory(h);
+          },
+          onProject,
+          p => {
+            const row = fact(`history/${p.agent}`, catalogEntry(p.agent)?.name ?? p.agent);
+            row.detail = `${plural(p.read, "session")} of ${p.files}`;
+            this.emit();
+            onProgress(p);
+          },
+        ),
+      scanProject: read.scanProject,
+      ...(read.brew !== undefined
+        ? {
+            brew: async () => {
+              const row = fact("brew", "Homebrew");
+              const table = await read.brew!();
+              settle(row, "sizes read");
+              return table;
+            },
+          }
+        : {}),
+      ...(read.scan !== undefined
+        ? {
+            scan: async recipe => {
+              const row = fact("scan", "Package managers");
+              const rows = await read.scan!(recipe);
+              settle(row, `${rows.length} found`);
+              return rows;
+            },
+          }
+        : {}),
+    };
+    const reading = await readThisComputer({ ...wrapped, statePath: this.deps.statePath, home: this.deps.home, ...(recipeFile !== undefined ? { recipeFile } : {}) }, io, true);
     if ("code" in reading) throw new Error(s.log.at(-1) ?? "this computer could not be read");
     if (s.cancelled) return;
     s.reading = reading;
     s.answers = { recipe: reading.catalogRecipe, logins: new Map(), wspTicks: undefined };
     s.screens = screensOf(reading, s.answers, this.deps);
+    s.disk = diskOf(reading, s.answers.recipe, this.deps.statePath);
+    s.step = 0;
     s.phase = "answering";
+  }
+
+  /** The sign-ins the screens answered with a copy, a sign-in on the machine or a key, as waiting rows, in the order
+   * the sign-ins screen lists them; a row fixed on skip is not one. */
+  private chosenSignIns(s: State): InitRow[] {
+    const logins = s.screens.find(x => x.id === "logins");
+    if (logins === undefined) return [];
+    return logins.items.flatMap((item): InitRow[] => {
+      const choice = logins.answers[item.id];
+      if (choice === undefined || choice === "skip" || item.mark === undefined || !(item.choices ?? []).some(c => c.value === choice)) return [];
+      return [{ id: `sign-in/${item.mark}`, kind: "sign-in", tool: item.mark, label: item.label, state: STATE.waiting }];
+    });
   }
 
   /** The agents given the wsp tools, as rows. */
@@ -418,26 +582,30 @@ export class InitJobs implements InitDoor {
         if (stage === undefined) return;
         const step = record["step"] as GoldenStep | undefined;
         s.frames.push({ type: "golden.stage", name: GOLDEN_NAME, stage, ...(text("detail") !== undefined ? { detail: text("detail")! } : {}), ...(step !== undefined ? { step: { label: step.label, command: step.command } } : {}), at });
-        if (stage === "ready") s.phase = "signing-in";
-        else if (stage === "sealed") s.phase = "finishing";
+        // The phase turns to signing in on the first sign-in row, not when the machine answers: the checks and the
+        // secrets between the two are the build's, and a status that says signing in with no row to sign in is a lie.
+        if (stage === "sealed") s.phase = "finishing";
         else if (SEAL_STAGES.has(stage)) s.phase = "sealing";
         break;
       }
       case "sign-in": {
         const tool = text("tool") ?? "";
         const id = `sign-in/${tool}`;
-        const next: InitRow = { id, kind: "sign-in", tool, label: text("label") ?? tool, state: STATE.open, ...(text("browserUrl") !== undefined ? { page: text("browserUrl")! } : {}), ...(text("code") !== undefined ? { code: text("code")! } : {}) };
+        // Without a page the command is still starting on the machine; with one, the person is waited on.
+        const page = text("browserUrl");
+        const next: InitRow = { id, kind: "sign-in", tool, label: text("label") ?? tool, state: page === undefined ? STATE.running : STATE.open, ...(page !== undefined ? { page } : {}), ...(text("code") !== undefined ? { code: text("code")! } : {}) };
         const had = row(id);
         if (had === undefined) s.rows.push(next);
         else Object.assign(had, next);
-        s.phase = "signing-in";
+        if (s.phase === "building") s.phase = "signing-in";
         break;
       }
       case "sign-in-result": {
+        if (s.phase === "building") s.phase = "signing-in";
         const tool = text("tool") ?? "";
         const id = `sign-in/${tool}`;
         const state = text("state") as LoginState | undefined;
-        const word = state !== undefined && state in LOGIN_STATE_WORDS ? LOGIN_STATE_WORDS[state] : (state ?? STATE.done);
+        const word = state !== undefined && state in INIT_SIGN_IN_WORDS ? INIT_SIGN_IN_WORDS[state] : (state ?? STATE.done);
         const had = row(id);
         const next: InitRow = { id, kind: "sign-in", tool, label: text("label") ?? tool, state: word, ...(text("note") !== undefined ? { detail: text("note")! } : {}) };
         if (had === undefined) s.rows.push(next);
@@ -446,6 +614,16 @@ export class InitJobs implements InitDoor {
           delete had.code;
           Object.assign(had, next);
         }
+        break;
+      }
+      case "key-set": {
+        if (s.phase === "building") s.phase = "signing-in";
+        const tool = text("tool") ?? "";
+        const id = `sign-in/${tool}`;
+        const next: InitRow = { id, kind: "sign-in", tool, label: text("label") ?? tool, state: STATE.keySet };
+        const had = row(id);
+        if (had === undefined) s.rows.push(next);
+        else Object.assign(had, next);
         break;
       }
       case "first-workspace": {
@@ -486,21 +664,24 @@ export class InitJobs implements InitDoor {
 
   /** The rows as the view shows them: the agents given the tools, the stages in the build's order (every one from
    * the first frame while the build runs, so the count means something; a stage the provider never ran leaves once
-   * the build is over), then the sign-ins, the first workspace and its project. */
+   * the build is over) with the sign-ins where they happen, after the machine answers and before the snapshot, then
+   * the first workspace and its project. A stage's label is its plain name; its state says where it is. */
   private rowsOf(s: State): InitRow[] {
     // Copies: a view on the events channel is a snapshot, and the rows here move on after it.
     const agents = s.rows.filter(r => r.kind === "agent").map(r => ({ ...r }));
-    const rest = s.rows.filter(r => r.kind !== "agent").map(r => ({ ...r }));
-    if (!s.building) return [...agents, ...rest];
+    const signIns = s.rows.filter(r => r.kind === "sign-in").map(r => ({ ...r }));
+    const rest = s.rows.filter(r => r.kind !== "agent" && r.kind !== "sign-in").map(r => ({ ...r }));
+    if (!s.building) return [...agents, ...signIns, ...rest];
     const view = reduceStages(s.frames, STAGE_WORDS);
     const over = initJobOver(s.phase);
     const stages = STAGE_WORDS.filter(w => !over || view.steps.some(x => x.stage === w.stage)).map((w): InitRow => {
       const step = view.steps.find(x => x.stage === w.stage);
       const state = step === undefined ? STATE.waiting : step.state === "current" ? STATE.running : step.state === "done" ? STATE.done : STATE.failed;
-      const label = step?.state === "done" ? w.end : step?.state === "failed" ? w.fail : w.start;
       const detail = step?.running?.command ?? step?.tail.at(-1);
-      return { id: `stage/${w.stage}`, kind: "stage", label, state, ...(detail !== undefined ? { detail } : {}), ...(step?.ms !== undefined ? { ms: step.ms } : {}) };
+      const lines = step === undefined ? [] : [...step.tail.slice(-STAGE_LINES), ...(step.running !== undefined ? [step.running.command] : [])];
+      return { id: `stage/${w.stage}`, kind: "stage", label: w.start, state, ...(detail !== undefined ? { detail } : {}), ...(step?.ms !== undefined ? { ms: step.ms } : {}), ...(lines.length > 0 ? { lines } : {}) };
     });
-    return [...agents, ...stages, ...rest];
+    const answered = stages.findIndex(r => r.id === "stage/ready") + 1;
+    return [...agents, ...stages.slice(0, answered), ...signIns, ...stages.slice(answered), ...rest];
   }
 }

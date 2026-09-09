@@ -3564,14 +3564,14 @@ describe("runtime verified wake", () => {
       await rt.workspaces.nap(ws.id);
       expect(tars).toEqual(["m1", "m1"]);
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
-      expect(vaultWarnings()).toEqual([`nap vault for ${ws.id} not stored, previous kept: the export was 5.9 KB, over the 4.9 KB cap`]);
+      expect(vaultWarnings()).toEqual([`nap vault for ${ws.id} not stored, previous kept: the export was 6 KB, over the 5 KB cap`]);
       expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
-      expect(napReason()).toBe("nap kept the previous vault; the export was 5.9 KB, over the 4.9 KB cap");
+      expect(napReason()).toBe("nap kept the previous vault; the export was 6 KB, over the 5 KB cap");
       // The status says it once; the record says it until a nap stores one, which is what the row and the tab read.
       const refused = await rt.workspaces.get(ws.id);
-      expect(refused.vaultRefused).toBe("the export was 5.9 KB, over the 4.9 KB cap");
+      expect(refused.vaultRefused).toBe("the export was 6 KB, over the 5 KB cap");
       expect(refused.vaultedAt).toBe(stored);
-      expect((await store.get("workspaces", ws.id))).toMatchObject({ vaultRefused: "the export was 5.9 KB, over the 4.9 KB cap", vaultedAt: stored });
+      expect((await store.get("workspaces", ws.id))).toMatchObject({ vaultRefused: "the export was 6 KB, over the 5 KB cap", vaultedAt: stored });
       await rt.workspaces.wake(ws.id);
       setTgzBytes(1_000);
       // Well inside the status poll's interval, so the only thing that moves is the stamp the next stash writes.

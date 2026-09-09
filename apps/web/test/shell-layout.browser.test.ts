@@ -554,7 +554,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
           expect(row.lineTops[0]!).toBeLessThan(row.lineTops[1]!);
           expect(row.lineTops[1]!).toBeLessThan(row.lineTops[2]!);
         }
-        expect(rows.workspaces.map(r => r.machine)).toEqual(["2 vCPU · 4 GB", "2 vCPU · 4 GB", "2 vCPU · 4 GB"]);
+        expect(rows.workspaces.map(r => r.machine)).toEqual(["2 vCPU · 4 GB", "2 vCPU · 4 GB", "2 vCPU · 4 GB"]);
         // The lead is the kind's glyph on every row, the cloud here, in one ink whatever the state; no dot beside it,
         // and the paused row's glyph alone dims.
         for (const row of rows.workspaces) {
@@ -698,7 +698,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         expect(read.threads).toEqual(["thread:s1", "thread:s2"]);
         expect(read.name).toBe("api");
         expect(read.state).toBe("");
-        expect(read.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr", "naps in 15m"]);
+        expect(read.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr", "naps in 15m"]);
         for (const line of read.lines) {
           expect(line.mono).toBe(true);
           expect(line.size).toBe("11px");
@@ -731,7 +731,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         const moved = await readSpaces();
         expect(moved.icons.map(icon => icon.current)).toEqual([false, true, false]);
         expect(moved.state).toBe("Paused");
-        expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB", "$0.00 today"]);
+        expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB", "$0.00 today"]);
         expect(moved.barBox.height).toBe(read.barBox.height);
         await page!.locator("[data-space-icon][aria-label=api]").click();
         await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "api");
@@ -883,10 +883,10 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(await page!.locator("[data-slot=badge]").count()).toBe(0);
       // This computer's second line is its cores and memory in the grammar a fork's size reads in; the words that
       // said which machine it is are the laptop and the name.
-      expect((await local.locator("[data-workspace-machine]").textContent())?.trim()).toBe("10 cores · 16 GB");
+      expect((await local.locator("[data-workspace-machine]").textContent())?.trim()).toBe("10 cores · 16 GB");
       expect((await local.locator("[data-workspace-meta]").textContent())?.trim()).toBe(FREE_WORD);
       expect((await local.locator("[data-workspace-state]").textContent())?.trim()).toBe("");
-      expect((await cloud.locator("[data-workspace-machine]").textContent())?.trim()).toBe("2 vCPU · 4 GB");
+      expect((await cloud.locator("[data-workspace-machine]").textContent())?.trim()).toBe("2 vCPU · 4 GB");
       expect((await cloud.locator("[data-workspace-meta]").textContent())?.trim()).toContain("$0.110/hr");
       expect((await paused.locator("[data-workspace-state]").textContent())?.trim()).toBe("Paused");
       // Uniform rows: one height for every kind and state, the lead slots and the names in one column, and the

@@ -20,24 +20,24 @@ const shape = (rows: readonly TableRow[]): string[][] => rows.map(r => [r.on ? "
 describe("the table of what travels", () => {
   it("one row per catalog entry: the tick, why it is here in this computer's own words, and the size its install downloads", () => {
     expect(shape(recipeTable(with_(used("go", 3, 40)), slice("node", "claude", "go")))).toEqual([
-      ["on", "Node 22 with npm", "always on the image", "198.8 MB"],
-      ["on", "Go", "40 commands in 3 sessions", "239.1 MB"],
-      ["on", "Claude Code", "installed here, never used", "208.0 MB"],
+      ["on", "Node 22 with npm", "always on the image", "199 MB"],
+      ["on", "Go", "40 commands in 3 sessions", "239 MB"],
+      ["on", "Claude Code", "installed here, never used", "208 MB"],
     ]);
     // An agent this computer has run says how much; one it has never run says that, and one it does not have says that.
     const histories = [{ agent: "claude", state: "read" as const, sessions: 151, calls: 4000 }];
     expect(shape(recipeTable({ ...RECIPE, histories }, slice("claude", "codex")))).toEqual([
-      ["on", "Claude Code", "used here, 151 sessions", "208.0 MB"],
-      ["off", "Codex", "not installed here", "455.0 MB"],
+      ["on", "Claude Code", "used here, 151 sessions", "208 MB"],
+      ["off", "Codex", "not installed here", "455 MB"],
     ]);
     // A row the recipe never named falls to the catalog's own evidence.
     expect(shape(recipeTable({ ...RECIPE, rows: [] }, slice("go", "ripgrep")))).toEqual([
-      ["on", "ripgrep", "always on the image", "4.5 MB"],
-      ["off", "Go", "in the catalog, on request", "239.1 MB"],
+      ["on", "ripgrep", "always on the image", "4 MB"],
+      ["off", "Go", "in the catalog, on request", "239 MB"],
     ]);
     expect(recipeTable(RECIPE, slice("gh"))[0]).toMatchObject({ name: "GitHub CLI", group: HERE_GROUP, heavy: false });
     expect(recipeTable(RECIPE, slice("gh"))[0]!.size).toBe(42188962);
-    expect(shape(recipeTable(RECIPE, slice("op")))).toEqual([["off", "1Password CLI", "in the catalog, on request", "41.0 MB"]]);
+    expect(shape(recipeTable(RECIPE, slice("op")))).toEqual([["off", "1Password CLI", "in the catalog, on request", "41 MB"]]);
   });
 
   it("a row under the floor says so beside its counts, a heavy row against its own, and the footer names the floor once", () => {
@@ -62,11 +62,11 @@ describe("the table of what travels", () => {
     ];
     const rows = recipeTable({ ...with_(installed("gh")), custom }, slice("node", "gh", "go"));
     expect(shape(rows)).toEqual([
-      ["on", "Node 22 with npm", "always on the image", "198.8 MB"],
-      ["on", "GitHub CLI", "installed here, never used", "40.2 MB"],
+      ["on", "Node 22 with npm", "always on the image", "199 MB"],
+      ["on", "GitHub CLI", "installed here, never used", "40 MB"],
       ["on", "cuda", "apt-get install -y cuda", "1.9 GB"],
       ["on", "just", "brew install just", "size unknown"],
-      ["off", "Go", "in the catalog, on request", "239.1 MB"],
+      ["off", "Go", "in the catalog, on request", "239 MB"],
     ]);
     expect(rows[2]).toMatchObject({ id: "cuda", kind: "custom", group: ADDED_GROUP, base: false, heavy: true });
     // A custom row without a size is the one kind the totals cannot count.
@@ -98,10 +98,10 @@ describe("the table of what travels", () => {
     const rows = recipeTable(with_(project("go", "go.mod needs Go"), used("wrangler", 4, 9), installed("yq")), slice("node", "go", "wrangler", "yq"));
     expect(rows.map(r => r.group)).toEqual([BASE_GROUP, PROJECT_GROUP, USED_GROUP, HERE_GROUP]);
     expect(shape(rows)).toEqual([
-      ["on", "Node 22 with npm", "always on the image", "198.8 MB"],
-      ["on", "Go", "go.mod needs Go", "239.1 MB"],
-      ["on", "Cloudflare Wrangler", "9 commands in 4 sessions", "239.4 MB"],
-      ["on", "yq", "installed here, never used", "13.5 MB"],
+      ["on", "Node 22 with npm", "always on the image", "199 MB"],
+      ["on", "Go", "go.mod needs Go", "239 MB"],
+      ["on", "Cloudflare Wrangler", "9 commands in 4 sessions", "239 MB"],
+      ["on", "yq", "installed here, never used", "14 MB"],
     ]);
     // A floor row the project also named stays in the base: it installs whatever anyone ticks.
     expect(recipeTable(with_(project("pnpm", "pnpm-lock.yaml needs pnpm")), slice("pnpm"))[0]).toMatchObject({ group: BASE_GROUP, why: "always on the image" });
@@ -109,23 +109,23 @@ describe("the table of what travels", () => {
   });
 
   it("the totals: what comes, what it downloads, and how many sizes the catalog does not have", () => {
-    expect(totalsLine(recipeTable(with_(used("go", 3, 40)), slice("node", "claude", "go")), "tools")).toBe("On: 3 tools, 645.9 MB");
-    expect(totalsLine(recipeTable({ ...RECIPE, rows: [] }, slice("claude", "go", "ripgrep")))).toBe("On: 1 row, 4.5 MB");
-    expect(totalsLine(recipeTable(with_(used("op", 1, 1)), slice("op", "ripgrep")))).toBe("On: 2 rows, 45.4 MB");
+    expect(totalsLine(recipeTable(with_(used("go", 3, 40)), slice("node", "claude", "go")), "tools")).toBe("On: 3 tools, 646 MB");
+    expect(totalsLine(recipeTable({ ...RECIPE, rows: [] }, slice("claude", "go", "ripgrep")))).toBe("On: 1 row, 4 MB");
+    expect(totalsLine(recipeTable(with_(used("op", 1, 1)), slice("op", "ripgrep")))).toBe("On: 2 rows, 45 MB");
     expect(totalsLine([])).toBe("On: 0 rows, 0 B");
     // A group's header carries the same two facts over its own rows, the base counted as rows and not as ticks.
-    expect(groupTotal(recipeTable(with_(used("go", 3, 40)), slice("node", "go")).filter(r => r.base))).toBe("1  198.8 MB");
-    expect(groupTotal(recipeTable(with_(used("go", 3, 40), used("wrangler", 1, 1)), slice("go", "wrangler")))).toBe("2 of 2  478.6 MB");
+    expect(groupTotal(recipeTable(with_(used("go", 3, 40)), slice("node", "go")).filter(r => r.base))).toBe("1  199 MB");
+    expect(groupTotal(recipeTable(with_(used("go", 3, 40), used("wrangler", 1, 1)), slice("go", "wrangler")))).toBe("2 of 2  479 MB");
     expect(groupTotal(recipeTable({ ...RECIPE, rows: [] }, slice("go", "java")))).toBe("0 of 2  0 B");
   });
 
   it("as text: the tick, the name, the why column, and the size flush right, each column as wide as its widest cell", () => {
     expect(tableLines(recipeTable(with_(used("go", 3, 40)), slice("node", "claude", "go")), 1)).toEqual([
-      "●  Node 22 with npm  base       always on the image         198.8 MB",
-      "●  Go                used       40 commands in 3 sessions   239.1 MB",
-      "●  Claude Code       installed  installed here, never used  208.0 MB",
+      "●  Node 22 with npm  base       always on the image         199 MB",
+      "●  Go                used       40 commands in 3 sessions   239 MB",
+      "●  Claude Code       installed  installed here, never used  208 MB",
     ]);
-    expect(tableLines(recipeTable({ ...RECIPE, rows: [] }, slice("go")), 1)).toEqual(["○  Go  catalog    in the catalog, on request  239.1 MB"]);
+    expect(tableLines(recipeTable({ ...RECIPE, rows: [] }, slice("go")), 1)).toEqual(["○  Go  catalog    in the catalog, on request  239 MB"]);
     expect(tableLines([], 1)).toEqual([]);
   });
 
@@ -159,8 +159,8 @@ describe("the table of what travels", () => {
 
   it("a heavy size is drawn a step brighter than the rest, and only where there are shades for it", () => {
     const [codex, claude] = recipeTable(with_(installed("codex", "agent")), slice("codex", "claude"));
-    expect(sizeCell(codex!, 8).paint!("455.0 MB")).toBe(grey(GREY.bright, "455.0 MB"));
+    expect(sizeCell(codex!, 8).paint!("455 MB")).toBe(grey(GREY.bright, "455 MB"));
     expect(sizeCell(claude!, 8).paint).toBeUndefined();
-    expect(sizeCell(codex!, 4)).toEqual({ text: "455.0 MB" });
+    expect(sizeCell(codex!, 4)).toEqual({ text: "455 MB" });
   });
 });

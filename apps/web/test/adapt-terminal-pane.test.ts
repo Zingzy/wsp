@@ -60,7 +60,7 @@ describe("a drop with memory near full", () => {
     { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
     { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
   ];
-  const SIZE_LINE = "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one";
+  const SIZE_LINE = "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one";
   const REBUILD = "Rebuild it from the Machine panel";
 
   it("rides the reconnecting and not-answering panes and no other", () => {

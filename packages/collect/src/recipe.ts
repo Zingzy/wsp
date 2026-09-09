@@ -54,10 +54,11 @@ const TICK_RULES: Readonly<Record<RecipeTick, TickRule>> = {
   default: { order: installedFirst, on: catalogDefault, weighsUse: false, ticksAgentsWithoutAdapter: false },
 };
 
-/** What the wizard's screens start from when no rule was named. A tool: installed here, then use over the floor,
- * then the catalog's default; a use below the floor is the row's answer and vetoes the catalog default under it, so
- * a tool looked at once stays off however popular it is. An agent: only its own use here, so one installed and never
- * run is off with the row saying so. */
+/** What the wizard's screens start from when no rule was named. A tool: its use here over the floor; a use below
+ * the floor, or a tool installed here that nothing ran, is this computer's answer and vetoes the catalog default under
+ * it, so a tool looked at once or never touched stays off however popular or large it is. Only a tool this computer
+ * says nothing about follows the catalog. An agent: only its own use here, so one installed and never run is off with
+ * the row saying so. */
 const BLENDED: TickRule = {
   // A tool says what the agents ran with it, so a row can read "installed here, never used"; an agent is placed by
   // whether it is on this computer, and its tick is a separate answer.
@@ -66,8 +67,8 @@ const BLENDED: TickRule = {
   ticksAgentsWithoutAdapter: false,
   on: (sources, entry) => {
     if (entry.kind !== "tool") return usedEnough(sources, entry);
-    if (sources.installed !== undefined) return true;
-    return sources.used !== undefined ? usedEnough(sources, entry) : catalogDefault(sources, entry);
+    if (sources.used !== undefined) return usedEnough(sources, entry);
+    return sources.installed === undefined && catalogDefault(sources, entry);
   },
 };
 

@@ -49,7 +49,7 @@
 // ?init=building puts the init job mid-build so the cloud row's progress line
 // can be measured.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, keptAccess, THEME_PRESETS, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, keptAccess, THEME_PRESETS, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
@@ -411,13 +411,15 @@ if (params.get("init") === "building") {
       id: "init_1",
       road: "manual",
       phase: "building",
-      keys: { solari: true, anthropic: false },
+      keys: { solari: true },
+      step: 0,
+      stoppable: true,
       screens: [],
       rows: [
-        { id: "stage/creating", kind: "stage", label: "Machine created", state: "done", ms: 14_000 },
-        { id: "stage/deploying-daemon", kind: "stage", label: "Installing the base (tools and daemon)", state: "running", detail: "node v22" },
-        { id: "stage/applying-setup", kind: "stage", label: "Applying your setup", state: "waiting" },
-        { id: "stage/ready", kind: "stage", label: "Waiting for the machine", state: "waiting" },
+        { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: "done", ms: 14_000 },
+        { id: "stage/deploying-daemon", kind: "stage", label: GOLDEN_STAGE_WORDS["deploying-daemon"], state: "running", detail: "node v22", lines: ["apt-get install -y git curl", "node v22"] },
+        { id: "stage/applying-setup", kind: "stage", label: GOLDEN_STAGE_WORDS["applying-setup"], state: "waiting" },
+        { id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "waiting" },
       ],
       progress: { done: 1, total: 4 },
       log: [],
@@ -432,13 +434,15 @@ if (params.get("init") === "waiting") {
       id: "init_1",
       road: "manual",
       phase: "signing-in",
-      keys: { solari: true, anthropic: false },
+      keys: { solari: true },
+      step: 0,
+      stoppable: true,
       screens: [],
       rows: [
-        { id: "stage/creating", kind: "stage", label: "Machine created", state: "done", ms: 14_000 },
-        { id: "stage/deploying-daemon", kind: "stage", label: "Installing the base (tools and daemon)", state: "done", ms: 40_000 },
-        { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: "open", page: "https://github.com/login/device", code: "8F4A-C21B" },
-        { id: "stage/ready", kind: "stage", label: "Waiting for the machine", state: "waiting" },
+        { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: "done", ms: 14_000 },
+        { id: "stage/deploying-daemon", kind: "stage", label: GOLDEN_STAGE_WORDS["deploying-daemon"], state: "done", ms: 40_000 },
+        { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" },
+        { id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "waiting" },
       ],
       progress: { done: 2, total: 4 },
       log: [],

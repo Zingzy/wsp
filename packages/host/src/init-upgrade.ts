@@ -8,7 +8,7 @@ import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { SnapshotFailedError, changeCounts, describeDiff, diffRecipes, isEmptyDiff, isSmallDelta, retiredBy, rowsToApply, type GoldenDelta, type GoldenImport, type RecipeDiff } from "@wsp/engine";
-import { goldenBuildLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, type GoldenLogin, type GoldenRetired, type RecipeDigest } from "@wsp/protocol";
+import { goldenBuildLine, upgradeSealFailedGoneLine, upgradeSealFailedStaysLine, upgradeSealFailedUnreadLine, type GoldenLogin, type GoldenRetired, type RecipeDigest, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { GRACE_MS, goldenHead, type GoldenBuilderView, type Runtime } from "@wsp/runtime";
 import { cancel, isCancel, log, note, outro, select } from "@clack/prompts";
 import { rebuildEstimate, type BuildTimes } from "./init-times.js";
@@ -24,11 +24,11 @@ export const UPGRADE_STEPS: readonly StageWords[] = [
   { stage: "installing-harness", start: "Installing agents", end: "Agents installed", fail: "Installing agents failed" },
   { stage: "installing-tools", start: "Installing tools", end: "Tools installed", fail: "Installing tools failed" },
   { stage: "installing-mcp", start: "Installing MCP servers", end: "MCP servers installed", fail: "Installing MCP servers failed" },
-  { stage: "ready", start: "Waiting for the machine", end: "Ready", fail: "The machine never became ready" },
-  { stage: "snapshotting", start: "Taking the snapshot", end: "Snapshot taken", fail: "Snapshot failed" },
-  { stage: "promoting", start: "Saving it as a durable template", end: "Saved as a durable template", fail: "Saving the template failed" },
-  { stage: "smoke-forking", start: "Booting a fork to prove it", end: "Fork booted and checked", fail: "The fork failed its check" },
-  { stage: "sealed", start: "Sealing", end: "Sealed", fail: "Seal failed" },
+  { stage: "ready", start: GOLDEN_STAGE_WORDS.ready, end: "Ready", fail: "The machine never answered" },
+  { stage: "snapshotting", start: GOLDEN_STAGE_WORDS.snapshotting, end: "Snapshot taken", fail: "Snapshot failed" },
+  { stage: "promoting", start: GOLDEN_STAGE_WORDS.promoting, end: "Image saved", fail: "Saving the image failed" },
+  { stage: "smoke-forking", start: GOLDEN_STAGE_WORDS["smoke-forking"], end: "Fork booted and checked", fail: "The fork failed its check" },
+  { stage: "sealed", start: GOLDEN_STAGE_WORDS.sealed, end: "Sealed", fail: "Seal failed" },
 ];
 
 /** Said once as the update runs: what stays and what is applied. */

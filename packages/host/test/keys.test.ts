@@ -8,6 +8,7 @@ import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { exitClassOf } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HELP, cli, forkCommandFor, jsonCliIO, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO } from "../src/cli.js";
+import { AGENT_KEY_VARIABLES, agentKeyEnvs, agentKeysIn, keysOf, savedEnv } from "../src/env-keys.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 
@@ -101,6 +102,31 @@ function setup(): void {
   home = join(dir, "home");
   mkdirSync(cwd);
 }
+
+describe("the wsp home's own keys, the ones the app's setup reads", () => {
+  it("savedEnv reads the home's .env alone: a key in the process environment or a checkout's .env is not saved", () => {
+    setup();
+    mkdirSync(home);
+    writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=from-cwd\nANTHROPIC_API_KEY=anth-from-cwd\n");
+    process.env["ANTHROPIC_API_KEY"] = "anth-from-env";
+    try {
+      expect(savedEnv(home)).toEqual({});
+      expect(keysOf(savedEnv(home))).toEqual({});
+      writeFileSync(join(home, ".env"), "SOLARI_API_KEY=from-home\nOPENAI_API_KEY=sk-x-fake\nEMPTY=\n");
+      expect(savedEnv(home)).toEqual({ SOLARI_API_KEY: "from-home", OPENAI_API_KEY: "sk-x-fake" });
+      expect(keysOf(savedEnv(home))).toEqual({ solari: "from-home" });
+    } finally {
+      delete process.env["ANTHROPIC_API_KEY"];
+    }
+  });
+
+  it("the agents' key variables are the catalog's declarations, and only those ride out of a saved record", () => {
+    expect([...AGENT_KEY_VARIABLES].sort()).toEqual(["ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]);
+    expect(agentKeysIn({ SOLARI_API_KEY: SOLARI, OPENAI_API_KEY: "sk-x-fake", OTHER: "x", GEMINI_API_KEY: "" })).toEqual({ OPENAI_API_KEY: "sk-x-fake" });
+    expect(agentKeyEnvs({ anthropic: ANTHROPIC })).toEqual({ ANTHROPIC_API_KEY: ANTHROPIC });
+    expect(agentKeyEnvs({})).toEqual({});
+  });
+});
 
 describe("loadKeys", () => {
   it("prompts for both keys and persists them to <home>/.env with mode 600", async () => {
