@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "cn";
 import { SystemDiagram, type Step } from "@/components/system-diagram";
 
-type Beat = { id: Step; kicker: string; title: string; body: string; command?: string };
+type Beat = { id: Step; kicker: string; title: string; body: string; command?: string; note?: string };
 
 const BEATS: Beat[] = [
   {
@@ -44,6 +44,7 @@ const BEATS: Beat[] = [
     kicker: "no hosted service",
     title: "Your keys never leave your computer.",
     body: "wsp talks to the machine provider with your key. Your sign-ins go from your disk into your image and from there to your machines, nowhere else. There is no server of ours and no wsp account. The whole thing is AGPL.",
+    note: "A test runs a day of threads and turns through wsp up and fails if the host holds more than 40 MB, so a build, its tests and the agent that wrote them never touch your RAM.",
   },
   {
     id: "naps",
@@ -137,6 +138,7 @@ function Beat({ beat }: { beat: Beat }) {
           {beat.command}
         </p>
       )}
+      {beat.note && <p className="mt-4 max-w-md font-mono text-[12.5px] leading-relaxed text-muted-foreground">{beat.note}</p>}
     </>
   );
 }

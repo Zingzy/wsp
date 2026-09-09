@@ -5,8 +5,10 @@ import { describe, it, type SuiteFactory } from "vitest";
 
 /** The cli as pnpm build leaves it; only the build makes it, so a test that spawns it cannot make it. */
 export const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
-/** The same build's library entry, for a test whose host has to be a real process of its own. */
-export const DIST = new URL("../dist/index.js", import.meta.url).href;
+/** A built package's library entry, for a test whose host has to be a real process of its own. */
+export const distOf = (pkg: string): string => new URL(`../../${pkg}/dist/index.js`, import.meta.url).href;
+
+export const DIST = distOf("host");
 
 /** A suite that spawns the built cli: never a silent pass when the build is absent. */
 export function describeWithBin(name: string, suite: SuiteFactory): void {
