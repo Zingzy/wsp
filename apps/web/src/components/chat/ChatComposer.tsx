@@ -36,15 +36,15 @@
 // start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
-import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, workspaceState, type MachineState, type ReachState, type SendRefusalKind, type WorkspacePhase } from "@wsp/protocol";
+import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
-import { useStatus, useStore, useWorkspace } from "../../protocol/store";
+import { useStore, useWorkspaceState } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
-import { useThreadFolder } from "../../files/root";
+import { useThreadStart } from "../../files/root";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { catalogFromHarness } from "./adapt";
-import { ComposerCheckoutRow } from "./ComposerCheckoutRow";
+import { canPickFolder, ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatImageThumb } from "./ChatImages";
@@ -63,21 +63,19 @@ const PLACEHOLDER = "Ask anything, or / for commands";
 const noop = () => {};
 
 /** What blocks a send right now, or null; the refusal table gives its words. The socket comes first: with it down
- * every other reading is stale. */
+ * every other reading is stale, and a state the app has no workspace for at all is one it cannot name. A paused machine
+ * is named too, and the composer reads it not as a block but as the wake the send makes first. */
 export function composerSendBlock(input: {
   conn: ConnStatus;
   hasApi: boolean;
-  phase: WorkspacePhase | null;
-  machineState: MachineState | null;
-  reach: ReachState | null;
+  state: WorkspaceState | null;
   hydrated: boolean;
 }): SendRefusalKind | null {
   if (!input.hasApi || input.conn === "connecting") return "connecting";
   if (input.conn === "reconnecting") return "reconnecting";
   if (input.conn === "closed") return "closed";
-  if (input.phase === null) return "not-found";
-  const state = workspaceState({ phase: input.phase, machineState: input.machineState, reach: input.reach });
-  if (state !== "running") return state;
+  if (input.state === null) return "not-found";
+  if (input.state !== "running") return input.state;
   if (!input.hydrated) return "loading";
   return null;
 }
@@ -98,10 +96,10 @@ interface SteerAttempt {
 
 export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thread: ChatThreadHandle }) {
   const api = useStore(s => s.api);
+  const wake = useStore(s => s.wake);
   const conn = useStore(s => s.conn);
   const sessions = useStore(s => s.sessions[workspaceId]);
-  const workspace = useWorkspace(workspaceId);
-  const status = useStatus(workspaceId);
+  const state = useWorkspaceState(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const [steering, setSteering] = useState<string | null>(null);
   const [steered, setSteered] = useState<SteerAttempt | null>(null);
@@ -109,7 +107,15 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const { threadKey, named } = thread;
   const queue = useComposerQueue(threadKey);
   const held = useComposerQueueHeld(threadKey);
-  const cwd = useThreadFolder(workspaceId);
+  const nextStart = useThreadStart(workspaceId);
+  // A view locked to a turn resumes in that turn's folder, as its row says; only a view about to open a thread reads the pick.
+  const viewCwd = thread.view.cwd;
+  const pickable = canPickFolder(thread);
+  const folderStart = useMemo(() => (pickable ? nextStart : viewCwd !== null ? { cwd: viewCwd } : {}), [nextStart, pickable, viewCwd]);
+  // The folder picker under the box is up: opened from its own trigger, from new thread here, or from the project
+  // menu's other folder row in the footer; it goes with the pick once the view is locked to a turn.
+  const [folderPicker, setFolderPicker] = useState(false);
+  const openFolderPicker = useCallback(() => setFolderPicker(true), []);
   const { harness: harnessId, startOptions, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const enqueue = useComposerDraftStore(s => s.enqueue);
@@ -138,15 +144,11 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [highlightedSearchKey, setHighlightedSearchKey] = useState<string | null>(null);
   const [dismissedSearchKey, setDismissedSearchKey] = useState<string | null>(null);
 
-  const blocked = composerSendBlock({
-    conn,
-    hasApi: api !== null,
-    phase: status?.phase ?? workspace?.phase ?? null,
-    machineState: status?.machineState ?? null,
-    reach: status?.reach.state ?? null,
-    hydrated: thread.hydrated,
-  });
-  const unavailable = blocked === null ? null : sendRefusal(blocked);
+  const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated });
+  // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
+  // button says it wakes first.
+  const wakesFirst = blocked === "paused";
+  const unavailable = blocked === null || wakesFirst ? null : sendRefusal(blocked);
   const sendDisabledReason = unavailable ?? (thread.busy ? TURN_IN_FLIGHT : null);
   const hasText = draft.prompt.trim().length > 0;
   // The catalog answers before the click; a row the runtime's table stood in for is no answer, so the picker is
@@ -272,17 +274,21 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       // row in the transcript is drawn from; a refused send hands them back rather than losing them.
       sendImagesAs(workspaceId, requestId);
       setImageRefusal(null);
-      void api
-        .startSession({
-          workspaceId,
-          prompt,
-          requestId,
-          ...(resume ? { resume } : {}),
-          ...(into !== undefined ? { thread: into } : {}),
-          ...(cwd !== null ? { cwd } : {}),
-          ...(attachments.length > 0 ? { attachments } : {}),
-          ...startOptions,
-        })
+      // The wake settles or fails before the start is asked; a wake that failed leaves the runtime to refuse the
+      // start in its own words, which land in the transcript like any other refusal.
+      void (wakesFirst ? wake(workspaceId) : Promise.resolve())
+        .then(() =>
+          api.startSession({
+            workspaceId,
+            prompt,
+            requestId,
+            ...(resume ? { resume } : {}),
+            ...(into !== undefined ? { thread: into } : {}),
+            ...folderStart,
+            ...(attachments.length > 0 ? { attachments } : {}),
+            ...startOptions,
+          }),
+        )
         .catch((err: unknown) => {
           setSending(false);
           onRefused();
@@ -290,7 +296,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, cwd, hold, images, into, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, workspaceId],
+    [api, appendLocalError, appendUserTurn, folderStart, hold, images, into, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
   const send = useCallback(() => {
@@ -532,7 +538,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                           event.target.value = "";
                         }}
                       />
-                      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} />
+                      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} onOtherFolder={openFolderPicker} />
                     </div>
                     <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
                       <ComposerPrimaryActions
@@ -543,6 +549,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                         showPlanFollowUpPrompt={false}
                         promptHasText={hasText}
                         isSendBusy={thread.busy}
+                        wakesFirst={wakesFirst}
                         sendDisabledReason={sendDisabledReason}
                         isConnecting={false}
                         isEnvironmentUnavailable={false}
@@ -559,7 +566,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
             </div>
           </form>
         </ComposerSurface.Host>
-        <ComposerCheckoutRow workspaceId={workspaceId} thread={thread} />
+        <ComposerCheckoutRow workspaceId={workspaceId} thread={thread} pickerOpen={folderPicker && pickable} onPickerOpenChange={setFolderPicker} />
       </ComposerSurface.Shell>
     </div>
   );

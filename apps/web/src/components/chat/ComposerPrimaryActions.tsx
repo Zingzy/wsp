@@ -1,5 +1,5 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/ComposerPrimaryActions.tsx at 57a66608 (MIT).
-// Differs from upstream: the settings hook and the sidebar stage artwork inside the send button are removed (no settings, no artwork), so the send button keeps the plain branch; the unavailable label says workspace, not environment; the stop button takes isInterruptPending and, while it holds, is disabled, labelled Stopping and shows the send button's spinner in place of the square.
+// Differs from upstream: the settings hook and the sidebar stage artwork inside the send button are removed (no settings, no artwork), so the send button keeps the plain branch; the unavailable label says workspace, not environment; the stop button takes isInterruptPending and, while it holds, is disabled, labelled Stopping and shows the send button's spinner in place of the square; the send button takes wakesFirst and reads Wake and send while the machine is paused, since the send wakes it.
 import { memo, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -33,10 +33,16 @@ interface ComposerPrimaryActionsProps {
   showSendWhileRunning?: boolean;
   /** The interrupt request is on the wire and unanswered; the turn's end or the reply clears it. */
   isInterruptPending?: boolean;
+  /** The machine is paused and the send wakes it first: the button says so, and nothing else about it changes. */
+  wakesFirst?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }
+
+/** The send button's name while the machine is paused: one send wakes it and sends, so the button says both. */
+export const WAKE_AND_SEND_LABEL = "Wake and send";
+export const SEND_LABEL = "Send message";
 
 export const formatPendingPrimaryActionLabel = (input: {
   compact: boolean;
@@ -75,6 +81,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   preserveComposerFocusOnPointerDown = false,
   showSendWhileRunning = false,
   isInterruptPending = false,
+  wakesFirst = false,
   onPreviousPendingQuestion,
   onInterrupt,
   onImplementPlanInNewThread,
@@ -248,8 +255,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 ? "Preparing worktree"
                 : isSendBusy
                   ? "Sending"
-                  : "Send message"
+                  : wakesFirst
+                    ? WAKE_AND_SEND_LABEL
+                    : SEND_LABEL
       }
+      title={wakesFirst ? WAKE_AND_SEND_LABEL : undefined}
     >
       {isConnecting || isSendBusy ? (
         <Spinner className="size-3.5" aria-hidden="true" />

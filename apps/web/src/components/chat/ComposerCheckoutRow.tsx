@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The strip under the composer naming where the thread works: the folder and
-// its git branch. Before the first message the folder is a picker over the
-// daemon's listings, one level at a time, across the same roots the panes
-// browse (its home and an imported project); the pick is what sessions.start
-// runs the harness in and where the panes root. Once a turn exists the row is
+// its git branch. Before the first message the folder is the one the runtime's
+// rule will open, the picked project's or the machine's own, and a picker over
+// the daemon's listings, one level at a time, across the same roots the panes
+// browse (its home and every project); a folder picked here is what
+// sessions.start names as cwd, over every project, and where the panes root.
+// Whether the picker is open is the composer's to say, so the project pick in
+// the box's footer opens it for its other folder row. Once a turn exists the row is
 // a label for the harness folder, which a cd in the agent's shell cannot move
 // (the CLI keys a session to it), so the label explains itself on hover and
 // offers a new thread with the picker open; the shell's own folder, as the
@@ -49,6 +52,14 @@ function useBranch(wire: TerminalWire | null, folder: string | null, running: bo
   return state.folder === folder ? state.branch : { kind: "unknown" };
 }
 
+/** Whether the composer is about to open a new thread, so its folder and its project are still the person's to pick: a
+ * fresh view, or an empty one whose send resumes no folder. The project pick in the footer and the folder picker in
+ * this row read the one predicate, so neither offers a pick the other has locked. */
+export function canPickFolder(thread: ChatThreadHandle): boolean {
+  const { cwd, entries, running } = thread.view;
+  return thread.hydrated && (thread.fresh || (entries.length === 0 && !running && cwd === null));
+}
+
 /** Sized like the picker button (size xs), so the row does not move when the label replaces it. */
 const labelClass = "inline-flex h-7 min-w-0 items-center gap-1 px-2 text-sm text-muted-foreground/70 sm:h-6 sm:text-xs";
 
@@ -61,17 +72,21 @@ function FolderMenu({
   workspaceId,
   roots,
   folder,
-  defaultOpen,
+  open,
+  onOpenChange,
   onPick,
 }: {
   workspaceId: string;
   roots: readonly string[];
   folder: string;
-  defaultOpen: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onPick: (dir: string) => void;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const [dir, setDir] = useState(folder);
+  // The level walked to while the menu is up; null is the shown folder, so a menu opened from outside starts there.
+  const [walked, setWalked] = useState<string | null>(null);
+  const dir = walked ?? folder;
+  const setDir = setWalked;
   const { levels, ensure } = useWorkspaceListing(workspaceId);
   const level = levels.get(dir);
   const parent = parentWithin(roots, dir);
@@ -86,8 +101,8 @@ function FolderMenu({
     <Menu
       open={open}
       onOpenChange={next => {
-        setOpen(next);
-        if (next) setDir(folder);
+        onOpenChange(next);
+        if (!next) setWalked(null);
       }}
     >
       <MenuTrigger
@@ -153,17 +168,29 @@ function FolderMenu({
   );
 }
 
-export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: string; thread: ChatThreadHandle }) {
+export function ComposerCheckoutRow({
+  workspaceId,
+  thread,
+  pickerOpen,
+  onPickerOpenChange,
+}: {
+  workspaceId: string;
+  thread: ChatThreadHandle;
+  /** Whether the folder picker is up; the composer holds it so the footer's other folder row can open it. */
+  pickerOpen: boolean;
+  onPickerOpenChange: (open: boolean) => void;
+}) {
   const wire = useDaemonWire(workspaceId);
   const roots = useRoots(workspaceId);
   const follow = useRootStore(s => s.follow);
   const shell = useRootStore(s => s.shell);
-  const folder = useThreadFolder(workspaceId);
-  const { cwd, shellCwd, entries, running } = thread.view;
-  // An empty view whose send resumes a row with a folder is locked to that folder like a turn.
-  const pickable = thread.hydrated && (thread.fresh || (entries.length === 0 && !running && cwd === null));
+  const choose = useRootStore(s => s.choose);
+  const startFolder = useThreadFolder(workspaceId);
+  const { cwd, shellCwd, running } = thread.view;
+  const pickable = canPickFolder(thread);
+  // A view on a turn names that turn's folder; a view about to open a thread names the one the thread will start in.
+  const folder = pickable ? startFolder : (cwd ?? startFolder);
   const canPick = wire !== null && roots.length > 0 && folder !== null;
-  const [pickNext, setPickNext] = useState(false);
   const branch = useBranch(wire, folder, running);
 
   useEffect(() => {
@@ -172,12 +199,11 @@ export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: stri
   useEffect(() => {
     shell(workspaceId, shellCwd);
   }, [shell, shellCwd, workspaceId]);
-  useEffect(() => {
-    if (!pickable) setPickNext(false);
-  }, [pickable]);
 
+  // Chosen outright, so the fresh view opens on this thread's folder rather than on the rule's project.
   const newThreadHere = () => {
-    setPickNext(true);
+    if (folder !== null) choose(workspaceId, folder);
+    onPickerOpenChange(true);
     thread.startNewThread();
   };
 
@@ -185,7 +211,7 @@ export function ComposerCheckoutRow({ workspaceId, thread }: { workspaceId: stri
     <ComposerSurface.ContextStrip data-composer-checkout data-pickable={pickable || undefined}>
       <div className="flex min-w-10 flex-1 items-center gap-1">
         {pickable && canPick ? (
-          <FolderMenu workspaceId={workspaceId} roots={roots} folder={folder} defaultOpen={pickNext} onPick={dir => follow(workspaceId, dir)} />
+          <FolderMenu workspaceId={workspaceId} roots={roots} folder={folder} open={pickerOpen} onOpenChange={onPickerOpenChange} onPick={dir => choose(workspaceId, dir)} />
         ) : (
           <>
             <Tooltip>

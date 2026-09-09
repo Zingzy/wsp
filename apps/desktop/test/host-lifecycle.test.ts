@@ -228,11 +228,11 @@ describe("openHost", () => {
     expect(existsSync(localWorkFolder(home))).toBe(true);
   });
 
-  it("shows the setup screen rather than failing when there is no key, no golden and no workspace", async () => {
+  it("is not ready rather than failing when there is no key, no golden and no workspace", async () => {
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
-    // Nothing recorded: the gate answers before any host is started, so the window has a screen to show.
-    expect(await checkSetup({ statePath: join(home, "state.json") })).toEqual({ ready: false, missing: "key" });
+    // Nothing recorded: the gate answers before any host is started, so the window has a first launch to show.
+    expect(await checkSetup({ statePath: join(home, "state.json") })).toEqual({ ready: false });
     // And a first launch that ends there leaves the person's home as it was: no workspace was recorded here.
     expect(existsSync(localWorkFolder(home))).toBe(false);
   });

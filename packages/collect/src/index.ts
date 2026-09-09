@@ -15,7 +15,7 @@ export { detectToolchains } from "./detect/toolchains.js";
 export { detectTools, parseBrewfile, parseBunGlobals, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList, type BrewLine, type GoModule, type Pkg } from "./detect/tools.js";
 export { classifyFormulae, linuxSupport, renderSnapshot, type BottleSnapshot } from "./brew-bottles.js";
 export { LINUX_BOTTLES } from "./data/linux-bottles.js";
-export { AGENTS, detectAgents } from "./detect/agents.js";
+export { AGENTS, agentRowId, detectAgents } from "./detect/agents.js";
 export { type Presence, presenceOf } from "./detect/presence.js";
 export * from "./history/index.js";
 export { type CommandCount, type RecipeOptions, computeRecipe, floorApplies, unknownCommands, withProject } from "./recipe.js";
@@ -26,3 +26,4 @@ export { CLAUDE_KEY_ENV, apiKeyHelperOf, detectLogins } from "./detect/logins.js
 export { FISH_CONF_D, RC_NAMES, RC_PATHS, isRcPath, isSecretName, rcFiles, simpleCommands, sourcedPaths, stripExports } from "./detect/shell-rc.js";
 export { type Signal, MAX_BYTES, bareUrls, fileSignals, keysSignal, modeSignal, nameSignal, pemSignal, topLevelKeys, urlSignal } from "./credential-signals.js";
 export { CACHE_DIRS, FINDER_METADATA } from "./cache-names.js";
+export { SSH_CONFIG_PATH, SSH_IGNORE_UNKNOWN_DETAIL, withIgnoreUnknown } from "./ssh-config.js";

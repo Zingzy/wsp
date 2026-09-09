@@ -43,6 +43,19 @@ describe("local backend", () => {
     expect(listed).toEqual([{ id: LOCAL_MACHINE_ID, state: "running", labels: {} }]);
   });
 
+  it("facts say what this computer is: the system by its maker's name, how long it has been up, and the folder commands start in", async () => {
+    const backend = new LocalBackend({ root });
+    const machine = await backend.get();
+    expect(machine.facts).toBeDefined();
+    const facts = await machine.facts!();
+    expect(facts.os).toMatch(/^(macOS \d|[A-Z][A-Za-z]+ )/);
+    expect(facts.os).not.toBe("");
+    expect(facts.uptimeMs).toBeGreaterThan(0);
+    expect(facts.folder).toBe(root);
+    // The name is read once and held; the uptime is read again.
+    expect((await machine.facts!()).os).toBe(facts.os);
+  });
+
   it("exec runs a shell command on this computer under the workspace folder and returns its exit code", async () => {
     const backend = new LocalBackend({ root });
     const machine = await backend.get();

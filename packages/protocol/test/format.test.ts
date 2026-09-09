@@ -52,6 +52,7 @@ import {
   fmtRate,
   fmtSize,
   fmtThreads,
+  fmtUptime,
   forgetNotice,
   goldenBuildLine,
   goneWords,
@@ -311,6 +312,12 @@ describe("fmtDuration, fmtElapsed and fmtCost", () => {
   it("fmtDuration's clock style reads minutes and two-digit seconds, hours ahead once there are any, and nothing sensible as zero", () => {
     expect([0, 999, 61_000, 900_000, 3_599_499, 3_600_000, 6 * 3_600_000 + 65_000, -5, NaN].map(ms => fmtDuration(ms, "clock"))).toEqual([
       "0m 00s", "0m 01s", "1m 01s", "15m 00s", "59m 59s", "1h 00m 00s", "6h 01m 05s", "0m 00s", "0m 00s",
+    ]);
+  });
+
+  it("fmtUptime reads minutes under an hour, hours and minutes under a day, then days and hours, and nothing sensible as zero", () => {
+    expect([0, 59_000, 60_000, 12 * 60_000, 3_600_000, 4 * 3_600_000 + 12 * 60_000, 24 * 3_600_000, 3 * 86_400_000 + 4 * 3_600_000 + 59 * 60_000, -5, NaN].map(ms => fmtUptime(ms))).toEqual([
+      "0m", "0m", "1m", "12m", "1h 0m", "4h 12m", "1d 0h", "3d 4h", "0m", "0m",
     ]);
   });
 

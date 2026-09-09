@@ -143,7 +143,7 @@ export function stubBackend(): StubBackend {
       const m: StubMachine = {
         id: `m${++seq}`,
         kind: spec.kind,
-        streamUrl: undefined,
+        streamUrl: spec.kind === "desktop" ? `wss://stub/stream/m${seq}` : undefined,
         ...(spec.labels !== undefined ? { labels: spec.labels } : {}),
         spec,
         paused: false,

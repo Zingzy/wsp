@@ -2,13 +2,13 @@
 // A small laptop as the collector would describe it, fixed so the screens'
 // tests can name rows; the real collector is what wsp init runs.
 import { BASE_FLOOR } from "@wsp/catalog";
-import type { Manifest, ManifestEntry } from "@wsp/collect";
+import { SSH_IGNORE_UNKNOWN_DETAIL, type Manifest, type ManifestEntry } from "@wsp/collect";
 import type { Recipe } from "@wsp/protocol";
 
 export const FIXTURE: Manifest = {
   entries: [
     { rung: "identity", id: "identity/git-user", label: "git name and email", paths: ["~/.gitconfig"], bytes: 512, default: "bring", required: true },
-    { rung: "identity", id: "identity/ssh-config", label: "~/.ssh/config", paths: ["~/.ssh/config"], bytes: 1200, default: "bring" },
+    { rung: "identity", id: "identity/ssh-config", label: "~/.ssh/config", paths: ["~/.ssh/config"], bytes: 1200, default: "bring", detail: SSH_IGNORE_UNKNOWN_DETAIL },
     { rung: "identity", id: "identity/ssh-key", label: "~/.ssh/id_ed25519", paths: ["~/.ssh/id_ed25519"], bytes: 400, default: "skip", reason: "private key, never copied" },
     { rung: "shell", id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 3000, default: "bring" },
     { rung: "shell", id: "shell/starship", label: "starship prompt", paths: ["~/.config/starship.toml"], bytes: 900, default: "bring" },

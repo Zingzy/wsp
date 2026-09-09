@@ -33,6 +33,18 @@ describe("the preload's bridge", () => {
     expect(invoke).toHaveBeenLastCalledWith("folder:pick");
   });
 
+  it("carries the first launch's calls, each on its own channel", async () => {
+    const wsp = (await bridge()) as DesktopBridge & { agents(): Promise<unknown>; history(ids: string[]): Promise<unknown>; install(ids: string[]): Promise<unknown>; finish(): Promise<void> };
+    await wsp.agents();
+    expect(invoke).toHaveBeenLastCalledWith("onboarding:agents");
+    await wsp.history(["claude"]);
+    expect(invoke).toHaveBeenLastCalledWith("onboarding:history", ["claude"]);
+    await wsp.install(["claude", "codex"]);
+    expect(invoke).toHaveBeenLastCalledWith("onboarding:install", ["claude", "codex"]);
+    await wsp.finish();
+    expect(invoke).toHaveBeenLastCalledWith("onboarding:finish");
+  });
+
   it("says when a terminal has focus and hands back the chords the shell stood aside from, unsubscribing with the same listener", async () => {
     const wsp = await bridge();
     wsp.setTerminalFocus(true);

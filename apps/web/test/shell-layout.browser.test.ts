@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The shell's chrome in a real Chromium: the sidebar's brand lockup starts
-// where the search row does, the two top rows are one height and start
-// where the workspace rows do, the search row opens the palette without
-// moving a row, a thread row's title keeps its room at the
+// The shell's chrome in a real Chromium: the sidebar toggle starts where the
+// search row does and the brand lockup one gap after it, the two top rows are
+// one height and start where the workspace rows do, the
+// search row sits on the selected row's surface with a hairline and opens the
+// palette without moving a row, a thread row's title keeps its room at the
 // default width, a status toast holds a long token inside its box, the
 // line for a provider out of reach is one muted mono line under the
 // search row, the line the runtime puts on a machine's row takes that row's second line whole,
@@ -40,7 +41,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, ConsoleMessage, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { accessFromNextMessage, PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingLine, THIS_COMPUTER } from "@wsp/protocol";
+import { accessFromNextMessage, FREE_WORD, PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingLine, THIS_COMPUTER } from "@wsp/protocol";
+import { WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
 import { textContrast } from "./contrast";
@@ -108,7 +110,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
-  it("the search row and the Workspaces row are one height, start where the workspace rows do, the search row alone wears a tint that deepens on hover, they carry one glyph each at the right edge and no chord on their faces, and open the palette without moving anything", async () => {
+  it("the search row and the Workspaces row are one height, start where the workspace rows do, the search row alone sits on the selected row's surface inside a hairline and takes the rows' hover, they carry one glyph each at the right edge and no chord on their faces, and open the palette without moving anything", async () => {
     const shot = async (name: string, theme: string): Promise<void> => {
       const path = join(SHOTS_DIR, `sidebar-top-${name}-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -119,13 +121,21 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         const s = getComputedStyle(el);
         return s.backgroundColor === "rgba(0, 0, 0, 0)" && s.borderTopWidth === "0px" && s.boxShadow === "none";
       });
-    // The alpha of a computed black tint: color(srgb 0 0 0 / a), or rgba(0, 0, 0, a).
-    const tintAlpha = (selector: string): Promise<number> =>
+    /** What a utility class paints beside the search row, read off a probe in the row's own scope (the glass
+     * re-declares the row tokens), so the row is held to the token and not to a colour written here. */
+    const tokenPaint = (utility: string): Promise<string> =>
+      page!.locator("[data-sidebar-search]").first().evaluate((host, cls) => {
+        const probe = document.createElement("span");
+        probe.className = cls;
+        host.append(probe);
+        const paint = cls.startsWith("border") ? getComputedStyle(probe).borderTopColor : getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return paint;
+      }, utility);
+    const skin = (selector: string): Promise<{ background: string; border: string; borderColor: string; shadow: string }> =>
       page!.locator(selector).first().evaluate(el => {
         const s = getComputedStyle(el);
-        if (s.borderTopWidth !== "0px" || s.boxShadow !== "none") return Number.NaN;
-        const m = /^(?:color\(srgb 0 0 0|rgba\(0, 0, 0,?) ?\/? ?([\d.]+)\)$/.exec(s.backgroundColor);
-        return m === null ? Number.NaN : Number(m[1]);
+        return { background: s.backgroundColor, border: s.borderTopWidth, borderColor: s.borderTopColor, shadow: s.boxShadow };
       });
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
@@ -136,13 +146,17 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(search.height).toBe(section.height);
       expect(Math.abs(search.x - section.x)).toBeLessThan(1);
       expect(Math.abs(search.x - workspace.x)).toBeLessThan(1);
-      const rest = await tintAlpha("button[aria-label='Search']");
-      expect(rest).toBeGreaterThan(0.01);
-      expect(rest).toBeLessThan(0.1);
+      // The field's surface is the selected row's token and its edge the sidebar's hairline: two rows on one tier.
+      const rest = await skin("button[aria-label='Search']");
+      expect(rest.background).toBe(await tokenPaint("bg-sidebar-row-selected"));
+      expect(rest.border).toBe("1px");
+      expect(rest.borderColor).toBe(await tokenPaint("border border-sidebar-border"));
+      expect(rest.shadow).toBe("none");
       await page!.locator("button[aria-label='Search']").hover();
       await page!.waitForTimeout(250);
-      const hovered = await tintAlpha("button[aria-label='Search']");
-      expect(hovered).toBeGreaterThan(rest);
+      const hovered = await skin("button[aria-label='Search']");
+      expect(hovered.background).toBe(await tokenPaint("bg-sidebar-row-hover"));
+      expect(hovered.border).toBe("1px");
       await page!.mouse.move(600, 400);
       await page!.waitForTimeout(250);
       expect(await transparent("button[aria-label='Workspaces']")).toBe(true);
@@ -428,7 +442,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
-  it("at 240, 300 and 360 px the rows keep one grammar: heights per kind, the state slot at the edge, the meta line in order, no trip glyphs, the thread title up to the time column, in both themes", async () => {
+  it("at 240, 300 and 360 px the rows keep one grammar: three lines and one height for every workspace row, two for every thread row, the state slot at the edge yielding to the glyphs on hover on every row, the machine on line two and the cost in order on line three, no trip glyphs, the thread title from the row's inset up to the time column, in both themes", async () => {
     interface WorkspaceRead {
       id: string | null;
       height: number;
@@ -438,6 +452,10 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       slotRight: number;
       slotWidth: number;
       nameX: number;
+      machine: string;
+      /** The three lines' tops, in order: the name, the machine, the cost. */
+      lineTops: number[];
+      lead: { x: number; width: number; svg: boolean; dot: boolean; color: string; opacity: string };
       meta: string;
       title: string | null;
       metaClipped: boolean;
@@ -462,7 +480,10 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         const workspaces = Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='ws:']")).map(row => {
           const slot = row.querySelector<HTMLElement>("[data-workspace-state]")!;
           const meta = row.querySelector<HTMLElement>("[data-workspace-meta]")!;
+          const machine = row.querySelector<HTMLElement>("[data-workspace-machine]")!;
           const name = row.querySelector<HTMLElement>("[data-workspace-name]")!;
+          const lead = row.querySelector<HTMLElement>("[data-workspace-lead]")!;
+          const glyph = lead.querySelector<SVGElement>("svg");
           const line = slot.parentElement!.getBoundingClientRect();
           const slotBox = slot.getBoundingClientRect();
           return {
@@ -473,6 +494,16 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
             slotRight: slotBox.right,
             slotWidth: slotBox.width,
             nameX: name.getBoundingClientRect().x,
+            machine: machine.textContent ?? "",
+            lineTops: [name, machine, meta].map(el => el.getBoundingClientRect().top),
+            lead: {
+              x: lead.getBoundingClientRect().x,
+              width: lead.getBoundingClientRect().width,
+              svg: glyph !== null,
+              dot: lead.querySelector(".rounded-full") !== null,
+              color: glyph === null ? "" : getComputedStyle(glyph).color,
+              opacity: glyph === null ? "" : getComputedStyle(glyph).opacity,
+            },
             meta: meta.textContent ?? "",
             title: meta.getAttribute("title"),
             metaClipped: meta.scrollWidth > meta.clientWidth,
@@ -513,12 +544,28 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         const rows = await readRows();
         console.info(`rows at ${width ?? "default"} ${theme}: ${JSON.stringify(rows)}`);
         expect(rows.workspaces.map(r => r.id)).toEqual(["ws:ws_a", "ws:ws_b", "ws:ws_c"]);
-        // Two-line rows are 44 px, the Idle rows the kit's 32 px row, whatever the state or the width.
-        expect(rows.workspaces.map(r => r.height)).toEqual([44, 44, 44]);
+        // Three-line workspace rows are 60 px, running, paused or gone; two-line thread rows 44 px; the Idle rows the
+        // kit's 32 px row, whatever the state or the width.
+        expect(rows.workspaces.map(r => r.height)).toEqual([60, 60, 60]);
         expect(rows.threads.map(r => r.height)).toEqual([44, 44, 44, 44]);
         expect(rows.idle).toEqual([32, 32]);
+        // Three lines stacked in one order on every row: the name, the machine, the cost.
+        for (const row of rows.workspaces) {
+          expect(row.lineTops[0]!).toBeLessThan(row.lineTops[1]!);
+          expect(row.lineTops[1]!).toBeLessThan(row.lineTops[2]!);
+        }
+        expect(rows.workspaces.map(r => r.machine)).toEqual(["2 vCPU · 4 GB", "2 vCPU · 4 GB", "2 vCPU · 4 GB"]);
+        // The lead is the kind's glyph on every row, the cloud here, in one ink whatever the state; no dot beside it,
+        // and the paused row's glyph alone dims.
+        for (const row of rows.workspaces) {
+          expect(row.lead.svg).toBe(true);
+          expect(row.lead.dot).toBe(false);
+          expect(row.lead.color).toBe(rows.workspaces[0]!.lead.color);
+          expect(Math.abs(row.lead.x - rows.workspaces[0]!.lead.x)).toBeLessThan(0.5);
+        }
+        expect(rows.workspaces.map(r => r.lead.opacity)).toEqual(["1", "0.5", "1"]);
         // The state slot: empty for running, the word for the rest, flush with the line's right edge on every row, two
-        // glyphs wide at least; a live row's line runs to the row's own inset, a dead row's stops before its two glyphs.
+        // glyphs wide at least; every row's line runs to the row's own inset, since the glyphs come only on hover.
         expect(rows.workspaces.map(r => r.state)).toEqual(["", "Paused", "Gone"]);
         for (const row of rows.workspaces) expect(Math.abs(row.slotFlush)).toBeLessThan(1);
         for (const row of rows.workspaces) expect(row.slotWidth).toBeGreaterThanOrEqual(44);
@@ -526,8 +573,11 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         const rowBox = await box("[data-row-id='ws:ws_a']");
         expect(Math.abs(live.slotRight - (rowBox.x + rowBox.width - 8))).toBeLessThan(1);
         expect(Math.round(paused.slotRight)).toBe(Math.round(live.slotRight));
-        expect(Math.round(gone.slotRight)).toBe(Math.round(live.slotRight) - 48);
+        expect(Math.round(gone.slotRight)).toBe(Math.round(live.slotRight));
         expect(new Set(rows.workspaces.map(r => Math.round(r.nameX))).size).toBe(1);
+        // At rest no row shows a glyph, the gone row included: its forget and rebuild wait for the hover like every row's actions.
+        const resting = await page!.locator("[data-row-id^='ws:'] ~ [data-sidebar=menu-action]").evaluateAll(els => els.map(el => getComputedStyle(el).opacity));
+        expect(resting).toEqual(["0", "0", "0", "0", "0", "0"]);
         // On hover the word yields and the glyphs take the slot; the name and the line under it stay put.
         const before = await box("[data-row-id='ws:ws_b'] [data-workspace-state]");
         const nameBefore = await box("[data-row-id='ws:ws_b'] [data-workspace-name]");
@@ -541,6 +591,21 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         }), { x: before.x, right: before.x + before.width, y: before.y, bottom: before.y + before.height });
         console.info(`hovered glyphs at ${width ?? "default"} ${theme}: ${JSON.stringify({ hovered, slot: before })}`);
         expect(hovered.map(g => ({ opacity: g.opacity, inside: g.inside }))).toEqual([{ opacity: "1", inside: true }, { opacity: "1", inside: true }]);
+        // The gone row's two recovery glyphs take its slot the same way, and its word yields to them.
+        const goneSlot = await box("[data-row-id='ws:ws_c'] [data-workspace-state]");
+        await page!.locator("[data-row-id='ws:ws_c']").hover();
+        await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-row-id='ws:ws_c'] [data-workspace-state]")!).opacity === "0");
+        expect(await box("[data-row-id='ws:ws_c'] [data-workspace-state]")).toEqual(goneSlot);
+        const goneHovered = await page!.locator("[data-row-id='ws:ws_c'] ~ [data-sidebar=menu-action]").evaluateAll((els, slot) => els.map(el => {
+          const b = el.getBoundingClientRect();
+          return { label: el.getAttribute("aria-label"), opacity: getComputedStyle(el).opacity, inside: b.x >= slot.x - 1 && b.right <= slot.right + 1 && b.y >= slot.y - 8 && b.bottom <= slot.bottom + 8 };
+        }), { x: goneSlot.x, right: goneSlot.x + goneSlot.width, y: goneSlot.y, bottom: goneSlot.y + goneSlot.height });
+        expect(goneHovered).toEqual([{ label: "Forget old", opacity: "1", inside: true }, { label: "Rebuild old", opacity: "1", inside: true }]);
+        if (theme === "dark") {
+          const path = join(SHOTS_DIR, `sidebar-rows-gone-hover-${width ?? "default"}.png`);
+          await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+          console.info(`gone row hover screenshot: ${path}`);
+        }
         await page!.mouse.move(600, 700);
         // The meta line in its one order, whole in the title, cut from the right when the width asks.
         expect(rows.workspaces[0]!.meta).toBe("$0.29 today · $0.110/hr · naps in 15m");
@@ -577,9 +642,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
           expect(short.length).toBeGreaterThan(0);
           for (const gap of short) expect(Math.abs(gap)).toBeLessThan(1);
         }
-        // The thread title sits at the same inset from its row's edge as the workspace name from its own.
-        const inset = rows.workspaces[0]!.nameX - (await box("[data-row-id='ws:ws_a']")).x;
-        for (const row of rows.threads) expect(Math.abs(row.titleX - row.rowX - (inset - 8))).toBeLessThan(1);
+        // Every row in the list is a thread, so no glyph leads one: the title starts at its row's own inset.
+        for (const row of rows.threads) expect(Math.abs(row.titleX - row.rowX)).toBeLessThan(1);
+        expect(await page!.locator("[data-row-id^='thread:'] svg.lucide-message-square").count()).toBe(0);
         const path = join(SHOTS_DIR, `sidebar-rows-${width ?? "default"}-${theme}.png`);
         await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
         console.info(`sidebar rows screenshot: ${path}`);
@@ -629,7 +694,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         expect(read.threads).toEqual(["thread:s1", "thread:s2"]);
         expect(read.name).toBe("api");
         expect(read.state).toBe("");
-        expect(read.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB · Linux", "$0.29 today · $0.110/hr", "naps in 15m"]);
+        expect(read.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr", "naps in 15m"]);
         // The meta lines are the rows' own muted mono, and every one of them stays inside the sidebar at every width.
         for (const line of read.lines) {
           expect(line.mono).toBe(true);
@@ -656,7 +721,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         const moved = await readSpaces();
         expect(moved.dots.map(dot => dot.text)).toEqual(["", "web", ""]);
         expect(moved.state).toBe("Paused");
-        expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today"]);
+        expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB", "$0.00 today"]);
         await page!.locator("[data-space-dot][aria-label=api]").click();
         await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "api");
         // The pointer leaves the row and its hover fades out before the shot, so what is saved is the rest state:
@@ -874,44 +939,43 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 120_000);
 
-  it("a mixed list keeps one row grammar: this computer's row leads with the kind's glyph, says what it is and shows no state word, while the cloud rows beside it keep their dot, spend and word, in both themes", async () => {
+  it("a mixed list keeps one row grammar: every row leads with its kind's glyph in one ink, the laptop on this computer and the cloud on a fork, line two says what each machine is, line three what it costs, free on this computer, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&local=1`);
       await page!.waitForSelector("[data-row-id='ws:ws_m']");
       const local = page!.locator("[data-row-id='ws:ws_m']");
       const cloud = page!.locator("[data-row-id='ws:ws_a']");
       const paused = page!.locator("[data-row-id='ws:ws_b']");
-      // One glyph in the lead where it means something: the laptop, no dot beside it, no chip and no badge.
-      expect(await local.locator("[data-workspace-lead]").getAttribute("data-workspace-lead")).toBe("glyph");
-      expect(await local.locator("[data-workspace-lead] svg").count()).toBe(1);
-      expect(await cloud.locator("[data-workspace-lead]").getAttribute("data-workspace-lead")).toBe("dot");
+      // One glyph in every lead, the kind's own: no dot, no chip and no badge anywhere.
+      expect(await local.locator("[data-workspace-lead] svg.lucide-laptop").count()).toBe(1);
+      expect(await cloud.locator("[data-workspace-lead] svg.lucide-cloud").count()).toBe(1);
+      expect(await page!.locator("[data-workspace-lead] .rounded-full").count()).toBe(0);
       expect(await page!.locator("[data-slot=badge]").count()).toBe(0);
-      expect((await local.locator("[data-workspace-meta]").textContent())?.trim()).toBe(THIS_COMPUTER);
+      expect((await local.locator("[data-workspace-machine]").textContent())?.trim()).toBe(THIS_COMPUTER);
+      expect((await local.locator("[data-workspace-meta]").textContent())?.trim()).toBe(FREE_WORD);
       expect((await local.locator("[data-workspace-state]").textContent())?.trim()).toBe("");
+      expect((await cloud.locator("[data-workspace-machine]").textContent())?.trim()).toBe("2 vCPU · 4 GB");
       expect((await cloud.locator("[data-workspace-meta]").textContent())?.trim()).toContain("$0.110/hr");
       expect((await paused.locator("[data-workspace-state]").textContent())?.trim()).toBe("Paused");
-      // Uniform rows: one height for every kind, the lead slots and the names in one column.
+      // Uniform rows: one height for every kind and state, the lead slots and the names in one column.
       const rows = await page!.locator("[data-row-id^='ws:']").evaluateAll(list =>
         list.map(row => {
           const lead = row.querySelector<HTMLElement>("[data-workspace-lead]")!;
           const name = row.querySelector<HTMLElement>("[data-workspace-name]")!;
-          return { height: row.getBoundingClientRect().height, lead: lead.getBoundingClientRect(), nameX: name.getBoundingClientRect().x };
+          return { height: row.getBoundingClientRect().height, lead: lead.getBoundingClientRect(), nameX: name.getBoundingClientRect().x, color: getComputedStyle(lead.querySelector("svg")!).color };
         }),
       );
+      expect(rows).toHaveLength(4);
       for (const row of rows) {
-        expect(row.height).toBe(rows[0]!.height);
+        expect(row.height).toBe(60);
         expect(Math.abs(row.lead.x - rows[0]!.lead.x)).toBeLessThan(0.5);
         expect(Math.abs(row.lead.width - rows[0]!.lead.width)).toBeLessThan(0.5);
         expect(Math.abs(row.nameX - rows[0]!.nameX)).toBeLessThan(0.5);
+        // One ink for every glyph: colour is not a status channel on the lead.
+        expect(row.color).toBe(rows[0]!.color);
       }
-      // This computer's line is short enough to be drawn whole at the default width.
-      expect(await local.locator("[data-workspace-meta]").evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
-      // The glyph reads at the weight of the neutral dot it stands in for, never a colour of its own.
-      const [glyph, neutralDot] = await Promise.all([
-        local.locator("[data-workspace-lead] svg").evaluate(el => getComputedStyle(el).color),
-        page!.locator("[data-row-id='ws:ws_c'] [data-workspace-lead] > span").evaluate(el => getComputedStyle(el).backgroundColor),
-      ]);
-      expect(glyph).toBe(neutralDot);
+      // This computer's lines are short enough to be drawn whole at the default width.
+      for (const line of ["[data-workspace-machine]", "[data-workspace-meta]"]) expect(await local.locator(line).evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
       const path = join(SHOTS_DIR, `sidebar-mixed-kinds-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`mixed-kind sidebar screenshot: ${path}`);
@@ -1349,7 +1413,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
-  it("a send refusal is one muted mono line, no panel, in a slot the composer keeps at one height, in both themes", async () => {
+  it("a send refusal is one muted mono line, no panel, in a slot the composer keeps at one height; a paused workspace has no line, its box takes words, and its send button reads Wake and send, in both themes", async () => {
     interface Composer {
       shell: Box;
       slot: Box;
@@ -1358,6 +1422,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       /** The line's paint, or null when the slot is empty. */
       line: { mono: boolean; background: string; border: string; icons: number } | null;
       panels: number;
+      send: { label: string | null; title: string | null; box: Box | null };
+      editable: boolean;
+      placeholder: string;
     }
     const composerAt = async (query: string, theme: string, name: string): Promise<Composer> => {
       await page!.goto(`${base}?theme=${theme}&${query}`);
@@ -1367,10 +1434,16 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const read = await page!.locator("[data-chat-composer]").evaluate(el => {
         const line = el.querySelector<HTMLElement>("[data-composer-refusal] [role=status]");
         const s = line === null ? null : getComputedStyle(line);
+        const send = el.querySelector<HTMLButtonElement>("[data-chat-composer-actions] button[type=submit]");
+        const editor = el.querySelector<HTMLElement>("[data-testid=composer-editor]");
+        const b = send?.getBoundingClientRect();
         return {
           text: el.querySelector("[data-composer-refusal]")?.textContent ?? "",
           line: s === null || line === null ? null : { mono: /mono/i.test(s.fontFamily), background: s.backgroundColor, border: `${s.borderTopWidth} ${s.borderLeftWidth}`, icons: line.getElementsByTagName("svg").length },
           panels: el.querySelectorAll("[data-composer-banner-surface]").length,
+          send: { label: send?.getAttribute("aria-label") ?? null, title: send?.getAttribute("title") ?? null, box: b === undefined ? null : { x: b.x, y: b.y, width: b.width, height: b.height } },
+          editable: editor?.getAttribute("contenteditable") !== "false",
+          placeholder: editor?.getAttribute("aria-placeholder") ?? el.querySelector("[data-placeholder]")?.textContent ?? "",
         };
       });
       const path = join(SHOTS_DIR, `composer-${name}-${theme}.png`);
@@ -1382,13 +1455,26 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const idle = await composerAt("ws=ws_a", theme, "idle");
       expect(idle.text).toBe("");
       expect(idle.line).toBeNull();
+      expect(idle.send.label).toBe("Send message");
+      expect(idle.editable).toBe(true);
       const paused = await composerAt("ws=ws_b", theme, "paused");
       const gone = await composerAt("ws=ws_c", theme, "gone");
       const working = await composerAt("ws=ws_a&linger=1", theme, "working");
-      expect(paused.text).toBe(sendRefusal("paused"));
+      // A paused workspace: no sentence anywhere, the box takes words, the same button in the same place says it wakes first.
+      expect(paused.text).toBe("");
+      expect(paused.line).toBeNull();
+      expect(paused.editable).toBe(true);
+      expect(paused.placeholder).toBe(idle.placeholder);
+      expect(paused.placeholder).not.toMatch(/paus|wake/i);
+      expect(paused.send.label).toBe(WAKE_AND_SEND_LABEL);
+      expect(paused.send.title).toBe(WAKE_AND_SEND_LABEL);
+      expect(paused.send.box).toEqual(idle.send.box);
+      expect(paused.slot).toEqual(idle.slot);
+      expect(paused.box).toEqual(idle.box);
+      expect(paused.shell).toEqual(idle.shell);
       expect(gone.text).toBe(sendRefusal("gone"));
       expect(working.text).toBe(stillWorkingLine("thr_linger"));
-      for (const state of [paused, gone, working]) {
+      for (const state of [gone, working]) {
         // The words in mono, painted on nothing: no fill, no border, no icon, no panel anywhere in the composer.
         expect(state.line).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0 });
         expect(state.panels).toBe(0);

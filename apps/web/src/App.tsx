@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
 import { useCreation, useReady, useSelectedId, useSelectedThreadId, useSettingsOpen, useStore } from "./protocol/store.js";
-import { Mark } from "./brand/Brand.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./components/ui/empty.js";
 import { WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { SettingsPage } from "./settings/SettingsPage.js";
@@ -40,8 +39,6 @@ export function App({ wsUrl, token }: { wsUrl: string; token: string }) {
   return <Shell />;
 }
 
-type Golden = "unknown" | "none" | "present";
-
 /** The center slot: the settings page while it is open, else the selected workspace's thread with the terminal drawer
  * under it, or the creation in progress. */
 function WorkspaceCenter() {
@@ -71,33 +68,12 @@ function WorkspaceCenter() {
   );
 }
 
-/** The window below the connection: one line pointing at wsp init until a
- * golden image exists, the three-region shell from then on. */
+/** The window below the connection: the three-region shell, on this computer when nothing else is recorded yet. */
 export function Shell() {
-  const api = useStore(s => s.api);
   const ready = useReady();
-  const [golden, setGolden] = useState<Golden>("unknown");
-  useEffect(() => {
-    if (!api) return;
-    let live = true;
-    // A failed lookup falls through to the app; the sidebar's own create reports the error.
-    void api
-      .getGolden()
-      .then(m => { if (live) setGolden(m ? "present" : "none"); })
-      .catch(() => { if (live) setGolden("present"); });
-    return () => { live = false; };
-  }, [api]);
-  if (golden === "none") {
-    return (
-      <p className="flex h-full items-center justify-center gap-2 p-6 font-mono text-sm text-muted-foreground">
-        <Mark className="h-[1em] shrink-0" />
-        No golden image yet. Run wsp init in a terminal; it opens this app when the machine is ready.
-      </p>
-    );
-  }
   return (
     <AppShell>
-      {ready && golden === "present" ? (
+      {ready ? (
         <WorkspaceCenter />
       ) : (
         <div className="p-6 font-mono text-sm text-muted-foreground">connecting to runtime…</div>

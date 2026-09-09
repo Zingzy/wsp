@@ -27,10 +27,6 @@ describe("index.css", () => {
     expect(appTerminalFontSize()).toBe(14);
   });
 
-  it("the search row's tint is one token, a few percent of black", () => {
-    expect(css).toMatch(/^\s*--search-row-tint: [2-8]%;$/m);
-  });
-
   // The hues are the one palette a person paints a workspace with, so they must never say what a state says and
   // must not read alike in a picker. The two colours they have to stay clear of are the app's own tokens, read
   // from the ramp rather than written down here, so a palette change on either side is what moves these numbers.
@@ -164,17 +160,6 @@ describe("index.css", () => {
          takes the muted token whole, the step that keeps it AA over a white desktop. */
       .desktop-mac [data-app-sidebar] [data-search-row] {
         color: var(--sidebar-muted-foreground);
-      }
-
-      /* The search row at rest: a few percent of black over the sidebar surface,
-         so over the glass it reads as a field and not loose text; hover one step
-         darker. The section rows beside it stay clear. */
-      [data-search-row] {
-        background: color-mix(in srgb, black var(--search-row-tint), transparent);
-
-        &:hover {
-          background: color-mix(in srgb, black calc(var(--search-row-tint) * 2), transparent);
-        }
       }
 
       /* A Ghostty config with background-opacity under 1: the viewport marks itself

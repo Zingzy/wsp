@@ -47,6 +47,7 @@ describe("keybinding parsing", () => {
 describe("default shortcuts", () => {
   const resolve = (event: ShortcutEventLike, platform: string, context: Record<string, boolean> = {}) =>
     resolveShortcutCommand(event, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context });
+  const DESKTOP_SHELL = { desktopShell: true };
 
   it("resolves each mod chord with Command on macOS and Control elsewhere", () => {
     expect(resolve(cmd("b"), MAC)).toBe("sidebar.toggle");
@@ -68,7 +69,26 @@ describe("default shortcuts", () => {
     expect(resolve(cmd("d"), MAC, { terminalFocus: true })).toBe("terminal.split");
     expect(resolve(cmd("n"), MAC)).toBe("chat.new");
     expect(resolve(cmd("n"), MAC, { terminalFocus: true })).toBe("terminal.new");
-    expect(resolve(cmd("o", { shiftKey: true }), MAC)).toBe("chat.new");
+    expect(resolve(cmd("o", { shiftKey: true }), MAC)).toBeNull();
+  });
+
+  it("mod+t opens a new thread in the selected workspace, Command on macOS and Control elsewhere, and is bound once", () => {
+    expect(resolve(cmd("t"), MAC, DESKTOP_SHELL)).toBe("chat.new");
+    expect(resolve(ctrl("t"), LINUX, DESKTOP_SHELL)).toBe("chat.new");
+    expect(resolve(ctrl("t"), MAC, DESKTOP_SHELL)).toBeNull();
+    // A terminal with focus keeps the chord: on Linux it is the shell's own.
+    expect(resolve(ctrl("t"), LINUX, { ...DESKTOP_SHELL, terminalFocus: true })).toBeNull();
+    expect(DEFAULT_KEYBINDINGS.filter(rule => rule.key === "mod+t")).toEqual([{ key: "mod+t", command: "chat.new", when: "!terminalFocus" }]);
+    // The chord is what every surface labels the action with: the row's plus, the palette and the menu.
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", { platform: MAC, context: DESKTOP_SHELL })).toBe("⌘T");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", { platform: LINUX, context: DESKTOP_SHELL })).toBe("Ctrl+T");
+  });
+
+  it("a browser tab keeps mod+t for its own new tab, so there the app's new thread is mod+n and reads so", () => {
+    expect(resolve(cmd("t"), MAC)).toBeNull();
+    expect(resolve(ctrl("t"), LINUX)).toBeNull();
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", MAC)).toBe("⌘N");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", LINUX)).toBe("Ctrl+N");
   });
 
   it("opens the palette from a focused terminal on macOS and leaves ctrl+k to the shell elsewhere", () => {
@@ -103,12 +123,14 @@ describe("chords a browser tab cannot take", () => {
     return browserTabClaimsShortcut(shortcut, platform);
   };
 
-  it("gives the browser Control with Tab and mod with a digit, on both platforms", () => {
+  it("gives the browser Control with Tab, mod with a digit and mod with T, on both platforms", () => {
     for (const platform of [MAC, LINUX]) {
       expect(claims("ctrl+tab", platform)).toBe(true);
       expect(claims("ctrl+shift+tab", platform)).toBe(true);
       expect(claims("mod+1", platform)).toBe(true);
       expect(claims("mod+9", platform)).toBe(true);
+      expect(claims("mod+t", platform)).toBe(true);
+      expect(claims("mod+shift+t", platform)).toBe(false);
     }
   });
 

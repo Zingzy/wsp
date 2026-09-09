@@ -127,7 +127,7 @@ describe("the wsp skill", () => {
     expect(section).toContain("wsp thread new --in mac --agent codex \"Say in one line which folder you are in");
     expect(section).toContain("Its folder is the workspace's own rather than the person's home");
     // One statement of the order a folder is picked in, so the paragraph cannot say two things about the same start.
-    expect(section).toContain("without it the thread starts in the workspace's imported project folder, else in the workspace's own folder, which on a fork is the machine's home folder");
+    expect(section).toContain("with neither, the thread starts in the project the last thread on that workspace used, else in the workspace's only project, else in the workspace's own folder, which on a fork is the machine's home folder");
     // No constant path stands in for that folder: the host decides it, and a line naming one would go stale.
     expect(section).not.toContain("~/wsp-work");
   });

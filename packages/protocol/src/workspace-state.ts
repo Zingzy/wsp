@@ -31,14 +31,17 @@ export interface WorkspaceKindWords {
    * says the reach word `unsupported` is this kind's steady state rather than something missing from one machine,
    * so a row says what the machine is instead of that its daemon is not there. */
   daemon: boolean;
+  /** Whether a machine of this kind streams its utilisation to the Machine tab's Live rows. False says those rows
+   * read that the stream is not on this kind, rather than waiting on a sample that never comes. */
+  live: boolean;
 }
 
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: null, driven: true, daemon: true },
-  local: { machine: THIS_COMPUTER, driven: false, daemon: true },
-  ssh: { machine: OVER_SSH, driven: false, daemon: false },
+  cloud: { machine: null, driven: true, daemon: true, live: true },
+  local: { machine: THIS_COMPUTER, driven: false, daemon: true, live: false },
+  ssh: { machine: OVER_SSH, driven: false, daemon: false, live: false },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {

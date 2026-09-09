@@ -159,11 +159,12 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and says what it is", () => {
-    expect(kindWords("cloud")).toEqual({ machine: null, driven: true, daemon: true });
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, driven: false, daemon: true });
+    expect(kindWords("cloud")).toEqual({ machine: null, driven: true, daemon: true, live: true });
+    // This computer serves a daemon but streams no utilisation to the Machine tab yet, so its Live rows say so.
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, driven: false, daemon: true, live: false });
     // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it, and
     // it serves no daemon at all, so a row for one says what the machine is rather than that its daemon is missing.
-    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, driven: false, daemon: false });
+    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, driven: false, daemon: false, live: false });
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {
