@@ -144,7 +144,7 @@ describe("header", () => {
     expect(screen.getByRole("img", { name: "wsp" })).toBeTruthy();
   });
 
-  it("the header row starts at the frame inset with the lockup, the toggle sits at the row's end, and the search row shares the content inset", async () => {
+  it("the header row starts at the frame inset with the toggle, the lockup follows it, and the search row shares the content inset", async () => {
     useStore.getState().bind(fakeApi([], []));
     await act(async () => {
       render(
@@ -158,10 +158,7 @@ describe("header", () => {
     expect(row.getAttribute("data-slot")).toBe("sidebar-header");
     expect(row.className).toContain("pl-[var(--header-frame-inset)]");
     expect(row.className).toContain("gap-[calc(var(--header-gap)-var(--workspace-titlebar-control-size)/2)]");
-    expect(lockup.previousElementSibling).toBeNull();
-    expect(row.lastElementChild!.getAttribute("data-slot")).toBe("sidebar-trigger");
-    expect(row.lastElementChild!.className).toContain("ml-auto");
-    expect(row.className).toContain("pr-[var(--sidebar-content-inset)]");
+    expect(lockup.previousElementSibling!.getAttribute("data-slot")).toBe("sidebar-trigger");
     expect(screen.getByRole("button", { name: "Search" }).closest("[data-sidebar-search]")!.className).toContain("px-[var(--sidebar-content-inset)]");
   });
 });

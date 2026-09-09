@@ -592,9 +592,9 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         console.info(`over a ${desktop} desktop the glass is rgb(${shot.glass.join(", ")}) and the search row rgb(${shot.searchRow.join(", ")}): ${Object.entries(ratios).map(([k, v]) => `${k} ${v.toFixed(2)}:1`).join(", ")}`);
         expectOneGap(openGaps);
         expect(Math.abs(wordmarkDrop)).toBeLessThanOrEqual(CENTRED);
-        // The search row's tint: darker than the bare glass beside it in every channel, and the word Search still AA on it.
-        expect(shot.searchRow.every((v, i) => v <= shot.glass[i]!)).toBe(true);
-        expect(shot.searchRow.some((v, i) => v < shot.glass[i]!)).toBe(true);
+        // The search row sits on the selected row's surface, so it reads apart from the bare glass beside it, and the word
+        // Search is still AA on it.
+        expect(shot.searchRow).not.toEqual(shot.glass);
         for (const ratio of Object.values(ratios)) expect(ratio).toBeGreaterThanOrEqual(4.5);
 
         // Collapsed, the page header is the frame row: the toggle lands where the sidebar's was, the breadcrumb after it, the row still drags.

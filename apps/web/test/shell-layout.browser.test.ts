@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The shell's chrome in a real Chromium: the sidebar's brand lockup starts
-// where the search row does and the sidebar toggle ends where the rows end,
-// the two top rows are one height and start where the workspace rows do, the
+// The shell's chrome in a real Chromium: the sidebar toggle starts where the
+// search row does and the brand lockup one gap after it, the two top rows are
+// one height and start where the workspace rows do, the
 // search row sits on the selected row's surface with a hairline and opens the
 // palette without moving a row, a thread row's title keeps its room at the
 // default width, a status toast holds a long token inside its box, the
@@ -93,15 +93,14 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     return b;
   };
 
-  it("the brand lockup starts where the search row does and the sidebar toggle ends where the rows end, on one centre line, in both themes", async () => {
+  it("the sidebar toggle starts where the search row does and the brand lockup one gap after it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const toggle = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
       const lockup = await box("[data-slot=sidebar-header] [role=img][aria-label=wsp]");
       const search = await box("button[aria-label='Search']");
-      expect(Math.abs(lockup.x - search.x)).toBeLessThan(1);
-      expect(Math.abs(toggle.x + toggle.width - (search.x + search.width))).toBeLessThan(1);
-      expect(toggle.x).toBeGreaterThan(lockup.x + lockup.width);
+      expect(Math.abs(toggle.x - search.x)).toBeLessThan(1);
+      expect(Math.abs(lockup.x - (toggle.x + toggle.width + (await rowGap("[data-slot=sidebar-header]"))))).toBeLessThan(1);
       // One vertical centre: the toggle glyph's ink (its icon box, whose panel fills it edge to edge) and the wordmark's optical centre.
       const glyph = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger] svg");
       expect(Math.abs(glyph.y + glyph.height / 2 - (lockup.y + lockup.height * LOCKUP_OPTICAL_CENTRE))).toBeLessThan(0.5);
@@ -1764,18 +1763,17 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("collapsing the sidebar puts the page header's toggle at the frame inset where the wordmark was, on the boundary it toggles, and the breadcrumb after it, in both themes", async () => {
+  it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const before = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
-      const lockup = await box("[data-slot=sidebar-header] [role=img][aria-label=wsp]");
       expect(await page!.locator("header [data-slot=sidebar-trigger]").count()).toBe(0);
       await page!.locator("[data-slot=sidebar-header] [data-slot=sidebar-trigger]").click();
       await page!.waitForSelector("[data-sidebar-state=collapsed]");
       // The row animates padding-left over 200 ms; the read waits for the toggle to land.
-      await page!.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().x - x) < 1, lockup.x);
+      await page!.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().x - x) < 1, before.x);
       const after = await box("header [data-slot=sidebar-trigger]");
-      expect(Math.abs(after.x - lockup.x)).toBeLessThan(1);
+      expect(Math.abs(after.x - before.x)).toBeLessThan(1);
       expect(Math.abs(after.y - before.y)).toBeLessThan(1);
       const crumb = await box("header [data-thread-breadcrumb]");
       expect(Math.abs(crumb.x - (after.x + after.width + (await rowGap("header [data-header-row]"))))).toBeLessThan(1);
