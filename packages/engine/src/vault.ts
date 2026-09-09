@@ -21,6 +21,10 @@ export interface VaultOptions {
   maxBytes?: number;
   /** exportPaths only: what the archive leaves behind under each path, judged before the size is read. */
   exclude?: CacheRule;
+  /** exportPaths only: absolute guest paths the archive leaves behind whatever the rule says, so what stands at each
+   * on the destination is left alone. A directory holding one of them travels as its contents and not as itself:
+   * --recursive-unlink replaces a directory it extracts wholesale, and would take the copy left behind with it. */
+  drop?: readonly string[];
   /** Import only: merge into what the destination already holds instead of replacing its directories. */
   overlay?: boolean;
   /** Import only: called as each part lands, with the bytes sent so far. */
@@ -104,28 +108,51 @@ export interface CacheRule {
  * find names every cache root under the rule on stdout, one per line as find spelled them minus a leading ./ ; a
  * second lists every entry kept, NUL separated, and tar takes that list with recursion off: both tars' exclude
  * patterns match a name at any depth, so a file called dist would otherwise go with the dist directory. Nothing under
- * a .git directory is judged, so a repository travels whole. Only find and tar features both GNU and BSD have. */
-function excludingArchiveScript(cwd: string, targets: readonly string[], rule: CacheRule, out: string): string {
+ * a .git directory is judged, so a repository travels whole. `drop` names exact paths the archive leaves behind
+ * whatever the rule says. Only find and tar features both GNU and BSD have. */
+function excludingArchiveScript(cwd: string, targets: readonly string[], rule: CacheRule, out: string, drop: readonly string[] = []): string {
   const names = (list: readonly string[]): string => list.map(n => `-name ${shellQuote(n)}`).join(" -o ");
+  const paths = (list: readonly string[]): string => `\\( ${list.map(p => `-path ${shellQuote(asPattern(p))}`).join(" -o ")} \\)`;
   const named = [
     ...(rule.dirs.length === 0 ? [] : [`\\( -type d \\( ${names(rule.dirs)} \\) \\)`]),
     ...(rule.files.length === 0 ? [] : [`\\( -type f \\( ${names(rule.files)} \\) \\)`]),
     ...rule.markers.map(m => `\\( -type d -exec test -f ${shellQuote(`{}/${m}`)} \\; \\)`),
   ];
   const cache = `\\( ${named.length === 0 ? "-false" : named.join(" -o ")} \\)`;
+  const skip = drop.length === 0 ? cache : `\\( ${cache} -o ${paths(drop)} \\)`;
+  // Every directory the archive would carry that holds a dropped path: it stays out of the archive while everything
+  // under it travels, which is how a dropped file's neighbours land without --recursive-unlink taking the copy the
+  // destination keeps. One that is a starting point leaves by not being on the list tar is handed; only one below a
+  // starting point needs a predicate, since -mindepth 1 means find never tests a starting point at all.
+  const held = ancestorsOf(drop).filter(h => targets.some(t => t === h || h.startsWith(`${t}/`)));
+  const walked = held.filter(h => targets.some(t => h.startsWith(`${t}/`)));
+  const flat = walked.length === 0 ? "" : `${paths(walked)} -o `;
+  const gone = new Set([...drop, ...held]);
   const where = targets.map(shellQuote).join(" ");
+  const carried = targets.filter(t => !gone.has(t));
   const list = `${out}.list`;
   const keep = `${out}.keep`;
   return [
     "set -eo pipefail",
     `cd ${shellQuote(cwd)}`,
-    `find ${where} -mindepth 1 -path '*/.git' -prune -o ${cache} -prune -print > ${shellQuote(list)}`,
-    `printf '%s\\0' ${where} > ${shellQuote(keep)}`,
-    `find ${where} -mindepth 1 \\( -path '*/.git' -o -path '*/.git/*' \\) -print0 -o ${cache} -prune -o -print0 >> ${shellQuote(keep)}`,
+    `find ${where} -mindepth 1 -path '*/.git' -prune -o ${skip} -prune -print > ${shellQuote(list)}`,
+    carried.length === 0 ? `: > ${shellQuote(keep)}` : `printf '%s\\0' ${carried.map(shellQuote).join(" ")} > ${shellQuote(keep)}`,
+    `find ${where} -mindepth 1 \\( -path '*/.git' -o -path '*/.git/*' \\) -print0 -o ${skip} -prune -o ${flat}-print0 >> ${shellQuote(keep)}`,
     `tar czf ${shellQuote(out)} --no-recursion --null -T ${shellQuote(keep)}`,
     `sed 's|^\\./||' ${shellQuote(list)}`,
     `rm -f ${shellQuote(list)} ${shellQuote(keep)}`,
   ].join("\n");
+}
+
+/** A path as find's -path takes it: that is an fnmatch pattern, so a folder a person named with a bracket or a star
+ * in it would otherwise match some other path and drop that one instead. */
+const asPattern = (path: string): string => path.replace(/[\\*?[]/g, m => `\\${m}`);
+
+/** Every directory above the dropped paths, as the archive spells them; the caller keeps the ones the archive holds. */
+function ancestorsOf(paths: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const p of paths) for (let cut = p.lastIndexOf("/"); cut > 0; cut = p.lastIndexOf("/", cut - 1)) out.add(p.slice(0, cut));
+  return [...out];
 }
 
 /** The script that archives a folder on the guest from its own root into `out`, its caches left behind under the rule. */
@@ -179,11 +206,20 @@ async function archiveOf<T>(machine: Machine, script: (out: string) => string, o
   }
 }
 
+/** An absolute guest path as the archive spells it from the root. */
+const rooted = (p: string): string => p.replace(/^\//, "");
+
+/** No cache is left behind: the rule a drop list alone travels under. */
+const NO_CACHES: CacheRule = { dirs: [], files: [], markers: [] };
+
 // Signed-URL transport on both directions: exec stdout could carry base64 for small exports but hits response-size limits.
 export const exportPaths = (machine: Machine, paths: string[], opts: VaultOptions = {}): Promise<Buffer> =>
   archiveOf(
     machine,
-    out => (opts.exclude === undefined ? groupArchiveScript([{ root: "/", paths }], out) : excludingArchiveScript("/", paths.map(p => p.replace(/^\//, "")), opts.exclude, out)),
+    out =>
+      opts.exclude === undefined && (opts.drop === undefined || opts.drop.length === 0)
+        ? groupArchiveScript([{ root: "/", paths }], out)
+        : excludingArchiveScript("/", paths.map(rooted), opts.exclude ?? NO_CACHES, out, (opts.drop ?? []).map(rooted)),
     opts,
     tmp => downloadBuffer(machine, tmp, opts),
   );

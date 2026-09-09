@@ -764,6 +764,105 @@ describe("exportFolder", () => {
     }
   });
 
+  /** Whether this computer's tar is the guest's: --recursive-unlink is GNU's, and the landing under test is the one
+   * the runtime runs on a Linux guest. */
+  const GNU_TAR = /GNU tar/.test(execFileSync("tar", ["--version"]).toString());
+
+  /** The two homes a move onto a newer image has: the fork's, whose top-level entries the vault lists, and the new
+   * machine's, which the image put there. */
+  function homes(): { fork: string; image: string } {
+    const root = mkdtempSync(join(tmpdir(), "wsp-move-"));
+    dirs.push(root);
+    const put = (rel: string, text: string): void => {
+      mkdirSync(join(root, rel, ".."), { recursive: true });
+      writeFileSync(join(root, rel), text);
+    };
+    put("fork/.zshrc", "the image's zshrc\n");
+    put("fork/.gitconfig", "the fork's own gitconfig\n");
+    put("fork/.claude/settings.json", "the image's settings\n");
+    put("fork/.claude/CLAUDE.md", "the fork's own memory\n");
+    put("fork/.claude/projects/-root-proj/S1.jsonl", "a session the fork wrote\n");
+    put("fork/.config/nvim/init.lua", "the fork's own editor config\n");
+    put("fork/proj/src/a.ts", "work\n");
+    put("image/.zshrc", "v2 zshrc\n");
+    put("image/.gitconfig", "v2 gitconfig\n");
+    put("image/.claude/settings.json", "v2 settings\n");
+    put("image/.claude/CLAUDE.md", "v2 memory\n");
+    put("image/.config/gh/hosts.yml", "v2 sign-in\n");
+    // Two files of the image's the fork deleted: one at the top of home, one inside a folder the image writes into.
+    put("image/.bashrc", "v2 bashrc\n");
+    put("image/.claude/agents/reviewer.md", "v2 reviewer\n");
+    return { fork: join(root, "fork"), image: join(root, "image") };
+  }
+
+  /** What the comparison hands the export: the two files this fork never touched and the one only the new image
+   * writes, as the runtime spells them, absolute under the fork's home. */
+  const dropped = (fork: string): string[] => [`${fork}/.zshrc`, `${fork}/.claude/settings.json`, `${fork}/.config/gh/hosts.yml`, `${fork}/.bashrc`, `${fork}/.claude/agents/reviewer.md`];
+
+  it("a move's archive leaves the dropped files out and their directories with them, and carries every other file the fork holds", async () => {
+    const g = await guest();
+    const { fork } = homes();
+    try {
+      const tar = await exportPaths(g.machine, readdirSync(fork).map(e => join(fork, e)), { fetch: globalThis.fetch, drop: dropped(fork) });
+      const under = fork.replace(/^\//, "");
+      expect(listing(tar).map(l => l.slice(under.length + 1))).toEqual([
+        ".claude/CLAUDE.md",
+        ".claude/projects",
+        ".claude/projects/-root-proj",
+        ".claude/projects/-root-proj/S1.jsonl",
+        ".config/nvim",
+        ".config/nvim/init.lua",
+        ".gitconfig",
+        "proj",
+        "proj/src",
+        "proj/src/a.ts",
+      ]);
+    } finally {
+      g.close();
+    }
+  });
+
+  it.skipIf(!GNU_TAR)("landed over the new image the way the upgrade lands it: untouched files are the image's, changed ones the fork's, a file only the image writes arrives, and the fork's project and sessions come whole", async () => {
+    const g = await guest();
+    const { fork, image } = homes();
+    try {
+      const tar = await exportPaths(g.machine, readdirSync(fork).map(e => join(fork, e)), { fetch: globalThis.fetch, drop: dropped(fork) });
+      const depth = fork.replace(/^\//, "").split("/").length;
+      execFileSync("tar", ["xzf", "-", "-C", image, `--strip-components=${depth}`, "--recursive-unlink"], { input: tar });
+      const read = (rel: string): string => readFileSync(join(image, rel), "utf8");
+      expect(read(".zshrc")).toBe("v2 zshrc\n");
+      expect(read(".claude/settings.json")).toBe("v2 settings\n");
+      expect(read(".gitconfig")).toBe("the fork's own gitconfig\n");
+      expect(read(".claude/CLAUDE.md")).toBe("the fork's own memory\n");
+      expect(read(".config/gh/hosts.yml")).toBe("v2 sign-in\n");
+      expect(read(".claude/projects/-root-proj/S1.jsonl")).toBe("a session the fork wrote\n");
+      expect(read(".config/nvim/init.lua")).toBe("the fork's own editor config\n");
+      expect(read("proj/src/a.ts")).toBe("work\n");
+      // A file of the image's the fork deleted comes back with the new image: an archive carries no deletion, and
+      // the folder it sits in is held out of the archive so the copies beside it survive.
+      expect(read(".bashrc")).toBe("v2 bashrc\n");
+      expect(read(".claude/agents/reviewer.md")).toBe("v2 reviewer\n");
+    } finally {
+      g.close();
+    }
+  });
+
+  it("a dropped path holding a glob character drops that path and nothing else, since find reads -path as a pattern", async () => {
+    const g = await guest();
+    const root = mkdtempSync(join(tmpdir(), "wsp-glob-"));
+    dirs.push(root);
+    mkdirSync(join(root, ".config"), { recursive: true });
+    writeFileSync(join(root, ".config", "a[1].txt"), "the image wrote this one\n");
+    writeFileSync(join(root, ".config", "a1.txt"), "the fork's own, which the pattern would eat\n");
+    try {
+      const tar = await exportPaths(g.machine, [join(root, ".config")], { fetch: globalThis.fetch, drop: [`${root}/.config/a[1].txt`] });
+      const under = root.replace(/^\//, "");
+      expect(listing(tar).map(l => l.slice(under.length + 1))).toEqual([".config/a1.txt"]);
+    } finally {
+      g.close();
+    }
+  });
+
   it("a folder that is not on the machine fails with a plain sentence before any download", async () => {
     const g = await guest();
     try {

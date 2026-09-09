@@ -56,6 +56,9 @@ import {
   applyGoldenImport,
   upgradeBuilder,
   nextSetupSha,
+  readOwnedFiles,
+  upgradePlan,
+  type UpgradePlan,
   type Builder,
   type BuildGoldenOptions,
   type CacheRule,
@@ -156,6 +159,7 @@ import type {
   TurnImage,
   TurnResult,
   TurnStatus,
+  UpgradeResult,
   WorkspaceCostEvent,
   WorkspaceCreateStage,
   WorkspaceKind,
@@ -936,7 +940,7 @@ export interface Runtime {
     /** Moves the workspace onto its golden's head version, carrying its files across. Refused in one sentence when
      * the machine is not running, the image is a project golden, or no golden knows the image; a workspace past
      * those and already on the head is returned untouched. */
-    updateImage(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    updateImage(id: string, origin?: WorkspaceOrigin): Promise<UpgradeResult>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
     rebuild(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
     /** Names the workspace, under the rules a fork's name takes: the space around the name is dropped, and a name
@@ -1708,8 +1712,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       .filter(s => s.length > 0 && !VAULT_SKIP.has(s))
       .map(s => `/root/${s}`);
   };
-  const vaultExport = async (m: Machine, o: Pick<VaultOptions, "maxBytes"> = {}): Promise<Buffer> =>
+  const vaultExport = async (m: Machine, o: Pick<VaultOptions, "maxBytes" | "drop"> = {}): Promise<Buffer> =>
     exportPaths(m, await vaultPathsOf(m), { ...o, ...(opts.vaultCaches !== undefined ? { exclude: opts.vaultCaches } : {}) });
+  /** What the fork's home owes a newer image, read while the machine still runs: the files the image it stands on
+   * wrote and it never touched, which the archive leaves behind so the new image's copies stand, and the ones it
+   * changed, which travel and are named on the result. A version that recorded none falls back to the old rule,
+   * where the whole home lands over the new image. */
+  const imageMovePlan = async (m: Machine, from: GoldenVersion | undefined, to: GoldenVersion): Promise<UpgradePlan> => {
+    if (from?.owned === undefined) return upgradePlan(undefined, to.owned, []);
+    const was = new Set(from.owned.map(f => f.path));
+    // What the comparison actually judges by the fork's bytes: the version's own rows, less the volatile ones, whose
+    // bytes never stand for an edit; and the volatile rows only the new image writes, where the comparison asks
+    // whether the fork holds a live copy of its own to leave alone.
+    const read = [
+      ...from.owned.filter(f => f.volatile !== true).map(f => f.path),
+      ...(to.owned ?? []).filter(f => f.volatile === true && !was.has(f.path)).map(f => f.path),
+    ];
+    return upgradePlan(from.owned, to.owned, await readOwnedFiles(m, read));
+  };
   const live = new Map<string, LiveWorkspace>();
   const builders = new Map<string, LiveBuilder>();
   /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
@@ -2401,7 +2421,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           fork(record, m => {
             entry.machine = m;
           }, override),
-        vaultExport: m => vaultExport(m),
+        vaultExport: (m, drop) => vaultExport(m, drop === undefined ? {} : { drop }),
         vaultImport: async (m, payload) => {
           await importInto(m, payload, "/");
         },
@@ -3197,15 +3217,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (refusal !== null) throw Object.assign(new Error(refusal), { kind: "conflict" });
       // The refusal covers an image no manifest knows, so both are there by the time the move runs.
       const to = head!;
-      const from = manifest!.versions.find(v => v.snapshotId === entry.record.golden)!.version;
-      if (to.snapshotId === entry.record.golden) return view(entry.record);
+      const was = entry.record.golden;
+      const from = manifest!.versions.find(v => v.snapshotId === was);
+      if (to.snapshotId === was) return { workspace: view(entry.record), moved: false, kept: [] };
+      // The archive is what lands and --recursive-unlink cannot merge, so which of the image's own files the fork
+      // keeps is settled here, off the machine that is still running, before anything is replaced.
+      const plan = await imageMovePlan(entry.machine, from, to);
       // The fork reads the record, so the new image is named before the machine is replaced; the vault carries the
       // work across the way a resize does. A move that throws puts the record back, so a retry forks what the
       // workspace is actually running.
-      const was = entry.record.golden;
       entry.record.golden = to.snapshotId;
       try {
-        await entry.ws.upgrade();
+        await entry.ws.upgrade(undefined, { drop: plan.drop.map(path => `${GUEST_HOME}/${path}`) });
       } catch (e) {
         entry.record.golden = was;
         throw e;
@@ -3213,8 +3236,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       followMachine(entry);
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
-      await emitStatus(entry, reachOf(entry), `moved from image v${from ?? "?"} to v${to.version}`);
-      return view(entry.record);
+      await emitStatus(entry, reachOf(entry), `moved from image v${from?.version ?? "?"} to v${to.version}`);
+      return { workspace: view(entry.record), moved: true, kept: plan.kept, ...(plan.fallback ? { fallback: true } : {}) };
     },
 
     async rebuild(id, origin) {

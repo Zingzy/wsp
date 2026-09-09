@@ -824,6 +824,26 @@ export function vaultKeptLine(why: string): string {
   return `nap kept the previous vault; ${why}`;
 }
 
+/** What moving a workspace onto a newer image does, the words every client shows before it runs. The home travels,
+ * less the files the image's own recipe wrote and this workspace never changed, whose newer copies come with the
+ * image; an archive carries no deletion, so a file the person took out of a folder the image writes into comes back
+ * with it; nothing installed outside the home travels at all, and the machine it all runs on is replaced. */
+export const IMAGE_MOVE_CONFIRM =
+  "Your home folder moves to the new machine, minus the files the image itself wrote and you never changed, which come from the new image; a file you deleted from a folder the image writes into comes back with it. Anything installed outside your home comes from the new image, and everything running on this machine stops with it.";
+
+/** What a move found nothing to do: the workspace already stands on the newest version, so no machine was replaced
+ * and no file was judged. Said in place of the kept line, which would otherwise claim files came across. */
+export const IMAGE_ALREADY_NEWEST = "already on the newest version of its image, so nothing moved";
+
+/** What the move came to, for the line the command line, the tool and the app print after it: the workspace's own
+ * edits to the image's files, which travelled, or the note that the image it stood on lists no files of its own
+ * (sealed before they were recorded), so its whole home came across and nothing of the newer image's stands. */
+export function imageKeptLine(kept: readonly string[], fallback = false): string {
+  if (fallback) return "the image it stood on lists no files of its own, so its whole home came across and none of the new image's copies stand";
+  if (kept.length === 0) return "every file the image wrote came from the new image; none of them had been changed here";
+  return `kept ${plural(kept.length, "changed file")}: ${nameList([...kept].sort())}; every other file the image wrote came from the new image`;
+}
+
 /** Which call found the provider no longer knew a record's machine: the status poll's read, a pause, a wake's read,
  * the sweep's read of a machine its listing lacked, or the record load at host start. */
 export type GoneSeenBy = "status poll" | "pause" | "wake" | "sweep" | "record load";
