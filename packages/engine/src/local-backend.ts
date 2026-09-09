@@ -19,10 +19,13 @@ import type { Capabilities, MachineFacts } from "@wsp/protocol";
  * machine id and never forks another. */
 export const LOCAL_MACHINE_ID = "local";
 
-/** This computer's own size, read once: its logical CPUs and its memory in MB, so a row can show what a fork's shows.
+const GB = 1024 ** 3;
+
+/** This computer's own size, read once: its logical CPUs and its memory in whole GB, so a row can show what a fork's
+ * shows. A kernel reports a little under the memory the chips hold, so the bytes round to the GB the person bought.
  * Nothing bills on it, so the rate is zero and the storage pricing is empty. */
-function localShape(): { cpu: number; memMb: number } {
-  return { cpu: cpus().length, memMb: Math.round(totalmem() / (1024 * 1024)) };
+export function localShape(cores: number = cpus().length, totalBytes: number = totalmem()): { cpu: number; memMb: number } {
+  return { cpu: cores, memMb: Math.round(totalBytes / GB) * 1024 };
 }
 
 const NO_SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" };

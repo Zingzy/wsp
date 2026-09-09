@@ -59,6 +59,7 @@ import {
   goneWords,
   harnessExitLine,
   isCodeSearchTool,
+  kindWords,
   listedName,
   machineCapRefusal,
   machineUnreachedLine,
@@ -705,8 +706,11 @@ describe("machine size words", () => {
     { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
   ];
 
-  it("fmtSize is the one line for a size in the app: vCPUs, a dot, the GB", () => {
-    expect([{ cpu: 2, memMb: 4096 }, { cpu: 4, memMb: 1536 }].map(fmtSize)).toEqual(["2 vCPU · 4 GB", "4 vCPU · 1.5 GB"]);
+  it("fmtSize is the one line for a size in the app: the cpus in the kind's word, a dot, the GB", () => {
+    expect([{ cpu: 2, memMb: 4096 }, { cpu: 4, memMb: 1536 }].map(size => fmtSize(size))).toEqual(["2 vCPU · 4 GB", "4 vCPU · 1.5 GB"]);
+    // A provider's cpus are virtual and this computer's are not: the same line, the kind's own word for them.
+    expect(fmtSize({ cpu: 10, memMb: 16384 }, kindWords("local").cpu)).toBe("10 cores · 16 GB");
+    expect(fmtSize({ cpu: 2, memMb: 4096 }, kindWords("cloud").cpu)).toBe("2 vCPU · 4 GB");
   });
 
   it("sizeWord spells vCPUs, an x and the GB the size table names, and sizeFromWord reads the same word back", () => {

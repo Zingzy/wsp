@@ -95,12 +95,12 @@ function spendLine({ project, cost }: Pick<WorkspaceMetaInput, "project" | "cost
 }
 
 /** What the machine is, the row's second line and one of the Spaces header's: the kind's own words where it has
- * them (this computer), else the size the provider built. Null before a status carries a size, so a surface leaves
- * the slot empty rather than drawing it half. */
+ * them (a machine over ssh), else the size its status carries in the kind's word for a cpu, a fork's vCPUs or this
+ * computer's cores. Null before a status carries a size, so a surface leaves the slot empty rather than drawing it half. */
 export function machineLine(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string | null {
   const kind = kindWords(workspaceKind(project.workspace));
   if (kind.machine !== null) return kind.machine;
-  return project.status === null ? null : fmtSize(project.status.size);
+  return project.status === null ? null : fmtSize(project.status.size, kind.cpu);
 }
 
 /** What the runtime is doing to this machine's daemon, or why its last attempt failed; the status leads where one
@@ -173,15 +173,25 @@ export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indic
 }
 
 /** How a workspace's glyph dims while its machine is paused, on the row's lead and the space bar's icon alike: half
- * ink, and no hue, since the state is a word elsewhere. Every other state leaves the glyph whole. */
+ * ink and no hue. The bar's colour is the space's own (the theme's ink on the current one, muted on the others), so
+ * this is all the state does there. */
 export function leadDimClass(project: Pick<SidebarProjectSnapshot, "state">): string | undefined {
   return project.state === "paused" ? "opacity-50" : undefined;
+}
+
+/** The class the row's kind glyph wears for its machine's state. Green means running and nothing else in this app,
+ * so the glyph takes the success ink while the machine runs, on a fork and on this computer; paused dims it by the
+ * rule above; every other state leaves it whole and muted, and the state slot's word says which. The tier of the
+ * green is the theme's foreground one, since emerald 500 reads 2.4:1 on the light sidebar and a mark has to clear
+ * 3:1 there; the running dot wears the same token, so a sidebar holds one emerald. */
+export function glyphStateClass(project: Pick<SidebarProjectSnapshot, "state">): string | undefined {
+  return project.state === "running" ? "text-success-foreground" : leadDimClass(project);
 }
 
 export function dotClassForTone(tone: StatusIndicatorTone): string {
   switch (tone) {
     case "running":
-      return "bg-success";
+      return "bg-success-foreground";
     case "paused":
       return "border border-muted-foreground/60 bg-transparent";
     case "neutral":

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LOCAL_MACHINE_ID, LocalBackend } from "../src/local-backend.js";
+import { LOCAL_MACHINE_ID, LocalBackend, localShape } from "../src/local-backend.js";
 
 describe("local backend", () => {
   let root: string;
@@ -32,6 +32,14 @@ describe("local backend", () => {
       sizes: [],
     });
     expect(backend.pricing.rateUsdPerHour({ cpu: 2, memMb: 4096 })).toBe(0);
+  });
+
+  it("this computer's size is its cores and its memory in whole GB, since a kernel reports a little under the chips it has", () => {
+    // A 16 GB Linux box reports about 15.5 GiB as MemTotal; a Mac reports the whole 16.
+    expect(localShape(10, 16_654_508_032)).toEqual({ cpu: 10, memMb: 16_384 });
+    expect(localShape(10, 16 * 1024 ** 3)).toEqual({ cpu: 10, memMb: 16_384 });
+    expect(localShape(8, 8 * 1024 ** 3)).toEqual({ cpu: 8, memMb: 8_192 });
+    expect(new LocalBackend({ root }).pricing.defaultSize.memMb % 1024).toBe(0);
   });
 
   it("get and list answer with the one machine that already exists, and it reads running", async () => {

@@ -6,8 +6,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NO_PROVIDER_LINE, THIS_COMPUTER } from "@wsp/protocol";
-import { NoProviderBackend } from "@wsp/engine";
+import { fmtSize, kindWords, NO_PROVIDER_LINE } from "@wsp/protocol";
+import { localShape, NoProviderBackend } from "@wsp/engine";
 import { createRuntime, jsonFileStore } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, noClaudeKeyNote, up } from "../src/cli.js";
@@ -98,7 +98,10 @@ describe("a computer with no machine provider key", () => {
     expect(served.lines.at(-1)).toBe(noClaudeKeyNote(true));
     const listed = captured();
     expect(await cli(["workspaces", "--state", statePath], listed)).toBe(0);
-    expect(listed.lines[0]).toContain(THIS_COMPUTER);
+    // The listing's machine cell is this computer's cores and memory, the size line its sidebar row reads, off the
+    // same os facts the local backend records; this runs on the real machine, so the line is computed, not spelled.
+    expect(listed.lines[0]).toContain(fmtSize(localShape(), kindWords("local").cpu));
+    expect(listed.lines[0]).toMatch(/\d+ cores · \d+ GB/);
   });
 
   it("answers the sentence naming what is missing on every road that would fork a machine, once and with nothing before it", async () => {

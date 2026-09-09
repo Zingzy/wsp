@@ -867,10 +867,12 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 120_000);
 
-  it("a mixed list keeps one row grammar: every row leads with its kind's glyph in one ink, the laptop on this computer and the cloud on a fork, line two says what each machine is, line three what it costs, free on this computer, in both themes", async () => {
+  it("a mixed list keeps one row grammar: every row leads with its kind's glyph, the laptop on this computer and the cloud on a fork, green while the machine runs and muted otherwise, at one size in one place, line two says what each machine is, line three what it costs, free on this computer, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
-      await page!.goto(`${base}?theme=${theme}&local=1`);
+      // The running fork is the selected row, so the green is read on the selected surface and, on this computer, at rest.
+      await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_a`);
       await page!.waitForSelector("[data-row-id='ws:ws_m']");
+      await page!.waitForSelector("[data-row-id='ws:ws_a'][data-active=true]");
       const local = page!.locator("[data-row-id='ws:ws_m']");
       const cloud = page!.locator("[data-row-id='ws:ws_a']");
       const paused = page!.locator("[data-row-id='ws:ws_b']");
@@ -879,29 +881,66 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(await cloud.locator("[data-workspace-lead] svg.lucide-cloud").count()).toBe(1);
       expect(await page!.locator("[data-workspace-lead] .rounded-full").count()).toBe(0);
       expect(await page!.locator("[data-slot=badge]").count()).toBe(0);
-      expect((await local.locator("[data-workspace-machine]").textContent())?.trim()).toBe(THIS_COMPUTER);
+      // This computer's second line is its cores and memory in the grammar a fork's size reads in; the words that
+      // said which machine it is are the laptop and the name.
+      expect((await local.locator("[data-workspace-machine]").textContent())?.trim()).toBe("10 cores · 16 GB");
       expect((await local.locator("[data-workspace-meta]").textContent())?.trim()).toBe(FREE_WORD);
       expect((await local.locator("[data-workspace-state]").textContent())?.trim()).toBe("");
       expect((await cloud.locator("[data-workspace-machine]").textContent())?.trim()).toBe("2 vCPU · 4 GB");
       expect((await cloud.locator("[data-workspace-meta]").textContent())?.trim()).toContain("$0.110/hr");
       expect((await paused.locator("[data-workspace-state]").textContent())?.trim()).toBe("Paused");
-      // Uniform rows: one height for every kind and state, the lead slots and the names in one column.
-      const rows = await page!.locator("[data-row-id^='ws:']").evaluateAll(list =>
-        list.map(row => {
+      // Uniform rows: one height for every kind and state, the lead slots and the names in one column, and the
+      // glyph itself one box at one offset in every row, so nothing moves when a machine's state changes.
+      const rows = await page!.locator("[data-row-id^='ws:']").evaluateAll(list => {
+        // Chromium prints the theme's tokens in oklch and an element's colour as it likes; a canvas pixel reads both as rgb.
+        const ctx = document.createElement("canvas").getContext("2d")!;
+        const rgb = (c: string): number[] => {
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillStyle = c;
+          ctx.fillRect(0, 0, 1, 1);
+          return Array.from(ctx.getImageData(0, 0, 1, 1).data.slice(0, 3));
+        };
+        return list.map(row => {
           const lead = row.querySelector<HTMLElement>("[data-workspace-lead]")!;
           const name = row.querySelector<HTMLElement>("[data-workspace-name]")!;
-          return { height: row.getBoundingClientRect().height, lead: lead.getBoundingClientRect(), nameX: name.getBoundingClientRect().x, color: getComputedStyle(lead.querySelector("svg")!).color };
-        }),
-      );
-      expect(rows).toHaveLength(4);
+          const svg = lead.querySelector("svg")!;
+          const box = svg.getBoundingClientRect();
+          const top = row.getBoundingClientRect().top;
+          return {
+            id: row.getAttribute("data-row-id"),
+            height: row.getBoundingClientRect().height,
+            lead: lead.getBoundingClientRect(),
+            nameX: name.getBoundingClientRect().x,
+            glyph: { x: box.x, y: box.y - top, width: box.width, height: box.height },
+            color: rgb(getComputedStyle(svg).color),
+            opacity: getComputedStyle(svg).opacity,
+            success: rgb(getComputedStyle(row).getPropertyValue("--success-foreground").trim()),
+          };
+        });
+      });
+      expect(rows.map(r => r.id)).toEqual(["ws:ws_a", "ws:ws_m", "ws:ws_b", "ws:ws_c"]);
       for (const row of rows) {
         expect(row.height).toBe(60);
         expect(Math.abs(row.lead.x - rows[0]!.lead.x)).toBeLessThan(0.5);
         expect(Math.abs(row.lead.width - rows[0]!.lead.width)).toBeLessThan(0.5);
         expect(Math.abs(row.nameX - rows[0]!.nameX)).toBeLessThan(0.5);
-        // One ink for every glyph: colour is not a status channel on the lead.
-        expect(row.color).toBe(rows[0]!.color);
+        expect(row.glyph).toEqual(rows[0]!.glyph);
       }
+      // The glyph's hue is the machine's state: the app's success green on the running fork and on this computer,
+      // the one muted ink on the paused and the gone row, the paused one at half opacity.
+      const [running, mac, pausedRow, gone] = rows as [(typeof rows)[number], (typeof rows)[number], (typeof rows)[number], (typeof rows)[number]];
+      expect(running.color).toEqual(running.success);
+      expect(mac.color).toEqual(running.success);
+      expect(pausedRow.color).toEqual(gone.color);
+      expect(pausedRow.color).not.toEqual(running.color);
+      expect([running.opacity, mac.opacity, gone.opacity]).toEqual(["1", "1", "1"]);
+      expect(pausedRow.opacity).toBe("0.5");
+      // The green clears the floor a mark has to, on the selected row's surface and on a row at rest.
+      const [onSelected] = await textContrast(page!, "[data-row-id='ws:ws_a'] [data-workspace-lead] svg");
+      const [atRest] = await textContrast(page!, "[data-row-id='ws:ws_m'] [data-workspace-lead] svg");
+      console.info(`${theme} glyph green ${running.color}: ${onSelected}:1 on the selected row, ${atRest}:1 at rest`);
+      expect(onSelected).toBeGreaterThanOrEqual(INK_FLOOR);
+      expect(atRest).toBeGreaterThanOrEqual(INK_FLOOR);
       // This computer's lines are short enough to be drawn whole at the default width.
       for (const line of ["[data-workspace-machine]", "[data-workspace-meta]"]) expect(await local.locator(line).evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
       const path = join(SHOTS_DIR, `sidebar-mixed-kinds-${theme}.png`);

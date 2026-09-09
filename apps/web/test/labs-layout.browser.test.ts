@@ -72,7 +72,7 @@ describe.skipIf(renderSkipped !== undefined)("the labs surfaces laid out in Chro
       const icons = Array.from(document.querySelectorAll<HTMLElement>("[data-space-icon]")).map(icon => {
         const b = icon.getBoundingClientRect();
         const svg = icon.querySelector("svg")!;
-        return { label: icon.getAttribute("aria-label") ?? "", current: icon.hasAttribute("data-space-icon-current"), text: icon.textContent ?? "", x: b.x, width: b.width, height: b.height, y: b.y, glyph: svg.getAttribute("data-space-glyph") ?? [...svg.classList].find(c => c.startsWith("lucide-") && c !== "lucide") ?? "", glyphSize: svg.getBoundingClientRect().width, color: getComputedStyle(icon).color };
+        return { label: icon.getAttribute("aria-label") ?? "", current: icon.hasAttribute("data-space-icon-current"), text: icon.textContent ?? "", x: b.x, width: b.width, height: b.height, y: b.y, glyph: svg.getAttribute("data-space-glyph") ?? [...svg.classList].find(c => c.startsWith("lucide-") && c !== "lucide") ?? "", glyphSize: svg.getBoundingClientRect().width, color: getComputedStyle(icon).color, glyphColor: getComputedStyle(svg).color };
       });
       const sidebar = document.querySelector<HTMLElement>("[data-slot=sidebar]")!.getBoundingClientRect();
       const plus = document.querySelector<HTMLElement>("[data-space-new]")!.getBoundingClientRect();
@@ -92,6 +92,8 @@ describe.skipIf(renderSkipped !== undefined)("the labs surfaces laid out in Chro
     expect(Math.abs((bar.icons[0]!.x + bar.plus.right) / 2 - (bar.sidebar.x + bar.sidebar.right) / 2)).toBeLessThan(2);
     expect(bar.icons[0]!.color).toBe(bar.ink.replace(/rgb\((\d+) (\d+) (\d+)\)/, "rgb($1, $2, $3)"));
     expect(new Set(bar.icons.slice(1).map(i => i.color)).size).toBe(1);
+    // The bar's colour is the space's own: no glyph wears the row's running green, whatever its machine is doing.
+    for (const icon of bar.icons) expect(icon.glyphColor).toBe(icon.color);
     await page!.mouse.move(600, 700);
     await shot(`space-bar-${theme}`);
 

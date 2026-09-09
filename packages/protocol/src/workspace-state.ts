@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { OVER_SSH, THIS_COMPUTER } from "./format.js";
+import { OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
 import type { MachineState, ReachState, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
@@ -20,9 +20,11 @@ export const isLocalWorkspace = (view: Pick<WorkspaceView, "kind">): boolean => 
 
 /** What a workspace's kind changes about the words a client shows for it. */
 export interface WorkspaceKindWords {
-  /** What the machine is, on the sidebar row's second line and at the head of the Machine tab's lineage; null for a
-   * kind whose rows show what it cost and which image it forked from there instead. */
+  /** What the machine is, on the sidebar row's second line and the Spaces header, for a kind whose status carries no
+   * size worth reading; null for a kind whose rows read its size there, in its own word for a cpu. */
   machine: string | null;
+  /** What this kind calls one of its cpus in that size line: a provider's are virtual, a machine that exists has cores. */
+  cpu: CpuWord;
   /** Whether wsp forks this machine, pauses it, wakes it, resizes it and pays for it by the hour, or it is a machine
    * that already exists and simply runs while the host does. The state word beside the name, the state dot, the
    * spend, the rate, the nap countdown, the usage chart and the pause and upgrade buttons all ride this. */
@@ -49,9 +51,9 @@ export type KindReading = "metrics" | "processes";
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: null, driven: true, daemon: true, metrics: true, processes: true, imports: "copies" },
-  local: { machine: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true, imports: "registers" },
-  ssh: { machine: OVER_SSH, driven: false, daemon: false, metrics: false, processes: false, imports: null },
+  cloud: { machine: null, cpu: "vCPU", driven: true, daemon: true, metrics: true, processes: true, imports: "copies" },
+  local: { machine: null, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "registers" },
+  ssh: { machine: OVER_SSH, cpu: "cores", driven: false, daemon: false, metrics: false, processes: false, imports: null },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
@@ -66,8 +68,8 @@ export function servesReading(kind: WorkspaceKind, reading: KindReading): boolea
 }
 
 /** What a refusal calls this workspace's machine. Only a kind wsp does not drive reaches one, since the capability
- * behind every driven move is what refuses on the others, so the driven kinds fall back to this computer's word
- * rather than carrying a second phrase no sentence prints. */
+ * behind every driven move is what refuses on the others, so a kind with no words of its own falls back to this
+ * computer's rather than carrying a second phrase no sentence prints. */
 export function machineWord(kind: WorkspaceKind): string {
   return WORKSPACE_KIND_WORDS[kind].machine ?? THIS_COMPUTER;
 }

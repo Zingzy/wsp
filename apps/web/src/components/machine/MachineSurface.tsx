@@ -74,7 +74,7 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
   // A machine wsp neither forks nor pays for has no spend to chart, nothing to nap and no image behind it; its rows
   // say what it is instead.
   const kind = kindWords(workspaceKind(workspace));
-  const goldens = useProjectGoldens(kind.machine === null);
+  const goldens = useProjectGoldens(kind.driven);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header workspace={workspace} status={status} />
@@ -83,7 +83,7 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
         <Projects workspace={workspace} status={status} kind={kind} onTaken={goldens.add} />
         <Live workspace={workspace} kind={kind} />
         {kind.driven && <Usage workspace={workspace} status={status} series={series} />}
-        {kind.machine === null && <GoldenLineage workspace={workspace} projects={goldens.list} />}
+        {kind.driven && <GoldenLineage workspace={workspace} projects={goldens.list} />}
       </ScrollArea>
       <Actions workspace={workspace} status={status} upgrade={upgrade} />
     </div>
@@ -178,14 +178,14 @@ function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
             "pending"
           )}
         </Row>
-        <Row label="Size" k="size" title={pendingSize ? `${fmtSize(pendingSize)} · resizing` : status ? fmtSize(status.size) : "pending"}>
+        <Row label="Size" k="size" title={pendingSize ? `${fmtSize(pendingSize)} · resizing` : status ? fmtSize(status.size, kind.cpu) : "pending"}>
           {pendingSize ? (
             <>
               {fmtSize(pendingSize)}
               <span className="text-muted-foreground"> · resizing</span>
             </>
           ) : status ? (
-            fmtSize(status.size)
+            fmtSize(status.size, kind.cpu)
           ) : (
             "pending"
           )}
@@ -277,7 +277,7 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
   const verbs = useWorkspaceVerbs();
   const projects = workspaceProjects(workspace);
   const importAction = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), verbs, false), "import-project");
-  const images = kind.machine === null && api?.snapshotWorkspace !== undefined;
+  const images = kind.driven && api?.snapshotWorkspace !== undefined;
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const snapshot = async (): Promise<void> => {

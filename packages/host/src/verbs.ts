@@ -83,6 +83,7 @@ import {
   importConsented,
   MACHINE_LEFT,
   importRequest,
+  fmtSize,
   kindWords,
   machineWord,
   needsRebuild,
@@ -680,13 +681,15 @@ function threadLine(t: ThreadRow): string[] {
 }
 
 /** A workspace row: what its machine is, its state where the kind has one, and how many projects it holds. The
- * kind's own words for the machine stand in for the provider's id, and a kind wsp does not drive has no state of its
- * own to name, so that cell stays empty; both facts come off the one kind table. The state cell reads the status the
- * sidebar reads, through the one predicate, so a machine the provider has paused or one whose daemon is dark says
- * here what it says there. The projects themselves are wsp projects' table. */
+ * machine cell is the kind's own words where it has them, the provider's id for a machine wsp forks, and for this
+ * computer the size line its sidebar row reads, one fact in one grammar in the app and here. A kind wsp does not
+ * drive has no state of its own to name, so that cell stays empty; every fact comes off the one kind table. The
+ * state cell reads the status the sidebar reads, through the one predicate, so a machine the provider has paused or
+ * one whose daemon is dark says here what it says there. The projects themselves are wsp projects' table. */
 function workspaceLine(w: WorkspaceListing): string[] {
   const kind = kindWords(workspaceKind(w));
-  return [w.name, w.id, kind.machine ?? w.machineId, kind.driven ? workspaceWord(workspaceStateOf(w, w)) : "", projectCountCell(workspaceProjects(w))];
+  const machine = kind.machine ?? (kind.driven ? w.machineId : fmtSize(w.size, kind.cpu));
+  return [w.name, w.id, machine, kind.driven ? workspaceWord(workspaceStateOf(w, w)) : "", projectCountCell(workspaceProjects(w))];
 }
 
 /** One project's row: its name, the folder it landed at, its size where the import measured one, and the day it landed. */

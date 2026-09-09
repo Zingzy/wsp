@@ -40,7 +40,7 @@ describe.skipIf(renderSkipped !== undefined)("the machine tab of this computer l
   it.each(["dark", "light"] as const)("in the %s theme the tab reads this computer's shape and what is true of it, with no spend, no nap, no image and no helper sentence", async theme => {
     await page!.goto(`${base}?theme=${theme}`);
     await page!.waitForSelector("[data-k=folder]");
-    expect(await page!.locator("[data-k=size]").textContent()).toBe("10 vCPU · 16 GB");
+    expect(await page!.locator("[data-k=size]").textContent()).toBe("10 cores · 16 GB");
     expect(await page!.locator("[data-k=state]").textContent()).toBe("Running");
     expect(await page!.locator("[data-k=reach]").textContent()).toBe("reachable");
     expect(await page!.locator("[data-k=cost]").textContent()).toBe(FREE_WORD);

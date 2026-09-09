@@ -26,6 +26,8 @@ import {
   spaceHeaderLines,
   idleCountdownLabel,
   dotClassForTone,
+  glyphStateClass,
+  leadDimClass,
   stateSlotWord,
   threadPill,
   reachNote,
@@ -206,25 +208,33 @@ describe("workspace row labels", () => {
     expect(slot("waking", "Waking", "neutral", true)).toBe("Waking");
   });
 
-  it("one machine line for the row and the Spaces header: the kind's words where it has them, else the size alone, nothing before a status", () => {
-    expect(machineLine(project({}, { kind: "local" }))).toBe("this computer");
+  it("one machine line for the row and the Spaces header: the kind's words where it has them, else the size in the kind's word for a cpu, nothing before a status", () => {
+    // This computer's line is its facts in a fork's grammar: cores, since they are not virtual, and whole GB.
+    expect(machineLine(project({ size: { cpu: 10, memMb: 16384 } }, { kind: "local" }))).toBe("10 cores · 16 GB");
     expect(machineLine(project({}))).toBe("2 vCPU · 4 GB");
     expect(machineLine({ status: null, workspace: project({}).workspace })).toBeNull();
+    expect(machineLine({ status: null, workspace: { ...project({}).workspace, kind: "local" } })).toBeNull();
     // A kind with its own words says them before any status has arrived, since no size is behind them.
-    expect(machineLine({ status: null, workspace: { ...project({}).workspace, kind: "local" } })).toBe("this computer");
+    expect(machineLine({ status: null, workspace: { ...project({}).workspace, kind: "ssh" } })).toBe(OVER_SSH);
+  });
+
+  it("one rule maps a workspace's state to the row's kind glyph class: the success green while the machine runs, the bar's paused dim while it is paused, nothing for every other state", () => {
+    const states: WorkspaceState[] = ["running", "pausing", "paused", "waking", "unreachable", "gone"];
+    expect(states.map(state => glyphStateClass({ state }))).toEqual(["text-success-foreground", undefined, "opacity-50", undefined, undefined, undefined]);
+    expect(states.map(state => leadDimClass({ state }))).toEqual([undefined, undefined, "opacity-50", undefined, undefined, undefined]);
   });
 
   it("the Spaces header of a machine wsp does not drive is its machine words and the word free: no figure, no rate, no nap line", () => {
     const header = (over: Partial<WorkspaceStatus>, view: Partial<WorkspaceView> = {}, meter: ReturnType<typeof tick> | null = null) =>
       spaceHeaderLines({ project: project(over, view), cost: meter, outOfMemory: undefined, nowMs: now });
-    expect(header({ idleAt: now + 14.5 * 60_000 }, { kind: "local" }, tick(0.29))).toEqual(["this computer", FREE_WORD]);
+    expect(header({ idleAt: now + 14.5 * 60_000, size: { cpu: 10, memMb: 16384 } }, { kind: "local" }, tick(0.29))).toEqual(["10 cores · 16 GB", FREE_WORD]);
     // Nothing the machine bills for reaches it, whatever the meter has ticked or the runtime has scheduled.
-    expect(header({}, { kind: "local" })).toEqual(["this computer", FREE_WORD]);
+    expect(header({ size: { cpu: 10, memMb: 16384 } }, { kind: "local" })).toEqual(["10 cores · 16 GB", FREE_WORD]);
     // A fork's header is untouched: the size, the spend with its rate, the countdown when one is set.
     expect(header({ idleAt: now + 14.5 * 60_000 }, {}, tick(0.29))).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr", "naps in 14m"]);
     expect(header({})).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr"]);
     // What the runtime is doing to the daemon still leads on both kinds: it is the one thing there a person waits on.
-    expect(header({ daemonNote: "updating the helper" }, { kind: "local" })).toEqual(["updating the helper", "this computer", FREE_WORD]);
+    expect(header({ daemonNote: "updating the helper" }, { kind: "local" })).toEqual(["updating the helper", "2 cores · 4 GB", FREE_WORD]);
   });
 
   it("this computer's cost line reads free and nothing about naps or state: it runs while the host does", () => {
@@ -248,7 +258,7 @@ describe("workspace row labels", () => {
     // What the runtime is doing to the daemon still leads: a note means an attempt is in flight.
     expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     // The Spaces header says it above what the machine is, in the same place the row gives it.
-    expect(spaceHeaderLines({ project: local("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual(["no daemon answering", "this computer", FREE_WORD]);
+    expect(spaceHeaderLines({ project: local("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual(["no daemon answering", "2 cores · 4 GB", FREE_WORD]);
     expect(daemonGoneLine("slow", kindWords("local"))).toBeUndefined();
     expect(daemonGoneLine(null, kindWords("local"))).toBeUndefined();
   });
@@ -296,7 +306,8 @@ describe("workspace row labels", () => {
     expect(threadPill({ status: "completed", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
     expect(threadPill({ status: "interrupted", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
     expect(threadPill({ status: "running", indicator: null })).toBeNull();
-    expect(dotClassForTone("running")).toContain("success");
+    // One emerald in the sidebar: the running dot wears the token the row's kind glyph wears while running.
+    expect(dotClassForTone("running")).toBe("bg-success-foreground");
     for (const cls of [dotClassForTone("paused"), dotClassForTone("neutral")]) expect(cls).toContain("muted-foreground");
     for (const cls of [dotClassForTone("running"), dotClassForTone("paused"), dotClassForTone("neutral")]) {
       expect(cls).not.toMatch(/emerald|zinc|sky|red/);
