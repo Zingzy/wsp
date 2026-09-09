@@ -43,6 +43,7 @@ import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, 
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
+import { CloudSetupRow } from "./CloudSetupRow.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { useSidebarMode, useSpaceWorkspaceId } from "./sidebarMode.js";
 import { SpaceDots } from "./SpaceDots.js";
@@ -531,6 +532,7 @@ export function WorkspaceSidebar() {
           </div>
         ) : null}
         {mode === "spaces" && visible.length > 0 ? <SpaceDots projects={visible.map(v => v.project)} currentId={currentSpace?.project.id ?? null} onSelect={select} /> : null}
+        <CloudSetupRow />
       </SidebarChromeFooter>
       {dialog ? (
         <NewWorkspaceDialog

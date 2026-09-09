@@ -1,0 +1,399 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>wsp</title>
+    <!-- The web app's own stylesheet, so every colour, radius and face here is the app's token; stage.mjs writes the built file's name. -->
+    <link rel="stylesheet" href="__WEB_CSS__" />
+    <style>
+      html { color-scheme: light dark; }
+      html.dark { color-scheme: dark; }
+      html:not(.dark) { color-scheme: light; }
+      body {
+        margin: 0;
+        height: 100vh;
+        overflow: hidden;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        color: var(--foreground);
+        font: 14px/1.5 var(--font-sans);
+        -webkit-font-smoothing: antialiased;
+        position: relative;
+      }
+      /* The app's stylesheet leaves html and body clear under the desktop's class so the sidebar shows the window's
+         glass; this page has no glass to show, so its ground is painted here, flat, in the app's token. */
+      .ground { position: fixed; inset: 0; background: var(--background); z-index: -1; }
+      /* The one gradient: a soft glow at the top of the page, the accent at low alpha over the flat ground. */
+      .glow {
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 55vh;
+        background: radial-gradient(55% 60% at 50% 0%, color-mix(in oklab, var(--primary) 16%, transparent) 0%, transparent 100%);
+        pointer-events: none;
+      }
+      header {
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 6px;
+        padding-top: 28px;
+        font: 14px var(--font-mono);
+        color: var(--muted-foreground);
+      }
+      header svg { width: 14px; height: 14px; }
+      main { position: relative; display: grid; place-items: center; }
+      section { width: 560px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+      section[hidden] { display: none; }
+      .hero { position: relative; width: 96px; height: 96px; display: grid; place-items: center; margin-bottom: 28px; }
+      .hero svg { width: 96px; height: 96px; color: var(--foreground); }
+      .micro {
+        margin: 0 0 14px;
+        font: 11px/1 var(--font-mono);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+      }
+      h1 { margin: 0 0 12px; font: 600 34px/1.15 var(--font-sans); letter-spacing: -0.02em; }
+      .sub { margin: 0 0 32px; max-width: 440px; font-size: 15px; line-height: 1.5; color: var(--muted-foreground); }
+      .card {
+        margin: 0 0 28px;
+        padding: 0;
+        list-style: none;
+        width: 100%;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg, 10px);
+        text-align: left;
+      }
+      .card li {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 48px;
+        padding: 0 10px 0 16px;
+      }
+      .card li + li { border-top: 1px solid var(--border); }
+      .glyph {
+        width: 18px;
+        height: 18px;
+        flex: none;
+        background: currentColor;
+        -webkit-mask: var(--mark) center / contain no-repeat;
+        mask: var(--mark) center / contain no-repeat;
+      }
+      /* The brand hues the app draws these two marks in; the rest are monochrome by design. */
+      .glyph[data-agent="claude"] { color: var(--agent-claude); }
+      .glyph[data-agent="gemini"] { color: var(--agent-gemini); }
+      .initial {
+        width: 18px;
+        height: 18px;
+        flex: none;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--input);
+        border-radius: 50%;
+        font: 10px var(--font-mono);
+        color: var(--muted-foreground);
+      }
+      .card .name { color: var(--foreground); }
+      .card .meta { font: 12px var(--font-mono); color: var(--muted-foreground); white-space: nowrap; }
+      .card .slot { margin-left: auto; display: flex; justify-content: flex-end; align-items: center; min-width: 96px; }
+      .state { font: 12px var(--font-mono); color: var(--muted-foreground); padding: 0 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .state.err { color: var(--foreground); }
+      kbd {
+        font: 12px var(--font-mono);
+        color: var(--muted-foreground);
+        padding: 3px 7px;
+        border: 1px solid var(--input);
+        border-radius: 6px;
+      }
+      button {
+        font: 12px var(--font-mono);
+        color: var(--foreground);
+        background: var(--card);
+        border: 1px solid var(--input);
+        border-radius: 6px;
+        height: 28px;
+        padding: 0 12px;
+        cursor: pointer;
+        box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 6%, transparent);
+      }
+      button:hover { background: var(--accent); }
+      button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button.primary {
+        height: 40px;
+        padding: 0 22px;
+        font: 500 14px var(--font-sans);
+        color: var(--background);
+        background: var(--foreground);
+        border-color: transparent;
+        border-radius: 10px;
+        box-shadow: inset 0 1px 0 color-mix(in oklab, var(--background) 20%, transparent), 0 1px 2px color-mix(in oklab, var(--foreground) 12%, transparent);
+      }
+      button.primary:hover { background: color-mix(in oklab, var(--foreground) 88%, var(--background)); }
+      button.primary .arrow { margin-left: 8px; }
+      button.link {
+        margin-top: 14px;
+        height: auto;
+        padding: 0;
+        border: 0;
+        background: none;
+        box-shadow: none;
+        font: 13px var(--font-sans);
+        color: var(--muted-foreground);
+      }
+      button.link:hover { color: var(--foreground); background: none; }
+      footer {
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0 40px 28px;
+        font-size: 13px;
+        color: var(--muted-foreground);
+      }
+      footer .fact { color: var(--foreground); }
+      #status { font: 12px var(--font-mono); max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <div class="ground" aria-hidden="true"></div>
+    <div class="glow" aria-hidden="true"></div>
+    <header aria-label="wsp">
+      <!-- A copy of apps/web/src/brand/mark.svg, which the desktop brand test pins it to. -->
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M1.6 8A3.4 3.4 0 0 1 8 8A3.4 3.4 0 0 0 14.4 8" /></svg>
+      <span>wsp</span>
+    </header>
+    <main>
+      <section id="welcome" data-screen="welcome">
+        <div class="hero">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.6 8A3.4 3.4 0 0 1 8 8A3.4 3.4 0 0 0 14.4 8" /></svg>
+        </div>
+        <h1>Welcome to wsp</h1>
+        <p class="sub">Your setup, on cloud machines, for coding agents. This computer is the first one.</p>
+        <button id="start" type="button" class="primary" autofocus>Get started<span class="arrow" aria-hidden="true">→</span></button>
+      </section>
+      <section id="agents" data-screen="agents" hidden>
+        <p class="micro">Your agents</p>
+        <h1>Let your agents drive wsp</h1>
+        <p class="sub">Each agent found here gets the wsp tools and skill, so it can start threads on this computer.</p>
+        <ul class="card" id="rows"></ul>
+        <button id="all" type="button" class="primary">Install all<span class="arrow" aria-hidden="true">→</span></button>
+        <button id="skip" type="button" class="link">Skip</button>
+      </section>
+      <section id="recap" data-screen="recap" hidden>
+        <p class="micro">This computer</p>
+        <h1>This computer is your first workspace</h1>
+        <p class="sub">Threads run here, under your own sign-ins. Cloud machines come later, from the sidebar.</p>
+        <button id="open" type="button" class="primary">Open wsp<span class="arrow" aria-hidden="true">→</span></button>
+        <p class="micro" style="margin-top: 36px">Next</p>
+        <ul class="card" id="next">
+          <li><span class="name">Start a thread</span><span class="slot"><kbd id="thread-key"></kbd></span></li>
+          <li><span class="name">Let your agent drive wsp</span><span class="slot" id="recap-agents"></span></li>
+          <li><span class="name">Set up cloud machines</span><span class="slot"><span class="state">in the sidebar</span></span></li>
+        </ul>
+      </section>
+    </main>
+    <footer>
+      <span>this computer: <span class="fact" id="computer"></span></span>
+      <span id="status"></span>
+    </footer>
+    <script>
+      const $ = id => document.getElementById(id);
+      const params = new URLSearchParams(location.search);
+      $("computer").textContent = params.get("computer") || "";
+      $("thread-key").textContent = params.get("threadKey") || "";
+      const text = e => String(e && e.message ? e.message : e).replace(/^.*Error: /, "");
+
+      // The app's stylesheet has two sides told apart by the dark class; this page follows the computer's, with
+      // transitions held off for one frame across a flip, as the app does.
+      const html = document.documentElement;
+      const scheme = window.matchMedia("(prefers-color-scheme: dark)");
+      const follow = () => {
+        html.classList.add("no-transitions");
+        html.classList.toggle("dark", scheme.matches);
+        requestAnimationFrame(() => html.classList.remove("no-transitions"));
+      };
+      follow();
+      scheme.addEventListener("change", follow);
+
+      /** id -> its row's slot, whether wsp is in it, whether an install is in flight, and whether it is on this computer. */
+      const rows = new Map();
+      let screen = "welcome";
+
+      function show(next) {
+        for (const id of ["welcome", "agents", "recap"]) $(id).hidden = id !== next;
+        screen = next;
+        const focus = { welcome: "start", agents: "all", recap: "open" }[next];
+        $(focus).focus();
+      }
+
+      function stateOf(slot, word, err) {
+        const span = document.createElement("span");
+        span.className = err ? "state err" : "state";
+        span.textContent = word;
+        if (err) span.title = word;
+        slot.replaceChildren(span);
+      }
+
+      const installable = () => [...rows].filter(([, r]) => r.found && !r.done && !r.busy).map(([id]) => id);
+
+      function keycap(label, onClick) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.addEventListener("click", onClick);
+        return button;
+      }
+
+      function settle() {
+        const left = installable();
+        $("all").disabled = left.length === 0;
+        const recap = $("recap-agents");
+        if (left.length > 0) recap.replaceChildren(keycap("Install", () => install(left)));
+        else if ([...rows.values()].some(r => r.done)) stateOf(recap, "MCP added");
+        else stateOf(recap, "not found");
+      }
+
+      async function install(ids) {
+        for (const id of ids) {
+          const r = rows.get(id);
+          r.busy = true;
+          for (const b of r.slot.querySelectorAll("button")) b.disabled = true;
+        }
+        settle();
+        let report;
+        try {
+          report = await window.wsp.install(ids);
+        } catch (e) {
+          for (const id of ids) {
+            const r = rows.get(id);
+            r.busy = false;
+            for (const b of r.slot.querySelectorAll("button")) b.disabled = false;
+          }
+          $("status").textContent = text(e);
+          settle();
+          return false;
+        }
+        for (const placed of report.installed) {
+          const r = rows.get(placed.id);
+          r.busy = false;
+          r.done = true;
+          stateOf(r.slot, "MCP added");
+        }
+        for (const failed of report.failures) {
+          const r = rows.get(failed.id);
+          r.busy = false;
+          r.done = true;
+          stateOf(r.slot, failed.error, true);
+        }
+        settle();
+        return report.failures.length === 0;
+      }
+
+      function glyphFor(a) {
+        if (a.glyph) {
+          const mark = document.createElement("span");
+          mark.className = "glyph";
+          mark.dataset.agent = a.id;
+          mark.style.setProperty("--mark", `url("agents/${a.id}.svg")`);
+          return mark;
+        }
+        const initial = document.createElement("span");
+        initial.className = "initial";
+        initial.textContent = a.name.slice(0, 1);
+        return initial;
+      }
+
+      function draw(agents) {
+        const list = $("rows");
+        list.replaceChildren();
+        for (const a of agents) {
+          const li = document.createElement("li");
+          li.dataset.agent = a.id;
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = a.name;
+          const meta = document.createElement("span");
+          meta.className = "meta";
+          meta.dataset.k = "meta";
+          meta.textContent = a.version ? `v${a.version}` : "";
+          const slot = document.createElement("span");
+          slot.className = "slot";
+          li.append(glyphFor(a), name, meta, slot);
+          list.append(li);
+          rows.set(a.id, { slot, meta, found: a.found, done: a.configured, busy: false });
+          if (!a.found) stateOf(slot, "not found");
+          else if (a.configured) stateOf(slot, "MCP added");
+          else slot.append(keycap("Install", () => install([a.id])));
+        }
+        settle();
+      }
+
+      /** The session counts arrive after the rows: the stores take a while to read, and the meta slot waits for them. */
+      async function history(agents) {
+        const found = agents.filter(a => a.found).map(a => a.id);
+        if (found.length === 0) return;
+        let counts;
+        try {
+          counts = await window.wsp.history(found);
+        } catch {
+          return;
+        }
+        for (const c of counts) {
+          const r = rows.get(c.id);
+          if (r === undefined) continue;
+          const words = c.sessions === 1 ? "1 session" : `${c.sessions} sessions`;
+          r.meta.textContent = [r.meta.textContent, words].filter(Boolean).join(" · ");
+        }
+      }
+
+      async function start() {
+        $("start").disabled = true;
+        let agents;
+        try {
+          agents = await window.wsp.agents();
+        } catch (e) {
+          $("status").textContent = text(e);
+          $("start").disabled = false;
+          return;
+        }
+        draw(agents);
+        show("agents");
+        void history(agents);
+      }
+
+      async function installAll() {
+        const left = installable();
+        if (left.length > 0 && !(await install(left))) return;
+        show("recap");
+      }
+
+      async function open() {
+        $("open").disabled = true;
+        try {
+          await window.wsp.finish();
+        } catch (e) {
+          $("status").textContent = text(e);
+          $("open").disabled = false;
+        }
+      }
+
+      $("start").addEventListener("click", start);
+      $("all").addEventListener("click", installAll);
+      $("skip").addEventListener("click", () => show("recap"));
+      $("open").addEventListener("click", open);
+      // Enter advances the screen and Esc on the agents screen is Skip; a focused button answers its own Enter.
+      document.addEventListener("keydown", e => {
+        if (e.key === "Escape" && screen === "agents") return show("recap");
+        if (e.key !== "Enter" || e.target instanceof HTMLButtonElement) return;
+        if (screen === "welcome") void start();
+        else if (screen === "agents") void installAll();
+        else void open();
+      });
+    </script>
+  </body>
+</html>

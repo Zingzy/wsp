@@ -80,7 +80,8 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     rollbackSnapshot: vi.fn(async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const })),
     listSessions: vi.fn(async () => sessions),
     subscribe: vi.fn(() => () => {}),
-    getGolden: async () => undefined,
+    // The rows here are forks of a golden, so one is sealed; first-run.test.tsx covers the sidebar with none.
+    getGolden: async () => ({ head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "t", setupSha: "s", createdAt: "c", smoke: { cmd: "true", exitCode: 0 } }] }),
     // The look sits on the record beside the name, so the fixture writes it there and answers with the row.
     setWorkspaceLook: vi.fn(async (id: string, look: WorkspaceLook) => {
       const row = workspaces.find(w => w.id === id)!;

@@ -1,23 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { homedir } from "node:os";
+import { existsSync } from "node:fs";
+import { homedir, hostname } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { currentHome, type CliIO } from "@wsp/host";
+import { agentHistories, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, ThemePreference } from "@wsp/protocol";
-import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell } from "electron";
+import type { Runtime } from "@wsp/runtime";
+import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
-import { fromAppPage } from "./origin.js";
-import type { Retry } from "./preload.js";
+import { fromAppPage, fromOnboardingPage } from "./origin.js";
 import { pagePreviews } from "./previews.js";
-import { checkSetup } from "./setup.js";
+import { checkSetup, recordThisComputer } from "./setup.js";
+import { installShim, shimText } from "./shim.js";
 import { windowOptions } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
-const WEB_DIR = here("../web");
+const WEB_DIR = assetDir("web");
 const PRELOAD = here("./preload.cjs");
-const SETUP_PAGE = here("./setup.html");
+const ONBOARDING_PAGE = here("./onboarding.html");
+/** The wsp command the shim runs, bundled beside this main. */
+const CLI_SCRIPT = here("./cli.mjs");
+/** The agents' published marks, one svg per catalog id, copied from the web app by stage.mjs. */
+const AGENT_MARKS = here("./agents");
 
 const refuse = (q: string): Promise<string> => Promise.reject(new Error(`no terminal to ask: ${q}`));
 const io: CliIO = { log: l => console.log(l), error: l => console.error(l), ask: refuse, askSecret: refuse };
@@ -95,20 +102,24 @@ function locate(): Promise<Located> {
   });
 }
 
-/** A serving host is attached to with no gate; otherwise the gate runs against
- * the located home and, when it passes, a host is started there. */
-async function showApp(located: Located): Promise<boolean> {
+/** A serving host is attached to with no gate; otherwise a host is started over the runtime the first launch just
+ * recorded this computer on, or, with none, over the located home once the gate says it holds something to show. */
+async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
   const statePath = statePathIn(located.home, process.cwd());
   if (located.session === undefined) {
-    const state = await checkSetup({ statePath });
-    if (!state.ready) return false;
+    let runtime = recorded;
+    if (runtime === undefined) {
+      const state = await checkSetup({ statePath });
+      if (!state.ready) return false;
+      runtime = state.runtime;
+    }
     session = await openHost({
       port: envPort("WSP_PORT", DEFAULT_PORT),
       wsPort: envPort("WSP_WS_PORT", DEFAULT_WS_PORT),
       statePath,
       webDir: WEB_DIR,
       io,
-      runtime: state.runtime,
+      runtime,
       // When a sign-in page opens without a click, it goes to the default browser, not into this window.
       openUrl: url => shell.openExternal(url).then(() => true, () => false),
     });
@@ -116,6 +127,8 @@ async function showApp(located: Located): Promise<boolean> {
     session = located.session;
   }
   io.log(`${session.owned ? "serving" : "attached"} ${session.url} (home ${located.home})`);
+  // Dark until the page says otherwise: the page opens on its dark side too, and tells the shell the preference once it has read it.
+  nativeTheme.themeSource = "dark";
   const win = newWindow(PRELOAD);
   // A link the page opens (a workspace's sign-in page, a preview in a new tab) belongs in the default browser, not a second window.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -143,24 +156,62 @@ async function showApp(located: Located): Promise<boolean> {
   return true;
 }
 
-/** The setup screen and the app window share the one preload. The host
- * starts before the setup window closes so the window count never hits zero. */
-async function showSetup(located: Located): Promise<void> {
-  const setup = newWindow(PRELOAD);
-  let checking: Promise<Retry> | undefined;
-  ipcMain.handle("setup:retry", () => {
-    checking ??= (async (): Promise<Retry> => {
-      const found = await locate();
-      const ready = await showApp(found);
-      if (ready) {
-        ipcMain.removeHandler("setup:retry");
-        setup.close();
-      }
-      return { ready, home: found.home, ...(found.stalePointer !== undefined ? { stalePointer: found.stalePointer } : {}) };
-    })().finally(() => (checking = undefined));
-    return checking;
+const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:history", "onboarding:install", "onboarding:finish"] as const;
+
+/** The operating system as a person names it, with its major version. */
+const OS_NAMES: Partial<Record<NodeJS.Platform, string>> = { darwin: "macOS", linux: "Linux", win32: "Windows" };
+function computerLine(): string {
+  const name = hostname().replace(/\.local$/, "");
+  const os = OS_NAMES[process.platform] ?? process.platform;
+  return `${name} · ${os} ${process.getSystemVersion().split(".")[0]}`;
+}
+
+/** The chord the app opens a new thread with: mod+n in the web's keybinding defaults, in the platform's spelling. */
+const threadKey = (): string => (process.platform === "darwin" ? "⌘N" : "Ctrl+N");
+
+/** The ids the page asked to install, as strings and nothing else; the catalog refuses an id it does not know. */
+function agentIds(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
+}
+
+/** The first launch: the welcome, the agents on this computer with the MCP install per agent, then this computer
+ * recorded as the workspace and the app opened on it. The onboarding page and the app window share the one preload;
+ * only the onboarding page is answered here, and only while it is up. The host starts before the page's window
+ * closes so the window count never hits zero. */
+async function showOnboarding(located: Located): Promise<void> {
+  const statePath = statePathIn(located.home, process.cwd());
+  const shim = shimPath(wspHome());
+  const page = newWindow(PRELOAD);
+  const gate = (event: IpcMainInvokeEvent, channel: string): void => {
+    if (!fromOnboardingPage(event.senderFrame?.url, ONBOARDING_PAGE)) throw new Error(`${channel}: not the onboarding page`);
+  };
+  ipcMain.handle("onboarding:agents", async event => {
+    gate(event, "onboarding:agents");
+    return (await agentsHere()).map(a => ({ ...a, glyph: existsSync(join(AGENT_MARKS, `${a.id}.svg`)) }));
   });
-  await setup.loadFile(SETUP_PAGE, { query: { home: located.home, stale: located.stalePointer ?? "" } });
+  ipcMain.handle("onboarding:history", (event, raw: unknown) => {
+    gate(event, "onboarding:history");
+    return agentHistories(agentIds(raw), undefined, statePath);
+  });
+  ipcMain.handle("onboarding:install", (event, raw: unknown) => {
+    gate(event, "onboarding:install");
+    // The command every config gets is the shim: the same rule wsp mcp install applies when it runs behind the shim.
+    return installEach(agentIds(raw), mcpServerSpec(statePath, { ...runningWsp(), shim }), homedir());
+  });
+  let finishing: Promise<void> | undefined;
+  ipcMain.handle("onboarding:finish", event => {
+    gate(event, "onboarding:finish");
+    return (finishing ??= (async () => {
+      const { runtime, workspace } = await recordThisComputer({ statePath });
+      io.log(`${workspace.name} (${workspace.id}) is this computer`);
+      await showApp(located, runtime);
+      for (const channel of ONBOARDING_CHANNELS) ipcMain.removeHandler(channel);
+      page.close();
+    })());
+  });
+  // The page follows the Mac's appearance: no preference record exists yet for it to read.
+  nativeTheme.themeSource = "system";
+  await page.loadFile(ONBOARDING_PAGE, { query: { computer: computerLine(), threadKey: threadKey() } });
 }
 
 let stopping: Promise<void> | undefined;
@@ -174,13 +225,25 @@ app.on("before-quit", event => {
 });
 app.on("window-all-closed", () => app.quit());
 
+/** The wsp command on this computer, rewritten whenever this app is not the one it names: an update or a move
+ * changes the path inside the bundle, and the shim is what every agent's config runs. A home that cannot be
+ * written costs the command, never the window. */
+function installCommand(): void {
+  const shim = shimPath(wspHome());
+  try {
+    io.log(`wsp command ${installShim(shim, shimText({ execPath: process.execPath, script: CLI_SCRIPT }))} at ${shim}`);
+  } catch (e) {
+    io.error(`wsp command not written at ${shim}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 app
   .whenReady()
   .then(async () => {
-    // Dark until the page says otherwise: the page opens on its dark side too, and tells the shell the preference once it has read it.
-    nativeTheme.themeSource = "dark";
+    installCommand();
     const located = await locate();
-    if (!(await showApp(located))) await showSetup(located);
+    if (located.stalePointer !== undefined) io.error(`~/.wsp/current-home names ${located.stalePointer}, but no host is serving it; opening ${located.home}`);
+    if (!(await showApp(located))) await showOnboarding(located);
   })
   .catch((e: unknown) => {
     dialog.showErrorBox("wsp could not start", e instanceof Error ? e.message : String(e));
