@@ -3,9 +3,9 @@
 // projects and whose harness takes an effort, so the row carries every
 // trigger it has: model, effort, access and project. At the 1200 px viewport
 // with the right panel open, as it opens by default, and at the narrowest
-// centre the row holds at (an 1100 px viewport with the sidebar at its widest
-// and the right panel open inline, a column of about 300 px; the shell lets
-// it go narrower still, which is the shell's own gap), every trigger reads
+// centre the shell hands the row (an 1100 px viewport with the sidebar at its
+// widest and the right panel open inline, where the sidebar gives way and the
+// column sits at the shell's floor), every trigger reads
 // whole, none is cut by its own box or by the row's, and a pick of the access
 // mode whose label names the machine moves no other trigger: the access
 // trigger wears the short form and its menu row the long one. A project
@@ -134,7 +134,7 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
 
   const widths = [
     { name: "1200", viewport: 1200, query: "", label: "the 1200 px viewport with the panel open" },
-    { name: "narrowest", viewport: 1100, query: `&sidebar=${SIDEBAR_MAX_WIDTH}&panel=preview`, label: "the narrowest centre the row holds at, an 1100 px viewport with the sidebar at its widest and the panel inline" },
+    { name: "narrowest", viewport: 1100, query: `&sidebar=${SIDEBAR_MAX_WIDTH}&panel=preview`, label: "the narrowest centre the shell hands the row, an 1100 px viewport with the sidebar at its widest and the panel inline" },
   ] as const;
 
   for (const width of widths) {

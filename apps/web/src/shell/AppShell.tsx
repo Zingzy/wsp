@@ -11,12 +11,13 @@ import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, type SidebarWidthS
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
 import { themeAttrs } from "../components/workspaceLook.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
+import { useViewportWidth } from "../hooks/useViewportWidth.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { isDesktopMac } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
 import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
-import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout.js";
+import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY, sidebarMaxWidthBeside } from "../rightPanelLayout.js";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./sidebarWidth.js";
 import { trackThreadHistory } from "./threadHistory.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
@@ -34,8 +35,9 @@ import { ThreadBreadcrumb } from "./ThreadBreadcrumb.js";
  * the settings page's reset reaches this window. */
 const sidebarWidthStore: SidebarWidthStore = {
   read: () => useStore.getState().preferences.sidebarWidth ?? null,
-  // A drag ends on a fractional width; the record keeps whole pixels.
-  write: width => void useStore.getState().setPreferences({ sidebarWidth: Math.round(width) }),
+  // A drag ends on a fractional width past the shell's cap of the moment; the record keeps whole pixels inside the
+  // sidebar's own bounds, the ones the settings page's stepper holds a typed width to.
+  write: width => void useStore.getState().setPreferences({ sidebarWidth: Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width))) }),
   subscribe: onChange =>
     useStore.subscribe((s, prev) => {
       if (s.preferences.sidebarWidth !== prev.preferences.sidebarWidth) onChange();
@@ -52,10 +54,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const terminalOpen = useTerminalDrawerStore(s => selectTerminalUiState(s.byWorkspaceId, workspaceId).terminalOpen);
   const toggleTerminal = useTerminalDrawerStore(s => s.toggle);
   const useSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const viewportWidth = useViewportWidth();
   // The current space's theme rides the sidebar element, so the glass recipe and the macOS material both take it.
   const spaceTheme = useSpaceTheme();
   const appDark = useAppDark();
   const rightPanelOpen = workspaceId !== null && panel.isOpen;
+  const panelInline = rightPanelOpen && !useSheet;
   // The switch chord in Spaces walks the threads last opened, so every selection is remembered from here on.
   useEffect(() => trackThreadHistory(), []);
 
@@ -90,7 +94,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         data-app-sidebar=""
         {...themeAttrs(spaceTheme, appDark)}
         className={cn(isDesktopMac() ? "sidebar-vibrancy" : "sidebar-glass", "border-r border-sidebar-border text-sidebar-foreground")}
-        resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: SIDEBAR_MAX_WIDTH, width: sidebarWidthStore }}
+        resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: sidebarMaxWidthBeside(viewportWidth, panelInline), width: sidebarWidthStore }}
       >
         <WorkspaceSidebar />
         <SidebarRail />
@@ -102,7 +106,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-shell-center>
             <WorkspacePageHeader className="border-b border-border">
               <ThreadBreadcrumb />
-              {rightPanelOpen && !useSheet ? null : <div className="ml-auto mr-px">{layoutControls}</div>}
+              {panelInline ? null : <div className="ml-auto mr-px">{layoutControls}</div>}
             </WorkspacePageHeader>
             <div className="flex min-h-0 flex-1 flex-col">{children}</div>
           </div>

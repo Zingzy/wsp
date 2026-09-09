@@ -8,6 +8,7 @@ import { DEFAULT_PREFERENCES, type WorkspaceView } from "@wsp/protocol";
 import { App } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { sidebarMaxWidthBeside } from "../src/rightPanelLayout.js";
 import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
@@ -53,9 +54,13 @@ beforeEach(() => {
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 
+/** jsdom's own window width, put back after a case that sets its own. */
+const JSDOM_INNER_WIDTH = window.innerWidth;
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  window.innerWidth = JSDOM_INNER_WIDTH;
 });
 
 async function mountShell() {
@@ -146,7 +151,10 @@ describe("app shell", () => {
     expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "system", sidebarMode: "list", labs: true });
   });
 
-  it("the sidebar opens at the width the host's record holds, follows a change to it, and a cleared width puts the default back", async () => {
+  it("the sidebar opens at the width the host's record holds, follows a change to it, a cleared width puts the default back, and beside the inline panel a narrow window holds it to the shell's rule without touching the record", async () => {
+    // A window every width here fits in; jsdom's own 1024 would already hold the sidebar to the rule.
+    window.innerWidth = 1280;
+    vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => { fn(0); return 1; });
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarWidth: 312 } });
     await mountShell();
     const wrapper = document.querySelector<HTMLElement>("[data-slot='sidebar-wrapper']")!;
@@ -156,8 +164,50 @@ describe("app shell", () => {
     // Past the sidebar's own bounds the kept width is held to them.
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarWidth: 900 } }));
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("480px");
+    // The panel is inline: at 1024 px the sidebar gives way to what is left once the panel and the centre keep their
+    // minimums, the record keeps the person's width, and closing the panel gives the sidebar its width back.
+    expect(document.querySelector('[data-preview-panel-mode="inline"]')).not.toBeNull();
+    window.innerWidth = 1024;
+    act(() => void window.dispatchEvent(new Event("resize")));
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(`${sidebarMaxWidthBeside(1024, true)}px`);
+    expect(useStore.getState().preferences.sidebarWidth).toBe(900);
+    act(() => useRightPanelStore.getState().close("ws_a"));
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("480px");
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } }));
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(`${SIDEBAR_DEFAULT_WIDTH}px`);
+  });
+
+  it("a press on the rail without travel leaves the record alone, and a drag writes the width it asked for held to the record's own bounds, not the panel's cap", async () => {
+    vi.stubGlobal(
+      "PointerEvent",
+      class extends MouseEvent {
+        readonly pointerId: number;
+        constructor(type: string, init: MouseEventInit & { pointerId?: number } = {}) {
+          super(type, init);
+          this.pointerId = init.pointerId ?? 0;
+        }
+      },
+    );
+    HTMLElement.prototype.setPointerCapture = () => {};
+    HTMLElement.prototype.releasePointerCapture = () => {};
+    HTMLElement.prototype.hasPointerCapture = () => true;
+    vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => { fn(0); return 1; });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarWidth: 480 } });
+    await mountShell();
+    expect(document.querySelector('[data-preview-panel-mode="inline"]')).not.toBeNull();
+    const rail = document.querySelector<HTMLElement>("[data-slot='sidebar-rail']")!;
+    // jsdom draws the sidebar at no width, so every drag starts from the kit's minimum.
+    fireEvent.pointerDown(rail, { button: 0, pointerId: 1, clientX: 220 });
+    fireEvent.pointerUp(rail, { pointerId: 1, clientX: 220 });
+    expect(useStore.getState().preferences.sidebarWidth).toBe(480);
+    fireEvent.pointerDown(rail, { button: 0, pointerId: 1, clientX: 220 });
+    fireEvent.pointerMove(rail, { pointerId: 1, clientX: 520 });
+    fireEvent.pointerUp(rail, { pointerId: 1, clientX: 520 });
+    expect(useStore.getState().preferences.sidebarWidth).toBe(480);
+    fireEvent.pointerDown(rail, { button: 0, pointerId: 1, clientX: 220 });
+    fireEvent.pointerMove(rail, { pointerId: 1, clientX: 170 });
+    fireEvent.pointerUp(rail, { pointerId: 1, clientX: 170 });
+    expect(useStore.getState().preferences.sidebarWidth).toBe(220);
   });
 
   it("opens the machine surface from the picker", async () => {
