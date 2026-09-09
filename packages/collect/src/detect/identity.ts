@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
+import { SSH_CONFIG_PATH, SSH_IGNORE_UNKNOWN_DETAIL } from "../ssh-config.js";
 import { entry, exists, firstLine, found, present, row } from "./common.js";
 
 const GIT_CONFIGS = ["~/.gitconfig", "~/.config/git/config"];
@@ -41,7 +42,7 @@ export async function detectIdentity(host: Host): Promise<ManifestEntry[]> {
     }
   }
 
-  rows.push(await row(host, { rung: "identity", id: "identity/ssh-config", label: "~/.ssh/config", paths: ["~/.ssh/config"] }));
+  rows.push(await row(host, { rung: "identity", id: "identity/ssh-config", label: SSH_CONFIG_PATH, paths: [SSH_CONFIG_PATH], detail: SSH_IGNORE_UNKNOWN_DETAIL }));
 
   const ssh = await host.fs.list(`${host.home}/.ssh`);
   const pubs = ssh.filter(n => n.endsWith(".pub")).map(n => `~/.ssh/${n}`);

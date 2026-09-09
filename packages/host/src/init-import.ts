@@ -8,7 +8,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readF
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { AGENTS, FISH_CONF_D, MCP_BIN_DIRS, type ManifestEntry, RC_NAMES, calledCommands, dropPlugins, guardCommands, guardSources, isRcPath, rcFiles, sourcedPaths, stripExports } from "@wsp/collect";
+import { AGENTS, FISH_CONF_D, MCP_BIN_DIRS, type ManifestEntry, RC_NAMES, SSH_CONFIG_PATH, calledCommands, dropPlugins, guardCommands, guardSources, isRcPath, rcFiles, sourcedPaths, stripExports, withIgnoreUnknown } from "@wsp/collect";
 import {
   agentInstallsFor,
   imageCommands,
@@ -211,6 +211,15 @@ function parentModes(files: readonly PlannedFile[], home: string): Map<string, n
   return modes;
 }
 
+/** A staged file rewritten in place. The copy keeps the laptop's mode, so a read-only one is opened writable for the
+ * one write and closed again. */
+function rewriteStaged(staged: string, text: string): void {
+  const mode = statSync(staged).mode & 0o7777;
+  chmodSync(staged, 0o600);
+  writeFileSync(staged, text);
+  chmodSync(staged, mode);
+}
+
 export interface PackOptions {
   /** Secrets already read from the Keychain, by key (see secretKey); a planned secret with no value is left out with a note. */
   secrets: ReadonlyMap<string, string>;
@@ -278,7 +287,6 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       cpSync(f.source, target, { recursive: true, dereference: true, filter: keep });
       chmodSync(target, f.mode);
     }
-    // The copy keeps the laptop's mode, so a read-only rc file is opened writable for the one write.
     const cut: CutNames[] = [];
     const silenced: string[] = [];
     const { onImage, tools } = opts;
@@ -292,11 +300,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       const guarded = fish ? sourced : guardCommands(pruned.text, missing, pruned.dropped);
       for (const n of [...pruned.dropped, ...missing]) if (!silenced.includes(n)) silenced.push(n);
       if (names.length > 0) cut.push({ path: `~/${relative(stage, staged)}`, names });
-      if (guarded === text) return;
-      const mode = statSync(staged).mode & 0o7777;
-      chmodSync(staged, 0o600);
-      writeFileSync(staged, guarded);
-      chmodSync(staged, mode);
+      if (guarded !== text) rewriteStaged(staged, guarded);
     };
     const walk = (dir: string): void => {
       for (const name of readdirSync(dir)) {
@@ -333,15 +337,22 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       writeFileSync(target, s.place(secret, existing), { mode: 0o600 });
       chmodSync(target, 0o600);
     }
-    // The copied Claude settings name a helper that runs on this computer. On the machine it reads the key file the
-    // login row placed, or goes when no key travelled: Claude Code runs a configured helper for every request, so
-    // one that fails there would shadow any other login (measured on 2.1.257).
     // A laptop config file is staged by its own row or by the row of the directory holding it.
     const stagedFor = (tildePath: string): { owner: PlannedFile; staged: string } | undefined => {
       const source = join(opts.home, tildePath.slice(2));
       const owner = files.find(f => f.source === source || f.source === dirname(source));
       return owner === undefined ? undefined : { owner, staged: join(stage, owner.dir ? `${owner.dest}/${basename(source)}` : owner.dest) };
     };
+    // The guest's ssh is not this computer's whatever this computer is, so every copy is prefaced the same way.
+    const ssh = stagedFor(SSH_CONFIG_PATH);
+    if (ssh !== undefined && existsSync(ssh.staged)) {
+      const text = readFileSync(ssh.staged, "utf8");
+      const guest = withIgnoreUnknown(text);
+      if (guest !== text) rewriteStaged(ssh.staged, guest);
+    }
+    // The copied Claude settings name a helper that runs on this computer. On the machine it reads the key file the
+    // login row placed, or goes when no key travelled: Claude Code runs a configured helper for every request, so
+    // one that fails there would shadow any other login (measured on 2.1.257).
     const settings = stagedFor(CLAUDE_SETTINGS_FILE);
     const claude = settings?.owner;
     const key = plan.secrets.find(s => s.command !== undefined && opts.secrets.has(secretKey(s)));

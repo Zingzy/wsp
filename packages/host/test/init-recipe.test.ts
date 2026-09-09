@@ -168,6 +168,16 @@ describe("rows the plan refuses by name", () => {
     expect(lockRefused(manifest, dir).entries).toEqual(manifest.entries);
     expect(isTickable(env)).toBe(true);
   });
+
+  it("a row carrying a detail still picks up the plan's refusal note; only a reason holds it off", () => {
+    const config = byId("identity/ssh-config");
+    expect(config.detail).toBeDefined();
+    const locked = lockRefused({ entries: [config] }, dir).entries[0]!;
+    expect(locked).toEqual({ ...config, default: "skip", reason: "a directory under .ssh is never copied whole" });
+    expect(isTickable(locked)).toBe(false);
+    // The same row with the line written as a reason instead would swallow the note and offer a tick the pack throws away.
+    expect(lockRefused({ entries: [{ ...config, detail: undefined, reason: config.detail! }] }, dir).entries[0]!.default).toBe("bring");
+  });
 });
 
 describe("consent rows", () => {
