@@ -2,11 +2,11 @@
 // The machine surface of the right panel: facts, the projects on the machine
 // with the import and the snapshot that images them, live utilisation, spend,
 // lineage with rollback, pause, wake, upgrade, rebuild and forget for one
-// workspace's machine. Pause, wake,
-// rebuild, forget, import and copy id read the workspace registry; the tab
-// keeps its own confirmations for the two that ask. A button is offered only
-// where its verb can run and its capability is there; the panel ends where its
-// content ends, with no sentence explaining what is not on it.
+// workspace's machine. Pause, wake, rebuild, forget, import and copy id read
+// the workspace registry; the tab keeps its own confirmations for the two
+// that ask. A button is offered only where its verb can run and its
+// capability is there; the panel ends where its content ends, with no
+// sentence explaining what is not on it.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { runAction } from "../../actions/contextMenu.js";

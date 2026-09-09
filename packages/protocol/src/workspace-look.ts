@@ -210,19 +210,18 @@ function wordsRead(theme: Wash, side: Side, alpha: number): number {
   return Math.min(...theme.dots.map(dot => contrastRatio(foreground, over(dotColour(dot), alpha, ground))));
 }
 
-/** The side a theme draws under, given the app's: its own pin, else the app's side while that side's words still
- * read on the wash, else the other side where only that one reads, else whichever reads better. A pale colour
- * laid whole on a dark app takes the light side's words; a deep one on a light app takes the dark side's. */
+/** The side a theme draws under, given the app's: its own pin, else the app's side. The opacity cap is what gives
+ * when the words would drown, so a dark app stays dark under a pale wash and a light one light under a deep one;
+ * only where even the slider's least opacity leaves the app's side unreadable does Auto take the other side, and
+ * only while that side reads better there. */
 export function themeScheme(theme: Pick<WorkspaceTheme, "mode"> & Partial<Wash>, appDark: boolean): Side {
   if (theme.mode !== "auto") return theme.mode;
   const own: Side = appDark ? "dark" : "light";
   if (theme.dots === undefined || theme.opacity === undefined) return own;
   const other: Side = appDark ? "light" : "dark";
   const wash: Wash = { dots: theme.dots, opacity: theme.opacity };
-  const ownReads = wordsRead(wash, own, theme.opacity);
-  if (ownReads >= WORD_FLOOR) return own;
-  const otherReads = wordsRead(wash, other, theme.opacity);
-  return otherReads >= WORD_FLOOR || otherReads > ownReads ? other : own;
+  const ownReads = wordsRead(wash, own, THEME_MIN_OPACITY);
+  return ownReads < WORD_FLOOR && wordsRead(wash, other, THEME_MIN_OPACITY) > ownReads ? other : own;
 }
 
 /** How far the opacity may go before the side's words drop under the floor on the colour laid over the ground: the

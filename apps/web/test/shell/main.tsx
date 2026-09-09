@@ -22,7 +22,8 @@
 // ?sidebar=<px> opens the sidebar at that remembered width so the rows can
 // be measured at several; ?spaces=1 opens it in the Spaces body, one
 // workspace under its header with an icon per workspace at the bottom;
-// ?look=1 gives the first two workspaces a theme and the first a glyph of its own, ?ssh=1 adds a machine over ssh;
+// ?look=1 gives the first two workspaces a theme and the first a glyph of its own, ?ssh=1 adds a machine over ssh,
+// ?many=<n> adds n more running forks so the space bar overflows;
 // ?archived=1 gives the first workspace two threads quiet for days, so the
 // Archived group nested in its idle shelf can be measured shut and opened;
 // ?images=<n> puts n images in the composer so the thumbnail row above the
@@ -111,6 +112,8 @@ if (params.get("look") === "1") {
 }
 // ?ssh=1 adds a machine over ssh, the third kind, so the space bar can be shot with every kind's own glyph.
 if (params.get("ssh") === "1") workspaces.push({ ...view("ws_s", "build-box"), kind: "ssh", machineId: "ssh:build-box", golden: "" });
+// ?many=<n> adds n more running forks, so the space bar can be measured once its icons outgrow the footer.
+for (let i = 0; i < Number(params.get("many") ?? 0); i++) workspaces.push(view(`ws_x${i}`, `extra-${i}`));
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
 // one; ws_b has only idle ones, the shape that used to draw no Idle header at all, one of them on Codex so both a
 // coloured and a monochrome agent mark sit in the shots.

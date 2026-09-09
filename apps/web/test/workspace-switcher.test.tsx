@@ -583,6 +583,29 @@ describe("the thread switcher in Spaces", () => {
     }
   });
 
+  it("with no thread open, as right after a space switch, a tap lands on the most recently opened thread and the hold starts there; Shift starts at the far end", async () => {
+    const restore = await mountSpaces(SIX);
+    try {
+      visit("thr_3");
+      visit("thr_5");
+      // The workspace alone, the way goToWorkspace leaves it after a switch between spaces.
+      act(() => useStore.getState().select("ws_a"));
+      expect(useStore.getState().selectedThreadId).toBeNull();
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      expect(threadCards()).toEqual(["thr_5", "thr_3", "thr_1", "thr_2", "thr_4"]);
+      expect(highlightedThread()).toBe("thr_5");
+      release();
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_5"));
+      act(() => useStore.getState().select("ws_a"));
+      tab({ shiftKey: true });
+      release();
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_4"));
+    } finally {
+      restore();
+    }
+  });
+
   it("threads never opened follow the ones that were, in the sidebar's order, and one thread alone puts nothing up", async () => {
     const restore = await mountSpaces(SIX.slice(0, 3));
     try {

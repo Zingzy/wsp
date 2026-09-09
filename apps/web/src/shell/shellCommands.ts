@@ -166,8 +166,10 @@ export function cycleWorkspaceSwitcher(step: 1 | -1, hold: ReadonlyArray<string>
 }
 
 /** The switch chord's step in Spaces: the overlay over the last five threads opened in the space on screen, the
- * open one first, so a tap lands on the thread before this one and a hold walks the rest. Nothing opens where
- * there is no second thread to land on, as the palette's disabled row says. */
+ * open one first, so a tap lands on the thread before this one and a hold walks the rest. With no thread open,
+ * which is how a switch between spaces leaves the space, the most recently opened thread is the one a tap lands on,
+ * so the walk starts on it rather than a step past it. Nothing opens where there is no second thread to land on,
+ * as the palette's disabled row says. */
 export function cycleThreadSwitcher(step: 1 | -1, hold: ReadonlyArray<string>): void {
   const switcher = useWorkspaceSwitcher.getState();
   if (switcher.open) {
@@ -178,7 +180,8 @@ export function cycleThreadSwitcher(step: 1 | -1, hold: ReadonlyArray<string>): 
   const threads = recentThreads(threadWalk(sidebarProjects(), selectedId), useThreadHistory.getState().recent, selectedThreadId);
   if (threads.length < 2) return;
   const targets = threads.map(thread => ({ workspaceId: thread.workspaceId, threadId: thread.threadId }));
-  switcher.openAt(targets, stepSwitcherAt(targets.length, 0, step), selectedId, hold);
+  const fromOpen = threads[0]!.threadId === selectedThreadId;
+  switcher.openAt(targets, fromOpen ? stepSwitcherAt(targets.length, 0, step) : step === 1 ? 0 : targets.length - 1, selectedId, hold);
 }
 
 /** The hold let go: the highlighted workspace, or thread, becomes the open one. */

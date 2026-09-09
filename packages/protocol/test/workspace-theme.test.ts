@@ -89,18 +89,24 @@ describe("grain, scheme and ink", () => {
     expect(snapGrain(7)).toBe(1);
   });
 
-  it("auto follows the app's side while its words read on the wash, takes the other side where only that one reads, and a pinned side stays whatever the app draws", () => {
-    // A quiet wash: the app's own side reads, so it stays.
+  it("auto keeps the app's side and lets the opacity cap give, so a dark app stays dark under a pale wash; a pinned side stays whatever the app draws", () => {
     expect(themeScheme(theme, true)).toBe("dark");
     expect(themeScheme(theme, false)).toBe("light");
-    // A pale colour laid whole: the dark side's words drown in it, the light side's read, so Auto takes light on a dark app.
+    // A pale colour laid whole on a dark app: the side stays dark and the cap drops instead of the words.
     const pale: WorkspaceTheme = { ...theme, dots: [{ angle: 55, radius: 0.72 }], harmony: "single", opacity: 1 };
-    expect(themeScheme(pale, true)).toBe("light");
+    expect(themeScheme(pale, true)).toBe("dark");
+    expect(opacityCap(pale, true)).toBeLessThan(0.5);
     expect(themeScheme(pale, false)).toBe("light");
-    // A deep colour laid whole: the reverse.
+    // A deep colour laid whole on a light app: the same the other way round.
     const deep: WorkspaceTheme = { ...theme, dots: [{ angle: 262, radius: 0.22 }], harmony: "single", opacity: 1 };
-    expect(themeScheme(deep, false)).toBe("dark");
+    expect(themeScheme(deep, false)).toBe("light");
+    expect(opacityCap(deep, false)).toBeLessThan(0.5);
     expect(themeScheme(deep, true)).toBe("dark");
+    // Every preset at the default opacity draws under the app's own side on both sides.
+    for (const preset of THEME_PRESETS) {
+      const picked = { ...theme, dots: [...preset.dots] };
+      expect({ id: preset.id, dark: themeScheme(picked, true), light: themeScheme(picked, false) }).toEqual({ id: preset.id, dark: "dark", light: "light" });
+    }
     expect(themeScheme({ ...pale, mode: "dark" }, false)).toBe("dark");
     expect(themeScheme({ ...deep, mode: "light" }, true)).toBe("light");
   });
@@ -121,11 +127,13 @@ describe("grain, scheme and ink", () => {
     // A quiet wash at the default opacity is never touched.
     expect(effectiveOpacity(theme, false)).toBe(theme.opacity);
     expect(effectiveOpacity(theme, true)).toBe(theme.opacity);
+    // Every preset keeps most of its colour on both sides; the ones whose wash crowds the dark words at the default
+    // 50 percent (sea, fern, sand on a dark app) paint a step under it rather than moving the side.
     for (const preset of THEME_PRESETS) {
-      for (const appDark of [false, true]) expect({ id: preset.id, appDark, cap: opacityCap({ ...theme, dots: [...preset.dots] }, appDark) >= 0.5 }).toEqual({ id: preset.id, appDark, cap: true });
+      for (const appDark of [false, true]) expect({ id: preset.id, appDark, cap: opacityCap({ ...theme, dots: [...preset.dots] }, appDark) >= 0.4 }).toEqual({ id: preset.id, appDark, cap: true });
     }
-    // Every dot counts, not the first alone: the cap reads the worst of them.
-    const twoTone: WorkspaceTheme = { ...theme, dots: [{ angle: 55, radius: 0.72 }, { angle: 262, radius: 0.22 }], harmony: "complementary", opacity: 1 };
+    // Every dot counts, not the first alone: a pale second colour pulls the cap under what the first alone allows.
+    const twoTone: WorkspaceTheme = { ...theme, dots: [{ angle: 225, radius: 0.42 }, { angle: 55, radius: 0.72 }], harmony: "complementary", opacity: 1 };
     expect(opacityCap(twoTone, true)).toBeLessThan(opacityCap({ ...twoTone, dots: [twoTone.dots[0]!] }, true));
   });
 

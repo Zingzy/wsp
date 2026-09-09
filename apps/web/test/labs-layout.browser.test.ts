@@ -139,6 +139,37 @@ describe.skipIf(renderSkipped !== undefined)("the labs surfaces laid out in Chro
     await page!.waitForSelector("[data-theme-picker]", { state: "detached" });
   }, 90_000);
 
+  it.each(["dark", "light"] as const)("in the %s theme a bar with more icons than the footer holds scrolls its group, keeps the icon on screen in view and never cuts the plus", async theme => {
+    await page!.goto(`${base}?theme=${theme}&spaces=1&look=1&local=1&ssh=1&many=8&sidebar=220`);
+    await page!.waitForFunction(() => document.querySelectorAll("[data-space-icon]").length === 13);
+    await page!.waitForFunction(() => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - 220) < 1);
+    // The last icon is far outside the group; going there scrolls it into view.
+    await page!.locator("[data-space-icon][aria-label=extra-7]").evaluate(el => el.scrollIntoView({ inline: "nearest" }));
+    await page!.locator("[data-space-icon][aria-label=extra-7]").click();
+    await page!.waitForFunction(() => document.querySelector("[data-space-icon-current]")?.getAttribute("aria-label") === "extra-7");
+    const read = await page!.evaluate(() => {
+      const group = document.querySelector<HTMLElement>("[data-space-icons]")!;
+      const sidebar = document.querySelector<HTMLElement>("[data-slot=sidebar]")!.getBoundingClientRect();
+      const g = group.getBoundingClientRect();
+      const plus = document.querySelector<HTMLElement>("[data-space-new]")!.getBoundingClientRect();
+      const current = document.querySelector<HTMLElement>("[data-space-icon-current]")!.getBoundingClientRect();
+      const first = document.querySelector<HTMLElement>("[data-space-icon]")!.getBoundingClientRect();
+      return { overflow: group.scrollWidth - group.clientWidth, groupRight: g.right, groupLeft: g.x, plus: { x: plus.x, right: plus.right, width: plus.width }, sidebar: { x: sidebar.x, right: sidebar.right }, current: { x: current.x, right: current.right }, first: { x: first.x, right: first.right }, barHeight: document.querySelector<HTMLElement>("[data-space-bar]")!.getBoundingClientRect().height };
+    });
+    console.info(`overflowing bar ${theme}: ${JSON.stringify(read)}`);
+    expect(read.overflow).toBeGreaterThan(0);
+    // The plus is whole, outside the group and inside the sidebar; the group ends before it.
+    expect(read.plus.width).toBe(28);
+    expect(read.plus.x).toBeGreaterThanOrEqual(read.groupRight);
+    expect(read.plus.right).toBeLessThanOrEqual(read.sidebar.right);
+    // The icon on screen is in view; the first one has scrolled out to the left and is not cut in half over the edge.
+    expect(read.current.x).toBeGreaterThanOrEqual(read.groupLeft - 1);
+    expect(read.current.right).toBeLessThanOrEqual(read.groupRight + 1);
+    expect(read.first.right).toBeLessThanOrEqual(read.groupLeft + 1);
+    expect(read.barHeight).toBe(28);
+    await shot(`space-bar-overflow-${theme}`);
+  }, 60_000);
+
   it.each(["dark", "light"] as const)("in the %s theme the sidebar follows the picker live: three presets, the grain at none and at most, the opacity at its least, and a pinned side", async theme => {
     await open(theme);
     await page!.locator("[data-space-icon][aria-label=api]").click({ button: "right" });

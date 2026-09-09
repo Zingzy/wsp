@@ -69,7 +69,11 @@ export function SettingsPage() {
               step={8}
               value={width}
               onValueChange={value => {
-                if (value !== null && Number.isFinite(value)) void setPreferences({ sidebarWidth: Math.round(value) });
+                // Held to the drag's bounds before the host hears it, since every keystroke lands here; the field's own
+                // clamp on blur then repeats the value, which is not sent twice.
+                if (value === null || !Number.isFinite(value)) return;
+                const sidebarWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(value)));
+                if (sidebarWidth !== width) void setPreferences({ sidebarWidth });
               }}
             >
               <NumberFieldGroup className="w-auto">

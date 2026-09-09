@@ -2,10 +2,9 @@
 // The overlay the switch chord holds up: one card per workspace in sidebar
 // order, or in Spaces one per thread of the space on screen in the order they
 // were last opened, the highlight walking them while the chord's modifier is
-// down. It
-// takes no focus and traps none, since the person is mid-chord and the
-// dispatcher owns the keys. Every card is the same box whatever it holds, so
-// the highlight moving changes colour and nothing else. The paint waits out
+// down. It takes no focus and traps none, since the person is mid-chord and
+// the dispatcher owns the keys. Every card is the same box whatever it holds,
+// so the highlight moving changes colour and nothing else. The paint waits out
 // SWITCHER_PAINT_DELAY_MS while the state does not, so a tap switches without
 // ever dimming the app.
 import { useEffect, useMemo, useRef, useState } from "react";

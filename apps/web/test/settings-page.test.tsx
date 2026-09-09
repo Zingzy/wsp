@@ -144,12 +144,21 @@ describe("the settings page", () => {
     fireEvent.change(widthField(), { target: { value: "300" } });
     fireEvent.blur(widthField());
     await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(300));
+    // A typed width outside the drag's bounds is held to them before the host hears it, not only on blur.
+    fireEvent.change(widthField(), { target: { value: "1000" } });
+    await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(480));
+    fireEvent.blur(widthField());
+    fireEvent.change(widthField(), { target: { value: "10" } });
+    await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(220));
+    fireEvent.blur(widthField());
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
     await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBeUndefined());
     expect(widthField().value).toBe(String(SIDEBAR_DEFAULT_WIDTH));
     expect(screen.queryByRole("button", { name: "Reset" })).toBeNull();
     await flush();
-    expect(sets).toEqual([{ theme: "light" }, { sidebarMode: "spaces" }, { terminalSize: "file" }, { sidebarWidth: SIDEBAR_DEFAULT_WIDTH + 8 }, { sidebarWidth: 300 }, { sidebarWidth: null }]);
+    expect(sets.filter(patch => "sidebarWidth" in patch).map(patch => patch.sidebarWidth)).not.toContain(1000);
+    expect(sets.filter(patch => "sidebarWidth" in patch).map(patch => patch.sidebarWidth)).not.toContain(10);
+    expect(sets).toEqual([{ theme: "light" }, { sidebarMode: "spaces" }, { terminalSize: "file" }, { sidebarWidth: SIDEBAR_DEFAULT_WIDTH + 8 }, { sidebarWidth: 300 }, { sidebarWidth: 480 }, { sidebarWidth: 220 }, { sidebarWidth: null }]);
   });
 
   it("in the shell's centre, the page takes the thread's place and the breadcrumb its name until a workspace is picked", async () => {

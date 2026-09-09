@@ -16,6 +16,7 @@ import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { useSpaceTheme } from "../src/sidebar/sidebarMode.js";
 import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
+import { leadDimClass } from "../src/sidebar/workspaceRows.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
@@ -1236,12 +1237,22 @@ describe("a workspace's own theme and glyph", () => {
     expect(web.className).toContain("text-sidebar-muted-foreground");
     expect(web.className.split(" ")).toContain("opacity-50");
     expect(mac.className.split(" ")).not.toContain("opacity-50");
-    // One row of one height, centred, and the plus at its right end makes a new workspace.
+    // One row of one height, centred, and the plus at its right end makes a new workspace. The icons sit in a
+    // group of their own that scrolls sideways once they outgrow the footer, and the plus stays outside it, so
+    // neither the first icon nor the plus is ever cut.
     const bar = document.querySelector<HTMLElement>("[data-space-bar]")!;
     expect(bar.className).toContain("justify-center");
     expect(bar.className).toContain("h-7");
     for (const icon of icons()) expect(icon.className).toContain("size-7");
+    const group = bar.querySelector<HTMLElement>("[data-space-icons]")!;
+    expect(group.className).toContain("overflow-x-auto");
+    expect(Array.from(group.querySelectorAll("[data-space-icon]"))).toEqual(icons());
     expect(bar.lastElementChild!.hasAttribute("data-space-new")).toBe(true);
+    expect(group.contains(bar.lastElementChild)).toBe(false);
+    // The paused fork dims by the one rule its row's lead dims by.
+    expect(leadDimClass({ state: "paused" })).toBe("opacity-50");
+    expect(leadDimClass({ state: "running" })).toBeUndefined();
+    expect(web.className.split(" ")).toContain(leadDimClass({ state: "paused" }));
     expect(screen.queryByRole("button", { name: "Workspaces" })).toBeNull();
     fireEvent.click(bar.querySelector("[data-space-new]")!);
     expect(await screen.findByRole("dialog")).toBeDefined();
@@ -1292,6 +1303,9 @@ describe("a workspace's own theme and glyph", () => {
     );
     await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_m", "ws:ws_b"]));
     expect(document.querySelector("[data-theme-probe]")!.textContent).toBe("none");
+    // The paused row's lead glyph dims by the same rule the bar's icon does.
+    expect(rowOf("web").querySelector("[data-workspace-lead] svg")!.getAttribute("class")!.split(" ")).toContain(leadDimClass({ state: "paused" }));
+    expect(rowOf("api").querySelector("[data-workspace-lead] svg")!.getAttribute("class")!.split(" ")).not.toContain("opacity-50");
     expect(document.querySelector("[data-space-glyph], [data-space-icon], [data-space-bar]")).toBeNull();
   });
 });
