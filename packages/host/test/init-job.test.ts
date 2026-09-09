@@ -18,9 +18,9 @@ import { localWiring, type Keys } from "../src/cli.js";
 import { InitJobs, type InitJobDeps } from "../src/init-job.js";
 import { smallRecipePath } from "../src/recipe-file.js";
 import { workspaceRoads } from "../src/server.js";
+import type { FakePtyLink } from "./fake-pty-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { CLAUDE_URL, DEVICE_URL, scriptedLink } from "./init-link.js";
-import type { FakePtyLink } from "./fake-pty-link.js";
 import type { HostHooks } from "../src/init-signin.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { scriptedAgent } from "./verbs-fixture.js";
@@ -436,6 +436,42 @@ describe("the init job, manual road", () => {
     expect(f.relay.closed).toBe(1);
     await expect(f.jobs.retry({ tool: "gh" })).rejects.toThrow(/no build is running|no failed sign-in/);
   }, 20_000);
+
+  it("a sign-in whose page hands a code back takes it from the app: the code reaches that login's own pty on the machine, the row signs in, and nothing of the code is kept", async () => {
+    const PASTED = "4/0AfakeCodeFromThePage";
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    // Claude Code's login alone: the page it prints hands a code back, which is the road with no terminal to paste into.
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "machine", "logins/codex": "skip" } });
+    await expect(f.jobs.signInCode({ tool: "claude", code: PASTED })).rejects.toThrow(/no init job is running|waiting for a code/);
+    const held = scriptedLink({ signedIn: true, hold: true, missing: false });
+    f.setLink(held);
+    await f.jobs.build({});
+    const waiting = async () => {
+      for (let i = 0; i < 600; i++) {
+        const row = f.jobs.view()?.rows.find(r => r.id === "sign-in/claude");
+        if (row?.state === SIGN_IN_OPEN_STATE && row.finish === "code") return row;
+        await new Promise(r => setTimeout(r, 10));
+      }
+      throw new Error("the sign-in row never opened on the code road");
+    };
+    expect(await waiting()).toMatchObject({ page: CLAUDE_URL, finish: "code" });
+    // A login on the callback road runs with a browser to find, so its page can return to the machine instead.
+    expect(held.ptys.some(p => (p.created["env"] as Record<string, string> | undefined)?.["DISPLAY"] !== undefined)).toBe(true);
+    await f.jobs.signInCode({ tool: "claude", code: PASTED });
+    const login = held.ptys.find(p => p.writes[0]?.includes("exec claude auth login"))!;
+    expect(login.writes.slice(1)).toContain(`${PASTED}\r`);
+    await f.settled();
+    const done = f.jobs.view()!;
+    expect(done.phase).toBe("done");
+    expect(done.rows.find(r => r.id === "sign-in/claude")).toMatchObject({ state: INIT_SIGN_IN_WORDS["signed-in"] });
+    // The row is over: no page left to open and no code left to take.
+    expect(done.rows.find(r => r.id === "sign-in/claude")).not.toHaveProperty("finish");
+    // The code went to the machine and nowhere else: not a row, not the log, not an event.
+    expect(JSON.stringify(f.events)).not.toContain(PASTED);
+    await expect(f.jobs.signInCode({ tool: "claude", code: PASTED })).rejects.toThrow(/no init job is running/);
+  });
 
   it("cancel while the screens wait drops the job; a build cannot start without answers", async () => {
     const f = fake();

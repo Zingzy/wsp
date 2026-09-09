@@ -1716,12 +1716,15 @@ describe("wsp init, flags and no terminal", () => {
     expect(stages.map(r => r["stage"])).toEqual(expect.arrayContaining(["creating", "installing-tools", "ready", "snapshotting", "sealed"]));
     expect(stages.some(r => r["stage"] === "installing-tools" && typeof (r["step"] as { command?: unknown } | undefined)?.command === "string")).toBe(true);
     expect(f.records.filter(r => r["event"] !== "stage")).toEqual([
-      // Each sign-in is an object as its command starts, then again with its page, then its outcome.
+      // Each sign-in is an object as its command starts, then again with its page and the road that page names, then
+      // its outcome.
       { event: "sign-in", tool: "gh", label: "GitHub CLI login" },
-      { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE_URL, nextCommand: `open '${DEVICE_URL}'`, waitSeconds: 960 },
+      { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE_URL, finish: "none", nextCommand: `open '${DEVICE_URL}'`, waitSeconds: 960 },
       { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: "gh auth login exited 0" },
       { event: "sign-in", tool: "claude", label: "Claude Code login" },
-      { event: "sign-in", tool: "claude", label: "Claude Code login", browserUrl: CLAUDE_URL, nextCommand: `open '${CLAUDE_URL}'`, waitSeconds: 900 },
+      // claude's row is declared callback, and the page it printed here redirects to the hosted paste-code page, not
+      // to a port on the machine, so the row takes a code.
+      { event: "sign-in", tool: "claude", label: "Claude Code login", browserUrl: CLAUDE_URL, finish: "code", nextCommand: `open '${CLAUDE_URL}'`, waitSeconds: 900 },
       { event: "sign-in-result", tool: "claude", label: "Claude Code login", state: "signed-in", note: "claude auth login exited 0" },
       // The tick made a workspace, so the last object names it in place of the fork command an agent would run.
       { event: "done", golden: "default", version: 1, snapshotId: "snap_wsp-h1-default-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up --state /tmp/wsp-test/state.json", workspace: { id: expect.stringMatching(/^ws_/) as unknown as string, name: LOCAL_NAME } },

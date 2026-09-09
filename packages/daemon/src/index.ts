@@ -7,7 +7,6 @@ export {
   OPEN_URL_RE,
   OPEN_URL_MAX,
   isOpenUrl,
-  callbackPortOf,
   callbackPortsIn,
   stripOsc8,
   TerminalUrlScanner,

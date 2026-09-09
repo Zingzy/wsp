@@ -119,6 +119,8 @@ const signIns: InitJob["rows"] = [
   { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: INIT_ROW_STATES.keySet },
   { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" },
   { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied },
+  // The row whose page hands a code back: the field for it sits under the row.
+  { id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Sign in to Google Cloud", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code" },
 ];
 
 const FACTS: InitJob["rows"] = [
@@ -145,14 +147,14 @@ const JOBS: Record<string, InitJob> = {
     phase: "signing-in",
     screens: [],
     rows: [...done(STAGES.slice(0, 9)), ...signIns, ...STAGES.slice(9)],
-    progress: { done: 11, total: 17 },
+    progress: { done: 11, total: 18 },
   },
   done: {
     ...base,
     phase: "done",
     screens: [],
     rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), ...done(STAGES.slice(9, 13)), { id: "workspace/first", kind: "workspace", label: "first", state: "forked" }],
-    progress: { done: 17, total: 17 },
+    progress: { done: 18, total: 18 },
     golden: { version: 1 },
     workspace: { id: "ws_first", name: "first" },
   },
@@ -208,6 +210,7 @@ const api: Api = {
   initAnswer: async () => base,
   initStep: async () => base,
   initBuild: async () => JOBS["building"]!,
+  initSignInCode: async () => JOBS["signing"]!,
   initCancel: async () => ({ ...base, phase: "cancelled" }),
 };
 

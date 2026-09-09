@@ -4,6 +4,7 @@
 // callback forward did not land), the tool's own status command that proves
 // the login, and how long the tool itself waits before it gives up. Nothing
 // here reads the tool's output beyond the status lines named below.
+import type { SignInFinish } from "@wsp/protocol";
 import { CLAUDE_CONFIG_DIR, CLAUDE_KEY_FILE } from "./roads.js";
 
 export interface StatusCheck {
@@ -48,6 +49,10 @@ export type SignIn =
       sources: readonly LoginSource[];
       /** The device-code, paste-code or no-browser variant, offered on a retry. */
       fallback?: string;
+      /** How this login finishes where nobody is at the machine's terminal: `callback` is the road the app takes for
+       * every tool that has one, `code` a page that hands a code back for the person to submit, `none` a flow the
+       * page or the tool's own prompts finish. Declared per tool here and nowhere else; the hand-off reads it. */
+      finish: SignInFinish;
       /** The shape the one-time code prints in, for a flow whose page asks for one; matched against what the tool
        * printed, past the URLs it printed. Absent, the flow shows no code and none is read out of its output. */
       code?: RegExp;
@@ -184,16 +189,19 @@ export const SIGN_IN_ROWS = {
   gh: {
     kind: "device",
     sources: ["file", "keychain"],
+    finish: "none",
     login: "gh auth login",
     // Two groups of four, as gh prints it: "! First copy your one-time code: XXXX-XXXX".
     code: /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/,
     status: { command: "gh auth status", signedIn: o => /Logged in to/.test(o) && !/Failed to log in/.test(o) },
     toolTimeoutMs: 15 * MIN,
   },
-  // Under the daemon pty DISPLAY is unset, so gcloud, gemini and railway take their paste or device flow by themselves.
+  // Under the daemon pty DISPLAY is unset, so gcloud, gemini and railway take their paste or device flow by
+  // themselves; their callback road is the one a DISPLAY the hand-off asks for opens.
   gcloud: {
     kind: "oauth",
     sources: ["file"],
+    finish: "callback",
     login: "gcloud auth login",
     status: { command: "gcloud auth list --filter=status:ACTIVE --format=value(account)", signedIn: ok(/@/) },
   },
@@ -202,6 +210,7 @@ export const SIGN_IN_ROWS = {
   aws: {
     kind: "oauth",
     sources: ["file"],
+    finish: "callback",
     login: "aws configure sso",
     fallback: "aws configure sso --use-device-code",
     status: { command: AWS_STATUS, signedIn: ok(/"Arn"/) },
@@ -212,37 +221,42 @@ export const SIGN_IN_ROWS = {
   wrangler: {
     kind: "oauth",
     sources: ["file"],
+    finish: "callback",
     login: "wrangler login",
     status: { command: "wrangler whoami", signedIn: has(/You are logged in/) },
     toolTimeoutMs: 2 * MIN,
     note: "needs the callback forward; CLOUDFLARE_API_TOKEN on the machine is the alternative",
   },
-  vercel: { kind: "oauth", sources: ["file"], login: "vercel login", status: { command: "vercel whoami", signedIn: (o, c) => c === 0 && !/No existing credentials/.test(o) }, toolTimeoutMs: 15 * MIN },
-  netlify: { kind: "oauth", sources: [], login: "netlify login", status: { command: "netlify status", signedIn: (o, c) => c === 0 && !/Not logged in/i.test(o) }, toolTimeoutMs: 5 * MIN },
-  fly: { kind: "oauth", sources: [], login: "fly auth login", status: { command: "fly auth whoami", signedIn: ok(/@/) }, toolTimeoutMs: 15 * MIN },
-  supabase: { kind: "oauth", sources: [], login: "supabase login", fallback: "supabase login --no-browser", status: { command: "supabase projects list", signedIn: ok() } },
-  railway: { kind: "oauth", sources: [], login: "railway login", status: { command: "railway whoami", signedIn: ok(/Logged in as/) }, toolTimeoutMs: 5 * MIN },
-  doppler: { kind: "oauth", sources: [], login: "doppler login", status: { command: "doppler me", signedIn: ok() }, toolTimeoutMs: 5 * MIN },
+  // A row's road is how the hand-off runs that login, so a road nobody measured would move a flow that works: these
+  // five carry `none`, which is what they do today.
+  vercel: { kind: "oauth", sources: ["file"], finish: "none", login: "vercel login", status: { command: "vercel whoami", signedIn: (o, c) => c === 0 && !/No existing credentials/.test(o) }, toolTimeoutMs: 15 * MIN },
+  netlify: { kind: "oauth", sources: [], finish: "none", login: "netlify login", status: { command: "netlify status", signedIn: (o, c) => c === 0 && !/Not logged in/i.test(o) }, toolTimeoutMs: 5 * MIN },
+  fly: { kind: "oauth", sources: [], finish: "none", login: "fly auth login", status: { command: "fly auth whoami", signedIn: ok(/@/) }, toolTimeoutMs: 15 * MIN },
+  supabase: { kind: "oauth", sources: [], finish: "none", login: "supabase login", fallback: "supabase login --no-browser", status: { command: "supabase projects list", signedIn: ok() } },
+  railway: { kind: "oauth", sources: [], finish: "callback", login: "railway login", status: { command: "railway whoami", signedIn: ok(/Logged in as/) }, toolTimeoutMs: 5 * MIN },
+  doppler: { kind: "oauth", sources: [], finish: "none", login: "doppler login", status: { command: "doppler me", signedIn: ok() }, toolTimeoutMs: 5 * MIN },
   // The shim gets the localhost-callback URL and the terminal the hosted paste-code one; either finishes the login.
   claude: {
     kind: "oauth",
     sources: ["keychain", "rc-key", "file", "helper"],
+    finish: "callback",
     keyEnv: "ANTHROPIC_API_KEY",
     login: "claude auth login",
     status: { command: "claude auth status", typed: CLAUDE_STATUS, signedIn: claudeSignedIn, detail: claudeSource, why: claudeWhy },
   },
-  codex: { kind: "oauth", sources: ["file"], keyEnv: "OPENAI_API_KEY", login: "codex login", fallback: "codex login --device-auth", status: { command: "codex login status", signedIn: ok(/Logged in using/) } },
-  gemini: { kind: "oauth", sources: ["file"], keyEnv: "GEMINI_API_KEY", login: "gemini", status: { command: GEMINI_STATUS, signedIn: ok(), detail: geminiSource }, toolTimeoutMs: 5 * MIN },
+  codex: { kind: "oauth", sources: ["file"], finish: "callback", keyEnv: "OPENAI_API_KEY", login: "codex login", fallback: "codex login --device-auth", status: { command: "codex login status", signedIn: ok(/Logged in using/) } },
+  gemini: { kind: "oauth", sources: ["file"], finish: "callback", keyEnv: "GEMINI_API_KEY", login: "gemini", status: { command: GEMINI_STATUS, signedIn: ok(), detail: geminiSource }, toolTimeoutMs: 5 * MIN },
   // Both counts print on exit 0; a provider key exported on the machine is listed under Environment and counts as a login.
   opencode: {
     kind: "key",
     sources: ["file"],
+    finish: "none",
     login: "opencode auth login",
     status: { command: "opencode auth list", signedIn: ok(/[1-9]\d* (credentials|environment variable)/), detail: secretNamed },
     note: "OpenCode dropped its Anthropic sign-in in 1.3.0; it takes an API key there",
     toolTimeoutMs: 5 * MIN,
   },
-  cloudflared: { kind: "oauth", sources: ["file"], login: "cloudflared tunnel login", status: { command: CLOUDFLARED_STATUS, signedIn: ok() } },
+  cloudflared: { kind: "oauth", sources: ["file"], finish: "none", login: "cloudflared tunnel login", status: { command: CLOUDFLARED_STATUS, signedIn: ok() } },
   op: { kind: "none", sources: [], note: "needs the 1Password desktop app; set OP_SERVICE_ACCOUNT_TOKEN on the machine instead" },
   // kubectl v1.36.1 puts a kuberc warning on stderr with no newline, so on the merged pty it would glue onto the context.
   kubectl: {
@@ -252,11 +266,12 @@ export const SIGN_IN_ROWS = {
     status: { command: "kubectl config current-context", typed: "kubectl config current-context 2>/dev/null", signedIn: ok(/\S/), detail: o => `context ${o.trim()}` },
   },
   // pi lists a model only for a provider it holds credentials for, and prints a /login hint on exit 0 when it holds none.
-  pi: { kind: "oauth", sources: ["file"], login: "pi", status: { command: "pi --list-models", signedIn: ok(/^provider\s+model\b/m) }, note: "type /login inside pi and pick a provider, then /exit; a key on the machine counts" },
+  pi: { kind: "oauth", sources: ["file"], finish: "none", login: "pi", status: { command: "pi --list-models", signedIn: ok(/^provider\s+model\b/m) }, note: "type /login inside pi and pick a provider, then /exit; a key on the machine counts" },
   // The pool lists keys from ~/.hermes/.env and the environment beside stored logins; with none it prints nothing on exit 0.
   hermes: {
     kind: "device",
     sources: ["file"],
+    finish: "none",
     login: "hermes auth",
     status: { command: "hermes auth list", signedIn: ok(/\(\d+ credentials\):/), detail: secretNamed },
     note: "pick Add a credential in the menu; keys in ~/.hermes/.env count",

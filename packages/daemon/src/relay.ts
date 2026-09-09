@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The guest half of the sign-in callback relay: the browser shim's script and
-// the socket it posts to, the URL parsing that finds a flow's callback port,
-// the terminal fallback for the same, and the listener heuristic for flows
-// whose URL names no port.
+// the socket it posts to, the terminal fallback that finds a flow's callback
+// port in what a pty printed, and the listener heuristic for flows whose URL
+// names no port. The rule for reading that port out of a URL is the
+// protocol's, which the host reads too.
 import { EventEmitter } from "node:events";
 import { mkdirSync, unlinkSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { dirname } from "node:path";
+import { RelayPort, callbackPortOf } from "@wsp/protocol";
 
 /** BROWSER value and xdg-open target on the guest. A bare path: tools append
  * the URL as the one argument, and Claude Code treats the literal "true" as
@@ -26,10 +28,6 @@ printf '%s' "$1" | curl -s -m 1 -o /dev/null --unix-socket ${OPEN_SOCKET_PATH} -
 exit 0
 `;
 
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
-/** Below this the laptop would need root to bind; the host refuses them, so they are never named. */
-const MIN_RELAY_PORT = 1024;
-
 /** Copies of @wsp/protocol's HTTP_URL_RE, HTTP_URL_MAX and isHttpUrl; the daemon test pins them equal. */
 export const OPEN_URL_RE = /^https?:\/\/[^\s\x00-\x1f\x7f]+$/i;
 export const OPEN_URL_MAX = 8192;
@@ -41,28 +39,6 @@ export function isOpenUrl(url: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** The localhost port a sign-in URL redirects to, read from its redirect_uri;
- * absent when there is no redirect_uri, it names another host, or it has no
- * explicit port (aws registers http://127.0.0.1/oauth/callback bare). */
-export function callbackPortOf(url: string): number | undefined {
-  let redirect: string | null;
-  try {
-    redirect = new URL(url).searchParams.get("redirect_uri");
-  } catch {
-    return undefined;
-  }
-  if (redirect === null) return undefined;
-  let target: URL;
-  try {
-    target = new URL(redirect);
-  } catch {
-    return undefined;
-  }
-  if (!LOOPBACK_HOSTS.has(target.hostname) || target.port === "") return undefined;
-  const port = Number(target.port);
-  return Number.isInteger(port) && port >= MIN_RELAY_PORT && port <= 65535 ? port : undefined;
 }
 
 // OSC 8 ; params ; URI ST, terminated by BEL or ESC backslash; the URI is what the link points at.
@@ -171,7 +147,8 @@ export class CallbackSpotter {
   }
 
   noteOpen(port: number, loopback: boolean): void {
-    if (!loopback || port < MIN_RELAY_PORT) return;
+    // A port the laptop could not bind is never named; the protocol's own rule for that is RelayPort.
+    if (!loopback || !RelayPort.safeParse(port).success) return;
     const ask = this.pending;
     if (ask === undefined) return;
     this.pending = undefined;

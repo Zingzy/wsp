@@ -74,6 +74,17 @@ export type InitScreen = z.infer<typeof InitScreen>;
 export const InitRowKind = z.enum(["fact", "stage", "sign-in", "secret", "agent", "workspace", "project"]);
 export type InitRowKind = z.infer<typeof InitRowKind>;
 
+/** How a sign-in finishes where nobody is at the machine's terminal, which is the app's case: `callback` for a page
+ * that redirects to a port on the machine, forwarded from this computer, so no code ever comes back; `code` for a
+ * page that hands a code back, which goes to the tool on the machine as the person would type it; `none` for a flow
+ * finished on the page or in the tool's own prompts, which the tool's status then proves. */
+export const SignInFinish = z.enum(["callback", "code", "none"]);
+export type SignInFinish = z.infer<typeof SignInFinish>;
+
+/** The longest code a page hands back that a client may submit: gcloud's is about eighty characters, and the field
+ * types into a machine's terminal, so the wire caps it. */
+export const SIGN_IN_CODE_MAX = 256;
+
 export const InitRow = z.object({
   id: z.string(),
   kind: InitRowKind,
@@ -87,6 +98,8 @@ export const InitRow = z.object({
   page: z.string().optional(),
   /** The code that page asks for, when the flow prints one. */
   code: z.string().optional(),
+  /** A sign-in's road, absent on every other kind of row: `code` is the row that takes a code from the person. */
+  finish: SignInFinish.optional(),
   /** How long the row ran, once it is over. */
   ms: z.number().optional(),
   /** A stage's latest lines, what the machine said while it ran, for the block under its row. */

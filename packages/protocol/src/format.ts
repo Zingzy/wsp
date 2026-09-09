@@ -1002,6 +1002,8 @@ export const CLOUD_SETUP_WORDS = {
     workspace: "WORKSPACE",
     open: "Open sign-in",
     retry: "Retry",
+    codeAsk: "Paste the code from the page",
+    codeSubmit: "Submit",
     keeps: "The build keeps running; the sidebar shows its progress",
     cancel: "Cancel the build",
     /** Why the cancel link is disabled while the seal runs: the host's refusal and the app's tooltip, one sentence. */

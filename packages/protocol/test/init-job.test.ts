@@ -12,7 +12,9 @@ import {
   LOGIN_STATE_WORDS,
   RuntimeRequest,
   INIT_ROW_STATES,
+  SIGN_IN_CODE_MAX,
   SOLARI_CONSOLE,
+  SignInFinish,
   initAgentPrompt,
   initButtonLine,
   initCostLine,
@@ -108,12 +110,16 @@ describe("the init job view", () => {
       { id: 4, op: "init.step", at: 2 },
       { id: 5, op: "init.build", firstWorkspace: "first", importFolder: "/Users/me/proj" },
       { id: 6, op: "init.cancel" },
+      { id: 7, op: "init.signInCode", tool: "gcloud", code: "4/0Afake" },
     ]) {
       expect(RuntimeRequest.safeParse(op).success, op.op).toBe(true);
     }
     expect(RuntimeRequest.safeParse({ id: 7, op: "init.start", road: "wizard" }).success).toBe(false);
     expect(RuntimeRequest.safeParse({ id: 8, op: "init.answer", screen: "build" }).success).toBe(false);
     expect(RuntimeRequest.safeParse({ id: 9, op: "init.step", at: -1 }).success).toBe(false);
+    // A code is one line typed into a terminal on the machine, so the wire takes neither an empty one nor a flood.
+    expect(RuntimeRequest.safeParse({ id: 10, op: "init.signInCode", tool: "gcloud", code: "" }).success).toBe(false);
+    expect(RuntimeRequest.safeParse({ id: 11, op: "init.signInCode", tool: "gcloud", code: "x".repeat(SIGN_IN_CODE_MAX + 1) }).success).toBe(false);
   });
 });
 
@@ -199,6 +205,13 @@ describe("the words the clients print for the job", () => {
   it("a sign-in row names its tool beside its id, so a client draws its mark without parsing the id", () => {
     const signIn = row({ id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device" });
     expect(InitJob.parse({ ...JOB, rows: [signIn] }).rows[0]).toEqual(signIn);
+  });
+
+  it("a sign-in row names the road it finishes on, so a client knows which row takes a code from the person", () => {
+    expect(SignInFinish.options).toEqual(["callback", "code", "none"]);
+    const takesCode = row({ id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Google Cloud login", state: INIT_ROW_STATES.open, page: "https://accounts.google.com/o/oauth2/auth", finish: "code" });
+    expect(InitJob.parse({ ...JOB, rows: [takesCode] }).rows[0]).toEqual(takesCode);
+    expect(InitJob.safeParse({ ...JOB, rows: [row({ finish: "paste" as InitRow["finish"] })] }).success).toBe(false);
   });
 
   it("the provider's console is spelled once, and the key screen's link names the company, not the host", () => {

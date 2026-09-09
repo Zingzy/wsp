@@ -4,6 +4,7 @@
 // the tool prints it (fake names, masked tokens; nothing real).
 import { describe, expect, it } from "vitest";
 import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
+import { SignInFinish } from "@wsp/protocol";
 import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, hasLogin, secretNamed, signInFor, signInWords, signsInByDefault, type SignIn } from "../src/signin-table.js";
 import { collectorLogins } from "./collector-logins.js";
 
@@ -218,6 +219,14 @@ describe("sign-in table", () => {
     expect(command("hermes").kind).toBe("device");
     expect(command("opencode").kind).toBe("key");
     for (const name of ["claude", "codex", "gemini", "gcloud", "aws", "wrangler", "vercel", "pi", "cloudflared"]) expect(command(name).kind, name).toBe("oauth");
+  });
+
+  it("declares in one place how each login finishes where nobody is at the machine's terminal, so the hand-off reads a road instead of guessing one", () => {
+    // The tools whose own notes here say a browser on the machine finishes them: their page returns to a port there.
+    for (const name of ["gcloud", "gemini", "railway", "wrangler", "aws", "claude", "codex"]) expect(command(name).finish, name).toBe("callback");
+    // gh prints the code its page asks for, and the rest are unmeasured from the app, so none of them takes a code back.
+    for (const name of ["gh", "vercel", "netlify", "fly", "supabase", "doppler", "opencode", "cloudflared", "pi", "hermes"]) expect(command(name).finish, name).toBe("none");
+    for (const [name, s] of Object.entries(SIGN_INS)) if (hasLogin(s)) expect(SignInFinish.options, name).toContain(s.finish);
   });
 
   it("signsInByDefault holds for the oauth and device kinds and not for key, none or a bare shell", () => {

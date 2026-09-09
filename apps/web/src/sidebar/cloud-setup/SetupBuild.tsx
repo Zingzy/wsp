@@ -2,19 +2,21 @@
 // The build as rows, in the order the job runs them: the agents here given the
 // tools, each stage of the image with the machine's latest lines under the one
 // running (a done stage folds to its row and opens on a click), each sign-in
-// where it happens with the keycap that opens its page, the first workspace and
-// its project. The bar at the top moves to the count. Closing the screen hides
-// it and the build goes on; the one link stops the job after asking once.
+// where it happens with the keycap that opens its page and, where its page
+// hands a code back, the field that takes it, the first workspace and its
+// project. The bar at the top moves to the count. Closing the screen hides it
+// and the build goes on; the one link stops the job after asking once.
 import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, initJobBuilding, initJobOver, initProgressState, initRowOver, type InitJob, type InitRow } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { CARD, META, NAME, ROW, ROW_LINE, RowState, Slot } from "./rows.js";
+import { SignInCode } from "./SignInCode.js";
 import { RowMark } from "./SignInMark.js";
 import { SetupScreen, type ScreenAction } from "./SetupScreen.js";
 
-export function SetupBuild({ job, onCancel, onRetry, onOpenWorkspace, onAgain, refusal }: { job: InitJob; onCancel: () => void; onRetry: (tool: string) => void; onOpenWorkspace: () => void; onAgain: () => void; refusal: string | null }) {
+export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, onAgain, refusal }: { job: InitJob; onCancel: () => void; onRetry: (tool: string) => void; onCode: (o: { tool: string; code: string }) => void; onOpenWorkspace: () => void; onAgain: () => void; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.build;
   const [asking, setAsking] = useState(false);
   const over = initJobOver(job.phase);
@@ -34,7 +36,12 @@ export function SetupBuild({ job, onCancel, onRetry, onOpenWorkspace, onAgain, r
       </span>
       <ul className={CARD} aria-label={words.headline}>
         {job.rows.map(row => (
-          <BuildRow key={row.id} row={row} onRetry={building && row.kind === "sign-in" && row.state === INIT_SIGN_IN_WORDS["not-signed-in"] ? () => onRetry(row.tool ?? row.id) : undefined} />
+          <BuildRow
+            key={row.id}
+            row={row}
+            onRetry={building && row.kind === "sign-in" && row.state === INIT_SIGN_IN_WORDS["not-signed-in"] ? () => onRetry(row.tool ?? row.id) : undefined}
+            onCode={row.finish === "code" ? (code: string) => onCode({ tool: row.tool ?? row.id, code }) : undefined}
+          />
         ))}
       </ul>
       {asking && building ? (
@@ -48,8 +55,9 @@ export function SetupBuild({ job, onCancel, onRetry, onOpenWorkspace, onAgain, r
   );
 }
 
-/** A stage's lines open under the running row on their own; a done row's open on a click and fold on the next. */
-function BuildRow({ row, onRetry }: { row: InitRow; onRetry?: () => void }) {
+/** A stage's lines open under the running row on their own; a done row's open on a click and fold on the next, and a
+ * sign-in whose page hands a code back takes it on the line under its own row. */
+function BuildRow({ row, onRetry, onCode }: { row: InitRow; onRetry?: () => void; onCode?: (code: string) => void }) {
   const [opened, setOpened] = useState<boolean | undefined>(undefined);
   const running = row.state === INIT_ROW_STATES.running;
   const lines = row.lines ?? [];
@@ -89,6 +97,7 @@ function BuildRow({ row, onRetry }: { row: InitRow; onRetry?: () => void }) {
           {lines.join("\n")}
         </pre>
       ) : null}
+      {waiting && onCode !== undefined ? <SignInCode label={row.label} onCode={onCode} /> : null}
     </li>
   );
 }

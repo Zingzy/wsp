@@ -57,6 +57,28 @@ export interface SignInFlow {
 /** The line the relay logs for a page it did not open, while a pty is on screen. */
 export const OPEN_LINE = "press o on the link above to open it here";
 
+/** Where a code from a sign-in's page reaches the tool waiting for it on the machine. The hand-off opens one writer
+ * per login while its command runs, and a submit from the app types the code into that login's own pty, the way the
+ * person would at the machine's terminal. Nothing is kept here: a code passes through and is gone. */
+export class SignInCodes {
+  private readonly writers = new Map<string, (code: string) => Promise<void>>();
+
+  /** The login takes a code from now until the returned close, which only closes the writer it opened. */
+  open(tool: string, write: (code: string) => Promise<void>): () => void {
+    this.writers.set(tool, write);
+    return () => {
+      if (this.writers.get(tool) === write) this.writers.delete(tool);
+    };
+  }
+
+  /** Types the code into that login's pty; refused when no sign-in for the tool is waiting for one. */
+  async submit(tool: string, code: string): Promise<void> {
+    const write = this.writers.get(tool);
+    if (write === undefined) throw new Error(`no sign-in for ${tool} is waiting for a code from you`);
+    await write(code);
+  }
+}
+
 export interface HostHooks {
   /** Whether a sign-in page the machine asks for may open here without a click: one open per o the person pressed,
    * and never the page o itself opened. A declined page that names a callback port is kept for the next o. */

@@ -441,6 +441,8 @@ export interface InitDoor {
   step(o: { at: number }): Promise<InitJob>;
   retry(o: { tool: string }): Promise<InitJob>;
   build(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob>;
+  /** Types the code a sign-in's page handed back into the tool waiting for it on the machine; refused when none is. */
+  signInCode(o: { tool: string; code: string }): Promise<InitJob>;
   cancel(): Promise<InitJob>;
   on(fn: (e: InitJobEvent) => void): () => void;
 }

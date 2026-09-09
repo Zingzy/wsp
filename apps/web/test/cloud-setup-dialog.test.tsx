@@ -158,6 +158,10 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string } = {}) {
       emit(next);
       return next;
     }),
+    initSignInCode: vi.fn(async () => {
+      if (over.refuse === "code") throw new Error("no sign-in for gcloud is waiting for a code from you");
+      return job ?? JOB;
+    }),
   } satisfies Api;
   return { api, emit, held: () => job };
 }
@@ -550,6 +554,29 @@ describe("the cloud setup sheet", () => {
     fireEvent.click(cancel);
     expect(api.initCancel).not.toHaveBeenCalled();
     expect(dialog.querySelector("[data-k=refusal]")).toBeNull();
+  });
+
+  it("a sign-in whose page hands a code back takes it on its row and sends it to the host for that tool; a refused submit says so and the row stays", async () => {
+    const PASTED = "4/0AfakeCodeFromThePage";
+    const signing: InitJob = {
+      ...JOB,
+      phase: "signing-in",
+      screens: [],
+      rows: [{ id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Sign in to Google Cloud", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code" }],
+      progress: { done: 0, total: 1 },
+    };
+    const { api, dialog } = await open({ setup: { ...HELD, job: signing }, refuse: "code" });
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    // The field is the line under the row it belongs to, inside it, and no other row has one.
+    expect(dialog.querySelectorAll("[data-k=code-line]")).toHaveLength(1);
+    expect(dialog.querySelector('[data-row="sign-in/gcloud"] [data-k=code-field]')).not.toBeNull();
+    fireEvent.change(k(dialog, "code-field"), { target: { value: PASTED } });
+    fireEvent.click(k(dialog, "code-submit"));
+    await waitFor(() => expect(api.initSignInCode).toHaveBeenCalledWith({ tool: "gcloud", code: PASTED }));
+    // The host refused this one: its words show under the keycap and the field is still there to try again.
+    await waitFor(() => expect(k(dialog, "refusal").textContent).toBe("no sign-in for gcloud is waiting for a code from you"));
+    expect(k(dialog, "code-field")).toBeDefined();
+    expect(dialog.textContent).not.toContain(PASTED);
   });
 
   it("opened from the row, the sheet outlives the seal: the done screen stays, Open workspace selects the fork, and only then does the row go", async () => {
