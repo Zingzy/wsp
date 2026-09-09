@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
@@ -11,13 +11,30 @@ const KIB = 1024;
 const MIB = KIB * 1024;
 const GIB = MIB * 1024;
 
-/** Whole bytes under a kilobyte, then one decimal in binary units up to GB. */
+/** Bytes as a person reads them, in binary units: whole under a gigabyte, since a tenth of a megabyte is noise at that
+ * scale, and GB with one decimal unless whole. */
 export function fmtBytes(n: number): string {
   if (n < KIB) return `${n} B`;
-  if (n < MIB) return `${(n / KIB).toFixed(1)} KB`;
-  if (n < GIB) return `${(n / MIB).toFixed(1)} MB`;
-  return `${(n / GIB).toFixed(1)} GB`;
+  if (n < MIB) return `${Math.round(n / KIB)} KB`;
+  if (n < GIB) return `${Math.round(n / MIB)} MB`;
+  const gb = n / GIB;
+  return `${Number.isInteger(Number(gb.toFixed(1))) ? Math.round(gb) : gb.toFixed(1)} GB`;
 }
+
+/** What a row reads where the catalog has measured no size. */
+export const UNKNOWN_SIZE = "size unknown";
+
+/** How often the agents ran a tool here, the one number a usage row shows. */
+export const fmtCalls = (n: number): string => `${n.toLocaleString("en-US")} ${n === 1 ? "call" : "calls"}`;
+
+/** The line under a screen's card: what the ticked rows come to. */
+export const initTallyLine = (count: number, noun: string, bytes: number): string => `${plural(count, noun.replace(/s$/, ""))} on the image · ${fmtBytes(bytes)}`;
+
+/** The disk ring's tooltip: what the image holds against the machine's disk. */
+export const initDiskLine = (used: number, total: number): string => `about ${fmtBytes(used)} of ${fmtBytes(total)} on the image`;
+
+/** The ring's tooltip and the primary's refusal once the ticks pass the disk. */
+export const initDiskOverLine = (over: number): string => `over by ${fmtBytes(over)}`;
 
 /** Memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
 const memGb = (memMb: number): number => Number((memMb / 1024).toFixed(1));
@@ -37,8 +54,9 @@ export type CpuWord = "vCPU" | "cores";
 
 /** A size as the sidebar row, the Machine tab and the new-workspace form show it: "2 vCPU · 4 GB", or "10 cores · 16 GB"
  * in the word the machine's kind has for a cpu. A size offer is always a provider's, so the provider's word is the default. */
+/** The size joins its words with no-break spaces, so a sentence carrying it never breaks between a number and its unit. */
 export function fmtSize(size: WorkspaceSize, cpu: CpuWord = "vCPU"): string {
-  return `${size.cpu} ${cpu} · ${fmtMemGb(size.memMb)}`;
+  return `${size.cpu}\u00a0${cpu}\u00a0·\u00a0${fmtMemGb(size.memMb).replace(" ", "\u00a0")}`;
 }
 
 /** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
@@ -937,6 +955,7 @@ export const CLOUD_SETUP_WORDS = {
   choice: {
     label: "CLOUD MACHINES",
     headline: "Set up cloud machines",
+    top: "Your setup goes on one machine image, built once and forked for every thread",
     manual: "Choose what goes on the image",
     agent: "Let an agent choose from your usage",
     agentWith: "with",
@@ -945,10 +964,9 @@ export const CLOUD_SETUP_WORDS = {
   keys: {
     label: "PROVIDER KEY",
     headline: "Your Solari key",
+    top: "Solari runs the machines; the key is saved in wsp's home on this computer and never leaves it",
     solari: "Solari API key",
-    anthropic: "Anthropic API key",
-    optional: "optional",
-    where: `Get one at ${SOLARI_CONSOLE}`,
+    where: "Get one at Solari",
     saved: "saved",
     unset: "not set",
     keycap: "Save",
@@ -957,17 +975,40 @@ export const CLOUD_SETUP_WORDS = {
     keycap: "Continue",
     back: "Back",
     build: "Build",
+    again: "Start over",
+    /** A sign-in row whose tool is off the image: its picker is fixed on skip. */
+    notOnImage: "not on the image",
+    /** A sign-in row the catalog locked out. */
+    leftAlone: "left alone",
+    /** The disk ring's name for the tooltip's reader. */
+    disk: "Disk on the image",
+  },
+  ask: {
+    label: "BUILD",
+    headline: "Your first cloud workspace",
+    top: "Forked from the image as soon as the build finishes",
+    name: "Name",
+    folder: "Project folder",
+    optional: "optional",
+    choose: "Choose",
   },
   build: {
     label: "BUILD",
     headline: "Building your image",
+    top: "The machine boots, installs what you ticked and is saved as the image every thread forks",
     image: "IMAGE",
     signIns: "SIGN-INS",
     computer: "THIS COMPUTER",
     workspace: "WORKSPACE",
-    open: "Open",
-    hide: "Hide",
-    cancel: "Cancel",
+    open: "Open sign-in",
+    retry: "Retry",
+    keeps: "The build keeps running; the sidebar shows its progress",
+    cancel: "Cancel the build",
+    /** Why the cancel link is disabled while the seal runs: the host's refusal and the app's tooltip, one sentence. */
+    cannotStop: "The image is being saved; the snapshot and the save cannot be stopped",
+    cancelSure: "Stop the build",
+    cancelWhy: "The machine is thrown away and nothing is saved",
+    cancelKeep: "Keep building",
     done: "Cloud machines are ready",
     failed: "The build stopped",
     keycap: "Open workspace",
@@ -976,11 +1017,13 @@ export const CLOUD_SETUP_WORDS = {
   agent: {
     label: "AGENT",
     headline: "Reading what your agents used",
+    top: "Your agent reads this computer and writes the recipe the next screens start from",
     title: "Set up cloud machines",
   },
   reading: {
     label: "THIS COMPUTER",
     headline: "Reading this computer",
+    top: "What is installed here and what your agents used decides what the image starts with",
   },
 } as const;
 
@@ -1035,10 +1078,44 @@ export const INIT_ROW_STATES = {
   importing: "importing",
   imported: "imported",
   /** A sign-in whose page waits for the person. */
-  open: "open",
+  open: "waiting for you",
+  /** A sign-in answered with an API key the home held, so the machine has it and nothing is asked. */
+  keySet: "key set",
   /** An agent on this computer whose config carries the wsp tools. */
   mcpAdded: "MCP added",
 } as const;
+
+/** A sign-in row's word once its outcome is in, the app's and wsp setup's spelling; the terminal's table keeps
+ * LOGIN_STATE_WORDS. */
+export const INIT_SIGN_IN_WORDS: Record<LoginState, string> = {
+  "signed-in": INIT_ROW_STATES.done,
+  "not-signed-in": "not signed in",
+  copied: "copied from this Mac",
+  "not-verified": "not verified",
+  skipped: "skipped",
+};
+
+/** Every build stage in plain words, the one table the app's rows and the terminal's lines read. */
+export const GOLDEN_STAGE_WORDS: Record<Exclude<GoldenStage, "failed">, string> = {
+  creating: "Creating the machine",
+  "deploying-daemon": "Installing the base tools",
+  "applying-setup": "Applying your setup",
+  "uploading-files": "Copying your files",
+  "installing-harness": "Installing agents",
+  "installing-tools": "Installing tools",
+  "installing-mcp": "Installing MCP servers",
+  ready: "Checking the machine answers",
+  snapshotting: "Taking the snapshot",
+  promoting: "Saving the image",
+  "smoke-forking": "Checking a fork boots",
+  sealed: "Finishing",
+};
+
+/** The id of the wsp tools screen's row for an agent, the one the app answers for it from the first launch's own answer. */
+export const wspToolsRowId = (agent: string): string => `wsp-tools/${agent}`;
+
+/** The sentence under the first workspace's title: when it comes and on what, from the recipe's own numbers. */
+export const initForkLine = (size: WorkspaceSize): string => `Forked from the image as soon as the build finishes, on a ${fmtSize(size)} machine`;
 
 /** The state word of a sign-in row while its page waits for the person. */
 export const SIGN_IN_OPEN_STATE = INIT_ROW_STATES.open;
@@ -1046,7 +1123,7 @@ export const SIGN_IN_OPEN_STATE = INIT_ROW_STATES.open;
 /** The state word of an agent on this computer whose config carries the wsp tools. */
 export const MCP_ADDED_WORD = INIT_ROW_STATES.mcpAdded;
 
-const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.mcpAdded, ...Object.values(LOGIN_STATE_WORDS)]);
+const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.keySet, INIT_ROW_STATES.mcpAdded, ...Object.values(INIT_SIGN_IN_WORDS), ...Object.values(LOGIN_STATE_WORDS)]);
 
 /** Whether a row's state word is one it ends on: what the progress count and a section's count read. */
 export const initRowOver = (state: string): boolean => ROW_OVER.has(state);
@@ -1076,7 +1153,7 @@ export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): strin
 export function initSetupLines(setup: InitSetup): string[] {
   const held = (yes: boolean): string => (yes ? CLOUD_SETUP_WORDS.keys.saved : CLOUD_SETUP_WORDS.keys.unset);
   const agents = setup.agents.length === 0 ? "none found" : setup.agents.map(a => (a.configured ? `${a.name} (${MCP_ADDED_WORD})` : a.name)).join(", ");
-  const lines = [`Solari key: ${held(setup.keys.solari)}; Anthropic key: ${held(setup.keys.anthropic)}`, `Agents here: ${agents}`];
+  const lines = [`Solari key: ${held(setup.keys.solari)}`, `Agents here: ${agents}`];
   if (setup.pricing !== null) lines.push(initCostLine(setup.pricing.size, setup.pricing.rateUsdPerHour));
   const job = setup.job;
   if (job === null) {

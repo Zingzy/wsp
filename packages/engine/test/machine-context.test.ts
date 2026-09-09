@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { TURN_END_WORDS, backgroundTasksLine } from "@wsp/protocol";
+import { TURN_END_WORDS, backgroundTasksLine, fmtBytes } from "@wsp/protocol";
 import {
   ALIAS_PROBES,
   BROWSER_SHIM_PATH,
@@ -202,7 +202,7 @@ describe("the document", () => {
     expect(doc.startsWith(`${CONTEXT_MARKER}\n`)).toBe(true);
     expect(doc).toContain("- Workspace: task-1.");
     expect(doc).toContain("- Golden: v3, sealed 2026-09-05, setup 9f2a7c1d4e5b.");
-    expect(doc).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free");
+    expect(doc).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2 GB free");
     expect(doc).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder.");
     expect(doc).toContain("- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.");
     expect(doc).toContain(`- ${TURN_END_WORDS}; a reply given with a command still running in the background reads failed (${backgroundTasksLine(1)}), and nothing wakes you when that command finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.`);
@@ -260,7 +260,7 @@ describe("the document", () => {
     expect(short).toContain("- Sign-ins go through wsp: run the tool's own login command");
     expect(short).toContain("bind 0.0.0.0, not 127.0.0.1");
     expect(short).toContain("- Containers do not run here: the kernel has no overlayfs, and Docker and Podman are not installed.");
-    expect(short).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2.0 GB free.");
+    expect(short).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2 GB free.");
     expect(short).toContain("- Secrets are exported by /etc/profile.d/wsp-secrets.sh. Use them by name ($NAME); never print, log or commit a value");
     expect(short).not.toContain("OPENAI_API_KEY");
     expect(short).not.toContain("raycast");
@@ -269,7 +269,7 @@ describe("the document", () => {
     const bare = renderShortContext({ probe: probeOf({ has: new Set(), overlay: true, disk: undefined }), facts: FACTS });
     expect(bare).not.toContain("tmux");
     expect(bare).toContain("- Docker and Podman are not installed.");
-    expect(bare).toContain("- Disk: size unknown when this file was written. wsp keeps 2.0 GB free.");
+    expect(bare).toContain("- Disk: size unknown when this file was written. wsp keeps 2 GB free.");
     expect(bare).not.toContain("Sign-ins");
   });
 
@@ -615,7 +615,7 @@ describe("applyMachineContext on a local guest", () => {
     expect(out.failure).toBeUndefined();
     expect(out.context).toEqual(CONTEXT_AGENTS.map(agent => ({ agent: agent.id, outcome: "written", path: expect.any(String), skill: expect.stringMatching(/\/wsp-machine\/SKILL\.md$/) })));
     expect(puts).toHaveLength(1);
-    expect(out.summary).toBe(`${(puts[0]!.bytes / 1024).toFixed(1)} KB written for Claude Code, Codex, Gemini CLI, OpenCode, Pi, Hermes Agent`);
+    expect(out.summary).toBe(`${fmtBytes(puts[0]!.bytes)} written for Claude Code, Codex, Gemini CLI, OpenCode, Pi, Hermes Agent`);
     // The texts travel as the archive, never inside a command: the probe and the untar are the only execs.
     expect(execs).toHaveLength(2);
     expect(execs.some(c => c.includes("base64 --decode"))).toBe(false);

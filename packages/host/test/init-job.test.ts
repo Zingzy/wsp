@@ -11,15 +11,17 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
-import { InitJob, LOGIN_STATE_WORDS, Recipe, SIGN_IN_OPEN_STATE, initAgentPrompt, type InitJobEvent } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, Recipe, SIGN_IN_OPEN_STATE, initAgentPrompt, type InitJobEvent } from "@wsp/protocol";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type Runtime } from "@wsp/runtime";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
 import { InitJobs, type InitJobDeps } from "../src/init-job.js";
 import { smallRecipePath } from "../src/recipe-file.js";
 import { workspaceRoads } from "../src/server.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { CLAUDE_URL, DEVICE_URL, scriptedLink } from "./init-link.js";
+import type { FakePtyLink } from "./fake-pty-link.js";
+import type { HostHooks } from "../src/init-signin.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { scriptedAgent } from "./verbs-fixture.js";
 
@@ -45,10 +47,15 @@ interface Fake {
   swapped: Keys[];
   installed: string[][];
   prompts: { prompt: string; harness?: string; model?: string; title?: string }[];
+  home: string;
+  /** The builder's terminal link the build dials; swapped under a running build to script the next sign-in. */
+  setLink(link: FakePtyLink): void;
+  /** The callback relay's hooks as the run wired them, and how often the relay was closed. */
+  relay: { hooks: HostHooks[]; closed: number };
   settled(): Promise<void>;
 }
 
-function fake(over: { keys?: Keys; configured?: boolean } = {}): Fake {
+function fake(over: { env?: Record<string, string>; configured?: boolean; read?: Partial<InitJobDeps["read"]> } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -69,20 +76,21 @@ function fake(over: { keys?: Keys; configured?: boolean } = {}): Fake {
   });
   const rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, local: localWiring(dir), hostId: "box:h1" });
   runtimes.push(rt);
-  const link = scriptedLink({ signedIn: true, hold: false, missing: false });
+  let link = scriptedLink({ signedIn: true, hold: false, missing: false });
+  const relay: Fake["relay"] = { hooks: [], closed: 0 };
   const saved: Record<string, string>[] = [];
   const swapped: Keys[] = [];
   const installed: string[][] = [];
-  let keys: Keys = over.keys ?? { solari: SOLARI };
+  let env: Record<string, string> = over.env ?? { SOLARI_API_KEY: SOLARI };
   const deps: InitJobDeps = {
     rt,
     statePath,
     home,
     platform: "darwin",
-    keys: () => keys,
+    saved: () => env,
     saveKeys: set => {
       saved.push(set);
-      keys = { ...keys, ...(set["SOLARI_API_KEY"] !== undefined ? { solari: set["SOLARI_API_KEY"] } : {}), ...(set["ANTHROPIC_API_KEY"] !== undefined ? { anthropic: set["ANTHROPIC_API_KEY"] } : {}) };
+      env = { ...env, ...set };
     },
     provider: k => void swapped.push(k),
     pricing: () => PRICING,
@@ -99,15 +107,24 @@ function fake(over: { keys?: Keys; configured?: boolean } = {}): Fake {
       recipe: async () => RECIPE,
       scanProject: async folder => ({ dir: folder, rows: [], candidates: [] }),
       scan: async () => [],
+      ...over.read,
     },
     build: {
       secrets: { read: async () => "gho_fake", run: async () => "sk-ant-x-helper\n" },
-      relay: async () => ({ close: async () => {} }),
+      relay: async (_rt, _builder, hooks) => {
+        relay.hooks.push(hooks);
+        return {
+          close: async () => {
+            relay.closed += 1;
+          },
+        };
+      },
       daemon: async () => ({ link: link.dial(), close: () => {} }),
       roads: () => workspaceRoads(rt, {}),
       recipe: recipe => ({ ...recipe, deployDaemon: async () => "node v22.12.0" }),
     },
     retry: { waitMs: 1, attempts: 3 },
+    pollMs: 5,
   };
   const jobs = new InitJobs(deps);
   const events: InitJobEvent[] = [];
@@ -116,40 +133,140 @@ function fake(over: { keys?: Keys; configured?: boolean } = {}): Fake {
     // Every view on the wire parses as the protocol's.
     InitJob.parse(e.job);
   });
-  return { jobs, rt, backend, statePath, events, saved, swapped, installed, prompts, settled: () => jobs.settled() };
+  return {
+    jobs,
+    rt,
+    backend,
+    statePath,
+    events,
+    saved,
+    swapped,
+    installed,
+    prompts,
+    home,
+    relay,
+    setLink: next => {
+      link = next;
+    },
+    settled: () => jobs.settled(),
+  };
 }
 
 const phases = (f: Fake): string[] => f.events.map(e => e.job.phase).filter((p, i, all) => i === 0 || all[i - 1] !== p);
 
 describe("the init job, manual road", () => {
-  it("opens with the keys' presence, the agents here and the price, and no job", async () => {
+  it("opens with the provider key's presence, the agents here and the price, and no job", async () => {
     const f = fake();
     const setup = await f.jobs.get();
     expect(setup).toEqual({
-      keys: { solari: true, anthropic: false },
+      keys: { solari: true },
+      home: f.home,
       agents: [{ id: "claude", name: "Claude Code", configured: false }],
       pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: expect.closeTo(0.11, 5) as unknown as number },
       job: null,
     });
   });
 
-  it("saving a key writes it to the wsp home's .env through the one writer and wires the provider; the view says held, never the key", async () => {
-    const f = fake({ keys: {} });
-    expect((await f.jobs.get()).keys).toEqual({ solari: false, anthropic: false });
-    const setup = await f.jobs.keys({ solari: "slr_live_typed", anthropic: "sk-ant-x-typed" });
-    expect(f.saved).toEqual([{ SOLARI_API_KEY: "slr_live_typed", ANTHROPIC_API_KEY: "sk-ant-x-typed" }]);
-    expect(f.swapped).toEqual([{ solari: "slr_live_typed", anthropic: "sk-ant-x-typed" }]);
-    expect(setup.keys).toEqual({ solari: true, anthropic: true });
-    expect(JSON.stringify(setup)).not.toMatch(/slr_live_typed|sk-ant-x-typed/);
+  it("saving the provider key writes it to the wsp home's .env through the one writer and wires the provider; the view says held, never the key", async () => {
+    const f = fake({ env: {} });
+    expect((await f.jobs.get()).keys).toEqual({ solari: false });
+    const setup = await f.jobs.keys({ solari: "slr_live_typed" });
+    expect(f.saved).toEqual([{ SOLARI_API_KEY: "slr_live_typed" }]);
+    expect(f.swapped).toEqual([{ solari: "slr_live_typed" }]);
+    expect(setup.keys).toEqual({ solari: true });
+    expect(JSON.stringify(setup)).not.toMatch(/slr_live_typed/);
     // Nothing typed: nothing written, nothing swapped.
     await f.jobs.keys({});
     expect(f.saved).toHaveLength(1);
   });
 
+  it("the keys the view reads are the home's alone: a key in the process environment is not saved, and an agent's key lands under the variable its sign-in row declares", async () => {
+    const f = fake({ env: { SOLARI_API_KEY: SOLARI } });
+    process.env["ANTHROPIC_API_KEY"] = "sk-ant-x-from-shell";
+    try {
+      await f.jobs.start({ road: "manual" });
+      await f.settled();
+      const logins = f.jobs.view()!.screens[3]!;
+      expect(logins.items.find(i => i.id === "logins/claude")!.key).toEqual({ name: "ANTHROPIC_API_KEY", saved: false });
+      // A row that takes no key is refused, so nothing a client names reaches the file.
+      await expect(f.jobs.keys({ rows: { "logins/gh": "ghp_fake" } })).rejects.toThrow(/takes no API key/);
+      expect(f.saved).toEqual([]);
+      const setup = await f.jobs.keys({ rows: { "logins/claude": "sk-ant-x-typed" } });
+      expect(f.saved).toEqual([{ ANTHROPIC_API_KEY: "sk-ant-x-typed" }]);
+      expect(setup.job!.screens[3]!.items.find(i => i.id === "logins/claude")!.key).toEqual({ name: "ANTHROPIC_API_KEY", saved: true });
+      expect(JSON.stringify(setup)).not.toMatch(/sk-ant-x/);
+    } finally {
+      delete process.env["ANTHROPIC_API_KEY"];
+    }
+  });
+
+  it("the read shows its work as rows: each rung of the collector as it lands, each agent's history with its counts, the scan; the next one runs while the last is done", async () => {
+    const seen: string[][] = [];
+    const f = fake({
+      read: {
+        collect: async onRung => {
+          onRung("identity", 3);
+          onRung("shell", 2);
+          onRung("toolchains", 1);
+          onRung("tools", 4);
+          onRung("agents", 2);
+          onRung("logins", 3);
+          return FIXTURE;
+        },
+        recipe: async (onHistory, _onProject, onProgress) => {
+          onProgress({ agent: "claude", read: 1, files: 2 });
+          onProgress({ agent: "claude", read: 2, files: 2 });
+          onHistory({ agent: "claude", state: "read", sessions: 2, calls: 9 });
+          onHistory({ agent: "codex", state: "empty", sessions: 0, calls: 0 });
+          return RECIPE;
+        },
+      },
+    });
+    f.jobs.on(e => {
+      if (e.job.phase === "reading") seen.push(e.job.rows.map(r => `${r.label}: ${r.state}${r.detail !== undefined ? ` (${r.detail})` : ""}`));
+    });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    const all = seen.flat();
+    expect(seen[0]).toEqual([]);
+    expect(all).toContain("Identity: running");
+    expect(all).toContain("Identity: 3 found");
+    expect(all).toContain("Shell: running");
+    expect(all).toContain("Sign-ins: 3 found");
+    expect(all).toContain("Claude Code: running (1 session of 2)");
+    expect(all).toContain("Claude Code: 2 sessions, 9 tool calls");
+    expect(all).toContain("Codex: no history here");
+    expect(all).toContain("Package managers: 0 found");
+    expect(seen.at(-1)!.every(line => !line.endsWith("running"))).toBe(true);
+    // Once the screens stand, the facts leave the rows: the build's rows take their place.
+    const read = f.jobs.view()!;
+    expect(read.phase).toBe("answering");
+    expect(read.rows).toEqual([]);
+    expect(read.step).toBe(0);
+    expect(read.disk).toMatchObject({ total: 20 * 1024 * 1024 * 1024 });
+    expect(read.disk!.fixed).toBeGreaterThan(0);
+    expect(read.disk!.fixed).toBeLessThan(read.disk!.total);
+  });
+
+  it("the step follows the answers and a step back, so a setup shut mid-way reopens where it was; a step off the screens is refused", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    expect(f.jobs.view()!.step).toBe(0);
+    expect((await f.jobs.answer({ screen: "agents", ticks: ["claude"] })).step).toBe(1);
+    expect((await f.jobs.answer({ screen: "tools", ticks: [] })).step).toBe(2);
+    expect((await f.jobs.step({ at: 1 })).step).toBe(1);
+    expect((await f.jobs.answer({ screen: "logins", answers: {} })).step).toBe(4);
+    expect((await f.jobs.answer({ screen: "wsp", ticks: [] })).step).toBe(5);
+    await expect(f.jobs.step({ at: 6 })).rejects.toThrow(/no step 6/);
+    await expect(f.jobs.step({ at: -1 })).rejects.toThrow(/no step/);
+    expect((await f.jobs.get()).job!.step).toBe(5);
+  });
+
   it("start reads this computer once and hands the five screens over; answers move the recipe; the build is wsp init's own run on the host's runtime, its sign-ins as rows, ending with the golden sealed and the first workspace forked", async () => {
     const f = fake();
     const started = await f.jobs.start({ road: "manual" });
-    expect(started).toMatchObject({ road: "manual", phase: "reading", keys: { solari: true, anthropic: false } });
+    expect(started).toMatchObject({ road: "manual", phase: "reading", keys: { solari: true }, step: 0 });
     await f.settled();
     const read = f.jobs.view()!;
     expect(read.phase).toBe("answering");
@@ -158,20 +275,48 @@ describe("the init job, manual road", () => {
 
     const answered = await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
     expect(answered.screens[0]!.ticks.sort()).toEqual(["claude", "codex"]);
-    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "skip" } });
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "copy" } });
     await f.jobs.answer({ screen: "wsp", ticks: ["wsp-tools/claude"] });
     await expect(f.jobs.start({ road: "manual" })).rejects.toThrow(/already/);
 
     const building = await f.jobs.build({ firstWorkspace: "first" });
     expect(building.phase).toBe("building");
-    // The rows are known up front, so the count means something from the first frame.
+    // The rows are known up front, so the count means something from the first frame: every stage, and every sign-in
+    // the screens chose, waiting for its turn after the machine answers.
     expect(building.rows.filter(r => r.kind === "stage")).toHaveLength(12);
+    expect(building.rows.filter(r => r.kind === "sign-in").map(r => [r.id, r.state])).toEqual([
+      ["sign-in/claude", "waiting"],
+      ["sign-in/codex", "waiting"],
+      ["sign-in/gh", "waiting"],
+    ]);
+    const first = building.rows.map(r => r.id);
+    expect(first.indexOf("sign-in/gh")).toBeGreaterThan(first.indexOf("stage/ready"));
+    expect(first.indexOf("sign-in/gh")).toBeLessThan(first.indexOf("stage/snapshotting"));
     expect(building.rows.find(r => r.kind === "workspace")).toMatchObject({ label: "first", state: "waiting" });
     expect(building.rows.find(r => r.kind === "agent")).toMatchObject({ id: "agent/claude", label: "Claude Code", state: "MCP added" });
+    // Stage rows read the protocol's plain names, whatever their state, with the machine's lines under the running one.
+    expect(building.rows.filter(r => r.kind === "stage").map(r => r.label)).toEqual(Object.values(GOLDEN_STAGE_WORDS));
     expect(f.installed).toEqual([["claude"]]);
     await f.settled();
     const done = f.jobs.view()!;
     expect(done.phase).toBe("done");
+    expect(done.rows.filter(r => r.kind === "stage").every(r => r.label === GOLDEN_STAGE_WORDS[r.id.slice("stage/".length) as keyof typeof GOLDEN_STAGE_WORDS])).toBe(true);
+    expect(f.events.some(e => e.job.rows.some(r => r.kind === "stage" && r.state === "running" && (r.lines?.length ?? 0) > 0))).toBe(true);
+    // The sign-ins sit where they happen: after the machine answers, before the snapshot.
+    const ids = done.rows.map(r => r.id);
+    expect(ids.indexOf("sign-in/gh")).toBeGreaterThan(ids.indexOf("stage/ready"));
+    expect(ids.indexOf("sign-in/gh")).toBeLessThan(ids.indexOf("stage/snapshotting"));
+    // A copied credential is a row that needs nothing, and while the phase says signing in a sign-in row is on the list.
+    expect(done.rows.find(r => r.id === "sign-in/codex")).toMatchObject({ kind: "sign-in", state: INIT_SIGN_IN_WORDS.copied });
+    const signing = f.events.filter(e => e.job.phase === "signing-in");
+    expect(signing.length).toBeGreaterThan(0);
+    expect(signing.every(e => e.job.rows.some(r => r.kind === "sign-in"))).toBe(true);
+    // The gh row stood as its command started, before its page, then carried the page while it waited.
+    const ghStates = f.events.map(e => e.job.rows.find(r => r.id === "sign-in/gh")).filter(r => r !== undefined).map(r => `${r.state}${r.page !== undefined ? " +page" : ""}`);
+    expect(ghStates[0]).toBe("waiting");
+    expect(ghStates).toContain("running");
+    expect(ghStates).toContain(`${SIGN_IN_OPEN_STATE} +page`);
+    expect(ghStates.indexOf("running")).toBeLessThan(ghStates.indexOf(`${SIGN_IN_OPEN_STATE} +page`));
     expect(done.error).toBeUndefined();
     expect(done.golden).toEqual({ version: 1 });
     expect(done.workspace).toMatchObject({ name: "first" });
@@ -182,7 +327,8 @@ describe("the init job, manual road", () => {
     expect(recipe.rows.find(r => r.id === "gh")?.signIn).toBe("machine");
     // Each sign-in was a row with its page while it waited, then its state word.
     const gh = done.rows.find(r => r.id === "sign-in/gh")!;
-    expect(gh).toMatchObject({ kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: LOGIN_STATE_WORDS["signed-in"] });
+    expect(gh).toMatchObject({ kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: INIT_SIGN_IN_WORDS["signed-in"] });
+    expect(gh.state).toBe("done");
     const waited = f.events.map(e => e.job.rows.find(r => r.id === "sign-in/gh")).find(r => r?.state === SIGN_IN_OPEN_STATE);
     expect(waited).toMatchObject({ page: DEVICE_URL });
     expect(f.events.some(e => e.job.rows.some(r => r.id === "sign-in/claude" && r.page === CLAUDE_URL))).toBe(true);
@@ -198,6 +344,99 @@ describe("the init job, manual road", () => {
     expect((await f.jobs.get()).job?.phase).toBe("done");
   });
 
+  it("cancel during the sign-ins stops the job: the sign-in in flight ends not signed in, the machine goes, nothing is sealed; a cancel during the seal is refused and the view says the job cannot be stopped", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "skip" } });
+    expect((await f.jobs.get()).job!.stoppable).toBe(true);
+    f.setLink(scriptedLink({ signedIn: false, hold: true, missing: false }));
+    await f.jobs.build({});
+    // The first sign-in's page is up and the person is waited on; the job says it can still be stopped.
+    await new Promise<void>(resolve => {
+      const off = f.jobs.on(e => {
+        if (e.job.rows.some(r => r.kind === "sign-in" && r.page !== undefined)) {
+          off();
+          resolve();
+        }
+      });
+    });
+    expect(f.jobs.view()!.stoppable).toBe(true);
+    const cancelled = await f.jobs.cancel();
+    expect(cancelled.phase).not.toBe("failed");
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("cancelled");
+    expect(view.stoppable).toBe(false);
+    expect(view.rows.find(r => r.id === "sign-in/gh")).toMatchObject({ state: "not signed in" });
+    expect(view.golden).toBeUndefined();
+    expect(goldenHead(await f.rt.golden.get()) ?? null).toBeNull();
+    expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
+    expect(view.log.some(l => l.includes("Stopped while signing in."))).toBe(true);
+  });
+
+  it("a sign-in that ran out reads not signed in and can be retried while the build runs, through the run's own relay so a callback page still returns; the build waits on none of it and the relay closes with the job", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
+    f.setLink(scriptedLink({ signedIn: false, hold: false, missing: false }));
+    await f.jobs.build({});
+    // The build goes on past the failed sign-in and seals; the row says not signed in.
+    await new Promise<void>(resolve => {
+      const off = f.jobs.on(e => {
+        if (e.job.rows.some(r => r.id === "sign-in/gh" && r.state === "not signed in") && e.job.phase === "sealing") {
+          off();
+          resolve();
+        }
+      });
+    });
+    // The relay is still up during the seal, its hooks the ones the run wired.
+    expect(f.relay.closed).toBe(0);
+    expect(f.relay.hooks).toHaveLength(1);
+    // The retried tool prints no page; the machine asks the host to open its callback page, which the relay's hook
+    // hands to the retry through the run's own flow, and the status then says signed in.
+    // The held login waits on the person; once the callback page is handed over, the tool's own status says signed in.
+    const held = scriptedLink({ signedIn: true, hold: true, missing: false });
+    const script = held.script;
+    held.script = (pty, line) => {
+      if (line.includes("gh auth status")) {
+        held.data(pty, "Logged in to github.com account me\r\nWSP_STATUS 0\r\n");
+        held.exit(pty, 0);
+        return;
+      }
+      script?.(pty, line);
+    };
+    f.setLink(held);
+    const retried = await f.jobs.retry({ tool: "gh" });
+    expect(retried.rows.find(r => r.id === "sign-in/gh")).toMatchObject({ state: "running" });
+    // A retry during the seal leaves the seal's phase word alone; its command is on the machine once its pty is open.
+    expect(retried.phase).toBe("sealing");
+    await vi.waitFor(() => expect(held.ptys.length).toBe(1));
+    const builderId = (await f.rt.golden.builders()).find(b => b.name === "default")!.id;
+    expect(f.relay.hooks[0]!.autoOpen(builderId, "https://dash.cloudflare.com/oauth2?state=x", 8976)).toBe(false);
+    await new Promise<void>(resolve => {
+      const off = f.jobs.on(e => {
+        if (e.job.rows.some(r => r.id === "sign-in/gh" && r.page === "https://dash.cloudflare.com/oauth2?state=x")) {
+          off();
+          resolve();
+        }
+      });
+    });
+    await new Promise<void>(resolve => {
+      const off = f.jobs.on(e => {
+        if (e.job.rows.some(r => r.id === "sign-in/gh" && r.state === "done")) {
+          off();
+          resolve();
+        }
+      });
+    });
+    await f.settled();
+    expect(f.jobs.view()!.phase).toBe("done");
+    expect(f.relay.closed).toBe(1);
+    await expect(f.jobs.retry({ tool: "gh" })).rejects.toThrow(/no build is running|no failed sign-in/);
+  }, 20_000);
+
   it("cancel while the screens wait drops the job; a build cannot start without answers", async () => {
     const f = fake();
     await f.jobs.start({ road: "manual" });
@@ -208,7 +447,7 @@ describe("the init job, manual road", () => {
   });
 
   it("a build with no provider key is refused before anything is read into the recipe", async () => {
-    const f = fake({ keys: {} });
+    const f = fake({ env: {} });
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await expect(f.jobs.build({})).rejects.toThrow(/Solari/);

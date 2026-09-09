@@ -101,7 +101,7 @@ describe("a computer with no machine provider key", () => {
     // The listing's machine cell is this computer's cores and memory, the size line its sidebar row reads, off the
     // same os facts the local backend records; this runs on the real machine, so the line is computed, not spelled.
     expect(listed.lines[0]).toContain(fmtSize(localShape(), kindWords("local").cpu));
-    expect(listed.lines[0]).toMatch(/\d+ cores · \d+ GB/);
+    expect(listed.lines[0]).toMatch(/\d+\u00a0cores\u00a0·\u00a0\d+\u00a0GB/);
   });
 
   it("answers the sentence naming what is missing on every road that would fork a machine, once and with nothing before it", async () => {

@@ -425,7 +425,7 @@ describe("the caps, checked again before the machine is asked", () => {
     const { rt, ws, since } = await workspaceOn({ claude: claude.factory });
     await expect(
       rt.sessions.start(ws.id, { prompt: "big one", attachments: [{ mediaType: "image/png", bytes: bytesOf(1, 12 * 1024 * 1024) }] }),
-    ).rejects.toThrow("over the 10.0 MB an image may be");
+    ).rejects.toThrow("over the 10 MB an image may be");
     expect(claude.starts).toHaveLength(0);
     expect(since().puts).toHaveLength(0);
   });

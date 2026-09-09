@@ -267,22 +267,22 @@ describe("export project dialog", () => {
 
     emit(event({}));
     expect(progress(root)).toEqual({ line: "Packing the folder", percent: "0" });
-    emit(event({ stage: "downloading", message: "The folder: 1.4 KB of 2.8 KB.", elapsedMs: 50, bytes: 1_400, total: 2_800 }));
-    expect(progress(root)).toEqual({ line: "Downloading the folder, 2.7 KB", percent: "50" });
+    emit(event({ stage: "downloading", message: "The folder: 1 KB of 3 KB.", elapsedMs: 50, bytes: 1_400, total: 2_800 }));
+    expect(progress(root)).toEqual({ line: "Downloading the folder, 3 KB", percent: "50" });
     emit(event({ dest: "/Users/me/other", stage: "landing", message: "Landing at /Users/me/other.", elapsedMs: 60 }));
-    expect(progress(root)).toEqual({ line: "Downloading the folder, 2.7 KB", percent: "50" });
+    expect(progress(root)).toEqual({ line: "Downloading the folder, 3 KB", percent: "50" });
     emit(event({ stage: "packing", message: "Packing the agents' state for it on the machine.", elapsedMs: 65 }));
     expect(progress(root)).toEqual({ line: "Packing sessions", percent: "50" });
     emit(event({ stage: "downloading", message: "Agent state: 0 B of 200 B.", elapsedMs: 66, bytes: 0, total: 200 }));
     expect(progress(root)).toEqual({ line: "Downloading sessions, 200 B", percent: "50" });
     emit(event({ stage: "landing", message: "Landing at /root/proj.", elapsedMs: 70 }));
     expect(progress(root)).toEqual({ line: "Landing on this Mac", percent: "100" });
-    emit(event({ stage: "done", message: "11 files, 2.8 KB, landed at /root/proj; 1 cache left behind; sessions: Claude Code (2 sessions) moved.", elapsedMs: 80 }));
+    emit(event({ stage: "done", message: "11 files, 3 KB, landed at /root/proj; 1 cache left behind; sessions: Claude Code (2 sessions) moved.", elapsedMs: 80 }));
     expect(progress(root)).toEqual({ line: "Done", percent: "100" });
     await act(async () => finish());
     await waitFor(() => expect(progress(root)).toEqual({ line: "proj is at /root/proj on this Mac.", percent: "100" }));
     expect(within(root).getByRole("status").className).toContain("text-muted-foreground");
-    expect(value(root, "files")).toBe("11 files · 2.8 KB");
+    expect(value(root, "files")).toBe("11 files · 3 KB");
     expect(root.querySelector("[data-k=files]")!.className).not.toContain("text-muted-foreground");
     expect(value(root, "caches")).toBe("1 folder");
     expect(root.querySelector("[data-k=cache-list]")).toBeNull();

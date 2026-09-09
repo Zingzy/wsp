@@ -25,7 +25,7 @@ describe("the Also on this Mac screen", () => {
   it("draws one row per tool under its manager, with the install line and the size measured here", () => {
     const items = alsoItems(scan, bare);
     expect(items.map(i => i.group)).toEqual(["Homebrew formulae", "Homebrew formulae", "Homebrew formulae", "npm globals"]);
-    expect(items[0]).toMatchObject({ id: "brew/just", label: "just", hint: { text: "4.0 MB" } });
+    expect(items[0]).toMatchObject({ id: "brew/just", label: "just", hint: { text: "4 MB" } });
     expect(items[0]!.detail[0]).toBe("brew install just");
     expect(items[3]!.detail[0]).toBe("npm install -g turbo");
     expect(items[3]!.detail[1]).toContain("2.5.0 here");
@@ -49,7 +49,7 @@ describe("the Also on this Mac screen", () => {
     expect(buildLine(manifest, scan[1]!, table)).toBeUndefined();
     const items = alsoItems(rows, recipe, r => buildLine(manifest, r, table));
     expect(items.find(i => i.id === diskbloom.id)!.detail).toEqual(["installs from its release: the v0.1.0 release of github.com/Zingzy/diskbloom", "installed on this Mac, 0.1.0"]);
-    expect(items.find(i => i.id === diskbloom.id)!.hint).toEqual({ text: "4.0 MB" });
+    expect(items.find(i => i.id === diskbloom.id)!.hint).toEqual({ text: "4 MB" });
     // A package with no row of its own keeps the screen's words for a custom row.
     expect(items.find(i => i.id === "brew/llvm")!.detail).toEqual(["brew install llvm", "installs on the machine after everything in the catalog"]);
     // A tick on it ticks the recipe's row and writes no custom row; the row stays off until then; an untick turns it off again.
@@ -96,8 +96,8 @@ describe("the Also on this Mac screen", () => {
     const paint = (i: number): ((padded: string) => string) | undefined => (typeof items[i]!.hint === "object" ? items[i]!.hint.paint : undefined);
     // The paint runs on the padded cell, so a colour never changes the column's width.
     expect(paint(0)).toBeUndefined();
-    expect(paint(1)!("2.0 GB")).toBe("\x1b[31m2.0 GB\x1b[39m");
-    expect(paint(2)!("600.0 MB")).toBe("\x1b[93m600.0 MB\x1b[39m");
+    expect(paint(1)!("2 GB")).toBe("\x1b[31m2 GB\x1b[39m");
+    expect(paint(2)!("600 MB")).toBe("\x1b[93m600 MB\x1b[39m");
     expect(paint(3)).toBeUndefined();
   });
 
@@ -106,7 +106,7 @@ describe("the Also on this Mac screen", () => {
     const brew = items.filter(i => i.group === "Homebrew formulae");
     const line = alsoGroupLine(scan);
     expect(line(brew, { ticks: new Set(), answers: new Map() })).toBe("0 of 3  0 B");
-    expect(line(brew, { ticks: new Set(["brew/just", "brew/llvm"]), answers: new Map() })).toBe("2 of 3  2.0 GB");
+    expect(line(brew, { ticks: new Set(["brew/just", "brew/llvm"]), answers: new Map() })).toBe("2 of 3  2 GB");
   });
 
   it("starts every row off: nothing here goes on the image unasked", () => {

@@ -33,6 +33,7 @@ import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
+import { agentKeyEnvs, parseEnvFile, savedEnv, type Keys } from "./env-keys.js";
 import { keychainReader } from "./init-import.js";
 import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
@@ -212,12 +213,7 @@ export interface CliIO {
   askSecret(question: string): Promise<string>;
 }
 
-export interface Keys {
-  /** The machine provider's key. Absent on a computer set up with no provider: wsp init took the local road, so
-   * this computer is the workspace and the provider module wired in its place refuses every machine road. */
-  solari?: string;
-  anthropic?: string;
-}
+export type { Keys } from "./env-keys.js";
 
 export interface KeySources {
   env: Record<string, string | undefined>;
@@ -283,16 +279,6 @@ export function jsonCliIO(err: Writable = process.stderr): CliIO {
   const nobody = (q: string): Promise<never> => Promise.reject(new Error(nobodyLine(q)));
   const noKey = (q: string): Promise<never> => Promise.reject(authRefusal(nobodyLine(q)));
   return { log: say, error: say, stream: text => void err.write(text), ask: nobody, askSecret: noKey };
-}
-
-function parseEnvFile(path: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (!existsSync(path)) return out;
-  for (const line of readFileSync(path, "utf8").split("\n")) {
-    const m = line.match(/^([A-Z_]+)=(.*)$/);
-    if (m && m[2]) out[m[1]!] = m[2]!.trim();
-  }
-  return out;
 }
 
 /** The one writer of the wsp home's .env: a key line it knows is rewritten in place, the rest appended, mode 0600. */
@@ -543,8 +529,9 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
 }
 
 /** The init job on this computer for a serving host: wsp init's own readers and build pieces, the keys read off the
- * files at each ask, the provider module swapped into the runtime once a key is saved, and the wsp tools written by
- * the road wsp mcp install takes, under the command this process runs as. */
+ * wsp home's .env alone at each ask (a key in this process's environment or a checkout's .env is the terminal's and
+ * never reads as saved on a screen), the provider module swapped into the runtime once a key is saved, and the wsp
+ * tools written by the road wsp mcp install takes, under the command this process runs as. */
 function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: UrlOpener, log: (line: string) => void): InitJobs {
   const home = homedir();
   const os = platform() === "darwin" ? "darwin" : "linux";
@@ -553,7 +540,7 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
     statePath,
     home,
     platform: os,
-    keys: () => keysFound(),
+    saved: () => savedEnv(wspHome()),
     saveKeys: set => writeEnvFile(join(wspHome(), ".env"), set),
     provider: keys => swapProvider(rt, keys),
     pricing: () => SOLARI_PRICING,
@@ -759,7 +746,7 @@ async function init(
         const { path, exists } = projectFolder(folder);
         return exists ? scanProject(nodeHost(), path) : undefined;
       },
-      keys,
+      agentKeys: agentKeyEnvs(keys),
       pricing: providerBackend(keys).pricing,
       statePath: opts.statePath,
       home: homedir(),

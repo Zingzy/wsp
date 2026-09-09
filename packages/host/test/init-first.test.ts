@@ -172,9 +172,9 @@ describe("the tick taken", () => {
 
 describe("the two lines the import prints", () => {
   it("names the files and bytes, and only the parts the plan has", () => {
-    expect(planLine(plan())).toBe("12 files, 3.0 KB.");
-    expect(planLine(plan({ repo: true }))).toBe("12 files, 3.0 KB; the repository whole.");
-    expect(planLine(plan({ secrets: [{ path: ".env", bytes: 12, signals: ["keys"] }] }))).toBe("12 files, 3.0 KB; 1 secret-shaped file read for what may travel.");
+    expect(planLine(plan())).toBe("12 files, 3 KB.");
+    expect(planLine(plan({ repo: true }))).toBe("12 files, 3 KB; the repository whole.");
+    expect(planLine(plan({ secrets: [{ path: ".env", bytes: 12, signals: ["keys"] }] }))).toBe("12 files, 3 KB; 1 secret-shaped file read for what may travel.");
   });
 
   it("counts only the agents whose sessions can travel, and adds their sessions up", () => {
@@ -184,13 +184,13 @@ describe("the two lines the import prints", () => {
       { agent: "gemini", name: "Gemini CLI", sessions: 0, bytes: 0, carry: "moves" as const },
       { agent: "opencode", name: "OpenCode", sessions: 9, bytes: 40, carry: "moves" as const, error: "state.db is locked" },
     ];
-    expect(planLine(plan({ agents }))).toBe("12 files, 3.0 KB; 50 sessions from Claude Code, Codex.");
+    expect(planLine(plan({ agents }))).toBe("12 files, 3 KB; 50 sessions from Claude Code, Codex.");
   });
 
   it("says where the folder landed and what was left out of it", () => {
     const landed = (over: Partial<ProjectImportResult> = {}): ProjectImportResult => ({ dest: "/Users/me/code/proj", files: 12, bytes: 3072, parts: 1, cut: [], rewritten: [], agents: [], ...over });
-    expect(importedLine(landed(), "first")).toBe("/Users/me/code/proj on first: 12 files, 3.0 KB.");
-    expect(importedLine(landed({ cut: [".env"], rewritten: [".git/config"] }), "proj")).toBe("/Users/me/code/proj on proj: 12 files, 3.0 KB; 1 file rewritten without their credentials; 1 secret-shaped file cut.");
+    expect(importedLine(landed(), "first")).toBe("/Users/me/code/proj on first: 12 files, 3 KB.");
+    expect(importedLine(landed({ cut: [".env"], rewritten: [".git/config"] }), "proj")).toBe("/Users/me/code/proj on proj: 12 files, 3 KB; 1 file rewritten without their credentials; 1 secret-shaped file cut.");
   });
 });
 

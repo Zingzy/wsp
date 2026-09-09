@@ -436,13 +436,19 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, setup: await init().get() });
               return;
             case "init.keys":
-              send({ id: msg.id, ok: true, setup: await init().keys({ ...(msg.solari !== undefined ? { solari: msg.solari } : {}), ...(msg.anthropic !== undefined ? { anthropic: msg.anthropic } : {}) }) });
+              send({ id: msg.id, ok: true, setup: await init().keys({ ...(msg.solari !== undefined ? { solari: msg.solari } : {}), ...(msg.rows !== undefined ? { rows: msg.rows } : {}) }) });
               return;
             case "init.start":
               send({ id: msg.id, ok: true, job: await init().start({ road: msg.road, ...(msg.harness !== undefined ? { harness: msg.harness } : {}) }) });
               return;
             case "init.answer":
               send({ id: msg.id, ok: true, job: await init().answer({ screen: msg.screen, ...(msg.ticks !== undefined ? { ticks: msg.ticks } : {}), ...(msg.answers !== undefined ? { answers: msg.answers } : {}) }) });
+              return;
+            case "init.step":
+              send({ id: msg.id, ok: true, job: await init().step({ at: msg.at }) });
+              return;
+            case "init.retry":
+              send({ id: msg.id, ok: true, job: await init().retry({ tool: msg.tool }) });
               return;
             case "init.build":
               send({ id: msg.id, ok: true, job: await init().build({ ...(msg.firstWorkspace !== undefined ? { firstWorkspace: msg.firstWorkspace } : {}), ...(msg.importFolder !== undefined ? { importFolder: msg.importFolder } : {}) }) });

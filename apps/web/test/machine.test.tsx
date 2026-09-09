@@ -201,7 +201,7 @@ describe("machine facts", () => {
     expect(fact("machine-id")).toBe("m_ws_a_0123456789abcdef");
     expect(fact("state")).toBe("Running");
     expect(fact("reach")).toBe("reachable");
-    expect(fact("size")).toBe("2 vCPU · 4 GB");
+    expect(fact("size")).toBe("2 vCPU · 4 GB");
   });
 
   it("every fact value carries its full text as a title, so a value the row cuts is still readable", async () => {
@@ -217,7 +217,7 @@ describe("machine facts", () => {
   });
 
   it("a nap whose vault was refused reads as a muted word in the facts with the cap under them; a machine whose vault stands has no such row", async () => {
-    const w = { ...view("ws_a", "api", "napping"), vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 645.8 MB, over the 200.0 MB cap" };
+    const w = { ...view("ws_a", "api", "napping"), vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 646 MB, over the 200 MB cap" };
     const api = await mount([w]);
     expect(fact("vault")).toBe("no backup since 2026-09-08");
     const cell = document.querySelector('[data-k="vault"]')!;
@@ -225,7 +225,7 @@ describe("machine facts", () => {
     expect(cell.className).toContain("font-mono");
     expect(cell.querySelector("span")!.className).toContain("text-muted-foreground");
     expect(document.querySelector('[data-slot="badge"]')).toBeNull();
-    expect(fact("vault-refused")).toBe("the export was 645.8 MB, over the 200.0 MB cap");
+    expect(fact("vault-refused")).toBe("the export was 646 MB, over the 200 MB cap");
     // A nap that stores one clears both: the row goes, and nothing about backups is said.
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), vaultedAt: "2026-09-09T08:00:00.000Z", vaultRefused: undefined } }));
     await waitFor(() => expect(document.querySelector('[data-k="vault"]')).toBeNull());
@@ -972,13 +972,13 @@ describe("upgrade", () => {
   it("offers the provider's sizes above the current one on both counts, the current left out, with the estimated rate", async () => {
     await mount([view("ws_a", "api")]);
     openPicker();
-    expect(screen.getAllByRole("button").map(b => b.textContent).filter(t => t?.includes("vCPU"))).toEqual(["4 vCPU · 8 GB", "4 vCPU · 16 GB", "8 vCPU · 16 GB", "16 vCPU · 32 GB"]);
-    expect(screen.queryByRole("button", { name: "2 vCPU · 4 GB" })).toBeNull();
+    expect(screen.getAllByRole("button").map(b => b.textContent).filter(t => t?.includes("vCPU"))).toEqual(["4 vCPU · 8 GB", "4 vCPU · 16 GB", "8 vCPU · 16 GB", "16 vCPU · 32 GB"]);
+    expect(screen.queryByRole("button", { name: "2 vCPU · 4 GB" })).toBeNull();
     // The new row prices the pick at the table's own rate, not the current rate scaled by vCPU.
-    expect(fact("resize-to")).toBe("4 vCPU · 8 GB · $0.22/hr");
-    fireEvent.click(screen.getByRole("button", { name: "4 vCPU · 16 GB" }));
-    expect(fact("resize-to")).toBe("4 vCPU · 16 GB · $0.30/hr");
-    expect(fact("resize-from")).toBe("2 vCPU · 4 GB · $0.11/hr");
+    expect(fact("resize-to")).toBe("4 vCPU · 8 GB · $0.22/hr");
+    fireEvent.click(screen.getByRole("button", { name: "4 vCPU · 16 GB" }));
+    expect(fact("resize-to")).toBe("4 vCPU · 16 GB · $0.30/hr");
+    expect(fact("resize-from")).toBe("2 vCPU · 4 GB · $0.11/hr");
   });
 
   it("paints the new size while the op runs, calls the api once, then settles on the status event", async () => {
@@ -988,7 +988,7 @@ describe("upgrade", () => {
     openPicker();
     fireEvent.click(screen.getByRole("button", { name: "Confirm resize" }));
 
-    expect(fact("size")).toBe("4 vCPU · 8 GB · resizing");
+    expect(fact("size")).toBe("4 vCPU · 8 GB · resizing");
     expect(screen.getByRole("status").textContent).toBe("Resizing…");
     expect(api.upgrade).toHaveBeenCalledTimes(1);
     expect(api.upgrade).toHaveBeenCalledWith("ws_a", { cpu: 4, memMb: 8192 });
@@ -1000,13 +1000,13 @@ describe("upgrade", () => {
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), size: { cpu: 4, memMb: 8192 } } }));
     // The footer ends where its content ends: no empty status line is kept under the buttons.
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
-    expect(fact("size")).toBe("4 vCPU · 8 GB");
+    expect(fact("size")).toBe("4 vCPU · 8 GB");
   });
 
   it("picks a larger tier when chosen", async () => {
     const api = await mount([view("ws_a", "api")]);
     openPicker();
-    fireEvent.click(screen.getByRole("button", { name: "8 vCPU · 16 GB" }));
+    fireEvent.click(screen.getByRole("button", { name: "8 vCPU · 16 GB" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm resize" }));
     await waitFor(() => expect(api.upgrade).toHaveBeenCalledWith("ws_a", { cpu: 8, memMb: 16384 }));
   });
@@ -1017,7 +1017,7 @@ describe("upgrade", () => {
     openPicker();
     fireEvent.click(screen.getByRole("button", { name: "Confirm resize" }));
     await waitFor(() => expect(screen.getByText("quota exceeded")).toBeDefined());
-    expect(fact("size")).toBe("2 vCPU · 4 GB");
+    expect(fact("size")).toBe("2 vCPU · 4 GB");
   });
 
   it("a backend that cannot resize gets no Upgrade button and no sentence about it; Pause stays, and the footer ends there", async () => {
@@ -1088,7 +1088,7 @@ describe("zombie", () => {
       api.emit({ type: "workspace.status", status: { ...status(w), reach: { state: "unreachable" } } });
     });
     await waitFor(() => expect(fact("out-of-memory")).toBe("Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the machine last answered; the work on it took the memory, not a fault of the machine"));
-    expect(fact("bigger-size")).toBe("A workspace on 4 vCPU · 8 GB ($0.22/hr) fits more; pick it when you make the next one");
+    expect(fact("bigger-size")).toBe("A workspace on 4 vCPU · 8 GB ($0.22/hr) fits more; pick it when you make the next one");
     // Not a zombie yet: no rebuild on offer for a machine the runtime is still waiting on.
     expect(screen.queryByRole("button", { name: "Rebuild api" })).toBeNull();
     act(() => api.emit({ type: "workspace.status", status: zombie(w) }));
@@ -1166,8 +1166,8 @@ describe("live", () => {
     await mount([view("ws_a", "api")]);
     feed("ws_a", [0, 1, 2, 3, 4].map(i => sysSample(i)));
     await waitFor(() => expect(fact("cpu")).toBe("33%"));
-    expect(fact("mem")).toBe("1.0 GB of 4.0 GB");
-    expect(fact("disk")).toBe("20.0 GB of 100.0 GB");
+    expect(fact("mem")).toBe("1 GB of 4 GB");
+    expect(fact("disk")).toBe("20 GB of 100 GB");
     expect(screen.getByText("load 0.42")).toBeDefined();
     for (const k of ["cpu", "mem", "disk"]) {
       const row = liveRow(k);
@@ -1247,7 +1247,7 @@ describe("live", () => {
     await waitFor(() => expect(fact("cpu")).toBe("pending"));
     feed("ws_a", [sysSample(0)]);
     await waitFor(() => expect(fact("cpu")).toBe("33%"));
-    expect(fact("disk")).toBe("20.0 GB of 100.0 GB");
+    expect(fact("disk")).toBe("20 GB of 100 GB");
   });
 
   it("the disk number takes the tier colour at 50, 65 and 75 percent; cpu and memory stay neutral", async () => {
@@ -1255,16 +1255,16 @@ describe("live", () => {
     const tone = (k: string): string => valueSlot(k).className;
     const disk = (pct: number): SysSample => sysSample(0, { cpu: 95, disk: { used: pct * GiB, total: 100 * GiB } });
     feed("ws_a", [disk(49.9)]);
-    await waitFor(() => expect(fact("disk")).toBe("49.9 GB of 100.0 GB"));
+    await waitFor(() => expect(fact("disk")).toBe("49.9 GB of 100 GB"));
     expect(tone("disk")).not.toMatch(/warning|caution|destructive/);
     feed("ws_a", [disk(50)]);
-    await waitFor(() => expect(fact("disk")).toBe("50.0 GB of 100.0 GB"));
+    await waitFor(() => expect(fact("disk")).toBe("50 GB of 100 GB"));
     expect(tone("disk")).toMatch(/text-warning-foreground/);
     feed("ws_a", [disk(65)]);
-    await waitFor(() => expect(fact("disk")).toBe("65.0 GB of 100.0 GB"));
+    await waitFor(() => expect(fact("disk")).toBe("65 GB of 100 GB"));
     expect(tone("disk")).toMatch(/text-caution-foreground/);
     feed("ws_a", [disk(75)]);
-    await waitFor(() => expect(fact("disk")).toBe("75.0 GB of 100.0 GB"));
+    await waitFor(() => expect(fact("disk")).toBe("75 GB of 100 GB"));
     expect(tone("disk")).toMatch(/text-destructive-foreground/);
     expect(fact("cpu")).toBe("95%");
     expect(tone("cpu")).not.toMatch(/warning|caution|destructive/);
@@ -1340,7 +1340,7 @@ describe("this computer as a workspace", () => {
     api.watchStatuses = vi.fn(async () => [{ ...status(MAC), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, ...(facts === null ? {} : { facts }) }]);
     useStore.getState().bind(api);
     render(<MachineSurface workspaceId={MAC.id} />);
-    await waitFor(() => expect(fact("size")).toBe("10 cores · 16 GB"));
+    await waitFor(() => expect(fact("size")).toBe("10 cores · 16 GB"));
     return api;
   }
 

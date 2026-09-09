@@ -69,8 +69,8 @@ describe.skipIf(renderSkipped !== undefined)("what a Live row says while it wait
 
     await page!.evaluate(() => (window as unknown as { landSample: () => void }).landSample());
     await expect.poll(() => slot("local", "cpu").textContent(), { timeout: 10_000 }).toBe("33%");
-    expect(await slot("local", "mem").textContent()).toBe("6.0 GB of 16.0 GB");
-    expect(await slot("local", "disk").textContent()).toBe("200.0 GB of 500.0 GB");
+    expect(await slot("local", "mem").textContent()).toBe("6 GB of 16 GB");
+    expect(await slot("local", "disk").textContent()).toBe("200 GB of 500 GB");
     expect(await heights()).toEqual(pendingHeights);
     const filled = join(SHOTS, "live-filled.png");
     await page!.locator("[data-testid=local-tab]").screenshot({ path: filled });

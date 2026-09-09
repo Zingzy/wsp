@@ -53,7 +53,7 @@ describe("file preview surface", () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": { content: "x".repeat(64), size: 3 * 1024 * 1024, truncated: true } }));
     const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/src/a.ts")} theme="dark" />);
     await waitFor(() => expect(container.querySelector("[data-file-truncated]")).not.toBeNull());
-    expect(container.querySelector("[data-file-truncated]")?.textContent).toContain("3.0 MB");
+    expect(container.querySelector("[data-file-truncated]")?.textContent).toContain("3 MB");
   });
 
   it("shows a read refusal as the body", async () => {

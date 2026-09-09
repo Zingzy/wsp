@@ -52,18 +52,18 @@ describe("the agents screen", () => {
     const histories = [{ agent: "claude", state: "read" as const, sessions: 151, calls: 4000 }];
     const items = tableItems(recipeTable({ ...RECIPE, histories }, CATALOG_AGENTS), RECIPE, FIXTURE, 4, false);
     expect(items.map(i => [i.label, text(i.why), text(i.hint)])).toEqual([
-      ["Claude Code", "used       used here, 151 sessions", "208.0 MB"],
-      ["Codex", "catalog    not installed here", "455.0 MB"],
-      ["OpenCode", "catalog    not installed here", "673.0 MB"],
-      ["Hermes Agent", "catalog    not installed here", "484.0 MB"],
-      ["Gemini CLI", "catalog    not installed here", "189.0 MB"],
-      ["Pi", "catalog    not installed here", "165.0 MB"],
+      ["Claude Code", "used       used here, 151 sessions", "208 MB"],
+      ["Codex", "catalog    not installed here", "455 MB"],
+      ["OpenCode", "catalog    not installed here", "673 MB"],
+      ["Hermes Agent", "catalog    not installed here", "484 MB"],
+      ["Gemini CLI", "catalog    not installed here", "189 MB"],
+      ["Pi", "catalog    not installed here", "165 MB"],
     ]);
     // No groups on this screen, and nothing locked: the six are one list.
     expect(items.every(i => i.group === undefined && i.lock === undefined)).toBe(true);
     expect(items.find(i => i.label === "Codex")!.detail[0]).not.toBe("installs, but wsp cannot run its threads yet");
     expect(items.find(i => i.label === "OpenCode")!.detail[0]).toBe("installs, but wsp cannot run its threads yet");
-    expect(items.find(i => i.label === "Claude Code")!.detail).toEqual(["on this Mac; its config (39.1 KB) comes along", "about 208.0 MB installed on the machine (measured 2026-09-05)"]);
+    expect(items.find(i => i.label === "Claude Code")!.detail).toEqual(["on this Mac; its config (39 KB) comes along", "about 208 MB installed on the machine (measured 2026-09-05)"]);
   });
 
   it("puts the ticked agents first, then the most used, then the rest as the table has them, so the cursor starts on the one wsp drives", () => {
@@ -103,10 +103,10 @@ describe("the tools screen", () => {
     // Every row in the used group carries its own count, so a wrong claim about what was run is visible.
     expect(text(by("go").why)).toBe("used       below the floor, 2 commands in 1 session");
     expect(text(by("wrangler").why)).toBe("used       40 commands in 3 sessions");
-    expect(text(by("gh").hint)).toBe("40.2 MB");
-    expect(text(by("op").hint)).toBe("41.0 MB");
+    expect(text(by("gh").hint)).toBe("40 MB");
+    expect(text(by("op").hint)).toBe("41 MB");
     expect(by("node").detail).toEqual(["ships in 5 lab images; on by default in the catalog; on every machine", "part of the base on every machine"]);
-    expect(by("go").detail).toEqual(["your agents used it in 1 session (2 calls)", "about 239.1 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
+    expect(by("go").detail).toEqual(["your agents used it in 1 session (2 calls)", "about 239 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
     expect(by("java").detail[0]).toBe("ships in 4 lab images; on request");
   });
 
@@ -116,7 +116,7 @@ describe("the tools screen", () => {
     const go = items.find(i => i.id === "go")!;
     expect(go.group).toBe(PROJECT_GROUP);
     expect(text(go.why)).toBe("project    go.mod needs Go");
-    expect(go.detail).toEqual(["go.mod needs Go", "about 239.1 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
+    expect(go.detail).toEqual(["go.mod needs Go", "about 239 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
     // A floor row the project also named says so under the cursor, even though the base is what puts it on the machine.
     const based = { ...RECIPE, rows: [...RECIPE.rows.filter(r => r.id !== "pnpm"), row({ id: "pnpm", source: { kind: "project", why: "pnpm-lock.yaml needs pnpm" } })] };
     const pnpm = tableItems(recipeTable(based, CATALOG_TOOLS), based, FIXTURE, 4, true).find(i => i.id === "pnpm")!;
@@ -179,7 +179,7 @@ describe("the sign-ins screen", () => {
   it("an MCP server with auth is a row under its own group, named by the config it sits in, copy or skip", () => {
     const github: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/github", label: "github", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", consent: true, detail: "stdio: npx server-github; runs via npx; carries a secret: env GITHUB_TOKEN (40 B)" };
     const notes: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", detail: "stdio: npx notes-mcp; carries no secret" };
-    const remote: ManifestEntry = { rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote sign-ins", group: "MCP sign-ins", paths: ["~/.mcp-auth"], bytes: 1800, default: "bring", consent: true, detail: "browser sign-ins saved by mcp-remote for remote servers: 1 token (1.4 KB)" };
+    const remote: ManifestEntry = { rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote sign-ins", group: "MCP sign-ins", paths: ["~/.mcp-auth"], bytes: 1800, default: "bring", consent: true, detail: "browser sign-ins saved by mcp-remote for remote servers: 1 token (1 KB)" };
     const locked: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/mac", label: "mac", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "skip", reason: "command is macOS-only, will not run", consent: true, detail: "stdio: /Applications/x; carries a secret: env A (4 B)" };
     const s = signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, notes, remote, locked] }), recipe), new Map());
     expect(s.items.filter(i => i.group === MCP_LOGINS).map(i => [i.label, i.why])).toEqual([
@@ -293,11 +293,11 @@ describe("the agents screen drawn", () => {
     expect(t).toContain("◆  Agents  1/6");
     expect(t).toContain(`┃  ${AGENTS_TOP}`);
     expect(t).toContain(`┃  ${LATER_LINE}`);
-    expect(t).toMatch(/● Claude Code\s+used\s+used here, 1 session\s+208\.0 MB\n/);
-    expect(t).toMatch(/● Codex\s+used\s+used here, 1 session\s+455\.0 MB\n/);
-    expect(t).toMatch(/○ OpenCode\s+installed\s+installed here, never used\s+673\.0 MB\n/);
+    expect(t).toMatch(/● Claude Code\s+used\s+used here, 1 session\s+208 MB\n/);
+    expect(t).toMatch(/● Codex\s+used\s+used here, 1 session\s+455 MB\n/);
+    expect(t).toMatch(/○ OpenCode\s+installed\s+installed here, never used\s+673 MB\n/);
     expect(t).toMatch(/○ Hermes Agent\s+catalog\s+not installed here/);
-    expect(t).toContain("On: 2 agents, 663.0 MB");
+    expect(t).toContain("On: 2 agents, 663 MB");
     // The ticked two come first, the heavy one on top as the table orders them, and the cursor starts there, so no
     // frame carries a note yet.
     expect(t.indexOf("● Codex")).toBeLessThan(t.indexOf("● Claude Code"));
@@ -343,10 +343,10 @@ describe("the tools screen drawn", () => {
     expect(t).toContain("◆  Tools  2/6");
     expect(t).toContain(`┃  ${TOOLS_TOP}`);
     expect(t).toContain(`┃  ${LATER_LINE}`);
-    expect(t).toMatch(/▾ Always on the image\s+1\s+198\.8 MB\n┃\s+• Node 22 with npm\s+base\s+always on the image\s+198\.8 MB\n/);
-    expect(t).toMatch(/▾ You use these\s+1 of 1\s+239\.1 MB\n┃\s+● Go\s+used\s+40 commands in 3 sessions\s+239\.1 MB\n/);
-    expect(t).toMatch(/▾ Installed here, never used\s+1 of 1\s+40\.2 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40\.2 MB\n/);
-    expect(t).toContain("On: 3 tools, 478.2 MB");
+    expect(t).toMatch(/▾ Always on the image\s+1\s+199 MB\n┃\s+• Node 22 with npm\s+base\s+always on the image\s+199 MB\n/);
+    expect(t).toMatch(/▾ You use these\s+1 of 1\s+239 MB\n┃\s+● Go\s+used\s+40 commands in 3 sessions\s+239 MB\n/);
+    expect(t).toMatch(/▾ Installed here, never used\s+1 of 1\s+40 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40 MB\n/);
+    expect(t).toContain("On: 3 tools, 478 MB");
     expect(t).toContain("Disk: 1.4 GB of 15.2 GB on the 20 GB builder");
     expect(t).toContain("┗  space on or off • ← → fold • enter next • esc back");
     // The two lines he struck out are gone with the all row.
@@ -360,7 +360,7 @@ describe("the tools screen drawn", () => {
     o.input.write(KEY.space);
     await settle();
     expect(o.text()).toMatch(/○ Go/);
-    expect(o.text()).toContain("On: 2 tools, 239.0 MB");
+    expect(o.text()).toContain("On: 2 tools, 239 MB");
     o.input.write(KEY.enter);
     const r = await p;
     expect(r.kind === "next" && [...r.ticks].sort()).toEqual(["gh", "node"]);
@@ -426,7 +426,7 @@ describe("the whole flow", () => {
     await settle(20);
     const mac = o.text().slice(o.text().lastIndexOf("◆  Also on this Mac"));
     expect(mac).toContain("◆  Also on this Mac  3/6");
-    expect(mac).toContain("What this Mac has installed that a package manager could put on the image too.");
+    expect(mac).toContain("What else this Mac could bring");
     expect(mac).toContain(ALSO_EMPTY);
     o.input.write(KEY.enter);
     await settle(20);

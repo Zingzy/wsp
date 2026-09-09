@@ -72,7 +72,7 @@ describe.skipIf(renderSkipped !== undefined)("the import dialog laid out in Chro
   const uncut = (selector: string): Promise<boolean> => page!.locator(selector).first().evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight);
   const read = async (query: string): Promise<void> => {
     await page!.goto(`${base}?${query}`);
-    await page!.waitForFunction(() => document.querySelector("[data-k=files]")?.textContent === "1204 files · 38.2 MB");
+    await page!.waitForFunction(() => document.querySelector("[data-k=files]")?.textContent === "1204 files · 38 MB");
   };
   /** Where everything that must hold still sits: the container, a summary row, both consent sections, the progress line and the action key. */
   const frame = async (): Promise<Record<string, Box>> => ({
@@ -128,8 +128,8 @@ describe.skipIf(renderSkipped !== undefined)("the import dialog laid out in Chro
     const before = await frame();
 
     await page!.locator("button:has-text('Import')").click();
-    await page!.waitForFunction(() => document.querySelector("[data-k=progress-line]")?.textContent === "Uploading 31.0 MB" && document.querySelector("[role=progressbar]")?.getAttribute("aria-valuenow") === "50");
-    expect(await page!.locator("[role=progressbar]").getAttribute("aria-label")).toBe("Uploading 31.0 MB");
+    await page!.waitForFunction(() => document.querySelector("[data-k=progress-line]")?.textContent === "Uploading 31 MB" && document.querySelector("[role=progressbar]")?.getAttribute("aria-valuenow") === "50");
+    expect(await page!.locator("[role=progressbar]").getAttribute("aria-label")).toBe("Uploading 31 MB");
     const during = await frame();
     expect(during).toEqual(before);
     const words = await contrast("[data-k=progress-line]");

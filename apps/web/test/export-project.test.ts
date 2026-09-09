@@ -102,13 +102,13 @@ describe("the landed line", () => {
 });
 
 describe("what the one slot says", () => {
-  const progress = { line: "Downloading the folder, 2.7 KB", fraction: 0.5 };
+  const progress = { line: "Downloading the folder, 3 KB", fraction: 0.5 };
 
   it("reads the refusal in its tone first, then the landed line quietly, then the step in mono, else the idle words quietly", () => {
     expect(slotWords({ refusal: { message: "/x exists", exists: true }, landed: "proj is at /x.", progress, idle: "" })).toEqual({ words: "/x exists", tone: "caution" });
     expect(slotWords({ refusal: { message: "/x is not a folder", exists: false }, landed: null, progress: null, idle: "" })).toEqual({ words: "/x is not a folder", tone: "error" });
     expect(slotWords({ refusal: null, landed: "proj is at /x.", progress, idle: "" })).toEqual({ words: "proj is at /x.", tone: "quiet" });
-    expect(slotWords({ refusal: null, landed: null, progress, idle: "Reading the folder." })).toEqual({ words: "Downloading the folder, 2.7 KB", tone: "step" });
+    expect(slotWords({ refusal: null, landed: null, progress, idle: "Reading the folder." })).toEqual({ words: "Downloading the folder, 3 KB", tone: "step" });
     expect(slotWords({ refusal: null, landed: null, progress: null, idle: "Reading the folder." })).toEqual({ words: "Reading the folder.", tone: "quiet" });
     expect(slotWords({ refusal: null, landed: null, progress: null, idle: "" })).toEqual({ words: "", tone: "quiet" });
   });

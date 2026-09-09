@@ -43,7 +43,7 @@ describe("live labels", () => {
   it("used of total prints each side under the shared byte rule", () => {
     const GiB = 1024 ** 3;
     expect(bytesOfLabel(3.14 * GiB, 7.75 * GiB)).toBe("3.1 GB of 7.8 GB");
-    expect(bytesOfLabel(900 * 1024 ** 2, 7.75 * GiB)).toBe("900.0 MB of 7.8 GB");
+    expect(bytesOfLabel(900 * 1024 ** 2, 7.75 * GiB)).toBe("900 MB of 7.8 GB");
   });
 });
 

@@ -192,7 +192,7 @@ describe("wsp verbs over the host", () => {
     // one size line the app's row reads, and it has no state to name, so that cell falls off the end of the row.
     expect(rows.map(r => r.split(/ {2,}/))).toEqual([
       ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running"],
-      ["mac", expect.stringMatching(/^ws_/), expect.stringMatching(/^\d+ cores · \d+ GB$/)],
+      ["mac", expect.stringMatching(/^ws_/), expect.stringMatching(/^\d+\u00a0cores\u00a0·\u00a0\d+\u00a0GB$/)],
     ]);
     expect(listed.io.errors).toEqual([]);
 
@@ -2347,7 +2347,7 @@ describe("wsp verbs over the host", () => {
       await run("new", "alpha");
       const path = pngFile(dir, "big.png", 1_258_291);
       const opened = await run("thread", "new", "--in", "alpha", "--image", path, "what is this?");
-      expect(opened.io.streamed).toContain("[image 1.2 MB png]");
+      expect(opened.io.streamed).toContain("[image 1 MB png]");
     });
 
     it("a path this computer has no file at answers in a sentence, not in the reader's own error", async () => {
@@ -2383,7 +2383,7 @@ describe("wsp verbs over the host", () => {
       const path = pngFile(dir, "huge.png", 12 * 1024 * 1024);
       const refused = await run("thread", "new", "--in", "alpha", "--image", path, "look");
       expect(refused.code).toBe(EXIT_CODES.usage);
-      expect(refused.io.errors).toEqual(["wsp thread new: huge.png is 12.0 MB, over the 10.0 MB an image may be"]);
+      expect(refused.io.errors).toEqual(["wsp thread new: huge.png is 12 MB, over the 10 MB an image may be"]);
       expect(claude.starts).toHaveLength(0);
     });
 
