@@ -896,6 +896,12 @@ export function noSshDaemonLine(name: string): string {
   return `${name} is reached over ssh, which carries no daemon yet: its terminal, files and ports are not served`;
 }
 
+/** What import is refused with on a machine reached over ssh: no road lands a folder there yet, so the verb says
+ * so before the folder is read. */
+export function noSshImportLine(name: string): string {
+  return `${name} is reached over ssh, which lands no folder yet; import to a fork, or register the folder on this computer`;
+}
+
 /** The one sentence a socket a machine's requests arrive on is refused a ticket with. A ticket authenticates the
  * next socket, and a socket this host minted no relay ticket for is one of the person's own, so a machine that
  * could mint one would hand itself the origin the relay stamps on it. */

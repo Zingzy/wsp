@@ -159,12 +159,14 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and says what it is", () => {
-    expect(kindWords("cloud")).toEqual({ machine: null, driven: true, daemon: true, metrics: true, processes: true });
-    // This computer serves a daemon and reads both its own load and its own processes off its host.
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true });
+    expect(kindWords("cloud")).toEqual({ machine: null, driven: true, daemon: true, metrics: true, processes: true, imports: "copies" });
+    // This computer serves a daemon and reads both its own load and its own processes off its host. A folder is
+    // already on this computer, so an import registers its path and copies nothing.
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true, imports: "registers" });
     // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it, and
     // it serves no daemon at all, so a row for one says what the machine is rather than that its daemon is missing.
-    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, driven: false, daemon: false, metrics: false, processes: false });
+    // Nothing lands a folder on it yet, so a drop tile and the import verb have no road to it.
+    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, driven: false, daemon: false, metrics: false, processes: false, imports: null });
   });
 
   it("the two readings a pane waits on are the table's to answer, so nothing sits at pending for a stream that never comes", () => {

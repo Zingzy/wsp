@@ -13,7 +13,11 @@
 // into the sidebar's one name box in the same slot, opened from the menu or by
 // a double-click on the name, so the row keeps its height and its grammar. The
 // words come from workspaceRows.ts and the actions from the workspace registry.
+// While a folder is dragged over the window the row is a dotted drop tile
+// instead, the same height, saying what a drop on it does in the row's muted
+// mono; the sidebar hands it the words and takes the drop.
 import { ChevronDownIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { useState, type DragEvent } from "react";
 import { needsRebuild, workspaceKind, type MemoryReading } from "@wsp/protocol";
 import { runAction } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
@@ -35,6 +39,46 @@ const ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
 const STATE_SLOT_CLASS = "min-w-11 shrink-0 text-right transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0";
 /** The kind's glyph reads at the weight of the muted meta beside it, and half that while the machine is paused. */
 const LEAD_GLYPH_CLASS = "text-muted-foreground/60";
+
+/** What a drop on this row does, in the kind's words, and the drop itself. */
+export interface DropTile {
+  readonly label: string;
+  readonly onDrop: (transfer: DataTransfer) => void;
+}
+
+/** The row as a drop tile: the row's own height, a dashed border, the meta line's mono, nothing else; a drag
+ * over it darkens the border and the words so the target reads before the drop. */
+export function WorkspaceDropTile({ rowId, tile }: { rowId: string; tile: DropTile }) {
+  const [over, setOver] = useState(false);
+  const claim = (event: DragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    setOver(true);
+  };
+  return (
+    <div
+      data-sidebar-row
+      data-row-id={rowId}
+      data-drop-tile
+      {...(over ? { "data-drop-over": "" } : {})}
+      className={cn(
+        THREE_LINE_ROW_CLASS,
+        ROW_META_CLASS,
+        "flex w-full items-center justify-center rounded-md border border-dashed border-sidebar-border text-center transition-colors",
+        over && "border-sidebar-foreground/50 text-sidebar-foreground",
+      )}
+      onDragEnter={claim}
+      onDragOver={claim}
+      onDragLeave={() => setOver(false)}
+      onDrop={event => {
+        event.preventDefault();
+        setOver(false);
+        tile.onDrop(event.dataTransfer);
+      }}
+    >
+      {tile.label}
+    </div>
+  );
+}
 
 export function WorkspaceRow({
   project,

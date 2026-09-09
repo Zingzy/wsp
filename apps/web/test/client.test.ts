@@ -184,7 +184,7 @@ describe("makeApi wrappers", () => {
 
   it("snapshotWorkspace and listProjectGoldens send their ops and parse the replies; a reply without the list is refused", async () => {
     const { api, lastSent } = await connect();
-    const golden = { snapshotId: "snap_p", project: { name: "proj", dest: "/root/work/proj", importedAt: "2026-09-06T10:01:00.000Z" }, golden: "snap_g", version: 1, workspaceId: "ws_1", workspaceName: "task", createdAt: "2026-09-06T10:06:00.000Z" };
+    const golden = { snapshotId: "snap_p", projects: [{ name: "proj", dest: "/root/work/proj", importedAt: "2026-09-06T10:01:00.000Z" }], golden: "snap_g", version: 1, workspaceId: "ws_1", workspaceName: "task", createdAt: "2026-09-06T10:06:00.000Z" };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, projectGolden: golden });
     expect(await api.snapshotWorkspace!("ws_1")).toEqual(golden);
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.snapshot", workspaceId: "ws_1" });

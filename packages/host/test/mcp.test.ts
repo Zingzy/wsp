@@ -12,7 +12,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, ProjectGolden, Recipe, TURN_TOKEN_ENV, ThreadView, WorkspaceView, noProjectLine, workspaceKind, type ExitClass } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
@@ -175,7 +175,7 @@ describe("the MCP server over the host", () => {
     const taken = await call("snapshot", { workspace: "alpha" });
     expect(taken.isError).toBe(false);
     const [golden] = await rt.golden.projects();
-    expect(golden).toMatchObject({ project: { name: "proj", dest: "/root/work/proj" }, golden: "snap_gold", version: 1, workspaceId: alpha!.id, workspaceName: "alpha" });
+    expect(golden).toMatchObject({ projects: [{ name: "proj", dest: "/root/work/proj" }], golden: "snap_gold", version: 1, workspaceId: alpha!.id, workspaceName: "alpha" });
     expect(taken.structured).toEqual({ projectGolden: golden });
     expect(ProjectGolden.parse((taken.structured as { projectGolden: unknown }).projectGolden)).toEqual(golden);
     expect(JSON.parse(taken.text)).toEqual(taken.structured);
@@ -183,15 +183,55 @@ describe("the MCP server over the host", () => {
     const byName = await call("new", { name: "task-a", from: "proj" });
     expect(byName.isError).toBe(false);
     const taskA = (await rt.workspaces.list()).find(w => w.name === "task-a")!;
-    expect(taskA).toMatchObject({ golden: golden!.snapshotId, projects: [golden!.project] });
+    expect(taskA).toMatchObject({ golden: golden!.snapshotId, projects: golden!.projects });
     expect(byName.structured).toEqual({ workspace: expect.objectContaining({ id: taskA.id, name: "task-a", golden: golden!.snapshotId }) });
     const byId = await call("new", { name: "task-b", from: golden!.snapshotId });
     expect(byId.isError).toBe(false);
-    expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: golden!.snapshotId, projects: [golden!.project] });
+    expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: golden!.snapshotId, projects: golden!.projects });
 
     const missing = await call("new", { name: "task-c", from: "nope" });
     expect(missing).toEqual(failedWith("no project golden named nope; wsp snapshot <workspace> takes one"));
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
+  });
+
+  it("thread_new with no workspace starts on the workspace holding the project the client's folder is a repo of, and the first line of the reply says so; a server with no client folder is a tool error in one line", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/spoo", dest: "/root/spoo", bundler: projectBundler() });
+    const repo = join(dir, "code", "spoo");
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    mkdirSync(join(repo, "packages", "api"), { recursive: true });
+    await client?.close();
+    await server?.close();
+    await connect({ cwd: join(repo, "packages", "api") });
+    const opened = await call("thread_new", { task: "hello from the repo" });
+    expect(opened.isError).toBe(false);
+    const thread = (await rt.sessions.list()).find(t => t.prompt === "hello from the repo")!;
+    expect(thread.workspaceId).toBe(alpha!.id);
+    expect(opened.text).toBe(`${threadOpenedLine(thread.threadId!, "alpha", "~/spoo")}\nre: hello from the repo`);
+    expect(opened.structured).toMatchObject({ threadId: thread.threadId, workspaceId: alpha!.id, text: "re: hello from the repo" });
+    expect(claude.starts.at(-1)!.cwd).toBe("/root/spoo");
+
+    await client?.close();
+    await server?.close();
+    await connect();
+    const bare = await call("thread_new", { task: "nowhere" });
+    expect(bare).toEqual(failedWith(noThreadTargetLine("workspace"), "usage"));
+  });
+
+  it("import onto this computer registers the folder with no plan; replace true, keep, cut or agents are refused as meaningless there, while replace false is nothing asked", async () => {
+    await call("new", { local: true, name: "mac" });
+    const proj = join(dir, "proj");
+    mkdirSync(join(proj, "src"), { recursive: true });
+    writeFileSync(join(proj, "src", "index.ts"), "export const a = 1;\n");
+    const refused = await call("import", { workspace: "mac", folder: proj, replace: true, keep: [".env"] });
+    expect(refused).toEqual(failedWith(registerTakesNoConsentLine(["keep", "replace"]), "usage"));
+    const landed = await call("import", { workspace: "mac", folder: proj, replace: false });
+    expect(landed.isError).toBe(false);
+    expect(landed.text).toBe(registeredLine(proj));
+    expect(landed.structured).toEqual({ imported: expect.objectContaining({ dest: proj, parts: 0, cut: [], agents: [] }) });
+    const [mac] = await rt.workspaces.list();
+    expect(mac!.projects?.map(p => p.name)).toEqual(["proj"]);
   });
 
   it("new and fork take size as <cpu>x<memGb>, which reaches the machine; one the provider does not offer is a tool error naming the list", async () => {

@@ -12,8 +12,7 @@ import { RequestError } from "../protocol/client.js";
 /** The protocol's rule under the name this folder's files already call it by; there is one implementation. */
 export const count = plural;
 
-/** The folder's own name from the path as typed. */
-export const folderName = (path: string): string => path.replace(/\/+$/, "").split("/").at(-1) ?? path;
+export { folderName } from "@wsp/protocol";
 
 /** The web's one set of words for what became of an agent's sessions, short enough for a row's end. */
 const OUTCOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {

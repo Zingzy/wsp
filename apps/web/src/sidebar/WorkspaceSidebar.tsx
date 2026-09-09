@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { PROVIDER_UNREACHED_LINE, computerOffline, goldenHead, isLocalWorkspace, workspaceState, type WorkspaceSize, type WorkspaceState, type WorkspaceTint } from "@wsp/protocol";
+import { DROP_A_FOLDER_LINE, PROVIDER_UNREACHED_LINE, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState, type WorkspaceTint } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { sidebarActions } from "../actions/sidebarActions.js";
@@ -31,11 +31,13 @@ import { Spinner } from "../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
-import { cn } from "../lib/utils.js";
+import { desktopBridge } from "../lib/desktopShell.js";
+import { cn, errorText } from "../lib/utils.js";
 import { catalogIn, useCapabilities, useLabs, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, onWorkspaceLookRequest, type ProjectTripRequest, type WorkspaceLookRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
+import { droppedFolder, useFolderDrag, useWindowFolderDrag } from "./folderDrag.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
@@ -51,7 +53,7 @@ import { SpaceHeader } from "./SpaceHeader.js";
 import { SPACE_LEAVING_SELECTOR, SpaceSlide } from "./SpaceSlide.js";
 import { NO_SWIPE, readSwipe } from "./spaceSwipe.js";
 import { ThreadRow } from "./ThreadRow.js";
-import { WorkspaceRow } from "./WorkspaceRow.js";
+import { WorkspaceDropTile, WorkspaceRow, type DropTile } from "./WorkspaceRow.js";
 import { NEW_THREAD_SHORTCUT, NEW_THREAD_TITLE, compactTimeLabel, defaultWorkspaceName } from "./workspaceRows.js";
 
 /** Which workspaces have their idle shelf shut, so a shelf is open until this workspace's own chevron shuts it. */
@@ -219,6 +221,41 @@ export function WorkspaceSidebar() {
   };
   const verbs = { ...defaultVerbs, rebuild: api?.rebuild ? rebuild : undefined };
 
+  // A folder dragged from the desktop: only the desktop shell can read where it is, and only a client with the import
+  // ops has anywhere to put it, so a browser tab's rows stay rows.
+  const droppedPath = desktopBridge()?.droppedPath;
+  useWindowFolderDrag(droppedPath !== undefined && verbs.importProject !== undefined);
+  const dragging = useFolderDrag(s => s.dragging);
+  /** Where a dropped folder goes, by the workspace's kind: registered at once on this computer, with the result or
+   * the refusal in the toast; read into the import dialog for a box. A file is neither. */
+  const landDrop = async (project: SidebarProjectSnapshot, transfer: DataTransfer): Promise<void> => {
+    useFolderDrag.getState().end();
+    const file = droppedFolder(transfer);
+    if (file === null || droppedPath === undefined) {
+      useStore.setState({ toast: DROP_A_FOLDER_LINE });
+      return;
+    }
+    const source = droppedPath(file);
+    if (kindWords(workspaceKind(project.workspace)).imports !== "registers") {
+      setTrip({ key: Date.now(), workspaceId: project.id, trip: "import", source });
+      return;
+    }
+    if (api?.importProject === undefined) return;
+    try {
+      const landed = await api.importProject({ workspaceId: project.id, ...registerRequest(source) });
+      useStore.setState({ toast: registeredLine(landed.dest) });
+    } catch (e) {
+      useStore.setState({ toast: `${project.displayName}: ${errorText(e)}` });
+    }
+  };
+  /** The row's tile while a drag lasts, where a drop has somewhere to go: a kind with an import road, on a machine the
+   * import action is not refused for, so a gone or zombie row stays a row. */
+  const tileFor = (project: SidebarProjectSnapshot, actions: ReadonlyArray<ResolvedAction>): DropTile | null => {
+    if (!dragging || actionById(actions, "import-project").refusal !== null) return null;
+    const label = dropTileLine(workspaceKind(project.workspace), project.displayName);
+    return label === null ? null : { label, onDrop: transfer => void landDrop(project, transfer) };
+  };
+
   const toggleCollapsed = (id: string): void => {
     setCollapsed(prev => {
       const next = new Set(prev);
@@ -328,12 +365,16 @@ export function WorkspaceSidebar() {
     const isCollapsed = collapsed.has(project.id);
     const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
     const naming = renaming?.rowId === workspaceRowId(project.id);
+    const tile = tileFor(project, actions);
     return (
       <SidebarMenuItem
         key={project.id}
         // A row holding the box takes no menu over it, as a thread row being named does not.
         {...(naming ? {} : { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") }) })}
       >
+        {tile !== null ? (
+          <WorkspaceDropTile rowId={workspaceRowId(project.id)} tile={tile} />
+        ) : (
         <WorkspaceRow
           project={project}
           cost={costs[project.id] ?? null}
@@ -351,6 +392,7 @@ export function WorkspaceSidebar() {
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actions, "rename"))}
         />
+        )}
         {threadsOf(visibleProject, newThreadAction, machine, isCollapsed, project.workspace.tint)}
       </SidebarMenuItem>
     );
@@ -546,7 +588,7 @@ export function WorkspaceSidebar() {
       ) : null}
       {trip !== null && tripTarget !== undefined ? (
         trip.trip === "import" ? (
-          <ImportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} />
+          <ImportProjectDialog key={trip.key} workspace={tripTarget} {...(trip.source !== undefined ? { initialSource: trip.source } : {})} onClose={() => setTrip(null)} />
         ) : (
           <ExportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} />
         )

@@ -36,6 +36,10 @@ export interface WorkspaceKindWords {
   metrics: boolean;
   /** Whether a machine of this kind lists its processes for the Processes tab, which the same rule holds for. */
   processes: boolean;
+  /** What `import` does to a folder on this computer for a machine of this kind: copies it there and asks about the
+   * secret-shaped files first, or registers its path with nothing copied and nothing to ask, the folder being on
+   * this computer already. Null where no road lands a folder yet, so no tile and no verb offers one. */
+  imports: "copies" | "registers" | null;
 }
 
 /** The two readings a pane waits on. Each is one module per kind: the cloud kind reads the guest's /proc, this
@@ -45,9 +49,9 @@ export type KindReading = "metrics" | "processes";
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: null, driven: true, daemon: true, metrics: true, processes: true },
-  local: { machine: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true },
-  ssh: { machine: OVER_SSH, driven: false, daemon: false, metrics: false, processes: false },
+  cloud: { machine: null, driven: true, daemon: true, metrics: true, processes: true, imports: "copies" },
+  local: { machine: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true, imports: "registers" },
+  ssh: { machine: OVER_SSH, driven: false, daemon: false, metrics: false, processes: false, imports: null },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {

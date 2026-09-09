@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, NOT_ON_THIS_KIND } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, NOT_ON_THIS_KIND, fmtBytes } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -18,6 +18,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { MachineSurface } from "../src/components/machine/MachineSurface.js";
+import { onProjectTripRequest, type ProjectTripRequest } from "../src/shell/shellRequests.js";
 import { provideDaemonHello } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import type { Api } from "../src/protocol/client.js";
@@ -90,6 +91,8 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     snapshotWorkspace: ReturnType<typeof vi.fn<(id: string) => Promise<ProjectGolden>>>;
     createWorkspace: ReturnType<typeof vi.fn<(golden: string, name?: string) => Promise<WorkspaceView>>>;
   } = {
+    planProject: vi.fn(async () => ({ source: "/Users/dev/proj", repo: true, files: 1, bytes: 20, secrets: [], excluded: [], skipped: [], agents: [] })),
+    importProject: vi.fn(async () => ({ dest: "/root/proj", files: 1, bytes: 20, parts: 1, cut: [], rewritten: [], agents: [] })),
     listProjectGoldens: vi.fn<() => Promise<ProjectGolden[]>>(async () => projects),
     snapshotWorkspace: vi.fn<(id: string) => Promise<ProjectGolden>>(async id => {
       const taken = pg("snap_taken", "snap_golden-v12", { workspaceId: id, createdAt: "2026-09-07T08:00:00.000Z" });
@@ -181,7 +184,7 @@ const onV12 = (): WorkspaceView => ({ ...view("ws_a", "api"), golden: "snap_gold
 const PROJECT = { name: "proj", dest: "/root/work/proj", importedAt: "2026-09-06T10:01:00.000Z" };
 const pg = (snapshotId: string, golden: string, over: Partial<ProjectGolden> = {}): ProjectGolden => ({
   snapshotId,
-  project: PROJECT,
+  projects: [PROJECT],
   golden,
   version: Number(golden.slice(-2)),
   workspaceId: "ws_a",
@@ -740,7 +743,8 @@ describe("project goldens in the lineage", () => {
     expect(marks("pg-snap_p2")).toEqual(["this fork"]);
     expect(marks("pg-snap_p1")).toEqual([]);
     expect(screen.getByText("snapshot 2026-09-06 · imported 2026-09-06 · from task-a")).toBeDefined();
-    expect(screen.getByText("forked 2026-08-30 · proj imported 2026-09-06")).toBeDefined();
+    // What is on the disk is the projects section's to list; the lineage row says when the fork was made and no more.
+    expect(screen.getByText("forked 2026-08-30")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "fork proj from snap_p1" }));
     await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("snap_p1", "proj-fork", undefined));
     expect(api.createFromGoldenHead).not.toHaveBeenCalled();
@@ -750,23 +754,83 @@ describe("project goldens in the lineage", () => {
     await mount([onV12()], CAPS, twoVersions);
     await waitFor(() => expect(marks("v12")).toEqual(["head", "this fork", "volatile"]));
     expect(document.querySelector("[data-k^='pg-']")).toBeNull();
-    expect(screen.queryByRole("button", { name: /^snapshot / })).toBeNull();
+    // Nothing to image yet: the projects section holds the button, dead until a project lands.
+    expect(screen.getByRole("button", { name: /^snapshot / })).toHaveProperty("disabled", true);
   });
 
-  it("snapshot sits on the live disk row once a project is loaded: it calls the api, lists the new golden and says what it is for; a refusal shows the runtime's sentence", async () => {
+  it("snapshot as image sits in the projects section once a project is loaded: it calls the api, the lineage lists the new golden and the section says what it is for; a refusal shows the runtime's sentence", async () => {
     const api = await mount([{ ...onV12(), projects: [PROJECT] }], CAPS, twoVersions);
     await waitFor(() => expect(marks("v12")).toEqual(["head", "this fork", "volatile"]));
     expect(api.listProjectGoldens).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "snapshot api as a project golden" }));
+    const button = screen.getByRole("button", { name: "snapshot api as a project golden" });
+    expect(button.textContent).toBe("Snapshot as image");
+    expect(button.closest("section")!.textContent).toContain("Projects");
+    fireEvent.click(button);
     await waitFor(() => expect(api.snapshotWorkspace).toHaveBeenCalledWith("ws_a"));
     await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken"]));
-    expect(api.listProjectGoldens).toHaveBeenCalledTimes(2);
-    expect(fact("lineage-note")).toBe("Project golden of proj taken. New forks of it start with the project.");
+    // The golden taken here is known here, so the list is not read again for it.
+    expect(api.listProjectGoldens).toHaveBeenCalledTimes(1);
+    expect(fact("projects-note")).toBe("Project golden of proj taken. New forks of it start with the projects in place.");
 
     api.snapshotWorkspace.mockRejectedValueOnce(new Error("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
-    fireEvent.click(screen.getByRole("button", { name: "snapshot api as a project golden" }));
-    await waitFor(() => expect(fact("lineage-note")).toBe("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
+    fireEvent.click(button);
+    await waitFor(() => expect(fact("projects-note")).toBe("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
     expect(rowsUnder("v12")).toEqual(["pg-snap_taken"]);
+  });
+});
+
+describe("the projects section", () => {
+  const SPOO = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-04T10:00:00Z", size: 48_200_000 };
+  const WSP = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-05T09:30:00Z" };
+  const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-k^='project-']")];
+
+  it("lists the workspace's projects oldest first, name, folder, size where one was measured and the day it landed, one mono row each at one height, then import a folder and snapshot as image", async () => {
+    await mount([{ ...view("ws_a", "api"), projects: [SPOO, WSP] }]);
+    expect(rows().map(r => r.getAttribute("data-k"))).toEqual(["project-spoo", "project-wsp"]);
+    const cells = (r: HTMLElement) => [...r.querySelectorAll("[data-cell]")].map(c => [c.getAttribute("data-cell"), c.textContent]);
+    expect(cells(rows()[0]!)).toEqual([["name", "spoo"], ["folder", "/root/spoo"], ["size", fmtBytes(48_200_000)], ["imported", "2026-09-04"]]);
+    expect(cells(rows()[1]!)).toEqual([["name", "wsp"], ["folder", "/root/wsp"], ["size", ""], ["imported", "2026-09-05"]]);
+    for (const r of rows()) {
+      expect(r.className).toContain("h-7");
+      expect(r.className).toContain("font-mono");
+      expect(r.querySelector("[data-slot='badge']")).toBeNull();
+    }
+    expect(rows()[0]!.querySelector("[data-cell='folder']")!.getAttribute("title")).toBe("/root/spoo");
+    const section = rows()[0]!.closest("section")!;
+    expect(within(section).getByRole("button", { name: "Import a folder" })).toBeDefined();
+    expect(within(section).getByRole("button", { name: "snapshot api as a project golden" }).textContent).toBe("Snapshot as image");
+    expect(document.querySelector("[data-k='projects-none']")).toBeNull();
+  });
+
+  it("with none it says so in one line, import a folder is still offered and snapshot as image waits for a project", async () => {
+    await mount([view("ws_a", "api")]);
+    expect(rows()).toEqual([]);
+    // A browser tab has no drop, so the line names the one road it has.
+    expect(fact("projects-none")).toBe("No projects yet. Import a folder.");
+    expect(screen.getByRole("button", { name: "Import a folder" })).toHaveProperty("disabled", false);
+    expect(screen.getByRole("button", { name: "snapshot api as a project golden" })).toHaveProperty("disabled", true);
+  });
+
+  it("import a folder asks through the registry's request for this workspace, so the sidebar's dialog opens as the row's menu would open it", async () => {
+    await mount([view("ws_a", "api")]);
+    const asked: ProjectTripRequest[] = [];
+    const off = onProjectTripRequest(request => asked.push(request));
+    fireEvent.click(screen.getByRole("button", { name: "Import a folder" }));
+    expect(asked).toEqual([{ workspaceId: "ws_a", trip: "import" }]);
+    off();
+  });
+
+  it("this computer lists the folders registered on it and offers no snapshot, since it is not a machine to image", async () => {
+    const mac: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "", projects: [{ name: "wsp", dest: "/Users/dev/wsp", importedAt: "2026-09-06T00:00:00Z", size: 133_000_000 }] };
+    const api = fakeApi([mac]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(mac), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_m" />);
+    await waitFor(() => expect(rows().map(r => r.getAttribute("data-k"))).toEqual(["project-wsp"]));
+    expect(screen.getByRole("button", { name: "Import a folder" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /as a project golden$/ })).toBeNull();
+    // No lineage draws and no snapshot is offered here, so the tab asks the host for no project goldens.
+    expect(api.listProjectGoldens).not.toHaveBeenCalled();
   });
 });
 

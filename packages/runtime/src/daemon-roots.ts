@@ -5,11 +5,13 @@
 import { posix } from "node:path";
 import { DAEMON_ROOTS_PATH, shellQuote } from "@wsp/protocol";
 
-export function writeDaemonRootsScript(roots: readonly string[]): string {
-  const next = `${DAEMON_ROOTS_PATH}.next`;
+/** `rootsPath` is where the daemon that reads it looks: the guest constant on a fork, beside the person's home on
+ * this computer's own daemon. */
+export function writeDaemonRootsScript(roots: readonly string[], rootsPath: string = DAEMON_ROOTS_PATH): string {
+  const next = `${rootsPath}.next`;
   return [
-    `mkdir -p ${shellQuote(posix.dirname(DAEMON_ROOTS_PATH))}`,
+    `mkdir -p ${shellQuote(posix.dirname(rootsPath))}`,
     `printf '%s\\n' ${roots.map(shellQuote).join(" ")} > ${shellQuote(next)}`,
-    `mv -f ${shellQuote(next)} ${shellQuote(DAEMON_ROOTS_PATH)}`,
+    `mv -f ${shellQuote(next)} ${shellQuote(rootsPath)}`,
   ].join("\n");
 }
