@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { getDefaultHighWaterMark } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { gzipSync } from "node:zlib";
 import { UPLOAD_PART_BYTES, exportFolder, exportPaths, exportPathsInto, fitsTar, folderExportScript, importInto, landBundle, tarOf, type CacheRule } from "../src/vault.js";
@@ -592,6 +593,37 @@ describe("exportFolder", () => {
     return { machine, cmds, close: () => server.close() };
   }
 
+  /** The watermark the download's own write stream takes, read from the stream module rather than assumed: `feed`
+   * waits on drain for a write over it and never waits for one under it, which is what the two cases below turn on. */
+  const WATERMARK = getDefaultHighWaterMark(false);
+
+  /** A fetch that serves the file its URL names in `chunks` pieces, each asked for only once the reader has taken the
+   * one before, and runs `atEnd` as the body closes. `size` is what a piece came to, which decides whether the write
+   * of a piece hits the watermark. */
+  function chunkedBody(chunks: number, atEnd: () => void = () => {}): { fetch: typeof globalThis.fetch; size: () => number; enqueued: () => number } {
+    let size = 0;
+    let enqueued = 0;
+    const fetch: typeof globalThis.fetch = async url => {
+      const body = readFileSync(new URL(String(url)).searchParams.get("path")!);
+      size = Math.ceil(body.length / chunks);
+      let at = 0;
+      return new Response(new ReadableStream<Uint8Array>({
+        async pull(c) {
+          await new Promise(r => setImmediate(r));
+          if (at >= body.length) {
+            atEnd();
+            c.close();
+            return;
+          }
+          c.enqueue(body.subarray(at, at + size));
+          at += size;
+          enqueued += 1;
+        },
+      }));
+    };
+    return { fetch, size: () => size, enqueued: () => enqueued };
+  }
+
   const listing = (tgz: Buffer): string[] =>
     execFileSync("tar", ["-tzf", "-"], { input: tgz }).toString().trim().split("\n").filter(l => l !== "").map(l => l.replace(/^\.\//, "").replace(/\/$/, "")).filter(l => l !== "." && l !== "").sort();
 
@@ -728,7 +760,7 @@ describe("exportFolder", () => {
     }
   });
 
-  it("the archive lands as it arrives: the file on disk grows while the response is still open, and every progress line is one the file has already taken", async () => {
+  it("a 6 MB body off the guest reports bytes that only go up, never runs the file ahead of them, and ends at the size the file takes", async () => {
     const g = await guest(256 * 1024);
     const root = folder();
     // Random bytes so the archive gzips to about its own size, several download chunks worth.
@@ -751,9 +783,67 @@ describe("exportFolder", () => {
       expect(seen.map(p => p.bytes).every((b, i, all) => i === 0 || b > all[i - 1]!)).toBe(true);
       // The write stream holds a chunk until its watermark, so the file trails the progress; it never runs ahead of it.
       expect(midStream.every((m, i, all) => m.disk < bytes && m.disk <= m.reported && (i === 0 || m.disk >= all[i - 1]!.disk))).toBe(true);
-      const held = midStream.filter(m => m.disk > 0);
-      expect(held.length).toBeGreaterThanOrEqual(3);
-      expect(held.at(-1)!.disk).toBeGreaterThan(held[0]!.disk);
+      expect(statSync(into).size).toBe(bytes);
+      expect(listing(readFileSync(into))).toContain("src/big.bin");
+    } finally {
+      g.close();
+    }
+  }, 60_000);
+
+  it("progress arrives while the response is still open: every chunk of the body is reported before the body ends", async () => {
+    const g = await guest();
+    const root = folder();
+    const dir = mkdtempSync(join(tmpdir(), "wsp-export-open-"));
+    dirs.push(dir);
+    const into = join(dir, "folder.tgz");
+    const CHUNKS = 4;
+    const seen: { bytes: number; total: number }[] = [];
+    let reportedWhenBodyEnded = -1;
+    const body = chunkedBody(CHUNKS, () => {
+      reportedWhenBodyEnded = seen.filter(p => p.bytes > 0).length;
+    });
+    try {
+      const { bytes } = await exportFolder(g.machine, root, RULE, into, { fetch: body.fetch, onProgress: p => seen.push(p) });
+      // Every chunk is asked for behind a macrotask while the path from one arriving to its report is microtasks only,
+      // so each report lands before the next chunk: a write over the watermark puts drain in that path and loses one.
+      expect(body.size()).toBeLessThan(WATERMARK);
+      expect(body.enqueued()).toBe(CHUNKS);
+      expect(reportedWhenBodyEnded).toBe(CHUNKS);
+      expect(seen.map(p => p.bytes).every((b, i, all) => i === 0 || b > all[i - 1]!)).toBe(true);
+      expect(seen.at(-1)).toEqual({ bytes, total: bytes });
+      expect(statSync(into).size).toBe(bytes);
+      expect(listing(readFileSync(into))).toContain("src/a.ts");
+    } finally {
+      g.close();
+    }
+  }, 60_000);
+
+  it("the archive lands as it arrives: a chunk over the watermark is on disk by the time its own progress line is out", async () => {
+    const g = await guest();
+    const root = folder();
+    const CHUNKS = 4;
+    // Twice the watermark to a chunk, and random so the archive gzips to about its own size: over the watermark the
+    // write stream holds nothing back, since `feed` waits on drain and a drained write has reached the file.
+    writeFileSync(join(root, "src", "big.bin"), randomBytes(2 * CHUNKS * WATERMARK));
+    const dir = mkdtempSync(join(tmpdir(), "wsp-export-drain-"));
+    dirs.push(dir);
+    const into = join(dir, "folder.tgz");
+    const midStream: { disk: number; reported: number }[] = [];
+    const body = chunkedBody(CHUNKS);
+    try {
+      const { bytes } = await exportFolder(g.machine, root, RULE, into, {
+        fetch: body.fetch,
+        onProgress: p => {
+          // The open runs on the thread pool, so a download that has written nothing has no file yet: that is no bytes
+          // on disk, which is the answer this case is about, rather than a stat that throws.
+          if (p.bytes > 0 && p.bytes < p.total) midStream.push({ disk: existsSync(into) ? statSync(into).size : 0, reported: p.bytes });
+        },
+      });
+      expect(body.size()).toBeGreaterThan(WATERMARK);
+      expect(midStream).toHaveLength(CHUNKS - 1);
+      expect(midStream.map(m => m.disk)).toEqual(midStream.map(m => m.reported));
+      expect(midStream.at(-1)!.disk).toBeGreaterThan(midStream[0]!.disk);
+      expect(midStream.at(-1)!.disk).toBeLessThan(bytes);
       expect(statSync(into).size).toBe(bytes);
       expect(listing(readFileSync(into))).toContain("src/big.bin");
     } finally {
