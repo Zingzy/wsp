@@ -31,8 +31,8 @@ mac:
   category: public.app-category.developer-tools
   icon: build/icon.icns
 dmg:
-  # The drag window: the app on the left, the Applications folder on the right, one image behind them carrying the
-  # arrow. dmg-builder reads the window's size off that image, so the two coordinates below are in its pixels.
+  # The drag window: the app on the left, the Applications folder on the right, one image behind them. dmg-builder
+  # reads the window's size off that image, so the two coordinates below are in its pixels.
   background: dmg-background.png
   # Named without the arch suffix electron-builder adds by default: the window says wsp 1.2.3, not the build's shape.
   title: wsp ${version}
